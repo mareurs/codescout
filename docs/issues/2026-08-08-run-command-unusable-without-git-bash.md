@@ -7,6 +7,7 @@ owner: marius
 related: [docs/issues/archive/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md]
 tags: [windows, process-spawn, ci, wine]
 kind: bug
+unverified: "the line 'Fix SHA: experiments — recorded once the branch merges' is OBSOLETE — master...experiments reports 0 on the left, so promotion is a fast-forward and the experiments SHA already IS the master SHA; nothing further will ever be recordable. Windows-only fix, never exercised on this host."
 ---
 
 # BUG: `run_command` is dead on a Windows host with no Git Bash, and says only "program not found"

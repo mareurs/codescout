@@ -11,18 +11,16 @@ tags:
 - misleading-error
 - commit-workflow
 - repair-and-continue
+closed: ''
+opened: 2026-08-16
+owner: marius
+related:
+- '2026-05-19-run-command-eval-backtick-eof.md'
+- '2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md'
+severity: medium
+unverified: 'the detection gate named in Resume is unbuilt. NOTE 2026-08-19: this file carried a SECOND, orphaned frontmatter block in its body saying status:open while the catalog block said status:mitigated — every query saw mitigated, a human reading the file saw both. Merged and removed; it had been miscounting the live-bug census by one.'
 ---
 
----
-status: open
-opened: 2026-08-16
-closed:
-severity: medium
-owner: marius
-related: [2026-05-19-run-command-eval-backtick-eof.md]
-tags: [run_command, shell, misleading-error, commit-workflow]
-kind: bug
----
 
 # BUG: `run_command` passes the command to `sh -c` verbatim, so backticks in a quoted commit message are substituted — and the diagnostic names the wrong cause
 

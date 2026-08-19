@@ -11,6 +11,7 @@ opened: 2026-08-18
 owner: marius
 related: []
 severity: medium
+unverified: no regression test — the fix IS a change to a test, so deleting the two .env calls in tests/cross_process_write_lock.rs leaves the suite green; archive trigger deliberately not met (this file says so itself). Fix SHA 45918ca8 is already the master SHA — promotion is fast-forward, do not wait for a second one.
 ---
 
 # BUG: a spawned-binary test points the guide-ledger GC at the developer's real state directory

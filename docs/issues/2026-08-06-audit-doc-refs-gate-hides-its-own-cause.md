@@ -7,6 +7,7 @@ owner: marius
 related: ["56b725405a9c36d1", "21f6d21b3bf82c30"]
 tags: [librarian, audit_doc_refs, ci, progressive-disclosure, silent-cap]
 kind: bug
+unverified: the ordering regression test is OWED, not written (Resume item 1); no fix-SHA value appears anywhere in the file, only the promise 'recorded on commit'; and the 'master-side SHA still needs recording after cherry-pick' wait is OBSOLETE — master...experiments reports 0 on the left, so promotion is fast-forward and no second SHA will ever exist
 ---
 
 # BUG: audit_doc_refs exits 1 but its 50-finding cap hides every finding that caused it

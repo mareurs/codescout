@@ -13,6 +13,7 @@ tags:
 - cross-repo
 topic: catalog-drift
 closed: 2026-08-18
+unverified: 'the text states ''the fix SHA below is already the master-side SHA'' but NO fix SHA appears anywhere in this file — the only 7-12 hex token present is the environment pin 282586b1. The mandatory archive field is asserted-present and absent. Also: the on-the-wire 3/3 split check named in Resume has not been re-run since the rebuild.'
 ---
 
 # BUG: `frontmatter_id_mismatch` asserts one cause, and its repair would overwrite a placeholder

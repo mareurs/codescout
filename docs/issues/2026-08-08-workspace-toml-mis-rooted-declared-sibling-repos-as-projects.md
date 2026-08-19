@@ -1,5 +1,5 @@
 ---
-status: fixed
+status: mitigated
 opened: 2026-08-08
 closed: 2026-08-08
 severity: medium
@@ -7,6 +7,7 @@ owner: marius
 related: [docs/issues/archive/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md, docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md]
 tags: [workspace, memory, config, windows]
 kind: bug
+unverified: no regression test; recurrence NOT prevented (c0bdeec7 validates ids against this same file); the doctor declared-root guard named in Resume is unimplemented; all three fix actions were on a gitignored file, so nothing here is verifiable on experiments
 ---
 
 # BUG: a mis-rooted `.codescout/workspace.toml` declared eight sibling repos as projects of this workspace — the second cause behind the eight VDI directories, and one `c0bdeec7` does not cover
