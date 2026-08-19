@@ -1492,7 +1492,7 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
     // Only the twin id is excused. A worktree file declaring some OTHER id is ordinary
     // post-move drift and still fires. And the row is not silently dropped either way:
     // `scan_worktree_scoped` already reports it, with `collision_with` naming this very id.
-    // docs/issues/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md
+    // docs/issues/archive/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md
     if worktree_twin_id(Path::new(abs_path)).as_deref() == Some(declared.as_str()) {
         return None;
     }

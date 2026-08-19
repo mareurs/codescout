@@ -1,7 +1,7 @@
 ---
-id: '43b65f77ef0e8187'
+id: 0622f053fa599a5d
 kind: bug
-status: open
+status: fixed
 title: repair_frontmatter_id has no worktree-registration guard, so it rewrites files inside an active worktree — and the check that feeds it misdiagnoses every shadow as a stale move
 owners:
 - marius
@@ -10,16 +10,10 @@ tags:
 - librarian
 - worktree
 - fix-safety
----
-
----
-status: open
+closed: 2026-08-19
 opened: 2026-08-19
-closed:
-severity: medium
 owner: marius
-tags: [doctor, librarian, worktree, fix-safety]
-kind: bug
+severity: medium
 ---
 
 # BUG: `repair_frontmatter_id` has no worktree-registration guard — and `frontmatter_id_mismatch` calls every worktree shadow a stale move
@@ -137,36 +131,67 @@ two sessions in one repo, one silently writing where the other is working.
 
 ## Fix idea
 
-Add the registration guard the siblings already have. Either:
+**Shipped 2026-08-19** — scan-side abstention only, which corrects this file's own
+recommendation.
 
-- **In the scan** — abstain in `check_frontmatter_id_matches_catalog` when the row is
-  worktree-scoped with an active registration, and say so, so the report stops asserting a
-  move. This also keeps the count honest for anyone measuring the mismatch population.
-- **Or in the fix** — skip covered rows in `run_fix` and report them under `skipped`,
-  mirroring `reseat_worktree` exactly.
+What this section originally said: *"Prefer **both**: the scan fix stops the misdiagnosis,
+the fix-side guard stops the write. They close different halves and neither implies the
+other."* **The last clause is wrong.** `scan_frontmatter_id_mismatches` derives its rows
+from `check_frontmatter_id_matches_catalog`, so a row that never becomes a violation can
+never reach the writer — the scan fix *does* imply the fix-side one. Reading the call chain
+refutes it; the recommendation was written from the shape of the two defects rather than
+from the code that connects them.
 
-Prefer **both**: the scan fix stops the misdiagnosis, the fix-side guard stops the write.
-They close different halves and neither implies the other. Mirror `prune_missing`'s
-dry-run treatment too — it surfaces `would_skip: "active worktree registration"` so the
-preview never promises more than `confirm=true` delivers.
+And building the redundant guard would have been actively worse than useless. It would be
+unreachable code, so no planted violation could exercise it — a guard that names an
+invariant it never runs, which is `prompt-surface-compaction-session-log:F-5`, recorded in
+this same session's log hours earlier. The two sibling fixes each carry their own
+registration guard because each has a *reachable* path that needs one.
 
+The implementation: `check_frontmatter_id_matches_catalog` gains a fourth abstention,
+alongside no-`id:`, missing-file and unparseable-frontmatter. A new `worktree_twin_id`
+helper (filesystem-only, mirroring `scan_worktree_scoped`'s own ancestor walk, so no
+connection is needed) computes the id the shadow's MAIN twin would carry; when the declared
+id equals it, the check abstains.
+
+Only the twin id is excused — a worktree file declaring some *other* id is ordinary
+post-move drift and still fires. Nothing is silently dropped either way, because
+`scan_worktree_scoped` already reports the row with `collision_with` naming this very id.
 ## Tests
 
-Must observe a *planted* violation and then apply mutations, per `CLAUDE.md` §
-mutation-apply discipline:
+Three, all planted-violation, then mutation-verified by application:
 
-- a registered worktree shadow whose frontmatter names its main twin produces **no**
-  `frontmatter_id_mismatch`;
-- a genuinely stale post-move id still does;
-- a dry-run over a root containing a registered worktree lists the stale row and not the
-  shadow.
+- `frontmatter_id_mismatch_abstains_for_a_worktree_shadow_declaring_its_main_twin` — with a
+  fixture guard asserting the row id and twin id actually differ, so the plain
+  `declared == id` early return cannot be what makes it pass.
+- `frontmatter_id_mismatch_still_fires_for_a_worktree_file_declaring_an_unrelated_id` — the
+  discriminator. Without it, "abstain for anything inside a worktree" passes.
+- `repair_frontmatter_id_leaves_a_worktree_shadow_alone_and_still_sweeps_the_stale_row` —
+  end to end through `run_fix`. `make_worktree_fixture` puts the worktree UNDER the main
+  root, which is the real layout and the reason the old code reached it, so the scope filter
+  cannot be what excludes the shadow. A stale row in the main checkout is the positive
+  control.
 
+**Mutations applied and run: 3. Killed: 3. Surviving: 0.**
+
+| Mutation | Observed |
+|---|---|
+| abstention disabled | KILLED — and the failure output reproduced the defect verbatim: `repaired: [{path: ".../main/.worktrees/feat/docs/plan.md", id: "ff6e215eb2aea6e5"}]` |
+| abstain for ANY file in a worktree | KILLED by the discriminator |
+| `worktree_twin_id` returns the row's own id | KILLED by both positive tests |
+
+The first is the one worth keeping: the regression test is a genuine reproduction of the
+write into another session's working tree, not merely a guard against it.
 ## Resume
 
-Not fixed in the session that found it — surfaced during reconnaissance after an unrelated
-`doctor` change, and the write path belongs to a concurrent session's worktree. Decide the
-scan-side vs fix-side split (recommendation: both) before implementing.
+Nothing outstanding. Fixed and archived in the same session it was filed.
 
+One thing deliberately NOT done: the report still says nothing about shadows under
+`frontmatter_id_mismatch`, because `scan_worktree_scoped` already reports every one of them
+with full detail. Emitting a second finding per shadow would double-count the same row in
+two checks — which is the shape `check_frontmatter_id_matches_catalog`'s own
+missing-file abstention already rejects (*"Reporting it here too would inflate the count on
+precisely the rows a repair cannot help"*).
 ## References
 
 - `src/librarian/tools/doctor.rs` — `check_frontmatter_id_matches_catalog`,
@@ -176,3 +201,22 @@ scan-side vs fix-side split (recommendation: both) before implementing.
   (whose substrate check counted this population)
 - `get_guide("librarian")` § Worktree overlay — fork-on-first-write and `merge_worktree`
 
+
+## Fix provenance
+
+- **SHA:** `f772b8fe` (experiments-only) — positional; does not survive a rebase of
+  `experiments`.
+- **patch-id:** `c5128d873990b049ce956c695a3899750d7b3f08` — content hash of the diff;
+  survives rebase and cherry-pick.
+
+Gate at fix time: `cargo fmt` clean, `cargo clippy --all-targets --features dashboard -D
+warnings` clean, **4232 passed / 45 ignored**.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+codescout's Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep c5128d873990 /tmp/patch-ids.txt
+```

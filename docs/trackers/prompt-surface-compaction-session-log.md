@@ -682,7 +682,9 @@ been missed:
    unknown until the check is fixed. That claim was written hours earlier and was already
    wrong.
 
-Filed as `docs/issues/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md`.
+Filed, fixed and archived the same day —
+`docs/issues/archive/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md`,
+`f772b8fe`.
 
 **Why this is not just "read the whole output".** The deltas were legible *only* because a
 prior run's vector had been written down. A count vector with nothing to compare it to

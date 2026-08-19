@@ -790,7 +790,8 @@ authoritative instead of derived.
   **stale-after-move ids** with **live worktree shadows**, and `fix=repair_frontmatter_id`
   — whose only filter is `containing_root` — would rewrite a file in another session's
   active working tree. Filed as
-  `docs/issues/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md`.
+  `docs/issues/archive/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md`
+  (fixed same day, `f772b8fe`).
   **Two consequences for this entry:** (a) do not cite "3 artifacts carry evidence of a
   prior identity" — the true figure is unknown until the check is de-contaminated, and it
   is the number this entry's whole *inversion* argument rests on; (b) the count moved
