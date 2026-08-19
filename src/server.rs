@@ -857,12 +857,19 @@ impl CodeScoutServer {
     /// slot, [`Rendezvous::poll`] stays quiet forever, and the anonymous-tier
     /// idle TTL is what eventually catches `/clear` — one interval late. The
     /// companion *adds* enforcement; the server degrades without it.
-    fn poll_rendezvous(&self) {
+    ///
+    /// Returns the rendezvous's current conversation id, if it has one, so the
+    /// caller can use it for usage-telemetry attribution instead of the
+    /// construction-time `cc_session_id` snapshot — which is otherwise never
+    /// updated for the lifetime of the process.
+    /// docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md
+    fn poll_rendezvous(&self) -> Option<String> {
         // Two independent mutexes, never held together: the rendezvous guard is
         // scoped to the block below and drops before the ledger lock is taken.
-        let (changed, active) = {
+        let (changed, active, current) = {
             let mut rv = self.rendezvous.lock();
-            (rv.poll(), rv.is_active())
+            let changed = rv.poll();
+            (changed, rv.is_active(), rv.current().map(str::to_string))
         };
         let mut led = self.guide_hints_emitted.lock();
         led.set_rendezvous_active(active);
@@ -873,6 +880,7 @@ impl CodeScoutServer {
             );
             led.rekey(&session);
         }
+        current
     }
 
     /// Drive [`poll_rendezvous`](Self::poll_rendezvous) without routing a tool
@@ -954,7 +962,13 @@ impl CodeScoutServer {
         // the first post-`/clear` response answer from the stale ledger and
         // suppress a guide the new conversation never received. Guarded by
         // `guide_hint_tests::a_tool_call_polls_the_rendezvous_and_re_arms`.
-        self.poll_rendezvous();
+        //
+        // The returned id is ALSO the fix for
+        // docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md:
+        // `self.cc_session_id` is a construction-time snapshot that a `/clear` or a
+        // subagent reusing this live process never updates, while the rendezvous is
+        // polled on every call and tracks the conversation we are CURRENTLY serving.
+        let rendezvous_session = self.poll_rendezvous();
 
         let mut ctx = self.build_context(progress, peer);
         ctx.workspace_override = workspace_override;
@@ -974,7 +988,7 @@ impl CodeScoutServer {
             self.agent.clone(),
             self.debug,
             self.session_id.clone(),
-            self.cc_session_id.clone(),
+            rendezvous_session.unwrap_or_else(|| self.cc_session_id.clone()),
         );
         let input_for_record = input.clone();
 
@@ -5645,6 +5659,82 @@ mod guide_hint_tests {
         assert!(
             !server.guide_hints_emitted.lock().contains("librarian"),
             "a tool call must poll the rendezvous and re-arm for the new conversation"
+        );
+    }
+
+    #[tokio::test]
+    /// Regression for
+    /// docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md:
+    /// `cc_session_id` used to be a construction-time snapshot, so a `/clear` (or a
+    /// subagent reusing this live process) kept attributing calls to the OLD
+    /// conversation forever. The fix reads the rendezvous's current id per call — the
+    /// same signal the ledger already polls — falling back to the snapshot only when
+    /// the rendezvous has none.
+    async fn a_tool_call_after_a_rendezvous_rekey_writes_the_new_cc_session_id() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let servers = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            servers_dir: Some(servers.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        let result = server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("dispatch ok");
+        assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
+
+        let db = dir.path().join(".codescout").join("usage.db");
+        let last_cc_session_id = |db: &std::path::Path| -> String {
+            rusqlite::Connection::open(db)
+                .unwrap()
+                .query_row(
+                    "SELECT cc_session_id FROM tool_calls ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        let before = last_cc_session_id(&db);
+
+        // The companion hook stamps our slot with a NEW conversation — the `/clear`
+        // (or subagent-reusing-a-live-server) case.
+        let slot = servers.path().join(format!("{}.json", std::process::id()));
+        let mut entry: crate::tools::rendezvous::Entry =
+            serde_json::from_str(&std::fs::read_to_string(&slot).unwrap()).unwrap();
+        entry.session = Some("conv-after-clear".to_string());
+        entry.hook_at = Some(chrono::Utc::now());
+        std::fs::write(&slot, serde_json::to_string(&entry).unwrap()).unwrap();
+        filetime::set_file_mtime(&slot, filetime::FileTime::from_unix_time(2_000_000_000, 0))
+            .unwrap();
+
+        let result = server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("dispatch ok");
+        assert!(result.is_error.is_none_or(|e| !e), "tree should succeed");
+
+        let after = last_cc_session_id(&db);
+
+        assert_ne!(
+            before, after,
+            "a rendezvous re-key must change the id written to tool_calls, not just the ledger"
+        );
+        assert_eq!(
+            after, "conv-after-clear",
+            "the newly stamped conversation must be what gets recorded, not the \
+             construction-time cc_session_id snapshot"
         );
     }
 

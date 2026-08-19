@@ -123,6 +123,19 @@ impl Rendezvous {
         self.active
     }
 
+    /// The session we currently believe we are serving, if any — the same value
+    /// [`poll`](Self::poll) just re-keyed to when it returns `Some`, and the value
+    /// seeded at [`publish`](Self::publish) otherwise.
+    ///
+    /// This is the per-call correction for usage telemetry: unlike a caller's own
+    /// construction-time snapshot, this field is updated by every `poll()` that
+    /// observes a fresh stamp, so reading it after a poll reflects the CURRENT
+    /// conversation rather than the one the process was born with.
+    /// docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md
+    pub fn current(&self) -> Option<&str> {
+        self.current.as_deref()
+    }
+
     /// Returns the new session id ONLY when it changed.
     ///
     /// Called on every guide-eligible request, so the unchanged path must stay
