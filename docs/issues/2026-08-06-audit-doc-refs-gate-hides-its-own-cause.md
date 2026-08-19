@@ -150,8 +150,10 @@ let shown_findings: Vec<_> = ranked.iter().take(cap).map(|f| finding_to_json(f))
 reader knows the absence of a high finding in the window is meaningful.
 
 Experiments-branch SHA: recorded on commit (this change ships with the
-extractor-precision work). Master-side SHA still needs recording after
-cherry-pick per CLAUDE.md § "After cherry-pick".
+extractor-precision work). **No master-side SHA is owed** — that rule was retired
+2026-08-19. Record the SHA and its patch-id at fix time and the pair stays
+resolvable whichever way the fix reaches master; see `docs/RELEASE.md`
+§ *Citing a fix: SHA + patch-id*.
 
 ## Tests added
 

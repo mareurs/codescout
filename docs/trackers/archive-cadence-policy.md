@@ -284,7 +284,9 @@ trigger (iv) now exists to catch.
   - `docs/trackers/tool-usage-patterns.md` (augmented artifact `f2ecdd76a6189efb`)
   - Per-work-stream `<topic>-session-log.md` files (F-N / W-N) — already archived when their work stream wraps; policy may not need to extend here.
 - **Related conventions:**
-  - `CLAUDE.md § After cherry-pick: cite the master SHA` (extended in T10).
+  - `CLAUDE.md § Bug Tracking` — cite the SHA *and* its patch-id. (Was
+    "After cherry-pick: cite the master SHA", extended in T10; that rule was
+    retired 2026-08-19 and the section renamed.)
   - `docs/TAXONOMY.md` (T6 — taxonomy cheatsheet; would gain a "Status vocabulary" section once policy lands).
   - `docs/issues/_TEMPLATE.md` (bug-file archive flow at `docs/issues/archive/` — the existing precedent for archive-on-ship).
 - **Cross-cutting:** the ship cadence question is out-of-scope here but obviously linked. Without a way to land experiments→master deliberately, the "shipped-to-master" state is rarely achievable, and the policy degenerates to "archive when shipped-to-experiments + old enough."

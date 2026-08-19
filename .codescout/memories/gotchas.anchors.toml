@@ -7,15 +7,15 @@ hash = "b1814030247b69cb39bcea375dbccc4865f717af98fdd8c66809a6822b245550"
 
 [[anchors]]
 path = "src/librarian/tools/context.rs"
-hash = "10c4ceef14af594ab6c655fc7dbc1f1ff054c6424dcf1ad5b0495189273966cf"
+hash = "3661e2415c8d69c674cd9b664c0fbf41203b9a2be05f1ae70fed0c6e7302e638"
 
 [[anchors]]
 path = "docs/trackers/artifact-augmentation-followups.md"
-hash = "39f5264ce50a1a0ddfcdfaed7dd0c30c65853283d7146a5121e5a0f40115d2ee"
+hash = "6bb07174599cbdb29ac7beaf7736326c71878fc231ccb448e4ba8535f31be70f"
 
 [[anchors]]
 path = "src/ast/parser.rs"
-hash = "49224dda49dca4f2f491b037ecdedae3b8e4ac017319c807b75c66c2057d5971"
+hash = "e1a5e2e88ddcc86db82927265a8fbeef80a7e8529c41c21e470307183abe1cdd"
 
 [[anchors]]
 path = ".codescout/embeddings/project.db"
@@ -23,11 +23,11 @@ hash = "299cc710929e49e6dcaead85f654d22518b5d6268a0ca361e1cb0da98ea0a2b1"
 
 [[anchors]]
 path = "src/lsp/client.rs"
-hash = "de5128db082a85b559d6cb459f38e47e55f250cf3e395ea95d8a987f8170d973"
+hash = "4ebd75a0368ed5caf79461702af7d69dc37976f6e34626e2129b7fc74b4c18d0"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "5d62ec83a72b6a056b8ca8d47c20cfaf82431feb4de2a30043fd2f063354702a"
+hash = "96156c8264655b30557db5cddc2bf54d1f479083741fe612f0aed3162cc55543"
 
 [[anchors]]
 path = ".codescout/project.toml"
@@ -39,12 +39,12 @@ hash = "ec269942aa229cdf317b8a8bca43e6f5555c55b2ef803735762102bc9e3863b0"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "2cf9e079985d01f02008044435f09eb428f33b72ce41e1fc63473c2fe3ceb771"
+hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "86d4892a183d5c32fe80f5592151bfe2664e081e0bb7037d788ae3977b565c59"
+hash = "fb7651b774eeb9aae6559f91cedaff3662a6cad62aa246ee4a3002a21dd2833d"
 
 [[anchors]]
 path = ".codescout/system-prompt.md"
-hash = "7dbf53e9dedac0b22a49230b8898d691716520faf5f14d1bb95f6cdfb1488db3"
+hash = "7b4656d4ab6fe1eedeb100311aca542c4d209b3bdbae6ed30e217e11f4425beb"
