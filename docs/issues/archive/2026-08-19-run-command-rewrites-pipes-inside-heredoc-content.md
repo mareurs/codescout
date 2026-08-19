@@ -1,5 +1,5 @@
 ---
-id: d5cb0c41335b2610
+id: 0de2778e6adac220
 kind: bug
 status: fixed
 title: 'BUG: run_command''s pipe instrumentation rewrites pipes inside heredoc content, corrupting written files'
@@ -153,3 +153,21 @@ Gate: fmt, clippy `--all-targets -D warnings`, `cargo test` 4262 passed / 45 ign
 
 - [2026-08-16 run_command backticks substituted in a quoted message](archive/2026-08-16-run-command-backticks-substituted-in-quoted-message.md) — sibling defect, same root: `run_command` transforming shell metacharacters that are content rather than command structure.
 - [2026-08-19 archived fix SHAs orphan when experiments rebases](2026-08-19-archived-fix-shas-orphan-when-experiments-rebases.md) — the 53-file pass during which this surfaced.
+
+## Fix provenance
+
+- **SHA:** `4ea33d15` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `50691255eccdc8e7ebb3ce3634d3ee01a8b17a3d` — content hash of the diff; survives rebase and cherry-pick.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer, and note that the pipes
+below are exactly the shape this bug used to rewrite:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 50691255eccd /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
+(cherry-pick) and any of them is the fix.

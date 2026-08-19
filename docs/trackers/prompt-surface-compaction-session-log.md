@@ -53,6 +53,11 @@ entry_high_water_W: 11
 >
 > Predecessors (both archived): `archive/prompt-guide-refactor-session-log.md`,
 > `archive/mcp-prompt-redesign-session-log.md`.
+> **Update, later on 2026-08-19:** of the three open bugs named above, the heredoc
+> pipe-rewrite is **fixed and archived** — new id `0de2778e6adac220`, fix `4ea33d15`,
+> patch-id `50691255eccd`. The `d5cb0c41335b2610` above was re-keyed by that move and no
+> longer resolves. Still open: the rendezvous latch bug and `grep`'s silent zero on an
+> absolute glob (`8036fbf1666e1603`).
 ## Index
 
 | ID | Date | Severity | Category | Status | Title |

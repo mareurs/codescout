@@ -1529,7 +1529,7 @@ async fn run_command_commit_backtick_gate_honours_acknowledge_risk() {
 /// The unit tests pin the masking; this pins that nothing downstream re-introduces the
 /// rewrite, which matters because the damage is invisible at the call site — exit 0, file
 /// written, corruption only in content the author does not re-read.
-/// `docs/issues/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md`.
+/// `docs/issues/archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md`.
 #[tokio::test]
 async fn heredoc_body_pipes_are_not_rewritten_into_the_written_file() {
     let (_dir, ctx) = project_ctx().await;

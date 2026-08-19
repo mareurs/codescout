@@ -185,7 +185,7 @@ fn inject_tee(
     // a pipeline stage, so the splice below landed in written content. Detect on a masked
     // copy: masking blanks body bytes in place, so `pipe_pos` still addresses the original
     // and the splice is unchanged. See
-    // docs/issues/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md.
+    // docs/issues/archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md.
     let masked = crate::util::path_security::mask_heredoc_bodies(resolved_command);
     if let Some(pipe_pos) = detect_terminal_filter(&masked) {
         // Use tempfile::NamedTempFile for unpredictable path (SF-3).

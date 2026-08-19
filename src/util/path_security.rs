@@ -811,7 +811,7 @@ fn heredoc_opener() -> &'static Regex {
 /// `git log --all -p | git patch-id --stable | tee '/tmp/codescout-unfiltered-hUMfFa' | grep …`,
 /// a temp path that will never exist, recorded in a permanent file as an instruction.
 /// Exit code 0, no warning. See
-/// `docs/issues/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md`.
+/// `docs/issues/archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md`.
 ///
 /// Masking rather than skipping-on-`<<` (the bug's own cheaper suggestion) keeps
 /// instrumentation working where the pipe is real — `cat <<'EOF' | grep x` pipes on the
