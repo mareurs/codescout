@@ -2347,16 +2347,37 @@ fn scan_archived_fix_sha_unresolvable(
 /// never to claim one of them is the fix: [`scan_archived_fix_sha_unresolvable`] documents
 /// at length why sweeping prose for hex and calling the result a fix SHA produces confident
 /// wrong answers about reproduction commits and exonerated suspects.
+///
+/// **Fences are skipped and backticks pair PER LINE, because global parity is not robust.**
+/// The first cut split the whole file on backticks and took alternate spans, which assumes
+/// every backtick pairs. One that does not inverts every span after it. Measured on
+/// `2026-08-18-three-ledgers-own-prefix-t-…`: a lone `` ` `` inside a fenced `grep` pattern
+/// (`'^#\{1,6\}[[:space:]]\+`\?T-[0-9]\+'`) left 393 backticks in the file, 71 of them before
+/// line 60 — so `c7bdfd22` read as prose and the file reported zero hashes while carrying
+/// three occurrences of one. Per-line pairing confines a stray backtick to its own line, and
+/// inline code does not span lines, so nothing legitimate is lost.
 fn commit_like_hashes(content: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for span in content.split('`').skip(1).step_by(2) {
-        let plausible = (7..=12).contains(&span.len())
-            && span
-                .chars()
-                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-            && span.chars().any(|c| c.is_ascii_alphabetic());
-        if plausible && !out.iter().any(|s| s == span) {
-            out.push(span.to_string());
+    let mut in_fence = false;
+    for line in content.lines() {
+        // A fence toggles on any ``` line — including ```rust. Content inside is quoted
+        // material, not this document's own references, and it is where stray backticks live.
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        for span in line.split('`').skip(1).step_by(2) {
+            let plausible = (7..=12).contains(&span.len())
+                && span
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+                && span.chars().any(|c| c.is_ascii_alphabetic());
+            if plausible && !out.iter().any(|s| s == span) {
+                out.push(span.to_string());
+            }
         }
     }
     out
@@ -2388,11 +2409,14 @@ fn commit_like_hashes(content: &str) -> Vec<String> {
 ///
 /// **Names the misleading case separately, because it is the one a reader gets wrong — and
 /// it is the majority, not a sub-case.** A file with no declared anchor but with commit-like
-/// hashes in its prose READS as anchored. Measured 2026-08-19 on this repo, **7 of the 9**
-/// findings carry such hashes and only 2 are plainly hash-free; the hashes are typically the
-/// commit the bug was OBSERVED at, sitting in an `Environment` line. (A hand-inspection
-/// before this check ran put the figure at three — a sample's count reported as the
-/// population's, which is the same error the check itself exists to make harder.) Stating
+/// hashes in its prose READS as anchored. Measured 2026-08-19 on this repo, **8 of the 9**
+/// findings carry such hashes and exactly one is plainly hash-free; the hashes are typically
+/// the commit the bug was OBSERVED at, sitting in an `Environment` line. (Two earlier figures
+/// for this were wrong and are worth knowing: a hand-inspection said *three*, because its
+/// probe counted the word "SHA" rather than hashes and so never opened the three heaviest
+/// carriers; and the check's own first run said *seven*, because [`commit_like_hashes`] paired
+/// backticks across the whole file. Each instrument was measuring a property adjacent to the
+/// one being reasoned about.) Stating
 /// *"hashes are present, none declared as the fix"* is safe; naming one as the fix is the
 /// confident wrong answer this module refuses to give.
 ///
@@ -3679,6 +3703,48 @@ mod tests {
             commit_like_hashes(text),
             vec!["6ce49487".to_string()],
             "only the 7-12 hex token containing a letter counts"
+        );
+    }
+    /// The parity bug, pinned with the real shape that produced it.
+    ///
+    /// Found 2026-08-19 while checking why the shipped check reported zero hashes for
+    /// `2026-08-18-three-ledgers-own-prefix-t-…`, which cites `c7bdfd22` three times. A lone
+    /// backtick inside a fenced `grep` pattern left the file with an odd backtick count, and
+    /// the first implementation split the WHOLE file on backticks and took alternate spans —
+    /// so every inline span after that character was inverted and the hash read as prose.
+    ///
+    /// Two behaviours in one fixture, because they are one decision: fenced content is
+    /// quoted material rather than this document's own references, and pairing per line stops
+    /// a stray character corrupting anything past its own line.
+    #[test]
+    fn commit_like_hashes_survives_a_lone_backtick_inside_a_fence() {
+        let text = "Intro `T-1` inline.\n\
+                    ```\n\
+                    git show `abc1234f` | git patch-id --stable\n\
+                    grep -n '^#\\{1,6\\}[[:space:]]\\+`\\?T-[0-9]\\+' docs/x.md\n\
+                    ```\n\
+                    codescout `experiments` @ `c7bdfd22`. Measured against the catalog.\n";
+        assert_eq!(
+            commit_like_hashes(text),
+            vec!["c7bdfd22".to_string()],
+            "the fenced hash is quoted material and must not count, and the stray backtick \
+             inside that fence must not invert the spans after it"
+        );
+    }
+    /// The other half of the same decision, and the half the fence fixture does NOT cover.
+    ///
+    /// Written because a mutation exposed the gap: with fenced content skipped, the fence
+    /// fixture's remaining backticks are even, so global pairing still passes it. Only a
+    /// stray backtick in PROSE separates the two designs. Per-line pairing confines the
+    /// damage to one line; global pairing loses every hash in the rest of the document.
+    #[test]
+    fn commit_like_hashes_confines_a_stray_prose_backtick_to_its_own_line() {
+        let text = "A sentence with one unmatched ` backtick, outside any fence.\n\
+                    codescout `experiments` @ `c7bdfd22`.\n";
+        assert_eq!(
+            commit_like_hashes(text),
+            vec!["c7bdfd22".to_string()],
+            "a stray backtick must corrupt at most its own line"
         );
     }
 
