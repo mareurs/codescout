@@ -1181,6 +1181,23 @@ fn main_path_for(abs_path: &Path, worktree_root: &Path, main_root: &Path) -> Opt
     Some(main_root.join(rel))
 }
 
+/// The id a linked worktree's shadow file legitimately declares in its frontmatter: its
+/// MAIN twin's. `None` when `abs_path` is not inside a linked worktree, or the main root
+/// cannot be resolved.
+///
+/// Filesystem-only, exactly like [`scan_worktree_scoped`]'s own resolution — an ancestor
+/// walk for a `.git` *file*, then a re-root. That is what lets
+/// [`check_frontmatter_id_matches_catalog`] use it without a connection, which it does not
+/// have.
+fn worktree_twin_id(abs_path: &Path) -> Option<String> {
+    let worktree_root = abs_path
+        .ancestors()
+        .find(|a| current_project::is_linked_worktree(a))?;
+    let main_root = current_project::worktree_main_root(worktree_root)?;
+    let main_path = main_path_for(abs_path, worktree_root, &main_root)?;
+    Some(ids::artifact_id_from_abs(&main_path))
+}
+
 /// Reads `artifact_augmentation.entry_collection` + `params` for `artifact_id`.
 /// `None` if the row is unaugmented.
 fn augmentation_entry_collection(
@@ -1417,7 +1434,7 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 /// unguarded (BL-33). Re-deriving the predicate here would reintroduce that defect in a
 /// second place.
 ///
-/// Only a **present and differing** id is a violation. The three abstentions are
+/// Only a **present and differing** id is a violation. The four abstentions are
 /// deliberate:
 /// - **No `id:` at all** is not a false assertion, and stamping one would newly
 ///   subject the file to the librarian guard — `docs/trackers/skill-frictions.md`
@@ -1425,6 +1442,8 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 /// - **A missing file** is [`check_missing_file`]'s finding. Reporting it here too
 ///   would inflate the count on precisely the rows a repair cannot help.
 /// - **Unparseable frontmatter** is left alone rather than guessed at.
+/// - **A linked worktree's shadow declaring its MAIN twin's id** is correct, not drift —
+///   see the block comment at the abstention itself.
 fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Violation> {
     let content = std::fs::read_to_string(abs_path).ok()?;
     let (fm, _) = crate::librarian::frontmatter::parse(&content).ok()?;
@@ -1448,6 +1467,36 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
             ),
         ));
     }
+    // A linked worktree's shadow legitimately declares its MAIN twin's id. The overlay's
+    // fork-on-first-write seeds a row at the worktree path while the file on disk stays a
+    // checkout of the same commit, so its frontmatter still carries the main file's id.
+    // Nothing moved. Reporting it as `frontmatter_id_mismatch` asserted a move that never
+    // happened, and the detail text said so in as many words.
+    //
+    // The write half is why this is an abstention rather than a reworded finding. This
+    // function feeds `scan_frontmatter_id_mismatches`, which feeds
+    // `fix=repair_frontmatter_id`, whose only filter is path containment — and a worktree
+    // sits UNDER its main checkout's root. `confirm=true` would therefore rewrite a tracked
+    // file inside another session's live working tree; if that session then commits (the
+    // entire point of a worktree), the worktree-path-derived id ships and becomes a
+    // GENUINE mismatch once merged back. The repair would manufacture the defect it exists
+    // to remove.
+    //
+    // Abstaining HERE is the whole guard, deliberately. A row that never becomes a
+    // violation cannot reach the writer, so a second check inside `run_fix` would be
+    // unreachable code — and an unreachable guard is one no planted violation can
+    // exercise, which is the failure recorded as `prompt-surface-compaction-session-log:F-5`.
+    // The two sibling fixes each carry their own registration guard because each has a
+    // reachable path that needs one; this one does not.
+    //
+    // Only the twin id is excused. A worktree file declaring some OTHER id is ordinary
+    // post-move drift and still fires. And the row is not silently dropped either way:
+    // `scan_worktree_scoped` already reports it, with `collision_with` naming this very id.
+    // docs/issues/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md
+    if worktree_twin_id(Path::new(abs_path)).as_deref() == Some(declared.as_str()) {
+        return None;
+    }
+
     Some(Violation::new(
         "frontmatter_id_mismatch",
         Some(id.to_string()),
@@ -1841,6 +1890,12 @@ fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>
 /// splicing a template's `id: ADR-{NUMBER}` to a 16-hex id. Pinned by
 /// `repair_frontmatter_id_never_rewrites_a_value_that_was_never_a_catalog_id`, which
 /// reproduced that rewrite before the guard existed.
+///
+/// The second write guard lives one level up, in
+/// [`check_frontmatter_id_matches_catalog`]'s worktree-twin abstention: a shadow file whose
+/// frontmatter names its main twin never becomes a violation, so it never reaches this
+/// function or the sweep it feeds. Pinned by
+/// `repair_frontmatter_id_leaves_a_worktree_shadow_alone_and_still_sweeps_the_stale_row`.
 fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
     let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String)> = stmt
@@ -2397,6 +2452,132 @@ mod tests {
             Some("ADR-{NUMBER}"),
             "the placeholder must survive untouched. File: {}",
             read("adr-template.md")
+        );
+    }
+
+    /// A worktree shadow declares its MAIN twin's id, and that is the overlay working.
+    ///
+    /// The fixture asserts up front that the two ids actually differ — otherwise the
+    /// plain `declared == id` early return would abstain and this test would prove
+    /// nothing about the worktree branch at all.
+    #[test]
+    fn frontmatter_id_mismatch_abstains_for_a_worktree_shadow_declaring_its_main_twin() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        std::fs::create_dir_all(worktree_root.join("docs")).unwrap();
+        let shadow = worktree_root.join("docs/plan.md");
+        let twin_id = crate::librarian::ids::artifact_id_from_abs(&main_root.join("docs/plan.md"));
+        std::fs::write(
+            &shadow,
+            format!("---\nid: {twin_id}\nkind: plan\n---\n\n# plan\n"),
+        )
+        .unwrap();
+
+        let shadow_str = crate::util::fs::RepoPath::from_path(&shadow).into_string();
+        let row_id = crate::librarian::ids::artifact_id_from_abs(&shadow);
+        assert_ne!(
+            row_id, twin_id,
+            "fixture guard: if these matched, the plain equality return would abstain and \
+             the worktree branch would never execute"
+        );
+
+        assert!(
+            check_frontmatter_id_matches_catalog(&row_id, &shadow_str).is_none(),
+            "a shadow naming its main twin is fork-on-first-write, not a move"
+        );
+    }
+
+    /// The discriminator. Without it, "abstain for anything inside a worktree" passes the
+    /// test above — and would silence genuine post-move drift in every worktree.
+    #[test]
+    fn frontmatter_id_mismatch_still_fires_for_a_worktree_file_declaring_an_unrelated_id() {
+        let (_tmp, _main_root, worktree_root) = make_worktree_fixture();
+        std::fs::create_dir_all(worktree_root.join("docs")).unwrap();
+        let f = worktree_root.join("docs/plan.md");
+        std::fs::write(&f, "---\nid: dead111111111111\nkind: plan\n---\n\n# plan\n").unwrap();
+        let f_str = crate::util::fs::RepoPath::from_path(&f).into_string();
+        let row_id = crate::librarian::ids::artifact_id_from_abs(&f);
+
+        let v = check_frontmatter_id_matches_catalog(&row_id, &f_str)
+            .expect("being inside a worktree does not excuse an unrelated stale id");
+        assert_eq!(v.check, "frontmatter_id_mismatch");
+    }
+
+    /// The destructive half, end to end.
+    ///
+    /// `make_worktree_fixture` puts the worktree UNDER the main root, which is the real
+    /// layout and the whole reason the old code reached it: `containing_root` is a path
+    /// test, and a worktree passes it. So the scope filter cannot be what keeps the shadow
+    /// out here — only the abstention can.
+    ///
+    /// The stale row in the main checkout is a positive control. Without it a sweep that
+    /// silently repaired nothing would pass.
+    #[tokio::test]
+    async fn repair_frontmatter_id_leaves_a_worktree_shadow_alone_and_still_sweeps_the_stale_row() {
+        let (_tmp, main_root, worktree_root) = make_worktree_fixture();
+        std::fs::create_dir_all(main_root.join("docs")).unwrap();
+        std::fs::create_dir_all(worktree_root.join("docs")).unwrap();
+
+        let stale = main_root.join("docs/stale.md");
+        std::fs::write(
+            &stale,
+            "---\nid: dead111111111111\nkind: adr\n---\n\n# stale\n",
+        )
+        .unwrap();
+
+        let shadow = worktree_root.join("docs/plan.md");
+        let twin_id = crate::librarian::ids::artifact_id_from_abs(&main_root.join("docs/plan.md"));
+        std::fs::write(
+            &shadow,
+            format!("---\nid: {twin_id}\nkind: plan\n---\n\n# plan\n"),
+        )
+        .unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(
+            &cat,
+            "1111111111111111",
+            &crate::util::fs::RepoPath::from_path(&stale).into_string(),
+        );
+        seed_artifact(
+            &cat,
+            &crate::librarian::ids::artifact_id_from_abs(&shadow),
+            &crate::util::fs::RepoPath::from_path(&shadow).into_string(),
+        );
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let applied = call(
+            &ctx,
+            json!({
+                "fix": "repair_frontmatter_id",
+                "root": crate::util::fs::RepoPath::from_path(&main_root).into_string(),
+                "confirm": true,
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            applied["totals"]["files"], 1,
+            "the shadow is inside the scope root by path, so only the abstention excludes \
+             it: {applied}"
+        );
+
+        let declared = |p: &std::path::Path| -> Option<String> {
+            crate::librarian::frontmatter::parse(&std::fs::read_to_string(p).unwrap())
+                .unwrap()
+                .0
+                .and_then(|fm| fm.id)
+        };
+        assert_eq!(
+            declared(&stale).as_deref(),
+            Some("1111111111111111"),
+            "positive control: without this the test passes on a sweep that did nothing"
+        );
+        assert_eq!(
+            declared(&shadow).as_deref(),
+            Some(twin_id.as_str()),
+            "the shadow must be untouched — a write here lands in another session's live \
+             working tree, and ships a worktree-derived id if that session commits"
         );
     }
 
