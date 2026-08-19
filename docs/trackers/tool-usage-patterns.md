@@ -659,7 +659,10 @@ still costs no slice budget, and still targets the repeat-within-5-minutes path.
 withdrawn:** fix (2). Do not spend 1900-char slice budget aiming at the corpus's healthiest
 class. The priority queue for *new* gate authoring is `err_family IS NULL`, whose largest
 member is the worktree/activate write block at 22 hits — see T-26 and
-`docs/issues/2026-08-20-largest-unclassified-error-is-the-worktree-activate-write-block.md`.
+`docs/issues/archive/2026-08-20-largest-unclassified-error-is-the-worktree-activate-write-block.md`
+(fixed in `4c7608ee`: 69 of 73 classified — though note the NULL bucket turned out **not** to
+be high-friction either, so this was taxonomy hygiene rather than the priority queue this
+entry called it).
 
 ### T-26 — grepping transcripts for friction is a wrong-tool choice with a measured false-positive rate
 

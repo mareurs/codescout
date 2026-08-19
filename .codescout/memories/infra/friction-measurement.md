@@ -143,8 +143,10 @@ Three confounds must be handled every time, and a fourth is unhandled:
   four open questions. Items 1-2 (attribution fix, `S-A OR S-B`) are prerequisites; 3-5 each
   have an open decision. **Start at the attribution bug, not the detector.**
 - **Bugs**: six filed 2026-08-20 in `66654f53` (patch-id
-  `8ddbe5e10a9851ec7b7db241e4590b51956a09df`) under `docs/issues/2026-08-20-*`. **Five still
-  open; one fixed and archived** — the `friction_target` alias gap, fixed in `db76f69a`
+  `8ddbe5e10a9851ec7b7db241e4590b51956a09df`) under `docs/issues/2026-08-20-*`. **Four still
+  open; two fixed and archived** — the `err_family` NULL head, fixed in `4c7608ee`
+  (patch-id `ec94d2846dc69de4f1db40928ba995d53ddcbb42`), 69 of 73 now classify with 4
+  one-off residue by design; and the `friction_target` alias gap, fixed in `db76f69a`
   (patch-id `bac32905dd0eb7ebb2fc156cb651723cbd2be00a`). That fix added `file_path` and
   `rel_path` only: `command`-addressed calls (438 rows) remain target-less **by decision**,
   and historical rows were **not** backfilled, so any attribution figure computed over rows

@@ -1078,7 +1078,8 @@ coverage table says something narrower: `run_command` is **0.2%** unclassified,
 `memory`/`symbols` ~50%. The NULL population is **49% librarian/artifact API-shape errors
 plus 31% a single worktree-activate write gate** — one uncovered *surface*, not a general
 untaught population. Classifying it (see
-`docs/issues/2026-08-20-largest-unclassified-error-is-the-worktree-activate-write-block.md`)
+`docs/issues/archive/2026-08-20-largest-unclassified-error-is-the-worktree-activate-write-block.md`,
+fixed in `4c7608ee` — 69 of 73 now classify)
 is still worth doing for taxonomy reasons; it is not a friction detector.
 
 **A caveat against over-reading this refutation.** One test run while producing it was
