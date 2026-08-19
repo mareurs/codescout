@@ -43,7 +43,7 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-6 | 2026-08-17 | proposed | small–medium | Derive TAXONOMY's append-recipe column from `entry_prefix` declarations — it drifted twice in one day |
 | CAP-7 | 2026-08-19 | proposed | small–medium | Make record decay detectable — three doctor checks so corrections travel (Layer 2) |
 | CAP-8 | 2026-08-19 | proposed | large | Content-addressed identity — a "gram" for entries, stored-not-derived ids for artifacts (Layer 3) |
-| CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then a 2-predicate detector and an in-band `friction()` self-report |
+| CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then **S-A only** (S-B falsified 2026-08-20) and an in-band `friction()` self-report |
 
 ## CAP-1 — Session artifact-touch ledger
 
@@ -1051,6 +1051,66 @@ prerequisites, items 3-5 each still have an open decision.**
   selects *against* the population it was meant to catch.
 - **`thinking`-block detection** — 0 of 4,906 blocks carry text; Opus-5/Sonnet-5 emit an
   encrypted signature only.
+
+### Correction 2026-08-20 — S-B is falsified; S-A survives
+
+Measured a few hours after this entry was written, with `scripts/friction-probe.py`
+(calibrated against TU-7's published immediate-repeat figures first: ratios 0.9 / 0.82 /
+0.63 on the three families with usable n, ordering preserved). **The 1.97x lift for
+`err_family IS NULL` does not reproduce from `usage.db`.**
+
+| Predicate (usage.db only, whole 30-day corpus) | NULL | classified | ratio |
+|---|---:|---:|---:|
+| immediate repeat (TU-7's discriminator) | **2.8%** (2/71) | ~4-5% avg | NULL is **better** |
+| same tool succeeds later | 15.5% | 11.2% | 1.38x |
+| any success in session | 0.0% | 0.4% | too lenient to discriminate |
+| `calls_to_recovery` | mean **1.13**, 0% unrecovered | mean 1.0-1.67 | mid-pack |
+| *(POV1's transcript-joined label, for reference)* | *53.2%* | *27.0%* | *1.97x* |
+
+Under every predicate computable from the database the detector would actually run
+against, the NULL bucket lands at or below the corpus average. Only the transcript-joined
+label puts it at 1.97x, and that label is not reproducible here.
+
+**Why the story was wrong, not just the number.** The justification was "a named family
+means someone wrote a teaching hint; NULL is the complement of the teaching effort". The
+coverage table says something narrower: `run_command` is **0.2%** unclassified,
+`read_markdown`/`grep`/`references` **0%**, against `artifact` **37.5%** and
+`memory`/`symbols` ~50%. The NULL population is **49% librarian/artifact API-shape errors
+plus 31% a single worktree-activate write gate** — one uncovered *surface*, not a general
+untaught population. Classifying it (see
+`docs/issues/2026-08-20-largest-unclassified-error-is-the-worktree-activate-write-block.md`)
+is still worth doing for taxonomy reasons; it is not a friction detector.
+
+**A caveat against over-reading this refutation.** One test run while producing it was
+itself invalid and is recorded so the mistake is not repeated: "recovery = a later success
+sharing the same `friction_target`" returns ~99% friction for *both* arms, because
+`friction_target` is only populated when `is_friction` is true, so a **success** essentially
+never carries one. That predicate cannot fire for any population. It says nothing about
+POV1's method, which reconstructed targets from `input_json`. The divergence between the
+two labels is therefore **unexplained**, not attributed — what is established is only that
+no usage.db-only predicate reproduces 1.97x.
+
+**S-A survives and is directly measurable:** 84 runs of length >=2 over 30 days, 181 of
+1,133 errors (16.0%) inside one, longest run 5 — consistent in magnitude with the ~69
+fires POV1 measured on its subset.
+
+**What this changes in the ask above.** Item 2 becomes **`S-A` only**. The "zero new
+columns" framing was hiding that S-B's *evidence* was never reproducible from the store the
+detector would query — a detector and its justification must live in the same instrument.
+Open question 3 is **answered and closed**: do not wait to re-measure after classification;
+the bucket is not high-friction now.
+
+**And a fifth open question, from the same pass.** Before/after comparison on this corpus is
+not yet possible: across a 2026-08-18 22:30 cutoff the adjusted effect is 0.86pp against
++/-0.40pp Poisson noise (2.15 sigma), needing ~8,071 clean calls per arm for 80% power
+against 1,740 available — **4.6x more data**. Three confounds have to be handled every time
+(workload mix, build identity + `codescout_dirty` at 4% -> 22%, and reconnect blending: the
+24h window held 15 builds across 23 processes). A fourth is unhandled: **mix confounding is
+fractal** — `read_markdown` looked 2.4x worse after the cutoff with its error *composition*
+unchanged (`librarian_managed_artifact` 68% before, 67% after), because the within-tool
+workload moved. The unit that would fix it is (tool x target-kind), which needs
+`friction_target` — NULL on 96.6% of rows. That is a third independent argument for the
+`friction_target` bug.
 
 ### Resume
 

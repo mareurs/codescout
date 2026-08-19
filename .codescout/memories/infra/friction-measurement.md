@@ -63,10 +63,56 @@ construct; absolute rates move with the threshold, ordering does not).
 | `repeat_family` (best variant) | 31.2% | 1.16x | reshaped |
 | `target_thrash` (≥3 on one target) | 27.1% | **1.00x** | **dropped** — friction-random |
 | `route_around` (different tool succeeds on same target) | 21.5% | **0.79x** | **dropped** — firings are agents correctly obeying the gate |
-| **`S-A OR S-B`** | **48.0%** | **1.78x** | **ship** — 26% recall, ~157 fires/30d, **zero new columns** |
+| ~~`S-A OR S-B`~~ | ~~48.0%~~ | ~~1.78x~~ | **S-B FALSIFIED 2026-08-20 — see below** |
 
 `S-A` = consecutive-error run in one session with no intervening success. `S-B` =
 `err_family IS NULL`.
+
+**S-B does not survive measurement against `usage.db` itself.** Re-measured with
+`scripts/friction-probe.py` (calibrated against TU-7 first — ratios 0.9 / 0.82 / 0.63,
+ordering preserved):
+
+| Predicate (usage.db only, 30-day corpus) | NULL | classified | ratio |
+|---|---:|---:|---:|
+| immediate repeat (TU-7's discriminator) | **2.8%** (2/71) | ~4-5% avg | NULL is **better** |
+| same tool succeeds later | 15.5% | 11.2% | 1.38x |
+| `calls_to_recovery` | mean **1.13**, 0% unrecovered | mean 1.0–1.67 | mid-pack |
+| *(POV1's transcript-joined label)* | *53.2%* | *27.0%* | *1.97x* |
+
+The NULL bucket is **49% librarian/artifact API-shape errors + 31% one worktree-activate
+write gate** — one uncovered *surface*, not a general untaught population. Classifying it is
+worth doing for taxonomy reasons; it is not a friction detector. **`S-A` survives**: 84 runs
+of length ≥2 over 30 days, 16.0% of errors inside one.
+
+Caveat recorded so the mistake is not repeated: one test run during this refutation was
+itself invalid — "recovery = a later success sharing `friction_target`" returns ~99%
+friction for *both* arms, because `friction_target` is only populated when `is_friction` is
+true, so a success essentially never carries one. The divergence from POV1's label is
+therefore **unexplained, not attributed**.
+
+## Before/after comparison — not yet possible, and what it would take
+
+Use `scripts/friction-probe.py --split-at "<UTC>" --clean-only`. On a 2026-08-18 22:30
+cutoff: adjusted effect **0.86pp** against **±0.40pp** Poisson noise (**2.15σ**), needing
+**~8,071 clean calls per arm** for 80% power against **1,740** available — **4.6× more
+data**. Re-run when that closes; do not quote the delta before then.
+
+Three confounds must be handled every time, and a fourth is unhandled:
+
+1. **Workload mix** — across that cutoff `run_command` went 34.8% → 48.9% of calls while
+   `symbols`/`edit_code`/`read_file`/`grep` all fell. Per-tool rates span 0.31% (`grep`) to
+   6.91% (`edit_code`), so the aggregate moves with no behaviour change. Handled by direct
+   standardisation; `mix_coverage` flags an extrapolating adjustment.
+2. **Build identity** — `codescout_sha` is per call and builds run *concurrently*, so a time
+   split mixes builds and a build split mixes time. `codescout_dirty` went **4% → 22%**;
+   `--clean-only` drops those.
+3. **Reconnects** — the 24h window held **15 builds across 23 processes**. "After" is not
+   one condition; the probe says so on every run.
+4. **UNHANDLED — mix confounding is fractal.** `read_markdown` looked 2.4× worse after the
+   cutoff with its error *composition* unchanged (`librarian_managed_artifact` 68% before,
+   67% after) — the within-tool workload moved. The unit that would fix it is
+   (tool × target-kind), which needs `friction_target`, NULL on 96.6% of rows. A third
+   independent argument for that bug.
 
 ## Signal availability — what lives where
 
