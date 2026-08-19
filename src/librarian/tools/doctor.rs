@@ -55,6 +55,12 @@
 //!    config declared eight sibling repos as sub-projects for a month while
 //!    `activate` kept reporting the real tree. Skipped, loudly, in a linked
 //!    worktree — see `scan_declared_project_roots`.
+//! 10. `terminal_status_with_caveat` — a bug file whose `status` is terminal and
+//!     whose `unverified:` field is non-empty. The reader half of the `unverified:`
+//!     convention: authors write the caveat, the canonical triage query filters on
+//!     `status`, and every caveated record has a terminal one by construction — so
+//!     without this the field only moved the problem from prose into frontmatter.
+//!     Archived files are included on purpose; see `scan_terminal_status_with_caveat`.
 //!
 //! Deferred to a follow-up: NFC unicode normalization, orphan
 //! `artifact_augmentation` rows (the FK already cascades on artifact
@@ -195,6 +201,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // And beside both, the inverse of snapshot_drift: `params` behind a body that ran
     // ahead. Same two sets, subtracted the other way; opposite remedy.
     all_violations.extend(scan_params_behind_body(&cat.conn)?);
+    // Reads bug-file frontmatter rather than catalog columns: `unverified:` lands in
+    // `extra`, which is not indexed. The SQL narrows first, so only terminal bug rows
+    // are ever opened.
+    all_violations.extend(scan_terminal_status_with_caveat(&cat.conn)?);
 
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
     // Reads happen while the lock is still held — kept minimal, then dropped
@@ -1908,6 +1918,107 @@ fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Vio
         .collect())
 }
 
+/// `terminal_status_with_caveat`: a bug file whose `status` is terminal *and* whose
+/// `unverified:` field is non-empty.
+///
+/// **This is the reader half of a feature that shipped without one.** The `unverified:`
+/// convention landed 2026-08-19 across `CLAUDE.md`, `docs/TAXONOMY.md`,
+/// `docs/issues/_TEMPLATE.md` and `src/prompts/guides/tracker-conventions.md`, and authors
+/// began using it the same day. Nothing surfaced it: the canonical triage query filters on
+/// `status`, and every record carrying a caveat has by definition a terminal one. A caveat
+/// nobody can query is the exact defect the field was introduced to fix, so until this check
+/// existed the convention only moved the problem from prose into frontmatter.
+///
+/// Measured 2026-08-19, the population is small and actionable: 8 files carry the field,
+/// 7 live and 1 archived.
+///
+/// **Archived files are included, deliberately.** `docs/issues/archive/` is where terminal
+/// records go and nothing re-reads it — so an archived caveat is not less hidden than a live
+/// one, it is more. One of the two archived today records that its own fix *widened* another
+/// open bug; that is precisely the kind of consequence which must stay reachable after the
+/// file stops being read.
+///
+/// **Reports every caveat, with no severity split** — CAP-7's open decision 2 asked whether
+/// to distinguish blocking from informational caveats via a leading marker. Not done, and
+/// not deferred silently: no such marker convention exists, so introducing one now would
+/// leave every caveat written before today unmarked and force them all into whichever bucket
+/// the default picks. That is a worse report than an undifferentiated one. The check is
+/// report-only (open decision 1), so the cost of an over-broad list is a line in a scan
+/// nobody is gated on.
+///
+/// Reports only; there is no `fix=`. Discharging a caveat means establishing the thing it
+/// says was never established, which is work, not repair.
+fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    // SQL narrows to the rows worth opening; the field itself lives in `extra`, which is
+    // NOT catalog-indexed, so the file has to be parsed. Ordered by abs_path for the same
+    // reason as every other scan here — a report nobody can diff against a prior run is
+    // half a report.
+    let mut stmt = conn.prepare(
+        "SELECT id, abs_path, status FROM artifact \
+         WHERE kind = 'bug' AND status IN ('fixed', 'mitigated', 'wontfix') \
+         ORDER BY abs_path",
+    )?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path, status) in &rows {
+        // Best-effort per file: an unreadable or unparseable bug file is `missing_file`'s
+        // finding or nobody's, never a silent caveat.
+        // `content` is bound to a local first because `parse` borrows it — the same shape
+        // `check_frontmatter_id_matches_catalog` uses, for the same reason.
+        let Ok(content) = std::fs::read_to_string(abs_path) else {
+            continue;
+        };
+        let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
+            continue;
+        };
+        let Some(raw) = fm.extra.get("unverified") else {
+            continue;
+        };
+        // An empty value is the shape the convention explicitly forbids ("never add it
+        // empty, because presence is what a query filters on"). Treat it as absent rather
+        // than reporting a caveat with no content.
+        let caveat = match raw {
+            Value::Null => continue,
+            Value::String(s) => s.trim().to_string(),
+            other => other.to_string(),
+        };
+        if caveat.is_empty() {
+            continue;
+        }
+
+        // Char-wise, not byte-wise: these are prose and routinely contain non-ASCII.
+        const CAVEAT_MAX: usize = 240;
+        let shown = if caveat.chars().count() > CAVEAT_MAX {
+            format!("{}…", caveat.chars().take(CAVEAT_MAX).collect::<String>())
+        } else {
+            caveat
+        };
+
+        out.push(Violation::new(
+            "terminal_status_with_caveat",
+            Some(id.clone()),
+            abs_path.clone(),
+            format!(
+                "status is `{status}` (terminal) but `unverified:` is set, so the canonical \
+                 triage query — kind=\"bug\" with status in open/investigating — cannot reach \
+                 this record. The caveat says: \"{shown}\". Either discharge it and clear the \
+                 field, or leave both: the record stays honest AND findable, which is the \
+                 whole point of the field. See get_guide(\"tracker-conventions\") § Bug files."
+            ),
+        ));
+    }
+    Ok(out)
+}
+
 fn check_abs_path_must_be_absolute(id: &str, abs_path: &str) -> Option<Violation> {
     // Schema declares `abs_path TEXT NOT NULL UNIQUE` but does not enforce
     // absoluteness. Pre-#66 code paths stored relative strings here in some
@@ -2578,6 +2689,154 @@ mod tests {
             Some(twin_id.as_str()),
             "the shadow must be untouched — a write here lands in another session's live \
              working tree, and ships a worktree-derived id if that session commits"
+        );
+    }
+
+    // ---- terminal_status_with_caveat -----------------------------------------------
+
+    /// A bug file on disk plus its catalog row, since the check reads both: SQL narrows
+    /// on `kind`/`status`, the caveat itself lives in frontmatter `extra`.
+    fn seed_bug(
+        cat: &Catalog,
+        dir: &std::path::Path,
+        name: &str,
+        status: &str,
+        unverified: Option<&str>,
+    ) {
+        let caveat = match unverified {
+            Some(v) => format!("unverified: \"{v}\"\n"),
+            None => String::new(),
+        };
+        let path = dir.join(format!("{name}.md"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!("---\nkind: bug\nstatus: {status}\n{caveat}---\n\n# BUG: {name}\n"),
+        )
+        .unwrap();
+        let row = TestArtifactRowBuilder::new(name)
+            .with_abs_path(&path)
+            .with_kind("bug")
+            .with_status(status)
+            .build();
+        art_upsert(cat, &row).unwrap();
+    }
+
+    /// The population the canonical triage query hides by construction.
+    ///
+    /// The two decoys are the test: an `open` bug carrying a caveat must NOT fire (the
+    /// triage query already reaches it, so reporting it is noise), and a `fixed` bug with
+    /// no caveat must NOT fire (that is the ordinary, healthy terminal state). Without
+    /// them, "report every bug file" passes.
+    #[tokio::test]
+    async fn terminal_status_with_caveat_reports_only_terminal_records_that_carry_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "caveated",
+            "fixed",
+            Some("no regression test"),
+        );
+        seed_bug(
+            &cat,
+            tmp.path(),
+            "still-open",
+            "open",
+            Some("also caveated"),
+        );
+        seed_bug(&cat, tmp.path(), "clean", "fixed", None);
+
+        let v = scan_terminal_status_with_caveat(&cat.conn).unwrap();
+
+        assert_eq!(
+            v.len(),
+            1,
+            "only the terminal-AND-caveated record may fire: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id.as_deref(), Some("caveated"));
+        assert!(
+            v[0].detail.contains("no regression test"),
+            "the caveat must be quoted, or the reader has to open every file: {}",
+            v[0].detail
+        );
+        assert!(
+            v[0].detail.contains("fixed"),
+            "and the status, so the reader knows which query missed it: {}",
+            v[0].detail
+        );
+    }
+
+    /// `mitigated` and `wontfix` are terminal too. Naming only `fixed` in the SQL would
+    /// silently exempt two thirds of the vocabulary — and `mitigated` is the status of the
+    /// record that motivated the whole `unverified:` convention.
+    #[tokio::test]
+    async fn terminal_status_with_caveat_covers_every_terminal_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_bug(&cat, tmp.path(), "a", "fixed", Some("x"));
+        seed_bug(&cat, tmp.path(), "b", "mitigated", Some("x"));
+        seed_bug(&cat, tmp.path(), "c", "wontfix", Some("x"));
+
+        let v = scan_terminal_status_with_caveat(&cat.conn).unwrap();
+        assert_eq!(v.len(), 3, "all three terminal statuses count: {v:#?}");
+    }
+
+    /// The convention says never add the field empty, "because presence is what a query
+    /// filters on". A record that does so anyway must read as absent, not as a caveat with
+    /// no content — otherwise the report grows entries that say nothing.
+    #[tokio::test]
+    async fn terminal_status_with_caveat_treats_an_empty_field_as_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_bug(&cat, tmp.path(), "empty", "fixed", Some(""));
+        seed_bug(&cat, tmp.path(), "blank", "fixed", Some("   "));
+
+        assert!(
+            scan_terminal_status_with_caveat(&cat.conn)
+                .unwrap()
+                .is_empty(),
+            "an empty or whitespace-only caveat is not a caveat"
+        );
+    }
+
+    /// Archived files are included deliberately: `docs/issues/archive/` is where terminal
+    /// records go and nothing re-reads it, so an archived caveat is MORE hidden than a live
+    /// one, not less.
+    #[tokio::test]
+    async fn terminal_status_with_caveat_reaches_an_archived_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_bug(
+            &cat,
+            &tmp.path().join("archive"),
+            "archived-one",
+            "fixed",
+            Some("widened another open bug"),
+        );
+
+        let v = scan_terminal_status_with_caveat(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "archiving must not silence a caveat: {v:#?}");
+        assert!(v[0].path.contains("archive"));
+    }
+
+    /// The caveat is prose and routinely non-ASCII (em dashes, arrows). Truncating it by
+    /// bytes would panic on a split character; this fixture puts multi-byte characters
+    /// exactly where a byte-wise cut would land.
+    #[tokio::test]
+    async fn a_long_caveat_is_truncated_without_splitting_a_character() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let long: String = "—é→ ".repeat(120);
+        seed_bug(&cat, tmp.path(), "verbose", "fixed", Some(&long));
+
+        let v = scan_terminal_status_with_caveat(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].detail.contains('…'),
+            "an over-long caveat is elided rather than dumped whole: {}",
+            v[0].detail
         );
     }
 
