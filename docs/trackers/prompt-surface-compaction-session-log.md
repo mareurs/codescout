@@ -9,7 +9,7 @@ tags:
 - compaction
 topic: prompt-surfaces
 entry_high_water_F: 9
-entry_high_water_W: 13
+entry_high_water_W: 14
 entry_prefix:
 - F
 - W
@@ -96,6 +96,7 @@ entry_prefix:
 | W-8 | 2026-08-19 | high | Scout the substrate even when the record says the design is settled — a record's substrate claim is a citation, not a fact | CAP-7's substrate check was wrong 4 times out of 4; two of the four would have shipped a confidently wrong diagnostic, including one that would report "fix SHA `12707fe` no longer resolves" about a commit whose own file says "Refactor 12707fe is INNOCENT" | validated |
 | W-9 | 2026-08-19 | high | Treat retiring a bookkeeping rule as a schema migration over the record corpus — sweep for text that forward-references the retired step | Three fix pointers sat one rebase from orphaned, with the patch-id that would survive unrecorded because recording it WAS the retired step; all three were invisible to triage because terminal status is what the query filters out, and the measured recovery cost on the ten files this already happened to is 2–153 ambiguous candidates | validated |
 | W-10 | 2026-08-19 | med | Reset one well-known element rather than everything — the survivor set is the only evidence the reset was correct | A cleared ledger and an inherited one both present as re-injection, so neither is distinguishable from the outside; because exactly one topic re-arms by design, one-of-five proved 58,963 bytes had been inherited before any state file was opened | validated |
+| W-14 | 2026-08-20 | high | `ps \| head -N` returns N arbitrary processes, not the newest N — a "newest" claim needs an explicit sort, not a bigger N | The truncated list showed 01:27:46 as newest against a 02:25:39 build, supporting *"the process predates the build by 58 minutes"*; sorted and untruncated, the real newest was 46 seconds old and 13 minutes NEWER than the build. A verdict inversion, on R-89's own process axis, one hour after R-89 was re-promoted | validated |
 | W-13 | 2026-08-19 | med | When one fix carries two separable behaviours, mutate them separately and name which fixture died | M6b passed the fixture written to pin its property — once fences were skipped that fixture's remaining backticks were incidentally even, so per-line pairing had zero discriminating coverage while looking fully covered | validated |
 | W-12 | 2026-08-19 | med | Choose a sweep predicate by what it must DISTINGUISH, not by what it must find — a presence check scores a wrong-value defect as healthy | `grep -c SHA` returns ≥1 for 7 of the 9 unanchored records — the hashes are environments and siblings, never the fix — and the `grep -c patch-id` used to measure THIS entry scored two more as anchored on prose mentions | validated |
 | W-11 | 2026-08-19 | high | Separate a finding's count from its remedy clause — the count is measured, the remedy is an inference about intent the checker cannot observe | Obeying it would have added 42 headings to an 1100-line tracker for entries with zero citations, contradicting the convention the file documents, and then silenced the check so the false premise became permanent; the same leap was also live on the write path, teaching it to every future author | validated |
@@ -1554,6 +1555,81 @@ measured datapoints are carried in it (the 88-minute stale process, and this inc
 it closes on the generalisation the audit produced: **probe the copy the consumer actually
 loads; every upstream proxy for it reads green in the broken world.** No fourth bullet was
 added — per the skill's own rule, the recurrence was a defect in the promoted text.
+
+## W-14 — `ps | head -N` is not "the newest N", and the truncation rule caught it live on the rule's own subject
+
+**Observed:** 2026-08-20, a `rebuilt/recon` pass immediately after `cargo rb` + `/mcp`, running
+the three-axis freshness probe that [[R-89]] had been re-promoted with hours earlier.
+
+**Pattern.** A truncated listing is a floor, never a count — and for `ps` specifically,
+`head -N` does not return the newest N. `ps` emits in process-table order, so truncating it
+returns N *arbitrary* processes. Sorting was the missing step, not a larger N.
+
+**Counterfactual, and it is concrete.** The first probe ran
+`ps -eo pid,lstart,etimes,cmd | grep '[c]odescout' | head -5`. Newest row shown: **01:27:46**.
+Binary built **02:25:39**. On that evidence the correct-looking report was *"the serving
+process predates the build by 58 minutes"* — which is R-89's exact documented failure, and
+would have had the user restart an already-fresh server and distrust a green rebuild.
+
+Re-run without truncation, sorted: **PID 2250592, started 02:38:33, 46 seconds old** — the
+`/mcp` reconnect, postdating the build by 13 minutes. Axis 2 was green the whole time. The
+truncated list did not merely under-report; it inverted the verdict.
+
+**Confirming data points:**
+
+1. This entry. The catch was made *by* the rule, on the rule's own subject: R-89's process
+   axis, probed one hour after R-89 was re-promoted to cover three axes.
+2. Same pass, a second predicate defect with no consequence: `grep -c 'codescout start'`
+   returned **25**, `pgrep -f 'codescout start --debug'` returned **24**. The extra was an
+   `mcpo`-hosted `codescout start --diagnostic` from a *different repo*. Naming what the
+   predicate literally matches would have caught it before the number was written down.
+3. `docs/trackers/tracker-hygiene-log.md`'s trust table, earlier the same day: `grep -A 14`
+   cut the table at D5, so D9/D10 rows were appended that already existed lower down — and
+   the real D10 sat at `batch | 2`, which the duplicate visually regressed to `individual | 0`.
+   Same rule, same day, three instances, only the third of which was caught before a commit.
+
+**Impact:** high — a wrong freshness verdict is acted on. It sends the user to restart a
+healthy process and, worse, teaches distrust of a build that was in fact correct.
+
+**Promote-when:** already promoted — this is a *use* of the Measurement rule (`~/.claude*/CLAUDE.md`
+§ Measurement, clause 2) rather than a new lesson. What is new and worth carrying is the
+`ps`-specific corollary: **`head` on an unsorted producer selects arbitrarily, so a
+"newest/oldest" claim needs an explicit sort, not a bigger N.** Promote that corollary into
+the reconnaissance SKILL.md if a second tool shows the same shape (`ls` without `-t`,
+`git log` without `--date-order`, a paginated API without an order-by).
+
+**Promoted-to:** not yet — corollary only, held at 1 datapoint.
+
+**Status:** validated — single datapoint, but decisive: the counterfactual is a verdict
+inversion, not a missed detail, and the sibling instances in *Confirming data points* show the
+parent rule recurring three times in one day.
+
+**Recon outcome, for the record.** All three freshness axes green, verified rather than
+assumed:
+
+| Axis | Probe | Result |
+|---|---|---|
+| build | 4 literals from `4c7608ee` absent at its parent commit, sought in the running binary | present, 1 each |
+| process | newest server start vs binary mtime | 02:38:33 vs 02:25:39 — process is 13 min newer |
+| distribution | install record + served bytes in all three profile caches | `1.16.14`, 37817 bytes, identical to source |
+
+`~/.cargo/bin/codescout` resolves to `target/release/codescout` in the main checkout, as memory
+`gotchas` § MCP Binary Symlink states.
+
+**One anomaly, investigated and closed.** 24 live `codescout start --debug` servers, oldest
+16.5 days, looked like a leak. Already filed:
+`docs/issues/archive/2026-07-28-mcp-servers-outlive-their-clients.md`, `wontfix`. Rather than
+re-file or re-litigate, ran **the file's own stated re-open test** — the discipline [[R-95]]
+was promoted for 20 minutes earlier, applied to the first deferral rationale encountered
+afterwards. Both arms held: **0 servers with a dead or reparented parent** (23 of 24 rooted in
+a live `claude`; the 24th's parent is this session's own codescout server, a legitimate
+child), and total RSS **2846 MiB / 128120 MiB = 2.22%**, against the decision's 0.9% baseline.
+
+Worth noting as the honest outcome: **re-costing a deferral does not always overturn it.** This
+`wontfix` was measured when written, named the evidence that would falsify it, and survived
+that test seven weeks later. R-95's other nine rationales were falsified because none of them
+had ever been executed — not because deferrals are generally wrong. The RSS trend (0.9% →
+2.22%, 2.5× in seven weeks) is recorded here since nothing else will notice it.
 
 ## Template for new entries
 
