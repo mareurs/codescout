@@ -1,7 +1,7 @@
 ---
 id: '4295b95e60bafeb9'
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: no check detects a fired Promote-when that was never harvested, so a validated lesson never reaches the surface that would change behaviour'
 owners:
 - marius
@@ -12,18 +12,38 @@ tags:
 - record-legibility
 - process
 topic: record-legibility
-closed: ''
+closed: 2026-08-19
 opened: 2026-08-19
 owner: marius
 related:
 - e9667199520251e4
 - '53e35aaefb9f7c71'
-severity: high
+severity: low
+unverified: closed as wontfix on a single datapoint, not on evidence the gap is harmless — re-open if a second promotion lands incompletely, or if a fired Promote-when is found unharvested in a way that costs something
 ---
 
 > **Status: open, severity high.** Nothing breaks at runtime. What fails is the step that
 > makes every other lesson take effect — and it fails silently, because a criterion that
 > fires produces no event, matches no query, and trips no CI signal.
+
+> **Closed wontfix 2026-08-19, same day, by the operator.** The triggering incident — a
+> promotion reaching one Claude Code profile of three — is **fixed**: all three `CLAUDE.md`
+> files are byte-identical (157 lines, `md5 08f0ef6cb534`) and carry both the Mutation-apply
+> discipline and the promoted measurement rule.
+>
+> The generalisation from that one incident to a checking mechanism was the agent's, not a
+> response to repeated cost. At **n=1**, building it is speculative: the design work below
+> measured a candidate population of 101 entries for the naive check, which is noise, and the
+> precise version needs a schema change plus a retroactive back-fill. Not worth it yet.
+>
+> **What did ship, and stands on its own** — the zero-code half, already committed:
+> `docs/templates/session-log.md` now carries the `Promotion status` audit section ported
+> from `eduplanner-ui`, and a `promotion-due` win status. Those reach all nine session logs
+> and every future one without any check existing.
+>
+> Re-open if a second promotion lands incompletely, or if an unharvested `Promote-when` is
+> found to have cost something. The measurements below are kept because they are the
+> expensive part and would otherwise be re-derived.
 
 ## Summary
 
