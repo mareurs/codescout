@@ -1523,6 +1523,42 @@ async fn run_command_commit_backtick_gate_honours_acknowledge_risk() {
     assert!(ok.is_ok(), "acknowledge_risk must bypass the gate: {ok:?}");
 }
 
+/// End-to-end regression for the heredoc pipe-rewrite corruption: write a file through a
+/// heredoc whose body contains pipes, then read the bytes back.
+///
+/// The unit tests pin the masking; this pins that nothing downstream re-introduces the
+/// rewrite, which matters because the damage is invisible at the call site — exit 0, file
+/// written, corruption only in content the author does not re-read.
+/// `docs/issues/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md`.
+#[tokio::test]
+async fn heredoc_body_pipes_are_not_rewritten_into_the_written_file() {
+    let (_dir, ctx) = project_ctx().await;
+
+    // Every `|` here is inside the body, destined for the file. Pre-fix,
+    // `detect_terminal_filter` found the last one and spliced
+    // `| tee '/tmp/codescout-unfiltered-…' |` into the text that got written.
+    let write = "cat > note.txt <<'EOF'\n- Resolve: git log --all -p | git patch-id --stable | grep abc123\nEOF";
+    RunCommand
+        .call(json!({"command": write}), &ctx)
+        .await
+        .expect("writing the heredoc should succeed");
+
+    let read = RunCommand
+        .call(json!({"command": "cat note.txt"}), &ctx)
+        .await
+        .expect("reading it back should succeed");
+    let content = read["stdout"].as_str().unwrap_or_default();
+
+    assert!(
+        !content.contains("codescout-unfiltered"),
+        "tee instrumentation leaked into written content: {content}"
+    );
+    assert!(
+        content.contains("git log --all -p | git patch-id --stable | grep abc123"),
+        "the heredoc body must land byte-for-byte: {content}"
+    );
+}
+
 #[tokio::test]
 async fn dangerous_command_returns_ack_handle() {
     let (dir, ctx) = project_ctx().await;

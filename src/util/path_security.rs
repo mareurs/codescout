@@ -748,11 +748,7 @@ fn strip_heredoc_bodies(command: &str) -> std::borrow::Cow<'_, str> {
     if !command.contains("<<") {
         return std::borrow::Cow::Borrowed(command);
     }
-    static HEREDOC_OPEN: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let re = HEREDOC_OPEN.get_or_init(|| {
-        Regex::new(r#"<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|([A-Za-z_][A-Za-z0-9_]*))"#)
-            .expect("HEREDOC_OPEN regex compiles")
-    });
+    let re = heredoc_opener();
 
     let mut out = String::with_capacity(command.len());
     let mut awaiting: Option<String> = None;
@@ -778,6 +774,97 @@ fn strip_heredoc_bodies(command: &str) -> std::borrow::Cow<'_, str> {
             }
         }
     }
+    std::borrow::Cow::Owned(out)
+}
+
+/// The heredoc opener pattern, shared by [`strip_heredoc_bodies`] and
+/// [`mask_heredoc_bodies`].
+///
+/// Extracted rather than copied: this file has already paid for a rule that "existed
+/// TWICE and the copies had already diverged" — one recognised `../` and the other did
+/// not (`dbaeb78b`). Two heredoc scanners disagreeing about what opens a body would be
+/// the same defect, and the two callers here are a gate and a rewrite, so a disagreement
+/// would mean the analysis and the transform seeing different commands.
+fn heredoc_opener() -> &'static Regex {
+    static HEREDOC_OPEN: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    HEREDOC_OPEN.get_or_init(|| {
+        Regex::new(r#"<<-?\s*(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|([A-Za-z_][A-Za-z0-9_]*))"#)
+            .expect("HEREDOC_OPEN regex compiles")
+    })
+}
+
+/// Blank out heredoc bodies **in place**, preserving every byte offset.
+///
+/// The sibling of [`strip_heredoc_bodies`], and the difference is the entire reason it
+/// exists: that one *removes* body lines, which serves a yes/no gate perfectly and is
+/// useless to a caller that must then splice at an offset the scan returned. Removing
+/// bytes moves every later index. Replacing each body byte with a space keeps `len()`
+/// and every index identical, so an offset found in the masked string addresses the same
+/// character in the original.
+///
+/// That is what `run_command`'s tee instrumentation needs. It asks
+/// `detect_terminal_filter` for the byte offset of the last pipe and splices
+/// `| tee '<tmp>' |` there — and `detect_terminal_filter`, though quote-aware, has no
+/// notion of a heredoc, so a `|` in a heredoc *body* read as a pipeline stage. The body
+/// is data destined for a file, so the rewrite landed in written content: measured
+/// 2026-08-19, a documentation line was written as
+/// `git log --all -p | git patch-id --stable | tee '/tmp/codescout-unfiltered-hUMfFa' | grep …`,
+/// a temp path that will never exist, recorded in a permanent file as an instruction.
+/// Exit code 0, no warning. See
+/// `docs/issues/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md`.
+///
+/// Masking rather than skipping-on-`<<` (the bug's own cheaper suggestion) keeps
+/// instrumentation working where the pipe is real — `cat <<'EOF' | grep x` pipes on the
+/// opener line, outside any body.
+///
+/// Multi-byte characters are replaced by as many spaces as they occupy, not one, or the
+/// offsets this function exists to preserve would shift on the first non-ASCII byte in a
+/// heredoc.
+pub fn mask_heredoc_bodies(command: &str) -> std::borrow::Cow<'_, str> {
+    if !command.contains("<<") {
+        return std::borrow::Cow::Borrowed(command);
+    }
+    let re = heredoc_opener();
+
+    let mut out = String::with_capacity(command.len());
+    let mut awaiting: Option<String> = None;
+    // `split_inclusive` keeps each line's terminator, so a command with no trailing
+    // newline is not silently given one — `lines()` plus a pushed `\n` would add a byte
+    // and break the offset guarantee at the tail.
+    for line in command.split_inclusive('\n') {
+        if let Some(delim) = awaiting.as_deref() {
+            if line.trim() == delim {
+                awaiting = None;
+            }
+            for ch in line.chars() {
+                if ch == '\n' {
+                    out.push('\n');
+                } else {
+                    for _ in 0..ch.len_utf8() {
+                        out.push(' ');
+                    }
+                }
+            }
+            continue;
+        }
+        out.push_str(line);
+        // `<<<word` is a here-string with no body; it would otherwise match the opener
+        // pattern starting one byte in.
+        if !line.contains("<<<") {
+            if let Some(c) = re.captures(line) {
+                awaiting = c
+                    .get(1)
+                    .or_else(|| c.get(2))
+                    .or_else(|| c.get(3))
+                    .map(|m| m.as_str().to_string());
+            }
+        }
+    }
+    debug_assert_eq!(
+        out.len(),
+        command.len(),
+        "mask_heredoc_bodies must preserve byte offsets"
+    );
     std::borrow::Cow::Owned(out)
 }
 
@@ -3859,5 +3946,77 @@ EOF"#;
                 "missed the message flag in: {cmd}"
             );
         }
+    }
+
+    // ── Heredoc masking (offset-preserving) ──────────────────────────────
+
+    /// The invariant the function exists for. `strip_heredoc_bodies` REMOVES lines, which
+    /// moves every later index; a caller that splices at a returned offset would write
+    /// into the wrong place. Masking must be length-exact, trailing newline or not, and
+    /// multi-byte characters are where a naive one-space-per-char version breaks.
+    #[test]
+    fn mask_heredoc_bodies_preserves_byte_offsets() {
+        for cmd in [
+            "cat > f <<'EOF'\na | b\nEOF",
+            "cat > f <<'EOF'\na | b\nEOF\n",
+            "echo hi",
+            "cat > f <<'EOF'\nünïcodé — pipe → ok\nEOF",
+        ] {
+            assert_eq!(
+                mask_heredoc_bodies(cmd).len(),
+                cmd.len(),
+                "offset drift on: {cmd:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mask_heredoc_bodies_blanks_a_pipe_in_the_body() {
+        let cmd = "cat > f <<'EOF'\na | grep b\nEOF";
+        let masked = mask_heredoc_bodies(cmd);
+        assert!(!masked.contains('|'), "body pipe survived: {masked:?}");
+        assert!(
+            masked.starts_with("cat > f <<'EOF'"),
+            "the opener line must survive: {masked:?}"
+        );
+    }
+
+    /// A pipe on the OPENER line is real pipeline syntax. Keeping it is what separates
+    /// this fix from the cheaper "skip instrumentation whenever `<<` appears" — that one
+    /// would trade a corruption bug for silently losing unfiltered capture.
+    #[test]
+    fn mask_heredoc_bodies_keeps_a_pipe_outside_the_body() {
+        let cmd = "cat <<'EOF' | grep x\nbody | not a pipe\nEOF";
+        let masked = mask_heredoc_bodies(cmd);
+        assert!(masked.starts_with("cat <<'EOF' | grep x"), "{masked:?}");
+        assert_eq!(
+            masked.matches('|').count(),
+            1,
+            "only the real pipe may survive: {masked:?}"
+        );
+    }
+
+    #[test]
+    fn mask_heredoc_bodies_leaves_a_command_without_a_heredoc_untouched() {
+        let cmd = "git log --all -p | grep foo";
+        assert_eq!(mask_heredoc_bodies(cmd).as_ref(), cmd);
+    }
+
+    /// Both halves together — this is the question `inject_tee` actually asks. The first
+    /// assertion is a **precondition, not decoration**: it pins that the raw string really
+    /// does fool the detector, so a later change that stopped reproducing the bug would
+    /// fail here rather than leave the second assertion passing vacuously.
+    #[test]
+    fn masking_hides_body_pipes_from_terminal_filter_detection() {
+        use crate::tools::command_summary::detect_terminal_filter;
+        let cmd = "cat > f <<'EOF'\n- Resolve: git log -p | git patch-id | grep abc\nEOF";
+        assert!(
+            detect_terminal_filter(cmd).is_some(),
+            "precondition: the raw string is what fooled the detector"
+        );
+        assert!(
+            detect_terminal_filter(&mask_heredoc_bodies(cmd)).is_none(),
+            "masking must hide the body pipe from the detector"
+        );
     }
 }

@@ -180,7 +180,14 @@ fn inject_tee(
     if buffer_only {
         return Ok((resolved_command.to_string(), None));
     }
-    if let Some(pipe_pos) = detect_terminal_filter(resolved_command) {
+    // A `|` inside a heredoc BODY is data destined for a file, not pipeline syntax, and
+    // `detect_terminal_filter` — quote-aware but with no notion of a heredoc — read it as
+    // a pipeline stage, so the splice below landed in written content. Detect on a masked
+    // copy: masking blanks body bytes in place, so `pipe_pos` still addresses the original
+    // and the splice is unchanged. See
+    // docs/issues/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md.
+    let masked = crate::util::path_security::mask_heredoc_bodies(resolved_command);
+    if let Some(pipe_pos) = detect_terminal_filter(&masked) {
         // Use tempfile::NamedTempFile for unpredictable path (SF-3).
         // persist() converts it to a regular file we manage via TmpfileGuard.
         let named = tempfile::Builder::new()
