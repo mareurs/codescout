@@ -701,7 +701,8 @@ population is invisible to the protocol flag. One line in `get_guide("error-hand
 would close it.
 
 **Instruments filed as bugs:**
-`docs/issues/2026-08-20-cc-py-cost-double-counts-split-assistant-entries.md` (2.1-2.6x cost
+`docs/issues/archive/2026-08-20-cc-py-cost-double-counts-split-assistant-entries.md`
+(2.1-2.6x cost
 inflation),
 `docs/issues/archive/2026-08-20-friction-target-omits-command-and-file-path.md` (**52.5%**
 of errors unattributable — the "38%" first recorded here was relayed without recomputation;

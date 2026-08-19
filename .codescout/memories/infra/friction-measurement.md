@@ -29,7 +29,7 @@ freshness check flags. Live datapoint for `capability-proposals:CAP-7`.
 | `usage.db` `cc_session_id` | **BROKEN** (filed, unfixed) | Resolved once at `src/server.rs:115-125`, cloned per call at `:974-977`. 30.9% of rows (8,980/29,103) sit in pools where one server `session_id` carries 2+ `cc_session_id` labels. **Never group by `cc_session_id` alone** — group by `session_id`, disambiguate by `called_at` window |
 | `usage.db` subagent attribution | **MISSING** (filed, unfixed) | 72.7% of calls and 68.3% of errors originate in dispatched subagents, filed under the parent. No `agent_id`/`is_sidechain` exists (`grep` → 0 matches in `src/`). Every per-session figure is a parent/subagent blend |
 | `usage.db` `friction_target` | **PARTIAL** (filed, unfixed) | Key list omits `command`/`file_path`/`id`/`topic`, so `run_command` errors are 431/431 NULL and both largest families are 0% attributable — 38% of errors. Also gated on `is_friction` (`src/usage/mod.rs:81`), so 0 of 25,696 non-overflowed successes have one |
-| `cc.py` cost/token output | **BROKEN** (filed, cross-repo) | Sums `message.usage` per JSONL line; one completion is 2-3 lines each carrying an identical usage dict. **2.1-2.6x inflation** (222 entries → 87 distinct `message.id`). Its call/turn/tool counts are fine; its costs are not |
+| `cc.py` cost/token output | **FIXED 2026-08-20** (`llm-proxy:38d80eb`, patch-id `03643e99d03f76f6ee32d5632a40521b47b80d0d`) | Summed `message.usage` per JSONL line; one completion is 2-3 lines each carrying an identical usage dict. Was **2.1-2.6x inflated**. Now deduped by `message.id`, and `cmd_stats` prints the fan-out. **Figures published BEFORE this fix are still wrong and cannot be scaled** — the factor varies per session (2.55x, 2.26x measured), so recompute from the transcript |
 | `cc.py` profile discovery | **BROKEN** (filed) | `PROJECTS_DIR` hardcoded to `~/.claude`, ignores `CLAUDE_CONFIG_DIR` — silently blind to `~/.claude-sdd` and `~/.claude-kat` |
 | `usage.db` `input_json`/`output_json` | **GOOD, richer than documented** | ~100% populated on this deployment (not the sparse debug-only case the docs imply). Targets are reconstructable retroactively |
 | `err_family` + backfill | **GOOD** | 26 families, fingerprint-versioned via `PRAGMA user_version` (`src/usage/db.rs:225`, `:444-483`, `:485-525`). Adding a family re-classifies history on next open |
@@ -143,8 +143,9 @@ Three confounds must be handled every time, and a fourth is unhandled:
   four open questions. Items 1-2 (attribution fix, `S-A OR S-B`) are prerequisites; 3-5 each
   have an open decision. **Start at the attribution bug, not the detector.**
 - **Bugs**: six filed 2026-08-20 in `66654f53` (patch-id
-  `8ddbe5e10a9851ec7b7db241e4590b51956a09df`) under `docs/issues/2026-08-20-*`. **Four still
-  open; two fixed and archived** — the `err_family` NULL head, fixed in `4c7608ee`
+  `8ddbe5e10a9851ec7b7db241e4590b51956a09df`) under `docs/issues/2026-08-20-*`. **Three still
+  open; three fixed and archived** — the `cc.py` cost double-count, fixed cross-repo in
+  `llm-proxy:38d80eb`; the `err_family` NULL head, fixed in `4c7608ee`
   (patch-id `ec94d2846dc69de4f1db40928ba995d53ddcbb42`), 69 of 73 now classify with 4
   one-off residue by design; and the `friction_target` alias gap, fixed in `db76f69a`
   (patch-id `bac32905dd0eb7ebb2fc156cb651723cbd2be00a`). That fix added `file_path` and

@@ -1,15 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- tooling
+- measurement
+- cross-repo
+closed: 2026-08-20
 opened: 2026-08-20
-closed:
-severity: high
 owner: marius
 related: []
-tags:
-  - tooling
-  - measurement
-  - cross-repo
-kind: bug
+severity: high
+unverified: 'No automated test exists — the claude-traces skill in llm-proxy has no test suite. Verification is two manual reproductions matching pre-computed values to the cent, re-runnable from the Reproduction section. Separately: figures published by this script before 2026-08-20 remain wrong and CANNOT be corrected by scaling, since the inflation factor varies per session (2.55x and 2.26x measured). And cc.py still reads only ~/.claude — filed in llm-proxy, not fixed here.'
 ---
 
 # BUG: cc.py sums message.usage per JSONL line, so every cost and token figure it reports is inflated 2.1–2.6×
@@ -127,31 +128,57 @@ cost table. In this repo that includes cost figures quoted into session analyses
 
 ## Fix
 
-Not yet implemented. In `cc.py:145-166`, dedup by `message.id` before summing — keep the
-first `usage` seen per id and ignore later repeats. `requestId` is a candidate fallback for
-entries lacking `message.id`; check whether any exist before relying on it.
+**FIXED 2026-08-20 in `llm-proxy:38d80eb`**
+(patch-id `03643e99d03f76f6ee32d5632a40521b47b80d0d`), at
+`/home/marius/agents/llm-proxy/.claude/skills/claude-traces/scripts/cc.py`.
+Cross-repo by design — this repo consumes the script through the
+`.claude/skills/claude-traces` symlink; the defect and its fix live in llm-proxy.
 
-Two adjacent fixes the same function wants, found in the same analysis and worth landing
-together since they all concern "what does this session's activity actually total":
+`aggregate_usage` now counts usage **once per `message.id`**. Entries carrying no id
+cannot be shown to be duplicates and are still counted — the pre-fix behaviour, kept
+deliberately rather than guessed at.
 
-- **Walk subagent files.** `<session-dir>/subagents/agent-*.jsonl` are separate files whose
-  activity `cc.py` never sees. Subagent cost share was measured at 0.5%–63.4% depending on
-  workflow, so a main-file-only total can understate a session by more than half.
-- **Fix `PROJECTS_DIR`.** It is hardcoded to `~/.claude` and ignores `CLAUDE_CONFIG_DIR`,
-  so on this host it silently cannot see the `~/.claude-sdd` and `~/.claude-kat` profiles.
-  The skill's own doc already warns that `--all`'s path decode mangles directory names
-  containing `-`; this is a second, unwarned instance of the same class.
+Verified against two sessions, matching independently computed values **to the cent**:
 
-Since the fix lands in llm-proxy, cite it cross-repo as `llm-proxy:<sha>` per this
-project's SHA-prefix discipline, and record the patch-id
-(`git show <sha> | git patch-id --stable`).
+| session | entries | `message.id` | fan-out | before | after |
+|---|---:|---:|---:|---:|---:|
+| `23b22760` | 222 | 87 | 2.55× | $14.0384 | **$5.3861** |
+| `55515bc5` | 1748 | 774 | 2.26× | $236.66 | **$108.4389** |
 
+`tool_calls` is **not** deduped and did not change (101 and 770, before and after). A
+`tool_use` block lives in exactly one of the split lines, so it never fanned out. **That
+asymmetry is why this survived so long**: the counts were always right and only the tokens
+were wrong, and a session whose tool list reads correctly does not invite a second look at
+its cost.
+
+`turns` now counts completions — what the label always meant — with the raw line count
+moved to `assistant_entries`, and `cmd_stats` printing both plus the ratio. A number that
+inflates 2.5× is invisible when only the inflated one is shown; displaying the fan-out is
+what makes the next instance of this self-evident rather than plausible.
+
+**Not fixed here, deliberately:** the hardcoded `~/.claude` base and lossy `--project`
+encoding, already filed in that repo as
+`llm-proxy:docs/issues/2026-07-10-ccpy-config-dir-hardcoded-and-path-encoding.md`. Its fix
+direction contains open design choices (a `--config-dir` flag versus an `--all-profiles`
+scan) that belong to that repo's owner. It still means **`cc.py` sees only the `~/.claude`
+profile**, so any re-measurement is scoped to one profile of three — pass explicit
+directories, as `scripts/friction-probe.py` and this repo's analysis code already do.
 ## Tests added
 
-None. A fixture with one completion split across three entries sharing a `message.id`,
-asserting the total equals one completion's cost rather than three, would pin this
-permanently.
+**None — and this is a real gap, not a formality.** `.claude/skills/claude-traces/` in
+llm-proxy has no test suite and no test harness to hang one on; adding both to a sibling
+repo was out of scope for a fix this size.
 
+What stands in for it: **two independent reproductions on real sessions, matching
+pre-computed expected values to the cent** ($5.3861 and $108.4389, from a separate
+`message.id`-dedup implementation written before the fix). Both re-run in seconds via the
+*Reproduction* section above, which is the actual regression procedure until a suite exists.
+
+The right test is small and specific, for whoever adds the first one: a fixture with **one**
+completion split across three `assistant` entries sharing a `message.id`, asserting the
+total equals one completion's cost rather than three. That single case would have caught
+this, and `tool_calls` staying constant across the same fixture is the second assertion
+worth pinning.
 ## Workarounds
 
 Do not use `cc.py` for cost or token figures. Use the reproduction snippet above, or dedup
@@ -162,12 +189,18 @@ without re-running against the transcript.
 
 ## Resume
 
-Patch `aggregate_usage` at `cc.py:145-166` in the llm-proxy repo to dedup on
-`message.id`; verify against the reproduction (expect `$5.3861` for `23b22760`). Then
-decide whether to land the two adjacent fixes in the same change — the `PROJECTS_DIR` one
-in particular affects which sessions are discoverable at all, so any re-measurement done
-before it lands will be scoped to one profile of three.
+N/A — fixed and archived.
 
+Two things this fix does **not** discharge:
+
+1. **Previously published figures are still wrong and cannot be scaled.** The inflation
+   factor tracks how often completions happened to be split (2.55× and 2.26× on two
+   sessions), so there is no divisor that repairs a past report — each has to be recomputed
+   from the transcript. Anything quoting `cc.py` costs before 2026-08-20 should be treated
+   as an upper bound of unknown tightness.
+2. **`cc.py` still sees only `~/.claude`.** Filed separately in llm-proxy; until it lands,
+   any profile-wide claim from this script covers one profile of three. Pass explicit
+   directories.
 ## References
 
 - `/home/marius/agents/llm-proxy/.claude/skills/claude-traces/scripts/cc.py:145-166` —
