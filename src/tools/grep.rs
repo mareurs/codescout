@@ -103,6 +103,24 @@ impl Tool for Grep {
             .unwrap_or(false);
         let files_mode = input.get("mode").and_then(|v| v.as_str()) == Some("files");
         let globs = parse_globs(&input);
+        // An absolute glob outside the search root can never match a candidate this walk
+        // yields, so without this the call returns a confident `0 matches` about a file it
+        // never opened. See unsatisfiable_absolute_glob.
+        if let Some(g) = unsatisfiable_absolute_glob(&globs, &search_path) {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "glob '{}' is an absolute path outside the search root '{}', so it cannot \
+                     match anything — glob patterns are filtered against a walk rooted there, \
+                     and every candidate starts with that root",
+                    g,
+                    search_path.display()
+                ),
+                "To search that file, pass it as path=<absolute path> — `path` resolves the \
+                 target directly instead of filtering a walk, and works across repos. For \
+                 sustained work in another repo, workspace(action=\"activate\", path=…) first.",
+            )
+            .into());
+        }
         let (re, is_literal_fallback) = build_grep_regex(pattern, ignore_case, whole_word)?;
         let mut matches: Vec<Value> = vec![];
         let mut total_match_count = 0usize;
@@ -815,6 +833,37 @@ fn parse_globs(input: &Value) -> Vec<String> {
     }
 }
 
+/// The absolute glob that cannot match anything this walk will yield, if there is one.
+///
+/// `ignore::overrides::OverrideBuilder` matches its patterns against candidates produced
+/// by a walk rooted at `search_path`, so an absolute pattern outside that root is
+/// **unsatisfiable by construction** — every candidate carries the root as a prefix. The
+/// walk then completes normally and reports `0 matches`, which reads as "the pattern is
+/// absent" when it means "the target was never visited". A false negative that looks like
+/// a finding is worse than an error, because nothing prompts the caller to look again.
+///
+/// Measured 2026-08-18: a sibling repo's file searched with `glob=<abs path>` returned 0,
+/// while the same file and the same pattern searched with `path=<abs path>` returned its
+/// 8 matches — `path` resolves the target directly and so escapes the root. The zero also
+/// carried the hidden-paths completeness warning, whose suggested remedy
+/// (`include_hidden=true`) could not have helped here; naming an unchecked cause ends the
+/// search for the real one.
+///
+/// Negations (`!…`) and relative patterns are not absolute paths and are left alone. An
+/// absolute glob *inside* the root is fine — `/…/codescout/src/**/*.rs` shares the prefix,
+/// so the walk can yield candidates that match it.
+///
+/// `docs/issues/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`.
+fn unsatisfiable_absolute_glob(globs: &[String], search_path: &std::path::Path) -> Option<String> {
+    globs
+        .iter()
+        .find(|g| {
+            let p = std::path::Path::new(g.as_str());
+            p.is_absolute() && !p.starts_with(search_path)
+        })
+        .cloned()
+}
+
 /// Grep against a buffer ref (`@tool_*`, `@cmd_*`, `@file_*`).
 ///
 /// `@tool_*` content is JSON; it is pretty-printed before search so
@@ -1310,6 +1359,97 @@ mod tests {
             result["files"].as_u64().unwrap() >= 2,
             "files must be >= 2, got {}",
             result["files"]
+        );
+    }
+
+    /// The predicate, in isolation. Each case is a decision the walk's semantics force:
+    /// absolute-outside cannot match, absolute-inside can, relative is the normal case,
+    /// and a negation is not an absolute path whatever it negates.
+    #[test]
+    fn unsatisfiable_absolute_glob_flags_only_absolute_paths_outside_the_root() {
+        let root = std::path::Path::new("/home/u/proj");
+
+        assert_eq!(
+            unsatisfiable_absolute_glob(&["/home/u/other/x.rs".to_string()], root).as_deref(),
+            Some("/home/u/other/x.rs")
+        );
+        assert_eq!(
+            unsatisfiable_absolute_glob(&["/home/u/proj/src/**/*.rs".to_string()], root),
+            None,
+            "an absolute glob INSIDE the root shares the prefix every candidate carries"
+        );
+        assert_eq!(
+            unsatisfiable_absolute_glob(&["*.rs".to_string(), "src/**".to_string()], root),
+            None,
+            "relative globs are the normal case and are matched against the root"
+        );
+        assert_eq!(
+            unsatisfiable_absolute_glob(&["!/home/u/other/x.rs".to_string()], root),
+            None,
+            "a negation is not an absolute path"
+        );
+        assert_eq!(
+            unsatisfiable_absolute_glob(&["*.rs".to_string(), "/elsewhere/y.rs".to_string()], root)
+                .as_deref(),
+            Some("/elsewhere/y.rs"),
+            "the offending glob is named even when it is not first"
+        );
+    }
+
+    /// End-to-end, with the bug's own control attached.
+    ///
+    /// `glob` is filtered against a walk rooted at the search path, so an absolute glob
+    /// outside that root matched nothing and the call answered a confident `0 matches`
+    /// about a file it never opened — a false negative that reads as a finding.
+    /// `docs/issues/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`
+    #[tokio::test]
+    async fn grep_rejects_an_absolute_glob_outside_the_search_root() {
+        use serde_json::json;
+        let root = tempdir().unwrap();
+        std::fs::write(root.path().join("a.rs"), "fn foo() {}\n").unwrap();
+        let outside = tempdir().unwrap();
+        let target = outside.path().join("lib.mjs");
+        std::fs::write(&target, "export function readInput() {}\n").unwrap();
+
+        let ctx = test_ctx().await;
+
+        let err = Grep
+            .call(
+                json!({
+                    "pattern": "export function readInput",
+                    "path": root.path().to_str().unwrap(),
+                    "glob": target.to_str().unwrap(),
+                }),
+                &ctx,
+            )
+            .await
+            .expect_err("an unsatisfiable absolute glob must error, not report a zero");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cannot match"),
+            "must say why it is empty: {msg}"
+        );
+        assert!(
+            msg.contains("path="),
+            "must name the remedy that actually works: {msg}"
+        );
+
+        // The control, taken from the bug's own Reproduction step 2: the same file and the
+        // same pattern via `path` still match. Without it this test would pass just as well
+        // if the fix had broken cross-repo reads altogether.
+        let ok = Grep
+            .call(
+                json!({
+                    "pattern": "export function readInput",
+                    "path": target.to_str().unwrap(),
+                }),
+                &ctx,
+            )
+            .await
+            .expect("path= resolves the target directly and must still work");
+        assert!(
+            ok["total"].as_u64().unwrap_or(0) >= 1,
+            "control must still match: {ok}"
         );
     }
 
