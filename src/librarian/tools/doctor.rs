@@ -1726,6 +1726,14 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 /// ledger's entry format is the subject. Emitting the latter per-entry would be N
 /// findings that all say the same thing.
 ///
+/// **What `entry_without_definition` cannot see: whether anything cites the entry.** It
+/// compares `params` ids against body-defined ids and stops, so it reads a ledger that
+/// defines on demand as one that forgot. Measured 2026-08-19 on `provenance-subsystem.md`:
+/// 42 undefined entries, **zero of them cited**, and the ledger's own body documents
+/// define-on-citation three lines above its first entry heading. The message now says what
+/// the check knows instead of asserting omission; the citation-aware split is still open in
+/// docs/issues/2026-08-19-entry-without-definition-asserts-omission-without-checking-citations.md
+///
 /// **NOT gated on `body_keeps_snapshot`, and that is the design decision here.** That
 /// gate is right for the row question — a params-canonical tracker mentions a few ids
 /// in passing without maintaining a snapshot, and nagging it is noise. Reusing it here
@@ -1788,9 +1796,13 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
                 Some(ledger.id),
                 ledger.abs_path,
                 format!(
-                    "{} of {} `{}` entries have no `## <ID> — <title>` heading, so every citation \
-                     of them resolves to nothing: {}{}. This ledger defines its other entries, so \
-                     these are omissions — add a heading for each.",
+                    "{} of {} `{}` entries have no `## <ID> — <title>` heading, so any citation \
+                     of them would resolve to nothing: {}{}. Whether any exists is not something \
+                     this check can tell you — it does not read the citation graph, so it cannot \
+                     distinguish entries the ledger meant to define from a ledger whose convention \
+                     is to define an entry when something first cites it. Check for citations \
+                     before adding the missing headings; a define-on-citation ledger is already correct. \
+                     See get_guide(\"tracker-conventions\") § Entry headings.",
                     undefined.len(),
                     ledger.claimed.len(),
                     ledger.collection,
@@ -3697,6 +3709,18 @@ mod tests {
         assert!(
             !v[0].detail.contains("BL-1"),
             "BL-1 has its heading — naming it makes the finding untrustworthy: {}",
+            v[0].detail
+        );
+        // The scan compares `params` ids against body-defined ids and never reads the
+        // citation graph, so it cannot tell an omission from a ledger that defines an entry
+        // only once something cites it. An earlier wording asserted "these are omissions —
+        // add a heading for each"; measured 2026-08-19 on `provenance-subsystem.md` that
+        // would have had a reader add 42 headings for entries with zero citations, against
+        // a define-on-citation convention stated in the ledger's own body.
+        assert!(
+            v[0].detail.contains("citation graph"),
+            "the finding must disclose that it does not read citations, rather than assert \
+             the entries are omissions: {}",
             v[0].detail
         );
     }

@@ -525,10 +525,12 @@ fn undefined_in_body_note(cat: &Catalog, artifact_id: &str, entry_id: &str) -> O
     match definition_gap(&body_defined_indices(&body, prefix), num) {
         DefinitionGap::Defined => None,
         DefinitionGap::EntryUndefined => Some(format!(
-            "`{entry_id}` has no `## {entry_id} — <title>` heading in the body, so every citation \
-             of it resolves to nothing — an index row does not define a token. This ledger defines \
-             its other entries, so this one is an omission: add the heading via \
-             artifact(action=\"update\", patch={{body_edits: [...]}})."
+            "`{entry_id}` has no `## {entry_id} — <title>` heading in the body, so any citation \
+             of it would resolve to nothing — an index row does not define a token. This ledger \
+             defines its other entries, so this one is most likely an omission: add the heading \
+             via artifact(action=\"update\", patch={{body_edits: [...]}}). If instead this ledger \
+             defines an entry only once something cites it, that is a valid convention and \
+             nothing is owed here yet."
         )),
         DefinitionGap::LedgerDefinesNothing => Some(format!(
             "This ledger defines NO `{prefix}-N` heading anywhere in its body, so `{entry_id}` and \
