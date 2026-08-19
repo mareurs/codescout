@@ -1101,7 +1101,7 @@ fn build_response(
     // makes the output self-explaining; the exit code itself still considers every
     // finding, so this changes presentation only. Stable sort, so scan order is
     // preserved within a rank.
-    // See docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md
+    // See docs/issues/archive/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md
     let mut ranked: Vec<&Finding> = findings.iter().collect();
     ranked.sort_by_key(|f| {
         let resolved = bucket(f.resolution.verdict) == Bucket::Resolved;
@@ -1452,6 +1452,100 @@ mod tests {
         assert!(
             build_response(&[], &[], &Degradation::default(), 0, None, None, "medium").is_err(),
             "an unknown fail_on value must error rather than behave like `never`"
+        );
+    }
+
+    /// `build_response` shows only the first 50 findings but computes `exit_code` over
+    /// every one of them. Ranking by `(unresolved, severity)` before truncating is what
+    /// keeps those two consumers agreeing: a `--fail-on high` run that exits 1 must SHOW
+    /// the finding that drove it. Pre-fix, `findings.iter().take(50)` took scan order, so
+    /// the gate could report failure with 50 `resolved` refs as its entire output.
+    ///
+    /// This fixture pins the **unresolved** half of the key. Every finding carries
+    /// `Severity::High`, so a ranking that sorted on severity alone would be a stable
+    /// no-op and strand the one broken ref at index 50 — outside the window.
+    ///
+    /// Regression guard for
+    /// `docs/issues/archive/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md`.
+    #[test]
+    fn ranking_surfaces_the_unresolved_finding_hidden_behind_a_full_window() {
+        let mut findings: Vec<Finding> = (0..50)
+            .map(|_| mk_finding(Verdict::Resolved, Severity::High))
+            .collect();
+        findings.push(mk_finding(Verdict::Missing, Severity::High));
+
+        let r = build_response(
+            &findings,
+            &[],
+            &Degradation::default(),
+            1,
+            None,
+            None,
+            "high",
+        )
+        .expect("`high` is a valid fail_on value");
+
+        assert_eq!(
+            r["exit_code"], 1,
+            "one Missing/High finding must fail a --fail-on high run"
+        );
+
+        let shown = r["findings"].as_array().expect("findings is an array");
+        assert_eq!(
+            shown.len(),
+            50,
+            "the cap still applies — ranking is presentation only"
+        );
+        assert_eq!(
+            shown[0]["verdict"], "missing",
+            "the finding that DROVE exit_code=1 must lead the window, else the gate \
+             reports failure and hides its own cause; first shown verdict was {}",
+            shown[0]["verdict"]
+        );
+    }
+
+    /// The **severity** half of the same key. Every finding here is unresolved, so a
+    /// ranking that sorted on the resolved/unresolved dimension alone would be a stable
+    /// no-op and strand the single `High` at index 50 — the gate would again exit 1 while
+    /// showing nothing but `Low`s.
+    ///
+    /// Paired with `ranking_surfaces_the_unresolved_finding_hidden_behind_a_full_window`:
+    /// each fixture holds one dimension uniform so that dropping the *other* dimension
+    /// from the sort key is observable. Neither test alone pins both.
+    #[test]
+    fn ranking_surfaces_the_high_severity_finding_among_low_severity_breakage() {
+        let mut findings: Vec<Finding> = (0..50)
+            .map(|_| mk_finding(Verdict::Missing, Severity::Low))
+            .collect();
+        findings.push(mk_finding(Verdict::Missing, Severity::High));
+
+        let r = build_response(
+            &findings,
+            &[],
+            &Degradation::default(),
+            1,
+            None,
+            None,
+            "high",
+        )
+        .expect("`high` is a valid fail_on value");
+
+        assert_eq!(
+            r["exit_code"], 1,
+            "one Missing/High finding must fail a --fail-on high run"
+        );
+
+        let shown = r["findings"].as_array().expect("findings is an array");
+        assert_eq!(
+            shown.len(),
+            50,
+            "the cap still applies — ranking is presentation only"
+        );
+        assert_eq!(
+            shown[0]["severity"], "high",
+            "the high-severity finding that drove exit_code=1 must lead the window; \
+             first shown severity was {}",
+            shown[0]["severity"]
         );
     }
 

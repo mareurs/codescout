@@ -7,7 +7,6 @@ owner: marius
 related: ["56b725405a9c36d1", "21f6d21b3bf82c30"]
 tags: [librarian, audit_doc_refs, ci, progressive-disclosure, silent-cap]
 kind: bug
-unverified: the ordering regression test is OWED, not written (Resume item 1) — the reordering is covered only indirectly, by tests that assert the cap and the exit code are unchanged, so a mutation reversing the sort key would not be caught.
 ---
 
 # BUG: audit_doc_refs exits 1 but its 50-finding cap hides every finding that caused it
@@ -145,7 +144,14 @@ ranked.sort_by_key(|f| {
 let shown_findings: Vec<_> = ranked.iter().take(cap).map(|f| finding_to_json(f)).collect();
 ```
 
-`sort_by_key` is stable, so scan order is preserved within a rank. The overflow
+`sort_by_key` is stable, so scan order is preserved within a rank.
+
+**Note (2026-08-19):** the ranking predicate has since been unified. The
+`matches!(f.resolution.verdict, Verdict::Resolved | Verdict::External)` above was
+replaced by the shared `bucket(f.resolution.verdict) == Bucket::Resolved`, after the
+summary counters, this ranking and the exit code were found to be three separate
+`matches!` expressions that disagreed. The snippet above is what shipped *here*; read
+`build_response` for the current shape. The overflow
 `hint` now states that the shown findings are ordered most-severe-first, so a
 reader knows the absence of a high finding in the window is meaningful.
 
@@ -157,17 +163,33 @@ was retired 2026-08-19 (see `docs/RELEASE.md` § *Citing a fix: SHA + patch-id*)
 
 ## Tests added
 
-Covered indirectly by the existing `outputguard_caps_findings_inline` (asserts the
-cap still applies) plus the whole `fail_on_*` family (asserts the exit code is
-unchanged by the reordering) — all 89 `audit_doc_refs` tests green.
+Two dedicated ordering tests in `src/librarian/tools/audit_doc_refs/mod.rs`, alongside
+the pre-existing indirect coverage (`outputguard_caps_findings_inline` for the cap, the
+`fail_on_*` family for the exit code being unchanged by the reordering).
 
-A dedicated ordering test is **owed**: assert that a findings vector whose first
-50 entries are all `Resolved` and whose 51st is `Missing`/`High` puts the high one
-in `shown_findings`. Not added yet because `build_response` takes `&[Finding]` and
-`Finding` construction in tests currently goes through `mk_finding`, which the
-existing tests use only for `fail_on` assertions — wiring a 51-element fixture is
-mechanical but was deferred to keep this change reviewable. See *Resume*.
+- `ranking_surfaces_the_unresolved_finding_hidden_behind_a_full_window` — 50
+  `Resolved`/`High` findings, then one `Missing`/`High`. Every finding carries the same
+  severity, so this pins the **unresolved** half of the sort key.
+- `ranking_surfaces_the_high_severity_finding_among_low_severity_breakage` — 50
+  `Missing`/`Low`, then one `Missing`/`High`. Every finding is unresolved, so this pins
+  the **severity** half.
 
+**The fixture named in *Resume* item 1 was deliberately not used.** It specified 50
+`Resolved`/`Low` plus one `Missing`/`High` — which passes even if the `resolved`
+dimension is deleted from the sort key, because severity alone already ranks the high
+finding first. Holding one dimension *uniform* in each fixture is what makes dropping
+the other one observable.
+
+Mutations applied to `build_response`'s sort key, with the observed result — not a
+coverage argument:
+
+| Mutation | Key becomes | Observed |
+|---|---|---|
+| no ordering at all | `(false, 0u8)` | **both tests FAIL** |
+| drop the `resolved` dimension | `(false, sev)` | unresolved test FAILS, severity test passes |
+| drop the `severity` dimension | `(resolved, 0u8)` | severity test FAILS, unresolved test passes |
+
+Zero surviving mutations. Gate green at 4247 passed / 45 ignored (+2 from 4245).
 ## Workarounds
 
 Bisect with `--paths`, one directory at a time, until each subset is small enough
@@ -181,19 +203,15 @@ for d in docs/*/; do printf '%-24s ' "$d"; \
 
 ## Resume
 
-Two follow-ups, both small:
+One follow-up remains:
 
-1. Add the deferred ordering regression test in
-   `src/librarian/tools/audit_doc_refs/mod.rs` tests: build 51 findings, 50
-   `Resolved`/`Low` then one `Missing`/`High`, call `build_response(..., "high")`,
-   and assert the high finding appears in `result["findings"]`. Anchor with
-   `cargo test --lib audit_doc_refs::tests`.
-2. Investigate why the CLI returned `tracker_id: null` without
-   `--no-emit-tracker`. Start at `upsert_tracker` /
-   `ensure_default_tracker` in `src/librarian/tools/audit_doc_refs/mod.rs` and
-   check whether the CLI path supplies a `ToolContext` with a current project.
-   File separately if confirmed.
+1. Investigate why the CLI returned `tracker_id: null` without `--no-emit-tracker`.
+   Start at `upsert_tracker` / `ensure_default_tracker` in
+   `src/librarian/tools/audit_doc_refs/mod.rs` and check whether the CLI path supplies
+   a `ToolContext` with a current project. File separately if confirmed — it is a
+   distinct defect, not a caveat on this fix.
 
+The deferred ordering regression test, formerly item 1, is **done** — see *Tests added*.
 ## References
 
 - `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md` —

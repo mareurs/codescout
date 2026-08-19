@@ -1424,7 +1424,8 @@ The existing guidance covers the *external* case: this skill's Phase 1 says *"Fo
 
 **Promote-when:** A second silent-cap instance appears in a tool that also gates. At two datapoints, promote to `docs/PROGRESSIVE_DISCOVERABILITY.md` as "if a truncated list feeds a verdict, sort by the verdict's key before truncating".
 
-**Status:** validated — fixed in `45669701`, verified live (window went 0/50 high to 50/50 high), and filed as `docs/issues/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md`.
+**Status:** validated — fixed in `45669701`, verified live (window went 0/50 high to 50/50 high), and filed as `docs/issues/archive/2026-08-06-audit-doc-refs-gate-hides-its-own-cause.md`
+(archived 2026-08-19 once the ordering regression test closed the last open item).
 
 ## W-3 — Reading the product code before believing a red test prevented turning a test failure into a data-loss bug
 
