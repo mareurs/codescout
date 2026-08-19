@@ -2562,6 +2562,50 @@ mod tests {
         );
     }
 
+    /// The group key must stay in the forward-slash form the catalog stores.
+    ///
+    /// The bug: this routed through `PathBuf::push`, which renders with the HOST
+    /// separator, so on Windows a forward-slash catalog row came back as
+    /// `C:\work\proj` — a string that is not a prefix of the row it was derived
+    /// from. The catalog stores forward-slash form on every platform (see
+    /// `util::fs::to_forward_slash`), so the key derived from a row has to as well.
+    ///
+    /// Honest about its reach: on POSIX the old and new implementations agree on
+    /// every well-formed row, because `Path` already separates on `/` here. This is
+    /// a characterization test locally and only discriminates when run on Windows —
+    /// which is exactly where the bug lived, and where nothing else was watching.
+    ///
+    /// BUG docs/issues/2026-08-19-doctor-outside-roots-group-rewrites-posix-paths-with-backslashes.md
+    #[test]
+    fn outside_roots_group_keeps_the_forward_slash_form_the_catalog_stores() {
+        for row in [
+            "C:/work/proj/docs/trackers/x.md",
+            "C:/work/proj/notes/x.md",
+            "/home/u/work/proj/docs/trackers/x.md",
+        ] {
+            let group = outside_roots_group(row);
+            assert!(
+                !group.contains('\\'),
+                "group key must stay forward-slash on every host: {row} -> {group}"
+            );
+            assert!(
+                row.starts_with(&group),
+                "group key must be a prefix of the row it groups: {row} -> {group}"
+            );
+        }
+
+        // A drive-lettered row splits on its first `docs` component exactly like a
+        // POSIX one, and falls back to the parent when there is none.
+        assert_eq!(
+            outside_roots_group("C:/work/proj/docs/trackers/x.md"),
+            "C:/work/proj"
+        );
+        assert_eq!(
+            outside_roots_group("C:/work/proj/notes/x.md"),
+            "C:/work/proj/notes"
+        );
+    }
+
     /// `summary.total` must partition `summary.by_check`. Both sit in the same
     /// object and `total` is the headline number a reader takes first.
     ///
