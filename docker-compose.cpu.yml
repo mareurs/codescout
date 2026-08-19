@@ -1,0 +1,122 @@
+name: codescout-retrieval-cpu
+
+# CPU-only retrieval stack — recovered from git history (pre-4036bb9a, the
+# commit that consolidated docker-compose.yml onto a single GPU profile).
+# Use this file on machines without an NVIDIA/AMD GPU.
+#
+#   docker compose -f docker-compose.cpu.yml --profile cpu --env-file .env.cpu up -d
+#
+# Dense embedder is llama-server (gguf, CPU build) serving CodeRankEmbed
+# Q4_K_M. Sparse is splade-pp via TEI's CPU image. Reranker is
+# bge-reranker-base on TEI's CPU image (smaller, ~250ms p95 — full
+# bge-reranker-v2-m3 is GPU-only in the main docker-compose.yml).
+#
+# First run: place CodeRankEmbed-Q4_K_M.gguf in ${CODESCOUT_MODEL_DIR:-./models}.
+# sparse-cpu / reranker-cpu pull their models from HuggingFace automatically
+# on first start (cached in the model_cache volume).
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.17.0@sha256:f1c7272cdac52b38c1a0e89313922d940ba50afd90d593a1605dbbc214e66ffb
+    container_name: codescout-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [retrieval_net]
+
+  # ------------------------------------------------------------------ DENSE
+  # llama-server serving CodeRankEmbed Q4_K_M (137M params, dim 768).
+  dense-cpu:
+    profiles: [cpu]
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:6b0a9b4fd7e3a9a55e959e5a74d47e11f8ccd4dfbc2556b7382a6516255dcc73
+    container_name: codescout-dense-cpu
+    restart: unless-stopped
+    command:
+      - --model
+      - /models/CodeRankEmbed-Q4_K_M.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --embedding
+      - --pooling
+      - mean
+      - --ctx-size
+      - "8192"
+      - --batch-size
+      - "4096"
+      - --ubatch-size
+      - "4096"
+      - --parallel
+      - "8"
+      - --threads
+      - "4"
+    ports:
+      - "127.0.0.1:48081:8080"
+    volumes:
+      - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks: [retrieval_net]
+
+  # ------------------------------------------------------------------ SPARSE
+  # Splade_PP_en_v1 on TEI's CPU image. ~80ms p95 — acceptable for the suite.
+  sparse-cpu:
+    profiles: [cpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6@sha256:66db77d7856c9319bbfaf2c5b80a6d0e0ac9ff128ade09eaca1d9c20213617a4
+    container_name: codescout-sparse-cpu
+    restart: unless-stopped
+    command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float32", "--auto-truncate"]
+    ports:
+      - "127.0.0.1:48084:80"
+    volumes:
+      - model_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [retrieval_net]
+
+  # ------------------------------------------------------------------ RERANK
+  # bge-reranker-base on TEI's CPU image (~280MB, ~250ms p95 — usable on CPU).
+  reranker-cpu:
+    profiles: [cpu]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6@sha256:66db77d7856c9319bbfaf2c5b80a6d0e0ac9ff128ade09eaca1d9c20213617a4
+    container_name: codescout-reranker-cpu
+    restart: unless-stopped
+    command: ["--model-id", "BAAI/bge-reranker-base", "--dtype", "float32", "--auto-truncate"]
+    ports:
+      - "127.0.0.1:48083:80"
+    volumes:
+      - model_cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [retrieval_net]
+
+volumes:
+  qdrant_storage:
+  model_cache:
+
+networks:
+  retrieval_net:
+    driver: bridge

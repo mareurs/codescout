@@ -179,6 +179,8 @@ docs/**/.codescout/
 # pattern here expecting it to suppress the litter.
 # See docs/issues/2026-08-08-gitignore-projects-rule-premise-false-on-a-real-host.md
 /.codescout/code-index.db
+/.codescout/code-index.db-shm
+/.codescout/code-index.db-wal
 /target-release-new/
 /.vscode/
 
@@ -190,3 +192,7 @@ docs/**/.codescout/
 # the durable record, and `subagent-driven-development` deletes the directory
 # once a plan's final review is clean.
 .superpowers/
+
+# Locally downloaded ONNX runtime shared library (windows-gnu / EDR workaround
+# for the local-embed-dynamic feature). Fetched per-machine, never committed.
+/.onnxruntime/
