@@ -66,7 +66,7 @@ pub(crate) fn rebuild_buffered_summary(raw: Value, output_id: &str) -> Value {
 /// a write must never have its target guessed
 /// (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`).
 ///
-/// See `docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
+/// See `docs/issues/archive/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
 pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<String> {
     if !stderr.contains("command substitution:") {
         return None;

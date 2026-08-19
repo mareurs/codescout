@@ -1,5 +1,5 @@
 ---
-id: e04115d9477d280b
+id: 5606ab6e35618aea
 kind: bug
 status: fixed
 title: 'BUG: run_command passes the command to `sh -c` verbatim, so backticks in a commit message are substituted — and the diagnostic names the wrong cause'
@@ -300,3 +300,36 @@ Two notes for whoever takes it:
 - `docs/issues/archive/2026-05-19-run-command-eval-backtick-eof.md` — deferred hypothesis #4
 - `docs/adrs/2026-07-10-repair-and-continue-input-handling.md` — why not auto-repair
 - `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` — the sibling audit of `run_command` gate shape
+
+## Fix provenance
+
+This bug was closed in two commits, because the diagnostic shipped before the gate's
+blocking measurement had been run.
+
+**The diagnostic** — names the cause when substitution *fails*:
+
+- **SHA:** `4c47760a` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `c078a8a7c18c0446ced9e2325c333b2bbd2c4a79` — content hash of the diff; survives rebase and cherry-pick.
+
+**The detection gate** — closes the silent half, 2026-08-19:
+
+- **SHA:** `26de395c` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `8e8636d21dd27f1b3860c519ba0f852c1c45cadc` — content hash of the diff; survives rebase and cherry-pick.
+
+The first was recovered 2026-08-19 by pickaxe —
+`git log -S 'substitution_diagnostic' -- src/tools/run_command/output.rs` — because the
+*Fix* section recorded only "Fix SHA: this commit", which names nothing once the file is
+read on its own. Same defect class as the three recovered in `c420e2df`; recorded here so
+it is not a fourth.
+
+If a SHA stops resolving, recover by patch-id. Use redirects, not pipes: Iron Law 3 blocks
+an unbounded `git log -p` piped to a trimmer.
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 8e8636d21dd2 /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
+(cherry-pick) and any of them is the fix.

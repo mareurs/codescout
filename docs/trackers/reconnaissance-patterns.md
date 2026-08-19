@@ -2146,8 +2146,8 @@ rationale the second sweep displaced.
 
 **Third instance — 2026-08-16, Promote-when FIRED.** During the worktree-cluster
 fixes, `git add -A` swept the concurrent session's newly-created bug file
-(`2026-08-16-run-command-backticks-substituted-in-quoted-message.md`,
-`e04115d9477d280b`) into `8b27b1ea`, a commit about the read-side worktree
+(`archive/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`,
+`5606ab6e35618aea` — archived 2026-08-19, id re-keyed by the move) into `8b27b1ea`, a commit about the read-side worktree
 notice. Content intact, attribution wrong, commit message silent — the same
 shape as the first two, in the same direction as the second (this session as
 perpetrator, not victim).

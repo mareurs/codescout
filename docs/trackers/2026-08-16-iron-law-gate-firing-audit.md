@@ -368,7 +368,7 @@ narrower rule would reduce rather than add to."* That entry reached this audit's
 by a different route — reading refused commands one at a time rather than aggregating them.
 
 **Sibling defect filed this session:**
-`docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md` — `run_command`
+`docs/issues/archive/2026-08-16-run-command-backticks-substituted-in-quoted-message.md` — `run_command`
 hands its string to `sh -c` unexamined, so backticks in a `git commit -m` message are
 substituted, and the failure reports `Argument list too long`, which is the wrong cause. Same
 function family, same theme as GF-4: the shell-shape knowledge lives in one place and never

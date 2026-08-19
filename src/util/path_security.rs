@@ -809,7 +809,7 @@ fn strip_heredoc_bodies(command: &str) -> std::borrow::Cow<'_, str> {
 /// Both are protections the shell honours, and the escaped form is already in use in the
 /// corpus as the manual workaround — flagging it would punish the fix.
 ///
-/// See `docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
+/// See `docs/issues/archive/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
 pub fn commit_message_backtick_hazard(command: &str) -> Option<String> {
     let stripped = strip_heredoc_bodies(command);
     let s: &str = stripped.as_ref();

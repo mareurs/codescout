@@ -2552,7 +2552,7 @@ fn run_command_format_compact_short_output() {
 
 /// The real stderr from the reported incident, verbatim. Four errors, and the one that
 /// reads most like an explanation is the wrong one.
-/// See `docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
+/// See `docs/issues/archive/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
 const SUBSTITUTION_STDERR: &str = "Usage: grep [OPTION]... PATTERNS [FILE]...\n\
      Try 'grep --help' for more information.\n\
      sh: command substitution: line 1: syntax error near unexpected token `...'\n\
