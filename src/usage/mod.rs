@@ -177,8 +177,29 @@ fn extract_overflow_tokens(result: &Result<Vec<Content>>) -> Option<i64> {
 
 /// The symbol/path a call addressed, for friction attribution. Priority order:
 /// the most specific address first (name_path/symbol), then name, then path/query/pattern.
+///
+/// `file_path` and `rel_path` are included because they are documented **aliases** of
+/// `path` on the tools that accept them, not separate concepts — so they sit immediately
+/// after it, and the canonical spelling still wins if a caller sends both. Omitting them
+/// cost 57 error rows their target on this project alone (measured 2026-08-20; all 51
+/// `file_path` rows carried no `path` at all), each one a file
+/// `legibility::recorder_lane` could not join to a candidate.
+///
+/// Deliberately absent: `command`. It is the largest target-less population by volume
+/// (438 rows) and is still not a target — see
+/// `extract_friction_target_ignores_shell_commands` for the reasoning, which is a
+/// decision rather than an oversight.
 fn extract_friction_target(input: &Value) -> Option<String> {
-    const KEYS: [&str; 6] = ["name_path", "symbol", "name", "query", "path", "pattern"];
+    const KEYS: [&str; 8] = [
+        "name_path",
+        "symbol",
+        "name",
+        "query",
+        "path",
+        "file_path",
+        "rel_path",
+        "pattern",
+    ];
     for k in KEYS {
         if let Some(s) = input.get(k).and_then(Value::as_str) {
             if !s.is_empty() {
@@ -287,6 +308,80 @@ mod content_tests {
             Some("src/lib.rs".to_string())
         );
         assert_eq!(extract_friction_target(&json!({"unrelated": 1})), None);
+    }
+
+    /// `file_path` and `rel_path` are documented ALIASES of `path` on the tools that
+    /// accept them (`read_file`, `edit_file`, `grep`, `create_file`, `read_markdown`,
+    /// `edit_markdown`, and `artifact`'s `rel_path`). Extracting only `path` means a call
+    /// that spelled it the other way records no target at all.
+    ///
+    /// Measured 2026-08-20 on this project's own `usage.db`: **51 error rows carried
+    /// `file_path` and NONE of them also carried `path`** — `read_file` 31, `edit_file` 10,
+    /// `read_markdown` 4, `edit_markdown` 4, `edit_code` 2 — plus 6 `artifact` rows
+    /// carrying `rel_path`. Every one is a file target that `legibility::recorder_lane`
+    /// should have been able to join to a `rel_file` candidate and could not.
+    #[test]
+    fn extract_friction_target_reads_the_documented_path_aliases() {
+        use serde_json::json;
+        assert_eq!(
+            extract_friction_target(&json!({"file_path": "src/x.rs"})),
+            Some("src/x.rs".to_string()),
+            "file_path is a documented alias of path and must yield a target"
+        );
+        assert_eq!(
+            extract_friction_target(&json!({"rel_path": "docs/trackers/foo.md"})),
+            Some("docs/trackers/foo.md".to_string()),
+            "rel_path is artifact's spelling of the same concept"
+        );
+        // An alias must not outrank the more specific keys, or a symbol-addressed call
+        // that also names a file would be attributed to the file.
+        assert_eq!(
+            extract_friction_target(&json!({"name_path": "A/b", "file_path": "src/x.rs"})),
+            Some("A/b".to_string()),
+            "name_path still wins over an alias"
+        );
+        // `path` and `file_path` are the same concept, so which one wins cannot matter for
+        // correctness — but pin it so the order is a decision rather than an accident.
+        assert_eq!(
+            extract_friction_target(&json!({"path": "a.rs", "file_path": "b.rs"})),
+            Some("a.rs".to_string()),
+            "canonical `path` is preferred when a caller sends both spellings"
+        );
+    }
+
+    /// `command` is deliberately NOT a friction target, and this test is the record of
+    /// that decision rather than an oversight.
+    ///
+    /// `run_command` accounts for 438 of the 596 target-less error rows (2026-08-20), so
+    /// adding `command` would close most of the gap by volume. It is still wrong:
+    ///
+    /// * The field is documented as *the symbol/path a call addressed*. A shell command is
+    ///   neither, and the sole consumer — `legibility::score_and_rank` — looks friction up
+    ///   by `name_path` then `rel_file`, so a command string is inert there: never matched,
+    ///   never surfaced, pure storage.
+    /// * A whole command varies by flags, so it groups badly; the executable name groups
+    ///   well but discards what was addressed. Neither is *the target*.
+    /// * `input_json` is populated on ~99% of rows, so the command is already recoverable
+    ///   at query time. Storing a derived form buys nothing and makes one column mean two
+    ///   things.
+    ///
+    /// If a consumer ever needs per-command grouping, give it its own column rather than
+    /// widening this one's contract.
+    #[test]
+    fn extract_friction_target_ignores_shell_commands() {
+        use serde_json::json;
+        assert_eq!(
+            extract_friction_target(&json!({"command": "cargo test --lib"})),
+            None,
+            "a shell command is not a symbol or a path — see this test's doc comment"
+        );
+        // ...but a run_command that DOES name a cwd path still yields nothing, because cwd
+        // is the directory the command ran in, not the thing it addressed.
+        assert_eq!(
+            extract_friction_target(&json!({"command": "ls", "cwd": "src/"})),
+            None,
+            "cwd is where the call ran, not what it addressed"
+        );
     }
 
     /// Regression for
