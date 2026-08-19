@@ -286,15 +286,26 @@ whoever next works that tracker.
 
 ## Fix provenance
 
-Two anchors, because the fix is two commits and neither covers the other's file.
+Two anchors, because the fix is two commits and neither covers the other's file. `5a72304c`
+is the citation-aware partition in `doctor.rs`; `4ffd2803` is the write-path twin in
+`augmentation.rs`, which `5a72304c` never revisits.
 
-| commit | covers | patch-id |
-|---|---|---|
-| `5a72304c` (`experiments`) | the citation-aware partition in `doctor.rs` | `e9f8df63b9113a5b4073deebc5501a2cb623287a` |
-| `4ffd2803` (`experiments`) | the write-path twin in `augmentation.rs` | `c6beb5f60c30e7d637d218819f688d8ffdd0f56d` |
+- **SHA:** `5a72304c` (`experiments`) — the citation-aware partition in `doctor.rs`
+- **patch-id:** `e9f8df63b9113a5b4073deebc5501a2cb623287a`
+- **SHA:** `4ffd2803` (`experiments`) — the write-path twin in `augmentation.rs`
+- **patch-id:** `c6beb5f60c30e7d637d218819f688d8ffdd0f56d`
 
 The SHAs are positional and do not survive a rebase of `experiments`. The patch-ids are
 content hashes of the diffs and survive rebase and cherry-pick.
+
+**This section was first written as a table**, because two commits read better in one — and
+that made both anchors invisible to `archived_fix_sha_unresolvable`, which keys on the
+`- **SHA:**` and `- **patch-id:**` lines and nothing else. A record a human reads as anchored
+and a tool reads as unanchored is
+`prompt-surface-compaction-session-log:W-12` running in the other direction. The parser is
+now plural (`structured_fix_pointers`, `5a72304c`'s successor commit) specifically so the
+two-commit case does not have to reach for a table to stay readable: a shape that makes the
+honest case unrepresentable gets worked around, and the workaround is the defect.
 
 If a SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes — Iron
 Law 3 blocks an unbounded `git log -p` piped to a trimmer:

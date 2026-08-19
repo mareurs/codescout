@@ -218,6 +218,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let (fix_sha_violations, archived_fix_shas) =
         scan_archived_fix_sha_unresolvable(ctx, &cat.conn)?;
     all_violations.extend(fix_sha_violations);
+    // The complement of the check above: it validates a declared anchor, this one reports
+    // a record that declares none. Scoped to LIVE terminal bug files — 297 of 355 archived
+    // files predate the rule, and the guide calls those stale instructions rather than debt.
+    all_violations.extend(scan_terminal_status_without_fix_anchor(ctx, &cat.conn)?);
 
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
     // Reads happen while the lock is still held — kept minimal, then dropped
@@ -2161,34 +2165,47 @@ fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<V
     Ok(out)
 }
 
-/// The structured fix pointer a bug file's `## Fix provenance` section carries.
+/// Every structured fix pointer a bug file's `## Fix provenance` section carries.
 ///
-/// Returns `(sha, patch_id)` from the two declared lines, or `None` when the file has no
-/// `- **SHA:**` line at all. Deliberately NOT a general hex sweep — see
-/// [`scan_archived_fix_sha_unresolvable`] for why that would be worse than useless.
-fn structured_fix_pointer(content: &str) -> Option<(String, Option<String>)> {
+/// Returns one `(sha, patch_id)` per `- **SHA:**` line, each paired with the
+/// `- **patch-id:**` line that follows it before the next SHA. Empty when the file declares
+/// none. Deliberately NOT a general hex sweep — see [`scan_archived_fix_sha_unresolvable`]
+/// for why that would be worse than useless.
+///
+/// **Plural, because a fix is not always one commit, and the singular shape hid one.**
+/// `docs/issues/archive/2026-08-19-entry-without-definition-…` is fixed by two commits in
+/// two files, neither superseding the other. Written against a parser that could hold one
+/// pair, its author reached for a table instead — which read well to a human and was
+/// invisible here, so both anchors it recorded were verified by nothing. A shape that makes
+/// the honest case unrepresentable gets worked around, and the workaround is the defect.
+fn structured_fix_pointers(content: &str) -> Vec<(String, Option<String>)> {
     fn backticked(s: &str) -> Option<String> {
         let start = s.find('`')? + 1;
         let rest = s.get(start..)?;
         let end = rest.find('`')?;
         Some(rest[..end].to_string())
     }
-    let mut sha = None;
-    let mut patch_id = None;
+    let mut out: Vec<(String, Option<String>)> = Vec::new();
     for line in content.lines() {
         let t = line.trim_start();
-        if sha.is_none() {
-            if let Some(rest) = t.strip_prefix("- **SHA:**") {
-                sha = backticked(rest);
+        if let Some(rest) = t.strip_prefix("- **SHA:**") {
+            if let Some(sha) = backticked(rest) {
+                out.push((sha, None));
             }
+            continue;
         }
-        if patch_id.is_none() {
-            if let Some(rest) = t.strip_prefix("- **patch-id:**") {
-                patch_id = backticked(rest);
+        if let Some(rest) = t.strip_prefix("- **patch-id:**") {
+            // Attach to the most recent SHA still missing one. A patch-id line appearing
+            // before any SHA line anchors nothing this check can verify, so it is dropped
+            // rather than guessed onto a later commit it may not describe.
+            if let Some(last) = out.last_mut() {
+                if last.1.is_none() {
+                    last.1 = backticked(rest);
+                }
             }
         }
     }
-    sha.map(|s| (s, patch_id))
+    out
 }
 
 /// `archived_fix_sha_unresolvable`: an archived bug file whose declared fix SHA no longer
@@ -2272,36 +2289,42 @@ fn scan_archived_fix_sha_unresolvable(
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
-        let Some((sha, patch_id)) = structured_fix_pointer(&content) else {
+        let pointers = structured_fix_pointers(&content);
+        if pointers.is_empty() {
             skipped += 1;
             continue;
-        };
-        scanned += 1;
-        if repo.revparse_single(&sha).is_ok() {
-            continue;
         }
-        let remedy = match &patch_id {
-            Some(p) => format!(
-                "Recover it by patch-id `{p}` — a content hash of the diff, invariant under \
+        // `scanned` counts FILES; `unresolvable` counts POINTERS. A two-commit fix can
+        // contribute two findings from one file, which is the point — verifying only the
+        // first anchor would leave the second rotting exactly as if it were never recorded.
+        scanned += 1;
+        for (sha, patch_id) in &pointers {
+            if repo.revparse_single(sha).is_ok() {
+                continue;
+            }
+            let remedy = match patch_id {
+                Some(p) => format!(
+                    "Recover it by patch-id `{p}` — a content hash of the diff, invariant under \
                  rebase and cherry-pick. Use redirects, not pipes (Iron Law 3 blocks an \
                  unbounded `git log -p` piped to a trimmer): `git log --all -p > /tmp/all.patch` \
                  then `git patch-id --stable < /tmp/all.patch > /tmp/ids.txt` and grep it."
-            ),
-            None => "No patch-id was recorded next to it, so there is no content-addressed \
+                ),
+                None => "No patch-id was recorded next to it, so there is no content-addressed \
                      way back: recovery means subject-keyword search, which returned 2-153 \
                      ambiguous candidates when measured. Record the pair on future fixes."
-                .to_string(),
-        };
-        out.push(Violation::new(
-            "archived_fix_sha_unresolvable",
-            Some(id.clone()),
-            abs_path.clone(),
-            format!(
-                "declared fix SHA `{sha}` no longer names an object in this repo. A SHA is \
+                    .to_string(),
+            };
+            out.push(Violation::new(
+                "archived_fix_sha_unresolvable",
+                Some(id.clone()),
+                abs_path.clone(),
+                format!(
+                    "declared fix SHA `{sha}` no longer names an object in this repo. A SHA is \
                  positional and dies when `experiments` is rebased, which happens after every \
                  ship; nothing re-reads `archive/`, so this rots unobserved. {remedy}"
-            ),
-        ));
+                ),
+            ));
+        }
     }
 
     let health = json!({
@@ -2313,6 +2336,165 @@ fn scan_archived_fix_sha_unresolvable(
                  hex would flag reproduction and exonerated-suspect commits as dead fixes.",
     });
     Ok((out, health))
+}
+/// Backticked tokens that look like an abbreviated commit hash: 7–12 hex characters, at
+/// least one of them a letter.
+///
+/// Narrow on purpose, in three ways. **16** hex is a catalog artifact id and **40** is a
+/// patch-id, so both lengths are excluded — including them would report a bug file's own id
+/// as a stray commit reference. Requiring a letter drops line numbers and version digits,
+/// which are all-hex by accident. And the result is used only to say *hashes are present*,
+/// never to claim one of them is the fix: [`scan_archived_fix_sha_unresolvable`] documents
+/// at length why sweeping prose for hex and calling the result a fix SHA produces confident
+/// wrong answers about reproduction commits and exonerated suspects.
+fn commit_like_hashes(content: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for span in content.split('`').skip(1).step_by(2) {
+        let plausible = (7..=12).contains(&span.len())
+            && span
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+            && span.chars().any(|c| c.is_ascii_alphabetic());
+        if plausible && !out.iter().any(|s| s == span) {
+            out.push(span.to_string());
+        }
+    }
+    out
+}
+
+/// `terminal_status_without_fix_anchor`: a live bug file that is `fixed` or `mitigated` but
+/// declares no `## Fix provenance` pointer, so nothing records which commit closed it.
+///
+/// **The complement of [`scan_archived_fix_sha_unresolvable`], and the larger population.**
+/// That check verifies a declared SHA still resolves; it cannot fire on a record that
+/// declares none — and absence is the common case, since the SHA-plus-patch-id rule landed
+/// 2026-08-19 and everything written before it is unanchored by default.
+///
+/// **Live files only, and that is a measurement rather than a preference.** Of 355 archived
+/// bug files, 58 carry the structured pointer and 297 do not; reporting those would be 297
+/// findings against records `get_guide("tracker-conventions")` explicitly calls *"stale
+/// instructions, not open debt"*. Of 14 live terminal files, 4 are anchored and 10 are not.
+/// The check fires where the remedy is still cheap and still owed: the guide requires the
+/// anchor **at archive time**, so a live terminal record is exactly the one about to need it.
+///
+/// **`wontfix` is excluded** — nothing was fixed, so no commit exists to point at. `fixed`
+/// and `mitigated` both imply a change landed.
+///
+/// **A record can declare that it owes nothing, via `no_fix_commit:` in frontmatter.** A
+/// mitigation that was a doc note or a workaround has no commit, and with no way to say so
+/// the check would nag those records forever until someone silenced it wholesale. Same shape
+/// as `unverified:`: absence means an anchor is owed, presence discharges it, and an empty
+/// value counts as absent because presence is what a query reads.
+///
+/// **Names the misleading case separately, because it is the one a reader gets wrong — and
+/// it is the majority, not a sub-case.** A file with no declared anchor but with commit-like
+/// hashes in its prose READS as anchored. Measured 2026-08-19 on this repo, **7 of the 9**
+/// findings carry such hashes and only 2 are plainly hash-free; the hashes are typically the
+/// commit the bug was OBSERVED at, sitting in an `Environment` line. (A hand-inspection
+/// before this check ran put the figure at three — a sample's count reported as the
+/// population's, which is the same error the check itself exists to make harder.) Stating
+/// *"hashes are present, none declared as the fix"* is safe; naming one as the fix is the
+/// confident wrong answer this module refuses to give.
+///
+/// Reports only; there is no `fix=`. Recovering a fix SHA is research, and a wrong anchor is
+/// worse than an absent one.
+fn scan_terminal_status_without_fix_anchor(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT id, abs_path, status FROM artifact \
+         WHERE kind = 'bug' AND status IN ('fixed', 'mitigated') \
+         ORDER BY abs_path",
+    )?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path, status) in &rows {
+        let path = Path::new(abs_path);
+        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
+            continue;
+        }
+        // Archived records are out of scope. Match a path COMPONENT rather than a substring,
+        // so a repo that happens to live under a directory named `archive` does not silence
+        // its entire issue tree.
+        if path
+            .components()
+            .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
+        {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        if !structured_fix_pointers(&content).is_empty() {
+            continue;
+        }
+        if let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) {
+            if let Some(raw) = fm.extra.get("no_fix_commit") {
+                let declared = match raw {
+                    Value::Null => String::new(),
+                    Value::String(s) => s.trim().to_string(),
+                    other => other.to_string(),
+                };
+                if !declared.is_empty() {
+                    continue;
+                }
+            }
+        }
+
+        let decoys = commit_like_hashes(&content);
+        const DECOYS_SHOWN: usize = 4;
+        let misleading = if decoys.is_empty() {
+            String::new()
+        } else {
+            let shown: Vec<String> = decoys
+                .iter()
+                .take(DECOYS_SHOWN)
+                .map(|h| format!("`{h}`"))
+                .collect();
+            let more = decoys.len().saturating_sub(DECOYS_SHOWN);
+            let tail = if more > 0 {
+                format!(" (+{more} more)")
+            } else {
+                String::new()
+            };
+            format!(
+                " It does not merely lack an anchor, it READS as anchored: {} commit-like \
+                 hash(es) sit in its prose — {}{} — none declared as the fix. Where this was \
+                 measured, the hash was the commit the bug was OBSERVED at, so a reader \
+                 scanning for provenance finds one and stops looking.",
+                decoys.len(),
+                shown.join(", "),
+                tail
+            )
+        };
+        out.push(Violation::new(
+            "terminal_status_without_fix_anchor",
+            Some(id.clone()),
+            abs_path.clone(),
+            format!(
+                "status is `{status}` but no `## Fix provenance` pointer is declared, so \
+                 nothing records which commit closed this.{misleading} Record both lines — \
+                 the SHA, and the patch-id from `git show <sha> | git patch-id --stable` — \
+                 which the guide requires AT archive time; once the SHA orphans on a rebase, \
+                 recovery measured 2-153 ambiguous candidates. If the mitigation had no \
+                 commit, say that in `no_fix_commit:` rather than leaving it ambiguous."
+            ),
+        ));
+    }
+    Ok(out)
 }
 
 fn check_abs_path_must_be_absolute(id: &str, abs_path: &str) -> Option<Violation> {
@@ -3317,6 +3499,245 @@ mod tests {
             "another repo's SHA is not ours to resolve: {v:#?}"
         );
         assert_eq!(health["scanned"], 0);
+    }
+    // ---- terminal_status_without_fix_anchor -----------------------------------------
+
+    /// A live (non-archived) bug file plus its catalog row. Distinct from
+    /// [`seed_archived_bug`] precisely because path is what this check partitions on.
+    fn seed_live_bug(
+        cat: &Catalog,
+        root: &std::path::Path,
+        name: &str,
+        status: &str,
+        extra_fm: &str,
+        body: &str,
+    ) {
+        let dir = root.join("docs").join("issues");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.md"));
+        std::fs::write(
+            &path,
+            format!("---\nkind: bug\nstatus: {status}\n{extra_fm}---\n\n# BUG: {name}\n\n{body}\n"),
+        )
+        .unwrap();
+        let row = TestArtifactRowBuilder::new(name)
+            .with_abs_path(&path)
+            .with_kind("bug")
+            .with_status(status)
+            .build();
+        art_upsert(cat, &row).unwrap();
+    }
+
+    /// The anchored file is the control: without it a check that fired on every terminal
+    /// record would pass this test.
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_fires_only_where_no_pointer_is_declared() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "bare",
+            "fixed",
+            "",
+            "Nothing here names a commit.",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "anchored",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n- **patch-id:** `deadbeefcafe`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "only the unanchored record fires: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("bare"));
+    }
+
+    /// The misleading case, and the reason this check says more than "no SHA found".
+    ///
+    /// The fixture is the real shape measured 2026-08-19: the only hash in the file is the
+    /// commit the bug was OBSERVED at, sitting in an Environment line. A reader scanning for
+    /// provenance finds it and stops.
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_names_the_hash_that_makes_it_read_as_anchored() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "decoy",
+            "fixed",
+            "",
+            "## Environment\n\ncodescout at `6ce49487` (experiments), rust-analyzer pinned.\n",
+        );
+        seed_live_bug(&cat, &root, "silent", "fixed", "", "No hashes at all.\n");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 2);
+        let decoy = v.iter().find(|x| x.path.contains("decoy")).unwrap();
+        let silent = v.iter().find(|x| x.path.contains("silent")).unwrap();
+        assert!(
+            decoy.detail.contains("6ce49487") && decoy.detail.contains("READS as anchored"),
+            "the decoy hash must be named, and named as a decoy: {}",
+            decoy.detail
+        );
+        assert!(
+            !silent.detail.contains("READS as anchored"),
+            "a file with no hashes is plainly unanchored and must NOT borrow the stronger \
+             wording — the two findings differ in what a reader should do: {}",
+            silent.detail
+        );
+    }
+
+    /// 297 of 355 archived files declare no pointer. Reporting them would bury the 9 live
+    /// records where the remedy is still owed, against records the guide calls stale
+    /// instructions rather than debt.
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_leaves_archived_records_alone() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_archived_bug(&cat, &root, "old", "No provenance section anywhere.");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert!(v.is_empty(), "archived records are out of scope: {v:#?}");
+    }
+
+    /// Without a way to say "this mitigation had no commit", the check nags those records
+    /// forever and gets silenced wholesale. An EMPTY declaration is absent, matching
+    /// `unverified:` — presence is what a query reads.
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_is_discharged_by_a_non_empty_declaration() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "declared",
+            "mitigated",
+            "no_fix_commit: \"mitigation was a doc note; nothing was committed\"\n",
+            "body",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "hollow",
+            "mitigated",
+            "no_fix_commit: \"\"\n",
+            "body",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "only the empty declaration still owes: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("hollow"));
+    }
+
+    /// `wontfix` means nothing was fixed, so there is no commit to point at. Including it
+    /// would make the check demand an anchor that cannot exist.
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_ignores_wontfix() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(&cat, &root, "declined", "wontfix", "", "Not doing this.");
+        seed_live_bug(&cat, &root, "done", "mitigated", "", "Mitigated somehow.");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_terminal_status_without_fix_anchor(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "wontfix owes no anchor: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("done"));
+    }
+
+    /// The discrimination that keeps the decoy heuristic honest. A 16-hex catalog id and a
+    /// 40-hex patch-id are both all-hex, and both appear routinely in bug files — reporting
+    /// either as a stray commit reference would make the finding untrustworthy.
+    #[test]
+    fn commit_like_hashes_excludes_catalog_ids_patch_ids_and_bare_numbers() {
+        let text = "id `10d7e46375cc3053`, patch-id `e9f8df63b9113a5b4073deebc5501a2cb623287a`, \
+                    line `1234567`, commit `6ce49487`, short `abc12`";
+        assert_eq!(
+            commit_like_hashes(text),
+            vec!["6ce49487".to_string()],
+            "only the 7-12 hex token containing a letter counts"
+        );
+    }
+
+    /// A fix is not always one commit. The singular parser this replaced is what pushed an
+    /// author into a table, which no check could read.
+    #[test]
+    fn structured_fix_pointers_returns_every_declared_pair_in_order() {
+        let text = "## Fix provenance\n\n\
+                    - **SHA:** `5a72304c` (`experiments`)\n\
+                    - **patch-id:** `e9f8df63b911`\n\
+                    - **SHA:** `4ffd2803` (`experiments`)\n\
+                    - **patch-id:** `c6beb5f60c30`\n";
+        assert_eq!(
+            structured_fix_pointers(text),
+            vec![
+                ("5a72304c".to_string(), Some("e9f8df63b911".to_string())),
+                ("4ffd2803".to_string(), Some("c6beb5f60c30".to_string())),
+            ],
+            "each patch-id must bind to the SHA above it, not to the first SHA in the file"
+        );
+    }
+
+    /// A second declared anchor must be verified too — checking only the first would leave
+    /// it rotting exactly as if it had never been recorded.
+    #[tokio::test]
+    async fn archived_fix_sha_checks_every_declared_pointer_not_only_the_first() {
+        let (_tmp, root, live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_archived_bug(
+            &cat,
+            &root,
+            "two",
+            &format!(
+                "## Fix provenance\n\n\
+                 - **SHA:** `{}` (`experiments`)\n\
+                 - **patch-id:** `aaaabbbbcccc`\n\
+                 - **SHA:** `deadbee` (`experiments`)\n\
+                 - **patch-id:** `ddddeeeeffff`\n",
+                &live[..8]
+            ),
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(
+            v.len(),
+            1,
+            "the live pointer passes, the dead one fires: {v:#?}"
+        );
+        assert!(v[0].detail.contains("deadbee"));
+        assert!(
+            v[0].detail.contains("ddddeeeeffff"),
+            "and carries the SECOND pair's patch-id, not the first's: {}",
+            v[0].detail
+        );
+        assert_eq!(health["scanned"], 1, "scanned counts files, not pointers");
     }
 
     /// With no `root=` and no active project there is no scope to infer, and the
