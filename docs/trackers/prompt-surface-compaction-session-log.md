@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 6
-entry_high_water_W: 5
+entry_high_water_W: 6
 ---
 
 > **Work stream:** auditing codescout's four prompt surfaces (`tools/list`,
@@ -47,6 +47,7 @@ entry_high_water_W: 5
 | W-3 | 2026-08-19 | high | Name the substrate before quoting a verdict — which tree, which binary, which index actually produced the number | Would have published 4222/1 as a gate result without knowing whether it described `HEAD` or a concurrent session's uncommitted mutant | validated |
 | W-4 | 2026-08-19 | high | Calibrate a hand-built instrument against a known-good one on the overlapping population before extending it | Six instrument defects, each producing a plausible number and no error — 80% of scanned files were worktree duplicates, and the first patch-id test silently did nothing while exiting 0 | validated |
 | W-5 | 2026-08-19 | high | When N records share a defect, fix the surface that instructed them before repairing any of them | Would have caveated 3 bug files while leaving 6 live instruction surfaces teaching the same rule to the next author | validated |
+| W-6 | 2026-08-19 | high | Diff a tool's full report against the baseline a document recorded; account for every delta before reading the field you came for | Verification had already SUCCEEDED at its stated purpose — stopping there would have missed an unguarded write into a concurrent session's worktree, and left CAP-8's load-bearing "3 artifacts" figure standing while wrong | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -635,6 +636,79 @@ entry, before any code was written.
 § Resume. The general lesson is W-4's, one level up: *a name is not a calibration*. CAP-8's
 method note asks the next author to query the catalog for prior art before proposing; this
 asks them to open the **context type** before declaring a check needs no design.
+
+## W-6 — Diff a tool's report against the baseline a document recorded — the deltas are the findings
+
+**Observed:** 2026-08-19, verifying that a newly-shipped `doctor` check (`f632e7ef`) was
+live on the rebuilt binary after `/mcp` reconnect.
+
+**Pattern:** when a diagnostic tool reports a *set* of counts and some document already
+records an earlier run of the same tool, do not just read the field you came for.
+**Diff the whole count vector against the recorded one, and account for every delta.**
+The field you came to check is the one you already believe; the deltas are the only part
+carrying information you do not have.
+
+Concretely: CAP-7's substrate check had recorded a `by_check` vector from a run earlier
+the same day. The verification run — whose only purpose was confirming `declared_roots`
+appeared — differed in three entries:
+
+| check | recorded | live |
+|---|---:|---:|
+| `frontmatter_id_mismatch` | 3 | **4** |
+| `missing_file` | 2 | **1** |
+| `worktree_scoped_row` | 2 | **3** |
+
+Two of the three were one event. Artifact `aeece182252e710d` fired both new rows: a
+backend-kotlin plan created that day in a *linked worktree*, whose
+`worktree_scoped_row` detail carried `collision_with: "8dcbd4fcb9fd5ffc"` — **the same
+value its frontmatter declared**. The shadow's id was correct; the check calling it *"a
+move re-keys the row and this file kept the id it was moved away from"* was wrong.
+
+**Counterfactual.** The verification I set out to run was `declared_roots` present, config
+path named, `declared: 1, missing: 0` — and it passed. Stopping there was the natural end
+of the task, and it would have read as a completely clean result. Three things would have
+been missed:
+
+1. `frontmatter_id_mismatch` conflates stale-after-move ids with live worktree shadows.
+2. `fix=repair_frontmatter_id` filters only on `containing_root`, so it would **write to a
+   file inside another session's active worktree** — while both sibling fixes
+   (`reseat_worktree`, `prune_missing`) carry an active-registration guard and document
+   why. The scope comment on the unguarded arm reasons carefully about cross-*repo* blast
+   radius, measured from a real 207-file incident; the cross-*worktree* axis was never
+   considered. One axis closed, one open, in the same function.
+3. CAP-8's substrate check rests on *"the **3** that differ are the only artifacts carrying
+   evidence of a prior identity"* — the figure its entire "invert stored-vs-derived ids"
+   argument is built on. It is 4, and the population is contaminated, so the real figure is
+   unknown until the check is fixed. That claim was written hours earlier and was already
+   wrong.
+
+Filed as `docs/issues/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md`.
+
+**Why this is not just "read the whole output".** The deltas were legible *only* because a
+prior run's vector had been written down. A count vector with nothing to compare it to
+reads as a description of the world; the same vector against a baseline reads as a set of
+events. That is the cheap part of this pattern — CAP-7's substrate check recorded its
+`doctor` run in full rather than the one number it needed, and that decision is what made
+this findable four hours later.
+
+**Confirming data points:**
+
+1. This session — three deltas, one live write-path defect, one falsified tracker claim.
+2. W-3 (same log) — the substrate question, one level down: *which tree produced this
+   number*. This is the sequel: *what did the same tree say last time*.
+
+**Impact:** high — a fix that writes into a concurrent session's working tree, found by a
+verification step that had already succeeded at its stated purpose.
+
+**Promote-when:** a second instance where diffing a tool's full report against a recorded
+baseline surfaces something the targeted check did not. At 2 datapoints, promote to
+CLAUDE.md as: *"When re-running a diagnostic a tracker has already recorded, diff the full
+report against the recorded one and account for every delta before reading the field you
+came for."* Pairs with the verify-open cadence, which is the same discipline over a slower
+clock.
+
+**Status:** validated — single datapoint, defect filed and tracker claim corrected in the
+same pass. Awaiting the promotion criterion.
 
 ## Template for new entries
 

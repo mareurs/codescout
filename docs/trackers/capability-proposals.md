@@ -781,6 +781,22 @@ authoritative instead of derived.
   `fix=repair_frontmatter_id` **to overwrite them with the path-derived value**. The system
   has a slot for stable identity and a maintenance action whose purpose is to erase it.
   Inverting that is likely a larger share of the work than any new code.
+- **CORRECTION 2026-08-19 (same day, hours later): that population is 4, and it is
+  CONTAMINATED.** A live `doctor` run after an unrelated rebuild returned
+  `frontmatter_id_mismatch: 4`. The new row is a backend-kotlin plan in a *linked worktree*
+  whose frontmatter names its main twin — the overlay's fork-on-first-write copying the
+  main file's frontmatter, which is correct. Its `worktree_scoped_row` detail reports
+  `collision_with` equal to the very id the frontmatter declares. So the check conflates
+  **stale-after-move ids** with **live worktree shadows**, and `fix=repair_frontmatter_id`
+  — whose only filter is `containing_root` — would rewrite a file in another session's
+  active working tree. Filed as
+  `docs/issues/2026-08-19-repair-frontmatter-id-rewrites-files-in-registered-worktrees.md`.
+  **Two consequences for this entry:** (a) do not cite "3 artifacts carry evidence of a
+  prior identity" — the true figure is unknown until the check is de-contaminated, and it
+  is the number this entry's whole *inversion* argument rests on; (b) the count moved
+  within hours of being measured, so treat every population figure here as a fact about an
+  instant. The 2026-07-17 ↔ 2026-08-19 growth comparison below is unaffected — it compares
+  citation-resolution counts, not this one.
 - `link_scan` already resolves entry tokens, artifact ids, rel_paths and md links
   (`src/librarian/tools/link_scan/`), with a pinned tie-break where archived definers lose to
   active ones. A gram would be a fourth citation kind in an existing resolver.
