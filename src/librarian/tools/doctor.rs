@@ -61,6 +61,12 @@
 //!     `status`, and every caveated record has a terminal one by construction — so
 //!     without this the field only moved the problem from prose into frontmatter.
 //!     Archived files are included on purpose; see `scan_terminal_status_with_caveat`.
+//! 11. `archived_fix_sha_unresolvable` — a bug file whose DECLARED fix SHA no
+//!     longer names an object in this repo. Scans only the structured
+//!     `## Fix provenance` triple (54 of 350 archived files); freeform prose is
+//!     skipped rather than swept, because sampled prose names reproduction
+//!     commits and an explicitly exonerated suspect. Coverage is reported so a
+//!     clean result cannot be read as "all archived fixes resolve".
 //!
 //! Deferred to a follow-up: NFC unicode normalization, orphan
 //! `artifact_augmentation` rows (the FK already cascades on artifact
@@ -205,6 +211,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `extra`, which is not indexed. The SQL narrows first, so only terminal bug rows
     // are ever opened.
     all_violations.extend(scan_terminal_status_with_caveat(&cat.conn)?);
+    // Needs both `ctx` (for the repo to resolve against) and the connection, so unlike
+    // `scan_declared_project_roots` it runs inside the lock. Its health block is carried
+    // out to `catalog_health` below, because a clean result over 54 of 350 archived files
+    // must not read as "every archived fix resolves".
+    let (fix_sha_violations, archived_fix_shas) =
+        scan_archived_fix_sha_unresolvable(ctx, &cat.conn)?;
+    all_violations.extend(fix_sha_violations);
 
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
     // Reads happen while the lock is still held — kept minimal, then dropped
@@ -376,6 +389,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Always present, even when nothing fired: its `note` is how a SKIP (linked worktree,
     // absent/unreadable/unparseable config) stays distinguishable from a pass.
     catalog_health.insert("declared_roots".to_string(), declared_roots_health);
+    catalog_health.insert("archived_fix_shas".to_string(), archived_fix_shas);
     catalog_health.insert("hint".to_string(), json!(health_hint));
 
     Ok(json!({
@@ -2019,6 +2033,160 @@ fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<V
     Ok(out)
 }
 
+/// The structured fix pointer a bug file's `## Fix provenance` section carries.
+///
+/// Returns `(sha, patch_id)` from the two declared lines, or `None` when the file has no
+/// `- **SHA:**` line at all. Deliberately NOT a general hex sweep — see
+/// [`scan_archived_fix_sha_unresolvable`] for why that would be worse than useless.
+fn structured_fix_pointer(content: &str) -> Option<(String, Option<String>)> {
+    fn backticked(s: &str) -> Option<String> {
+        let start = s.find('`')? + 1;
+        let rest = s.get(start..)?;
+        let end = rest.find('`')?;
+        Some(rest[..end].to_string())
+    }
+    let mut sha = None;
+    let mut patch_id = None;
+    for line in content.lines() {
+        let t = line.trim_start();
+        if sha.is_none() {
+            if let Some(rest) = t.strip_prefix("- **SHA:**") {
+                sha = backticked(rest);
+            }
+        }
+        if patch_id.is_none() {
+            if let Some(rest) = t.strip_prefix("- **patch-id:**") {
+                patch_id = backticked(rest);
+            }
+        }
+    }
+    sha.map(|s| (s, patch_id))
+}
+
+/// `archived_fix_sha_unresolvable`: an archived bug file whose declared fix SHA no longer
+/// names an object in this repo.
+///
+/// **Why this exists, measured 2026-08-19:** archived bug files carry the only record of
+/// which commit fixed what, and nothing re-reads `archive/`. A SHA is positional — it dies
+/// when `experiments` is rebased, which happens after every ship — so the pointer rots
+/// silently. Subject-keyword recovery of a dead one returned 2–153 ambiguous candidates.
+/// That is why the `patch-id` now rides alongside, and why this check reports it: the
+/// remedy travels with the finding instead of being looked up afterwards.
+///
+/// **Scanned population: the STRUCTURED form only, and the report says so.** Of 350
+/// archived files, 54 carry the `## Fix provenance` triple; the other 296 mention commits
+/// in freeform prose. Sweeping those for hex would be worse than not checking them:
+/// sampled prose includes `` `a45f1bd7` `` naming a *reproduction* commit, and `12707fe`
+/// appearing as "suspected the recent refactor" and then "**Refactor 12707fe is
+/// INNOCENT**". Reporting either as a dead fix SHA would be a confident wrong answer about
+/// a commit the file itself exonerates — the exact failure mode
+/// [`check_outside_managed_roots`] takes pains to avoid. Coverage is reported in
+/// `catalog_health.archived_fix_shas` so a clean result cannot be read as "all 350 archived
+/// fixes resolve".
+///
+/// **Resolvability, not reachability.** `revparse_single` failing means the object is gone
+/// from the database. A commit that resolves but is unreachable from any ref is a weaker,
+/// different question — orphaned-but-not-yet-collected is the normal state of a
+/// cherry-picked fix's original, and flagging it would fire on healthy repos. CAP-7's
+/// measurement used the same predicate: "objects absent from the object DB, not merely
+/// unreferenced".
+///
+/// Scoped to the active project's git root, like `fix=repair_frontmatter_id`: the catalog
+/// spans every repo on the machine, and a SHA only means anything inside the repo that
+/// minted it. Resolving a codescout SHA against a sibling repo would report every one of
+/// them dead.
+///
+/// **Scans every bug row, not only archived ones** — `archived` in the check name is the
+/// motivating case, not the filter. A fixed-but-unarchived file's pointer rots by the same
+/// mechanism, and gating on path would make the check miss it during exactly the window
+/// when someone might still remember the commit. Measured on this repo: 54 scanned, 324
+/// skipped, of which 296 are archived and 28 are live.
+///
+/// Reports only; there is no `fix=`. Recovering a dead pointer means finding the commit by
+/// patch-id, which is a search, not a repair.
+fn scan_archived_fix_sha_unresolvable(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+) -> Result<(Vec<Violation>, Value)> {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok((
+            Vec::new(),
+            json!({
+                "note": "no active project, so there is no repo to resolve SHAs against — \
+                         declared fix SHAs were NOT checked"
+            }),
+        ));
+    };
+    let Ok(repo) = git2::Repository::open(&cp.git_root) else {
+        return Ok((
+            Vec::new(),
+            json!({
+                "note": format!(
+                    "{} is not a git repository, so declared fix SHAs were NOT checked",
+                    crate::util::fs::RepoPath::from_path(&cp.git_root).into_string()
+                )
+            }),
+        ));
+    };
+
+    let mut stmt =
+        conn.prepare("SELECT id, abs_path FROM artifact WHERE kind = 'bug' ORDER BY abs_path")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let (mut scanned, mut skipped, mut out) = (0usize, 0usize, Vec::new());
+    for (id, abs_path) in &rows {
+        let path = Path::new(abs_path);
+        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Some((sha, patch_id)) = structured_fix_pointer(&content) else {
+            skipped += 1;
+            continue;
+        };
+        scanned += 1;
+        if repo.revparse_single(&sha).is_ok() {
+            continue;
+        }
+        let remedy = match &patch_id {
+            Some(p) => format!(
+                "Recover it by patch-id `{p}` — a content hash of the diff, invariant under \
+                 rebase and cherry-pick. Use redirects, not pipes (Iron Law 3 blocks an \
+                 unbounded `git log -p` piped to a trimmer): `git log --all -p > /tmp/all.patch` \
+                 then `git patch-id --stable < /tmp/all.patch > /tmp/ids.txt` and grep it."
+            ),
+            None => "No patch-id was recorded next to it, so there is no content-addressed \
+                     way back: recovery means subject-keyword search, which returned 2-153 \
+                     ambiguous candidates when measured. Record the pair on future fixes."
+                .to_string(),
+        };
+        out.push(Violation::new(
+            "archived_fix_sha_unresolvable",
+            Some(id.clone()),
+            abs_path.clone(),
+            format!(
+                "declared fix SHA `{sha}` no longer names an object in this repo. A SHA is \
+                 positional and dies when `experiments` is rebased, which happens after every \
+                 ship; nothing re-reads `archive/`, so this rots unobserved. {remedy}"
+            ),
+        ));
+    }
+
+    let health = json!({
+        "scanned": scanned,
+        "skipped_no_structured_pointer": skipped,
+        "unresolvable": out.len(),
+        "note": "Only files carrying the `## Fix provenance` triple are checked. Files that \
+                 mention commits in freeform prose are SKIPPED, not passed: sweeping prose for \
+                 hex would flag reproduction and exonerated-suspect commits as dead fixes.",
+    });
+    Ok((out, health))
+}
+
 fn check_abs_path_must_be_absolute(id: &str, abs_path: &str) -> Option<Violation> {
     // Schema declares `abs_path TEXT NOT NULL UNIQUE` but does not enforce
     // absoluteness. Pre-#66 code paths stored relative strings here in some
@@ -2838,6 +3006,189 @@ mod tests {
             "an over-long caveat is elided rather than dumped whole: {}",
             v[0].detail
         );
+    }
+
+    // ---- archived_fix_sha_unresolvable ----------------------------------------------
+
+    /// A real git repo with one real commit, so resolution is genuine rather than mocked.
+    fn git_fixture_with_commit() -> (tempfile::TempDir, std::path::PathBuf, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test").unwrap();
+        config.set_str("user.email", "test@test.com").unwrap();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let sha = repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap()
+            .to_string();
+        (tmp, root, sha)
+    }
+
+    fn seed_archived_bug(cat: &Catalog, root: &std::path::Path, name: &str, body: &str) {
+        let dir = root.join("docs").join("issues").join("archive");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.md"));
+        std::fs::write(
+            &path,
+            format!("---\nkind: bug\nstatus: fixed\n---\n\n# BUG: {name}\n\n{body}\n"),
+        )
+        .unwrap();
+        let row = TestArtifactRowBuilder::new(name)
+            .with_abs_path(&path)
+            .with_kind("bug")
+            .with_status("fixed")
+            .build();
+        art_upsert(cat, &row).unwrap();
+    }
+
+    fn ctx_rooted_at(cat: Catalog, root: &std::path::Path) -> ToolContext {
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: root.to_path_buf(),
+            git_root: root.to_path_buf(),
+            main_root: None,
+            umbrella: None,
+        });
+        TestToolContextBuilder::new(cat)
+            .with_current_project(cp)
+            .build()
+    }
+
+    /// The live commit is the control: without it, a check that flagged every declared SHA
+    /// would pass.
+    #[tokio::test]
+    async fn archived_fix_sha_reports_a_dead_pointer_and_carries_the_patch_id_remedy() {
+        let (_tmp, root, live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_archived_bug(
+            &cat,
+            &root,
+            "alive",
+            &format!(
+                "## Fix provenance\n\n- **SHA:** `{}` (experiments-only)\n",
+                &live[..8]
+            ),
+        );
+        seed_archived_bug(
+            &cat,
+            &root,
+            "dead",
+            "## Fix provenance\n\n- **SHA:** `deadbee` (experiments-only)\n\
+             - **patch-id:** `c5128d873990b049ce956c695a3899750d7b3f08`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+        };
+
+        assert_eq!(v.len(), 1, "only the dead pointer fires: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("dead"));
+        assert!(v[0].detail.contains("deadbee"), "names the dead SHA");
+        assert!(
+            v[0].detail.contains("c5128d873990b049"),
+            "and carries the patch-id, so the remedy travels WITH the finding rather than \
+             being looked up afterwards: {}",
+            v[0].detail
+        );
+        assert_eq!(health["scanned"], 2);
+        assert_eq!(health["unresolvable"], 1);
+    }
+
+    /// A dead pointer with nothing to recover it by is a strictly worse finding, and must
+    /// not silently reuse the patch-id wording.
+    #[tokio::test]
+    async fn a_dead_pointer_with_no_patch_id_says_there_is_no_way_back() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_archived_bug(
+            &cat,
+            &root,
+            "orphan",
+            "## Fix provenance\n\n- **SHA:** `deadbee` (experiments-only)\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, _) = {
+            let cat = ctx.catalog.lock();
+            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].detail.contains("No patch-id"),
+            "the absence must be stated, not glossed: {}",
+            v[0].detail
+        );
+    }
+
+    /// The design decision, pinned. Freeform prose naming commits is SKIPPED, not swept.
+    ///
+    /// Both decoys are real shapes from `docs/issues/archive/`: a reproduction commit, and
+    /// a suspect the file explicitly exonerates. Sweeping hex would report each as a dead
+    /// fix SHA — a confident wrong answer about a commit that was never the fix.
+    #[tokio::test]
+    async fn archived_fix_sha_skips_freeform_prose_instead_of_sweeping_it_for_hex() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_archived_bug(
+            &cat,
+            &root,
+            "prose",
+            "Added `src/bug032_repro.rs` (commit `a45f1bd7`).\n\n\
+             Suspected the recent refactor `12707fe`.\n\n\
+             1. **Refactor 12707fe is INNOCENT.** Diff confirms it.\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+        };
+
+        assert!(
+            v.is_empty(),
+            "a reproduction commit and an exonerated suspect are not dead fix SHAs: {v:#?}"
+        );
+        assert_eq!(health["scanned"], 0);
+        assert_eq!(
+            health["skipped_no_structured_pointer"], 1,
+            "and the skip must be COUNTED — a clean result over a fraction of the corpus \
+             read as full coverage is the failure this module keeps guarding against"
+        );
+    }
+
+    /// A SHA is only meaningful inside the repo that minted it. Resolving one against a
+    /// sibling repo would report every declared pointer dead at once.
+    #[tokio::test]
+    async fn archived_fix_sha_ignores_rows_outside_the_active_repo() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let (_other_tmp, other_root, _) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_archived_bug(
+            &cat,
+            &other_root,
+            "elsewhere",
+            "## Fix provenance\n\n- **SHA:** `deadbee` (experiments-only)\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "another repo's SHA is not ours to resolve: {v:#?}"
+        );
+        assert_eq!(health["scanned"], 0);
     }
 
     /// With no `root=` and no active project there is no scope to infer, and the
