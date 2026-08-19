@@ -14,7 +14,7 @@ closed: 2026-08-19
 opened: 2026-08-19
 owner: marius
 severity: medium
-unverified: 'not verified live at fix time (since verified: slot 2729343 stamped 412ms after publish, ledger survived the restart with only the opener re-armed); WIDENS the open latch bug 54a70b49f6f26681 by voiding its /mcp workaround — trade recorded under Fix ideas'
+unverified: fix itself is fully verified live (inheritance + surgical activate, 2026-08-19); the standing caveat is that it WIDENS the open latch bug 54a70b49f6f26681 by voiding its /mcp workaround — trade recorded under Known cost
 ---
 
 # BUG: a `/mcp` reconnect makes the rendezvous inactive forever, and the next `activate` wipes the guide ledger
@@ -265,23 +265,47 @@ The fourth is recorded rather than counted, because reporting 4/4 would overstat
 coverage this suite actually has.
 ## Resume
 
-Fixed and archived. Two follow-ups, neither blocking:
+Fixed, archived, and **verified live end to end 2026-08-19**. One standing consequence,
+not a loose end: see § Known cost.
 
-**1. Live verification — DONE 2026-08-19, after a Claude Code restart.** Slot `2729343` was
-published at `09:54:19.379Z` and stamped `hook_at: 09:54:19.791Z` — **412 ms later**,
-confirming the SessionStart hook finds the slot already present, exactly the ordering
-`session-start.mjs` documents. The ledger also survived the restart with only
-`project-activation-bootstrap` re-armed (four other topics carried their pre-restart
-stamps), and a following `artifact(find)` injected no `librarian` guide. The
-construction-time re-arm and the keyed-tier persistence both behave as designed.
+### Live verification — both halves observed
 
-Still unobserved: the **inheritance path itself**, which only runs on the next reconnect
-from a stamped predecessor. That precondition now holds — slot `2729343` carries a stamp —
-so the next `/mcp` exercises it. Check `hook_at` is non-null in the new pid's slot, and that
-a `workspace(activate)` afterwards re-injects nothing.
+**Half 1, the stamp (after a Claude Code restart).** Slot `2729343` published at
+`09:54:19.379Z`, stamped `hook_at: 09:54:19.791Z` — **412 ms later**. The SessionStart hook
+finds the slot already present, exactly the ordering `session-start.mjs` documents.
 
-**2. The latch interaction** — see § Known cost above. `54a70b49f6f26681` stays open and is
-now wider; its workaround section has been corrected to say so.
+**Half 2, the inheritance (after a `/mcp` reconnect).** The new slot:
+
+```json
+{"pid":2759601,"started_at":"2026-08-19T09:57:46.355Z",
+ "session":"a8acb1cf-…","hook_at":"2026-08-19T09:54:19.791Z"}
+```
+
+The stamp is **three and a half minutes older than the slot holding it** — carried from
+predecessor `2729343`, which is itself now gc'd. No hook ran at 09:57 (a reconnect fires no
+SessionStart), so an unaided slot would have been unstamped. That timestamp gap is the
+proof, and it also shows the scan-before-`gc` ordering holding under real conditions rather
+than only in the fixture.
+
+**The behaviour that matters.** A `workspace(activate)` on the same project immediately
+after the reconnect left the ledger intact:
+
+| topic | stamp | |
+|---|---|---|
+| `progressive-disclosure` | 09:10:22Z | survived |
+| `librarian` | 09:11:25Z | survived |
+| `symbol-navigation` | 09:15:44Z | survived |
+| `tracker-conventions` | 09:21:29Z | survived |
+| `project-activation-bootstrap` | 09:58:01Z | re-armed at construction — by design |
+| `workspace-state` | 09:58:22Z | genuinely absent before; correctly emitted |
+
+Four topics carrying **pre-reconnect** stamps survived an activation that would previously
+have cleared the ledger to a single entry. Only `workspace-state` was injected, and only
+because it was the one topic this ledger genuinely lacked. **54,277 bytes** of guide bodies
+not re-sent, on one call.
+
+The verification recipe this section carried at archive time was followed verbatim, which
+is the whole reason the check was one command rather than a re-investigation.
 ## References
 
 - `src/tools/rendezvous.rs` — `Entry.hook_at`, `Rendezvous::publish`, `poll`, `is_active`
