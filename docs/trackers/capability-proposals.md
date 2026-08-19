@@ -645,10 +645,26 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
   `worktree_scoped_row` 2). Adding a check is idiomatic, not novel.
 - `scan_undefined_entries` (`src/librarian/tools/doctor.rs:1501`) is the nearest sibling in
   shape — it already emits a per-artifact finding citing the conventions guide.
-- **Check 3 is fully specified already**, by the bug it would have caught:
+- **Check 3's ASSERTION is fully specified already**, by the bug it would have caught:
   `docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`
   names the assertion, the report shape, and says to site it next to
-  `abs_path_outside_managed_roots`. Nothing needs designing.
+  `abs_path_outside_managed_roots`. **Its substrate is not** — corrected 2026-08-19 after a
+  pre-implementation scout, logged as `prompt-surface-compaction-session-log:F-6`. This
+  entry previously read "Nothing needs designing", which was wrong twice:
+  - **`doctor` cannot reach the `[[project]]` list.** `ctx.workspace` is
+    `crate::librarian::workspace::WorkspaceConfig` (`src/librarian/workspace.rs:9`) and
+    carries `.roots`. The `[[project]]` entries live on a **different type with the same
+    name**, `crate::config::workspace::WorkspaceConfig` (`src/config/workspace.rs:4-12`),
+    whose `projects: Vec<ProjectEntry>` holds the `{id, root}` pairs
+    (`src/config/workspace.rs:39-46`). Nothing threads it into `ToolContext`
+    (`src/librarian/tools/mod.rs:84-103`). So check 3 must locate, read and parse
+    `.codescout/workspace.toml` itself — precedent at `src/tools/config/mod.rs:511-515`,
+    path via `crate::config::workspace::workspace_config_path` — or the plumbing changes.
+  - **The worktree case is a decision, not an edge case.** The config is gitignored, so it
+    does not travel into a linked worktree; when absent there, discovery falls back to the
+    **main** checkout's settings, a state the code already names `topology: "inherited"`
+    (`src/tools/config/mod.rs:939-948`). "The active workspace config" is therefore
+    ambiguous in exactly the situation this repo is usually in. See open decision 4.
 - **Genuinely missing:** no check reads bug-file frontmatter at all, and nothing resolves a
   git SHA. Check 1 needs a git handle inside doctor — `resolve_head_sha` and
   `probe_has_git_remote` already use `git2`, so the dependency exists; do not shell out.
@@ -678,12 +694,22 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
 3. **Cost of check 1.** Resolving N SHAs per run is cheap with `git2`; scanning history for
    a patch-id is not. Suggest: resolve the SHA only, and *report* the recorded patch-id
    without resolving it.
+4. **Which root check 3 resolves against, in a worktree** (added 2026-08-19 with the
+   substrate correction). Three sub-questions, and answering only the first is how this
+   ships wrong-but-green: (a) when the worktree has no `.codescout/workspace.toml` of its
+   own, does the check read main's, or report nothing? (b) if it reads main's, does it
+   resolve declared roots against the worktree root or the main root? (c) should an
+   inherited config be checked at all, given the operator cannot fix it from here? Leaning:
+   check the checkout's OWN config only, and when absent emit nothing rather than a
+   finding — an inherited config is main's to repair, and reporting it from five worktrees
+   turns one defect into five. State the skip in the report so the silence is legible.
 
 ### Resume
 
 1. Read `src/librarian/tools/doctor.rs` around `scan_undefined_entries` for the finding
    shape and the per-check registration point.
-2. Implement check 3 first — it is fully specified and needs no git.
+2. Implement check 3 first — it needs no git. It DOES need its own config read and open
+   decision 4 settled; read the corrected substrate check above before starting.
 3. Then check 2 (frontmatter read, no git), then check 1 (needs `git2`).
 4. Each check needs a test that observes a *planted* violation, applied and run — not a
    coverage argument. See `CLAUDE.md` § mutation-apply discipline.

@@ -11,7 +11,7 @@ topic: prompt-surfaces
 entry_prefix:
 - F
 - W
-entry_high_water_F: 5
+entry_high_water_F: 6
 entry_high_water_W: 5
 ---
 
@@ -37,6 +37,7 @@ entry_high_water_W: 5
 | F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — field experiment **superseded** by hamsa A-26's controlled arms (0/10, 0/10, control 10/10); routing reverted in `89d32048`, evidence points at *substituted* not *unrouted* |
 | F-4 | 2026-08-18 | med | librarian-api | open | `anchor_heading` inserts only *before* a heading, so a ledger that appends at the end cannot use the server-writes path |
 | F-5 | 2026-08-19 | high | self-friction | fixed-verified | A guard that names the invariant but never exercises it — forcing the gate open left 62/62 passing; "mutation-tested" is a per-ASSERTION claim, not a per-commit one |
+| F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -571,6 +572,69 @@ then sweep every surface carrying the same rule, including the memories.*
 
 **Status:** validated — 2 datapoints, one of them this session's own edit leaking twice
 while sweeping for exactly this failure mode.
+
+## F-6 — CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all
+
+**Observed:** 2026-08-19, post-compaction scout before implementing CAP-7 check 3
+(`declared_root_missing`) in `docs/trackers/capability-proposals.md`.
+
+**When:** Phase 1 reconnaissance, before writing any code — triggered by that tracker's own
+augmentation prompt, which says the `Substrate check` line is the load-bearing part and must
+be re-verified before acting.
+
+**Expected (CAP-7 substrate check):** *"**Check 3 is fully specified already**, by the bug it
+would have caught … names the assertion, the report shape, and says to site it next to
+`abs_path_outside_managed_roots`. Nothing needs designing."* And separately: *"**Genuinely
+missing:** no check reads bug-file frontmatter at all, and nothing resolves a git SHA"* —
+naming git as the only new dependency, for check 1.
+
+**Got (scouted reality):** the *assertion* is specified. The *substrate* is not, in two ways
+neither CAP-7 nor the bug file mentions:
+
+1. **`doctor` has no handle to the project list.** Its `ctx.workspace` is
+   `crate::librarian::workspace::WorkspaceConfig` (`src/librarian/workspace.rs:9`), which
+   carries `.roots` and umbrellas. The `[[project]]` entries live on a **different type with
+   the same name** — `crate::config::workspace::WorkspaceConfig`
+   (`src/config/workspace.rs:4-12`), whose `projects: Vec<ProjectEntry>` holds the
+   `{id, root}` pairs (`src/config/workspace.rs:39-46`). Nothing threads the latter into
+   `ToolContext` (`src/librarian/tools/mod.rs:84-103`). The check must therefore locate,
+   read and parse `.codescout/workspace.toml` itself — precedent at
+   `src/tools/config/mod.rs:511-515` — or the plumbing must change. A same-named type on
+   the context field is exactly the shape that reads as "already available".
+
+2. **The worktree case is a live decision, not an edge case.** The config is gitignored, so
+   it does not travel into a linked worktree; when it is absent there, discovery silently
+   falls back to the **main** checkout's settings, a state the code already names
+   `topology: "inherited"` (`src/tools/config/mod.rs:939-948`). So "the active workspace
+   config" is ambiguous in precisely the situation this repo is usually in — five linked
+   worktrees exist right now. Which root the declared `root` resolves against, and whether
+   an inherited config should be checked at all, has to be decided before the check can
+   report anything trustworthy.
+
+**Probable cause:** the substrate check was written from the *bug file*, which specifies the
+assertion completely and correctly, and not from `doctor`'s context type. The bug is a
+config-state defect, so its author had no reason to look at what a librarian tool can reach.
+Two structurally different types sharing the name `WorkspaceConfig` is what let
+"`ctx.workspace`" read as sufficient without opening it.
+
+**Workaround:** implement check 3 as a self-contained config read (locate via
+`crate::config::workspace::workspace_config_path`, parse, iterate `projects`) rather than off
+`ctx`, and record the worktree resolution as a fourth open decision on CAP-7 rather than
+deciding it silently inside the check.
+
+**Severity:** med — would not have cascaded, but the first implementation attempt reaches for
+`ctx.workspace.projects`, which does not compile, and then has to guess at root resolution
+with the worktree fallback invisible. Under subagent dispatch that is at least one failed
+task the controller absorbs; the worktree half could have shipped as a wrong-but-green check.
+
+**Status:** fixed-verified — CAP-7's substrate check corrected in the same commit as this
+entry, before any code was written.
+
+**Fix idea / Pointer:** CAP-7 in `docs/trackers/capability-proposals.md`;
+`docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`
+§ Resume. The general lesson is W-4's, one level up: *a name is not a calibration*. CAP-8's
+method note asks the next author to query the catalog for prior art before proposing; this
+asks them to open the **context type** before declaring a check needs no design.
 
 ## Template for new entries
 
