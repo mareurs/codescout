@@ -11,7 +11,7 @@ tags:
 - reflective
 - backlog
 topic: capability-proposals
-entry_high_water_CAP: 8
+entry_high_water_CAP: 9
 entry_prefix: CAP
 ---
 
@@ -43,6 +43,7 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-6 | 2026-08-17 | proposed | small–medium | Derive TAXONOMY's append-recipe column from `entry_prefix` declarations — it drifted twice in one day |
 | CAP-7 | 2026-08-19 | proposed | small–medium | Make record decay detectable — three doctor checks so corrections travel (Layer 2) |
 | CAP-8 | 2026-08-19 | proposed | large | Content-addressed identity — a "gram" for entries, stored-not-derived ids for artifacts (Layer 3) |
+| CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then a 2-predicate detector and an in-band `friction()` self-report |
 
 ## CAP-1 — Session artifact-touch ledger
 
@@ -955,6 +956,114 @@ for prior art was run during an unrelated cleanup, not during the proposal. Quer
 catalog for existing specs *before* writing a capability proposal — the substrate check is
 the load-bearing part of a CAP entry, and mine missed a shipped feature.
 
+## CAP-9 — Friction observability: fix attribution first, then a two-predicate detector and an in-band `friction()` self-report
+
+**Ask.** In the requester's words: *"what do we need more to measure frictions with the
+agent, maybe a column in the db, maybe a feedback tool, more logs... I want to be able to
+easily spot frictions from logic/systemic/tool usage/etc."*
+
+This entry is the surviving design after a five-agent reconnaissance (2026-08-19/20) killed
+five of six things originally proposed. It is deliberately ordered: **items 1-2 are
+prerequisites, items 3-5 each still have an open decision.**
+
+### The ask, in five items
+
+1. **Fix attribution.** Resolve `cc_session_id` per *call* rather than per process, and add
+   `agent_id` + `is_sidechain`. Everything else reads off these numbers.
+2. **Two detector predicates, replacing three that failed.** `S-A` = consecutive-error run
+   in one session with no intervening success; `S-B` = `err_family IS NULL`. Fire an in-band
+   nudge once per session per key through `GuideLedger::notice_once`.
+3. **A `friction()` tool** writing typed observations (kind/subkind/severity/notes, bound to
+   the triggering `tool_call_id`), so the agent can record logic friction and user
+   corrections that leave no mechanical trace.
+4. **Ingest `toolDenialKind`** from the transcript as three separate counters:
+   native-redirect, codescout-tool-misuse, `user-rejected`.
+5. **Offline narration analysis** — high-precision first-person-error regexes over
+   `assistant:text`, as a report, not a nudge.
+
+### Substrate check (2026-08-20)
+
+| Piece | What exists | What is missing |
+|---|---|---|
+| Per-call session identity | `ServerEnv::from_env` reads `CLAUDE_CODE_SESSION_ID` once (`src/server.rs:115-125`); `CodeScoutServer::cc_session_id` doc says *"Resolved once on purpose"* (`src/server.rs:169-177`); cloned per call at `src/server.rs:974-977`. The **rendezvous already polls per call** and re-keys the ledger — `session_key` is documented as *"Distinct from `cc_session_id`, which is usage-correlation only"* (`src/server.rs:178-180`) | Telemetry reading that resolved identity. The machinery is built; it is simply not wired to `usage.db` |
+| `agent_id` / `is_sidechain` | **Nothing.** `grep("agent_id\|is_sidechain\|agentId", "src/**/*.rs")` → 0 matches | The whole column pair |
+| `S-A` (consecutive-error run) | `outcome`, `cc_session_id`, `called_at` all present on `tool_calls` | Write-time bookkeeping, or a query — no new column strictly required |
+| `S-B` (`err_family IS NULL`) | `err_family` + `normalize_err_family` + fingerprint backfill (`src/usage/db.rs:225`, `:444-483`, `:485-525`) | **Nothing — it is a `WHERE` clause** |
+| Nudge channel | `GuideLedger::notice_once` (`src/tools/guide_ledger.rs:324-326`) and `refusal_predicate` (`src/prompts/mod.rs:487-519`), the carrier measured at 96% next-call compliance | A friction-nudge caller |
+| Observation storage | `pika_observations` table EXISTS in `usage.db` with a full typed schema (kind ∈ iron_law/tool_bug/misusage/pattern, subkind, predicate, verdict ∈ slip/habit/promoted/rejected, severity, recurrence, `u_id`/`h_id`/`t_id`/`bug_id`). **0 rows, and 0 references in `src/`** — created by a buddy plugin skill (`<profile>/plugins/cache/sdd-misc-plugins/buddy/0.9.1/skills/codescout-pika/sql/v1-bootstrap.sql`) | A write path, an ownership decision, and durability — see the filed orphaning bug |
+| `toolDenialKind` | Structural field on `type:"user"` transcript entries, paired with `is_error:true` on 153/153 denials, stable across CC 2.1.233-235 | Any ingest at all — `usage.db` cannot see these by construction |
+| Turn / token axes | `promptId` (turn key, 0/126 contiguity violations) and `message.usage` (100% coverage) exist **in transcripts only** | Deliberately NOT proposed as columns — see *Withdrawn* below |
+
+### Why it is worth building (measured 2026-08-19/20, mostly not self-generated)
+
+- **The current instrument mis-attributes most of its own rows.** 72.7% of calls and 68.3%
+  of errors originate in dispatched subagents filed under the parent's `cc_session_id`;
+  separately, 30.9% of rows (8,980/29,103) sit in pools where one server `session_id` carries
+  2+ `cc_session_id` labels. Every per-session friction number in this repo is a blend.
+- **The detector predicates were validated against ground truth, not asserted.** Over 840
+  matched errors (74.5% of the 30-day corpus), against a 27.0% base friction rate:
+  `S-A OR S-B` = **48.0% precision, 1.78x lift, 26.0% recall, ~157 fires/30d, zero new
+  columns.**
+- **The three originally-proposed detectors all failed.** `repeat_family` 1.16x at best,
+  `target_thrash` **27.1% against a 27.0% base rate** (friction-random), `route_around`
+  **0.79x** — worse than firing on every error, and all five tightenings went *down*
+  (0.55-0.69x). Route-around firings are dominated by agents correctly obeying the gate.
+- **`err_family IS NULL` self-retires.** A named family is evidence someone already wrote a
+  teaching hint; NULL is the complement of the teaching effort, and measures 1.97x lift. As
+  gates get authored, high-friction NULLs migrate into named families and the signal fades —
+  the correct behaviour for a friction detector.
+- **In-band self-report beats transcript parsing for the human-correction class.** Keyword
+  search over user text: 67 hits, **0 genuine**. The agent, which sees both the correction
+  and its own call history, is the more accurate instrument — not merely the more convenient
+  one. Agent self-reports outnumber human corrections ~54 to ~7 in the same 32 hours.
+
+### Open questions
+
+1. **Historical rows.** 30.9% carry a possibly-wrong label and nothing distinguishes them.
+   Fixing the write path leaves a half-trustworthy corpus with no way to tell which half. A
+   `session_attribution` column or a documented cutoff date — option 3 of the 2026-08-16 bug,
+   still unimplemented after two related fixes.
+2. **Who owns `pika_observations`.** Adopt it into codescout's migrations, or leave it
+   plugin-owned and make observations self-sufficient? Enabling `PRAGMA foreign_keys` to make
+   the declared cascade real would *also* start deleting observations at 30 days, which is
+   probably wrong for a durable record.
+3. **Does `S-B` survive its own success?** If classifying today's NULL head keeps the bucket
+   near 2x lift, the signal is about *newness* rather than those specific messages. Worth
+   re-measuring after the first batch of families lands, before wiring anything to it.
+4. **Is `agent_id` worth it on detection grounds?** No — friction lift across the
+   parent/subagent boundary is 0.98x. It buys **correctness of attribution**, not precision.
+   Subagent cost share ranges 0.5%-63.4% by workflow, so the value depends on how common
+   delegation is across projects.
+
+### Withdrawn, with reasons (so they are not re-proposed)
+
+- **`resolves_id`** — needs a target on success rows; `is_friction = overflowed || outcome !=
+  "success"` (`src/usage/mod.rs:81`) gates extraction off by design. 0 of 25,696
+  non-overflowed successes have one.
+- **Turn and token/cost columns** — codescout sees one `call_content()` invocation. `promptId`
+  is a Claude Code transcript concept never sent to the server; tokens live in the API
+  response consumed by the harness. Any server-side field would be unverifiable
+  client-supplied data or a transcript parser rewritten in Rust. The 30-day sweep also makes
+  `usage.db` the *less* durable side. Fix the transcript tooling instead.
+- **Rework-loop density as a proxy** — rework is the normal mode: median repeat-edit fraction
+  0.68 across 58 buckets, the five known anchors ranked 12/17/28/30/55 of 58, none in the top
+  6, and the two pure-reasoning anchors fell below the edit threshold entirely. The filter
+  selects *against* the population it was meant to catch.
+- **`thinking`-block detection** — 0 of 4,906 blocks carry text; Opus-5/Sonnet-5 emit an
+  encrypted signature only.
+
+### Resume
+
+Do **not** start at the detector. Start at
+`docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
+and decide its open question 1 (historical rows), because the answer determines whether a
+column is needed in the same migration as the per-call resolution fix. Items 1-2 are the
+only ones worth specifying until that lands; items 3-5 each depend on a decision above.
+
+Six supporting defects were filed 2026-08-20 in `66654f53` — session-id freezing,
+`friction_target` key omissions, `pika_observations` orphaning, worktree telemetry deletion,
+the unclassified-error head, and a 2.1-2.6x cost overcount in `cc.py`. Read them before
+trusting any number in this entry that they touch.
 ## Anti-goals
 
 - Not a wishlist. An entry without a substrate check ("what exists today, what is missing") is not

@@ -596,6 +596,113 @@ command is being composed.
 **Do not** read this as an argument to loosen the gate. Both IL-3 conditions fired
 correctly on every one of the 74 occasions, including against the author of this entry.
 
+---
+
+#### Correction 2026-08-20 — the volume is right, the word "friction" is wrong
+
+This entry counted error **rows** and reported them as **friction** — and the project had
+already recorded that this is the wrong move, **twice, before this entry was written.**
+
+> `2026-08-15-tool-usage-investigation:TU-7`, 2026-08-15: *"Ranking error families by count
+> puts `il3_pipe_to_trimmer` (262) near the top. It is **healthy**... So frequency is not the
+> signal — recovery is."* Its augmentation prompt states it was *"recorded specifically so it
+> is not re-litigated by someone ranking error families by count."*
+
+`2026-08-16-iron-law-gate-firing-audit` then replicated TU-7 (96% recovery / 3% immediate
+repeat) and its own read contract repeats the warning. T-25 was written 2026-08-19 and did
+exactly the thing both documents exist to prevent. The 2026-08-20 pass below then re-derived
+TU-7's conclusion from scratch, across five dispatched agents, at roughly 150k tokens —
+spending real budget to rediscover a negative result that was on disk, indexed, and
+citable the whole time.
+
+**That is the finding worth keeping from this correction**, more than the numbers: a
+well-written negative result with an explicit do-not-re-litigate note did not survive four
+days. It is a live datapoint for `capability-proposals:CAP-7` (make record decay detectable
+so corrections travel) — the decay here was not a stale *fact*, it was a stale *warning*,
+which no freshness check would flag. Anyone ranking `err_family` by count should be routed
+to TU-7 before they publish.
+
+What the 2026-08-20 pass adds beyond TU-7 is scale and a base rate: a detector-validation
+pass over **840 matched errors — 74.5% of the 30-day error corpus**, joined to transcripts
+by exact `(tool_name, input_json)` equality, measuring what actually happened after each
+one. Friction rate by family, against a **27.0% corpus base rate**:
+
+| err_family | n | friction rate | lift |
+|---|---:|---:|---:|
+| `il2_structural_edit` | 47 | 4.3% | **0.16x** |
+| `il3_shell_on_source` | 119 | 13.4% | **0.50x** |
+| `il1_read_overlaps_symbol` | 82 | 18.3% | 0.68x |
+| `il3_pipe_to_trimmer` | 188 | 19.1% | **0.71x** |
+| **`err_family IS NULL`** | 62 | **53.2%** | **1.97x** |
+| `read_markdown_overflow_threshold` | 12 | 58.3% | 2.16x |
+
+**Every Iron-Law gate is below base rate.** Median calls-to-recovery across the whole
+corpus is **1**. So the gates are simultaneously the highest-volume *and* the healthiest
+errors here, and the 96%-comply / 47%-re-offend split this entry treats as a tension reads
+more dully: re-offence is real, frequent, and largely harmless. (The friction label is that
+pass's own construct — retry of the same mistake, or >=3 calls to recover, or no recovery
+within 25 calls. Absolute rates move with the threshold; the ordering does not.)
+
+**Who commits them is not who this entry assumed.** 72.7% of calls and 68.3% of errors in
+`usage.db` originate in dispatched **subagents**, filed under the parent's `cc_session_id`
+with no column to separate them — and Iron-Law violations concentrate **75-88%** in those
+subagents, which never receive the parent's injected guides. That is a *dispatch-briefing*
+fix (Iron Law 6, measured), not a `source.md` slice edit.
+
+**And this entry's own denominator is suspect.** 30.9% of rows (8,980/29,103) carry a
+possibly-wrong `cc_session_id`, so every per-session figure above is a parent/subagent
+blend. Filed as
+`docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`.
+
+**What survives:** fix (1) — have the gate echo the rewritten command — is still cheap,
+still costs no slice budget, and still targets the repeat-within-5-minutes path. **What is
+withdrawn:** fix (2). Do not spend 1900-char slice budget aiming at the corpus's healthiest
+class. The priority queue for *new* gate authoring is `err_family IS NULL`, whose largest
+member is the worktree/activate write block at 22 hits — see T-26 and
+`docs/issues/2026-08-20-largest-unclassified-error-is-the-worktree-activate-write-block.md`.
+
+### T-26 — grepping transcripts for friction is a wrong-tool choice with a measured false-positive rate
+
+**Tool:** `grep` (on transcript JSONL) vs structured telemetry · **Verdict:** wrong-tool · **Session:** `851504c5` + 5 dispatched POV agents
+
+Four attempts to measure agent friction from Claude Code transcript text, each on a
+different signal, each returning a plausible number and no error — which is why nothing
+raised:
+
+| Attempt | Result |
+|---|---|
+| Keyword search for user corrections (`no,`, `wait`, `don't`, `that's wrong`) over 154 user-role entries | **67 hits, 0 genuine.** Every one a synthetic wrapper: skill preambles (`Base directory for this skill:`), task-notification blocks, `<local-command-caveat>`, compaction summaries. After an exclusion list: **3** genuine corrections across 4 large sessions |
+| Text-grep `This call is blocked` to count hook denials | **~4x overcount** (13 raw hits vs 3 real denials in one file) — the phrase also appears in prose *discussing* denials, including subagent reports about this very investigation |
+| `is_error` as a friction flag | Dismissed as useless (1 hit in 683 entries) — **wrongly.** It is absent on codescout `RecoverableError`s *by design* (`RecoverableError -> isError:false`) and present on **153/153** hook denials. Two mechanisms, two records; one grep sees neither cleanly |
+| `thinking` blocks as the substrate for logic-friction detection | **0 of 4,906 carry text.** Opus-5/Sonnet-5 emit an encrypted `signature` only; just `claude-sonnet-4-6` emits plaintext. ~10M reasoning tokens generated and discarded |
+
+**The structured fields were there the whole time.** `usage.db`'s `err_family` (26 families,
+backfilled, fingerprint-versioned) and Claude Code's own `toolDenialKind` (present on every
+denial, `permission-rule` vs `user-rejected`) both predate every grep written above, and
+both were reached only *after* a grep had already produced a number.
+
+**Corollary that cost real work: the phrase families an agent guesses are the weak ones.**
+Measured over 4,180 narration blocks — `actually` fired **337** times at ~25% precision;
+`wait` fired **once**; while first-person error admissions (`I was wrong`, `I blurred`,
+`misread`) fired **12** times at **100%** precision, and self-correction verbs (`corrects
+my`, `contradicts what I`) **39** times at **100%** on the sampled subset.
+
+**Prompt gaps.** *General:* when the question is about tool-call behaviour, the structured
+telemetry is the instrument and the transcript is the corroborator — not the reverse. No
+prompt surface says so, and `analyze-usage`'s nine canonical queries contain no
+error-taxonomy query keyed on `err_family`, so an agent asked to "measure frictions" has no
+obvious structured entry point. *codescout-specific:* the `RecoverableError -> isError:false`
+convention is documented as an **error-handling** decision and nowhere as a **measurement**
+consequence — an analyst reading transcripts cannot know that codescout's largest error
+population is invisible to the protocol flag. One line in `get_guide("error-handling")`
+would close it.
+
+**Instruments filed as bugs:**
+`docs/issues/2026-08-20-cc-py-cost-double-counts-split-assistant-entries.md` (2.1-2.6x cost
+inflation), `docs/issues/2026-08-20-friction-target-omits-command-and-file-path.md` (38% of
+errors unattributable),
+`docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
+(30.9% of rows mis-attributed).
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
