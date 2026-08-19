@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 6
-entry_high_water_W: 10
+entry_high_water_W: 11
 ---
 
 > **Work stream:** began as an audit of codescout's four prompt surfaces (`tools/list`,
@@ -77,6 +77,7 @@ entry_high_water_W: 10
 | W-8 | 2026-08-19 | high | Scout the substrate even when the record says the design is settled — a record's substrate claim is a citation, not a fact | CAP-7's substrate check was wrong 4 times out of 4; two of the four would have shipped a confidently wrong diagnostic, including one that would report "fix SHA `12707fe` no longer resolves" about a commit whose own file says "Refactor 12707fe is INNOCENT" | validated |
 | W-9 | 2026-08-19 | high | Treat retiring a bookkeeping rule as a schema migration over the record corpus — sweep for text that forward-references the retired step | Three fix pointers sat one rebase from orphaned, with the patch-id that would survive unrecorded because recording it WAS the retired step; all three were invisible to triage because terminal status is what the query filters out, and the measured recovery cost on the ten files this already happened to is 2–153 ambiguous candidates | validated |
 | W-10 | 2026-08-19 | med | Reset one well-known element rather than everything — the survivor set is the only evidence the reset was correct | A cleared ledger and an inherited one both present as re-injection, so neither is distinguishable from the outside; because exactly one topic re-arms by design, one-of-five proved 58,963 bytes had been inherited before any state file was opened | validated |
+| W-11 | 2026-08-19 | high | Separate a finding's count from its remedy clause — the count is measured, the remedy is an inference about intent the checker cannot observe | Obeying it would have added 42 headings to an 1100-line tracker for entries with zero citations, contradicting the convention the file documents, and then silenced the check so the false premise became permanent; the same leap was also live on the write path, teaching it to every future author | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -1017,6 +1018,86 @@ than everything — the survivor set is the only evidence the reset was correct.
 **Incidental:** the rebuild was functionally a no-op. `doctor` returns identical results
 across it (`scanned` 57, `unresolvable` 0, same `by_check`), and the source tree has not
 moved since `b34bf10e` — the two commits after it are docs-only.
+
+## W-11 — A diagnostic's remedy clause is a claim about intent — read the artifact's own policy before obeying it
+
+**Observed:** 2026-08-19. Task was to close `doctor`'s last structural finding in this
+repo — give `docs/trackers/provenance-subsystem.md` its 42 missing `## PV-N — <title>`
+entry headings. Scouting the file first turned the task into a defect in the diagnostic.
+
+**Pattern:** Separate a finding's **count** from its **remedy clause**. The count is
+usually measured. The remedy clause is usually an inference about what the author *meant*,
+and a checker that reads only its own two inputs cannot observe intent. Before acting on
+it, read the artifact's own stated policy — a ledger, config or schema often documents the
+convention that makes the "defect" correct behaviour.
+
+Here the two clauses failed differently:
+
+| Clause | Status |
+|---|---|
+| "42 of 68 entries have no heading" | measured, correct |
+| "every citation of them resolves to nothing" | **vacuously true** — there are no citations |
+| "This ledger defines its other entries, so these are omissions — add a heading for each" | **false for this ledger** |
+
+The file states the opposite policy three lines above its first entry heading: the
+defining-sections block carries a heading for every `PV-N` *another file references*, added
+when the entry is first cited from elsewhere. Define-on-citation is coherent, and the
+ledger follows it exactly.
+
+**Measured before believing either side** — the question is not "how many lack headings"
+but "is any *cited* entry undefined", since a dangling citation is the only harm the rule
+exists to prevent:
+
+- defined by a heading: **26** ids
+- cited by any other file: **25** ids — a strict subset
+- **cited but undefined: 0**
+- `link_scan` over 1075 artifacts and 3883 citations: 538 dangling, 423 ambiguous, and
+  **not one carries a `PV-` token**; `cross_repo` likewise.
+
+**Sampling trap avoided on the way:** `grep -c 'PV-'` against the `link_scan` result
+buffer returned 0 — but that buffer caps `dangling` and `ambiguous` at 50 rows each
+against populations of 538 and 423. A zero from a truncated sample is evidence about the
+sample. The conclusion rests on the direct id comparison instead.
+
+**Counterfactual:** obeying the finding adds 42 headings to an 1100-line tracker for
+entries nothing references, contradicts the file's documented convention at 42 places, and
+then *silences the diagnostic* — so the false premise becomes invisible and permanent.
+Nothing downstream would ever have flagged it.
+
+**Second-order, and the more valuable half:** the same unsupported leap lived on the
+**write path** — `undefined_in_body_note` told an author *"so this one is an omission"* on
+every `append_entry` to any such ledger. Found only by sweeping for the phrase rather than
+repairing the surface that happened to report the problem (this is W-5's rule, applied to a
+message rather than to records). Fixing the reporter alone would have left the generator
+teaching the same thing to every future author.
+
+**The fix that made the test possible:** *"This ledger defines its other entries"* is an
+observable fact; *"so this one is an omission"* is an inference. Keeping the fact and
+softening only the inference repaired the defect **and** left the existing test that pins
+that phrase passing — the test was using it to identify which `DefinitionGap` arm fired,
+which is still true. Splitting fact from inference is what made the change cheap.
+
+**Unlooked-for bonus:** the guarding assertion prints the whole rendered message on
+failure, and the mutation run's panic output showed *"before adding 1 headings"* on a
+single-entry ledger — a grammar defect that had been invisible while the test was green.
+**A failing assertion that dumps the rendered string is a free proofreading pass on
+message text.**
+
+**Confirming data points:**
+
+1. This entry (2026-08-19) — `entry_without_definition`, two surfaces, `4ffd2803`.
+2. Pending: a second finding whose remedy clause asserts intent the checker cannot observe.
+
+**Impact:** high — prevented 42 wrong edits, converted a cosmetic task into a diagnostic
+fix on two surfaces, and left the real defect (citation-aware partition) filed rather than
+hidden behind a silenced check.
+
+**Promote-when:** a second diagnostic is found asserting a cause it cannot observe. At 2
+datapoints, promote to CLAUDE.md as: *"A finding's remedy clause is a hypothesis about
+intent. Verify it against the artifact's own stated convention before acting, and treat a
+check that cannot see the harm it names as the defect."*
+
+**Status:** validated — single datapoint, acted on and committed (`4ffd2803`).
 
 ## Template for new entries
 
