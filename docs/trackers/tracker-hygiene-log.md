@@ -46,6 +46,7 @@ neutral (streak unchanged).
 | D5 canonical-conflict | individual | 1 | — |
 | D9 augmentation-stale | individual | 0 | — |
 | D10 session-log-decay | **batch** | 2 | — |
+| D11 promotion-pointer drift | individual | 0 | — |
 
 D10 graduated to `batch` this sweep (2026-07-17: 4/4 approved; 2026-08-16: 8/8
 approved). Batch mode is presentation only — every finding still gets its own verdict,
@@ -681,7 +682,51 @@ race), R-100, CAP-5.
 
 ## HY-11 — Proposal: promotion pointers decay, and the convention mandates a pointer the template gives no field for
 
-**Kind:** proposal · **Sweep:** 2026-08-17 (out-of-cadence, user-raised) · **Status:** open
+**Kind:** proposal · **Sweep:** 2026-08-17 (out-of-cadence, user-raised) · **Status:**
+**promoted 2026-08-20** — `claude-plugins:10dfe5d`, companion `1.16.13`, verified at the
+served bytes in all three profile caches (22124 bytes, identical to source).
+
+**Shipped, in the order this entry prescribed.** Step 1 first, because *"a detector cannot
+check a pointer that was never written"*:
+
+1. **`**Promoted-to:**` added to the wins block** of `docs/templates/session-log.md`,
+   line-start and one surface per line, per this entry's machine-parseable requirement.
+   The same edit added `promotion-due` to the W-N skeleton's `Status:` line — it had been
+   defined in the vocabulary table since 2026-08-19 but **absent from the skeleton a copier
+   actually reads**, which is the mechanical reason it stood at 0 uses across 149 entries.
+   That is [[HY-10]]'s one-field-of-four root cause a third time.
+2. **D11 shipped with this entry's name, its three verdicts** (repoint / absorbed / retire)
+   **and its active-entries-only scope.** It runs every sweep, not inside D10 — D10 fires at
+   ≥21 days idle, which is archive time.
+3. Step 2 of this entry — back-filling the completed promotions — is **partially done**;
+   see *Carried forward* below.
+
+**Process deviation, recorded rather than hidden.** This SKILL.md's own rule is *"proposals
+confirmed across 2+ sweeps → PR"*. HY-11 had one sweep. It shipped anyway because an
+independent n=2 measurement corroborated it from outside the sweep process —
+`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`, re-opened the
+same day on its own pre-registered criterion. Corroboration from a second instrument is what
+the 2-sweep rule is a proxy for; if that reasoning proves wrong, D11's trust row starts at
+`individual` and will show it.
+
+**Three rules added to D11 that this entry did not have**, each from a miss measured
+2026-08-18/20 and none derivable from the pointer-decay framing:
+
+- **Name every instance of the target, not its type.** An audit that wrote *"the user's
+  global CLAUDE.md"* — singular — promoted into one file of three.
+- **For an installed artifact the target is the SERVING copy.** Three rules promoted into a
+  plugin skill were byte-identical across all three profile caches *and* stale against
+  source. A divergence check across the copies reads **green** on that signature; only
+  comparing each copy to the claim catches it.
+- **Prefer a back-citation to a verbatim quote.** A quote goes red when the promoted rule is
+  legitimately reworded — a false positive produced by the promotion working as intended.
+  Observed the same day on [[R-89]]. `R-1` and `R-3` have used the durable form since May.
+
+**Carried forward (this entry stays open as a work item, not as a proposal):** the 13 live
+entries claiming a promoted status still need `**Promoted-to:**` back-filled. Two are done —
+`prompt-surface-compaction-session-log:W-4`, which named **no target at all**, and the three
+reconnaissance bullets, which now back-cite their own entry ids. This is the cheapest it will
+ever be.
 
 The decay/distill pattern has a direction no detector looks in. D1 checks index → file.
 HY-5 §1 proposes basename → live surface after a move. `audit_doc_refs` checks doc → code.

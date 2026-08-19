@@ -64,6 +64,25 @@ either way. Record one of:
 > another profile's copy happened to be injected as project instructions. Three
 > files that should be byte-identical have an md5; compare them.
 
+> ⚠️ **For an INSTALLED artifact the target is the SERVING copy — not the repo
+> source, and not the other copies.** Measured 2026-08-20: three rules promoted
+> into a plugin skill were byte-identical across all three profile caches *and*
+> stale against source, because the commit never bumped the version the cache is
+> keyed on. Comparing the copies to each other reads **green** there — only
+> comparing each copy to the claim catches it. And the session that made the edit
+> is the **least representative observer**: its own reload resolved the skill from
+> the repo source, so the confirming evidence sitting in front of it was evidence
+> about the wrong artifact.
+
+> ⚠️ **Anchor on a back-citation, not a verbatim quote.** A quote goes red when the
+> promoted rule is legitimately reworded — a false positive produced by the
+> promotion working as intended, observed 2026-08-20 when `R-89`'s bullet was
+> rewritten and the tracker's stored quote had to be edited to match. The durable
+> form is the promoted text citing its own entry id —
+> *"(R-1 + R-7 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"* — so
+> verification is a `grep` for the id and survives every rewording. Keep the quote
+> as a reading aid; do not make it the predicate.
+
 Run this when the work stream wraps, **and** whenever a criterion fires
 mid-stream — an audit that only happens at archive time is one that happens
 after the lesson was needed. Prior art: `eduplanner-ui`
@@ -140,7 +159,9 @@ without the pattern, with at least one piece of evidence.
 
 **Promote-when:** <criterion for graduating into permanent docs (CLAUDE.md, ADR, etc.)>
 
-**Status:** validated | promoted-to-permanent-docs | archived
+**Promoted-to:** <surface + section, one per line, line-start — omit until it lands>
+
+**Status:** validated | promotion-due | promoted-to-permanent-docs | archived
 
 ---
 ```
