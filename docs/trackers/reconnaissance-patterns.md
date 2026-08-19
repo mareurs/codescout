@@ -1317,7 +1317,10 @@ seam — scout the root cause again; and when it cites two functions, read the l
 them."* Pairs naturally with the existing "plan code looks fictional" row in the
 composition table, which covers someone else's plan but not your own.
 
-**Status:** promoted-to-permanent-docs — landed 2026-08-20 in
+**Status:** promoted-to-permanent-docs — landed 2026-08-20 in `claude-plugins:23a11c3`,
+shipped to all three profile caches in `1.16.11` (`claude-plugins:23ca288`) and verified
+there at the served bytes. The commit alone did not make it live — see
+`prompt-surface-compaction-session-log:F-9`. In
 `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 — Scout, as a
 bullet opening verbatim: *"Re-entering your OWN bug file or plan to implement it counts as a
 seam — authorship is no exemption."* The read-the-layer-between-two-functions clause and the
@@ -2077,10 +2080,25 @@ failure recurs. The Phase-1 step should name both freshness axes: run a probe th
 can only succeed on the new build, and confirm the serving process postdates that
 build.
 
-**Status:** promoted-to-permanent-docs — landed 2026-08-20 in
-`claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 — Scout, as a
-bullet opening verbatim: *"Build freshness and process freshness are two separate facts, and
-`mtime` answers neither."* Both freshness axes are named in it, as this entry required. Note
+**Status:** promoted-to-permanent-docs, then **re-promoted the same day** — the promoted text
+was Outgrown before it was ever live.
+
+- **Promoted** 2026-08-20 in `claude-plugins:23a11c3` as *"Build freshness and process
+  freshness are two separate facts, and `mtime` answers neither."* Both freshness axes this
+  entry required were named in it.
+- **Audited and found Outgrown** (rubric row 2) hours later — by its own promotion. `23a11c3`
+  did not bump `plugin.json`, and the plugin cache is keyed on that version, so all three
+  profiles kept serving the pre-edit copy: committed, reviewed, in force nowhere. Neither a
+  build nor a process was involved, which makes **distribution** a third axis of the same law.
+- **Re-promoted** in `claude-plugins:a5df5bd`, shipped in `1.16.12`, verified at the served
+  bytes in all three caches. The bullet now opens: *"Freshness is a property of the copy that
+  SERVES you, and it breaks on three independent axes — build, process, and distribution.
+  `mtime` answers none of them."* Per the skill's own audit rule — a recurrence of an
+  already-promoted law is a defect in the promoted text, not a new entry — no fourth bullet
+  was added.
+
+Full account, including the four proxies that read green in the broken world:
+`prompt-surface-compaction-session-log:F-9`. Note
 this entry carried **no `Status:` line at all** until the sweep in
 `prompt-surface-compaction-session-log:F-7`: the criterion fired 2026-08-16 and stayed
 invisible to every field-presence query for four days, which is the failure mode, not a

@@ -78,7 +78,7 @@ entry_prefix:
 | F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — field experiment **superseded** by hamsa A-26's controlled arms (0/10, 0/10, control 10/10); routing reverted in `89d32048`, evidence points at *substituted* not *unrouted* |
 | F-4 | 2026-08-18 | med | librarian-api | open | `anchor_heading` inserts only *before* a heading, so a ledger that appends at the end cannot use the server-writes path |
 | F-5 | 2026-08-19 | high | self-friction | fixed-verified | A guard that names the invariant but never exercises it — forcing the gate open left 62/62 passing; "mutation-tested" is a per-ASSERTION claim, not a per-commit one |
-| F-9 | 2026-08-20 | high | substrate-drift | open | Three rules promoted into the recon SKILL.md are in force in **zero of three** profiles — no version bump, so every cache still serves the pre-edit copy; and this session was the one observer that could not see it |
+| F-9 | 2026-08-20 | high | substrate-drift | fixed-verified | Three rules promoted into the recon SKILL.md were in force in **zero of three** profiles — no version bump, so every cache served the pre-edit copy; and this session was the one observer that could not see it. Closed at the served bytes in `1.16.12` |
 | F-8 | 2026-08-20 | high | process | mitigated | The `git add -A` prohibition existed, was measured, and still did not reach the moment of committing — and the mitigation I switched to is itself the documented anti-pattern one rung up |
 | F-7 | 2026-08-19 | high | process | mitigated | A fired `Promote-when` is a zombie win and nothing queries for one — W-4 sat unharvested for a day while its failure recurred 3×, and the one lesson that WAS promoted reached 1 of 3 profiles |
 | F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
@@ -1478,17 +1478,36 @@ artifact.
 **Severity:** high — silent, and it defeats the promotion entirely. Three lessons with 2–4
 datapoints each reach nobody, while every surface says they were promoted.
 
-**Status:** open — fix known and scripted, not yet run:
-`plugin.json` + README bump 1.16.10 → 1.16.11, then
-`./scripts/bump-cache.sh codescout-companion 1.16.11`, whose own header warns that bumping
-without seeding the cache leaves the install record pointing at a non-existent path and CC
-silently fails to load.
+**Status:** fixed-verified 2026-08-20. The `1.16.11` bump landed from a *concurrent* session
+while this one was compacting (`claude-plugins:23ca288`, checklist refresh `dbc8982`); the
+re-promotion below then shipped in `1.16.12` (`claude-plugins:a5df5bd` + its release commit,
+`NO_PUSH=1`, local only, via `scripts/release.sh`).
+
+**Measured at the served bytes** — the probe R-89's rewritten wording now demands:
+
+| copy | three-axis text | stale text | bytes | install record |
+|---|---:|---:|---:|---|
+| `.claude` cache 1.16.12 | 1 | 0 | 34497 | `1.16.12`, own profile ✅ |
+| `.claude-sdd` cache 1.16.12 | 1 | 0 | 34497 | `1.16.12`, own profile ✅ |
+| `.claude-kat` cache 1.16.12 | 1 | 0 | 34497 | `1.16.12`, own profile ✅ |
+| repo source | 1 | 0 | 34497 | — |
+
+**Four plausible greens sit above the one measurement that counts**, and that is the
+transferable part of this entry. The *commit* says the version bumped — silent about caches.
+The *install record* says `1.16.12` — and `bump-cache.sh`'s own header warns that record can
+name a directory nobody created. The *directory listing* says `1.16.12/` exists — silent
+about contents. `release.sh` prints `✓ … 1.16.12` — its own claim about its own work. Only
+the served file's byte count plus phrase match is evidence about the artifact CC will load.
+Each of the four reads green in the broken world; three of them read green in the world this
+entry was filed about.
 
 **Two smaller gaps found in the same pass**, both conventions the ledger already follows:
 
 1. **No SHA pinned.** Prior promotions record `promoted to SKILL.md (claude-plugins:f842848,
    2026-05-28)`; mine name the file and the verbatim text but not `claude-plugins:23a11c3`
-   (`grep -c` → 0).
+   (`grep -c` → 0). **Closed 2026-08-20** — [[R-89]], [[R-49]] and `bug-fix-session-log:W-36`
+   now each carry the commit *and* the version that shipped it, which is the pair that
+   actually answers "is it live?"; the SHA alone would not have.
 2. **The promoted-set audit was not run or recorded.** The skill requires it *before* adding,
    and `R-93` is the precedent that did it properly, pinning `claude-plugins:c889e83`
    (1.16.4 → 1.16.5).
@@ -1499,8 +1518,16 @@ This incident is a **third** axis — **cache freshness** — on the same law: t
 committed (repo fresh), and no process or build was involved at all. Per the skill's own
 rule, *"a recurrence of an already-promoted law is a defect in the promoted text, not a new
 entry"*, so the remedy is to re-promote R-89's evolved form covering all three axes rather
-than to file this as an unrelated lesson. That re-promotion is itself blocked on the version
+than to file this as an unrelated lesson. That re-promotion was itself blocked on the version
 bump above — which is the same defect, one turn later.
+
+**Re-promotion shipped** 2026-08-20 in `claude-plugins:a5df5bd` (`1.16.12`). R-89's bullet
+now opens: *"Freshness is a property of the copy that SERVES you, and it breaks on three
+independent axes — build, process, and distribution. `mtime` answers none of them."* Both
+measured datapoints are carried in it (the 88-minute stale process, and this incident), and
+it closes on the generalisation the audit produced: **probe the copy the consumer actually
+loads; every upstream proxy for it reads green in the broken world.** No fourth bullet was
+added — per the skill's own rule, the recurrence was a defect in the promoted text.
 
 ## Template for new entries
 

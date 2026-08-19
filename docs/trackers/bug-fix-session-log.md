@@ -3012,7 +3012,10 @@ narrower, truer entry in one pass instead of two.
 
 **Promote-when:** already at two independent datapoints. **Routing: craft-shaped, so the recon SKILL and not codescout memory** — "a trait method added to correct a behaviour gets no default impl, so the compiler enumerates the implementors" is true in any language with default trait/interface methods and would not mislead another project. (Only the *instances* — `known_dim`, `embed_document` — are project facts, and they live here in the tracker.) Sync-flow it as a one-line rule; do not spend a slot in the ~10-rule memory cap on a general lesson.
 
-**Status:** promoted-to-permanent-docs — landed 2026-08-20 in
+**Status:** promoted-to-permanent-docs — landed 2026-08-20 in `claude-plugins:23a11c3`,
+shipped to all three profile caches in `1.16.11` (`claude-plugins:23ca288`) and verified
+there at the served bytes. The commit alone did not make it live — see
+`prompt-surface-compaction-session-log:F-9`. In
 `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 — Scout, as a
 bullet opening verbatim: *"A trait or interface method added to CORRECT a behaviour gets no
 default implementation — then the compiler enumerates the implementors."* Routed to the
