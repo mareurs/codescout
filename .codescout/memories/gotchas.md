@@ -37,10 +37,30 @@ embed a sample text first.
 
 ## Cherry-Pick SHA Discipline
 
-Always record the **master-side SHA** after cherry-pick, not the experiments-side original.
-After `git rebase master`, experiments-side originals become orphans — `git branch --contains`
-returns empty. Use `git log master --oneline --grep="<subject>"` to recover master SHA if needed.
+Record the fix **SHA and its patch-id** — the SHA alone is not durable, and both promotion
+paths stay available without needing to check which one applies.
 
+A SHA is positional. After `git rebase master`, experiments-side originals of cherry-picked
+commits become orphans and `git branch --contains` returns empty. Measured 2026-08-19:
+**10 of 63 archived bug files had already lost their fix pointer**, with the objects absent
+from the object DB rather than merely unreferenced — so the reflog cannot help either.
+
+`git show <sha> | git patch-id --stable` is a content hash of the diff and survives rebase
+**and** cherry-pick. Zero genuine collisions across 3594 commits; all 104 duplicate
+patch-ids were the same change appearing on two branches, which is the anchor working.
+
+There is no promotion path to check and nothing owed later — record the pair once at fix
+time. To recover an already-orphaned commit, resolve its patch-id with **redirects**, since
+Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep <first-12-of-patch-id> /tmp/patch-ids.txt
+```
+
+`git log master --oneline --grep="<subject>"` is a weaker fallback: measured the same day,
+subject probes returned between 2 and 153 candidates — a search, not a lookup.
 ## Cross-Repo Commit References
 
 When a tracker cites a commit from a sibling repo, prefix: `<repo>:<sha>` (e.g. `codescout-companion:0b75991`).

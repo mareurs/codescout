@@ -67,18 +67,15 @@ master is NOT required; experiments is never deleted.
 When archiving an experiments-only fix the file must carry the fix SHA
 labelled experiments.
 
-Whether it ALSO needs a pending-master-SHA line depends on how the fix will
-reach master. Only one of the two paths needs it:
-  cherry-pick  — YES. A new SHA is minted on master and the experiments-side
-                 original orphans on the next rebase; nothing re-reads
-                 archive/ to repair it. Add the Resume line.
-  fast-forward — NO. master moves onto the exact commits, so the experiments
-                 SHA already IS the master SHA. Writing the line sends a
-                 later session hunting for a SHA that will never exist.
-Check which path applies before writing it:
-  git rev-list --left-right --count master...experiments
-A 0 on the left means master is a strict ancestor and fast-forward is
-available. Both paths are specified in docs/RELEASE.md.
+Record its patch-id alongside the SHA:
+  git show <fix-sha> | git patch-id --stable
+The SHA is positional and dies when experiments is rebased (which happens
+after every ship). The patch-id is a content hash of the diff and survives
+both rebase and cherry-pick, so it still finds the change afterwards.
+There is NO promotion path to check, NO pending-master-SHA Resume line, and
+nothing to come back and reconcile. Measured 2026-08-19: 10 of 63 archived
+bug files had already lost their SHA; zero patch-id collisions in 3594
+commits.
 Check where a SHA lives with:
   git branch --contains <fix-sha>
 Archive via artifact(action="move", id=..., new_rel_path="docs/issues/archive/...")
@@ -147,16 +144,9 @@ are how future-me avoids re-walking dead ends.*
   genuine collisions, and all 104 duplicate patch-ids were the same change on two
   branches. 10 archived bug files had already lost their fix pointer to a rebase.*
 
-*Do **not** unconditionally chase a master-side SHA. Check the promotion path first:*
-
-```
-git rev-list --left-right --count master...experiments
-```
-
-*A `0` on the left means `master` is a strict ancestor, promotion is a **fast-forward**,
-and the `experiments` SHA already **is** the master SHA — there is no second one, and
-waiting for it strands the file forever. Only a cherry-pick mints a new SHA worth
-recording later.*
+*There is **no promotion path to check**, no pending-master-SHA line to write, and nothing
+to come back and reconcile. Record both once and the record stays resolvable whichever way
+the fix reaches `master`.*
 ## Tests added
 *Regression test name + `path:line`. If the test is intentionally absent,
 say why (timing-dependent, env-specific, manual-only). Empty `Tests added`

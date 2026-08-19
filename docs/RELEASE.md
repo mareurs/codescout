@@ -91,24 +91,21 @@ git push
 git checkout experiments
 git rebase master
 
-# 4. Reconcile bug-file SHAs to master (run AFTER the cherry-pick lands)
-#    Archiving itself does NOT happen here — a bug file is archived as soon as its
-#    fix is verified on experiments (see get_guide("tracker-conventions")).
-#    What is still owed at this point is the SHA swap, and archive/ is where it is
-#    easiest to forget:
-#    For each <fix-sha> just cherry-picked:
-#    - find the bug file citing the experiments-side SHA — check BOTH
-#      docs/issues/ and docs/issues/archive/:
-#        grep -rl <experiments-sha> docs/issues/
-#    - replace it with the master-side SHA from the cherry-pick, and drop the
-#      "master-side SHA still to be recorded" line from its Resume section
-#    - confirm: git branch --contains <master-sha>  → must show 'master'
-#    - if the file is still in docs/issues/ and its status is fixed/mitigated/wontfix,
+# 4. Archive any terminal bug files (NO SHA reconciliation — see below)
+#    There is no longer a SHA swap owed here. Bug files record the fix SHA *and*
+#    its patch-id at fix time; the patch-id survives the rebase that orphans the
+#    SHA, so nothing has to come back and re-cite. See "Citing a fix: SHA +
+#    patch-id" below.
+#    Archiving itself is independent of shipping — a bug file is archived as soon
+#    as its fix is verified on experiments (see get_guide("tracker-conventions")).
+#    This step is just the convenient moment to sweep what is still sitting in
+#    docs/issues/:
+#    - if the file's status is fixed/mitigated/wontfix,
 #      archive it now via the catalog (NOT git mv — id = sha256(abs_path)):
 #        mcp call codescout artifact '{"action":"move","id":"<id>",
 #          "new_rel_path":"docs/issues/archive/<date>-<slug>.md"}'
 #    Skip files still `open` / `investigating` — they stay in docs/issues/ regardless.
-#    Commit separately: docs: reconcile bug-file SHAs to master for <date>
+#    Commit separately: docs: archive verified bug files for <date>
 
 # 5. (Optional, recommended after large refactors or batched-bug sessions)
 #    Verify doc refs still resolve — bug-file Resume sections cite paths that
@@ -214,17 +211,34 @@ runs are minutes-scale. Skip for docs-only or trivial mechanical diffs. Rational
 per-defect analysis: tracker `test-escape-hardening` (intervention I-3) and memory
 `test-design-discipline`.
 
-### After cherry-pick: cite the master SHA, not the experiments-side original
+### Citing a fix: SHA + patch-id (the SHA alone does not survive)
 
-When tracking a multi-fix shipping session (running tally in chat, notes in a tracker, F-N entries citing evidence), record the **master-side SHA** assigned by `cherry-pick` — not the original SHA on `experiments`. After the subsequent `git rebase master`, the experiments-side originals become orphans (rebase detects cherry-picks and drops them). `git branch --contains <orphan-sha>` then returns empty for every fix, and the running tally fails the "are they all on master?" audit even though every fix shipped.
+A SHA is **positional**: it names a commit's place in a branch's history. After `git rebase master`, the experiments-side originals of cherry-picked commits become orphans (rebase detects the cherry-picks and drops them), and `git branch --contains <orphan-sha>` returns empty for every fix even though every fix shipped. Measured 2026-08-19: 10 of 63 archived bug files had already lost their fix pointer this way — objects absent from the object DB, not merely unreferenced.
+
+So record **both** identifiers at fix time:
 
 ```bash
-# 2. Cherry-pick — capture the new SHA, do not just use the original
-master_sha=$(git rev-parse HEAD)   # immediately after `git cherry-pick`
-echo "$master_sha"                  # record this in the tally, not the pre-cherry-pick SHA
+sha=$(git rev-parse HEAD)
+git show "$sha" | git patch-id --stable    # content hash of the diff
 ```
 
-Or, after the fact: `git log master --oneline --grep="<subject prefix>"` to recover the master SHA by commit message.
+The patch-id survives rebase **and** cherry-pick, because it hashes the change rather than its position. Measured across 3594 commits: zero genuine collisions, and all 104 duplicate patch-ids were the same change appearing on two branches — the anchor working, not failing.
+
+**There is no promotion path to check and nothing owed later.** Both paths stay available; recording the pair once replaces the old "capture the master SHA afterwards" follow-up.
+
+If a cited SHA has already been orphaned, recover the commit by its patch-id. Use
+redirects, not pipes — Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```bash
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep <first-12-of-patch-id> /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
+and any of them is the fix. `git log master --oneline --grep="<subject prefix>"` is a
+weaker fallback — measured 2026-08-19, subject-keyword probes returned between 2 and 153
+candidates, which is a search rather than a lookup.
 
 This applies to **every SHA-citing surface** — tracker entries (F-N / W-N / U-N / H-N / R-N), `artifact_event` `anchor_commit` / `also_mutates`, `docs/issues/<bug>.md` Fix sections, ADRs. The concise rule + the cross-repo `<repo>:<sha>` prefix convention live in memory `gotchas` (Cherry-Pick SHA Discipline, Cross-Repo Commit References).
 

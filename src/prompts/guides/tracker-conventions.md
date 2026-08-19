@@ -96,27 +96,18 @@ git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
 grep <first-12-of-patch-id> /tmp/patch-ids.txt
 ```
 
-**Whether it ALSO needs a pending-master-SHA `## Resume` line depends on how the fix
-will reach `master`. Only one of the two paths needs it** — check before writing it:
+**There is no promotion path to check and no pending-master-SHA `## Resume` line.**
+Recording the SHA *and* its patch-id replaces both. Whichever way the fix reaches
+`master` — fast-forward or cherry-pick — the pair stays resolvable, so nothing is owed
+later and no session has to come back and reconcile.
 
-| Path | Resume line? | Why |
-|---|---|---|
-| **cherry-pick** | **yes** | A new SHA is minted on `master` and the `experiments`-side original orphans on the next rebase. Nothing re-reads `archive/` to repair it, so the line is the only prompt. |
-| **fast-forward** | **no** | `master` moves onto the exact commits, so the `experiments` SHA already **is** the master SHA. Writing the line sends a later session hunting for one that will never exist. |
+Check where a SHA currently lives with `git branch --contains <fix-sha>`.
 
-```
-git rev-list --left-right --count master...experiments
-```
-
-A `0` on the left means `master` is a strict ancestor and fast-forward is available.
-Both paths are specified in `docs/RELEASE.md`; `docs/issues/_TEMPLATE.md` carries the
-same table.
-
-Check where a SHA actually lives with `git branch --contains <fix-sha>`.
-
-(Measured 2026-08-08: 24 archived bug files carry the cherry-pick form, written before
-that cohort's path was settled as fast-forward. They are stale instructions, not open
-debt — the SHA in each is already correct. Do not sweep them.)
+(Historical note: many archived bug files carry an older form that promises a master-side
+SHA "still to be recorded", written when that follow-up was the rule. **They are stale
+instructions, not open debt** — the SHA in each was correct when written. Do not sweep
+them. Measured 2026-08-19: 10 of 63 had nonetheless lost their SHA to a rebase, which is
+why the patch-id now rides alongside.)
 
 Archive through the catalog — `artifact(action="move", id=…,
 new_rel_path="docs/issues/archive/…")` — never a bare `git mv`: `id =
