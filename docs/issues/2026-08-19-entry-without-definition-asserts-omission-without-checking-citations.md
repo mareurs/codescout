@@ -1,7 +1,7 @@
 ---
 id: '6962d98218162987'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: entry_without_definition asserts the entries are omissions without checking whether anything cites them'
 owners:
 - marius
@@ -12,7 +12,7 @@ tags:
 - link-scan
 - trackers
 topic: catalog-drift
-closed: null
+closed: 2026-08-19
 opened: 2026-08-19
 owner: marius
 related:
@@ -160,25 +160,32 @@ change that would let a reader *act* on the finding, and it needs the substrate 
 recorded in *Resume*.
 ## Tests added
 
-One assertion added to the existing
-`undefined_entries_names_only_the_undefined_rows_in_a_defining_ledger`
-(`src/librarian/tools/doctor.rs`): the detail must contain `citation graph` — the finding
-must disclose that it does not read citations rather than assert omission.
+Three fixtures, differing by **one index row**, because a single fixture cannot tell an
+omission from a define-on-citation convention — which is the defect this closes:
 
-Mutation applied and observed, not reasoned about: replacing the disclosure clause with
-*"these are plainly omissions"* — the exact regression this guards against — made the test
-**FAIL**. Restored; whole suite green at 4247 passed / 45 ignored.
+- `undefined_entries_names_only_the_undefined_rows_in_a_defining_ledger` — `BL-3` sits in
+  an index row. Rows define nothing but ARE scanned for citations, so this is the **cited**
+  half: a reference that resolves to nothing today.
+- `undefined_entries_separates_an_uncited_entry_from_a_cited_one` — same ledger with the
+  row removed. Nothing mentions `BL-3`, so nothing is broken and the finding must say so
+  differently.
+- `undefined_entries_counts_a_stem_qualified_citation` — `log:BL-3`. A file-stem qualifier
+  and a cross-repo qualifier are one syntactic shape, both emitted as `CrossRepoToken`, so
+  matching only bare `EntryToken`s would read a qualified citation as no citation at all.
 
-The panic output also caught a defect the assertion was not looking for. The rendered
-message read *"before adding 1 headings"* on a single-entry ledger, because the count was
-interpolated into a plural noun. Reworded to *"before adding the missing headings"*, which
-drops the argument entirely. **A failing assertion that prints the whole rendered string is
-a cheap proofreading pass on message text** — the grammar bug had been invisible while the
-test was green.
+Mutations applied and the **observed** result:
 
-Still owed, and part of the real fix rather than this one: a fixture whose undefined entry
-**is** cited, asserted to report differently from one whose undefined entries are not. A
-single-fixture test cannot tell the two apart.
+| # | Mutation | Observed |
+|---|---|---|
+| M1 | skip the citation sweep (`cited` always empty) | cited + qualified tests FAIL, uncited passes |
+| M2 | drop the `CrossRepoToken` arm | qualified test FAILS, alone |
+| M3 | invert the partition predicate | all three FAIL |
+
+Zero survivors. M3 is the one the pair was built for: the uncited fixture failed by
+emitting the **cited** message, so the inversion is caught in both directions rather than
+one.
+
+Gate: fmt, clippy `--all-targets -D warnings`, `cargo test` 4266 passed / 45 ignored.
 ## Workarounds
 
 Ignore the finding for `provenance-subsystem.md`. **Do not add headings for uncited
@@ -221,10 +228,22 @@ the ledger's own body:
 | `PV-1`, `PV-9` | 1 each | 0 |
 
 `PV-12` is cited eight times, once inside a section heading, and defines nothing. A reader
-following it lands nowhere. **So the partition would not merely re-label 42 entries as
-benign — it would separate roughly five real navigational breaks from ~37 that are the
-ledger's documented convention working as intended.** That is a far better outcome than
-either "add 42 headings" or "add none", and it is the argument for option 1 over option 2.
+following it lands nowhere.
+
+**The "roughly five" written here was wrong, and the shipped check is what proved it.** The
+figure came from spot-checking eight tokens, finding five with occurrences, and reporting
+the SAMPLE's count as the population's — W-4's exact failure, on the third pass over this
+same question. Run live against the corpus:
+
+> 42 of 68 `items` entries have no `## <ID> — <title>` heading. **Cited despite that: 33**
+> — PV-1, PV-3, PV-6, PV-9, PV-11, PV-12, PV-16, PV-17 … (+25 more) … **Uncited: 9**
+
+So the ledger has **33 dangling references**, not five, and only 9 of the 42 are the
+define-on-citation convention working as intended. The convention is real and documented;
+it is simply not what most of these entries are. Three rounds of hand-measurement gave
+three different answers — "42 omissions", "0 cited", "~5 cited" — and the tool gave the
+fourth by reading the whole population instead of a sample of it. That is the argument for
+option 1, made better than any reasoning could have.
 
 One design decision this forces: **self-citations count.** `link_scan` reports `self_cites`
 separately (843 of 3883) because it creates no self-edges, but a citation that resolves to

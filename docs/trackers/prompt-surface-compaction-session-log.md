@@ -582,6 +582,16 @@ that one is about *which world* was measured, this one about *whether the ruler 
    — `grep` says "a floor, not a count" when it caps — which is exactly the discipline a
    hand-rolled `| head` skips.
 
+**Fourth datapoint (2026-08-19, evening).** Same failure, sharpest instance yet: spot-checked
+**8** of 42 undefined `PV-N` tokens, found 5 with occurrences, and wrote "at least five
+undefined entries are cited" into W-11. Five is the *sample's* count. The shipped check,
+reading the whole corpus, returned **33**. The instance matters because of where it
+happened — inside a correction to W-11, in an entry that already documents the same trap
+twice, written by an agent who had just quoted the rule. Holding the rule in mind is
+demonstrably not the control; the control is refusing to state a count that a `head`, a
+`limit`, or a hand-picked sample produced. Three hand-measurements of one question gave
+three different answers before the tool gave the fourth.
+
 **Status:** validated — 3 datapoints, all 2026-08-18/19, each with the wrong answer
 available and plausible. Datapoint 3 also self-refutes the "just remember it" reading of
 this entry.
@@ -1090,6 +1100,19 @@ own body. Measured directly:
 So at least five undefined entries are cited in the ledger's own prose — `PV-12` eight
 times, including inside a section heading. A reader following any of them lands nowhere.
 Those are **real** navigational breaks, not policy.
+
+**Second correction, same day: "at least five" was 33.** The table above is a sample of
+eight tokens; five of them had occurrences, and that five was written down as though it
+were the population. It is not — it is the sample's count, which is **W-4's exact failure,
+on the third pass over this one question**, in an entry whose own text already warns about
+a truncated sample twice. Measured by the shipped check across the whole corpus:
+
+> 42 of 68 `items` entries have no heading. **Cited despite that: 33** … **Uncited: 9**
+
+The running tally on this single question: *42 omissions* → *0 cited* → *~5 cited* →
+**33 cited, 9 uncited**. Every hand-measurement was wrong, in a different direction each
+time, and each felt like a correction of the last. The one that held was the one that read
+the whole population instead of sampling it — which is the tool, not the reasoning.
 
 What survives unchanged: the ledger's define-on-citation convention is real and documented,
 no *external* citation dangles, and the diagnostic still asserted a cause it could not

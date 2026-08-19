@@ -1622,6 +1622,66 @@ fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBacked
     Ok(out)
 }
 
+/// Every entry token cited anywhere in the catalog, computed fresh from the files.
+///
+/// **Deliberately not `entry_cite`.** That table is materialized only by
+/// `link_scan(write=true)`, so a check reading it would report against whatever the last
+/// scan happened to leave behind — a stale-substrate diagnostic of exactly the kind
+/// `doctor` exists to catch. `link_scan::extract` is a pure function over a body, so the
+/// citations are recomputed here with nothing to go stale. It is the same door
+/// [`crate::librarian::catalog::augmentation::body_defined_indices`] uses for the
+/// *definition* half, which is what keeps the two halves of this check agreeing about what
+/// a citation and a definition are.
+///
+/// **Both citation shapes count.** A bare `PV-12` extracts as `EntryToken`; a qualified
+/// `provenance-subsystem:PV-12` extracts as `CrossRepoToken`, because a file-stem qualifier
+/// and a repo qualifier are one syntactic shape that extraction cannot tell apart and does
+/// not try to. Taking the token half of the qualified form is what stops a qualified
+/// citation reading as no citation at all.
+///
+/// **Self-citations count too**, and that is a decision rather than an oversight.
+/// `link_scan` reports them separately because it creates no self-edges; here the question
+/// is whether a reader following the token lands anywhere, and a reference that resolves to
+/// nothing is broken whether or not it came from the same file. Measured 2026-08-19 on
+/// `provenance-subsystem.md`: `PV-12` is cited 8 times in the ledger's own prose, once
+/// inside a section heading, and defines nothing. Every real break found there was a
+/// self-citation, so excluding them would have reported the ledger as clean.
+///
+/// Extraction is deliberately dumb — `UTF-8` and `SHA-256` arrive as entry tokens — which
+/// costs nothing here, because the result is only ever intersected against ids a ledger
+/// actually claims.
+///
+/// Unreadable files are skipped, as `missing_file` is the finding for those.
+fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<std::collections::BTreeSet<String>> {
+    use crate::librarian::tools::link_scan::extract::{extract, CitationKind};
+
+    let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut cited = std::collections::BTreeSet::new();
+    for path in paths {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for c in extract(&text).citations {
+            match c.kind {
+                CitationKind::EntryToken => {
+                    cited.insert(c.raw);
+                }
+                CitationKind::CrossRepoToken => {
+                    if let Some((_, token)) = c.raw.rsplit_once(':') {
+                        cited.insert(token.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(cited)
+}
+
 /// `snapshot_drift`: an augmented tracker's `params` hold entry ids that its
 /// markdown body line-anchors nowhere.
 ///
@@ -1750,8 +1810,22 @@ fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
 /// Reports only; there is no `fix=`. Writing an entry's heading means writing its
 /// title and body, which is content, not repair.
 fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let ledgers = params_backed_ledgers(conn)?;
+    // The citation sweep reads every artifact file, so it runs only when there is something
+    // to classify. A catalog whose ledgers all define their entries pays nothing for this.
+    let any_undefined = ledgers.iter().any(|l| {
+        let defined =
+            crate::librarian::catalog::augmentation::body_defined_indices(&l.body, &l.prefix);
+        l.claimed.iter().any(|n| !defined.contains(n))
+    });
+    let cited = if any_undefined {
+        corpus_cited_tokens(conn)?
+    } else {
+        std::collections::BTreeSet::new()
+    };
+
     let mut out = Vec::new();
-    for ledger in params_backed_ledgers(conn)? {
+    for ledger in ledgers {
         let prefix = &ledger.prefix;
         let defined =
             crate::librarian::catalog::augmentation::body_defined_indices(&ledger.body, prefix);
@@ -1781,34 +1855,71 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
                 ),
             ));
         } else {
+            let (cited_undefined, uncited): (Vec<String>, Vec<String>) =
+                undefined.iter().cloned().partition(|t| cited.contains(t));
+
             // Bounded sample; the count carries the magnitude. An unbounded list of 50
             // ids buries every other finding — the failure
-            // `abs_path_outside_managed_roots` already had to cap for.
+            // `abs_path_outside_managed_roots` already had to cap for. The sample is drawn
+            // from the CITED half whenever there is one, because those are the ids a reader
+            // can act on today.
             const SAMPLE: usize = 8;
-            let shown = undefined.iter().take(SAMPLE).cloned().collect::<Vec<_>>();
-            let suffix = if undefined.len() > SAMPLE {
-                format!(" … (+{} more)", undefined.len() - SAMPLE)
+            let focus = if cited_undefined.is_empty() {
+                &uncited
+            } else {
+                &cited_undefined
+            };
+            let shown = focus
+                .iter()
+                .take(SAMPLE)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let suffix = if focus.len() > SAMPLE {
+                format!(" … (+{} more)", focus.len() - SAMPLE)
             } else {
                 String::new()
             };
-            out.push(Violation::new(
-                "entry_without_definition",
-                Some(ledger.id),
-                ledger.abs_path,
+
+            let detail = if cited_undefined.is_empty() {
                 format!(
-                    "{} of {} `{}` entries have no `## <ID> — <title>` heading, so any citation \
-                     of them would resolve to nothing: {}{}. Whether any exists is not something \
-                     this check can tell you — it does not read the citation graph, so it cannot \
-                     distinguish entries the ledger meant to define from a ledger whose convention \
-                     is to define an entry when something first cites it. Check for citations \
-                     before adding the missing headings; a define-on-citation ledger is already correct. \
+                    "{} of {} `{}` entries have no `## <ID> — <title>` heading: {}{}. Nothing in \
+                     the catalog cites any of them, so no reference is broken today. That is what \
+                     a ledger defining an entry only once something cites it looks like, and it is \
+                     equally what a ledger that simply never wrote the headings looks like — this \
+                     check reads the citation graph, not intent, and will not guess between them. \
                      See get_guide(\"tracker-conventions\") § Entry headings.",
                     undefined.len(),
                     ledger.claimed.len(),
                     ledger.collection,
-                    shown.join(", "),
+                    shown,
                     suffix
-                ),
+                )
+            } else {
+                format!(
+                    "{} of {} `{}` entries have no `## <ID> — <title>` heading. Cited despite \
+                     that: {} — {}{}, whose references resolve to nothing right now. Fix those \
+                     first; each needs a `## <ID> — <title>` heading, the only shape `link_scan` \
+                     binds a token to. Uncited: {} — nothing is broken there yet, and that is \
+                     consistent with a ledger whose convention is to define an entry when \
+                     something first cites it. This check reads the citation graph, so the split \
+                     is measured rather than assumed. \
+                     See get_guide(\"tracker-conventions\") § Entry headings.",
+                    undefined.len(),
+                    ledger.claimed.len(),
+                    ledger.collection,
+                    cited_undefined.len(),
+                    shown,
+                    suffix,
+                    uncited.len()
+                )
+            };
+
+            out.push(Violation::new(
+                "entry_without_definition",
+                Some(ledger.id),
+                ledger.abs_path,
+                detail,
             ));
         }
     }
@@ -3711,16 +3822,89 @@ mod tests {
             "BL-1 has its heading — naming it makes the finding untrustworthy: {}",
             v[0].detail
         );
-        // The scan compares `params` ids against body-defined ids and never reads the
-        // citation graph, so it cannot tell an omission from a ledger that defines an entry
-        // only once something cites it. An earlier wording asserted "these are omissions —
-        // add a heading for each"; measured 2026-08-19 on `provenance-subsystem.md` that
-        // would have had a reader add 42 headings for entries with zero citations, against
-        // a define-on-citation convention stated in the ledger's own body.
+        // BL-3 lives in an index row. Rows define nothing but ARE scanned for citations, so
+        // this fixture is the CITED half of the partition: a reference that resolves to
+        // nothing today, and the half a reader can act on. Its twin below is the uncited
+        // half, and neither fixture alone can tell the two apart.
+        assert!(
+            v[0].detail.contains("Cited despite that: 1"),
+            "a cited-but-undefined entry is the actionable half and must be counted: {}",
+            v[0].detail
+        );
+        // An earlier wording asserted "these are omissions — add a heading for each" on no
+        // evidence at all. Measured 2026-08-19 on `provenance-subsystem.md`, that would have
+        // had a reader add 42 headings against a define-on-citation convention stated in the
+        // ledger's own body — while missing the ~5 entries there that ARE cited and broken.
         assert!(
             v[0].detail.contains("citation graph"),
-            "the finding must disclose that it does not read citations, rather than assert \
-             the entries are omissions: {}",
+            "the finding must say the split is measured rather than assumed: {}",
+            v[0].detail
+        );
+    }
+
+    /// The uncited half of the partition, and the twin the test above needs to mean
+    /// anything.
+    ///
+    /// Same defect shape — an id in `params` with no defining heading — but the token
+    /// appears nowhere in the corpus, so no reference is broken and the finding must say so
+    /// differently. The difference between the two fixtures is exactly one index row.
+    ///
+    /// A single fixture cannot distinguish "the ledger forgot" from "the ledger defines on
+    /// citation", which is why the check used to assert the former on no evidence.
+    #[test]
+    fn undefined_entries_separates_an_uncited_entry_from_a_cited_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "log",
+            tmp.path(),
+            // No index row this time, so nothing mentions BL-3 anywhere.
+            "# L\n\n## BL-1 — first\n\n## BL-2 — second\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+
+        let v = scan_undefined_entries(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].check, "entry_without_definition");
+        assert!(v[0].detail.contains("BL-3"), "{}", v[0].detail);
+        assert!(
+            v[0].detail.contains("Nothing in the catalog cites"),
+            "an uncited undefined entry breaks no reference and must be reported as such: {}",
+            v[0].detail
+        );
+        assert!(
+            !v[0].detail.contains("Cited despite that"),
+            "nothing cites BL-3, so the actionable half must be absent entirely: {}",
+            v[0].detail
+        );
+    }
+
+    /// A citation qualified by file stem (`log:BL-3`) counts as a citation.
+    ///
+    /// It has to, and the reason is a quirk of extraction rather than a preference: a
+    /// file-stem qualifier and a cross-repo qualifier are **one syntactic shape**, so
+    /// `link_scan` emits both as `CrossRepoToken` and leaves resolution to decide. Matching
+    /// only bare `EntryToken`s would therefore read a qualified citation as no citation at
+    /// all — and `get_guide("tracker-conventions")` tells authors to qualify precisely when
+    /// several ledgers share a prefix, which is when ambiguity makes it most necessary.
+    #[test]
+    fn undefined_entries_counts_a_stem_qualified_citation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "log",
+            tmp.path(),
+            "# L\n\n## BL-1 — first\n\n## BL-2 — second\n\nSee log:BL-3 for the rest.\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+
+        let v = scan_undefined_entries(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(
+            v[0].detail.contains("Cited despite that: 1"),
+            "a stem-qualified citation is still a citation, and this one dangles: {}",
             v[0].detail
         );
     }
