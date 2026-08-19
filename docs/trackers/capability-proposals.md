@@ -617,9 +617,16 @@ authors look is not a convention).
 
 ## CAP-7 — Make record decay detectable — three doctor checks so corrections travel
 
-**Status:** open — proposed 2026-08-19. **Checks 2 and 3 shipped 2026-08-19**
-(check 3: `f632e7ef` / patch-id `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2`; check 2:
-`067ced2c` / patch-id `4315447d80b5bed845e5911dd8178adaf3b72a9a`). **Check 1 open.**
+**Status:** **COMPLETE — all three checks shipped 2026-08-19.**
+
+| check | commit | patch-id |
+|---|---|---|
+| 1 `archived_fix_sha_unresolvable` | `b34bf10e` | `cdb2b89d91f336f7b9af25675fd6d1803a79ca4b` |
+| 2 `terminal_status_with_caveat` | `067ced2c` | `4315447d80b5bed845e5911dd8178adaf3b72a9a` |
+| 3 `declared_root_missing` | `f632e7ef` | `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2` |
+
+Layer 2 is done. The entry stays here rather than graduating to a spec because there is
+nothing left to design — it is a record of what shipped and why.
 
 ### The ask
 
@@ -629,8 +636,12 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
 `CLAUDE.md`, `docs/TAXONOMY.md`, `docs/issues/_TEMPLATE.md` and
 `src/prompts/guides/tracker-conventions.md`.
 
-1. **`archived_fix_sha_unresolvable`** — an archived bug file whose cited fix SHA no longer
-   resolves. Report the file, the dead SHA, and its recorded patch-id if present.
+1. ~~**`archived_fix_sha_unresolvable`**~~ — **SHIPPED 2026-08-19**, `b34bf10e` / patch-id
+   `cdb2b89d91f336f7b9af25675fd6d1803a79ca4b`. Reports the file, the dead SHA, and the
+   recorded patch-id **with** the finding, so the remedy travels instead of being looked up
+   afterwards. Live: scanned 54, skipped 324, unresolvable 0 — a true negative, since those
+   54 pointers were written the same day from live commits; the check earns its keep at the
+   next rebase of `experiments`.
 2. ~~**`terminal_status_with_caveat`**~~ — **SHIPPED 2026-08-19**, `067ced2c` / patch-id
    `4315447d80b5bed845e5911dd8178adaf3b72a9a`. A bug file whose `status` is terminal
    (`fixed`/`mitigated`/`wontfix`) *and* whose `unverified:` field is non-empty — the
@@ -649,6 +660,26 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
    rejected separately — `Path::join` discards the base for an absolute path, so they would
    otherwise be validated against themselves. Six mutations applied and run; one survived
    (`is_dir()` → `exists()`, 5/5 green) and was closed with a sixth test.
+
+### Substrate corrections found while implementing (2026-08-19)
+
+Three, all found by scouting before designing, and all in the same class — a figure or a
+reachability assumption stated without opening the thing it described. This entry's
+augmentation prompt says the substrate check is its load-bearing part; on this entry it was
+wrong **four times out of four checks attempted**, which is worth more than any single
+correction below.
+
+1. **Check 3:** `doctor` could not reach the `[[project]]` list at all — `ctx.workspace` is
+   a *different type with the same name*. Logged as
+   `prompt-surface-compaction-session-log:F-6`.
+2. **Check 1, corpus size:** the archived corpus is **350 files, not 63**. The 63 was a
+   subset, quoted here as if it were the population.
+3. **Check 1, parseability:** only **54** carry a structured fix pointer. The other 296
+   mention commits in freeform prose — including `a45f1bd7` naming a *reproduction* commit
+   and `12707fe` appearing as "suspected the recent refactor" then "**Refactor 12707fe is
+   INNOCENT**". Sweeping prose for hex would have reported a dead fix SHA about a commit the
+   file explicitly exonerates. The check parses the structured line only and **reports its
+   coverage**, so a clean result cannot be read as "every declared fix resolves".
 
 ### Substrate check (2026-08-19)
 
@@ -711,9 +742,10 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
    undifferentiated list of 8 beats a differentiated one whose categories are an artifact of
    when each entry happened to be written. Revisit only if the population grows enough that
    reading all of it stops being cheap.
-3. **Cost of check 1.** Resolving N SHAs per run is cheap with `git2`; scanning history for
-   a patch-id is not. Suggest: resolve the SHA only, and *report* the recorded patch-id
-   without resolving it.
+3. ~~**Cost of check 1.**~~ **RESOLVED as suggested:** the SHA is resolved via `git2`
+   (`revparse_single`, ~54 calls); the patch-id is *reported, never resolved*. A history
+   scan for a patch-id is exactly the expensive thing the suggestion avoided, and the
+   finding hands the reader the redirect-form recipe instead of running it for them.
 4. **Which root check 3 resolves against, in a worktree** (added 2026-08-19 with the
    substrate correction). Three sub-questions, and answering only the first is how this
    ships wrong-but-green: (a) when the worktree has no `.codescout/workspace.toml` of its
