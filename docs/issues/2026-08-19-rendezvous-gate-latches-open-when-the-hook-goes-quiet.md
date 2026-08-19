@@ -45,8 +45,11 @@ Sketch of what a reproduction would require:
 1. Start codescout with the companion plugin active. Let one `SessionStart` stamp land, so
    `Rendezvous::active` flips true (`src/tools/rendezvous.rs:138`).
 2. Break the hook **without** restarting the MCP server — e.g. disable the plugin, or make
-   `hooks/session-start.mjs` exit non-zero. A `/mcp` reconnect would respawn the process and reset
-   the flag, so it must survive.
+   `hooks/session-start.mjs` exit non-zero. ~~A `/mcp` reconnect would respawn the process and reset
+   the flag, so it must survive.~~ **Amended 2026-08-19 (`4800c297`): that constraint is
+   gone.** A reconnect now inherits the stamp from the predecessor slot, so the flag survives
+   one either way — which makes this step easier to stage, and the bug correspondingly
+   wider than when it was filed.
 3. `/clear` in Claude Code. This mints a new conversation id but does not respawn the subprocess.
 4. `workspace(action="activate", path=<a different project root>)`.
 5. Expected-if-broken: the ledger takes the gated `re_arm(PROJECT_SCOPED)` path keyed to the *old*
@@ -149,10 +152,27 @@ None — nothing was changed. The behaviour described here is already pinned by 
 
 ## Workarounds
 
-`/mcp` reconnect. Respawning the server resets `Rendezvous::active` to false, after which the gate
-reflects reality again. A user who suspects guides have gone quiet after disabling the companion
-plugin should reconnect rather than `/clear`.
+> **VOID as of 2026-08-19, `4800c297`.** This section used to read: *"`/mcp` reconnect.
+> Respawning the server resets `Rendezvous::active` to false, after which the gate reflects
+> reality again."* That is no longer true. `Rendezvous::publish` now inherits `hook_at`
+> from a predecessor slot carrying the same session id, so a reconnect **carries the belief
+> forward** instead of resetting it. The latch was process-scoped; it is now
+> conversation-scoped, and this bug has no workaround left short of starting a new
+> conversation.
 
+**Remaining workaround: start a new conversation** (`/clear` does mint a new id, but that is
+precisely the event this bug makes invisible — so a fresh Claude Code session is the
+reliable one). A new conversation means a new session id, and inheritance is matched on
+session id, so nothing carries over.
+
+The change that voided the old workaround was made knowingly, and the trade is recorded in
+`docs/issues/archive/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md`:
+a **measured** ~59–67 KB of guides re-sent on every reconnect, against this file's own
+**unmeasured** impact — which its Root cause section calls *"a hypothesis wearing a
+conclusion's clothes until someone runs the reproduction sketch"*. If that sketch ever
+reproduces and the impact turns out to be large, the trade should be revisited, and the
+shape to consider is the staleness bound already sketched in § Fix — now with a second
+reason to want one.
 ## Resume
 
 Run the five-step reproduction sketch in § Reproduction against `experiments` at `7ca4e8c1` or later,

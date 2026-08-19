@@ -1,5 +1,5 @@
 ---
-id: 3e0f11d4875f0075
+id: '3e0f11d4875f0075'
 kind: bug
 status: fixed
 title: A /mcp reconnect leaves the rendezvous permanently inactive, so the next workspace(activate) clears the whole guide ledger and every guide re-emits
@@ -14,7 +14,7 @@ closed: 2026-08-19
 opened: 2026-08-19
 owner: marius
 severity: medium
-unverified: 'not verified live: this conversation has no stamped predecessor to inherit from, so the effect is only observable after the next SessionStart stamps the slot; the equivalent-mutation caveat on active-at-publish is recorded under Tests'
+unverified: 'not verified live at fix time (since verified: slot 2729343 stamped 412ms after publish, ledger survived the restart with only the opener re-armed); WIDENS the open latch bug 54a70b49f6f26681 by voiding its /mcp workaround — trade recorded under Fix ideas'
 ---
 
 # BUG: a `/mcp` reconnect makes the rendezvous inactive forever, and the next `activate` wipes the guide ledger
@@ -202,6 +202,44 @@ invisible *and* nothing ever expires, which makes the blunt clear the only thing
 it and permanent guide starvation. That is what
 `a_fresh_ledger_reports_no_rendezvous` exists to protect, and it holds. Absent a companion
 this fix inherits nothing, so the blunt default is preserved byte for byte.
+
+## Known cost — this fix widens an open bug
+
+**Added 2026-08-19, after the fix shipped, on finding a filed bug that should have been read
+first.**
+
+`docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`
+(`54a70b49f6f26681`, filed `e76b513e`) records that `Rendezvous::active` is **monotone** —
+written true once and never false. Its stated workaround was:
+
+> *"`/mcp` reconnect. Respawning the server resets `Rendezvous::active` to false, after which
+> the gate reflects reality again."*
+
+**This fix voids that.** Inheriting `hook_at` across a reconnect carries the belief forward,
+converting a **process-scoped** latch into a **conversation-scoped** one. If the companion
+hook goes quiet mid-conversation — plugin disabled, hook script broken, cache invalidated —
+the server now keeps believing a hook is live through every reconnect, and a `/clear` stays
+invisible with no reset available.
+
+**The trade, stated plainly rather than buried:**
+
+| | this bug | the latch bug |
+|---|---|---|
+| impact | **measured** — ~59–67 KB of guides re-sent per reconnect | **unmeasured**; its own Root cause calls the estimate *"a hypothesis wearing a conclusion's clothes"* |
+| trigger | every `/mcp`, and `cargo rb` + `/mcp` is the documented way to ship a server change | requires deliberately breaking the companion mid-conversation, then `/clear` |
+| reproduced | yes, on this machine | no — the file's `## Resume` is a five-step sketch nobody has run |
+
+On those numbers the trade is worth taking, and it was taken. But it is a **real** cost, not
+a free one, and if the latch bug's reproduction sketch ever runs and shows a large impact,
+this is the first thing to revisit — the staleness bound sketched in that file's `## Fix`
+would close both, at the price of the clock Ruling 2 avoided.
+
+**Process note, worth more than the finding.** This interaction was found *after* shipping,
+by a routine `artifact(find, kind="bug", status="open")` — the exact query
+`get_guide("project-activation-bootstrap")` § Phase 0 prescribes before bug work, and which
+this session was shown twice and did not run. The whole investigation, fix and archive
+happened without once asking what was already filed about the subsystem being changed. Every
+other check in this session was thorough; the cheapest one was skipped.
 ## Tests
 
 Four in `src/tools/rendezvous.rs`:
@@ -227,17 +265,23 @@ The fourth is recorded rather than counted, because reporting 4/4 would overstat
 coverage this suite actually has.
 ## Resume
 
-Fixed; unit-verified, **not** verified live — see `unverified:`.
+Fixed and archived. Two follow-ups, neither blocking:
 
-The reason is worth knowing rather than just noting: this conversation's chain is already
-broken. Its current slot carries `hook_at: null` and there is no stamped predecessor for
-session `a8acb1cf-…`, so the next `/mcp` inherits nothing and the server stays inactive.
-The fix becomes observable here only once a SessionStart (`/clear`, `/compact`, or a fresh
-launch) stamps a slot — from that point every later reconnect carries it forward.
+**1. Live verification — DONE 2026-08-19, after a Claude Code restart.** Slot `2729343` was
+published at `09:54:19.379Z` and stamped `hook_at: 09:54:19.791Z` — **412 ms later**,
+confirming the SessionStart hook finds the slot already present, exactly the ordering
+`session-start.mjs` documents. The ledger also survived the restart with only
+`project-activation-bootstrap` re-armed (four other topics carried their pre-restart
+stamps), and a following `artifact(find)` injected no `librarian` guide. The
+construction-time re-arm and the keyed-tier persistence both behave as designed.
 
-**To verify live:** after a SessionStart has stamped the slot, `/mcp`, then check
-`hook_at` is non-null in `~/.local/state/codescout/servers/<new pid>.json`, and that a
-`workspace(activate)` no longer re-injects guides the conversation already holds.
+Still unobserved: the **inheritance path itself**, which only runs on the next reconnect
+from a stamped predecessor. That precondition now holds — slot `2729343` carries a stamp —
+so the next `/mcp` exercises it. Check `hook_at` is non-null in the new pid's slot, and that
+a `workspace(activate)` afterwards re-injects nothing.
+
+**2. The latch interaction** — see § Known cost above. `54a70b49f6f26681` stays open and is
+now wider; its workaround section has been corrected to say so.
 ## References
 
 - `src/tools/rendezvous.rs` — `Entry.hook_at`, `Rendezvous::publish`, `poll`, `is_active`
