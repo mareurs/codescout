@@ -108,3 +108,13 @@ tests/fixtures/*/.codescout/
 /.codescout/code-index.db
 /target-release-new/
 /.vscode/
+
+# Locally downloaded ONNX runtime shared library (windows-gnu / EDR workaround
+# for the local-embed-dynamic feature). Fetched per-machine, never committed.
+/.onnxruntime/
+
+# Stray artifact from an accidental `> nul`/`2>nul` redirect under Git Bash on
+# Windows (cmd.exe NUL-device syntax creates a literal file when run under
+# bash instead of discarding output). Recurs across sessions; harmless to
+# delete, never intentional.
+/nul

@@ -157,9 +157,46 @@ fn parent_pid() -> u32 {
 
 #[cfg(windows)]
 fn parent_pid() -> u32 {
-    // No getppid here. The hook walks ancestry itself, so a zero degrades to
-    // "never matched" rather than to a WRONG match — the safe direction.
-    0
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let pid = std::process::id();
+
+    // SAFETY: TH32CS_SNAPPROCESS with a 0 pid snapshots every running process;
+    // th32ProcessID is ignored for this flag per the Win32 docs.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        // No getppid here — the hook walks ancestry itself, so a zero degrades
+        // to "never matched" rather than to a WRONG match, the safe direction.
+        return 0;
+    }
+
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+
+    let mut ppid = 0u32;
+    // SAFETY: `entry` is zero-initialized with `dwSize` set as the API requires;
+    // `snapshot` is the valid handle returned above, closed once below either way.
+    unsafe {
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32ProcessID == pid {
+                    ppid = entry.th32ParentProcessID;
+                    break;
+                }
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+    }
+    ppid
 }
 
 /// Remove slots whose process is gone. Marked cleanup, not discovery — see

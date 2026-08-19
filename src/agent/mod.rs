@@ -2305,6 +2305,15 @@ mod tests {
     async fn memory_embedder_is_built_from_the_shared_code_embedder() {
         use crate::retrieval::embedder::{CodeDenseAdapter, DenseEmbedder};
 
+        // Pin the embedder to a remote/HTTP backend so `Agent::new` takes its instant,
+        // zero-I/O branch regardless of ambient `[embeddings]`/env config — mirrors
+        // `semantic_memory_store_bootstrap_times_out_on_hung_qdrant`'s guard. Without
+        // this, a host without `local-embed` compiled in (or without cached ONNX
+        // weights/network even with it compiled in) would panic resolving the default
+        // `local:AllMiniLML6V2Q` model before ever reaching the `Arc::ptr_eq` assertion
+        // below.
+        let _embedder_url = EnvGuard::set("CODESCOUT_EMBEDDER_URL", "http://unused.invalid");
+
         let agent = Agent::new(None).await.unwrap();
         let mem: std::sync::Arc<dyn DenseEmbedder> = agent.memory_embedder().await.unwrap();
 
@@ -2322,7 +2331,7 @@ mod tests {
         assert!(
             std::sync::Arc::ptr_eq(&adapter.0, &seen_client_embedder),
             "memory_embedder's returned adapter must wrap the SAME embedder Arc the \
-             RetrievalClient it built holds — got two different instances"
+                 RetrievalClient it built holds — got two different instances"
         );
     }
 

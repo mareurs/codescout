@@ -915,9 +915,17 @@ async fn activating_a_linked_worktree_reports_the_divergence_it_creates() {
     let wt = base.join("main/.worktrees/feat");
     std::fs::create_dir_all(wt.join(".codescout")).unwrap();
     std::fs::write(wt.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+    // Build the gitdir pointer from the pre-canonicalization dir path: on Windows,
+    // std::fs::canonicalize() yields a `\\?\`-verbatim path, and verbatim paths only
+    // treat `\` as a separator — a `/`-joined suffix there would never be found by
+    // is_linked_worktree's Path::components() walk. Real `git worktree add` never
+    // writes verbatim pointers, so the non-canonical form here matches production.
     std::fs::write(
         wt.join(".git"),
-        format!("gitdir: {}/main/.git/worktrees/feat\n", base.display()),
+        format!(
+            "gitdir: {}/main/.git/worktrees/feat\n",
+            dir.path().display()
+        ),
     )
     .unwrap();
 
@@ -986,9 +994,17 @@ async fn a_worktree_whose_main_has_workspace_toml_reports_inherited_topology() {
     let wt = base.join("main/.worktrees/feat");
     std::fs::create_dir_all(wt.join(".codescout")).unwrap();
     std::fs::write(wt.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+    // Build the gitdir pointer from the pre-canonicalization dir path: on Windows,
+    // std::fs::canonicalize() yields a `\\?\`-verbatim path, and verbatim paths only
+    // treat `\` as a separator — a `/`-joined suffix there would never be found by
+    // is_linked_worktree's Path::components() walk. Real `git worktree add` never
+    // writes verbatim pointers, so the non-canonical form here matches production.
     std::fs::write(
         wt.join(".git"),
-        format!("gitdir: {}/main/.git/worktrees/feat\n", base.display()),
+        format!(
+            "gitdir: {}/main/.git/worktrees/feat\n",
+            dir.path().display()
+        ),
     )
     .unwrap();
 

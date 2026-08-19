@@ -2496,13 +2496,26 @@ mod tests {
         // root was absolute and outside — with a hint (`grep(pattern, path)`)
         // that resolves against the active project and therefore has no correct
         // invocation for that repo at all.
-        let root = Path::new("/home/u/work/myproj");
+        //
+        // The root/otherrepo literals must be genuinely `Path::is_absolute()` on
+        // the host running the test: a driveless POSIX-style path like
+        // `/home/u/work/otherrepo` has a root but no prefix, so Rust's
+        // `is_absolute()` is false for it on Windows — that silently defeats the
+        // `targets_outside` check this test exists to exercise. Drive-letter
+        // literals on Windows, POSIX-rooted literals elsewhere — forward slashes
+        // on both, since this string is shell-tokenized (`shell_tokens` treats
+        // `\` as a shell escape character, which mangles a backslash-style
+        // Windows path before `Path::new` ever sees it; `C:/...` is still
+        // `is_absolute()` on Windows and survives tokenization intact).
+        #[cfg(windows)]
+        let (root, otherrepo): (&Path, &str) = (Path::new("C:/work/myproj"), "C:/work/otherrepo");
+        #[cfg(not(windows))]
+        let (root, otherrepo): (&Path, &str) =
+            (Path::new("/home/u/work/myproj"), "/home/u/work/otherrepo");
+
         assert!(
-            check_source_file_access(
-                "grep -rn 'x' /home/u/work/otherrepo --include='*.mjs'",
-                root
-            )
-            .is_none(),
+            check_source_file_access(&format!("grep -rn 'x' {otherrepo} --include='*.mjs'"), root)
+                .is_none(),
             "a glob filter beside an out-of-project search root is not a project read"
         );
     }
@@ -3663,12 +3676,24 @@ EOF"#;
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
 
-        // `..` only survives canonicalization when an intermediate directory does not
-        // exist — the branch's own comment says so, and `/var/..` resolves cleanly, so a
-        // path built from real directories takes the OutsideRoot arm instead.
-        let WritePathDecision::Denied(msg) =
-            classify_write_path("no-such-dir-xyz/../escape.rs", tmp.path(), &cfg, &[])
-        else {
+        // `..` only survives canonicalization when the FINAL directory it resolves
+        // to (after collapsing `..`) still doesn't exist — not merely when an
+        // intermediate segment is missing. On Windows, `CreateFileW`'s NT path
+        // translation lexically collapses `dir/..` pairs before any filesystem
+        // lookup happens, so a single missing intermediate (`no-such-dir-xyz/..`)
+        // resolves cleanly there even though it fails on POSIX's component-wise
+        // `readdir` walk. Nesting a SECOND missing directory after the collapse
+        // (`.../also-missing/`) defeats both: Windows collapses the first `..`
+        // and then fails to canonicalize `also-missing` (which genuinely doesn't
+        // exist), and POSIX fails at `no-such-dir-xyz` before ever reaching `..`.
+        // Either way `best_effort_canonicalize` falls back to the raw, unresolved
+        // path, so this input takes the hard-Denied arm on every platform.
+        let WritePathDecision::Denied(msg) = classify_write_path(
+            "no-such-dir-xyz/../also-missing/escape.rs",
+            tmp.path(),
+            &cfg,
+            &[],
+        ) else {
             // If this ever classifies differently the message contract still needs a home;
             // fail loudly rather than skipping the assertion.
             panic!("an unresolved '..' must be a hard Denied, not approvable");

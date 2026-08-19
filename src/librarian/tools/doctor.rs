@@ -829,17 +829,21 @@ fn count_dead_root(
 /// so a truncated sample can still account for every row it dropped, and it
 /// never decides whether a row is a violation.
 fn outside_roots_group(path: &str) -> String {
-    let p = std::path::Path::new(path);
-    let mut prefix = std::path::PathBuf::new();
-    for comp in p.components() {
-        if comp.as_os_str() == "docs" {
-            return prefix.to_string_lossy().into_owned();
-        }
-        prefix.push(comp);
+    let mut segments: Vec<&str> = path.split('/').collect();
+    if let Some(docs_idx) = segments.iter().position(|s| *s == "docs") {
+        return segments[..docs_idx].join("/");
     }
-    p.parent()
-        .map(|d| d.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string())
+    if segments.len() > 1 {
+        segments.pop();
+        let joined = segments.join("/");
+        if joined.is_empty() && path.starts_with('/') {
+            "/".to_string()
+        } else {
+            joined
+        }
+    } else {
+        String::new()
+    }
 }
 
 /// Pulls every `(id, abs_path)` row once and runs six per-row checks
@@ -2555,6 +2559,50 @@ mod tests {
         assert_eq!(
             outside_roots_group("/home/u/agents/system/crash/root_cause.md"),
             "/home/u/agents/system/crash"
+        );
+    }
+
+    /// The group key must stay in the forward-slash form the catalog stores.
+    ///
+    /// The bug: this routed through `PathBuf::push`, which renders with the HOST
+    /// separator, so on Windows a forward-slash catalog row came back as
+    /// `C:\work\proj` — a string that is not a prefix of the row it was derived
+    /// from. The catalog stores forward-slash form on every platform (see
+    /// `util::fs::to_forward_slash`), so the key derived from a row has to as well.
+    ///
+    /// Honest about its reach: on POSIX the old and new implementations agree on
+    /// every well-formed row, because `Path` already separates on `/` here. This is
+    /// a characterization test locally and only discriminates when run on Windows —
+    /// which is exactly where the bug lived, and where nothing else was watching.
+    ///
+    /// BUG docs/issues/2026-08-19-doctor-outside-roots-group-rewrites-posix-paths-with-backslashes.md
+    #[test]
+    fn outside_roots_group_keeps_the_forward_slash_form_the_catalog_stores() {
+        for row in [
+            "C:/work/proj/docs/trackers/x.md",
+            "C:/work/proj/notes/x.md",
+            "/home/u/work/proj/docs/trackers/x.md",
+        ] {
+            let group = outside_roots_group(row);
+            assert!(
+                !group.contains('\\'),
+                "group key must stay forward-slash on every host: {row} -> {group}"
+            );
+            assert!(
+                row.starts_with(&group),
+                "group key must be a prefix of the row it groups: {row} -> {group}"
+            );
+        }
+
+        // A drive-lettered row splits on its first `docs` component exactly like a
+        // POSIX one, and falls back to the parent when there is none.
+        assert_eq!(
+            outside_roots_group("C:/work/proj/docs/trackers/x.md"),
+            "C:/work/proj"
+        );
+        assert_eq!(
+            outside_roots_group("C:/work/proj/notes/x.md"),
+            "C:/work/proj/notes"
         );
     }
 
