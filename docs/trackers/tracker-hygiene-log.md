@@ -722,11 +722,34 @@ the 2-sweep rule is a proxy for; if that reasoning proves wrong, D11's trust row
   legitimately reworded — a false positive produced by the promotion working as intended.
   Observed the same day on [[R-89]]. `R-1` and `R-3` have used the durable form since May.
 
-**Carried forward (this entry stays open as a work item, not as a proposal):** the 13 live
-entries claiming a promoted status still need `**Promoted-to:**` back-filled. Two are done —
-`prompt-surface-compaction-session-log:W-4`, which named **no target at all**, and the three
-reconnaissance bullets, which now back-cite their own entry ids. This is the cheapest it will
-ever be.
+**Step 2 discharged 2026-08-20 — all three steps of this entry are now complete.** All **13**
+live entries claiming a promoted status carry a line-start `**Promoted-to:**` field, and each
+was verified *at* the target rather than transcribed from prose (13/13 field, 13/13
+verification recorded). This entry's *"cheapest it will ever be"* held: every destination was
+still recoverable.
+
+**D11's first sweep, run as part of the back-fill — three findings, all `repoint`:**
+
+| Entry | Declared | Observed |
+|---|---|---|
+| `bug-fix-session-log:F-17` | *"(open; 4-site swap + 3 per-tool regression tests planned)"* | destination `status: fixed`, archived — a stale plan reading as an open action |
+| `bug-fix-session-log:F-44` | *"Both should be updated with these facets"* (future tense) | the update had landed; both destinations fixed + archived, and the disambiguator file carries both assigned facets |
+| `release-promotion-session-log:F-1` | *"tracked in the bug ledger rather than here"* — no path | destination named only in the `Promote-when FIRED` paragraph, never in `Status:` |
+
+Zero `absorbed`, zero `retire`. F-1 is the most instructive: **the pointer existed and was
+simply not where a reader or a query looks**, which is this entry's thesis stated as a
+measurement rather than an argument.
+
+**Two non-greens recorded rather than smoothed:** `release-promotion-session-log:W-13`
+promoted its second half into codescout memory `conventions`, which is not a file under a
+tracked path and therefore has no anchor a sweep can read; and F-44's destinations do not
+back-cite `F-44`, so its anchor is content rather than a citation — the weaker form, kept
+because archived surfaces are left alone.
+
+**Evidence for the back-citation rule, from this ledger's own data:** [[R-1]] and [[R-3]] are
+the two oldest promotions and the only ones that anchored on a back-citation from the start.
+Their bullets have been reworded repeatedly since 2026-05 and both anchors still resolve,
+with no maintenance. Every quote-anchored claim needed re-syncing when its rule changed.
 
 The decay/distill pattern has a direction no detector looks in. D1 checks index → file.
 HY-5 §1 proposes basename → live surface after a move. `audit_doc_refs` checks doc → code.
