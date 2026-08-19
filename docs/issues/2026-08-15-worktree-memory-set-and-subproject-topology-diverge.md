@@ -12,6 +12,7 @@ tags:
 - sub-projects
 - silent-divergence
 - gitignore
+unverified: only the topology half is closed (1869adcb); the memory half is unfixed and is a decision rather than an implementation — a worktree activation still serves that commit's memories, so the memory set silently diverges from the main checkout. See section 'Still open — the semantic question'.
 ---
 
 ## Summary
@@ -185,5 +186,29 @@ That asymmetry is why one half could be fixed by reading through to main and the
 other cannot be — there is nothing to read through *to*, since the worktree's
 memories are present, just older.
 
-Promotion is a fast-forward, so the `experiments` SHA above already is the master
-SHA; deliberately no pending-master-SHA line.
+Provenance is recorded under § *Fix provenance* below, as a SHA **and** a patch-id.
+The earlier note here reasoned that promotion is a fast-forward so the `experiments`
+SHA is already the master SHA — true today, and beside the point: an `experiments`
+SHA orphans when `experiments` is rebased, which happens after every ship. The
+patch-id is what survives that, and it does not depend on the branches' current
+relationship.
+
+
+## Fix provenance
+
+Covers the **topology half only**. The memory half has no commit, by design — it is the
+open decision in § *Still open*.
+
+- **SHA:** `1869adcb` (`experiments`) — *fix(agent): inherit a worktree's discovery settings
+  from the main checkout*. Positional; does not survive a rebase of `experiments`.
+- **patch-id:** `31d3db2e703eb5d4bb1d407d93e2577f6b8b8a23` — content hash of the diff;
+  survives rebase and cherry-pick.
+
+Confirmed against the commit's own stat rather than its subject line: it carries
+`src/agent/mod.rs`, `src/tools/config/mod.rs` and `src/tools/config/tests.rs`, which are the
+files § *Fix* describes.
+
+An `unverified:` field was added 2026-08-19 carrying the memory-half caveat. It was already
+stated plainly in § *Resume* and § *Still open* — in prose, where no triage query could reach
+it. This record is terminal (`mitigated`), so `find(kind="bug", status in open/investigating)`
+does not return it; the field is what makes the open half findable.

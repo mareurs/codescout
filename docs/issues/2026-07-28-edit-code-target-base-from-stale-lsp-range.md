@@ -10,7 +10,7 @@ tags:
 - silent-corruption
 topic: edit_code write fidelity
 closed: 2026-07-28
-unverified: the original +4 shift was never reproduced, so this fix is not known to address the reported symptom; and the 'master-side SHA after cherry-pick' wait is OBSOLETE — master...experiments reports 0 on the left, so promotion is a fast-forward and no second SHA will ever exist
+unverified: the original +4 shift was never reproduced, so this fix is not known to address the reported symptom; the two hazards it does close were verified independently of the unconfirmed mechanism
 ---
 
 # BUG: edit_code derives the insert indentation from an unrepaired LSP line index
@@ -270,8 +270,12 @@ and module without that warning landed correctly. If it recurs, capture `sym.sta
 `sym.range_start_line`, `editing_start_line`'s return, and the sampled line's text in the
 same breath — that quartet settles it, and nothing short of it will.
 
-Also outstanding: master-side SHA after cherry-pick. The SHA here is an `experiments` SHA
-and orphans on rebase.
+Nothing is outstanding on provenance. That paragraph used to read *"Also outstanding:
+master-side SHA after cherry-pick — the SHA here is an `experiments` SHA and orphans on
+rebase"*, which was wrong twice over: the practice it named has been retired in favour of a
+patch-id recorded once, and **no fix SHA was ever written into this file at all**, so the
+sentence worried about the durability of a pointer that did not exist. Recovered and
+recorded under § *Fix provenance*.
 ## References
 
 - `src/tools/symbol/edit_code.rs:808-814` — `sibling_line` / `target_base` / `reindent_to`
@@ -283,3 +287,23 @@ and orphans on rebase.
   stale/repaired-range family, but the insert *position* rather than the column
 - `docs/issues/archive/2026-05-29-edit-code-kotlin-stale-lsp-range.md` — earliest
   stale-LSP-range entry in this family
+
+
+## Fix provenance
+
+- **SHA:** `1e7722a0` (`experiments`) — *fix(symbol): sample the reindent base from the
+  validated line, never from a blank*. Positional; does not survive a rebase of
+  `experiments`.
+- **patch-id:** `06f6ef543adeec3b67370c8a83e945034e8121fb` — content hash of the diff;
+  survives rebase and cherry-pick.
+
+Recovered 2026-08-19 with `git log -S 'anchor_indent' -- src/symbol/edit.rs`, then confirmed
+against the commit's own stat: it carries `src/symbol/edit.rs` (+86) and
+`src/tools/symbol/edit_code.rs`, which are the two files § *Fix* describes. `anchor_indent`
+is live at `src/symbol/edit.rs:125` with four regression tests.
+
+**The status stays `mitigated`, and the `unverified:` field stays set.** Neither is an
+oversight. `doctor`'s `terminal_status_with_caveat` will keep naming this record, which is
+the check working — its remedy is *"discharge it and clear the field, **or** leave both"*,
+and leaving both is what keeps an unreproduced symptom honest without hiding it from a
+triage query.
