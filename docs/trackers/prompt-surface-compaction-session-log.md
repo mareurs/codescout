@@ -8,7 +8,7 @@ tags:
 - session-log
 - compaction
 topic: prompt-surfaces
-entry_high_water_F: 8
+entry_high_water_F: 9
 entry_high_water_W: 13
 entry_prefix:
 - F
@@ -78,6 +78,7 @@ entry_prefix:
 | F-3 | 2026-08-18 | med | prompt-surface | open | 19.2% of the tool surface is bought for 38 calls, and the data cannot say whether those tools are dead or unrouted — field experiment **superseded** by hamsa A-26's controlled arms (0/10, 0/10, control 10/10); routing reverted in `89d32048`, evidence points at *substituted* not *unrouted* |
 | F-4 | 2026-08-18 | med | librarian-api | open | `anchor_heading` inserts only *before* a heading, so a ledger that appends at the end cannot use the server-writes path |
 | F-5 | 2026-08-19 | high | self-friction | fixed-verified | A guard that names the invariant but never exercises it — forcing the gate open left 62/62 passing; "mutation-tested" is a per-ASSERTION claim, not a per-commit one |
+| F-9 | 2026-08-20 | high | substrate-drift | open | Three rules promoted into the recon SKILL.md are in force in **zero of three** profiles — no version bump, so every cache still serves the pre-edit copy; and this session was the one observer that could not see it |
 | F-8 | 2026-08-20 | high | process | mitigated | The `git add -A` prohibition existed, was measured, and still did not reach the moment of committing — and the mitigation I switched to is itself the documented anti-pattern one rung up |
 | F-7 | 2026-08-19 | high | process | mitigated | A fired `Promote-when` is a zombie win and nothing queries for one — W-4 sat unharvested for a day while its failure recurred 3×, and the one lesson that WAS promoted reached 1 of 3 profiles |
 | F-6 | 2026-08-19 | med | substrate-drift | fixed-verified | CAP-7 says check 3 needs no design — but `doctor` cannot reach the `[[project]]` list at all; two same-named `WorkspaceConfig` types, and a gitignored config that a worktree silently inherits from main |
@@ -1433,6 +1434,73 @@ exactly the right moment. Deliberately **not** filed as a bug — one datapoint,
 appetite for building checks was spent at n=1 on the promotion audit
 (`docs/issues/archive/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`).
 Recorded here so a second instance has something to join.
+
+## F-9 — Three promoted rules are in force in zero of three profiles, and the session that promoted them is the one observer that cannot see it
+
+**Observed:** 2026-08-20, `/codescout-companion:reconnaissance` invoked during compaction
+prep. Reading the loaded skill surfaced its own § *Every promotion audits the promoted set*,
+which governs edits to that file — a section I had not read before editing it an hour earlier.
+
+**When:** After `claude-plugins:23a11c3` added three Phase 1 bullets promoted from codescout
+ledgers (`R-89` build-vs-process freshness, `R-49` re-scout your own bug file, `W-36`
+no-default-trait-impl).
+
+**Expected:** the promoted rules are live — the skill body loaded in this very turn contains
+all three.
+
+**Got — measured across all three profile caches:**
+
+| copy | Phase 1 bullets | contains the new rule | bytes |
+|---|---:|---:|---:|
+| `.claude` cache 1.16.10 | 31 | **0** | 31568 |
+| `.claude-sdd` cache 1.16.10 | 31 | **0** | 31568 |
+| `.claude-kat` cache 1.16.10 | 31 | **0** | 31568 |
+| repo source | **34** | **1** | 33823 |
+
+All three profiles are cache-installed at `1.16.10` (each correctly under its own profile
+root — the 2026-05-16 cross-profile drift is not present). The commit did not bump
+`plugin.json`, so the cache key never changed and nothing re-synced.
+
+**Probable cause:** exactly the mechanism already filed in
+`docs/issues/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`:
+*"the plugin cache is keyed by the version in `plugin.json` … the change is committed,
+reviewed, and in force nowhere — with no error, no warning, and nothing in `git status` to
+suggest it."* A second open bug describing the fix, unread at the moment it applied.
+
+**Why the available evidence pointed the wrong way — the part worth keeping.** The skill body
+loaded this turn *does* contain the three bullets, because `/reload-plugins` resolved the
+skill from the **repo source** (`Base directory: /home/marius/work/claude/claude-plugins/…`)
+rather than from a cache. So the session that shipped the change is the **least
+representative possible observer** of whether it shipped: it is the only one reading the
+write-side copy. Confirming evidence was directly in view and was evidence about the wrong
+artifact.
+
+**Severity:** high — silent, and it defeats the promotion entirely. Three lessons with 2–4
+datapoints each reach nobody, while every surface says they were promoted.
+
+**Status:** open — fix known and scripted, not yet run:
+`plugin.json` + README bump 1.16.10 → 1.16.11, then
+`./scripts/bump-cache.sh codescout-companion 1.16.11`, whose own header warns that bumping
+without seeding the cache leaves the install record pointing at a non-existent path and CC
+silently fails to load.
+
+**Two smaller gaps found in the same pass**, both conventions the ledger already follows:
+
+1. **No SHA pinned.** Prior promotions record `promoted to SKILL.md (claude-plugins:f842848,
+   2026-05-28)`; mine name the file and the verbatim text but not `claude-plugins:23a11c3`
+   (`grep -c` → 0).
+2. **The promoted-set audit was not run or recorded.** The skill requires it *before* adding,
+   and `R-93` is the precedent that did it properly, pinning `claude-plugins:c889e83`
+   (1.16.4 → 1.16.5).
+
+**And the audit, now run, has a verdict on [[R-89]] itself — rubric row 2, *Outgrown*.**
+R-89's promoted wording is *"build freshness and process freshness are two separate facts."*
+This incident is a **third** axis — **cache freshness** — on the same law: the artifact was
+committed (repo fresh), and no process or build was involved at all. Per the skill's own
+rule, *"a recurrence of an already-promoted law is a defect in the promoted text, not a new
+entry"*, so the remedy is to re-promote R-89's evolved form covering all three axes rather
+than to file this as an unrelated lesson. That re-promotion is itself blocked on the version
+bump above — which is the same defect, one turn later.
 
 ## Template for new entries
 
