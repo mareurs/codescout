@@ -853,7 +853,7 @@ fn parse_globs(input: &Value) -> Vec<String> {
 /// absolute glob *inside* the root is fine — `/…/codescout/src/**/*.rs` shares the prefix,
 /// so the walk can yield candidates that match it.
 ///
-/// `docs/issues/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`.
+/// `docs/issues/archive/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`.
 fn unsatisfiable_absolute_glob(globs: &[String], search_path: &std::path::Path) -> Option<String> {
     globs
         .iter()
@@ -1401,7 +1401,7 @@ mod tests {
     /// `glob` is filtered against a walk rooted at the search path, so an absolute glob
     /// outside that root matched nothing and the call answered a confident `0 matches`
     /// about a file it never opened — a false negative that reads as a finding.
-    /// `docs/issues/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`
+    /// `docs/issues/archive/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`
     #[tokio::test]
     async fn grep_rejects_an_absolute_glob_outside_the_search_root() {
         use serde_json::json;

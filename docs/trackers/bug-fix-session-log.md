@@ -3991,8 +3991,19 @@ hook task would have duplicated `readInput`, `emit`, `detectFor` and `git` inste
 of reusing them. This is the reconnaissance skill's own "a search that finds nothing
 is evidence about the search, not about the world" — hit while running that skill.
 
-**Status:** promoted-to-bug-tracker —
-`docs/issues/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`.
+**Status:** fixed-verified (2026-08-19) — promoted to
+`docs/issues/archive/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`
+and fixed there in `c38bfd91` (patch-id `913ba9c70e0b`).
+
+The first half of this entry's *Fix idea* shipped, with one correction the source supplied:
+the boundary is the **search root**, not the project root — which is exactly why `path=`
+works, since it makes the target the root instead of filtering a walk over a different one.
+An absolute `glob` outside that root is now a `RecoverableError` naming `path=`.
+
+The second half did **not** ship: the hidden-paths warning is still ungated. It is carried
+as the bug's `unverified:` caveat, with a note that narrowing it should be measured first
+rather than guessed — a warning narrowed on a guess is the same defect pointed the other
+way.
 
 **Fix idea / Pointer:** Reject an absolute `glob` outside the project root with a
 `RecoverableError` naming `path=` as the remedy, and gate the hidden-paths warning

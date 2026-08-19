@@ -948,7 +948,7 @@ a *different* project is active, and asked for the single tool call it will make
 **Fixture realism — why an absolute path is a TRAP, not a competing correct answer.**
 Passing an absolute path outside the active project root as `grep`'s `glob` returns
 `0 matches`, with a warning that misattributes the cause
-(`docs/issues/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`). So
+(`docs/issues/archive/2026-08-18-grep-absolute-glob-outside-project-returns-silent-zero.md`). So
 the `workspace=` pin is genuinely the only correct route, and an absolute-path answer
 fails **silently** in the field. It is scored as its own failure class, never folded into
 UNPARSEABLE.

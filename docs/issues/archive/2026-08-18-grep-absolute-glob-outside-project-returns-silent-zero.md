@@ -202,3 +202,24 @@ on a guess would be the same defect in the other direction.
 - `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` §6 — the scout that surfaced it
 - `docs/trackers/bug-fix-session-log.md` F-55 — the session-log entry
 - `/home/marius/work/claude/claude-plugins/codescout-companion/hooks/lib.mjs` — the file that "had no exports"
+
+## Fix provenance
+
+- **SHA:** `c38bfd91` (`experiments`) — positional; does not survive a rebase of `experiments`.
+- **patch-id:** `913ba9c70e0b4fc97834d91159e56d0579ffd071` — content hash of the diff; survives rebase and cherry-pick.
+
+Covers the first of the two defects in the title. The second is recorded in `unverified:`
+and in § *Resume*; there is no second commit owed for it, because it is a change nobody
+has decided to make.
+
+If the SHA stops resolving, recover the commit by patch-id. Use redirects, not pipes —
+Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+
+```
+git log --all -p > /tmp/all.patch
+git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
+grep 913ba9c70e0b /tmp/patch-ids.txt
+```
+
+Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
+(cherry-pick) and any of them is the fix.

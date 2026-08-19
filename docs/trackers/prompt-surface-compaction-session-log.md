@@ -58,6 +58,17 @@ entry_high_water_W: 11
 > patch-id `50691255eccd`. The `d5cb0c41335b2610` above was re-keyed by that move and no
 > longer resolves. Still open: the rendezvous latch bug and `grep`'s silent zero on an
 > absolute glob (`8036fbf1666e1603`).
+> **Update 2 (2026-08-19, later) — supersedes the update above.** Of the three bugs the
+> header names, **two are now fixed and archived**: the heredoc pipe-rewrite
+> (`0de2778e6adac220`, fix `4ea33d15`) and `grep`'s absolute-glob silent zero
+> (`a23bdded8539b234`, fix `c38bfd91`). The commit-message backtick substitution is fixed
+> and archived too (`5606ab6e35618aea`, fix `26de395c`). Only the **rendezvous latch bug**
+> (`54a70b49f6f26681`) is still open of those named. Every id written above this line was
+> re-keyed by its archive move and no longer resolves.
+>
+> Corrections stack here rather than replacing the text above because this block sits in
+> the preamble, before the first heading, and `artifact(update, body_edits)` is strictly
+> section-scoped — there is no heading to address it by. Filed as a bug.
 ## Index
 
 | ID | Date | Severity | Category | Status | Title |
