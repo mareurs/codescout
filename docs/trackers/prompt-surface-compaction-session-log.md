@@ -93,7 +93,7 @@ entry_prefix:
 | W-8 | 2026-08-19 | high | Scout the substrate even when the record says the design is settled — a record's substrate claim is a citation, not a fact | CAP-7's substrate check was wrong 4 times out of 4; two of the four would have shipped a confidently wrong diagnostic, including one that would report "fix SHA `12707fe` no longer resolves" about a commit whose own file says "Refactor 12707fe is INNOCENT" | validated |
 | W-9 | 2026-08-19 | high | Treat retiring a bookkeeping rule as a schema migration over the record corpus — sweep for text that forward-references the retired step | Three fix pointers sat one rebase from orphaned, with the patch-id that would survive unrecorded because recording it WAS the retired step; all three were invisible to triage because terminal status is what the query filters out, and the measured recovery cost on the ten files this already happened to is 2–153 ambiguous candidates | validated |
 | W-10 | 2026-08-19 | med | Reset one well-known element rather than everything — the survivor set is the only evidence the reset was correct | A cleared ledger and an inherited one both present as re-injection, so neither is distinguishable from the outside; because exactly one topic re-arms by design, one-of-five proved 58,963 bytes had been inherited before any state file was opened | validated |
-| W-12 | 2026-08-19 | med | Choose a sweep predicate by what it must DISTINGUISH, not by what it must find — a presence check scores a wrong-value defect as healthy | `grep -c SHA` returns ≥1 for the three worst records in the corpus: their only hex is the commit the bug was OBSERVED at, which reads as provenance to any reader scanning for one | validated |
+| W-12 | 2026-08-19 | med | Choose a sweep predicate by what it must DISTINGUISH, not by what it must find — a presence check scores a wrong-value defect as healthy | `grep -c SHA` returns ≥1 for 7 of the 9 unanchored records — the hashes are environments and siblings, never the fix — and the `grep -c patch-id` used to measure THIS entry scored two more as anchored on prose mentions | validated |
 | W-11 | 2026-08-19 | high | Separate a finding's count from its remedy clause — the count is measured, the remedy is an inference about intent the checker cannot observe | Obeying it would have added 42 headings to an 1100-line tracker for entries with zero citations, contradicting the convention the file documents, and then silenced the check so the false premise became permanent; the same leap was also live on the write path, teaching it to every future author | validated |
 ---
 
@@ -1179,10 +1179,16 @@ deliberately as provenance, while a hex string has three other reasons to be in 
 **Counterfactual:** The triggering record said its outstanding item was a *master-side SHA
 after cherry-pick*. Two things were wrong with that, and the stated one was the lesser: the
 practice had been retired, **and no fix SHA was ever written into the file at all**. Fixing
-only that file would have left seven more live terminal records with no durable anchor.
-Three of those seven are worse than unanchored — they are *misleadingly* anchored, carrying
-an observation SHA in an `Environment` line and no `## Fix provenance` section. A reader
-scanning for provenance finds a plausible short hash and stops.
+only that file would have left every other live terminal record unanchored.
+
+**Corrected 2026-08-19, by the check this entry led to.** The figures above were themselves
+produced by a presence check — `grep -c patch-id` — which scored two records as anchored on
+prose mentions, one of them a bug file whose SUBJECT is patch-ids. Measured by the shipped
+`terminal_status_without_fix_anchor` against the structured `- **SHA:**` form: **9** live
+terminal records lack an anchor, and **7 of the 9** carry commit-like hashes with none
+declared as the fix. The misleading shape is the majority, not a sub-case — which inverts
+what the finding's wording has to do. An entry warning against presence-checks, measured
+with one, twice.
 
 The cost is asymmetric and measured. Recovering an anchor is cheap while a distinctive
 identifier exists — `1e7722a0` came back in one `git log -S 'anchor_indent'` — and the
@@ -1209,9 +1215,11 @@ as healthy. At that point promote to CLAUDE.md next to the SHA + patch-id rule, 
 *a sweep predicate must distinguish the good case from the bad one — if the defect satisfies
 the predicate, the sweep reports a clean corpus.*
 
-**Filed:** `docs/issues/2026-08-19-terminal-bug-file-with-no-recoverable-fix-anchor.md`
-(`1701c47a7b15b93d`), proposing a `terminal_status_without_fix_anchor` check — report-only,
-since recovering a fix SHA is research and a wrong anchor is worse than an absent one.
+**Filed and shipped the same day**, `375225cc`:
+`docs/issues/archive/2026-08-19-terminal-bug-file-with-no-recoverable-fix-anchor.md`
+(`53e35aaefb9f7c71`). `terminal_status_without_fix_anchor` is report-only — recovering a fix
+SHA is research, and a wrong anchor is worse than an absent one. Five mutations applied,
+zero survivors.
 
 **Status:** validated — three datapoints in this log, the third contributing a distinct
 mechanism. Awaiting the promotion criterion.
