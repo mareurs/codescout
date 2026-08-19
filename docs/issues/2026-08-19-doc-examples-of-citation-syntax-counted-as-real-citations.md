@@ -11,8 +11,9 @@ tags:
 closed: ''
 opened: 2026-08-19
 owner: marius
-related: []
-severity: low
+related:
+- '10d7e46375cc3053'
+severity: med
 ---
 
 # BUG: documentation examples of citation syntax are indistinguishable from citations
@@ -59,6 +60,35 @@ naturally draw from it ("534 broken citations to fix").
 
 That is the actual defect: not the count, but that **the count cannot be interpreted**.
 
+
+## A second consumer, and a measurement that bounds it (2026-08-19)
+
+**Severity raised low → med here.** Not because anything new broke — because the defect
+acquired a consumer that *classifies* rather than one that merely counts.
+
+`doctor`'s `entry_without_definition` now partitions its undefined ids on whether anything
+cites them (`corpus_cited_tokens`, shipped `5a72304c`, patch-id
+`e9f8df63b9113a5b4073deebc5501a2cb623287a`). It calls the same `link_scan::extract`, so it
+inherits this defect exactly: a guide that writes an entry token as an *example* of citation
+syntax makes that token look cited, and the check would then report a define-on-citation
+entry as a real dangling reference — landing it in the actionable half of its own partition,
+which is the half a reader is told to act on first.
+
+**Bounded, not hypothetical, on the one population measured so far.** The finding that
+prompted this — 33 cited / 9 uncited on `docs/trackers/provenance-subsystem.md` — was checked
+by reading the occurrences rather than trusting the count: they are prose of the form
+*"(PV-3)"*, *"PV-12's labelling population"*, *"the answer on PV-12"*. All genuine citations;
+none is a syntax example, and none sits in inline code. **The 33 is not inflated.**
+
+Two things narrow the exposure, and both are worth knowing before anyone re-measures:
+
+- `extract` already excludes **fenced** code blocks via its `in_code_block` guard, so the
+  exposure is confined to **inline** code and bare prose — and inline code is scanned
+  deliberately, with the comment *"real citations live here"*. The fix cannot simply stop
+  scanning it.
+- Guide-like artifacts are where token-as-example text concentrates. The population to check
+  before trusting a *cited* count is `get_guide` sources, `docs/TAXONOMY.md`, `CLAUDE.md`,
+  and the conventions docs — not the ledgers themselves.
 ## Reproduction
 
 1. Write a document explaining citation syntax, using a realistic token as the example.
@@ -108,4 +138,3 @@ advertisement for the finding.
 - `src/librarian/tools/link_scan/extract.rs` — the extractor
 - `get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified*
 - `docs/issues/archive/2026-08-18-qualified-citation-silently-truncated-when-file-stem-exceeds-31-chars.md` — where this was noticed
-
