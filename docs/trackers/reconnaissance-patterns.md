@@ -425,6 +425,8 @@ and the anchor still resolves — a verbatim quote would have needed re-syncing 
 
 ## R-4 — Grep undercounts struct-field construction sites by 2-3×
 
+**Status:** promoted — verdict `miss` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`, D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The promotion was recorded **nowhere in this ledger** — not in the entry, not in the Index verdict; only the skill knew. Surfaced by the 2026-08-20 verify-open sweep.
+
 **Verdict:** miss
 
 **Observed:** 2026-05-19, same work stream
@@ -453,6 +455,8 @@ expansion.
 ---
 
 ## R-6 — Explicit recon invocation on substrate before mechanism design
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
 
 **Verdict:** hit
 
@@ -489,6 +493,8 @@ storage" to SKILL.md. Currently 1/2.
 ---
 
 ## R-8 — Miss: `edit_markdown(action='replace')` shape unverified on marker-bearing section
+
+**Status:** promoted — verdict `miss → proposal` (Index row), but the proposal has in fact landed. **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`, D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The Index still says `proposal`; surfaced by the 2026-08-20 verify-open sweep.
 
 **Verdict:** miss → proposal
 
@@ -616,6 +622,8 @@ second occurrence before SKILL.md promotion.
 ---
 ## R-11 — Concept docs diverged from code on concurrency semantics
 
+**Status:** open — verdict `hit → proposal` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. Not back-cited in the served `SKILL.md`, so the proposal has not landed; datapoint count not re-assessed here.
+
 **Verdict:** hit → proposal
 
 **Date:** 2026-05-30
@@ -653,6 +661,8 @@ assertions to verify against the keying expression, not facts.
 shared constant. At 2 datapoints, promote to the skill as a Phase-1 rule:
 "verify isolation-claim adjectives against the keying expression."
 ## R-12 — Plan's proposed data structure cited the symptom layer, not the structural layer
+
+**Status:** open — verdict `hit → proposal` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. Not back-cited in the served `SKILL.md`, so the proposal has not landed; datapoint count not re-assessed here.
 
 **Verdict:** hit → proposal
 
@@ -889,10 +899,14 @@ closing the bug class."
 
 ## R-24 — Scout the resource-key derivation before designing a concurrency test; path-keyed hashing makes worktrees a safe fan-out fixture
 
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
+
 (hit) Before testing shared-LSP behavior under concurrency, I scouted how the mux lock/socket + RocksDB home are keyed: `workspace_hash(workspace_root)` — the path (`src/lsp/mux/mod.rs:15-28`; `servers/mod.rs:81`; regression `socket_path_deterministic_for_same_workspace`). That single fact determined the whole test design — isolated worktree hashes cannot collide with the live mux, so a 3-agent concurrent cold-start runs safely on a working machine. Directly answers last session's R-23 miss (verifying shared-resource recovery by contending on the live hash). The same run also surfaced a 4-site `workspace=` pin gap and a concurrent-cold-start kotlin-lsp failure.
 
 **Evidence:** bug-fix W-13 + F-18; `issues/2026-06-11-lsp-tools-ignore-workspace-pin-path`.
 ## R-25 — Scout the catalog's status source + id-keying before archiving a librarian tracker
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
 
 (hit) `/reconnaissance` invoked as I was about to archive 3 session-logs by hand-editing `status: archived` frontmatter + `git mv` to `archive/`. Scouting the librarian first overturned the plan: `artifact(find)`'s active-vs-hidden verdict reads the **catalog DB row's** `status`, not the file (`find.rs:90` → `{nin: HIDDEN_STATUSES}`, defined `mod.rs:27`). A `git mv` + frontmatter edit touches neither the catalog status nor — until someone runs `reindex` — anything the librarian queries, so all 3 would have kept showing `active`. Worse: `id = sha256(abs_path)[..16]` (`ids.rs:17-23`), so the eventual reindex mints a NEW id for the moved file and the cleanup `DELETE … id NOT IN seen_ids` (`indexer.rs:56-237`, `index_repo_sync`) drops the old row — orphaning its `events`/augmentation. Correct mechanism: `artifact(action="update", patch={status:"archived"})` (writes catalog row + frontmatter now) then `artifact(action="move")` (atomic rename + abs_path re-point, `mv.rs:14-75`). Path-keyed-id kin of R-24 and R-15.
 
@@ -900,16 +914,22 @@ closing the bug class."
 
 ## R-26 — A grep line-match locates a symbol; it does not confirm a mechanism
 
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
+
 (hit) `/reconnaissance` invoked after I'd already written "the orphan-squatter mechanism, confirmed" into a mux-LSP-sharing brainstorm — but "confirmed" rested on a `grep` hit (`kill_on_drop` at `process.rs:93`, `Command::new` at `:86`), not a read of the function. Scouting the actual body (`run`, `src/lsp/mux/process.rs:66-135`) is what earned the word: the LSP child is spawned `.kill_on_drop(true)` with **no** `setsid` / `process_group` / `pre_exec` / signal handler anywhere in the spawn path, so `kill_on_drop` — which rides `Child::drop` and never runs under SIGKILL — is the *sole* teardown. The SIGKILL-mux → orphaned-JVM → immortal-RocksDB-lock-holder mechanism (the systemd-reparented kotlin-lsp we found on backend-kotlin) therefore holds. The grep proved *presence* of `kill_on_drop`; only the read ruled out the *falsifier* — a process-group or signal handler that would reap the child regardless. Lesson: a grep line-number is Phase-1 location, not Phase-2 confirmation — never narrate "confirmed" on a mechanism off a grep hit; read the body. Kin of R-19 (assert-a-checkable-fact only after reading) and R-5 (grep ≠ proof).
 
 **Evidence:** this session — backend-kotlin mux/RocksDB lock-contention brainstorm; claim verified read-only against `src/lsp/mux/process.rs:66-135` (no commit). Open edge (R-15 kin, still unscouted): the same brainstorm's *upgrade* recommendation rests on an upstream changelog line — kotlin-lsp v261.13587.0 "indices … properly shared between multiple projects and LS instances" — known only via a WebFetch fast-model paraphrase of `RELEASES.md`, not a raw read; explicitly flagged verify-before-acting and not yet acted on.
 
 ## R-28 — Enumerate a prompt surface's full gate set before editing; targeted test filters miss cross-cutting gates
 
+**Status:** open — verdict `hit + miss` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
+
 (hit + miss) Editing the onboarding system-prompt instructions touched `source.md` (onboarding_prompt surface), `memory-templates.md` (`{{include}}`'d into both single + workspace flows), `workspace_onboarding_prompt.md`, and `builders.rs`. **Hit:** pre-edit recon enumerated the gate set — `extracts_onboarding_prompt_byte_for_byte`, the `prompt_surfaces_onboarding_snapshot` fixture, the 2200-byte `source_md_under_cap`, the `assert_eq!(ONBOARDING_VERSION, 28)` version-pin, the workspace-scope heading-presence test, and the `"6 memories"` content test — so every gate update landed in one commit and only the snapshot needed a legitimate re-bless. **Miss:** a sibling change earlier the same session (get_guide description, `c799e887`) was verified with a *targeted* `cargo test --lib guide::` that did not include `server::tests::tool_descriptions_stay_under_budget` (`src/server.rs:1598`); the 329-char (cap 300) description shipped and was caught only by the onboarding task's full-suite run (bug-fix F-20). Lesson: a tool/field's validating gate often lives in a DIFFERENT module (`server::tests`) than the code it guards; `cargo test --lib <module>` filters silently skip it. Enumerate gates by what they assert on, not by where the edit sits — and run the full suite (or `server::`) for anything a global budget/snapshot gate validates. Kin R-1/R-7 (include_str'd-constant invariants), R-27 (verify before building on a claim).
 
 **Evidence:** bug-fix F-20 + W-15; commits `8427ae4a` (onboarding fix), `31a655e5` (description-budget), `c799e887` (where the gap shipped); verified read-only against `src/prompts/source.rs`, `src/prompts/mod.rs`, `src/server.rs:1598`.
 ## R-29 — Verify a flight-recorder-harvested target exists in the active repo before ranking it
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
 
 **Date:** 2026-06-13 · **Verdict:** hit · **Kin:** R-23 (usage.db telemetry re-derivation), R-19 (cross-project recommendation scouting)
 
@@ -929,6 +949,8 @@ closing the bug class."
 
 ## R-33 — Dead-vs-live is a per-symbol call-graph fact, not a file-proximity fact
 
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
+
 **Date:** 2026-06-15 · **Verdict:** hit
 
 **Seam:** `src/embed/fusion.rs::rrf_fuse` + `BM25Result` vs `src/embed/schema.rs::SearchResult`. The legacy-retrieval-removal tracker's 2026-06-14 reconciliation marked **both** "graduated into live consumers — NOT deletable" because they are adjacent symbols from the same legacy-fusion era.
@@ -943,6 +965,8 @@ closing the bug class."
 
 ## R-34 — On a cross-platform branch, the host `cargo check` is not the rebase gate; cross-compile to the target the branch exists to support
 
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
+
 (hit) Rebased `vdi-windows` onto `experiments` — 41 ours / 89 theirs. The sole conflict was in `src/tools/mod.rs`, in the very `#[cfg(unix)]` gating the branch exists to maintain: `experiments` added `pub mod guide_ledger;` and our `d07d7b18` added `#[cfg(unix)]` to `pub mod peer;` at the same line; both kept. The seam I scouted was not the conflict (that resolution is trivially correct — two independent edits) but the **completeness of the platform gating after absorbing 89 incoming commits**. A host `cargo check` (Linux/unix) only re-compiles the path that already built; it never exercises the Windows side, so it cannot answer "is the rebase correct?" for the dimension this branch is *about*. Scouted the real target: `cargo check --target x86_64-pc-windows-gnu` (MinGW + windows-gnu target both present from the branch's existing local loop) — EXIT=0, clean but for 3 pre-existing dead-code warnings (unix-only LSP-mux helpers in `src/lsp/manager.rs`, already tracked as WIN-23). 
 
 **Counterfactual:** had any of the 89 `experiments` commits introduced an ungated `peer::` use, `std::os::unix::*` import, or other unix-only call, a Linux-only "looks good" would have shipped a broken Windows build that surfaces only on the user's next VDI compile — maximally far from the rebase, hard to attribute back to it. The cross-compile makes the gate fire at the seam, not in the field.
@@ -951,6 +975,8 @@ closing the bug class."
 
 **Evidence:** `vdi-windows` rebase this session (master-side conflict resolve commit on the rebased tip); `src/tools/mod.rs` peer-gate; `cargo check --target x86_64-pc-windows-gnu` EXIT=0; WIN-23 dead-code warning cluster (`windows-platform-support.md`).
 ## R-35 — A tool's own error diagnostic is a hypothesis, not ground truth; reproduce the failing internal call on the real file
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. Cited by § *The seven laws* as the head of the error-message chain (R-35 → R-71 → R-82), so the lesson is distilled in-file even though the entry itself is not back-cited in the served `SKILL.md`.
 
 (hit) Debugging a live `edit_code(insert, position="after")` refusal on
 `backend-kotlin/.../RoomConstraintsTest.kt`. The refusal text — *"cannot determine
@@ -997,6 +1023,8 @@ dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression te
 
 ## R-39 — Adding a tool param/alias is additive-safe (positive-presence schema tests, no `additionalProperties:false`)
 
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
+
 **Observed:** 2026-07-10, unifying the path-param alias set across the file/markdown/symbol tools and adding `file_path`/`output_id` schema properties (param-alias-ergonomics session, driven by a usage.db error-pattern sweep across 72 project DBs).
 
 **Scout done (before editing a shared contract + several `input_schema`s):** grepped the whole tree for schema-shape tests. Every `*_schema_*` test is *positive-presence* — `schema["properties"]["x"].is_object()`, `contains_key(...)`, `enum.contains(...)`; none enumerate the exact property set or assert a property is *absent*. Also confirmed no tool `input_schema()` sets `additionalProperties: false` (`src/server.rs` assembles the schema object without it).
@@ -1010,6 +1038,8 @@ dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression te
 **Evidence:** positive-presence tests in `src/tools/{memory,semantic,symbol,ast,run_command}/tests.rs` + `src/tools/peer.rs`; schema assembly in `src/server.rs` (no `additionalProperties`); gate: 3038 passed / 0 failed. Promote-when (2nd datapoint): distill "adding a tool param/alias is additive-safe — schema tests are presence-only, schemas are open" into codescout memory `reconnaissance`. param-alias-ergonomics session (this session); commit pending.
 
 ## R-41 — A table-rebuild migration's `INSERT … SELECT` column list is a silent allow-list
+
+**Status:** promoted — verdict `miss → promoted` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 — Scout, as the *seam class: schema-migration ordering* bullet. D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The Index knew; the entry did not.
 
 **Verdict:** miss → promoted (was a pending seam-class in SKILL.md Phase 1; Stage-2 is the confirming datapoint)
 
@@ -1026,6 +1056,8 @@ dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression te
 **Evidence:** tracker-entry-graph Stage-2 (experiments); `src/librarian/catalog/migrate_v6.rs`; fix 9aa8063f; test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3 / R-28.
 
 ## R-42 — A reader's None/absent branch that dead-ends silently drops every value the writer stored in that variant
+
+**Status:** promoted — verdict `miss → promoted` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md` § Phase 1 — Scout, as the *seam class: writer-shape ↔ reader-surfacing* bullet. D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. The Index knew; the entry did not.
 
 **Verdict:** miss → promoted (was a pending seam-class in SKILL.md Phase 1; Stage-2 is the confirming datapoint)
 
@@ -1047,6 +1079,8 @@ dump output (AST 214 / LSP 216, matcher flips Some→None at 216); regression te
 
 
 ## R-44 — Hit: a proposed `#[cfg]` gate needs its consumer set enumerated, not its declaration site read
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
 
 **Verdict:** hit (recon caught it pre-dispatch; no downstream gate was reached because no code was written) — write-side twin of R-43, backstopped by R-5
 
@@ -1114,6 +1148,8 @@ twin), R-5 (compiler backstop that would NOT have caught the dead test), R-17
 (sibling-caller spot-check).
 ## R-45 — Hit: relocating a file needs a discovery-by-scan grep, which caller enumeration cannot substitute for
 
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
+
 **Verdict:** hit (ordering caveat — recon ran after the edit, before the gate).
 
 Fixing the two-module lock-file leak
@@ -1162,6 +1198,8 @@ not project-shaped — holds in any language with a shared runtime directory —
 destination is `SKILL.md` Phase 1 as a named seam class, not a project memory.
 
 ## R-47 — Hit: enumerate the delegate's callers too; the report walked one call path
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
 
 **Verdict:** hit.
 
@@ -1216,6 +1254,8 @@ function in the chain the fix touches, not only the one the report names; a defe
 shared machinery lives on the link that performs the operation."*
 
 ## R-48 — Hit: a fix built from the report's reproduction inherits its blind spots, and so does every test written against it
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
 
 **Verdict:** hit — though a near-miss: the gap survived commit, a green gate, seven tests
 and an archive, and was caught only at the live-verification step.
@@ -1347,6 +1387,8 @@ before the `F-7` sweep.
 
 ## R-50 — The view is not the set: five errors, one shape
 
+**Status:** open — verdict `miss → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. `→ rule` records that it fed a distilled law, not that it reached the skill: not back-cited in the served `SKILL.md`. Datapoint count not re-assessed here.
+
 **Verdict:** miss → rule. Recon did not prevent these; they were caught downstream, each
 by a different accident. The value is in the shape they share.
 
@@ -1407,6 +1449,8 @@ summary) is project-shaped and belongs in the `reconnaissance` memory instead.
 ---
 
 ## R-51 — Miss: an instrument that writes into the corpus it measures
+
+**Status:** open — verdict `miss → rule, promote-ready` (Index row), lifted 2026-08-20 by the verify-open sweep. **`promote-ready` is a fired criterion that nothing harvested** — the exact state `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` is about, found by the sweep that bug provoked. Not back-cited in the served `SKILL.md`. Candidate for the next promotion pass.
 
 **Date:** 2026-08-03 · **Verdict:** miss → rule · **Kin:** R-50 (complement), R-10 (completeness scout)
 
@@ -1479,6 +1523,8 @@ directory-exclusion check and needs an explicit provenance-of-provenance rule.
 
 ## R-52 — An artifact's ownership is the union of its inputs' ownership
 
+**Status:** open — verdict `miss → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. `→ rule` records that it fed a distilled law, not that it reached the skill: not back-cited in the served `SKILL.md`. Datapoint count not re-assessed here.
+
 **Date:** 2026-08-04 · **Verdict:** miss → rule · **Kin:** R-51 (sibling, not amendment)
 
 **Why a sibling and not an amendment to R-51.** The two failures are different and
@@ -1547,6 +1593,8 @@ stronger version of the same fix.
 **Verdict:** miss → rule, **applied**. Second datapoint for the R-51 family and
 the first to separate misplaced-data from wrong-numbers.
 ## R-53 — A corpus's composition is a seam; census it by producer before measuring
+
+**Status:** open — verdict `miss → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. `→ rule` records that it fed a distilled law, not that it reached the skill: not back-cited in the served `SKILL.md`. Datapoint count not re-assessed here.
 
 **Class:** input-validity — the analysed corpus vs. the corpus you believe you
 have. Sibling to R-50 (*the view is not the set*) and R-51 (*an instrument that
@@ -1623,6 +1671,8 @@ programme did the first carefully and never did the second.
 ---
 
 ## R-54 — A row is not an observation until you have checked the unit and the nesting
+
+**Status:** open — verdict `miss → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. `→ rule` records that it fed a distilled law, not that it reached the skill: not back-cited in the served `SKILL.md`. Datapoint count not re-assessed here.
 
 **Class:** input-validity, sampling-frame layer. Third in the family: R-50 guards
 the **listing** (what did the view drop), R-53 guards the **substrate** (what is
@@ -1784,6 +1834,8 @@ call, where the tell is a code shape rather than a syscall string.
 
 ## R-75 — A process-level env scrub is not configuration isolation
 
+**Status:** open — verdict `miss → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. `→ rule` records that it fed a distilled law, not that it reached the skill: not back-cited in the served `SKILL.md`. Datapoint count not re-assessed here.
+
 **Observed:** 2026-08-13, verifying end-to-end that the local ONNX embedding path runs
 offline, against the release binary rather than the test suite.
 
@@ -1839,6 +1891,8 @@ mechanism design), R-59 (a repo artifact that already knew the answer, unconsult
 
 ## R-87 — Hit: before designing an abstraction, scout for the dispatch point that already exists
 
+**Status:** promoted — verdict `hit` (Index row). **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`, D11-verified 2026-08-20 in the served `1.16.13` cache: back-cited by id, 1 occurrence. Like [[R-4]], the promotion was recorded **nowhere in this ledger** — not in the entry, not in the Index verdict; only the skill knew. Surfaced by the 2026-08-20 verify-open sweep.
+
 **Observed:** 2026-08-15, SD-1b. Asked how to generalise doc-ref extraction
 across "the other supported languages" and how to "abstract it away".
 
@@ -1889,6 +1943,8 @@ the reconnaissance skill file (in the codescout-companion repo, so not a path
 resolvable from here) as a named seam class: *the variant-dispatch seam*.
 
 ## R-88 — Hit: the instrument that nominates a refactor group also fixes its axis, and that axis can be orthogonal to the real duplication
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line and was invisible to every disposition query. Not back-cited in the served `SKILL.md`, so not promoted; datapoint count not re-assessed here.
 
 **Verdict:** hit — the scout falsified the group's premise and located the actual
 duplication, which a live A/B measurement then confirmed as a defect.
@@ -2326,6 +2382,8 @@ was read as a possible silent no-op, and reading `mod.rs:341` first showed `path
 glob list, so no bug was filed. Added by the 2026-08-16 disposition sweep.
 ## R-92 — A filed root cause is a hypothesis, and confirming it usually widens the bug
 
+**Status:** open — verdict `hit ×2` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. Two datapoints already recorded in the verdict. Not back-cited in the served `SKILL.md`; kin to [[R-49]], which *was* promoted — worth checking whether this is the same law.
+
 **Verdict:** hit (×2) · **Observed:** 2026-08-16, fixing the two tool-quirk bugs the
 2026-08-16 hygiene sweep filed
 
@@ -2386,6 +2444,8 @@ cause is a lower bound; re-derive its scope"* — since it is craft-shaped, not
 project-shaped.
 
 ## R-93 — First audit-on-promote: C re-promoted, and the audit's own precedent text failed the audit
+
+**Status:** open — verdict `hit` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. It is the precedent the audit-on-promote convention cites (`claude-plugins:c889e83`, 1.16.4 → 1.16.5), so the *convention* landed even though this entry is not itself back-cited in the served `SKILL.md`.
 
 **Observed:** 2026-08-16, first exercise of the audit-on-promote protocol that
 shipped the same day (`claude-plugins:c889e83`, 1.16.4 → 1.16.5).
@@ -2452,6 +2512,8 @@ inevitable, five of them are normal.
 
 ## R-94 — A wiring inventory is not a delivery inventory, and it is wrong in both directions
 
+**Status:** open — verdict `hit ×1, miss ×2 (self-caught)` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. Three datapoints already recorded in the verdict. Not back-cited in the served `SKILL.md`, so not promoted.
+
 **Verdict:** hit ×1, miss ×2 (self-caught) · **Observed:** 2026-08-16, fixing BL-25
 (guide topics nothing triggers)
 
@@ -2513,6 +2575,8 @@ conclusion. At that point rule 1 ("can it arrive by a path not in the registry?"
 craft-shaped half and belongs in the `reconnaissance` memory topic.
 
 ## R-95 — A deferral rationale is a claim, and it is the least-audited kind
+
+**Status:** open — verdict `hit ×5 → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. **Five datapoints** recorded in the verdict, which is the highest count of any unpromoted entry in this ledger and above most `Promote-when` thresholds. Not back-cited in the served `SKILL.md`. Strongest candidate for the next promotion pass.
 
 **Verdict:** hit ×5 in one cluster → rule
 
@@ -2586,6 +2650,8 @@ read-the-`## Fix`-as-a-plan rule (R-62).
 ---
 
 ## R-96 — Widening a gate disarms the tests that used it as scaffolding, and they go green for a new reason
+
+**Status:** open — verdict `miss (self-caught) → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. `→ rule` records that it fed a distilled law, not that it reached the skill: not back-cited in the served `SKILL.md`. Datapoint count not re-assessed here.
 
 **Verdict:** miss (self-caught by the suite) → rule · **Observed:** 2026-08-16, the IL-3
 refactor (GF-1/GF-2 in `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md`).
@@ -2665,6 +2731,8 @@ hardcoded seed. A fixture that leaves the ratio implicit lands on the wrong side
 of a future gate without saying so.
 
 ## R-97 — A classifier you just wrote has been calibrated on exactly one case: the one that made you write it
+
+**Status:** open — verdict `miss (self-caught) → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. `→ rule` records that it fed a distilled law, not that it reached the skill: not back-cited in the served `SKILL.md`. Datapoint count not re-assessed here.
 
 **Verdict:** miss (self-caught on the second real input) → rule
 
