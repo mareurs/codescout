@@ -617,8 +617,9 @@ authors look is not a convention).
 
 ## CAP-7 — Make record decay detectable — three doctor checks so corrections travel
 
-**Status:** open — proposed 2026-08-19. **Check 3 shipped 2026-08-19**
-(`f632e7ef`, patch-id `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2`); checks 1 and 2 open.
+**Status:** open — proposed 2026-08-19. **Checks 2 and 3 shipped 2026-08-19**
+(check 3: `f632e7ef` / patch-id `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2`; check 2:
+`067ced2c` / patch-id `4315447d80b5bed845e5911dd8178adaf3b72a9a`). **Check 1 open.**
 
 ### The ask
 
@@ -630,9 +631,15 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
 
 1. **`archived_fix_sha_unresolvable`** — an archived bug file whose cited fix SHA no longer
    resolves. Report the file, the dead SHA, and its recorded patch-id if present.
-2. **`terminal_status_with_caveat`** — a bug file whose `status` is terminal
-   (`fixed`/`mitigated`/`wontfix`) *and* whose `unverified:` field is non-empty. This is the
-   population the canonical triage query hides by construction.
+2. ~~**`terminal_status_with_caveat`**~~ — **SHIPPED 2026-08-19**, `067ced2c` / patch-id
+   `4315447d80b5bed845e5911dd8178adaf3b72a9a`. A bug file whose `status` is terminal
+   (`fixed`/`mitigated`/`wontfix`) *and* whose `unverified:` field is non-empty — the
+   population the canonical triage query hides by construction. Archived files are included
+   deliberately (nothing re-reads `archive/`, so a caveat there is *more* hidden). Live on
+   this repo it reports **8**, and the list is immediately actionable: three of the eight
+   say their fix SHA is missing, obsolete, or promised-but-absent, which is exactly the
+   population check 1 exists to resolve. Four mutations applied and run, four killed, all
+   load-bearing.
 3. ~~**`declared_root_missing`**~~ — **SHIPPED 2026-08-19**, `f632e7ef` / patch-id
    `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2`. For each `[[project]]` in the workspace
    config, `<config_owner_root>/<declared_root>` must be a directory. Open decision 4 was
@@ -697,8 +704,13 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
 1. **Severity and gating.** Should any of these fail CI, or report only? Leaning
    report-only: the measured cause of the unarchived pile is an unsatisfiable gate, and
    adding a gate is how that recurs. Visible absence beats mandatory verification.
-2. **Where check 2 draws the line.** `unverified:` non-empty is mechanical, but a caveat
-   can be informational rather than blocking. Possibly a severity split on a leading marker.
+2. ~~**Where check 2 draws the line.**~~ **RESOLVED 2026-08-19: report every caveat, no
+   severity split.** Not deferred silently — the reason is that no leading-marker convention
+   exists, so introducing one at implementation time would leave every caveat written before
+   that moment unmarked and force them all into whichever bucket the default picks. An
+   undifferentiated list of 8 beats a differentiated one whose categories are an artifact of
+   when each entry happened to be written. Revisit only if the population grows enough that
+   reading all of it stops being cheap.
 3. **Cost of check 1.** Resolving N SHAs per run is cheap with `git2`; scanning history for
    a patch-id is not. Suggest: resolve the SHA only, and *report* the recorded patch-id
    without resolving it.
@@ -718,12 +730,16 @@ record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08
    It is now the nearest sibling for checks 1 and 2 in every respect that matters here:
    finding shape, registration point in `call`, a `catalog_health` sub-object that reports
    what was NOT checked, and a hint that surfaces the count.
-2. Next: check 2 (`terminal_status_with_caveat`) — frontmatter read, no git. Note it needs
-   something check 3 did not: a way to enumerate bug files. `artifact(kind="bug")` rows are
-   in the catalog, so this is a SQL scan plus a frontmatter parse, closer to
-   `scan_undefined_entries` than to check 3. Verify that before designing — the last two
-   substrate assumptions on this entry were both wrong.
-3. Then check 1 (`archived_fix_sha_unresolvable`) — needs `git2`.
+2. ~~Next: check 2~~ — done. Its substrate prediction held this time: the `artifact` table
+   carries `kind` and `status` columns, so it is a SQL narrow plus a frontmatter parse
+   (`unverified:` lands in `extra`, which is NOT catalog-indexed). Read
+   `scan_terminal_status_with_caveat` as the nearest sibling for check 1.
+3. **Next: check 1 (`archived_fix_sha_unresolvable`)** — needs `git2`, and check 2 just
+   handed it a target list. Three of the eight caveats check 2 reports are *about a missing
+   or obsolete fix SHA*, so check 1 has a ready-made validation set: it should fire on those
+   files and not on the other five. Scout whether `resolve_head_sha`'s `git2` handle is
+   reachable from `doctor` before designing — that is the assumption class that was wrong
+   twice on this entry.
 4. Each check needs tests that observe a *planted* violation, and then **N mutations
    actually applied and run**, with the observed surviving count reported. Not a coverage
    argument. See `CLAUDE.md` § mutation-apply discipline — and note that on check 3 the
@@ -819,6 +835,23 @@ authoritative instead of derived.
 - **Entry tokens:** of 6321 cross-file citations, 43% resolve, **33% are ambiguous**, 24%
   dangling. The gram fixes the ambiguous share; it does **not** fix dangling (missing
   headings), and `doctor` says that population is already largely migrated.
+- **Caveat on the two figures above, added 2026-08-19.** They are **upper bounds**.
+  `docs/issues/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md`
+  records that `link_scan` has no "mention" mode: a token written to *teach* the syntax is
+  extracted identically to one written to *cite*. Every document explaining how citations
+  work therefore injects its own examples into the graph — and those land preferentially in
+  the **ambiguous** and **dangling** buckets, because a teaching example usually has many
+  definers or none. That is precisely the share this entry's argument rests on.
+  **Magnitude: small, and bounded by a mechanism worth knowing.** `link_scan` skips fenced
+  code blocks and scans only inline and prose tokens, so the majority of examples — which
+  live in ``` fences — never enter the graph. A hand-picked sample of four teaching
+  artifacts yields 79 tokens (`docs/TAXONOMY.md` 8; the bug file about this problem itself
+  **0**). Treat 79 as a floor from an unsystematic sample, not a count: nobody has
+  enumerated every teaching artifact, and the share falling in the ambiguous/dangling
+  buckets specifically is unmeasured. The correction does not overturn the case for CAP-8 —
+  it means the headline percentages should be quoted as "at most", and that the
+  2026-07-17 ↔ 2026-08-19 growth comparison is only sound if the inflation is roughly
+  constant across both surveys, which is plausible but unchecked.
 - **Not a codescout pathology.** 7 repos with meaningful entry counts show 26–72% ambiguity;
   `backend-kotlin` (different umbrella, different language, 722 entries) sits at 34%, and
   codescout at 28% is among the healthiest. This is a property of the per-file `PREFIX-N`
