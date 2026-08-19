@@ -12,7 +12,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 5
-entry_high_water_W: 3
+entry_high_water_W: 5
 ---
 
 > **Work stream:** auditing codescout's four prompt surfaces (`tools/list`,
@@ -44,6 +44,8 @@ entry_high_water_W: 3
 | W-1 | 2026-08-18 | med | Scout the generator before editing a generated surface | Would have shipped a "free mechanical dedup" with no valid implementation | validated |
 | W-2 | 2026-08-18 | high | Do the cache arithmetic before scoping byte-shaving: a 100% cache_read surface costs its cache_read price, not its byte count | Would have sunk dozens of evals into `artifact`'s 51-param long tail to recover ~$0.0002/request, while the axis that might move (does the prose change behaviour?) went unmeasured | validated |
 | W-3 | 2026-08-19 | high | Name the substrate before quoting a verdict — which tree, which binary, which index actually produced the number | Would have published 4222/1 as a gate result without knowing whether it described `HEAD` or a concurrent session's uncommitted mutant | validated |
+| W-4 | 2026-08-19 | high | Calibrate a hand-built instrument against a known-good one on the overlapping population before extending it | Six instrument defects, each producing a plausible number and no error — 80% of scanned files were worktree duplicates, and the first patch-id test silently did nothing while exiting 0 | validated |
+| W-5 | 2026-08-19 | high | When N records share a defect, fix the surface that instructed them before repairing any of them | Would have caveated 3 bug files while leaving 6 live instruction surfaces teaching the same rule to the next author | validated |
 ---
 
 ## Baseline measurement (2026-08-18)
@@ -462,6 +464,113 @@ a green bar proves nothing until you mutate it, the other says a measurement pro
 nothing until you know what it measured.
 
 **Status:** validated — two datapoints, both in this work stream.
+
+## W-4 — Calibrate a hand-built instrument against a known-good one before believing any number it produces
+
+**Observed:** 2026-08-19, sizing the payoff of the content-addressed-identity proposal
+(CAP-8) across 10 repos in 2 umbrellas.
+
+**Pattern:** When you build an ad-hoc measuring instrument (a script, a regex, a walk) and
+a **known-good** instrument already covers part of the same population, run both on the
+overlap and compare *before* extending yours to the part it does not cover. A ratio near 1
+licenses the extension; a large ratio localises what you got wrong.
+
+**Counterfactual:** My scan reported codescout at 7261 ambiguous citations against
+`link_scan`'s 423 — **17×**. Every intermediate number I had produced up to that point was
+wrong, and none of them looked wrong. Six distinct instrument defects, each found only by
+checking:
+
+1. `.claude/worktrees/` not excluded — **80% of codescout's 6858 markdown files were 5–6
+   copies of the same content**. This alone accounted for most of the gap.
+2. The noise-prefix regex included single-letter prefixes (`T-`, `M-`, `N-`), which ate
+   *genuine* ledger tokens. "9% noise" was really **1%**.
+3. Self-references counted as breakage — **35% of all mentions**. `link_scan` has a test
+   named `self_citation_wins_even_with_other_definers`; a file citing its own entry
+   resolves fine.
+4. Fenced code blocks not stripped, so quoted examples counted as citations.
+5. The archived-loses-to-active tie-break unmodelled, overstating ambiguity.
+6. In the *fix* for a stale count, I nearly wrote 16 where recounting gave **17** — and the
+   recount also revealed my checking regex had false negatives (`S-NN` and `HY-10` do not
+   match a `PREFIX-N` pattern).
+
+After the fixes: self-cites 1.27×, dangling 1.19×, ambiguous 1.73×. **Two of three
+converging is what licensed reporting the third** — a uniform 5× gap would have meant a
+population mismatch, but two matching while one stays high localises the residual to
+something specific (link_scan's dangling is prefix-gated to declared ledgers, and it scans
+1072 catalogued artifacts rather than the filesystem).
+
+**Confirming data points:**
+
+1. This session — six defects, zero found by re-reading the script, all six by comparing
+   its output to something independent.
+2. The `git patch-id` rebase-invariance test: the first run silently did nothing because
+   `git cherry-pick` has no `-q` flag, and `exit_code` was **0** because the last command in
+   the chain succeeded. The result — "patch-id ALSO CHANGED" — was a broken instrument, not
+   a finding, and would have killed a correct design.
+
+**Impact:** high — every one of these produced a *number*, never an error. A wrong number
+is publishable, citable, and compounds: it becomes the denominator of the next decision.
+
+**Promote-when:** a third work stream where a hand-built measurement diverged from a
+known-good instrument on the overlap. At 3, promote to `CLAUDE.md` next to the
+mutation-apply discipline — the three are one rule: **a green bar, a measurement, and a
+tool's output all need an independent check before they carry weight.** Pairs with
+`prompt-surface-compaction-session-log:W-3` (name the substrate before quoting the verdict);
+that one is about *which world* was measured, this one about *whether the ruler is straight*.
+
+**Status:** validated — 2 datapoints this session, both with the wrong answer available and
+plausible.
+
+## W-5 — When several records make the same mistake, fix the generator — the records were obeying it
+
+**Observed:** 2026-08-19, repairing three bug files that sat unarchived waiting on a
+master-side SHA a fast-forward promotion would never mint.
+
+**Pattern:** When N records share a defect, **read the surface that told them to do it
+before repairing any of them.** Repairing the instances leaves the generator running; the
+next author reproduces the defect faithfully, and the repair looks like carelessness on
+their part rather than a working instruction.
+
+**Counterfactual:** I had already caveated the three files and was about to move on. Marius
+said *"lets fix taxonomy first"*, and the generator was there in two places:
+
+- `docs/issues/_TEMPLATE.md` **contradicted itself** — its comment block carried the correct
+  cherry-pick/fast-forward table, while its `## Fix` section, the prose an author actually
+  reads *while writing that section*, said unconditionally to "list **master-side** commit
+  SHAs".
+- `docs/TAXONOMY.md`'s BUG row said the same thing with **no condition at all**.
+
+The three authors were not careless. They read the instruction and followed it. Repairing
+only the three files would have left both surfaces teaching the same thing to the next
+author, and this session's other measurement says nothing re-reads a bug file once written.
+
+The sweep found more than expected: **six** live instruction surfaces carried the rule
+(`CLAUDE.md`, `docs/RELEASE.md`, `docs/TAXONOMY.md`, `_TEMPLATE.md`, the
+`tracker-conventions` guide, and memory `gotchas`, which `RELEASE.md` names as the rule's
+concise home). Two leaks appeared *inside my own edits*: a RELEASE.md code block left
+contradicting the paragraph I had just rewritten above it, and a TAXONOMY section
+(`## SHA-citation rule`) I had never opened, which taught the old rule and cited a CLAUDE.md
+heading I had renamed forty minutes earlier — which then broke two further live citations.
+
+**Confirming data points:**
+
+1. This session — 3 instances, 6 generator surfaces, 2 self-inflicted leaks during the
+   sweep itself.
+2. `docs/trackers/reconnaissance-patterns.md`'s standing law that a declared consolidation
+   leaks at call sites nobody swept: *declaring the law is cheap, the whole-tree sweep is
+   the actual work, and the sweep is what gets skipped.* Same shape, arriving from the
+   documentation side rather than the code side.
+
+**Impact:** high — instance-repair on a live generator has a *negative* half-life: the pile
+regrows while the repair makes it look handled.
+
+**Promote-when:** a third instance where repairing records without repairing their source
+document would have regenerated the defect. At 3, promote to `CLAUDE.md` as: *before
+repairing N records that share a defect, find and fix the surface that instructed them —
+then sweep every surface carrying the same rule, including the memories.*
+
+**Status:** validated — 2 datapoints, one of them this session's own edit leaking twice
+while sweeping for exactly this failure mode.
 
 ## Template for new entries
 

@@ -11,7 +11,7 @@ tags:
 - reflective
 - backlog
 topic: capability-proposals
-entry_high_water_CAP: 6
+entry_high_water_CAP: 8
 entry_prefix: CAP
 ---
 
@@ -41,6 +41,8 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-4 | 2026-08-16 | proposed | — | Cross-session collision hint — tell a session when another one just touched this file |
 | CAP-5 | 2026-08-17 | proposed | medium | Server-assigned entry ids for prose trackers — make allocation atomic instead of advisory |
 | CAP-6 | 2026-08-17 | proposed | small–medium | Derive TAXONOMY's append-recipe column from `entry_prefix` declarations — it drifted twice in one day |
+| CAP-7 | 2026-08-19 | proposed | small–medium | Make record decay detectable — three doctor checks so corrections travel (Layer 2) |
+| CAP-8 | 2026-08-19 | proposed | large | Content-addressed identity — a "gram" for entries, stored-not-derived ids for artifacts (Layer 3) |
 
 ## CAP-1 — Session artifact-touch ledger
 
@@ -612,6 +614,169 @@ mapping. (1) closes the drift class on its own.
 **Kin:** HY-10 (the 3:27 ledger/tracker ratio, and the F/W blocker), CAP-5 (the
 allocator this builds on), R-99 (a convention documented anywhere other than where
 authors look is not a convention).
+
+## CAP-7 — Make record decay detectable — three doctor checks so corrections travel
+
+**Status:** open — proposed 2026-08-19, substrate checked, not implemented.
+
+### The ask
+
+Three new checks in `librarian(action="doctor")` so that a record's decay becomes a
+**query** instead of something a human has to notice. This is "Layer 2" of the
+record-legibility work; Layer 1 (the `unverified:` caveat field) shipped 2026-08-19 across
+`CLAUDE.md`, `docs/TAXONOMY.md`, `docs/issues/_TEMPLATE.md` and
+`src/prompts/guides/tracker-conventions.md`.
+
+1. **`archived_fix_sha_unresolvable`** — an archived bug file whose cited fix SHA no longer
+   resolves. Report the file, the dead SHA, and its recorded patch-id if present.
+2. **`terminal_status_with_caveat`** — a bug file whose `status` is terminal
+   (`fixed`/`mitigated`/`wontfix`) *and* whose `unverified:` field is non-empty. This is the
+   population the canonical triage query hides by construction.
+3. **`declared_root_missing`** — for each `[[project]]` in the active workspace config,
+   assert `<workspace_root>/<relative_root>` exists and is a directory.
+
+### Substrate check (2026-08-19)
+
+- `librarian(action="doctor")` **exists** and is already a named-checks drift scanner:
+  `src/librarian/tools/doctor.rs`. A live run this date returned 8 check kinds
+  (`abs_path_outside_managed_roots` 310, `entry_without_definition` 1,
+  `frontmatter_id_is_not_a_catalog_id` 3, `frontmatter_id_mismatch` 3,
+  `ledger_defines_nothing` 2, `missing_file` 2, `params_behind_body` 1,
+  `worktree_scoped_row` 2). Adding a check is idiomatic, not novel.
+- `scan_undefined_entries` (`src/librarian/tools/doctor.rs:1501`) is the nearest sibling in
+  shape — it already emits a per-artifact finding citing the conventions guide.
+- **Check 3 is fully specified already**, by the bug it would have caught:
+  `docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`
+  names the assertion, the report shape, and says to site it next to
+  `abs_path_outside_managed_roots`. Nothing needs designing.
+- **Genuinely missing:** no check reads bug-file frontmatter at all, and nothing resolves a
+  git SHA. Check 1 needs a git handle inside doctor — `resolve_head_sha` and
+  `probe_has_git_remote` already use `git2`, so the dependency exists; do not shell out.
+- Rule-of-three is satisfied: `audit_doc_refs`, `link_scan` and `doctor` are three existing
+  instances of "continuous mechanical re-check", so a fourth predicate under the same
+  chokepoint is earned duplication rather than a speculative abstraction.
+
+### Why it matters (measured 2026-08-19)
+
+- **10 of 63** archived bug files had already lost their fix SHA; the objects are absent
+  from the object database, and subject-keyword recovery returns 2–153 candidates.
+- **14 of 16** terminal-but-unarchived bug files stated a blocker in prose that no query
+  could reach. One `fixed` record whose body read *"Tests added: None"* and *"does not
+  prevent recurrence"* was invisible to `find(kind="bug", status="open")`.
+- The correction problem is **propagation, not knowledge**: on 2026-08-18 one bug file
+  independently worked out the fast-forward rule and wrote it down, while three siblings sat
+  waiting on a SHA that would never exist. Nothing re-reads a bug file once written. These
+  checks are what would make such a correction travel.
+
+### Open decisions
+
+1. **Severity and gating.** Should any of these fail CI, or report only? Leaning
+   report-only: the measured cause of the unarchived pile is an unsatisfiable gate, and
+   adding a gate is how that recurs. Visible absence beats mandatory verification.
+2. **Where check 2 draws the line.** `unverified:` non-empty is mechanical, but a caveat
+   can be informational rather than blocking. Possibly a severity split on a leading marker.
+3. **Cost of check 1.** Resolving N SHAs per run is cheap with `git2`; scanning history for
+   a patch-id is not. Suggest: resolve the SHA only, and *report* the recorded patch-id
+   without resolving it.
+
+### Resume
+
+1. Read `src/librarian/tools/doctor.rs` around `scan_undefined_entries` for the finding
+   shape and the per-check registration point.
+2. Implement check 3 first — it is fully specified and needs no git.
+3. Then check 2 (frontmatter read, no git), then check 1 (needs `git2`).
+4. Each check needs a test that observes a *planted* violation, applied and run — not a
+   coverage argument. See `CLAUDE.md` § mutation-apply discipline.
+
+## CAP-8 — Content-addressed identity — a "gram" for entries, and stored-not-derived ids for artifacts
+
+**Status:** open — proposed 2026-08-19, measured and validated, **not** implemented. This is
+a migration, and should be built after CAP-7.
+
+### The ask
+
+Every identity in this system is **positional**, and every one has a measured failure:
+
+| Identity | Derived from | Measured failure |
+|---|---|---|
+| artifact id | `sha256(abs_path)` | re-keys on move — archiving is the normal end state |
+| entry id | per-file `PREFIX-N` counter | 33% of cross-file entry citations are ambiguous |
+| citation qualifier | file stem | truncated past 31 chars (fixed 2026-08-19, `6d0145e1`) |
+| fix pointer | git SHA on a rewritable branch | 10 of 63 archived files already dead |
+
+Replace positional identity with **content** identity. Marius's framing: *"identity is by
+content, not moving space."*
+
+### Two halves, two mechanisms — do not conflate them
+
+This was got wrong once mid-analysis and is the most important thing on this entry.
+
+**Entries (the gram).** A tracker entry gets an id derived from `hash(title + description)`.
+Measured across 10 repos in 2 umbrellas (3263 markdown files, worktrees excluded, fences
+stripped):
+
+- **Title churn: 0.7%** — 4 of 598 entries ever had their title changed. The cascade
+  ("regenerate and update every reference") would have fired four times in project history.
+- **Collision rate:** `hash(title)` 4.8% → `hash(title+description)` **3.4%**. Of the 16
+  residual colliding groups, **15 are deliberate repeats** (the same eval case re-run across
+  `nav-eval-round-2/3/4/5`, archive duplicates). **Genuine accidental collisions: 1 group,
+  2 headings, 0.10%.**
+- Prose churn : heading churn is **55 : 1**, so the hash must cover the **title only** —
+  never the body.
+
+**Artifacts.** A title-hash **cannot** serve artifacts: **222 files carry `title: null`**,
+and the real title collisions are live-ledger/archive-companion pairs (`Prompt Hamsa — Audit
+Log` ×2, `Reconnaissance patterns` ×3) — which `get_guide("tracker-conventions")` *mandates*
+creating. The fix here is not a hash but an **inversion**: make the stored frontmatter `id:`
+authoritative instead of derived.
+
+### Substrate check (2026-08-19)
+
+- Only **359 of 3263** files carry a 16-hex frontmatter `id:` (11%), and **356 of those are
+  exactly `sha256(current path)`** — the field is a cached derivation, not identity.
+- The **3** that differ are the only artifacts in the corpus carrying evidence of a prior
+  identity. `doctor` classifies them as `frontmatter_id_mismatch`, and ships
+  `fix=repair_frontmatter_id` **to overwrite them with the path-derived value**. The system
+  has a slot for stable identity and a maintenance action whose purpose is to erase it.
+  Inverting that is likely a larger share of the work than any new code.
+- `link_scan` already resolves entry tokens, artifact ids, rel_paths and md links
+  (`src/librarian/tools/link_scan/`), with a pinned tie-break where archived definers lose to
+  active ones. A gram would be a fourth citation kind in an existing resolver.
+
+### Payoff, measured
+
+- **Artifact ids:** of 574 distinct 16-hex ids cited in markdown, 151 are dead (26%), and
+  **73 of those died purely by re-keying** — the document is still on disk and readable.
+  Content identity fixes **48% of dead ids / 45% of dead instances** by construction.
+- **Entry tokens:** of 6321 cross-file citations, 43% resolve, **33% are ambiguous**, 24%
+  dangling. The gram fixes the ambiguous share; it does **not** fix dangling (missing
+  headings), and `doctor` says that population is already largely migrated.
+- **Not a codescout pathology.** 7 repos with meaningful entry counts show 26–72% ambiguity;
+  `backend-kotlin` (different umbrella, different language, 722 entries) sits at 34%, and
+  codescout at 28% is among the healthiest. This is a property of the per-file `PREFIX-N`
+  convention wherever it is used.
+
+### Open decisions
+
+1. **Add the gram, or replace `PREFIX-N`?** Strongly prefer *add*. Git's own model is
+   content-addressed objects plus human-readable refs; `bug-fix-session-log:F-33` is legible
+   and `gram:a3f9c2` is not, and this project's moat is the LLM-facing surface.
+2. **Whether identical entries in different ledgers SHOULD share a gram.** Under content
+   addressing they do, and for the eval-round repeats that is arguably correct. Decide
+   before implementing, because it determines whether the ledger is part of the key.
+3. **Migration order.** Additive first: compute and store grams, re-key nothing, leave every
+   existing citation working. Big-bang re-keying is the rewrite trap.
+4. **The declared-vs-undeclared F/W contradiction** (see `docs/TAXONOMY.md` § Main taxonomy)
+   should be settled first — it changes what the gram is being asked to fix.
+
+### Resume
+
+1. Settle open decision 2, then 1 — neither needs code.
+2. Prototype gram computation over the existing corpus and re-run the collision measurement
+   before writing any resolver change; the numbers above are reproducible from
+   `docs/issues/2026-08-19-archived-fix-shas-orphan-when-experiments-rebases.md`'s method.
+3. Treat the `repair_frontmatter_id` inversion as its own change with its own decision — it
+   changes what `doctor` considers a defect.
 
 ## Anti-goals
 
