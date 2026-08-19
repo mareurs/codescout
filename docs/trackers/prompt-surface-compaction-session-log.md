@@ -626,6 +626,24 @@ wrong answer available and plausible. Datapoints 3, 5, 6 and 7 all post-date the
 refute the "just remember it" reading of it. See [[F-7]] for the meta-failure the
 unharvested criterion belongs to.
 
+**Promotion anchor** — added 2026-08-20. Until then this entry's promotion claim named **no
+target at all**, which is exactly the defect
+`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` describes,
+sitting unnoticed on the entry that provoked that bug.
+
+- **Target — all three, named individually:** `~/.claude/CLAUDE.md`,
+  `~/.claude-sdd/CLAUDE.md`, `~/.claude-kat/CLAUDE.md`. Named one by one rather than as
+  *"the user's global CLAUDE.md"*, because that singular phrasing is precisely what let the
+  2026-08-18 promotion land in one file of three and read as done.
+- **Section:** `### Measurement — Never State a Count Your Instrument Did Not Measure`
+- **Verified 2026-08-20:** all three present and byte-identical,
+  `md5 08f0ef6cb5345a3df50a3f4b3b989a96`.
+- **Anchor kind:** section-heading match, not a verbatim body quote. A quote is the fragile
+  form — [[R-89]]'s promoted text was rewritten this same day, which would have turned a
+  quote-based check red on a *correctly* promoted entry. Prefer an anchor that survives the
+  rule being reworded: a stable heading, or a back-citation of this entry's id inside the
+  target.
+
 ## W-5 — When several records make the same mistake, fix the generator — the records were obeying it
 
 **Observed:** 2026-08-19, repairing three bug files that sat unarchived waiting on a

@@ -1,7 +1,7 @@
 ---
 id: '4295b95e60bafeb9'
 kind: bug
-status: wontfix
+status: open
 title: 'BUG: no check detects a fired Promote-when that was never harvested, so a validated lesson never reaches the surface that would change behaviour'
 owners:
 - marius
@@ -12,14 +12,13 @@ tags:
 - record-legibility
 - process
 topic: record-legibility
-closed: 2026-08-19
+closed: ''
 opened: 2026-08-19
 owner: marius
 related:
 - e9667199520251e4
 - '53e35aaefb9f7c71'
-severity: low
-unverified: closed as wontfix on a single datapoint, not on evidence the gap is harmless — re-open if a second promotion lands incompletely, or if a fired Promote-when is found unharvested in a way that costs something
+severity: high
 ---
 
 > **Status: open, severity high.** Nothing breaks at runtime. What fails is the step that
@@ -45,6 +44,62 @@ unverified: closed as wontfix on a single datapoint, not on evidence the gap is 
 > found to have cost something. The measurements below are kept because they are the
 > expensive part and would otherwise be re-derived.
 
+> **RE-OPENED 2026-08-20.** The closure above pre-registered its own exit condition —
+> *"re-open if a second promotion lands incompletely"* — and it fired.
+> `prompt-surface-compaction-session-log:F-9`: three rules promoted into the reconnaissance
+> `SKILL.md` (`claude-plugins:23a11c3`) reached **zero of three** profiles, because the
+> commit did not bump the version the plugin cache is keyed on. Different mechanism from the
+> 2026-08-18 instance, same class. At n=2 the design below is revised — and the fix that was
+> sequenced first turns out to be the weaker one.
+
+## The corrected design (2026-08-20, n=2)
+
+**Fix idea 3 — the profile-divergence md5 — would not have caught the second instance.**
+Measured 2026-08-20:
+
+    08f0ef6cb5345a3df50a3f4b3b989a96  ~/.claude/CLAUDE.md
+    08f0ef6cb5345a3df50a3f4b3b989a96  ~/.claude-sdd/CLAUDE.md
+    08f0ef6cb5345a3df50a3f4b3b989a96  ~/.claude-kat/CLAUDE.md
+
+Green — and correctly so. The two failures have **different signatures**:
+
+| | 2026-08-18 (`CLAUDE.md`) | 2026-08-20 (`SKILL.md`, F-9) |
+|---|---|---|
+| the copies vs **each other** | diverge → md5 fires | byte-identical → md5 green |
+| each copy vs **what the entry claims is in it** | absent in 2 of 3 | absent in 3 of 3 |
+
+Comparing the copies to each other catches one case. Comparing each copy to the **claim**
+catches both. So the thing to build is claim-verification; fix idea 3 is demoted to a
+strictly weaker test of the same property.
+
+**And the anchor must not be a verbatim quote.** Measured the same day: rewriting R-89's
+promoted bullet forced a matching edit to the quote stored in `reconnaissance-patterns.md`.
+Had that edit been missed, a quote-based check would have reported red on a *correctly*
+promoted entry — a false positive produced by the promotion working exactly as intended.
+
+The durable form is **bidirectional**: the entry names the target path, and the promoted text
+back-cites the entry id. `R-1` and `R-3` have done this since 2026-05 —
+*"(R-1 + R-7 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"* — so they are
+verifiable by `grep -c 'R-1' <target>`, invariant under every rewording of the rule itself.
+Measured 2026-08-20: the reconnaissance `SKILL.md` back-cites 20 distinct entry ids, and
+**none of the three promoted that day cite themselves**.
+
+**Population, measured 2026-08-20** — live trackers, excluding `archive/`, counted per entry
+rather than per line: **149** entries carry a `**Promote-when:**`; **13** claim a promoted
+status; `promotion-due` is applied to **0**, existing only in `docs/templates/session-log.md`
+and in this file.
+
+**Sequenced remedy, revised:**
+
+1. **Back-fill the 13 promotion claims** to carry target + durable anchor. Zero code.
+   In progress 2026-08-20.
+2. **A `tracker-hygiene` detector that verifies claims every sweep.** The skill already does
+   this — inside **D10 step 1**, which fires only at ≥21 days idle. That is archive time,
+   which is after the lesson was needed: fix idea 1 restated, now as a located defect rather
+   than a general worry.
+3. **Only then a `doctor` check**, if 1–2 prove insufficient. It can never be a CI gate: the
+   targets (`~/.claude*/CLAUDE.md`, plugin caches) are machine-local and outside every repo,
+   so its verdict is not reproducible on another host.
 ## Summary
 
 Session-log entries carry a `**Promote-when:**` line naming the condition under which the
