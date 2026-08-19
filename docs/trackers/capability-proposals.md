@@ -798,6 +798,15 @@ authoritative instead of derived.
   within hours of being measured, so treat every population figure here as a fact about an
   instant. The 2026-07-17 ↔ 2026-08-19 growth comparison below is unaffected — it compares
   citation-resolution counts, not this one.
+- **RESOLVED same day, `f772b8fe`.** The check now abstains for a worktree shadow declaring
+  its main twin, so the population is de-contaminated. A live run after the fix returns
+  `frontmatter_id_mismatch: 3`, and all three are genuine post-move stale ids in
+  `docs/issues/archive/` and `docs/trackers/` — none in a worktree; `worktree_scoped_row`
+  stays at 3, so nothing was dropped, only re-attributed. **The original figure of 3 is
+  therefore correct again, and this entry's inversion argument stands** — but it stands on
+  a measurement that has now been checked rather than on one that happened to read 3 while
+  counting two different things. Keep consequence (b): the figure is still a fact about an
+  instant, and re-measuring it is one `doctor` call.
 - `link_scan` already resolves entry tokens, artifact ids, rel_paths and md links
   (`src/librarian/tools/link_scan/`), with a pinned tie-break where archived definers lose to
   active ones. A gram would be a fourth citation kind in an existing resolver.
