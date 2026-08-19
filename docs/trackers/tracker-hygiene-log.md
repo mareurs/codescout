@@ -10,7 +10,7 @@ tags:
 entry_prefix: HY
 next-sweep-due: 2026-09-15
 sweep-interval-days: 30
-entry_high_water_HY: 14
+entry_high_water_HY: 15
 ---
 
 # Tracker hygiene log
@@ -1131,6 +1131,73 @@ surfaces that scan these files all passed it — `read_markdown` silently omits 
 
 **Related:** HY-13 (vocabulary compression — same shape, one level up: the standard has to
 be measured, not decreed), HY-5 §1, `R-104`.
+
+## HY-15 — Verify-open sweep: 56% of the R-N ledger had no disposition field, and five promotions were recorded nowhere
+
+**Kind:** hit · **Sweep:** 2026-08-20 (verify-open cadence, triggered by a "what's open?" ask) · **Status:** open
+
+CLAUDE.md's verify-open cadence fires before any backlog triage. Run on `docs/trackers/**`
+excluding `archive/`.
+
+**Population.** 14 open bugs; 32 session-log entries at `Status: open`, 16 of them older than
+14 days. But the dominant finding was not staleness — it was **absence**.
+
+**Evidence pair.** *Declared* by `get_guide("tracker-conventions")` § Required fields:
+*"`**Status:**` is not optional… Without it, criteria go unharvested indefinitely — 39 of 57
+entries in one ledger, over three months."* *Observed*: that ledger is
+`reconnaissance-patterns.md`, and it still stood at **34 of 61 (56%)** with no `Status:` line.
+The guide had measured the defect, published the number, and the ledger it measured was never
+repaired.
+
+**The dispositions were not missing — they were unreachable.** 34 of 34 already carried a
+verdict in the Index row and nowhere else. That is [[HY-10]]'s *"one entry format, never two"*
+with the index **ahead** and the body behind, which is the opposite of the direction that rule
+usually fails in, and `**Status:**` is the field every query reads.
+
+**Mapping derived from precedent, not from the template.** The skill's
+`reconnaissance-patterns-template.md` declares `hit | miss | proposal | promoted | wontfix`,
+but every one of the 27 entries that *did* carry a `Status:` line used it as a **disposition**
+(`open — <datapoint count>`, `promoted to SKILL.md (<sha>)`), with the verdict living in the
+Index column. Writing `hit` into `Status:` would have been template-conformant and would have
+destroyed the harvest signal — the datapoint count is what makes a `Promote-when` actionable.
+Verdicts preserved verbatim in each new line; **datapoint counts deliberately not
+re-assessed**, and each line says so rather than implying a number nothing measured.
+
+**Five promotions recorded nowhere — D11 inverted.** D11 asks *"the entry claims promotion;
+did it land?"* This is the other direction: *"it landed; does anything say so?"*
+
+| Entry | Ledger said | Served `SKILL.md` |
+|---|---|---|
+| [[R-4]] | Index `miss`, no entry status | back-cited by id |
+| [[R-87]] | Index `hit`, no entry status | back-cited by id |
+| [[R-8]] | Index `miss → proposal` | proposal had landed; back-cited by id |
+| [[R-41]], [[R-42]] | Index `miss → promoted`, entry silent | back-cited by id |
+
+For R-4 and R-87 **only the skill knew**. Worth adding as a D11 second direction: a promotion
+with no ledger record is as invisible as a ledger record with no promotion, and the
+back-citation makes it mechanically detectable in both directions.
+
+**Two promotion candidates, left as findings.** [[R-51]] carries `promote-ready` in its
+verdict — a fired criterion nothing harvested, which is precisely what
+`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` is about, found
+by the sweep that bug provoked. [[R-95]] sits at **five datapoints** unpromoted, the highest
+count of any unpromoted entry in the ledger and above most `Promote-when` thresholds.
+
+**One zombie corrected.** `bug-fix-session-log:F-3` read *"open → fixed-verified after plan
+edit lands this turn"* for **94 days**; the edit landed that afternoon. The reconnaissance
+`SKILL.md` quotes F-3 as its worked exemplar with `Status: fixed-verified`, so shipped
+teaching material disagreed with the entry it quoted, and the skill was right.
+
+**Third datapoint for a promotable rule: future-tense prose in a disposition field ages into a
+false open.** F-3 (*"after … lands this turn"*), F-17 (*"planned"*), F-44 (*"should be
+updated"*) — all accurate when written, all false within hours, none noticed for weeks. A
+disposition field should record what **is**, and put the intent in a `Fix idea` / `Next` line
+where nothing reads it as state. Promote at a fourth datapoint, or now if the next sweep wants
+a D11 sibling check for it.
+
+**Result:** 61/61 R-N entries carry a `Status:` line, zero duplicates. Distribution: 48 `open`,
+7 `promoted`, 2 `promoted-to-permanent-docs`, 2 `promote-when`, 1 `drafted`, 1 `proposal`.
+Committed `9a982ed5`.
 
 ## Template for new entries
 

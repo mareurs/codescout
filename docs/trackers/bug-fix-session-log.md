@@ -370,7 +370,22 @@ substring lives in the guidance text rather than the message text.
 **Severity:** med — would have caused first subagent's tests to fail to
 compile; controller would then absorb the failed-task drift mid-dispatch.
 
-**Status:** open → fixed-verified after plan edit lands this turn.
+**Status:** fixed-verified — the plan edit landed in the same 2026-05-18 session; [[W-2]] is
+the win that records it.
+
+**Corrected 2026-08-20 by the verify-open sweep.** The line read *"open → fixed-verified
+after plan edit lands this turn"* for **94 days** — a conditional status whose condition was
+met hours after it was written, with nothing to notice. It was accurate when written and
+false by the end of that afternoon.
+
+The reconnaissance `SKILL.md` quotes this entry as its **worked F-N exemplar**, with
+`**Status:** fixed-verified — plan edit landed before any subagent ran.` (verified present in
+the served `1.16.13` cache). So teaching material shipped to all three profiles disagreed
+with the entry it was quoting, and the skill was the one that was right.
+
+Third datapoint for a promotable rule: **future-tense prose in a disposition field ages into
+a false open.** Siblings [[F-17]] (*"(open; … planned)"*) and [[F-44]] (*"Both should be
+updated"*), both found the same day by D11's first sweep.
 ## W-2 — Pre-dispatch recon caught test-shape error before any subagent ran
 
 **When:** About to dispatch Task 1 of the jsonpath negative-slice plan to a
