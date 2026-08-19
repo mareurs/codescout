@@ -781,6 +781,76 @@ fn strip_heredoc_bodies(command: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// The backticked text in a `git commit` message that the shell will EVALUATE, or
+/// `None` when there is none.
+///
+/// `run_command` hands its input to `sh -c`, so a commit message written in this
+/// project's house style — symbols and paths in backticks — has those backticks run as
+/// command substitution before `git` ever sees them. When the backticked text is not a
+/// command the shell says so and [`crate::tools::run_command::output`]'s substitution
+/// diagnostic names the cause. When it *is* a command it runs, its stdout is spliced
+/// into the message, and nothing reports anything. That silent half is what this gate
+/// exists for, and it is not hypothetical: `da5176d5`'s committed message permanently
+/// reads `per memory  §` because `` `conventions` `` was executed, matched no command,
+/// and substituted empty.
+///
+/// **Both scoping decisions were settled by measuring `.codescout/usage.db` (9,790
+/// `run_command` calls), not argued:**
+///
+/// - **Heredoc bodies are stripped first.** 283 of the 291 backtick-bearing `git commit`
+///   calls put the message in a heredoc, where the shell evaluates nothing. Inspecting
+///   the raw string would reject 283 correct commands to catch 2 — the false positive
+///   that matters here is exposure, not intent.
+/// - **Only the message-flag shape is examined.** Backticks inside a commit message are
+///   never intended as substitution (0 of 291), but elsewhere on a command line a
+///   backtick may be a deliberate one, so this does not look there.
+///
+/// A backtick counts as evaluated unless it is inside single quotes or backslash-escaped.
+/// Both are protections the shell honours, and the escaped form is already in use in the
+/// corpus as the manual workaround — flagging it would punish the fix.
+///
+/// See `docs/issues/2026-08-16-run-command-backticks-substituted-in-quoted-message.md`.
+pub fn commit_message_backtick_hazard(command: &str) -> Option<String> {
+    let stripped = strip_heredoc_bodies(command);
+    let s: &str = stripped.as_ref();
+
+    // `-m`, `-am`, `-a -m`, `--message`, `--message=`. Bounded repetition keeps a long
+    // command from turning this into a scan of the whole string.
+    static COMMIT_MESSAGE_FLAG: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = COMMIT_MESSAGE_FLAG.get_or_init(|| {
+        Regex::new(r"(?s)\bcommit\b.{0,200}?\s(?:-[A-Za-z]*m|--message)[\s=]")
+            .expect("COMMIT_MESSAGE_FLAG regex compiles")
+    });
+    if !re.is_match(s) {
+        return None;
+    }
+
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut it = s.char_indices();
+    while let Some((i, c)) = it.next() {
+        match c {
+            // Inside single quotes a backslash is literal; everywhere else it escapes
+            // the next character, a backtick included.
+            '\\' if !in_single => {
+                it.next();
+            }
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '`' if !in_single => {
+                let rest = &s[i + c.len_utf8()..];
+                let inner = match rest.find('`') {
+                    Some(end) => &rest[..end],
+                    None => rest,
+                };
+                return Some(inner.chars().take(40).collect());
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Split a command into independently-piped segments at top-level `;`, `&&`, `||`.
 ///
 /// Without this, `a; b | head` is analysed as one pipeline whose left-hand side is
@@ -3699,5 +3769,95 @@ EOF"#;
             .to_string();
         assert!(err.contains("is outside the project root"), "got: {err}");
         assert!(err.contains("Call approve_write"), "got: {err}");
+    }
+
+    // ── Commit-message backtick gate ─────────────────────────────────────
+    //
+    // Every fixture below is a shape taken from `.codescout/usage.db` (9,790
+    // `run_command` calls), not invented. The gate's whole difficulty is that the
+    // dangerous shape and the safe one differ only in quoting.
+
+    /// The confirmed instance. `da5176d5`'s committed message permanently reads
+    /// `per memory  §` because this exact shape ran `conventions` as a command,
+    /// matched nothing, and substituted empty. No error, no diagnostic.
+    #[test]
+    fn commit_backtick_gate_flags_the_shape_that_silently_mangled_a_real_commit() {
+        let cmd = r#"git commit -m "per memory `conventions` § Environment-Agnostic Tuning""#;
+        assert_eq!(
+            commit_message_backtick_hazard(cmd).as_deref(),
+            Some("conventions"),
+            "the gate must name the text the shell would execute"
+        );
+    }
+
+    /// The dominant safe convention in the corpus — heredoc into a file, then
+    /// `git commit -F`. 283 of the 291 backtick-bearing `git commit` calls protect their
+    /// message this way, so flagging the shape would reject correct commands two orders
+    /// of magnitude more often than it catches a defect.
+    ///
+    /// Be precise about what guards it, because a mutation run said otherwise: this
+    /// fixture SURVIVES deleting `strip_heredoc_bodies` (checked 2026-08-19), since `-F`
+    /// carries no message flag and the scope test returns first. Heredoc stripping is
+    /// pinned by the sibling below, which uses `-m`. Kept as the `-F` scope control.
+    #[test]
+    fn commit_backtick_gate_ignores_a_quoted_heredoc_message() {
+        let cmd = "cat > /tmp/m <<'EOF'\nfixes `foo::bar` in `src/x.rs`\nEOF\ngit commit -F /tmp/m";
+        assert_eq!(commit_message_backtick_hazard(cmd), None);
+    }
+
+    /// The message flag IS present here; the backticks are confined to a heredoc body
+    /// the shell never evaluates. Stripping has to happen before the flag test.
+    #[test]
+    fn commit_backtick_gate_ignores_backticks_confined_to_a_heredoc_body() {
+        let cmd = "git commit -m \"$(cat <<'EOF'\ncites `symbols` and `edit_code`\nEOF\n)\"";
+        assert_eq!(commit_message_backtick_hazard(cmd), None);
+    }
+
+    /// The workaround already in use in the corpus — one of the two exposed calls used
+    /// it deliberately. Flagging it would punish the fix.
+    #[test]
+    fn commit_backtick_gate_ignores_backslash_escaped_backticks() {
+        let cmd = r#"git commit -m "labels dbaeb78b as an \`experiments\` SHA""#;
+        assert_eq!(commit_message_backtick_hazard(cmd), None);
+    }
+
+    /// Single quotes suppress substitution outright — the shell does not even expand
+    /// parameters inside them.
+    #[test]
+    fn commit_backtick_gate_ignores_single_quoted_backticks() {
+        let cmd = "git commit -m 'touches `foo` and `bar`'";
+        assert_eq!(commit_message_backtick_hazard(cmd), None);
+    }
+
+    /// Scope control, and the reason the gate is narrow: outside a commit message a
+    /// backtick may be a deliberate substitution, while 0 of 291 commit messages ever
+    /// wanted one. The gate refuses only where the measurement says refusing is safe.
+    #[test]
+    fn commit_backtick_gate_ignores_substitution_outside_a_commit_message() {
+        assert_eq!(commit_message_backtick_hazard("echo `date +%Y`"), None);
+        assert_eq!(commit_message_backtick_hazard("git log --oneline -1"), None);
+        assert_eq!(
+            commit_message_backtick_hazard("git commit -F /tmp/msg"),
+            None
+        );
+    }
+
+    /// Flag spellings that all reach the same hazard. `-am` is the one a plain `-m`
+    /// substring test misses, and it is ordinary usage.
+    #[test]
+    fn commit_backtick_gate_covers_every_message_flag_spelling() {
+        for cmd in [
+            r#"git commit -m "cites `x`""#,
+            r#"git commit -am "cites `x`""#,
+            r#"git commit -a -m "cites `x`""#,
+            r#"git commit --message "cites `x`""#,
+            r#"git commit --message="cites `x`""#,
+        ] {
+            assert_eq!(
+                commit_message_backtick_hazard(cmd).as_deref(),
+                Some("x"),
+                "missed the message flag in: {cmd}"
+            );
+        }
     }
 }

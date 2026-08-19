@@ -1477,6 +1477,52 @@ async fn run_command_dangerous_rejected_without_ack() {
     );
 }
 
+/// Wiring, not logic — the logic is pinned in `path_security`'s
+/// `commit_backtick_gate_*` family. This asserts the gate is reachable through
+/// `RunCommand::call`, the boundary the bug it closes was itself burned by: a value
+/// computed correctly and never rendered reaches nobody. See
+/// `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`.
+#[tokio::test]
+async fn run_command_refuses_a_commit_message_the_shell_would_substitute() {
+    let (_dir, ctx) = project_ctx().await;
+    let err = RunCommand
+        .call(
+            json!({"command": r#"git commit -m "per memory `conventions` here""#}),
+            &ctx,
+        )
+        .await
+        .expect_err("a commit message with an evaluated backtick must be refused");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("conventions"),
+        "the refusal must name the text the shell would run: {msg}"
+    );
+    assert!(
+        msg.contains("commit -F") || msg.contains("heredoc"),
+        "the refusal must point at the safe convention, not just say no: {msg}"
+    );
+}
+
+/// Paired control. The escape hatch stays open — `acknowledge_risk` is how a caller
+/// says the substitution is intended — and the refusing half also shows the gate reads
+/// the shape rather than requiring `git` to lead the command.
+#[tokio::test]
+async fn run_command_commit_backtick_gate_honours_acknowledge_risk() {
+    let (_dir, ctx) = project_ctx().await;
+    // Inert on purpose: `echo` prefixes it, so nothing commits on either call.
+    let cmd = "echo git commit -m \"cites `true` here\"";
+
+    RunCommand
+        .call(json!({"command": cmd}), &ctx)
+        .await
+        .expect_err("the gate fires on the shape alone");
+
+    let ok = RunCommand
+        .call(json!({"command": cmd, "acknowledge_risk": true}), &ctx)
+        .await;
+    assert!(ok.is_ok(), "acknowledge_risk must bypass the gate: {ok:?}");
+}
+
 #[tokio::test]
 async fn dangerous_command_returns_ack_handle() {
     let (dir, ctx) = project_ctx().await;

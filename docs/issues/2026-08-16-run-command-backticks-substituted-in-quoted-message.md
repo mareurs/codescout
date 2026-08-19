@@ -1,7 +1,7 @@
 ---
 id: e04115d9477d280b
 kind: bug
-status: mitigated
+status: fixed
 title: 'BUG: run_command passes the command to `sh -c` verbatim, so backticks in a commit message are substituted — and the diagnostic names the wrong cause'
 owners:
 - marius
@@ -11,14 +11,13 @@ tags:
 - misleading-error
 - commit-workflow
 - repair-and-continue
-closed: ''
+closed: 2026-08-19
 opened: 2026-08-16
 owner: marius
 related:
 - '2026-05-19-run-command-eval-backtick-eof.md'
 - '2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md'
 severity: medium
-unverified: 'the detection gate named in Resume is unbuilt. NOTE 2026-08-19: this file carried a SECOND, orphaned frontmatter block in its body saying status:open while the catalog block said status:mitigated — every query saw mitigated, a human reading the file saw both. Merged and removed; it had been miscounting the live-bug census by one.'
 ---
 
 
@@ -153,33 +152,71 @@ does not read reaches nobody — the defect filed as
 `docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`
 (fixed `4cdafd9a`, archived).
 
-Status `mitigated`, not `fixed`: the substitution still happens, and a message whose
-backticks *parse* is still silently mangled rather than refused. What is fixed is that a
-failure now names its cause. The detection gate remains open as the root-cause fix — see
-§ Resume.
+### The detection gate — added 2026-08-19, after the measurement
 
-Fix SHA: this commit, on `experiments`.
+`commit_message_backtick_hazard(command)` in `src/util/path_security.rs`, beside
+`is_unbounded_lhs` exactly as § Resume asked. Returns the backticked text the shell would
+evaluate, or `None`. Wired at **step 2.6** of `run_command_inner` — with the other policy
+gates, not ahead of them, because a command blocked for any other reason is blocked
+whatever its message says, and answering "backtick" first would change what every other
+refusal reads as. That is the ordering rule step 4.3 had to learn across two CI rounds.
+
+Three decisions, each settled by the corpus measurement above rather than argued:
+
+- **Heredoc bodies are stripped first**, reusing the existing `strip_heredoc_bodies`. 283
+  of 291 protect their message this way; inspecting the raw string would reject them all.
+- **Only the message-flag shape is examined** (`-m`, `-am`, `-a -m`, `--message`,
+  `--message=`). Backticks in a commit message are never intended as substitution (0 of
+  291), but elsewhere on a command line they may be, so the gate does not look there.
+- **Single-quoted and backslash-escaped backticks are ignored.** Both are protections the
+  shell honours, and the escaped form is already the corpus's manual workaround — flagging
+  it would punish the fix.
+
+The refusal is a `RecoverableError` naming the offending text and pointing at the safe
+convention (quoted heredoc + `git commit -F`), which 97% of this repo's backtick-bearing
+commits already use. `acknowledge_risk=true` bypasses it, as with every sibling gate. No
+repair is attempted — a commit is a write, and a write never has its target guessed
+(`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`).
+
+**Status `fixed`.** The silent half is closed: a message whose backticks *parse* is now
+refused before `git` runs instead of being mangled with no signal. Substitution itself is
+unchanged elsewhere, deliberately — outside a commit message it may be what the caller
+meant.
 ## Tests added
 
-Four in `src/tools/run_command/tests.rs`, over a `SUBSTITUTION_STDERR` const holding the
-reported incident's stderr verbatim — all four errors, in order, so the fixture is the
-real input rather than a paraphrase of it.
+Nine tests. Seven pin the predicate in `src/util/path_security.rs`, two pin the wiring in
+`src/tools/run_command/tests.rs` — because a value computed correctly and never reached is
+this subsystem's own recorded failure mode
+(`docs/issues/archive/2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary.md`).
 
-| Test | Mutation it catches |
-|---|---|
-| `substitution_diagnostic_names_the_cause_and_disowns_the_misleading_line` | dropping the `Argument list too long` clause, or the runnable `git commit -F` correction |
-| `substitution_diagnostic_is_silent_when_substitution_worked` | switching detection from the shell marker to command shape — which would fire on every backtick-bearing command, including working ones |
-| `substitution_diagnostic_is_silent_when_the_command_shows_no_substitution` | claiming a cause not visible in the caller's string |
-| `format_compact_surfaces_the_shell_cause_on_every_output_shape` | the boundary — asserted through **both** the short-output and buffered shapes, which render from different branches |
+**Every fixture is a shape taken from `usage.db`, not invented** — including the exact
+command that produced `da5176d5`.
 
-**Mutation-verified on the boundary test**, which is the one worth checking because a
-correct field that never renders is indistinguishable from no fix at all. Removing the
-`format_run_command` append turns it red with the compact render reduced to
-`✗ exit 126 · 0 lines` — cause invisible, exactly the shape of the
-`frontmatter_max`-dropped-at-the-boundary defect.
+Mutations applied and the **observed** result, not a coverage argument:
 
-Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean, `cargo test`
-4030 passed / 0 failed / 45 ignored.
+| # | Mutation | Observed |
+|---|---|---|
+| M1 | drop `strip_heredoc_bodies` | heredoc-body test FAILS |
+| M2 | drop backslash-escape handling | escaped-backtick test FAILS |
+| M3 | drop single-quote tracking | single-quoted test FAILS |
+| M4 | drop the message-flag scope check | scope-control test FAILS |
+| M5 | disable the step 2.6 call site | **both** wiring tests FAIL |
+
+Zero survivors, and each of M1–M4 killed exactly one fixture, so every decision is
+independently pinned rather than jointly.
+
+**M5's failure output reproduced the historical defect live.** With the gate disabled the
+acknowledge-risk fixture printed `git commit -m cites  here` — the double space where
+`` `true` `` had been. That is `da5176d5`'s signature character-for-character, produced by
+a test rather than inferred from one.
+
+**One honest correction the mutations forced.** `commit_backtick_gate_ignores_a_quoted_heredoc_message`
+SURVIVED M1: its fixture uses `-F`, so the scope test returns before stripping matters. Its
+doc comment claimed to guard heredoc stripping and did not. Reworded to say what it
+actually is — the `-F` scope control — with stripping pinned by its sibling.
+
+Gate: fmt, clippy `--all-targets -D warnings`, `cargo test` 4256 passed / 45 ignored
+(+9 from 4247).
 ## Workarounds
 
 - `git commit -F <path>` with the message written via a quoted heredoc (`<<'EOF'`, quoted
@@ -237,10 +274,15 @@ stops depending on every author knowing the convention, and its remedy hint writ
 because the safe pattern is already what 97% of the corpus does.
 ## Resume
 
-The diagnostic is in. **The blocker is discharged** — see § *Corpus measurement* above. The
-answer is "never" (0 of 291), so refusing on shape is safe *provided* the shape test is
-quote-aware: 283 of the 291 protect their backticks in a heredoc and must not be flagged.
-What remains is building the gate itself.
+**Nothing outstanding.** The diagnostic shipped first; the measurement discharged the
+gate's blocker (§ *Corpus measurement*); the gate is built, wired and mutation-checked
+(§ *Fix*, § *Tests added*).
+
+One boundary worth knowing rather than fixing: the gate is scoped to the commit-message
+shape, so a backtick the shell evaluates elsewhere on a command line is still evaluated —
+which is correct, since there it may be deliberate. If that ever needs narrowing, the
+measurement to run first is the same one: of the 103 backtick-bearing `run_command` calls
+that are NOT `git commit`, how many wanted substitution.
 
 Two notes for whoever takes it:
 

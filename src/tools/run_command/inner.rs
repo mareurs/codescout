@@ -315,6 +315,30 @@ pub(crate) async fn run_command_inner(
         }
     }
 
+    // --- Step 2.6: Commit-message backtick gate ---
+    // Sits WITH the other policy gates rather than ahead of them: a command blocked for
+    // any other reason is blocked whatever its message contains, and answering "backtick"
+    // first would change what every other refusal reads as. Same ordering rule the shell
+    // preflight at step 4.3 had to learn across two CI rounds.
+    if !buffer_only && !acknowledge_risk {
+        if let Some(inner) =
+            crate::util::path_security::commit_message_backtick_hazard(resolved_command)
+        {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "the commit message contains a backtick the shell evaluates before git \
+                     runs: `{inner}` executes as a command and its output replaces that text"
+                ),
+                "Write the message with a quoted heredoc and `git commit -F` — what 97% of \
+                 this repo's backtick-bearing commits already do:\n  \
+                 cat > /tmp/msg <<'EOF'\n  <message>\n  EOF\n  git commit -F /tmp/msg\n\
+                 Otherwise escape each backtick as \\`, or drop the backticks. Pass \
+                 acknowledge_risk=true if the substitution is genuinely intended.",
+            )
+            .into());
+        }
+    }
+
     // --- Step 3: Shell command mode check (skip for buffer-only queries) ---
     if !buffer_only {
         match security.shell_command_mode.as_str() {
