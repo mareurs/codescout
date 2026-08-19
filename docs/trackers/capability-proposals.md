@@ -778,6 +778,50 @@ authoritative instead of derived.
 3. Treat the `repair_frontmatter_id` inversion as its own change with its own decision — it
    changes what `doctor` considers a defect.
 
+### Substrate CORRECTION 2026-08-19 — an entry-id scheme already exists, and partly ships
+
+Found after the entry above was written, by a semantic query for prior art that should have
+run first. **The substrate check above is incomplete. Read this before acting on CAP-8.**
+
+`docs/superpowers/specs/2026-07-17-tracker-entry-graph-stage2-design.md` is a design for
+exactly this problem, with an *Identity model* section, closing TMR-1 ("entries, not files,
+are the graph nodes, with globally unique entry IDs") and TMR-7 ("edges captured at write
+time") of `docs/trackers/tracker-management-redesign.md`.
+
+And it is **not just a design**. The live `artifact` tool schema shows `append_entry`
+accepts a `cites` parameter whose refs may be "a 16-hex artifact id, a `<slug>:<local>`
+entry id, or a unique rel_path", creating `entry_cite` edges atomically; `update_entry`
+refuses to change an entry `id` precisely because "entry ids key `entry_cite` rows". So a
+per-tracker frozen **slug** plus `<slug>:<local>` entry ids is an existing, shipped identity
+scheme.
+
+**What this changes:**
+
+- The gram would be a **third** entry-identity scheme unless it supersedes `<slug>:<local>`.
+  Decide that explicitly — it is now the first question, ahead of the two listed above.
+- The Stage-2 spec **explicitly scopes out** re-keying artifact ids (`sha256(abs_path)` →
+  `sha256(rel_path)`) as a catalog-wide migration, which is the same territory as this
+  entry's artifact half. Read its *Backward compatibility* and *Move durability* sections
+  before re-deriving that analysis.
+- Its motivation survey is a **directly comparable earlier measurement**, and the
+  comparison is the argument for doing something:
+
+| | 2026-07-17 (spec survey) | 2026-08-19 (this session) |
+|---|---:|---:|
+| artifacts scanned | 821 | 1073 |
+| citations | 2144 | 3858 |
+| resolvable edges | 487 | 922 |
+| **ambiguous** | **248** | **423** |
+| **dangling** | **372** | **534** |
+
+The design was specced a month ago and both loss populations grew by roughly 70% and 45%.
+That is the case for scheduling it, and it is stronger than anything in the entry above.
+
+**Method note for whoever picks this up:** this correction exists because a semantic query
+for prior art was run during an unrelated cleanup, not during the proposal. Query the
+catalog for existing specs *before* writing a capability proposal — the substrate check is
+the load-bearing part of a CAP entry, and mine missed a shipped feature.
+
 ## Anti-goals
 
 - Not a wishlist. An entry without a substrate check ("what exists today, what is missing") is not
