@@ -541,6 +541,61 @@ another agent's specific, dated, falsifiable claim*. A zero that would let you o
 someone else's measurement earns one confirming query in a different shape before the
 conclusion — because the cost of being wrong is not a re-run, it is a wrong correction
 entered into the record.
+### T-25 — IL-3 refusals are 42% of all tool errors, and the error text is not the gap
+
+**Tool:** `run_command` · **Verdict:** wrong-tool · **Session:** `8a62140a`
+
+**Measured** on `.codescout/usage.db`, the 30 hours to 2026-08-19T19:00Z:
+
+| | last 30h | prior 30h |
+|---|---:|---:|
+| calls | 5087 | 5441 |
+| errors | 175 (3.44%) | 218 (4.01%) |
+| `il3_pipe_to_trimmer` | 50 | 47 |
+| `il3_shell_on_source` | 24 | 44 |
+| next-largest family (`librarian_managed_artifact`) | 17 | 23 |
+
+**74 of 175 errors — 42% — come from one gate.** The overall error rate is *falling*
+(3.44% against a stable ~4.0% baseline), so this is the steady state, not a regression.
+
+**Why it is not an error-text problem.** The IL-3 refusal is close to an exemplary
+`RecoverableError`: it names the `@cmd_*` buffer workflow, lists the allowed bounded-LHS
+commands, enumerates the unbounded producers, and adds the subtle case — that `git` is
+unbounded only *without* an output limiter, and that `--oneline` is not one. Nothing about
+that text needs improving.
+
+The tell is repetition. **5 of the pipe refusals and 4 of the shell-on-source refusals are
+a repeat of an identical `(tool, err_family)` failure within five minutes** — 9 of the 20
+repeat-failures in the whole window. An agent that read the remediation and still
+re-composed the same shape is not under-informed at *read* time; it was under-informed at
+*compose* time. The author of this entry hit the gate twice in this session while holding
+the full Iron Law text in context.
+
+**The specific gap.** Iron Law 3's always-loaded form is one line plus a parenthetical:
+*"NEVER pipe unbounded run_command → run bare, query @cmd_* buffer"*. It covers the
+canonical `cargo test | grep FAIL`. It does **not** cover the two shapes agents actually
+reach for:
+
+1. `<long-running thing> 2>&1 | tail -5` — the intent is bounding *output size*, not
+   filtering, and the rule as written does not read as applying.
+2. `git log --oneline | head` — `--oneline` looks like a limiter and is not.
+
+Both appear only in `get_guide("iron-laws-detail")`, which is not loaded at the moment a
+command is being composed.
+
+**Two candidate fixes, in preference order:**
+
+1. **Cheap and testable — make the gate echo the rewrite.** Have the refusal lead with the
+   corrected form of *the command it just rejected*, not the general rule. This targets the
+   repeat-within-5-minutes path directly and costs nothing in the prompt budget.
+2. **Surface the two wrong shapes by example in the `source.md` slice.** ~120 characters
+   against the 1900-char cap, aimed at 42% of all tool errors. Competes for slice budget,
+   so it should be landed *after* (1) and measured against the same `usage.db` query —
+   otherwise the two changes cannot be told apart.
+
+**Do not** read this as an argument to loosen the gate. Both IL-3 conditions fired
+correctly on every one of the 74 occasions, including against the author of this entry.
+
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
