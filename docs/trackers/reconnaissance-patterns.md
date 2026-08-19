@@ -380,6 +380,13 @@ pattern. Concrete addition: `SKILL.md § Phase 1 — Scout`, sub-bullet
 "For `include_str!`'d content files, grep `<CONST>.contains / .find /
 snapshot` to enumerate asserting tests."
 
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+§ Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache: back-citation
+*"(R-1 + R-7 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"* present,
+1 occurrence. This entry and [[R-3]] are the ledger's two oldest promotions and the only ones
+that anchored on a back-citation from the start — which is why they are the only two that
+survived every later rewording of the surrounding bullets without maintenance.
+
 **Status:** promoted to SKILL.md (claude-plugins:f842848, 2026-05-28). Added as a 5th bullet under Phase 1 — Scout, citing R-1 + R-7 by name with the loophole-closing cross-reference from the "When NOT to Use" rewrite (same commit). Promote-when criterion fired with 2/2 datapoints — R-1 (mcp-prompt-redesign work stream, 2026-05-19) and R-7 (this session's prompt-guide-refactor F-4 + W-3, 2026-05-28).
 
 ---
@@ -405,6 +412,12 @@ their callers cross crate / module boundaries; assertion sites do too.
 **Promote-when:** R-3 already validated as a needed default. Cheap
 fix: add a sentence to `SKILL.md § Phase 1 — Scout` — "Grep scope
 defaults to workspace root, not the file being modified."
+
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+§ Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache: back-citation
+*"(R-3 → R-73b → R-77 → R-79 in codescout's `docs/trackers/reconnaissance-patterns.md` …)"*
+present, 1 occurrence. The bullet has been rewritten and extended repeatedly since 2026-05
+and the anchor still resolves — a verbatim quote would have needed re-syncing each time.
 
 **Status:** promoted to SKILL.md (claude-plugins:787cdec0, 2026-05-23). Added as a 4th bullet under Phase 1 — Scout, citing this R-3 row by name. Promote-when criterion fired with 1/1 datapoint, per the tracker's note ("already validated as a needed default").
 
@@ -1317,6 +1330,11 @@ seam — scout the root cause again; and when it cites two functions, read the l
 them."* Pairs naturally with the existing "plan code looks fictional" row in the
 composition table, which covers someone else's plan but not your own.
 
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+§ Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache, not the repo
+source: back-citation *"(R-49 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"*
+present, 1 occurrence.
+
 **Status:** promoted-to-permanent-docs — landed 2026-08-20 in `claude-plugins:23a11c3`,
 shipped to all three profile caches in `1.16.11` (`claude-plugins:23ca288`) and verified
 there at the served bytes. The commit alone did not make it live — see
@@ -2079,6 +2097,13 @@ edits a tool it also uses — the normal condition in this repo, and the reason 
 failure recurs. The Phase-1 step should name both freshness axes: run a probe that
 can only succeed on the new build, and confirm the serving process postdates that
 build.
+
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+§ Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache, not the repo
+source: back-citation *"(R-89 in codescout's `docs/trackers/reconnaissance-patterns.md`…)"*
+present, 1 occurrence. The back-citation was added *because* of this entry: its bullet was
+reworded the same day it was promoted, and a quote-only anchor would have gone red on a
+promotion that had worked.
 
 **Status:** promoted-to-permanent-docs, then **re-promoted the same day** — the promoted text
 was Outgrown before it was ever live.

@@ -1015,6 +1015,9 @@ count would likely grow.
 
 **Related patterns:** the same shape applies to `docs/issues/*.md` bug files whose Fix section cites a SHA but whose `status:` frontmatter never flipped — see CLAUDE.md Standard Ship Sequence step 4 (the archive-move discipline) for the analogue at the bug-tracker level. Also pairs with the audit_doc_refs lint at the doc-link level: three independent surfaces (session-log entries, bug-file frontmatter, doc-link targets) all drift the same way under the same root cause — fix-then-forget.
 
+**Promoted-to:** `CLAUDE.md` (codescout project) § Ad-Hoc Session Logs — the "Verify-open
+cadence" rule. D11-verified 2026-08-20: phrase present, 1 occurrence.
+
 **Status:** promoted-to-permanent-docs — graduated to CLAUDE.md § Ad-Hoc Session Logs as the "Verify-open cadence" rule (2026-05-25).
 
 ## W-8 — `prompt_surfaces` test gate catches cap violation before ship
@@ -1284,7 +1287,10 @@ bug class."
 
 **Severity:** med — three core LSP-nav tools silently fail under the documented per-request `workspace=` pin (the safe-concurrency mechanism). Workaround: absolute path.
 
-**Status:** promoted-to-bug-tracker — `docs/issues/archive/2026-06-11-lsp-tools-ignore-workspace-pin-path.md` (open; 4-site swap + 3 per-tool regression tests planned).
+**Promoted-to:** `docs/issues/archive/2026-06-11-lsp-tools-ignore-workspace-pin-path.md`
+— D11-verified 2026-08-20: file present, frontmatter `status: fixed`.
+
+**Status:** promoted-to-bug-tracker — `docs/issues/archive/2026-06-11-lsp-tools-ignore-workspace-pin-path.md`. **Repointed 2026-08-20 by D11's first sweep:** the parenthetical read *"(open; 4-site swap + 3 per-tool regression tests planned)"* while the destination has been `status: fixed` and archived. A stale plan reading as an open one — the exact shape [[W-7]]'s verify-open cadence exists for, one level up.
 
 **Fix idea / Pointer:** swap to `resolve_read_path_for` at the 4 sites; mirror `read_file_honors_workspace_override_pin`.
 
@@ -2779,6 +2785,9 @@ would have left four siblings broken behind a passing test.
 section: *"run the reproduction before reading the fix plan — the plan is a hypothesis
 about the reproduction."*
 
+**Promoted-to:** `CLAUDE.md` (codescout project) § Bug Tracking. D11-verified 2026-08-20:
+the quoted opening clause is present, 1 occurrence.
+
 **Status:** promoted-to-permanent-docs — landed 2026-08-20 in `CLAUDE.md` § Bug Tracking.
 Promoted text, verbatim, so a later reader can verify without re-deriving it: *"Run the
 reproduction before reading the fix plan — the plan is a hypothesis about the reproduction."*
@@ -2961,7 +2970,16 @@ I was one sentence away from reporting "this project has no semantic memories, s
 
 **Severity:** med — no wrong output, but it cost several tool round-trips and the misleading hint pointed away from the real cause.
 
-**Status:** promoted-to-bug-tracker — belongs on the two existing `edit_code`/`edit_file` bug files rather than as a fourth. Both should be updated with these facets.
+**Promoted-to:**
+`docs/issues/archive/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md`
+`docs/issues/archive/2026-08-11-edit-code-cannot-remove-nonempty-module.md`
+— D11-verified 2026-08-20: both present, both `status: fixed`. The disambiguator file carries
+both facets this entry assigned it (insert-after-nested-impl, ≥1 match; the misleading
+"syntax errors" hint, 2 matches). Neither file back-cites `F-44`, so the anchor here is
+content rather than a citation — the weaker form, kept because the destinations are archived
+and archived surfaces are left alone.
+
+**Status:** promoted-to-bug-tracker — belongs on the two existing `edit_code`/`edit_file` bug files rather than as a fourth. **Repointed 2026-08-20 by D11's first sweep:** *"Both should be updated with these facets"* is future tense and had been readable as an open action; the update had in fact landed, and both destinations are now fixed and archived. Facet 1 ("naive substring match") was **withdrawn** by this entry's own same-day correction, so it was correctly never promoted.
 
 **Fix idea / Pointer:** `docs/issues/2026-08-11-edit-code-cannot-remove-nonempty-module.md` (substring filter), `docs/issues/2026-08-11-edit-code-no-disambiguator-for-duplicate-name-path.md` (narrower than filed; add the `insert`-after-nested-impl failure and the wrong hint).
 
@@ -3011,6 +3029,11 @@ narrower, truer entry in one pass instead of two.
 **Impact:** high. The alternative failure is invisible and permanent.
 
 **Promote-when:** already at two independent datapoints. **Routing: craft-shaped, so the recon SKILL and not codescout memory** — "a trait method added to correct a behaviour gets no default impl, so the compiler enumerates the implementors" is true in any language with default trait/interface methods and would not mislead another project. (Only the *instances* — `known_dim`, `embed_document` — are project facts, and they live here in the tracker.) Sync-flow it as a one-line rule; do not spend a slot in the ~10-rule memory cap on a general lesson.
+
+**Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+§ Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache, not the repo
+source: back-citation *"(W-36 in codescout's `docs/trackers/bug-fix-session-log.md`.)"*
+present, 1 occurrence.
 
 **Status:** promoted-to-permanent-docs — landed 2026-08-20 in `claude-plugins:23a11c3`,
 shipped to all three profile caches in `1.16.11` (`claude-plugins:23ca288`) and verified

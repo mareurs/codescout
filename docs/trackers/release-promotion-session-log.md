@@ -1279,6 +1279,13 @@ Ranked by what to do first.
 
 **Severity:** med — without the scout, the fork would have reported `docs/architecture/companion-plugin.md` (a file already read and trusted this session) as carrying 5 high-severity broken refs, a false regression entering the promotion punch list.
 
+**Promoted-to:** `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`
+(which cross-references `docs/issues/archive/2026-07-28-audit-doc-refs-json-pointer-false-positive.md`)
+— D11-verified 2026-08-20: present. **Added by D11's first sweep**, because the destination
+was named only in the `Promote-when criterion FIRED` paragraph further down, never in the
+`Status:` line. Anyone reading the disposition field alone got *"tracked in the bug ledger"*
+with no path — the pointer existed and was simply not where a reader or a query looks.
+
 **Status:** promoted-to-bug-tracker (2026-08-06; was `mitigated`) — fork corrected mid-flight; `audit_doc_refs`'s own inconsistent path handling is unfixed and now tracked in the bug ledger rather than here. See the promote-when note below.
 
 **Fix idea / Pointer:** Candidate for a U-N entry in `docs/trackers/codescout-usage-frictions.md` if this recurs on a second file/session — any doc describing `codescout-companion` internals will likely trip the same false positive. Promote once a second datapoint lands.
@@ -2109,6 +2116,10 @@ Sequence in `docs/RELEASE.md` now names a live-surface call as an explicit step 
 tool-facing output, distinct from `cargo rb` + reconnect (which only establishes that the new code
 is running).
 
+**Promoted-to:** `docs/RELEASE.md` § *Before cherry-pick: read the live output of any
+tool-facing change (required)*, plus a pointer at step 1 of the Standard Ship Sequence.
+D11-verified 2026-08-20: heading text present, 1 occurrence.
+
 **Status:** promoted-to-permanent-docs — `docs/RELEASE.md` § *Before cherry-pick: read the live output of any tool-facing change (required)*, with a pointer at step 1 of the Standard Ship Sequence so a reader who scans only the code block still meets it. Marked **required** rather than advisory — unlike the mutation-test step beside it — because it costs one tool call and no cheaper check covers the class.
 
 ## F-13 — A two-point probe produced a recommendation a 28-point probe inverted
@@ -2196,6 +2207,12 @@ its severity justification, and the researcher bug moved from tuning to model se
 measurement is a hypothesis. The complement is already there in spirit ("Root cause — if unknown,
 write `Unknown — see Hypotheses tried`"); what is missing is that a **stated** root cause also
 decays, and nothing marks when it was last checked.
+
+**Promoted-to:** `docs/issues/_TEMPLATE.md` § Root cause — the `inferred from src/x.rs:12 —
+not measured` marker. D11-verified 2026-08-20: present, 1 occurrence.
+codescout memory `conventions` § Bug Tracking — the mirrored one-liner. **Not** D11-verified:
+memories are not files under a tracked path, so this half of the promotion has no anchor a
+sweep can read. Recorded as a known gap rather than as a green.
 
 **Status:** promoted-to-permanent-docs — landed 2026-08-07 in `docs/issues/_TEMPLATE.md` § Root cause: every stated mechanism now also cites what **measured** it (command + date), and a mechanism read out of the code but never observed at runtime says so explicitly (`inferred from src/x.rs:12 — not measured`). One line mirrored into memory `conventions` § Bug Tracking so it is in context at session start rather than only at template-copy time. This is option (b) of task #31 — cite the command rather than add a `## Premise check` section — chosen because the template already demands `path:line` on every root-cause claim, so it extends an existing habit instead of adding a section that gets left as `N/A`.
 

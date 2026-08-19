@@ -626,7 +626,15 @@ wrong answer available and plausible. Datapoints 3, 5, 6 and 7 all post-date the
 refute the "just remember it" reading of it. See [[F-7]] for the meta-failure the
 unharvested criterion belongs to.
 
-**Promotion anchor** — added 2026-08-20. Until then this entry's promotion claim named **no
+**Promoted-to:**
+`~/.claude/CLAUDE.md` § Measurement — Never State a Count Your Instrument Did Not Measure
+`~/.claude-sdd/CLAUDE.md` § Measurement — Never State a Count Your Instrument Did Not Measure
+`~/.claude-kat/CLAUDE.md` § Measurement — Never State a Count Your Instrument Did Not Measure
+
+D11-verified 2026-08-20: the section heading is present in all three, 1 occurrence each, and
+the files are byte-identical (`md5 08f0ef6cb5345a3df50a3f4b3b989a96`).
+
+**Anchor notes** — added 2026-08-20. Until then this entry's promotion claim named **no
 target at all**, which is exactly the defect
 `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` describes,
 sitting unnoticed on the entry that provoked that bug.
