@@ -369,6 +369,28 @@ that no heading defines.
   entries sat uncounted for exactly this reason.
 - Give the tracker a `params_schema` with `required` and `enum` where the shape has
   settled. A schema is what stops each author inventing their own entry shape.
+- **`**Valid:**` declares a decay class.** Declaring one is what makes an entry a
+  *Statement* — a claim that can be true or false and owes a proof; an entry that
+  declares none (a backlog item, a proposal) is not, and owes nothing. Three forms,
+  no fourth: `invariant` (a law), `dated YYYY-MM-DD` (true of an instant),
+  `conditional — <event>` (true until that fires). A bare `conditional` with no
+  event, or any other value, is refused — `conditionally speaking` does not parse
+  as the class it starts with, on a word-boundary check. The first declaration in a
+  section wins if there is more than one.
+- **`**Rests on:**` is the durable route back to the proof.** Code rots and
+  `path:line` rots with it; an ADR, a decision, or a principle does not. Three of
+  codescout's seven ADRs already converge on this shape by practice — `Decision` is
+  the claim, `Confidence` the evidence, `Revisit-when` the condition, and
+  `Sites (initial)` labelling the rotting pointers as rotting in its own heading. It
+  is parsed today; nothing consumes it yet — that lands with a later layer.
+- Both fields are detected **line-anchored**, and a line inside a fenced code block
+  is skipped — a worked example teaching the syntax is never mistaken for a
+  declaration, including the examples on this page. `librarian(action="doctor")`
+  reports `entry_conditional_past_due`, `entry_dated_stale`, and
+  `entry_cited_from_outside_but_undeclared` — read-only worklists, never verdicts,
+  each gated on cross-file citation exposure so an entry nothing depends on never
+  generates work. The third names an entry "load-bearing and undeclared," never
+  "promoted" — that judgement stays with the reader.
 
 ### Detecting these fields
 

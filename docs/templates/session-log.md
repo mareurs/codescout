@@ -133,6 +133,11 @@ ID. Add a matching row to the Index table.
 
 **Status:** open | wontfix-false-alarm | fixed-verified | mitigated | promoted-to-bug-tracker | pinned-as-eval-baseline
 
+**Valid:** invariant | dated YYYY-MM-DD | conditional — <the event that ends it>
+
+**Rests on:** <one durable sentence — an ADR, a decision, or the principle this
+instantiates>
+
 **Fix idea / Pointer:** <issue # in formal tracker, plan task ID, or "TBD">
 
 ---
@@ -162,6 +167,11 @@ without the pattern, with at least one piece of evidence.
 **Promoted-to:** <surface + section, one per line, line-start — omit until it lands>
 
 **Status:** validated | promotion-due | promoted-to-permanent-docs | archived
+
+**Valid:** invariant | dated YYYY-MM-DD | conditional — <the event that ends it>
+
+**Rests on:** <one durable sentence — an ADR, a decision, or the principle this
+instantiates>
 
 ---
 ```
