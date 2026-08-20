@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-20
-closed:
+closed: 2026-08-20
 severity: medium
 owner: marius
 related: []
@@ -124,36 +124,45 @@ $ sqlite3 .codescout/usage.db "SELECT * FROM pika_schema_version;"
 
 ## Fix
 
-Not yet implemented, and the choice depends on who should own the table:
+Fixed in `experiments` @ `fcb96f134af5de5879ba299323d6cae8216852de` (patch-id
+`0ce90d9e4fdb58c33d7c7cd02db74681bef3f41e`). Chose **option 3** — user's explicit call
+(2026-08-20), against option 1 (denormalize in the plugin repo) and option 2 (enable
+`PRAGMA foreign_keys` on `usage.db`).
 
-1. **Make observations self-sufficient** (preferred if the table stays plugin-owned):
-   denormalize the friction-relevant facts onto the observation row at write time —
-   `tool_name`, `err_family`, `called_at`, `friction_target` — so a pruned parent costs
-   nothing. The FK becomes a convenience join for fresh rows rather than a dependency. This
-   is the only option that survives a plugin and a server disagreeing about lifecycle.
-2. **Adopt the table into codescout's own migrations** and enable `foreign_keys` on the
-   `usage.db` connection. Correct long-term, but enabling the pragma is not a free change:
-   it activates every declared cascade at once, which is exactly the class of accident
-   `2026-07-05-v6-migration-cascade-deletes-child-rows` documents on the catalog side.
-   Enabling it would also mean observations *are* deleted at 30 days, which is probably
-   wrong for a durable friction record — so this option needs option 1 anyway, or an
-   exemption for observed rows in the sweep.
-3. **Exempt observed calls from the sweep** — `DELETE ... WHERE called_at < … AND id NOT IN
-   (SELECT tool_call_id FROM pika_observations)`. Keeps the join intact and makes an
-   observation a retention pin. Cheapest to state, but couples codescout's sweep to a table
-   it does not own.
+`write_record`'s sweep now checks `sqlite_master` for a table named `pika_observations`
+(the same existence-probe idiom already used in `retrieval/sqlite_code_store.rs` and
+`memory/sqlite_semantic_store.rs`) before choosing which `DELETE` to run:
 
-Option 1 is the recommendation; it is the only one that does not require codescout and the
-plugin to agree.
+- **Table present:** `DELETE FROM tool_calls WHERE called_at < datetime('now','-30 days')
+  AND id NOT IN (SELECT tool_call_id FROM pika_observations)` — a referenced row survives
+  the sweep; an equally old, unreferenced row is pruned exactly as before.
+- **Table absent** (a project that has never run the plugin): the original unconditional
+  `DELETE`, unchanged. No new cost, no reference to a table that isn't there.
 
-Record the fix SHA **and** its patch-id (`git show <sha> | git patch-id --stable`).
+**Why option 3 over option 1 (the bug's own recommendation):** option 1 is plugin-repo
+work — the editable source is a sibling repo
+(`/home/marius/work/claude/claude-plugins/buddy/skills/codescout-pika/`), a different
+stack (Python/SQL skill, no `cargo` gate), outside this session's cadence. Still the right
+long-term fix if the table stays plugin-owned; not superseded by this one, just deferred.
+**Why not option 2:** enabling `PRAGMA foreign_keys` on `usage.db` activates every declared
+cascade in that file at once — an unknown blast radius for any OTHER third-party table
+that might reference `tool_calls`, not scoped to this one table the way option 3 is.
 
+**Acknowledged tradeoff, not resolved by this fix:** codescout's retention sweep now
+names a plugin-owned table by string literal. If the plugin's schema changes the table
+name, or a future plugin wants the same protection, this code does not generalize — it is
+a targeted exemption for the one table filed here, not a plugin-extension point.
 ## Tests added
 
-None. A regression test should insert an observation against a >30-day-old call, run the
-sweep, and assert the observation is still readable **with its friction fields intact** —
-which under option 1 means asserting the denormalized columns, not the join.
-
+`usage::db::tests::retention_spares_a_row_referenced_by_a_pika_observation`
+(`src/usage/db.rs`) — creates `pika_observations` with the plugin's own bootstrap shape,
+inserts one 31-day-old `tool_calls` row WITH an observation and one WITHOUT, triggers the
+sweep via the next `write_record`, and asserts: the observed row survives, the unobserved
+row is pruned exactly as before, and the observation row itself is untouched. The existing
+`retention_prunes_old_rows` test (no `pika_observations` table in its connection) stays
+green unmodified, covering the table-absent path. Full gate green: `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test --lib` (4138 passed, 0 failed,
+7 ignored).
 ## Workarounds
 
 Query observations with a LEFT JOIN, never an inner join, and treat a NULL parent as
