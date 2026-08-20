@@ -74,7 +74,15 @@ impl UsageRecorder {
                 Ok((p.root.clone(), p.head_sha.clone()))
             })
             .await?;
-        let conn = db::open_db(&project_root)?;
+        // A worktree is deleted at the end of its life, taking its OWN
+        // `.codescout/usage.db` with it — durable telemetry cannot live there.
+        // Write it into the main checkout's db instead, tagged with the
+        // worktree's own root in the `project_root` column below (unchanged),
+        // so it stays distinguishable and queryable after the worktree is gone.
+        // docs/issues/2026-08-20-worktree-removal-deletes-its-usage-telemetry.md
+        let db_root = crate::util::path_security::worktree_main_root(&project_root)
+            .unwrap_or_else(|| project_root.clone());
+        let conn = db::open_db(&db_root)?;
         let (outcome, overflowed, error_msg) = classify_content_result(result);
 
         // Friction fields (Phase 1 of the legibility probe).
@@ -529,6 +537,69 @@ mod content_tests {
             rows_in(dir_b.path()),
             0,
             "it must NOT land in the session-default workspace B's usage.db"
+        );
+    }
+
+    #[tokio::test]
+    /// Regression for
+    /// docs/issues/2026-08-20-worktree-removal-deletes-its-usage-telemetry.md: a call
+    /// pinned into a linked worktree used to write its telemetry to `<worktree>/.codescout/
+    /// usage.db`, which is deleted along with the worktree at the end of its life. It must
+    /// land in the MAIN checkout's durable db instead, still tagged with the worktree's own
+    /// root via `project_root` so it stays distinguishable.
+    async fn record_content_pinned_into_a_worktree_writes_to_the_main_checkouts_db() {
+        use serde_json::json;
+
+        let main = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(main.path().join(".codescout")).unwrap();
+        let canon_main = std::fs::canonicalize(main.path()).unwrap();
+        let canon_worktree = std::fs::canonicalize(worktree.path()).unwrap();
+
+        // Shape a linked worktree the same way `worktree_main_root`'s own unit test does:
+        // a `.git` FILE pointing `gitdir: <main>/.git/worktrees/<name>`.
+        std::fs::write(
+            worktree.path().join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", canon_main.display()),
+        )
+        .unwrap();
+
+        let agent = crate::agent::Agent::new(Some(canon_main.clone()))
+            .await
+            .unwrap();
+        let recorder =
+            UsageRecorder::new(agent, false, "wt-session".to_string(), "cc-wt".to_string());
+        let input = json!({"query": "x"});
+
+        let _ = recorder
+            .record_content("symbols", &input, Some(&canon_worktree), || async {
+                Ok(vec![Content::text("ok")])
+            })
+            .await;
+
+        assert!(
+            !worktree.path().join(".codescout").join("usage.db").exists(),
+            "the worktree's own usage.db must never be created — it would be deleted \
+             with the worktree"
+        );
+
+        let conn = crate::usage::db::open_db(&canon_main).unwrap();
+        let (count, project_root): (i64, String) = conn
+            .query_row(
+                "SELECT COUNT(*), MAX(project_root) FROM tool_calls",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "the call's telemetry must land in the MAIN checkout's usage.db"
+        );
+        assert_eq!(
+            project_root,
+            canon_worktree.to_string_lossy(),
+            "project_root must still name the worktree, so the row stays distinguishable \
+             from the main checkout's own calls"
         );
     }
 
