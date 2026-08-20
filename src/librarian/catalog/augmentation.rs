@@ -829,7 +829,11 @@ pub struct PendingSection {
     /// can never be born undefined. Callers never format the heading themselves;
     /// that is the whole point (CAP-5 defect class 2).
     pub title: String,
-    /// Section prose, written verbatim beneath the heading.
+    /// Section prose, written beneath the heading — but not always verbatim: the
+    /// allocator prepends a default `**Valid:** dated <today>` line when `body`
+    /// declares no class, leaves `body` untouched when it already declares one,
+    /// and refuses the whole call (no id allocated, nothing written) when the
+    /// declaration it does carry fails to parse.
     pub body: String,
     /// Existing heading to insert BEFORE. Required rather than optional: a wrong
     /// guess about placement on a WRITE needs manual repair, and this project's
@@ -3013,6 +3017,50 @@ mod tests {
             written.contains("the prose\n\n## Template for new entries"),
             "trailing whitespace in the caller's body must be trimmed, leaving \
              exactly one blank line before the anchor heading:\n{written}"
+        );
+    }
+
+    /// The `None` branch depends on `parse_validity` skipping fenced code blocks —
+    /// a body whose ONLY `**Valid:**` line sits inside a worked-example fence must
+    /// still read as `Ok(None)` and get stamped, not be treated as a caller
+    /// declaration. Pinned from this side of the module boundary (this task may not
+    /// touch `statements.rs`): a future change there that stops skipping fences
+    /// would flip this test red without anything else here noticing, and the entry
+    /// would be born with the fenced example as its FIRST (and so authoritative,
+    /// under first-wins) `**Valid:**` line.
+    #[test]
+    fn allocator_stamps_when_the_only_valid_line_is_inside_a_fence() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: U\n---\n\n## U-1 — first\n\nx\n\n## Template for new entries\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "worked example".to_string(),
+            body: "Example syntax:\n\n```\n**Valid:** invariant\n```\n\nthe prose".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+        };
+        allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
+
+        let written = std::fs::read_to_string(&md).unwrap();
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        assert!(
+            written.contains(&format!("**Valid:** dated {today}")),
+            "a fenced **Valid:** line is a worked example, not a declaration — the \
+             section must still be stamped with a real one:\n{written}"
+        );
+        assert_eq!(
+            written.matches("**Valid:**").count(),
+            2,
+            "the fenced example line plus exactly one stamped declaration — never a \
+             second REAL declaration:\n{written}"
         );
     }
 
