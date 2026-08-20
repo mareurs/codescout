@@ -265,10 +265,16 @@ impl LibrarianAdapter {
 /// Whether a librarian response names a path under the bug-file or tracker directories.
 ///
 /// Scans `abs_path`/`rel_path` at the top level and one level into a `find`-style `items`
-/// array — deliberately shallow. A deep walk over an arbitrarily large response to choose
-/// a guide would cost more than the guide saves, and the shallow form covers the shapes
-/// that actually carry a path: `get`/`create`/`update`/`move` return one at the top level,
-/// `find` returns them per item.
+/// array, plus `path` inside a `doctor`-style `violations` array — deliberately shallow. A
+/// deep walk over an arbitrarily large response to choose a guide would cost more than the
+/// guide saves, and the shallow form covers the shapes that actually carry a path:
+/// `get`/`create`/`update`/`move` return one at the top level, `find` returns them per
+/// item, `doctor` returns them per violation under a differently-named key.
+///
+/// Each shape is enumerated explicitly because a missing one fails as a *wrong guide*
+/// rather than as an error — see
+/// `docs/issues/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
+/// for the case where `doctor` was the missing shape.
 ///
 /// Forward-slash comparison is safe here: `rel_path` is always stored forward-slash (see
 /// `librarian(action="doctor")`'s forward-slash check), and `abs_path` is relativized by
@@ -285,10 +291,27 @@ fn names_tracker_path(result: &Value) -> bool {
     if any_path_field(result) {
         return true;
     }
-    result
+    if result
         .get("items")
         .and_then(Value::as_array)
         .is_some_and(|items| items.iter().any(any_path_field))
+    {
+        return true;
+    }
+    // `doctor` is the one action whose rows carry neither `abs_path`/`rel_path` nor an
+    // `items` array: it returns `violations: [{check, artifact_id, path, detail}]`
+    // (`src/librarian/tools/doctor.rs:466`, field at `:135`). Before this branch existed,
+    // an agent holding a worklist of `entry_cited_from_outside_but_undeclared` rows —
+    // the caller with the most concrete need for the entry-field rules — was the one
+    // caller guaranteed to receive `librarian` instead.
+    //
+    // Scanned as its own key rather than by adding `path` to `any_path_field`, which
+    // would widen the TOP-LEVEL check across every response shape to serve one action.
+    // `violations` is unique to `doctor`, so the blast radius is exactly that response.
+    result
+        .get("violations")
+        .and_then(Value::as_array)
+        .is_some_and(|rows| rows.iter().any(|row| is_tracker_path(row.get("path"))))
 }
 
 /// Compact summary shown in place of a buffered librarian response.
@@ -791,6 +814,30 @@ mod tests {
         // segments, and a bare mention in some other field is not one.
         assert!(!names_tracker_path(&json!({
             "title": "how docs/trackers/ works"
+        })));
+
+        // `doctor` returns neither shape above: rows sit under `violations`, and the
+        // field is `path`. The entry-validity checks report tracker entries, so this is
+        // the caller that most needs `tracker-conventions` and the one that used to be
+        // guaranteed not to get it.
+        assert!(names_tracker_path(&json!({
+            "violations": [
+                {"check": "abs_path_must_be_absolute", "path": "src/main.rs"},
+                {"check": "entry_cited_from_outside_but_undeclared",
+                 "path": "docs/trackers/statement-validity-session-log.md"},
+            ]
+        })));
+        assert!(!names_tracker_path(&json!({
+            "violations": [{"check": "snapshot_drift", "path": "src/main.rs"}]
+        })));
+
+        // The `path` key is honoured ONLY inside `violations`. Promoting it into
+        // `any_path_field` would be the obvious simplification and would widen the
+        // top-level check across every librarian response to serve one action; this
+        // pins the narrow scoping so that change fails loudly instead of silently
+        // re-routing unrelated calls.
+        assert!(!names_tracker_path(&json!({
+            "path": "docs/trackers/x.md"
         })));
     }
 
