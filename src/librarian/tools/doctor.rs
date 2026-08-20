@@ -211,6 +211,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `extra`, which is not indexed. The SQL narrows first, so only terminal bug rows
     // are ever opened.
     all_violations.extend(scan_terminal_status_with_caveat(&cat.conn)?);
+    // Per-entry cross-file citation exposure, computed once and shared by every check
+    // in the validity-decay family (Tasks 5-7) so each prices its worklist against the
+    // same population rather than recomputing it.
+    let indegree = entry_indegree(&cat.conn)?;
+    all_violations.extend(scan_conditional_past_due(&cat.conn, &indegree)?);
     // Needs both `ctx` (for the repo to resolve against) and the connection, so unlike
     // `scan_declared_project_roots` it runs inside the lock. Its health block is carried
     // out to `catalog_health` below, because a clean result over 54 of 350 archived files
@@ -1684,6 +1689,219 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<std::collections::
         }
     }
     Ok(cited)
+}
+
+/// Token → how many OTHER files cite it — files that do NOT define it.
+///
+/// **This is a file-level count, not a citation-occurrence count, and that follows
+/// from `extract()`'s own dedup rather than from a choice made here.**
+/// `push_citation` inserts into a `BTreeSet<(CitationKind, raw)>` per document, so a
+/// file that mentions the same bare token five times still contributes exactly one
+/// `Citation` to `extract(text).citations`. Measured live while testing this function:
+/// a fixture file citing `R-1` twice in prose produced ONE citation, not two — the
+/// brief this was built from assumed occurrence-counting and its own test was wrong
+/// about the number for that reason. The metric this function actually computes is
+/// "how many other files reach this token at least once", which is arguably the
+/// better exposure signal anyway: it is what stops one chatty file inflating a
+/// token's apparent reach.
+///
+/// **Exposure is a target-side count.** Which entry a citation came FROM requires
+/// attribution and slugs; which entry it points AT does not — that is what lets this
+/// check, and the ones built on it (Tasks 5-7), ship before the entry graph
+/// (`docs/superpowers/specs/2026-07-17-tracker-entry-graph-stage2-design.md`) exists.
+///
+/// **Same-file citations are excluded, and that is load-bearing.** Measured
+/// 2026-08-20: 407 of 1427 ledger citations (28.5%) sit above the first definition —
+/// hand-maintained `## Index` rows. Counting them would let an entry's own index row
+/// inflate its own exposure, which is a self-reference wearing exposure's clothes.
+/// `link_scan` already classifies these `SelfCite`.
+///
+/// **Both citation shapes count.** A bare `PV-12` extracts as `EntryToken`; a
+/// qualified `provenance-subsystem:PV-12` extracts as `CrossRepoToken`, because a
+/// file-stem qualifier and a repo qualifier are one syntactic shape extraction cannot
+/// tell apart. Taking the token half of the qualified form is what stops a qualified
+/// citation reading as no citation at all — the same idiom [`corpus_cited_tokens`]
+/// uses.
+///
+/// **Computed fresh from the files**, for the same reason `corpus_cited_tokens` is: a
+/// check that reads a materialized table reports on whatever the last scan left
+/// behind. NOTE: `corpus_cited_tokens`'s own doc comment currently misattributes
+/// `entry_cite`'s writer to `link_scan` — already tracked at
+/// `docs/issues/2026-08-20-doctor-comment-misnames-entry-cite-writer.md`; `link_scan`
+/// has zero references to that table, and its only writer is `append_entry(cites=...)`.
+/// Not repeated here.
+fn entry_indegree(
+    conn: &rusqlite::Connection,
+) -> Result<std::collections::BTreeMap<String, usize>> {
+    use crate::librarian::tools::link_scan::extract::{entry_sections, extract, CitationKind};
+
+    let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    // Which paths DEFINE which tokens, gathered up front so a same-file citation can
+    // be excluded before it is counted rather than filtered back out after the fact.
+    let mut definer: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+        Default::default();
+    let mut bodies: Vec<(String, String)> = Vec::new();
+    for path in paths {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for s in entry_sections(&text) {
+            definer.entry(s.id).or_default().insert(path.clone());
+        }
+        bodies.push((path, text));
+    }
+
+    let mut deg: std::collections::BTreeMap<String, usize> = Default::default();
+    for (path, text) in &bodies {
+        for c in extract(text).citations {
+            let token = match c.kind {
+                CitationKind::EntryToken => c.raw,
+                CitationKind::CrossRepoToken => match c.raw.rsplit_once(':') {
+                    Some((_, t)) => t.to_string(),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            if definer.get(&token).is_some_and(|d| d.contains(path)) {
+                continue; // same-file: SelfCite, never exposure
+            }
+            *deg.entry(token).or_insert(0) += 1;
+        }
+    }
+    Ok(deg)
+}
+
+/// Days after which a declared `conditional` is worth re-reading.
+///
+/// Deliberately NOT `FRESHNESS_HORIZON_DEFAULT`: that is a commit-distance gate of 50
+/// whose own doc comment says every call site passes `topo_distance_from_head: None`,
+/// so it has never been exercised. 30 days is a guess — the verify-open cadence in
+/// `CLAUDE.md` uses 14 days for `Status: open`, and a decay horizon should run looser
+/// than a triage one. Re-tune from the first month's output.
+#[allow(dead_code)] // consumed by the dated-past-due check (Task 6), not yet shipped
+const VALIDITY_HORIZON_DAYS: i64 = 30;
+
+/// Cross-file citations below which a Statement is not worth anyone's attention.
+///
+/// Shared, on purpose, by every check in this family (Tasks 5-7): two checks producing
+/// work independently is how a backlog becomes the steady state — as of June 2025 more
+/// than 604,000 English Wikipedia pages carried at least one `{{citation needed}}`.
+/// Also a guess; re-tune from the first month's output.
+const EXPOSURE_THRESHOLD: usize = 5;
+
+/// Truncate an entry section's text at the first NESTED entry definition inside it.
+///
+/// `entry_sections` bounds a section at the next heading of the same-or-higher level,
+/// so a deeper child's definition sits WHOLLY inside its parent's section text — real
+/// in this corpus, not hypothetical: `docs/trackers/provenance-subsystem.md` defines
+/// both `### PV-2` and `#### PV-8` / `#### PV-25`, so `PV-2`'s raw section text
+/// contains both children's full bodies.
+///
+/// Parsing a `**Valid:**` declaration straight out of an untruncated parent would let
+/// `parse_validity`'s first-wins rule read the CHILD's declaration as the PARENT's,
+/// whenever the parent declares nothing of its own. That is the unsafe direction: it
+/// asserts a law nobody declared for the parent, where the correct read is the `dated`
+/// default. Truncating at the first nested entry's heading line removes the
+/// possibility entirely — a parent with no declaration of its own reads as `None`
+/// (the caller's `dated` default), never as its child's class.
+///
+/// Shared by every check in this family that parses a declaration out of a section
+/// (Tasks 5-7): call this before `parse_validity`, never `section.text` directly.
+fn declared_section_text(
+    section: &crate::librarian::tools::link_scan::extract::EntrySection,
+    all: &[crate::librarian::tools::link_scan::extract::EntrySection],
+) -> String {
+    let cut = all
+        .iter()
+        .filter(|other| {
+            other.heading_line > section.heading_line && other.heading_line <= section.end_line
+        })
+        .map(|other| other.heading_line)
+        .min();
+
+    match cut {
+        Some(nested_line) => {
+            let keep = (nested_line - section.heading_line) as usize;
+            section
+                .text
+                .lines()
+                .take(keep)
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        None => section.text.clone(),
+    }
+}
+
+/// A declared `conditional` whose named event may already have fired.
+///
+/// **Reports a worklist, never a verdict.** Selection is syntactic and cheap — a
+/// section's own `**Valid:**` line, above the exposure gate; whether the condition
+/// actually fired is the reader's judgement, and always will be. The `detail` carries
+/// the condition text so it can be adjudicated without reopening the file.
+///
+/// **Gated on `EXPOSURE_THRESHOLD`, not run over every conditional entry.** A
+/// conditional nobody is citing is not worth anyone's attention. `indegree` is computed
+/// once per `doctor` run by [`entry_indegree`] and shared with the checks that follow,
+/// so the population is priced consistently rather than recomputed per check.
+///
+/// **A malformed `**Valid:**` is swallowed here, not reported here.** That is a
+/// different, not-yet-shipped check's business (`validity_unparseable`); reporting it
+/// here too would duplicate the finding, and staying silent here is what keeps the two
+/// checks from ever disagreeing about the same defect.
+///
+/// **Truncates each section with [`declared_section_text`]** before parsing, so a
+/// parent entry with no declaration of its own never inherits a nested child's.
+///
+/// Read-only; there is no `fix=`. Discharging a conditional means judging whether the
+/// named event happened, which only a reader can do.
+fn scan_conditional_past_due(
+    conn: &rusqlite::Connection,
+    indegree: &std::collections::BTreeMap<String, usize>,
+) -> Result<Vec<Violation>> {
+    use crate::librarian::statements::{parse_validity, Validity};
+    use crate::librarian::tools::link_scan::extract::entry_sections;
+
+    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (aid, path) in rows {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let sections = entry_sections(&text);
+        for s in &sections {
+            let exposure = indegree.get(&s.id).copied().unwrap_or(0);
+            if exposure < EXPOSURE_THRESHOLD {
+                continue;
+            }
+            let declared = declared_section_text(s, &sections);
+            // A malformed declaration is `validity_unparseable`'s business, not this
+            // check's — swallowing it here would hide it, reporting it here would
+            // duplicate it.
+            let Ok(Some(Validity::Conditional { condition })) = parse_validity(&declared) else {
+                continue;
+            };
+            out.push(Violation::new(
+                "entry_conditional_past_due",
+                Some(aid.clone()),
+                path.clone(),
+                format!(
+                    "{} (exposure {exposure}) is conditional on: {condition} — check \
+                     whether that has happened; this is a worklist, not a verdict",
+                    s.id
+                ),
+            ));
+        }
+    }
+    Ok(out)
 }
 
 /// `snapshot_drift`: an augmented tracker's `params` hold entry ids that its
@@ -6070,6 +6288,182 @@ root = "work/elsewhere/ghost"
                 .unwrap()
                 .contains("sub/project"),
             "reports the config it actually read, so the base is auditable"
+        );
+    }
+
+    // ---- entry_indegree / scan_conditional_past_due ------------------------------------
+
+    /// A minimal entry ledger: write it to disk AND seed its catalog row, since both
+    /// checks read the file (for citations/declarations) and the catalog (for the
+    /// abs_path to read it from).
+    fn seed_ledger(cat: &Catalog, id: &str, path: &std::path::Path, text: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+        let row = TestArtifactRowBuilder::new(id).with_abs_path(path).build();
+        art_upsert(cat, &row).unwrap();
+    }
+
+    #[test]
+    fn indegree_counts_cross_file_citations_and_excludes_the_definer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.md");
+        let b = tmp.path().join("b.md");
+        let c = tmp.path().join("c.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        // a.md DEFINES R-1 and cites it twice in its own index table and prose — neither
+        // may count, because a same-file citation is a SelfCite, not exposure.
+        seed_ledger(
+            &cat,
+            "a",
+            &a,
+            "## Index\n| R-1 | x |\n\n## R-1 — the law\n\nas R-1 says, ...\n",
+        );
+        // Two DISTINCT files cite R-1 from outside. `extract()` dedups citations of the
+        // same (kind, token) WITHIN one document (see `entry_indegree`'s doc comment), so
+        // this is deliberately two files rather than one file citing twice — that would
+        // measure something else.
+        seed_ledger(&cat, "b", &b, "see R-1\n");
+        seed_ledger(&cat, "c", &c, "and again R-1\n");
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get("R-1").copied(),
+            Some(2),
+            "b.md and c.md's citations both count — a.md defines R-1, so its own index \
+         row and prose must not inflate its exposure"
+        );
+    }
+
+    #[test]
+    fn indegree_takes_the_token_half_of_a_cross_repo_citation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.md");
+        let b = tmp.path().join("b.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, "a", &a, "## R-9 — the law\n\nprose only\n");
+        seed_ledger(&cat, "b", &b, "see other:R-9 from over here\n");
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get("R-9").copied(),
+            Some(1),
+            "a qualified `other:R-9` citation must be attributed to the token half, R-9 — \
+         the same idiom corpus_cited_tokens uses"
+        );
+    }
+
+    #[test]
+    fn conditional_past_due_fires_only_above_the_exposure_gate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-1 — exposed\n\n**Valid:** conditional — until the plan edit lands\n\n\
+         ## R-2 — ignored\n\n**Valid:** conditional — until something else\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-1".to_string(), 9usize);
+        deg.insert("R-2".to_string(), 1usize);
+
+        let v = scan_conditional_past_due(&cat.conn, &deg).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "only the exposed conditional is worth anyone's time: {v:#?}"
+        );
+        assert!(v[0].detail.contains("R-1"));
+        assert!(
+            v[0].detail.contains("until the plan edit lands"),
+            "the worklist must carry the condition to adjudicate, not just an id"
+        );
+        assert_eq!(v[0].check, "entry_conditional_past_due");
+    }
+
+    #[test]
+    fn conditional_past_due_fires_exactly_at_the_exposure_threshold() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-3 — at the line\n\n**Valid:** conditional — the boundary case\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-3".to_string(), EXPOSURE_THRESHOLD);
+        assert_eq!(
+            scan_conditional_past_due(&cat.conn, &deg).unwrap().len(),
+            1,
+            "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
+        );
+
+        deg.insert("R-3".to_string(), EXPOSURE_THRESHOLD - 1);
+        assert!(
+            scan_conditional_past_due(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "one below the threshold must not fire"
+        );
+    }
+
+    #[test]
+    fn conditional_past_due_does_not_read_a_nested_childs_declaration_as_the_parents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        // PV-2 (the parent, level 3) declares nothing itself; its nested child PV-8
+        // (level 4) sits WHOLLY inside PV-2's section text and declares conditional.
+        // Without truncation, PV-2 would read PV-8's declaration as its own under
+        // `parse_validity`'s first-wins rule.
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "### PV-2 — parent, no declaration of its own\n\n\
+         prose about the parent\n\n\
+         #### PV-8 — nested child\n\n\
+         **Valid:** conditional — the child's own event\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("PV-2".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert("PV-8".to_string(), EXPOSURE_THRESHOLD);
+
+        let v = scan_conditional_past_due(&cat.conn, &deg).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "PV-2 declares nothing of its own and must not inherit PV-8's declaration: {v:#?}"
+        );
+        assert!(v[0].detail.contains("PV-8"));
+    }
+
+    #[test]
+    fn conditional_past_due_swallows_a_malformed_valid_line_rather_than_reporting_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-7 — malformed\n\n**Valid:** not-a-real-class\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
+
+        assert!(
+            scan_conditional_past_due(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "a malformed declaration is `validity_unparseable`'s finding, not this check's"
         );
     }
 }
