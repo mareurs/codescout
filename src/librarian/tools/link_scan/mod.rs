@@ -144,7 +144,7 @@ fn entry_dst_ref(
 /// is routinely a preamble line or a hand-maintained `## Index` row while the entries that
 /// genuinely rest on it cite it further down. Reading `c.line` alone attributed to whatever
 /// contained the first mention and dropped the rest
-/// (`docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md`).
+/// (`docs/issues/archive/2026-08-21-entry-attribution-follows-the-first-mention-only.md`).
 ///
 /// **Both `Edge` and `SelfCite` come through here, and that is the point.** File grain and
 /// entry grain disagree about self-citation, correctly: an artifact citing itself is a
@@ -741,7 +741,7 @@ mod tests {
         // reaching attribution and failing it, almost all index-table mentions.
         //
         // `Citation` now carries `repeat_lines` and attribution walks `occurrences()`.
-        // docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md
+        // docs/issues/archive/2026-08-21-entry-attribution-follows-the-first-mention-only.md
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
 

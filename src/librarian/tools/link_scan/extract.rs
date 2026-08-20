@@ -216,7 +216,7 @@ impl Citation {
     /// preamble or `## Index` row, while the entry that genuinely rests on it cites it
     /// further down. Reading `line` alone attributes to whatever contains the first
     /// mention and silently drops the rest
-    /// (`docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md`).
+    /// (`docs/issues/archive/2026-08-21-entry-attribution-follows-the-first-mention-only.md`).
     pub fn occurrences(&self) -> impl Iterator<Item = u32> + '_ {
         std::iter::once(self.line).chain(self.repeat_lines.iter().copied())
     }

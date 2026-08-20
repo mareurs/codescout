@@ -693,7 +693,8 @@ needs is the seam.
 numbers (324/322) would have quietly contradicted it forever. It also concealed a real
 defect for a while: the same dedup means a passing mention above an entry consumes the
 citation, now filed and measured at 1461 shadowed across 139 ledgers
-(`docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md`).
+(`docs/issues/archive/2026-08-21-entry-attribution-follows-the-first-mention-only.md`,
+fixed same-day in `383b394e`).
 
 **Status:** fixed-verified — doc comment corrected and the real collapse pinned by
 `entry_edges_reports_citation_grain_and_edge_grain_separately`; the underlying limitation

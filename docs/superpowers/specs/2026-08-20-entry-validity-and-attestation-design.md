@@ -1061,17 +1061,41 @@ So this is not "the citation graph at finer grain"; it is the much smaller objec
 ledger entry cites something"*. That is still exactly what Layers 4 and 5 consume, but it
 is roughly a sixth of what the wording below implies.
 
-**One known defect caps it further.** `extract::push_citation` keeps one citation per
-`(kind, raw)` per document, carrying the FIRST occurrence's line, so a passing mention in
-a preamble or `## Index` table consumes the citation and the entry that genuinely rests on
-the token records nothing. Measured 2026-08-21: **1461 shadowed citations across 139
-ledgers**, worst in exactly the ledgers that maintain a hand-written index table. That is
-an upper bound — unfiltered by resolution, and corpus-wide where the 322 is project-scoped
-— but it is the same order as the whole materialized graph, so it is the dominant limit on
-coverage. `docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md`.
-Fixing it means changing what `extract` emits, which is a behaviour change to the exposure
-metric three shipped `doctor` checks are gated on — sequence it with its own measurement,
-not as a rider.
+**Two defects capped it, and both are now fixed** (2026-08-21). They were independent and
+compounding, and neither alone recovered the canonical example.
+
+1. **`SelfCite` was decided at file grain** (`b750419a`). `resolve` returned `SelfCite`
+   whenever the citing FILE defined the token, and that arm was matched before the one
+   holding `entry_section_at` — so every intra-ledger edge was discarded before
+   attribution ran. A ledger's `**Kin:**` and `**Chain.**` lines, its densest and most
+   deliberate edges, contributed nothing.
+   `docs/issues/archive/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md`
+2. **Attribution followed a token's FIRST mention** (`383b394e`). `push_citation` kept one
+   citation per `(kind, raw)` per document carrying only the first occurrence's line, so a
+   passing mention in a preamble or `## Index` table consumed it.
+   `docs/issues/archive/2026-08-21-entry-attribution-follows-the-first-mention-only.md`
+
+The second was deferred here as "a behaviour change to the exposure metric three shipped
+`doctor` checks are gated on". That was true of the two options considered and false of the
+one taken: `Citation` now carries **all** its occurrence lines while `extract` still emits
+exactly one per `(kind, raw)`, so every consumer's citation count is byte-identical and
+exposure cannot move by construction. Verified rather than argued — `doctor`'s
+`summary.total` and every `by_check` count came back identical across the change, with
+`entry_cited_from_outside_but_undeclared` at 32 both times.
+
+**Measured live**, project-scoped, across the three states:
+
+| | before | after `b750419a` | after `383b394e` |
+|---|---:|---:|---:|
+| `entry_cite` rows, `origin='scan'` | 322 | 391 | **1513** |
+| of those, intra-ledger | 0 | 68 | **703** |
+| distinct source ledgers | 44 | — | **85** |
+| `derived` | 323 | 391 | **1345** |
+
+So the sixth-of-the-citation-graph estimate below was measuring a defect, not a ceiling.
+The 1461 figure this section previously carried is superseded: it was corpus-wide,
+unfiltered by resolution, and inflated by omitting `SelfCite` from the outcomes that
+prevent an edge.
 
 **The original split reasoning, for the record.** Measured 2026-08-20, before shipping:
 

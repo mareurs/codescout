@@ -1,8 +1,8 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: entry-grain attribution follows a token's FIRST mention, so a passing reference above an entry consumes the real one
-closed:
+closed: 2026-08-21
 ---
 
 ## Symptom
@@ -13,7 +13,9 @@ once, only the **first** mention survives to be attributed — so a passing refe
 preamble, an index table, or a `## Summary` **consumes** the citation, and the entry that
 genuinely rests on that token records no edge at all.
 
-Pinned by `a_token_first_mentioned_outside_an_entry_loses_its_entry_attribution`
+Originally pinned as a known limitation by
+`a_token_first_mentioned_outside_an_entry_loses_its_entry_attribution`, now inverted and
+renamed to `a_token_first_mentioned_outside_an_entry_still_attributes_to_the_entry_citing_it`
 (`src/librarian/tools/link_scan/mod.rs`), which asserts `derived == 0` for a file whose
 `## W-1` body cites `F-1` directly, because a line above it mentioned `F-1` first.
 
@@ -140,5 +142,94 @@ entries' bodies, first mentioned on line 90 in the preamble, and still recording
 intra-ledger edges after `b750419a` for that reason alone.
 ## Fix
 
-Not yet. Tracked for Layer 3 follow-up; see `statement-validity-session-log:F-5` for the
-sibling reporting defect found in the same pass.
+Fixed on `experiments` in **`383b394e`**, patch-id
+**`3d0050f3e69f368ceec1e30eb9fd52f21008e888`** (the SHA dies on the next rebase; the
+patch-id is a content hash of the diff and survives rebase and cherry-pick). Depends on
+`b750419a`, the entry-grain `SelfCite` fix — the two suppressors were independent and
+compounding, and neither alone recovers the exemplar.
+
+### A third option, not either of the two above
+
+Both options in *Why it is not fixed here* assume the fix must change **how many
+`Citation`s `extract` emits**. Reading `entry_indegree`'s loop rather than its doc comment
+shows that is the wrong axis: it increments once per `Citation`, so the file-level exposure
+guarantee is *emergent* from the dedup rather than enforced anywhere.
+
+So: keep exactly one `Citation` per `(kind, raw)` per document, and have it **carry all its
+occurrence lines**. `Citation` gains `repeat_lines: Vec<u32>` (later occurrences, ascending,
+deliberately EXCLUDING `line` so no overlap invariant exists to violate) plus
+`occurrences()`. `attribute_entry_edge` returns a `Vec` and walks them all.
+
+Every consumer's citation count is byte-identical, so exposure **cannot** move by
+construction — no recalibration, nothing to re-verify. Checked across all three consumers
+rather than assumed: `corpus_cited_tokens` inserts into a `BTreeSet` (immune either way),
+`entry_indegree` increments per `Citation` (count unchanged), `link_scan` is the only one
+reading the new field.
+
+Counter semantics preserved: `attributed` and `outside_any_entry` still partition the
+RESOLVED CITATIONS — one attributed citation however many entries it reaches — with the
+edge count in `derived`. Counting per-occurrence would have made the two incomparable,
+which is the confusion those fields were split to prevent.
+
+### Measured live
+
+| | pre-`b750419a` | post-`b750419a` | **post-`383b394e`** |
+|---|---:|---:|---:|
+| `attributed` | 325 | 393 | **862** |
+| `outside_any_entry` | 1399 | 2203 | **1740** |
+| `derived` | 323 | 391 | **1345** |
+| `entry_cite` rows, `origin='scan'` | 322 | 391 | **1513** |
+| of those, intra-ledger | 0 | 68 | **703** |
+| distinct source ledgers | 44 | — | **85** |
+| distinct source entries | — | — | **683** |
+| self-loops | 0 | 0 | **0** |
+
+**469 citations moved from unattributable to attributed, producing +954 edges** — roughly
+two entries per newly-attributed citation, exactly the `## Index`-row-shadows-several-
+dependents shape this bug predicted.
+
+The partition closes exactly: `862 + 1740 = 2602` against `393 + 2203 = 2596`, and the
+difference of 6 is the 6 newly-indexed citations. Nothing appeared from nowhere.
+
+**The exposure claim was tested, not asserted.** `librarian(action="doctor")` reports
+`summary.total` 378 with every `by_check` count byte-identical to the pre-fix run —
+`entry_cited_from_outside_but_undeclared` still exactly **32**. Had this taken option 1,
+that number would have moved and three shipped checks would have needed recalibration
+before anything could ship.
+
+### The exemplar, finally
+
+`reconnaissance-patterns:R-3` — 3 inbound edges before, **22** now. Five come from within
+its own ledger (`R-1`, `R-41`, `R-44`, `R-93`, `R-96`) and needed BOTH fixes: `b750419a` to
+stop discarding them as `SelfCite`, this one to see past the preamble mention on line 90.
+Seven more come from the archived companion, including `R-77` and `R-79` — literally the
+chain the reconnaissance skill names in prose (`R-3 → R-73b → R-77 → R-79`), which the
+graph could not see until now.
+
+### Mutation-verified
+
+Four applied to the real source, suite run, observed:
+
+| mutation | observed |
+|---|---|
+| `occurrences()` yields only `line` | **killed**, 3 tests |
+| `repeat_lines` seeded `vec![line]`, overlapping `line` | **killed**, 2 tests |
+| (the above also covers `push_citation`'s `Occupied` arm) | |
+| drop the triple dedup in `attribute_entry_edge` | **survives**, 70/70 green |
+
+The survivor is a genuine **equivalent mutant**: the vec feeds a `BTreeSet` and `attributed`
+counts citations, so duplicates are unobservable. Chasing it found a false **comment**
+rather than a missing test — it claimed the dedup kept `attributed` honest about distinct
+claims, which it cannot, since `attributed` never reads the vec's length. Corrected to state
+that it moves no number.
+
+The two `extract`-level tests earn their place: under the overlap mutation every `mod.rs`
+integration test still passed, because a duplicated first line attributes to the same
+section and dedups away.
+
+Regression tests: `a_token_first_mentioned_outside_an_entry_still_attributes_to_the_entry_citing_it`,
+`one_citation_attributes_to_every_entry_that_mentions_the_token`,
+`a_repeated_token_stays_one_citation_and_records_every_line`,
+`a_token_mentioned_once_has_no_repeat_lines`.
+
+Gate: fmt + clippy clean, 4394 passed / 45 ignored / 0 failed.
