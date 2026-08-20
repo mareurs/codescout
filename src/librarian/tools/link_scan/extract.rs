@@ -952,4 +952,155 @@ gamma
             "a definition-shaped line that is not an ATX heading must not define a section: {s:?}"
         );
     }
+
+    /// `entry_sections()` and `extract()` are two independent readers of the same
+    /// thing — which `## <ID> — <title>` headings a markdown file defines (see the
+    /// doc comment on `entry_sections` for why they must never diverge silently).
+    /// Task 1's re-review measured 104/104 agreement between them across the whole
+    /// `docs/**/*.md` corpus after the frontmatter/fence-parity fix, but noted the
+    /// agreement was pinned by nothing in CI — the nested-fence regression test above
+    /// pins the *mechanism* that broke, not the *property* that the two readers agree
+    /// (`.superpowers/sdd/2026-08-20-statement-validity-layers-1-2/task-1-re-review.md`,
+    /// Deferred minor 2). This test is that missing pin, modelled on
+    /// `both_entry_prefix_readers_agree_on_every_yaml_form`
+    /// (`src/librarian/catalog/augmentation.rs`) — same idea, two independent readers
+    /// of one property, checked against real inputs rather than trusted by a comment.
+    ///
+    /// Walking the live corpus, rather than a frozen fixture copy, is deliberate: a
+    /// fixture would exercise only the shapes the unit tests above already cover and
+    /// would pin nothing new, where the live corpus can surface a real file that trips
+    /// a path neither reader's unit tests anticipated — which is exactly how the
+    /// nested-fence and HTML-comment-block cases below were both found. The cost is
+    /// sensitivity to unrelated doc edits: a new or edited file under `docs/` can turn
+    /// this test red for a reason that has nothing to do with whatever change
+    /// triggered the run. That cost is paid off by the failure message, not avoided —
+    /// every assertion below names the file, the ids each reader saw and did not see,
+    /// and the direction of the difference, so a legitimate new-doc failure is
+    /// diagnosable from the test output alone rather than mysterious.
+    ///
+    /// One disagreement is a known, *named* exception, not a count budget: `CAP-4` in
+    /// `docs/trackers/capability-proposals.md` is a pre-existing `extract()` defect —
+    /// a pulldown_cmark HTML comment block swallows the following heading, so
+    /// `extract()` never sees it while `entry_sections` (a different, line-oriented
+    /// parser) does — filed at
+    /// `docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md`,
+    /// which prescribes this exact check. It predates this branch and is not fixed
+    /// here.
+    ///
+    /// The exception is matched by identity (file + the full id-set diff), not
+    /// counted: a bare "at most 1 disagreeing file" tolerance would stay green if
+    /// `CAP-4` got fixed and a different, real drift appeared in its place — same
+    /// count, wrong file, silent guard. Matching identity catches either failure mode
+    /// on its own: an unexpected file trips the first assertion regardless of how many
+    /// total disagreements there are, and `CAP-4` no longer appearing trips the
+    /// second — which is the loud failure this test should produce the day that bug is
+    /// fixed, as the prompt to delete the exception below.
+    #[test]
+    fn entry_sections_and_extract_agree_on_the_live_corpus() {
+        // A known, pre-existing extract() defect — not fixed here. See the doc
+        // comment above and
+        // docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md.
+        const KNOWN_EXCEPTION_PATH: &str = "docs/trackers/capability-proposals.md";
+        const KNOWN_EXCEPTION_SECTIONS_ONLY: &[&str] = &["CAP-4"];
+
+        let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let docs_root = repo_root.join("docs");
+        let mut files: Vec<std::path::PathBuf> = ignore::WalkBuilder::new(&docs_root)
+            .build()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path().to_path_buf())
+            .filter(|p| p.extension().map(|ext| ext == "md").unwrap_or(false))
+            .collect();
+        files.sort();
+        assert!(
+            files.len() > 500,
+            "expected docs/**/*.md to hold hundreds of markdown files; found {} — the \
+             walk is looking in the wrong place ({docs_root:?}) and every assertion \
+             below would pass vacuously",
+            files.len()
+        );
+
+        let mut unexpected = Vec::new();
+        let mut known_exception_seen = false;
+
+        for path in &files {
+            let text = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let rel = path
+                .strip_prefix(&repo_root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            let sections = entry_sections(&text);
+            let real_lines = text.lines().count() as u32;
+            let overshooting: Vec<(String, u32, u32)> = sections
+                .iter()
+                .filter(|s| s.end_line > real_lines)
+                .map(|s| (s.id.clone(), s.end_line, real_lines))
+                .collect();
+            if !overshooting.is_empty() {
+                unexpected.push(format!(
+                    "{rel}: entry_sections() end_line runs past EOF for \
+                     {overshooting:?} (id, end_line, real_line_count)"
+                ));
+            }
+
+            let extract_ids: std::collections::BTreeSet<String> = extract(&text)
+                .definitions
+                .into_iter()
+                .map(|d| d.token)
+                .collect();
+            let section_ids: std::collections::BTreeSet<String> =
+                sections.into_iter().map(|s| s.id).collect();
+            if extract_ids == section_ids {
+                continue;
+            }
+
+            let extract_only: Vec<&String> = extract_ids.difference(&section_ids).collect();
+            let sections_only: Vec<&String> = section_ids.difference(&extract_ids).collect();
+            let sections_only_strs: Vec<&str> = sections_only.iter().map(|s| s.as_str()).collect();
+
+            if rel == KNOWN_EXCEPTION_PATH
+                && extract_only.is_empty()
+                && sections_only_strs == KNOWN_EXCEPTION_SECTIONS_ONLY
+            {
+                known_exception_seen = true;
+                continue;
+            }
+
+            unexpected.push(format!(
+                "{rel}: extract()-only (extract() saw, entry_sections() missed)=\
+                 {extract_only:?}; entry_sections()-only (entry_sections() saw, \
+                 extract() missed)={sections_only:?}"
+            ));
+        }
+
+        assert!(
+            unexpected.is_empty(),
+            "entry_sections() and extract() disagree beyond the known CAP-4 exception \
+             on {} file(s):\n  {}\n\n\
+             Each line names the file and, per reader, the ids only that reader saw — \
+             investigate why the two readers see different definitions there. Do not \
+             widen this into a count tolerance (see the doc comment above for why that \
+             is the wrong guard); if the corpus genuinely grew a new instance of the \
+             known CAP-4-shaped defect, name it explicitly alongside CAP-4 rather than \
+             loosening the check.",
+            unexpected.len(),
+            unexpected.join("\n  ")
+        );
+
+        assert!(
+            known_exception_seen,
+            "the known CAP-4 exception ({KNOWN_EXCEPTION_PATH}, extract() dropping the \
+             heading after an HTML comment block, filed at \
+             docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md) \
+             did not reproduce this run — either that pre-existing extract() defect has \
+             been fixed (delete KNOWN_EXCEPTION_PATH/KNOWN_EXCEPTION_SECTIONS_ONLY and \
+             this assertion) or the file/heading was renamed (update the constants above \
+             to match). Do not leave this test silently downgraded by removing the \
+             check instead."
+        );
+    }
 }
