@@ -213,20 +213,44 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     all_violations.extend(scan_terminal_status_with_caveat(&cat.conn)?);
     // Per-entry cross-file citation exposure, computed once and shared by every check
     // in the validity-decay family (Tasks 5-7) so each prices its worklist against the
-    // same population rather than recomputing it.
+    // same population rather than recomputing it. Stays GLOBAL/unscoped — Ruling 17 —
+    // even though the three checks below now scope their REPORTED population to the
+    // active project: narrowing the metric itself would understate real cross-repo
+    // exposure and manufacture false negatives.
     let indegree = entry_indegree(&cat.conn)?;
-    all_violations.extend(scan_conditional_past_due(&cat.conn, &indegree)?);
+    let (conditional_violations, conditional_scoped) =
+        scan_conditional_past_due(ctx, &cat.conn, &indegree)?;
+    all_violations.extend(conditional_violations);
     // Same shared `indegree`; today's date is computed once here rather than inside
     // `scan_dated_stale` itself, so the horizon comparison stays deterministic under test.
     let today_epoch_days = {
         let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
         (chrono::Utc::now().date_naive() - epoch).num_days()
     };
-    all_violations.extend(scan_dated_stale(&cat.conn, &indegree, today_epoch_days)?);
+    let (dated_violations, dated_scoped) =
+        scan_dated_stale(ctx, &cat.conn, &indegree, today_epoch_days)?;
+    all_violations.extend(dated_violations);
     // Same shared `indegree`; the inverse question of the two checks above — a
     // load-bearing entry that declares no class at all, rather than one whose
     // declared class needs revisiting.
-    all_violations.extend(scan_cited_but_undeclared(&cat.conn, &indegree)?);
+    let (cited_violations, cited_scoped) = scan_cited_but_undeclared(ctx, &cat.conn, &indegree)?;
+    all_violations.extend(cited_violations);
+    // Entry-validity rows scoped OUT of the report because they belong to a project
+    // root other than the active one (Fix 2 for MF-1). A scoped-out row never becomes
+    // a `Violation`, so `summary.total` cannot count it the way the
+    // `abs_path_outside_managed_roots` sampler's elided rows are counted — this map is
+    // how the drop stays visible instead of silent. Combined across all three checks
+    // rather than kept per-check: the reader-facing question is "how much of my
+    // worklist is actually mine", not which of the three checks it came from.
+    let mut entry_validity_scoped_by_project: std::collections::BTreeMap<String, usize> =
+        Default::default();
+    for (group, n) in conditional_scoped
+        .into_iter()
+        .chain(dated_scoped)
+        .chain(cited_scoped)
+    {
+        *entry_validity_scoped_by_project.entry(group).or_insert(0) += n;
+    }
     // Needs both `ctx` (for the repo to resolve against) and the connection, so unlike
     // `scan_declared_project_roots` it runs inside the lock. Its health block is carried
     // out to `catalog_health` below, because a clean result over 54 of 350 archived files
@@ -358,6 +382,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              confirm a row should be under a managed root before treating it as drift."
         ));
     }
+    if !entry_validity_scoped_by_project.is_empty() {
+        let total_scoped: usize = entry_validity_scoped_by_project.values().sum();
+        let n_projects = entry_validity_scoped_by_project.len();
+        hint_parts.push(format!(
+            "{total_scoped} entry-validity row(s) (entry_conditional_past_due / entry_dated_stale / \
+             entry_cited_from_outside_but_undeclared) scoped out of this report because they belong \
+             to {n_projects} other project root(s) — see catalog_health.entry_validity_scoped_by_project. \
+             Exposure itself stays cross-repo (entry_indegree is not scoped); only the reported \
+             worklist is limited to the active project, so a developer here is not handed other \
+             repos' work."
+        ));
+    }
     if hidden_rows > 0 {
         hint_parts.push(format!(
             "{hidden_rows} row(s) hidden as missing (>{grace}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", old_root, new_root) to migrate a moved repo."
@@ -404,6 +440,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         catalog_health.insert(
             "outside_roots_by_project".to_string(),
             json!(outside_by_project),
+        );
+    }
+    if !entry_validity_scoped_by_project.is_empty() {
+        catalog_health.insert(
+            "entry_validity_scoped_by_project".to_string(),
+            json!(entry_validity_scoped_by_project),
         );
     }
     // Always present, even when nothing fired: its `note` is how a SKIP (linked worktree,
@@ -1954,9 +1996,10 @@ fn declared_section_text(
 /// Read-only; there is no `fix=`. Discharging a conditional means judging whether the
 /// named event happened, which only a reader can do.
 fn scan_conditional_past_due(
+    ctx: &ToolContext,
     conn: &rusqlite::Connection,
     indegree: &std::collections::BTreeMap<String, usize>,
-) -> Result<Vec<Violation>> {
+) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     use crate::librarian::statements::{parse_validity, Validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
@@ -1965,7 +2008,14 @@ fn scan_conditional_past_due(
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
+    // Scoped to the active project's git root, same precedent as
+    // `scan_archived_fix_sha_unresolvable` / `scan_terminal_status_without_fix_anchor`.
+    // No active project means no scoping (report everything) — a config-only caller
+    // must not silently get an empty worklist, the same degradation shape `call()`
+    // already uses for `detect_move_candidates`.
+    let cp = ctx.current_project.as_deref();
     let mut out = Vec::new();
+    let mut scoped_out: std::collections::BTreeMap<String, usize> = Default::default();
     for (aid, path, status) in rows {
         // An archived row is excluded from the REPORTED population, mirroring what
         // `entry_indegree` already does on the citing side (Ruling 15/16) — otherwise
@@ -1991,6 +2041,21 @@ fn scan_conditional_past_due(
             let Ok(Some(Validity::Conditional { condition })) = parse_validity(&declared) else {
                 continue;
             };
+            // Exposure stays global — `entry_indegree` is not scoped, and must not
+            // be, per Ruling 17 (MF-1's fix on the reported population, not the
+            // metric). Only the emitted worklist is limited to the active project,
+            // so a developer standing in one repo is not handed another repo's
+            // finding to act on. A row this drops never becomes a Violation, so
+            // `summary.total` cannot count it — announced instead via
+            // `catalog_health.entry_validity_scoped_by_project`.
+            if let Some(cp) = cp {
+                if super::containing_root(std::slice::from_ref(&cp.git_root), Path::new(&path))
+                    .is_none()
+                {
+                    *scoped_out.entry(outside_roots_group(&path)).or_insert(0) += 1;
+                    continue;
+                }
+            }
             out.push(Violation::new(
                 "entry_conditional_past_due",
                 Some(aid.clone()),
@@ -2003,7 +2068,7 @@ fn scan_conditional_past_due(
             ));
         }
     }
-    Ok(out)
+    Ok((out, scoped_out))
 }
 
 /// Horizon, in days, past a `dated` Statement's declared date before it counts as stale.
@@ -2074,10 +2139,11 @@ fn iso_to_epoch_days(iso: &str) -> Option<i64> {
 /// Read-only; there is no `fix=`. Reports a worklist, never a verdict — re-running the
 /// underlying measurement and judging whether the date is still true is the reader's.
 fn scan_dated_stale(
+    ctx: &ToolContext,
     conn: &rusqlite::Connection,
     indegree: &std::collections::BTreeMap<String, usize>,
     today_epoch_days: i64,
-) -> Result<Vec<Violation>> {
+) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     use crate::librarian::statements::{parse_validity, Validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
@@ -2089,7 +2155,12 @@ fn scan_dated_stale(
     // Named to satisfy `clippy::type_complexity` — the tuple itself is the point: a
     // TOTAL sort key so no two rows can ever compare equal.
     type DatedStaleSortKey = (std::cmp::Reverse<usize>, String, String);
+    // Scoped to the active project's git root — see `scan_conditional_past_due` for
+    // the full reasoning (same precedent, same "no active project means no
+    // scoping" degradation).
+    let cp = ctx.current_project.as_deref();
     let mut scored: Vec<(DatedStaleSortKey, Violation)> = Vec::new();
+    let mut scoped_out: std::collections::BTreeMap<String, usize> = Default::default();
     for (aid, path, status) in rows {
         // An archived row is excluded from the REPORTED population — same guard as
         // `scan_conditional_past_due` and `scan_cited_but_undeclared`; MF-2, 2026-08-20.
@@ -2118,6 +2189,16 @@ fn scan_dated_stale(
             if age < VALIDITY_HORIZON_DAYS {
                 continue;
             }
+            // Exposure stays global; only the emitted worklist is scoped. See
+            // `scan_conditional_past_due` for the full reasoning.
+            if let Some(cp) = cp {
+                if super::containing_root(std::slice::from_ref(&cp.git_root), Path::new(&path))
+                    .is_none()
+                {
+                    *scoped_out.entry(outside_roots_group(&path)).or_insert(0) += 1;
+                    continue;
+                }
+            }
             scored.push((
                 (std::cmp::Reverse(exposure), path.clone(), s.id.clone()),
                 Violation::new(
@@ -2144,7 +2225,7 @@ fn scan_dated_stale(
     // 33-entry ledger alternating two exposure values did. Rather than keep hunting for
     // the right fixture shape, the dependency on stability is removed instead.
     scored.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(scored.into_iter().map(|(_, v)| v).collect())
+    Ok((scored.into_iter().map(|(_, v)| v).collect(), scoped_out))
 }
 
 /// A Statement other files depend on that declares no decay class at all.
@@ -2179,9 +2260,10 @@ fn scan_dated_stale(
 ///
 /// Read-only; there is no `fix=`. Reports a worklist, never a verdict.
 fn scan_cited_but_undeclared(
+    ctx: &ToolContext,
     conn: &rusqlite::Connection,
     indegree: &std::collections::BTreeMap<String, usize>,
-) -> Result<Vec<Violation>> {
+) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     use crate::librarian::statements::parse_validity;
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
@@ -2190,7 +2272,14 @@ fn scan_cited_but_undeclared(
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
+    // Scoped to the active project's git root — see `scan_conditional_past_due` for
+    // the full reasoning. This is the check MF-1 measured burying every other
+    // finding (168 of 215 shown rows, 74% of them about repos other than the
+    // active one); the scoping lands here in the same shared shape as the other
+    // two checks rather than as a special case.
+    let cp = ctx.current_project.as_deref();
     let mut out = Vec::new();
+    let mut scoped_out: std::collections::BTreeMap<String, usize> = Default::default();
     for (aid, path, status) in rows {
         // An archived row is excluded from the REPORTED population — same guard as
         // `scan_conditional_past_due` and `scan_dated_stale`; MF-2, 2026-08-20.
@@ -2214,6 +2303,16 @@ fn scan_cited_but_undeclared(
             if !matches!(parse_validity(&declared), Ok(None)) {
                 continue;
             }
+            // Exposure stays global; only the emitted worklist is scoped. See
+            // `scan_conditional_past_due` for the full reasoning.
+            if let Some(cp) = cp {
+                if super::containing_root(std::slice::from_ref(&cp.git_root), Path::new(&path))
+                    .is_none()
+                {
+                    *scoped_out.entry(outside_roots_group(&path)).or_insert(0) += 1;
+                    continue;
+                }
+            }
             out.push(Violation::new(
                 "entry_cited_from_outside_but_undeclared",
                 Some(aid.clone()),
@@ -2226,7 +2325,7 @@ fn scan_cited_but_undeclared(
             ));
         }
     }
-    Ok(out)
+    Ok((out, scoped_out))
 }
 
 /// `snapshot_drift`: an augmented tracker's `params` hold entry ids that its
@@ -6628,6 +6727,17 @@ root = "work/elsewhere/ghost"
         art_upsert(cat, &row).unwrap();
     }
 
+    /// A ctx with no active project, for the entry-validity scan family's tests that
+    /// exercise exposure/declaration/archived-row logic and don't care about project
+    /// scoping (Fix 2, MF-1). `current_project: None` is exactly the "no scoping —
+    /// report everything" case the scans themselves implement, so these tests see the
+    /// same unscoped behaviour they pinned before ctx was threaded through. Backed by
+    /// its own throwaway in-memory catalog — the scans only read `ctx.current_project`,
+    /// never `ctx.catalog`, so it need not be the same catalog as the test's `cat`.
+    fn unscoped_ctx() -> ToolContext {
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
+    }
+
     #[test]
     fn indegree_counts_cross_file_citations_and_excludes_the_definer() {
         let tmp = tempfile::tempdir().unwrap();
@@ -6694,7 +6804,7 @@ root = "work/elsewhere/ghost"
         deg.insert("R-1".to_string(), 9usize);
         deg.insert("R-2".to_string(), 1usize);
 
-        let v = scan_conditional_past_due(&cat.conn, &deg).unwrap();
+        let (v, _) = scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -6723,15 +6833,19 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert("R-3".to_string(), EXPOSURE_THRESHOLD);
         assert_eq!(
-            scan_conditional_past_due(&cat.conn, &deg).unwrap().len(),
+            scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
+                .unwrap()
+                .0
+                .len(),
             1,
             "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
         );
 
         deg.insert("R-3".to_string(), EXPOSURE_THRESHOLD - 1);
         assert!(
-            scan_conditional_past_due(&cat.conn, &deg)
+            scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "one below the threshold must not fire"
         );
@@ -6760,7 +6874,7 @@ root = "work/elsewhere/ghost"
         deg.insert("PV-2".to_string(), EXPOSURE_THRESHOLD);
         deg.insert("PV-8".to_string(), EXPOSURE_THRESHOLD);
 
-        let v = scan_conditional_past_due(&cat.conn, &deg).unwrap();
+        let (v, _) = scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -6785,8 +6899,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
 
         assert!(
-            scan_conditional_past_due(&cat.conn, &deg)
+            scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "a malformed declaration is `validity_unparseable`'s finding, not this check's"
         );
@@ -6814,8 +6929,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-98".to_string(), EXPOSURE_THRESHOLD + 50);
 
         assert!(
-            scan_conditional_past_due(&cat.conn, &deg)
+            scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "a token with no entry in `indegree` at all must be treated as zero \
              exposure, not skip the gate"
@@ -6839,8 +6955,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-60".to_string(), EXPOSURE_THRESHOLD + 3);
 
         assert!(
-            scan_conditional_past_due(&cat.conn, &deg)
+            scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "a definer located under an /archive/ path segment must not be reported \
              even though its exposure clears the gate — mirrors entry_indegree's \
@@ -6874,7 +6991,7 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert("R-61".to_string(), EXPOSURE_THRESHOLD + 3);
 
-        let v = scan_conditional_past_due(&cat.conn, &deg).unwrap();
+        let (v, _) = scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -7110,7 +7227,7 @@ root = "work/elsewhere/ghost"
         deg.insert("R-3".to_string(), 99usize);
 
         // 2026-08-20 as days since epoch.
-        let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
+        let (v, _) = scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685).unwrap();
         let ids: Vec<String> = v
             .iter()
             .map(|x| x.detail.split_whitespace().next().unwrap().to_string())
@@ -7178,7 +7295,7 @@ root = "work/elsewhere/ghost"
         }
         seed_ledger(&cat, "led", &p, &text);
 
-        let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
+        let (v, _) = scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685).unwrap();
         assert_eq!(v.len(), 33);
         let got: Vec<String> = v
             .iter()
@@ -7211,14 +7328,18 @@ root = "work/elsewhere/ghost"
         deg.insert("R-9".to_string(), EXPOSURE_THRESHOLD);
 
         assert_eq!(
-            scan_dated_stale(&cat.conn, &deg, 20_685).unwrap().len(),
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
+                .unwrap()
+                .0
+                .len(),
             1,
             "age == VALIDITY_HORIZON_DAYS must fire — the gate is `<`, not `<=`"
         );
         // One day younger (age 29, "today" = 2026-08-19) must NOT fire.
         assert!(
-            scan_dated_stale(&cat.conn, &deg, 20_684)
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_684)
                 .unwrap()
+                .0
                 .is_empty(),
             "one day inside the horizon must not fire"
         );
@@ -7239,15 +7360,19 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD);
         assert_eq!(
-            scan_dated_stale(&cat.conn, &deg, 20_685).unwrap().len(),
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
+                .unwrap()
+                .0
+                .len(),
             1,
             "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
         );
 
         deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD - 1);
         assert!(
-            scan_dated_stale(&cat.conn, &deg, 20_685)
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
                 .unwrap()
+                .0
                 .is_empty(),
             "one below the threshold must not fire"
         );
@@ -7278,8 +7403,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-99".to_string(), EXPOSURE_THRESHOLD + 50);
 
         assert!(
-            scan_dated_stale(&cat.conn, &deg, 20_685)
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
                 .unwrap()
+                .0
                 .is_empty(),
             "a token with no entry in `indegree` at all must be treated as zero \
              exposure, not skip the gate"
@@ -7307,7 +7433,7 @@ root = "work/elsewhere/ghost"
         deg.insert("PV-3".to_string(), EXPOSURE_THRESHOLD);
         deg.insert("PV-9".to_string(), EXPOSURE_THRESHOLD);
 
-        let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
+        let (v, _) = scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -7334,8 +7460,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-6".to_string(), EXPOSURE_THRESHOLD);
 
         assert!(
-            scan_dated_stale(&cat.conn, &deg, 20_685)
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
                 .unwrap()
+                .0
                 .is_empty(),
             "an invariant or conditional declaration is not this check's business — only \
              `dated` is"
@@ -7358,8 +7485,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
 
         assert!(
-            scan_dated_stale(&cat.conn, &deg, 20_685)
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
                 .unwrap()
+                .0
                 .is_empty(),
             "a malformed declaration is `validity_unparseable`'s finding, not this check's"
         );
@@ -7393,8 +7521,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-9".to_string(), EXPOSURE_THRESHOLD);
 
         assert!(
-            scan_dated_stale(&cat.conn, &deg, 20_685)
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
                 .unwrap()
+                .0
                 .is_empty(),
             "both a composite-invalid and a range-valid-but-calendar-invalid date must \
              be skipped, not reported or panicked on"
@@ -7418,8 +7547,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-62".to_string(), EXPOSURE_THRESHOLD + 3);
 
         assert!(
-            scan_dated_stale(&cat.conn, &deg, 20_685)
+            scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
                 .unwrap()
+                .0
                 .is_empty(),
             "a definer located under an /archive/ path segment must not be reported \
              even though its exposure and age both clear the gate"
@@ -7452,7 +7582,7 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert("R-63".to_string(), EXPOSURE_THRESHOLD + 3);
 
-        let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
+        let (v, _) = scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -7512,7 +7642,7 @@ root = "work/elsewhere/ghost"
         deg.insert("R-2".to_string(), 20usize);
         deg.insert("R-3".to_string(), 1usize);
 
-        let v = scan_cited_but_undeclared(&cat.conn, &deg).unwrap();
+        let (v, _) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -7542,15 +7672,19 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD);
         assert_eq!(
-            scan_cited_but_undeclared(&cat.conn, &deg).unwrap().len(),
+            scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
+                .unwrap()
+                .0
+                .len(),
             1,
             "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
         );
 
         deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD - 1);
         assert!(
-            scan_cited_but_undeclared(&cat.conn, &deg)
+            scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "one below the threshold must not fire"
         );
@@ -7582,7 +7716,7 @@ root = "work/elsewhere/ghost"
         deg.insert("PV-2".to_string(), EXPOSURE_THRESHOLD);
         deg.insert("PV-8".to_string(), EXPOSURE_THRESHOLD);
 
-        let v = scan_cited_but_undeclared(&cat.conn, &deg).unwrap();
+        let (v, _) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -7608,8 +7742,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
 
         assert!(
-            scan_cited_but_undeclared(&cat.conn, &deg)
+            scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "a malformed declaration is `validity_unparseable`'s finding, not this \
              check's — it is not the same thing as declaring nothing"
@@ -7636,8 +7771,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-98".to_string(), EXPOSURE_THRESHOLD + 50);
 
         assert!(
-            scan_cited_but_undeclared(&cat.conn, &deg)
+            scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "a token with no entry in `indegree` at all must be treated as zero \
              exposure, not skip the gate"
@@ -7664,8 +7800,9 @@ root = "work/elsewhere/ghost"
         }
 
         assert!(
-            scan_cited_but_undeclared(&cat.conn, &deg)
+            scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "any declared class at all — invariant, dated, or conditional — takes an \
              entry out of this check's business"
@@ -7689,8 +7826,9 @@ root = "work/elsewhere/ghost"
         deg.insert("R-64".to_string(), EXPOSURE_THRESHOLD + 3);
 
         assert!(
-            scan_cited_but_undeclared(&cat.conn, &deg)
+            scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
+                .0
                 .is_empty(),
             "a definer located under an /archive/ path segment must not be reported \
              even though its exposure clears the gate"
@@ -7719,7 +7857,7 @@ root = "work/elsewhere/ghost"
         let mut deg = std::collections::BTreeMap::new();
         deg.insert("R-65".to_string(), EXPOSURE_THRESHOLD + 3);
 
-        let v = scan_cited_but_undeclared(&cat.conn, &deg).unwrap();
+        let (v, _) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
             v.len(),
             1,
@@ -7727,6 +7865,120 @@ root = "work/elsewhere/ghost"
              one may be reported: {v:#?}"
         );
         assert_eq!(v[0].artifact_id, Some("active".to_string()));
+    }
+
+    // ---- scan_cited_but_undeclared: project scoping (Fix 2, MF-1) ---------------------
+
+    #[test]
+    fn cited_but_undeclared_reports_a_row_under_the_active_project_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let p = root.join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, "led", &p, "## R-70 — in scope\n\nno class\n");
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-70".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let ctx = ctx_rooted_at(cat, &root);
+        let (v, scoped_out) = {
+            let cat = ctx.catalog.lock();
+            scan_cited_but_undeclared(&ctx, &cat.conn, &deg).unwrap()
+        };
+        assert_eq!(
+            v.len(),
+            1,
+            "a row under the active project's git_root must be reported: {v:#?}"
+        );
+        assert!(
+            scoped_out.is_empty(),
+            "nothing was scoped out: {scoped_out:?}"
+        );
+    }
+
+    #[test]
+    fn cited_but_undeclared_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let p = sibling_root.join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, "led", &p, "## R-71 — out of scope\n\nno class\n");
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-71".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let (v, scoped_out) = {
+            let cat = ctx.catalog.lock();
+            scan_cited_but_undeclared(&ctx, &cat.conn, &deg).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "a row under a SIBLING root must not be reported when an active project is \
+             set — component-boundary matching, not a prefix match: {v:#?}"
+        );
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the scoped-out row must be COUNTED, not silently dropped — a filtered row \
+             never becomes a Violation, so summary.total cannot count it, but this map \
+             must: {scoped_out:?}"
+        );
+    }
+
+    #[test]
+    fn cited_but_undeclared_does_not_treat_a_prefix_matching_sibling_as_contained() {
+        // `containing_root`'s own doc comment: "/proj/sub must not be treated as
+        // contained by /proj/subterfuge". A `String::starts_with`-based scope check
+        // would wrongly treat `active-project-2` as inside `active-project`, because
+        // the STRING `.../active-project-2/...` starts with the string
+        // `.../active-project` even though the directory is a sibling, not a child.
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let lookalike_root = tmp.path().join("active-project-2");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&lookalike_root).unwrap();
+        let p = lookalike_root.join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, "led", &p, "## R-74 — prefix lookalike\n\nno class\n");
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-74".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let (v, scoped_out) = {
+            let cat = ctx.catalog.lock();
+            scan_cited_but_undeclared(&ctx, &cat.conn, &deg).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "a string-prefix-matching sibling must not be treated as contained — \
+             component-boundary matching, not String::starts_with: {v:#?}"
+        );
+        assert_eq!(scoped_out.values().sum::<usize>(), 1, "{scoped_out:?}");
+    }
+
+    #[test]
+    fn cited_but_undeclared_reports_everything_when_there_is_no_active_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, "led", &p, "## R-72 — no active project\n\nno class\n");
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-72".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let (v, scoped_out) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "no active project must mean NO scoping — report everything, not an empty \
+             worklist, matching how call() degrades detect_move_candidates: {v:#?}"
+        );
+        assert!(scoped_out.is_empty(), "{scoped_out:?}");
     }
 
     #[tokio::test]
@@ -7750,6 +8002,48 @@ root = "work/elsewhere/ghost"
             json!(1),
             "call() must wire a REAL entry_indegree into scan_cited_but_undeclared, not \
              an empty/placeholder map: {out:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_reports_entry_validity_scoped_out_rows_in_catalog_health() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // The undeclared, above-threshold entry lives OUTSIDE the active project.
+        let led = sibling_root.join("led.md");
+        seed_ledger(&cat, "led", &led, "## R-73 — outside\n\nno class here\n");
+        for i in 0..EXPOSURE_THRESHOLD {
+            let p = sibling_root.join(format!("citer-{i}.md"));
+            seed_ledger(&cat, &format!("citer-{i}"), &p, "see R-73\n");
+        }
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert!(
+            out["summary"]["by_check"]
+                .get("entry_cited_from_outside_but_undeclared")
+                .is_none(),
+            "the scoped-out row must not appear in the report at all: {out:#?}"
+        );
+        assert!(
+            out["catalog_health"]["entry_validity_scoped_by_project"]
+                .as_object()
+                .is_some_and(|m| !m.is_empty()),
+            "the drop must be ANNOUNCED, not silent — same discipline as \
+             outside_roots_by_project: {out:#?}"
+        );
+        assert!(
+            out["catalog_health"]["hint"]
+                .as_str()
+                .unwrap()
+                .contains("scoped out"),
+            "{out:#?}"
         );
     }
 }
