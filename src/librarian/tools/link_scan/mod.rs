@@ -133,10 +133,18 @@ fn entry_dst_ref(
 
 /// Entry-grain attribution for one already-resolved citation.
 ///
-/// Returns the `(src_slug, src_local, dst_ref)` triple that keys an `entry_cite` row, or
-/// `None` when the citation cannot be attributed to an entry — the caller counts those as
-/// `outside_any_entry`, which keeps `attributed + outside_any_entry` a partition of the
-/// resolved citations.
+/// Returns every `(src_slug, src_local, dst_ref)` triple the citation keys — one per
+/// DISTINCT entry that mentions the token — or an empty vec when it can be attributed to
+/// no entry at all. The caller counts a non-empty result as one `attributed` citation and
+/// an empty one as `outside_any_entry`, which keeps those two a partition of the resolved
+/// citations even though a single citation may now yield several edges.
+///
+/// **Every occurrence is walked, not just the first.** `extract` emits one `Citation` per
+/// `(kind, raw)` per document carrying all its positions, because a token's first mention
+/// is routinely a preamble line or a hand-maintained `## Index` row while the entries that
+/// genuinely rest on it cite it further down. Reading `c.line` alone attributed to whatever
+/// contained the first mention and dropped the rest
+/// (`docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md`).
 ///
 /// **Both `Edge` and `SelfCite` come through here, and that is the point.** File grain and
 /// entry grain disagree about self-citation, correctly: an artifact citing itself is a
@@ -148,30 +156,54 @@ fn entry_dst_ref(
 /// The one case a same-file citation must still be refused is the **true** self-reference:
 /// the citation sits inside the very entry that defines the token, so `src_local ==
 /// dst_local`. Nothing rests on an entry naming itself, and a self-loop at entry grain
-/// would inflate that entry's own indegree.
+/// would inflate that entry's own indegree. Refused per-occurrence, so an entry that names
+/// itself AND is named by a sibling still records the sibling's edge.
 fn attribute_entry_edge(
     sections: &[extract::EntrySection],
     c: &extract::Citation,
     src_id: &str,
     dst_id: &str,
     id_to_slug: &BTreeMap<String, String>,
-) -> Option<(String, String, String)> {
-    let src_section = extract::entry_section_at(sections, c.line)?;
-    let src_slug = id_to_slug.get(src_id)?;
-    let dst_ref = entry_dst_ref(c, dst_id, id_to_slug)?;
+) -> Vec<(String, String, String)> {
+    let (Some(src_slug), Some(dst_ref)) =
+        (id_to_slug.get(src_id), entry_dst_ref(c, dst_id, id_to_slug))
+    else {
+        // A slugless endpoint cannot key an entry_cite row (`src_slug` FKs
+        // `artifact(slug)`), so no occurrence of this citation can be attributed.
+        return Vec::new();
+    };
+    let dst_local = dst_ref.rsplit_once(':').map(|(_, local)| local);
 
-    if src_id == dst_id {
-        match dst_ref.rsplit_once(':') {
-            // Intra-ledger, two different entries: a real edge.
-            Some((_, dst_local)) if dst_local != src_section.id => {}
-            // Either the entry citing itself, or a file-grain self-link
-            // (`ArtifactId` / `RelPathLink`) whose `dst_ref` names no entry at all.
-            // Neither is an edge between two distinct nodes.
-            _ => return None,
+    let mut out: Vec<(String, String, String)> = Vec::new();
+    for line in c.occurrences() {
+        let Some(src_section) = extract::entry_section_at(sections, line) else {
+            continue;
+        };
+        if src_id == dst_id {
+            match dst_local {
+                // Intra-ledger, two different entries: a real edge.
+                Some(local) if local != src_section.id.as_str() => {}
+                // Either the entry citing itself, or a file-grain self-link
+                // (`ArtifactId` / `RelPathLink`) whose `dst_ref` names no entry at all —
+                // `None` lands here deliberately, since "no entry named" is not
+                // "a different entry".
+                _ => continue,
+            }
+        }
+        let triple = (src_slug.clone(), src_section.id.clone(), dst_ref.clone());
+        // Two mentions inside ONE entry are one edge.
+        //
+        // This dedup is NOT observable in any reported count, and saying so is the
+        // point: `desired_entry` is a BTreeSet that collapses duplicates anyway, and
+        // `attributed` counts citations rather than triples. Removing it is an
+        // equivalent mutation — confirmed by applying it, 70/70 still green. It is kept
+        // only to bound the vec for a token repeated many times inside one entry, and a
+        // reader should not infer that any number moves when it fires.
+        if !out.contains(&triple) {
+            out.push(triple);
         }
     }
-
-    Some((src_slug.clone(), src_section.id.clone(), dst_ref))
+    out
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -343,12 +375,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     // Entry grain, derived from the SAME resolution — assembly only.
                     // `resolve` already proved the target unique, so nothing here
                     // re-decides what a citation points at.
-                    match attribute_entry_edge(sections, c, &row.id, &dst_id, &id_to_slug) {
-                        Some(triple) => {
-                            edges_attributed += 1;
-                            desired_entry.insert(triple);
-                        }
-                        None => edges_outside_any_entry += 1,
+                    let triples = attribute_entry_edge(sections, c, &row.id, &dst_id, &id_to_slug);
+                    if triples.is_empty() {
+                        edges_outside_any_entry += 1;
+                    } else {
+                        // Citation grain: ONE attributed citation however many entries
+                        // mention the token, so this stays a partition with
+                        // `outside_any_entry` over the resolved citations. The edge count
+                        // is `derived`, below.
+                        edges_attributed += 1;
+                        desired_entry.extend(triples);
                     }
                     desired.insert((row.id.clone(), dst_id));
                 }
@@ -364,12 +400,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     // Before this split, every `**Kin:**` and `**Chain.**` cross-reference
                     // a ledger wrote about its own entries was discarded here, unattributed
                     // and uncounted.
-                    match attribute_entry_edge(sections, c, &row.id, &dst_id, &id_to_slug) {
-                        Some(triple) => {
-                            edges_attributed += 1;
-                            desired_entry.insert(triple);
-                        }
-                        None => edges_outside_any_entry += 1,
+                    let triples = attribute_entry_edge(sections, c, &row.id, &dst_id, &id_to_slug);
+                    if triples.is_empty() {
+                        edges_outside_any_entry += 1;
+                    } else {
+                        edges_attributed += 1;
+                        desired_entry.extend(triples);
                     }
                 }
                 Some(resolve::Outcome::Ambiguous { candidates, total }) => {
@@ -558,6 +594,7 @@ mod tests {
             raw: raw.to_string(),
             kind: CitationKind::EntryToken,
             line: 7,
+            repeat_lines: Vec::new(),
         }
     }
 
@@ -577,6 +614,7 @@ mod tests {
             raw: "R-43".into(),
             kind: CitationKind::EntryToken,
             line: 7,
+            repeat_lines: Vec::new(),
         };
         assert_eq!(
             entry_dst_ref(&c, "dstid0000000000", &map).unwrap(),
@@ -590,6 +628,7 @@ mod tests {
             raw: "reconnaissance-patterns:R-43".into(),
             kind: CitationKind::CrossRepoToken,
             line: 7,
+            repeat_lines: Vec::new(),
         };
         assert_eq!(
             entry_dst_ref(&c, "dstid0000000000", &map).unwrap(),
@@ -603,6 +642,7 @@ mod tests {
                 raw: "whatever".into(),
                 kind,
                 line: 7,
+                repeat_lines: Vec::new(),
             };
             assert_eq!(
                 entry_dst_ref(&c, "dstid0000000000", &map).unwrap(),
@@ -621,6 +661,7 @@ mod tests {
             raw: "R-43".into(),
             kind: CitationKind::EntryToken,
             line: 7,
+            repeat_lines: Vec::new(),
         };
         assert!(entry_dst_ref(&c, "unminted0000000", &BTreeMap::new()).is_none());
     }
@@ -691,16 +732,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_token_first_mentioned_outside_an_entry_loses_its_entry_attribution() {
-        // A real limitation of entry-grain attribution on this substrate, pinned so it
-        // is a known shape rather than a surprise.
+    async fn a_token_first_mentioned_outside_an_entry_still_attributes_to_the_entry_citing_it() {
+        // This test previously pinned the OPPOSITE, as a known limitation:
+        // `push_citation` kept one Citation per (kind, raw) per document carrying only the
+        // FIRST occurrence's line, so a passing mention in a preamble or a hand-maintained
+        // `## Index` row consumed the citation and the entry that genuinely rested on the
+        // token recorded nothing. Measured floor at the time: 799 self-cite citations
+        // reaching attribution and failing it, almost all index-table mentions.
         //
-        // `extract::push_citation` keeps ONE citation per (kind, raw) per document —
-        // `if seen.insert(...)` — carrying the FIRST occurrence's line. That dedup is
-        // deliberate and load-bearing for `entry_indegree`, which wants a file-level
-        // exposure count. But attribution reads that single line, so when a token's
-        // first mention is in a preamble or a non-defining section, the edge is
-        // attributed to nothing even though later mentions sit squarely inside entries.
+        // `Citation` now carries `repeat_lines` and attribution walks `occurrences()`.
         // docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
@@ -738,18 +778,103 @@ mod tests {
         assert_eq!(
             out["counts"]["citations"],
             json!(1),
-            "extract dedupes to one"
+            "STILL one Citation for the two mentions — the exposure guarantee, not an \
+             accident. `doctor::entry_indegree` increments once per Citation and derives \
+             its file-level count from that, so emitting one per occurrence would have \
+             moved a metric three shipped checks are gated on: {out:#?}"
+        );
+        assert_eq!(
+            e["attributed"],
+            json!(1),
+            "one citation, attributed — the partition counts citations, not occurrences: \
+             {out:#?}"
         );
         assert_eq!(
             e["outside_any_entry"],
-            json!(1),
-            "the first mention wins, and it is the preamble one: {out:#?}"
+            json!(0),
+            "the preamble mention no longer consumes it: {out:#?}"
         );
         assert_eq!(
             e["derived"],
+            json!(1),
+            "W-1's genuine dependency on F-1 records its edge: {out:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_citation_attributes_to_every_entry_that_mentions_the_token() {
+        // The capability the first-mention fix actually buys: a token cited from THREE
+        // entries yields three edges from ONE Citation. A ledger's `**Kin:**` lines
+        // converge on the same handful of tokens, so this is the common shape rather than
+        // an edge case — and before the fix at most one of the three could ever be
+        // recorded, whichever happened to appear first in the file. Here the `## Index`
+        // row appears first, which is precisely the arrangement that made the loss
+        // systematic: 107 shadowed citations in reconnaissance-patterns.md alone.
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let dst = tmp.path().join("target.md");
+        std::fs::write(&dst, "## F-1 — the widely-cited entry\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "dst", &dst, "target");
+
+        let src = tmp.path().join("source.md");
+        std::fs::write(
+            &src,
+            "## Index\n\
+             a row naming F-1 near the top, as ledgers do\n\
+             ## W-1 — first dependent\n\
+             rests on F-1\n\
+             ## W-2 — second dependent\n\
+             also rests on F-1\n\
+             ## W-3 — third dependent\n\
+             and F-1 again, twice: F-1\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "src", &src, "source");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+        let e = &out["counts"]["entry_edges"];
+
+        assert_eq!(
+            out["counts"]["citations"],
+            json!(1),
+            "five mentions, one Citation — exposure unmoved: {out:#?}"
+        );
+        assert_eq!(
+            e["attributed"],
+            json!(1),
+            "citation grain: ONE attributed citation however many entries it reaches, so \
+             `attributed` + `outside_any_entry` stays a partition of the resolved \
+             citations. Counting per-occurrence here would make the two incomparable: \
+             {out:#?}"
+        );
+        assert_eq!(
+            e["outside_any_entry"],
             json!(0),
-            "W-1's genuine dependency on F-1 records NO entry edge, because a passing \
-             mention above it consumed the only citation: {out:#?}"
+            "the citation reached at least one entry, so it is not in the other half of \
+             the partition — the `## Index` mention alone would not have been enough: \
+             {out:#?}"
+        );
+        assert_eq!(
+            e["derived"],
+            json!(3),
+            "edge grain: W-1, W-2 and W-3 each record their own edge. W-3 mentions F-1 \
+             TWICE and still contributes exactly one — two mentions inside one entry are \
+             one claim. `## Index` is not an entry, so its row attributes to nothing: \
+             {out:#?}"
         );
     }
 

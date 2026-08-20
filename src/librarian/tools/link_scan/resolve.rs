@@ -403,6 +403,7 @@ mod tests {
         Citation {
             raw: raw.to_string(),
             kind,
+            repeat_lines: Vec::new(),
             line: 1,
         }
     }

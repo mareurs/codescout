@@ -189,7 +189,37 @@ impl CitationKind {
 pub struct Citation {
     pub raw: String,
     pub kind: CitationKind,
+    /// FIRST occurrence in the document. The anchor `link_scan::finding` reports, and
+    /// the only position that existed before entry-grain attribution needed more.
     pub line: u32,
+    /// Every LATER occurrence, ascending. Empty for a token mentioned once.
+    ///
+    /// **Deliberately excludes `line`** — one position, one owner, so there is no
+    /// invariant like `repeat_lines[0] == line` for a later edit to violate silently.
+    /// Iterate with [`Citation::occurrences`] rather than reading either field alone;
+    /// reading only `line` is the defect this field exists to fix.
+    ///
+    /// **The citation COUNT is unchanged by this field, and that is the point.**
+    /// `push_citation` still emits exactly one `Citation` per `(kind, raw)` per
+    /// document, so `doctor::entry_indegree` — which increments once per `Citation` and
+    /// derives its file-level exposure guarantee from that emergent property — keeps
+    /// counting exactly what it counted before. Emitting one `Citation` per occurrence
+    /// instead would have moved that metric, and three shipped `doctor` checks are
+    /// gated on it.
+    pub repeat_lines: Vec<u32>,
+}
+
+impl Citation {
+    /// Every occurrence in the document, ascending, `line` first.
+    ///
+    /// Attribution must walk all of them: a token's first mention is routinely a
+    /// preamble or `## Index` row, while the entry that genuinely rests on it cites it
+    /// further down. Reading `line` alone attributes to whatever contains the first
+    /// mention and silently drops the rest
+    /// (`docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md`).
+    pub fn occurrences(&self) -> impl Iterator<Item = u32> + '_ {
+        std::iter::once(self.line).chain(self.repeat_lines.iter().copied())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -286,7 +316,10 @@ pub fn extract(text: &str) -> DocExtract {
         ..Default::default()
     };
     let mut seen_defs = std::collections::BTreeSet::new();
-    let mut seen_cites = std::collections::BTreeSet::new();
+    // (kind, raw) -> index into `out.citations`, so a repeat mention appends its line to
+    // the Citation already emitted instead of being dropped. A set would lose the
+    // position; see `Citation::repeat_lines`.
+    let mut seen_cites = std::collections::BTreeMap::new();
 
     let mut in_code_block = false;
     let mut in_heading = false;
@@ -351,7 +384,7 @@ pub fn extract(text: &str) -> DocExtract {
 /// entry token is not double-reported.
 fn scan_tokens(
     out: &mut DocExtract,
-    seen: &mut std::collections::BTreeSet<(CitationKind, String)>,
+    seen: &mut std::collections::BTreeMap<(CitationKind, String), usize>,
     chunk: &str,
     line: u32,
 ) {
@@ -391,13 +424,26 @@ fn scan_tokens(
 
 fn push_citation(
     out: &mut DocExtract,
-    seen: &mut std::collections::BTreeSet<(CitationKind, String)>,
+    seen: &mut std::collections::BTreeMap<(CitationKind, String), usize>,
     raw: String,
     kind: CitationKind,
     line: u32,
 ) {
-    if seen.insert((kind, raw.clone())) {
-        out.citations.push(Citation { raw, kind, line });
+    match seen.entry((kind, raw.clone())) {
+        std::collections::btree_map::Entry::Vacant(slot) => {
+            slot.insert(out.citations.len());
+            out.citations.push(Citation {
+                raw,
+                kind,
+                line,
+                repeat_lines: Vec::new(),
+            });
+        }
+        // Still ONE Citation per (kind, raw) per document — the count every existing
+        // consumer reads is unchanged. Only the position is no longer thrown away.
+        std::collections::btree_map::Entry::Occupied(slot) => {
+            out.citations[*slot.get()].repeat_lines.push(line);
+        }
     }
 }
 
@@ -708,6 +754,61 @@ mod tests {
             .find(|c| c.raw == "F-9")
             .expect("F-9 cited");
         assert_eq!(f9.line, 5);
+    }
+
+    #[test]
+    fn a_repeated_token_stays_one_citation_and_records_every_line() {
+        // Two properties in one test because they are in tension and the pair is the
+        // whole design:
+        //
+        //   COUNT is unchanged  — `doctor::entry_indegree` increments once per Citation
+        //                         and derives its file-level exposure guarantee from that
+        //                         emergent property. One Citation per occurrence would
+        //                         have silently converted exposure into an occurrence
+        //                         count, moving a metric three shipped doctor checks are
+        //                         gated on.
+        //   POSITION is kept    — attribution needs every occurrence, because a token's
+        //                         first mention is routinely a preamble or `## Index` row.
+        //
+        // Asserting only the first would let a fix for either half break the other.
+        let ex = extract("cites R-9 here\nfiller\nand R-9 again\nand once more R-9\n");
+
+        let r9: Vec<&Citation> = ex.citations.iter().filter(|c| c.raw == "R-9").collect();
+        assert_eq!(
+            r9.len(),
+            1,
+            "three mentions must still yield ONE Citation: {:?}",
+            ex.citations
+        );
+        assert_eq!(r9[0].line, 1, "`line` stays the FIRST occurrence");
+        assert_eq!(
+            r9[0].repeat_lines,
+            vec![3, 4],
+            "and every later occurrence is kept, ascending, excluding `line` itself"
+        );
+        assert_eq!(
+            r9[0].occurrences().collect::<Vec<_>>(),
+            vec![1, 3, 4],
+            "`occurrences()` is the only correct way to read positions — reading `line` \
+             alone is the first-mention defect this field exists to fix"
+        );
+    }
+
+    #[test]
+    fn a_token_mentioned_once_has_no_repeat_lines() {
+        // The overwhelmingly common case must not allocate a misleading singleton.
+        // Pins that `repeat_lines` EXCLUDES `line`: a `vec![1]` here would mean the two
+        // fields overlap, and every consumer iterating `occurrences()` would double-count
+        // the first position.
+        let ex = extract("cites R-9 once\n");
+        let r9: Vec<&Citation> = ex.citations.iter().filter(|c| c.raw == "R-9").collect();
+        assert_eq!(r9.len(), 1);
+        assert!(
+            r9[0].repeat_lines.is_empty(),
+            "no repeats means empty, not [line]: {:?}",
+            r9[0]
+        );
+        assert_eq!(r9[0].occurrences().collect::<Vec<_>>(), vec![1]);
     }
 
     #[test]
