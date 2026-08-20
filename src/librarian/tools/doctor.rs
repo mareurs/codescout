@@ -1691,6 +1691,26 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<std::collections::
     Ok(cited)
 }
 
+/// Whether this row counts as "archived" for exposure purposes.
+///
+/// **Not status alone.** Measured 2026-08-20: of 465 citer rows a status-only filter
+/// missed, statuses were `fixed 352 · closed 59 · draft 17 · unknown 12 · wontfix 11 ·
+/// mitigated 10 · active 3 · done 1` — NONE said `archived`. This repo archives a file
+/// by MOVING it into `docs/issues/archive/` or `docs/trackers/archive/` (per
+/// `get_guide("tracker-conventions")`) while `status:` keeps meaning the bug/tracker
+/// OUTCOME, not archival state. So archived-ness is encoded by location for roughly
+/// 70% of this corpus's archived rows, and a status-only filter reads all of them as
+/// live.
+///
+/// **The status half is deliberately kept in parity with `link_scan/resolve.rs:61`'s
+/// exact vocabulary (`"archived" | "superseded"`), not `HIDDEN_STATUSES`** (which adds
+/// `retired` — zero live rows carry it today, but that is not a guarantee). Do not
+/// "fix" this into `HIDDEN_STATUSES`: it would silently change the population this
+/// function and `resolve()` agree on.
+fn row_is_archived(abs_path: &str, status: &str) -> bool {
+    matches!(status, "archived" | "superseded") || abs_path.contains("/archive/")
+}
+
 /// Token → how many OTHER files cite it — files that do NOT define it.
 ///
 /// **This is a file-level count, not a citation-occurrence count, and that follows
@@ -1716,16 +1736,17 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<std::collections::
 /// inflate its own exposure, which is a self-reference wearing exposure's clothes.
 /// `link_scan` already classifies these `SelfCite`.
 ///
-/// **A token with more than one definer contributes NO exposure at all** — its key is
-/// dropped from the returned map entirely, not merely zeroed. See the `retain` call at
-/// the bottom of this function for the full measured reasoning (F-1/W-1/F-2 definer
-/// counts, and the named CrossRepoToken follow-on that would restore this population's
-/// exposure without pooling). Ruling 2026-08-20.
+/// **A token with more than one definer contributes NO exposure UNLESS exactly one of
+/// those definers is active.** See the `retain` call at the bottom of this function for
+/// the full measured reasoning and the exact parity this now holds with
+/// `link_scan::resolve::resolve` (`resolve.rs:306-315`): a unique definer resolves even
+/// when archived (archived is not nonexistent), but where two or more artifacts define
+/// one token, the sole ACTIVE one wins — an archived co-definer never creates
+/// ambiguity, and it never breaks one either. Rulings 2026-08-20.
 ///
-/// **Citations from archived or superseded artifacts do not count toward exposure.**
-/// The DEFINING side is untouched — an archived file still defines its token — only the
-/// CITING side is filtered, same idiom as `DefinitionIndex::build`'s `active` flag in
-/// `link_scan/resolve.rs`. Ruling 2026-08-20.
+/// **Citations from archived artifacts do not count toward exposure** — see
+/// [`row_is_archived`]. The DEFINING side is untouched by that filter: an archived file
+/// still defines its token. Ruling 2026-08-20.
 ///
 /// **Both citation shapes count.** A bare `PV-12` extracts as `EntryToken`; a
 /// qualified `provenance-subsystem:PV-12` extracts as `CrossRepoToken`, because a
@@ -1753,31 +1774,35 @@ fn entry_indegree(
 
     // Which paths DEFINE which tokens, gathered up front so a same-file citation can
     // be excluded before it is counted rather than filtered back out after the fact.
-    // Built from EVERY row regardless of status — the archived/superseded filter below
-    // touches only the CITING side; an archived definer still defines.
+    // Built from EVERY row regardless of archived-ness — that filter touches only the
+    // CITING side (below) and the definer-vs-active split (further below); an archived
+    // definer still defines.
     let mut definer: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
         Default::default();
-    // (path, text, citable) — `citable` is false for archived/superseded rows, so a
-    // citation FROM one of them is gathered here but never counted below.
+    // Paths that are NOT archived, so a defining set's active-vs-archived split (Ruling
+    // 16, below) can be computed without a second pass over the rows.
+    let mut active_paths: std::collections::BTreeSet<String> = Default::default();
+    // (path, text, citable) — `citable` is false for archived rows, so a citation FROM
+    // one of them is gathered here but never counted below.
     let mut bodies: Vec<(String, String, bool)> = Vec::new();
     for (path, status) in rows {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
+        let citable = !row_is_archived(&path, &status);
+        if citable {
+            active_paths.insert(path.clone());
+        }
         for s in entry_sections(&text) {
             definer.entry(s.id).or_default().insert(path.clone());
         }
-        // Same idiom as `DefinitionIndex::build`'s `active` flag
-        // (`link_scan/resolve.rs`): archived and superseded material is a historical
-        // snapshot, not part of "how much rests on this claim now".
-        let citable = !matches!(status.as_str(), "archived" | "superseded");
         bodies.push((path, text, citable));
     }
 
     let mut deg: std::collections::BTreeMap<String, usize> = Default::default();
     for (path, text, citable) in &bodies {
         if !citable {
-            continue; // archived/superseded citers do not add exposure
+            continue; // archived citers do not add exposure
         }
         for c in extract(text).citations {
             let token = match c.kind {
@@ -1795,22 +1820,32 @@ fn entry_indegree(
         }
     }
 
-    // A token with more than one definer contributes NO exposure. Measured 2026-08-20:
-    // `F-1` alone is defined in 113 separate sections (98 for `W-1`, 90 for `F-2`)
-    // because `F-N`/`W-N` are namespaced per work stream — each session log owns its own
-    // counter, and `F-1..F-5` are defined in all eight live logs (per
-    // `get_guide("tracker-conventions")`). Pooling their citations under one key is
-    // guessing which log a bare `F-1` means, at scale — 1611 of 1801 gate-clearing
-    // sections were clearing it on exposure earned by an UNRELATED ledger's citations,
-    // not their own. `link_scan::resolve::resolve` already refuses this guess for the
-    // identical shape: a bare `EntryToken` with >1 definer resolves to `Ambiguous`, never
-    // to a pooled edge. Retaining a multi-definer token here would make `entry_indegree`
-    // more confident than the resolver that owns the same ambiguity.
+    // A token with more than one definer contributes NO exposure, UNLESS exactly one of
+    // those definers is active. Measured 2026-08-20: `F-1` alone is defined in 113
+    // separate sections (98 for `W-1`, 90 for `F-2`) because `F-N`/`W-N` are namespaced
+    // per work stream — each session log owns its own counter, and `F-1..F-5` are
+    // defined in all eight live logs (per `get_guide("tracker-conventions")`). Pooling
+    // their citations under one key is guessing which log a bare `F-1` means, at scale —
+    // 1611 of 1801 gate-clearing sections were clearing it on exposure earned by an
+    // UNRELATED ledger's citations, not their own.
     //
-    // Zero-definer tokens are NOT dropped by this filter (`.is_none_or` keeps them):
-    // that population is `scan_undefined_entries`'s question, not this one's, and
-    // dropping them here would silently reclassify an undefined-but-cited token as a
-    // definer collision instead.
+    // The active-only refinement is not optional polish: `link_scan::resolve::resolve`
+    // (`resolve.rs:306-315`) resolves a bare `EntryToken` to the SOLE active definer when
+    // exactly one of several raw definers is active, and only falls back to `Ambiguous`
+    // when zero or more-than-one are. Treating EVERY multi-definer token as ambiguous
+    // here — the literal composition of "definers > 1 is ambiguous" with "citing side
+    // filters archived" — silently inverted that parity: a token defined once in an
+    // active artifact and once in an archived one read as ambiguous here while
+    // `resolve()` already resolves it. `get_guide("tracker-conventions")` states the rule
+    // this now follows: "A unique definer resolves even when its artifact is archived —
+    // archived is not nonexistent. Where two artifacts define one token, the sole active
+    // one wins."
+    //
+    // Zero-definer tokens are NOT dropped by this filter (`.is_none_or` keeps them, and
+    // a token with exactly one raw definer — active or archived — is unique before the
+    // active-count check ever runs): that population is `scan_undefined_entries`'s
+    // question, not this one's, and dropping it here would silently reclassify an
+    // undefined-but-cited token as a definer collision instead.
     //
     // Named follow-on, not built here: a file-stem-qualified citation
     // (`bug-fix-session-log:F-33`) already resolves to ONE specific definer via
@@ -1819,7 +1854,15 @@ fn entry_indegree(
     // bare token the way this function currently does — would restore real exposure for
     // the F/W population without pooling. Not attempted here: it needs the `Corpus`/
     // `by_stem` machinery `link_scan` builds, which this function does not have.
-    deg.retain(|token, _| definer.get(token).is_none_or(|d| d.len() <= 1));
+    deg.retain(|token, _| {
+        let Some(defs) = definer.get(token) else {
+            return true;
+        };
+        if defs.len() <= 1 {
+            return true;
+        }
+        defs.iter().filter(|p| active_paths.contains(*p)).count() == 1
+    });
 
     Ok(deg)
 }
@@ -1839,14 +1882,7 @@ const EXPOSURE_THRESHOLD: usize = 5;
 /// Measured 2026-08-20 against every entry in `docs/**/*.md`: 3 of 1101 sections
 /// actually contain a nested entry definition —
 /// `docs/superpowers/specs/2026-06-26-c1-output-buffer-dedup-design.md:C-1`,
-/// `docs/trackers/prompt-hamsa-audit-log.md:A-28`, and `:A-29`. (An earlier draft of
-/// this comment named `docs/trackers/provenance-subsystem.md`'s `PV-2`/`PV-8` as a
-/// fourth case; that was wrong — an intervening same-level, non-entry heading
-/// (`### Defining sections for cited entries` at line 1019) bounds `PV-2`'s section at
-/// line 1018, before `PV-8` (line 1038) even starts, so `PV-8` never nests under `PV-2`
-/// at all. Corrected after review rather than left standing: a false example asserted
-/// as measured fact in the surface the next reader trusts is exactly the defect this
-/// feature exists to detect.)
+/// `docs/trackers/prompt-hamsa-audit-log.md:A-28`, and `:A-29`.
 ///
 /// Parsing a `**Valid:**` declaration straight out of an untruncated parent would let
 /// `parse_validity`'s first-wins rule read the CHILD's declaration as the PARENT's,
@@ -6581,6 +6617,111 @@ root = "work/elsewhere/ghost"
             Some(1),
             "only b.md's active citation may count — a.md is still R-1's definer despite \
          being archived, and c.md's archived citation must not add exposure: {deg:?}"
+        );
+
+        // The assertion above is INSENSITIVE to whether a.md is genuinely registered as
+        // R-1's definer: with only one archived co-definer, "correctly registered" and
+        // "silently dropped from `definer`" both leave R-1 with the same one active
+        // definer overall, so a mutation that also strips archived rows from the DEFINING
+        // side (not just the citing side) leaves the assertion above green — the exact gap
+        // this test's own name was found not to cover. Pin it with a second token that has
+        // ONLY archived definers: two archived files defining R-2 gives 0 ACTIVE definers
+        // among 2 raw ones, which is genuinely ambiguous (neither wins per Ruling 16), so
+        // R-2 must stay ABSENT from the map. If archived rows were ever silently dropped
+        // from `definer` entirely, R-2 would read as a 0-raw-definer (merely undefined)
+        // token instead — which this filter correctly does NOT treat as ambiguous — and
+        // would wrongly let it through.
+        let a2 = tmp.path().join("a2.md");
+        let a3 = tmp.path().join("a3.md");
+        let d = tmp.path().join("d.md");
+        for (id, p) in [("a2", &a2), ("a3", &a3)] {
+            std::fs::write(p, "## R-2 — also the law\n\nprose\n").unwrap();
+            let row = TestArtifactRowBuilder::new(id)
+                .with_abs_path(p)
+                .with_status("archived")
+                .build();
+            art_upsert(&cat, &row).unwrap();
+        }
+        seed_ledger(&cat, "d", &d, "see R-2\n");
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get("R-2"),
+            None,
+            "R-2 has two definers and NEITHER is active — genuinely ambiguous per Ruling 16, \
+         and must stay dropped even though both would-be definers are archived (not \
+         undefined): {deg:?}"
+        );
+    }
+
+    #[test]
+    fn indegree_treats_a_token_as_unique_when_exactly_one_definer_is_active() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let archived_def = tmp.path().join("old.md");
+        let active_def = tmp.path().join("new.md");
+        let citer = tmp.path().join("citer.md");
+
+        // Two RAW definers for the same token: one archived, one active. Per
+        // `get_guide("tracker-conventions")` and `link_scan::resolve::resolve`'s own
+        // tie-break (`resolve.rs:306-315`), the sole ACTIVE definer wins and the token is
+        // NOT ambiguous — an archived co-definer never creates ambiguity. This is
+        // mutation MR-5's target: the OLD rule ("ambiguous whenever raw definer count > 1")
+        // would drop this token; the current rule must not.
+        std::fs::write(&archived_def, "## R-5 — the old law\n\nprose\n").unwrap();
+        let row = TestArtifactRowBuilder::new("old")
+            .with_abs_path(&archived_def)
+            .with_status("archived")
+            .build();
+        art_upsert(&cat, &row).unwrap();
+
+        seed_ledger(
+            &cat,
+            "new",
+            &active_def,
+            "## R-5 — the current law\n\nprose\n",
+        );
+        seed_ledger(&cat, "citer", &citer, "see R-5\n");
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get("R-5").copied(),
+            Some(1),
+            "one archived co-definer must not make an otherwise-unique active definer read \
+         as ambiguous: {deg:?}"
+        );
+    }
+
+    #[test]
+    fn indegree_excludes_a_citer_archived_by_location_not_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let def = tmp.path().join("led.md");
+        let active_citer = tmp.path().join("b.md");
+        let archive_dir = tmp.path().join("docs").join("issues").join("archive");
+        let located_citer = archive_dir.join("old-bug.md");
+
+        seed_ledger(&cat, "led", &def, "## R-1 — the law\n\nprose\n");
+        seed_ledger(&cat, "b", &active_citer, "see R-1\n");
+
+        // This repo archives files by MOVING them under an `archive/` directory while
+        // leaving `status:` at the bug's OUTCOME (e.g. `fixed`), per
+        // `get_guide("tracker-conventions")`. A status-only archived filter reads this row
+        // as live; it must not count toward exposure.
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        std::fs::write(&located_citer, "also see R-1\n").unwrap();
+        let row = TestArtifactRowBuilder::new("old-bug")
+            .with_abs_path(&located_citer)
+            .with_status("fixed")
+            .build();
+        art_upsert(&cat, &row).unwrap();
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get("R-1").copied(),
+            Some(1),
+            "the archive/-located citer must not add exposure even though its status is \
+         `fixed`, not `archived`: {deg:?}"
         );
     }
 
