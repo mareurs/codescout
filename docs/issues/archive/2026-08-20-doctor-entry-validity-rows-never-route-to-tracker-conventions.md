@@ -1,16 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- doctor
+- prompt-surface
+- guide-routing
+closed: 2026-08-20
 opened: 2026-08-20
-closed:
-severity: medium
 owner: marius
 related: []
-tags:
-  - librarian
-  - doctor
-  - prompt-surface
-  - guide-routing
-kind: bug
+severity: medium
 ---
 
 # BUG: `librarian(action="doctor")` routes entry-validity rows to the wrong guide
@@ -138,35 +138,47 @@ pub path: String,
 
 ## Fix
 
-Not yet implemented. Two options, in preference order:
+**IMPLEMENTED 2026-08-20 (`experiments`).**
 
-1. **Teach `names_tracker_path` the `violations` shape** — add
-   `violations[].path` to the scan alongside `items`. Smallest change, and it
-   keeps the "does this response name a tracker path" framing intact. Note the
-   field is `path`, so `any_path_field` needs to accept that key too, which
-   widens the top-level check as a side effect — check that no other response
-   carries an unrelated `path` key that would now mis-route.
-2. **Branch on the check names** — return `Some("tracker-conventions")` when any
-   violation's `check` starts with `entry_` or equals `validity_unparseable`.
-   More precise and immune to key-shape drift, but couples the adapter to
-   doctor's check vocabulary, which `Violation::check`'s own doc comment warns
-   has gone stale before.
+- Fix SHA (`experiments`): `32736ca0`
+- Fix patch-id: `87fd01df0ffe843d505c3619926fe0285d142b08`
 
-Partially mitigated already: the four checks' `detail` strings now carry their
-own remediation text, so a mis-routed agent can still fix the row from the
-report alone. That is a mitigation of the *consequence*, not of this defect —
-the routing is unchanged and `status` stays `open`.
+`names_tracker_path` (`src/librarian/adapter.rs`) gains a third branch scanning
+`violations[].path`, alongside the existing top-level `abs_path`/`rel_path` check
+and the `items` branch.
 
-- Mitigation SHA (`experiments`): `ada22c94`
-- Mitigation patch-id: `dad17f3f1c43176bc0fe94dcc532f83ad6c9dcb9`
+**Option 1 from the original plan, narrowed.** That option was written as "add
+`violations[].path` to the scan" and warned that widening `any_path_field` to
+accept a `path` key would affect every response shape. The implemented form
+avoids that entirely: `path` is read only inside `violations`, which is a key
+unique to `doctor`, so the blast radius is exactly that one response. Option 2
+(branching on `check` name prefixes) was rejected as planned — `Violation::check`'s
+own doc comment records that an enumeration of check names had already gone stale
+by three, and coupling the adapter to that vocabulary would inherit the same rot.
 
+The earlier mitigation stands and is independent: the four checks carry their own
+remediation text (`ada22c94`, patch-id
+`dad17f3f1c43176bc0fe94dcc532f83ad6c9dcb9`), so a report is self-teaching even
+when the guide does not arrive — a second, non-overlapping route to the same
+information rather than a fallback.
 ## Tests added
 
-None yet — this file is the capture, the fix is not written. A fix must add a
-test asserting `relevant_guide_topic` returns `Some("tracker-conventions")` for
-a synthetic doctor response carrying one `violations[].path` under
-`docs/trackers/`.
+`tracker_paths_route_to_the_tracker_guide_and_nothing_else_does`
+(`src/librarian/adapter.rs`) — the pre-existing routing test, extended with three
+cases:
 
+1. A doctor-shaped response whose `violations[]` carries a `docs/trackers/` path
+   → matches.
+2. A doctor-shaped response whose violations are all under `src/` → does not.
+3. **A top-level `{"path": "docs/trackers/x.md"}` → does NOT match.** This pins the
+   *narrowness*, not just the fix: promoting `path` into `any_path_field` is the
+   obvious later simplification, and without this assertion it would silently
+   re-route unrelated librarian responses.
+
+Both mutations applied and observed to fail, rather than reasoned about:
+promoting `path` into `any_path_field` fails case 3; reading `abs_path` instead of
+`path` inside the new branch fails case 1. Restored: 4368 pass, `clippy -D
+warnings` clean.
 ## Workarounds
 
 Call `get_guide("tracker-conventions")` explicitly after any
@@ -175,13 +187,7 @@ Call `get_guide("tracker-conventions")` explicitly after any
 
 ## Resume
 
-Read `relevant_guide_topic` at `src/librarian/adapter.rs:182-205` and decide
-between Fix options 1 and 2 above. Before choosing option 1, grep the librarian
-tool responses for a top-level `path` key that is *not* a tracker path
-(`grep -rn '"path":' src/librarian/tools/`) — if one exists, option 1 mis-routes
-it and option 2 is correct. Then add the `relevant_guide_topic` test named under
-*Tests added*.
-
+N/A — fixed and archived.
 ## References
 
 - `src/librarian/adapter.rs:182-205`, `:276-292` — the routing decision

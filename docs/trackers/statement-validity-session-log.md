@@ -36,7 +36,7 @@ entry_high_water_F: 4
 |----|------|---------:|----------|--------|-------|
 | F-2 | 2026-08-20 | med | subagent | open | A locally-true claim, restated one layer up, becomes false |
 | F-3 | 2026-08-20 | low | codescout-tool | fixed-verified | Pre-writing index rows in a new ledger consumes the ids they name |
-| F-4 | 2026-08-20 | med | architectural | promoted-to-bug-tracker | Gated doc surfaces were kept current; the routing that serves them was never checked |
+| F-4 | 2026-08-20 | med | architectural | fixed-verified | Gated doc surfaces were kept current; the routing that serves them was never checked |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -71,10 +71,12 @@ recalled; and after the promotion, re-verified by predicate rather than by recal
 - **W-5** — *UNFIRED.* One datapoint. Promote at a second post-ship audit that finds a
   runtime-surface gap the doc surfaces hid; target is `CLAUDE.md` § Prompt Surface
   Consistency, which today names three surfaces and gates them only for tool-name drift.
-- **F-4** — not a promotion; filed as a bug
-  (`docs/issues/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`).
-  Its consequence is mitigated — the four checks now carry their own remediation text — but
-  the routing defect itself is open.
+- **F-4** — not a promotion; filed as a bug, now **fixed and archived**
+  (`docs/issues/archive/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`).
+  Fixed in `32736ca0` (patch-id `87fd01df0ffe843d505c3619926fe0285d142b08`): `names_tracker_path`
+  gained a `violations[].path` branch. Its consequence was independently mitigated first —
+  the four checks carry their own remediation text (`ada22c94`) — so the information now has
+  two non-overlapping routes rather than a primary and a fallback.
 ## Category conventions
 
 | Category | When to use |
@@ -446,15 +448,22 @@ this defect.
 **Severity:** med — every entry-validity triage session gets the wrong guide, silently. No
 error, no missing output; just a worklist the reader has not been taught to act on.
 
-**Status:** promoted-to-bug-tracker
+**Status:** fixed-verified
 
-**Valid:** conditional — until `names_tracker_path` routes doctor responses to `tracker-conventions`
+**Valid:** dated 2026-08-20
+
+> The `conditional` this entry originally declared — *"until `names_tracker_path` routes
+> doctor responses to `tracker-conventions`"* — **fired the same day**, in `32736ca0`.
+> Reclassified to `dated`, because what remains true is the observation as of that date,
+> not an open condition. Left here as a worked example of the class doing its job: the
+> event was named, so the entry could be resolved rather than re-derived.
 
 **Rests on:** A teaching surface is only as good as its trigger — coverage is a property of
 the routing, not of the text.
 
 **Fix idea / Pointer:**
-`docs/issues/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
+`docs/issues/archive/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
+(fixed `32736ca0`, patch-id `87fd01df0ffe843d505c3619926fe0285d142b08`)
 
 ---
 

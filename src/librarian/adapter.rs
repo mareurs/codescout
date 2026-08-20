@@ -273,7 +273,7 @@ impl LibrarianAdapter {
 ///
 /// Each shape is enumerated explicitly because a missing one fails as a *wrong guide*
 /// rather than as an error — see
-/// `docs/issues/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
+/// `docs/issues/archive/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
 /// for the case where `doctor` was the missing shape.
 ///
 /// Forward-slash comparison is safe here: `rel_path` is always stored forward-slash (see
