@@ -42,18 +42,51 @@ serves both, and the dedup that makes exposure right makes attribution lossy.
 
 ## Impact
 
-Under-counts the entry graph, silently and with a bias: the citations most likely to be
-shadowed are the ones in ledgers that maintain a hand-written index table or a
-`## Template` section, because those repeat every token near the top of the file. Those
-are also the largest, most-cited ledgers — so the loss concentrates where the graph would
-be most useful.
+Under-counts the entry graph, silently, with a bias toward the ledgers where the graph
+would be most useful.
 
-Not measured yet. Measuring it needs a probe that counts, per document, tokens appearing
-both outside and inside an entry section. `outside_any_entry` = 1397 of 1719 attributable
-citations on this corpus (2026-08-21) is an upper bound on the affected population, not an
-estimate of it — most of that 1397 is documents that are not ledgers at all and have no
-entries to attribute to.
+**Measured 2026-08-21** by running the real `extract` over each entry section's own text
+(same fence and definition rules — no second token detector) and counting citations whose
+first mention falls outside every entry while the same token IS cited from inside one:
 
+```
+docs read              4103
+of those, ledgers       277
+citations (all)        6380
+first mention outside  3374
+SHADOWED               1461   in 139 ledger(s)
+```
+
+Worst offenders, and they are exactly the predicted shape — ledgers carrying a
+hand-maintained `## Index` table that lists every id near the top of the file, so the
+table's mention always precedes the entry's own:
+
+| shadowed | ledger |
+|---:|---|
+| 107 | `codescout docs/trackers/reconnaissance-patterns.md` |
+| 94 | `southpole/MRV-poc docs/trackers/reconnaissance-patterns.md` |
+| 89 | `backend-kotlin docs/trackers/gantt-rebalance-session-log.md` |
+| 74 | `codescout docs/trackers/bug-fix-session-log.md` |
+| 74 | `backend-kotlin docs/trackers/solver-invariants.md` |
+
+**1461 is an upper bound on recoverable edges, not an estimate of them.** Two reasons it
+overstates, both worth stating rather than quietly correcting for:
+
+1. It is **unfiltered by resolution** — it counts every shadowed citation, including ones
+   that would resolve `Ambiguous`, `Dangling` or `CrossRepo` and so would never become an
+   edge. On the project-scoped run, roughly half of all citations reach `Edge`.
+2. It is **corpus-wide** (4103 docs, every repo), while the materializer that produced the
+   current 322 edges ran project-scoped over 1099 artifacts. The two numbers describe
+   different populations and must not be divided by one another.
+
+Even discounted for both, the shadowed population is the same order as the entire
+materialized graph — so this is the dominant limitation on entry-grain coverage, not a
+tail case.
+
+There is also a second-order effect worth naming: `## Index` tables are precisely what
+`get_guide("tracker-conventions")` § *One entry format, never two* already discourages,
+for an unrelated reason (rows define no citable token). This bug gives that guidance a
+second, independent cost.
 ## Why it is not fixed here
 
 Two options, both larger than the change that surfaced this:

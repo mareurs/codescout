@@ -989,7 +989,9 @@ verification.
 | 0 | **Attribution probe** — measure nearest-preceding-heading precision on this corpus | — | **DONE 2026-08-20** — naive 87.9%; use the section-bound rule |
 | 1 | `**Valid:**` + `**Rests on:**`, default-is-decay, allocator stamping, `asserted_at` | — | **SHIPPED 2026-08-20**, partially — see below |
 | 2 | **Four** doctor checks (not three), gated on shared exposure | 1 | **SHIPPED 2026-08-20** — one exposure term, not `max()` — see below |
-| 3 | Slug bulk-mint → `origin='scan'` materializer, `rel='rests-on'` | 0 | designed, not scheduled — **split it**, see below |
+| 3a | Slug bulk-mint (`doctor fix=mint_slugs`) | 0 | **SHIPPED 2026-08-20** — 4107/4107 minted |
+| 3b | `origin='scan'` entry-grain materializer | 3a | **SHIPPED 2026-08-21** — 322 edges; see below |
+| 3c | `rel='rests-on'` edges | 3b + declarations | **deferred, deliberately** — ~7 real declarations corpus-wide |
 | 4 | Entry-grain `context` anchor | 3 | designed, not scheduled |
 | 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | designed, not scheduled |
 | 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4, 5a | designed, not scheduled |
@@ -1044,7 +1046,34 @@ load-bearing because another repo depends on it keeps its true exposure), and ro
 filtered out that way are counted in `catalog_health.entry_validity_scoped_by_project`
 rather than dropped silently.
 
-**Layer 3's two halves are not equally ready — split them.** Measured 2026-08-20:
+**Layer 3 shipped 2026-08-20/21, and the entry graph is smaller and differently shaped
+than this document assumed.** Measured on the live catalog after materializing:
+
+- `entry_cite` went **13 rows → 335**: 322 `origin='scan'`, the 13 `origin='write'`
+  untouched. 303 carry an entry-grain `<slug>:<local>` destination, 32 a bare artifact id.
+- Only **44 of 1099** scanned artifacts are a source of any entry-grain edge.
+
+**The graph is sparse on the SOURCE side, and that is structural rather than incidental.**
+An edge needs the *citing* document to be a ledger with `## <ID> — <title>` headings, and
+most artifacts — specs, plans, ADRs, READMEs, bug files — define no entries at all. Of
+1721 resolved-and-attributable citations, **1397 sit outside any entry** and 324 inside.
+So this is not "the citation graph at finer grain"; it is the much smaller object *"a
+ledger entry cites something"*. That is still exactly what Layers 4 and 5 consume, but it
+is roughly a sixth of what the wording below implies.
+
+**One known defect caps it further.** `extract::push_citation` keeps one citation per
+`(kind, raw)` per document, carrying the FIRST occurrence's line, so a passing mention in
+a preamble or `## Index` table consumes the citation and the entry that genuinely rests on
+the token records nothing. Measured 2026-08-21: **1461 shadowed citations across 139
+ledgers**, worst in exactly the ledgers that maintain a hand-written index table. That is
+an upper bound — unfiltered by resolution, and corpus-wide where the 322 is project-scoped
+— but it is the same order as the whole materialized graph, so it is the dominant limit on
+coverage. `docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md`.
+Fixing it means changing what `extract` emits, which is a behaviour change to the exposure
+metric three shipped `doctor` checks are gated on — sequence it with its own measurement,
+not as a rider.
+
+**The original split reasoning, for the record.** Measured 2026-08-20, before shipping:
 
 - **Slug bulk-mint → `origin='scan'` materializer is well-fed.** `entry_cite` holds **13
   rows, all `origin='write'`**; a corpus `link_scan` reports 4042 citations, 861
