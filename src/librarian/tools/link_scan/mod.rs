@@ -262,10 +262,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // diffable across runs.
     let mut desired_entry: BTreeSet<(String, String, String)> = BTreeSet::new();
     // Citations that resolved to an edge but sit outside every entry section — a
-    // preamble, or a trailing `## Summary` that defines nothing. Counted rather than
-    // dropped silently: it is exactly the population entry-grain provenance cannot
-    // describe, and its size is what tells a reader whether that matters.
+    // preamble, a trailing `## Summary` that defines nothing, or (the bulk of them, 1397
+    // of 1719 measured on this corpus) a document that is not a ledger at all and
+    // defines no entries. Counted rather than dropped silently: entry-grain provenance
+    // exists only where the CITING document is itself a ledger, which makes the entry
+    // graph sparse on the source side in a way the citation graph is not.
     let mut edges_outside_any_entry = 0usize;
+    // Citations that DID land inside an entry, counted per citation.
+    //
+    // Reported beside `derived` because the two are otherwise silently incomparable:
+    // `derived` is the size of a DEDUPLICATED set of (src_slug, src_local, dst_ref)
+    // triples, and publishing only that set size next to a per-citation counter invites
+    // the ratio `derived / (derived + outside_any_entry)`, which divides edges by
+    // citations and means nothing. With both present, `attributed` vs
+    // `outside_any_entry` partitions the citations and `attributed` vs `derived` shows
+    // the collapse — each comparison between like and like.
+    //
+    // The two differ less than one would guess, because `extract` ALREADY dedupes:
+    // `push_citation` keeps one `Citation` per `(kind, raw)` per document. So repeating
+    // one token inside one entry does not inflate `attributed`. What still collapses
+    // here is a bare token and its stem-qualified twin — `R-43` and
+    // `patterns:R-43` are different `raw` values that `entry_dst_ref` maps onto the same
+    // `<dst_slug>:R-43`, so one entry citing both records one edge and two attributions.
+    let mut edges_attributed = 0usize;
 
     for (i, ex, sections) in &extracts {
         let row = &rows[*i];
@@ -287,6 +306,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                             entry_dst_ref(c, &dst_id, &id_to_slug),
                         ) {
                             (Some(src_slug), Some(dst_ref)) => {
+                                edges_attributed += 1;
                                 desired_entry.insert((
                                     src_slug.clone(),
                                     src_section.id.clone(),
@@ -418,11 +438,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "citations": citations_total,
             "self_cites": self_cites,
             "entry_edges": {
+                // Citation-grain: these two partition the resolved citations.
+                "attributed": edges_attributed,
+                "outside_any_entry": edges_outside_any_entry,
+                // Edge-grain: `derived` is `attributed` deduplicated by
+                // (src_slug, src_local, dst_ref); `written` + `skipped_existing`
+                // partition it. Do not compare across the two groups.
                 "derived": entry_report.derived,
                 "written": entry_report.written,
                 "skipped_existing": entry_report.skipped_existing,
                 "pruned": entry_pruned,
-                "outside_any_entry": edges_outside_any_entry,
             },
             "edges_desired": desired.len(),
             "edges_unchanged": d.unchanged,
@@ -458,7 +483,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::catalog::artifact::{upsert as art_upsert, TestArtifactRowBuilder};
+    use crate::librarian::catalog::Catalog;
+    use crate::librarian::current_project::CurrentProject;
     use crate::librarian::tools::link_scan::extract::{Citation, CitationKind};
+    use crate::librarian::tools::TestToolContextBuilder;
+    use crate::librarian::workspace::Root;
+    use std::sync::Arc;
+
+    /// Write a ledger to disk, seed its catalog row, and give it a slug — all three are
+    /// needed: `link_scan` reads the FILE for citations, the CATALOG for the abs_path to
+    /// read it from, and the SLUG to key `entry_cite` on either side.
+    fn seed_scan_artifact(cat: &Catalog, id: &str, path: &std::path::Path, slug: &str) {
+        let row = TestArtifactRowBuilder::new(id).with_abs_path(path).build();
+        art_upsert(cat, &row).unwrap();
+        cat.conn
+            .execute(
+                "UPDATE artifact SET slug=?1 WHERE id=?2",
+                rusqlite::params![slug, id],
+            )
+            .unwrap();
+    }
 
     fn cite(raw: &str) -> Citation {
         Citation {
@@ -530,6 +575,134 @@ mod tests {
             line: 7,
         };
         assert!(entry_dst_ref(&c, "unminted0000000", &BTreeMap::new()).is_none());
+    }
+
+    #[tokio::test]
+    async fn entry_edges_reports_citation_grain_and_edge_grain_separately() {
+        // The two grains must each be internally comparable:
+        //   attributed + outside_any_entry  = resolved citations
+        //   derived                          = attributed, collapsed by dst_ref
+        // A reader who compares ACROSS the groups gets a meaningless ratio, which is
+        // why both are emitted rather than just the set size.
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let dst = tmp.path().join("target.md");
+        std::fs::write(
+            &dst,
+            "## F-1 — target entry\n\nbody\n\n## F-2 — other entry\n\nbody\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "dst", &dst, "target");
+
+        // W-1 cites F-1 both bare and stem-qualified — two distinct `raw` values, so
+        // `extract` keeps both, but `entry_dst_ref` maps them onto one `target:F-1`.
+        // The preamble cites F-2, which belongs to no entry.
+        let src = tmp.path().join("source.md");
+        std::fs::write(
+            &src,
+            "preamble mentions F-2\n\
+             ## W-1 — citing entry\n\
+             bare F-1 and qualified target:F-1\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "src", &src, "source");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+        let e = &out["counts"]["entry_edges"];
+
+        assert_eq!(
+            e["attributed"],
+            json!(2),
+            "both the bare and the qualified citation sit inside W-1: {out:#?}"
+        );
+        assert_eq!(
+            e["outside_any_entry"],
+            json!(1),
+            "the preamble citation belongs to the file, not an entry: {out:#?}"
+        );
+        assert_eq!(
+            e["derived"],
+            json!(1),
+            "the qualifier is stripped, so both attributions collapse to ONE edge — \
+             this is why `derived` cannot be compared to a per-citation count: {out:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_token_first_mentioned_outside_an_entry_loses_its_entry_attribution() {
+        // A real limitation of entry-grain attribution on this substrate, pinned so it
+        // is a known shape rather than a surprise.
+        //
+        // `extract::push_citation` keeps ONE citation per (kind, raw) per document —
+        // `if seen.insert(...)` — carrying the FIRST occurrence's line. That dedup is
+        // deliberate and load-bearing for `entry_indegree`, which wants a file-level
+        // exposure count. But attribution reads that single line, so when a token's
+        // first mention is in a preamble or a non-defining section, the edge is
+        // attributed to nothing even though later mentions sit squarely inside entries.
+        // docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let dst = tmp.path().join("target.md");
+        std::fs::write(&dst, "## F-1 — target entry\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "dst", &dst, "target");
+
+        let src = tmp.path().join("source.md");
+        std::fs::write(
+            &src,
+            "preamble mentions F-1 in passing\n\
+             ## W-1 — the entry that actually rests on it\n\
+             this is the real dependency on F-1\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "src", &src, "source");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+        let e = &out["counts"]["entry_edges"];
+
+        assert_eq!(
+            out["counts"]["citations"],
+            json!(1),
+            "extract dedupes to one"
+        );
+        assert_eq!(
+            e["outside_any_entry"],
+            json!(1),
+            "the first mention wins, and it is the preamble one: {out:#?}"
+        );
+        assert_eq!(
+            e["derived"],
+            json!(0),
+            "W-1's genuine dependency on F-1 records NO entry edge, because a passing \
+             mention above it consumed the only citation: {out:#?}"
+        );
     }
 
     /// One shape for every finding array. `ambiguous` used to call the cited text
