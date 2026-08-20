@@ -652,7 +652,7 @@ fix (Iron Law 6, measured), not a `source.md` slice edit.
 **And this entry's own denominator is suspect.** 30.9% of rows (8,980/29,103) carry a
 possibly-wrong `cc_session_id`, so every per-session figure above is a parent/subagent
 blend. Filed as
-`docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`.
+`docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`.
 
 **What survives:** fix (1) — have the gate echo the rewritten command — is still cheap,
 still costs no slice budget, and still targets the repeat-within-5-minutes path. **What is
@@ -708,7 +708,7 @@ inflation),
 of errors unattributable — the "38%" first recorded here was relayed without recomputation;
 the alias half is fixed and archived in `db76f69a`, the `command` half is target-less by
 decision),
-`docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
+`docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
 (30.9% of rows mis-attributed).
 ## Prompt improvement candidates
 

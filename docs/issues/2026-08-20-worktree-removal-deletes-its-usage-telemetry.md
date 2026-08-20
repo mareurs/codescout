@@ -4,8 +4,7 @@ opened: 2026-08-20
 closed:
 severity: medium
 owner: marius
-related:
-  - docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md
+related: ["docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md"]
 tags:
   - usage-db
   - telemetry
@@ -90,7 +89,7 @@ with the *Reproduction* above.
 
 This is the second reason a transcript-vs-DB count can disagree, distinct from the session
 identity pooling in
-`docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`.
+`docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`.
 An analysis that treats "fewer DB rows than transcript calls" as a logging failure will
 mis-diagnose this as a dropped write.
 
@@ -143,4 +142,4 @@ rows whose `project_root` differs from the DB's own root.
 
 - `src/usage/db.rs` — `open_db`, and the retention sweep in `write_record`
 - `src/usage/mod.rs` — `write_content`, `workspace_override`
-- `docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
+- `docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`

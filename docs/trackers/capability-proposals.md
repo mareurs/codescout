@@ -1116,7 +1116,7 @@ workload moved. The unit that would fix it is (tool x target-kind), which needs
 ### Resume
 
 Do **not** start at the detector. Start at
-`docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
+`docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
 and decide its open question 1 (historical rows), because the answer determines whether a
 column is needed in the same migration as the per-call resolution fix. Items 1-2 are the
 only ones worth specifying until that lands; items 3-5 each depend on a decision above.

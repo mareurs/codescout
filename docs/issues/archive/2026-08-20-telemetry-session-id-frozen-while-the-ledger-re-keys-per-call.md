@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-20
-closed:
+closed: 2026-08-20
 severity: high
 owner: marius
 related:
@@ -13,6 +13,7 @@ tags:
   - telemetry
   - session-identity
 kind: bug
+unverified: historical rows (30.9% at filing) were left as-is by deliberate choice, no schema marker; and when CODESCOUT_SESSION_ID is explicitly pinned, calls before the first rendezvous re-key of a process's life record the pinned ledger key rather than the true CLAUDE_CODE_SESSION_ID -- see Fix
 ---
 
 # BUG: usage.db's session id is frozen at construction while the guide ledger re-keys per call, so 31% of rows may name the wrong conversation
@@ -159,30 +160,40 @@ measurement, the `b8bb058f` attribution is theirs.
 
 ## Fix
 
-Not yet implemented. The cheap correct shape: resolve `cc_session_id` **per call** from the
-same rendezvous the ledger already polls, instead of cloning the construction-time value at
-`src/server.rs:974-977`. The rendezvous is queried on every tool call already, so the
-marginal cost is a field read, not new I/O.
+Fixed in `experiments` @ `1ef92dbce9aae66e04ef7b8199b75297c55c9f38` (patch-id `5c40b76fc085a145c23fdb63a73965520c22e3ad`).
 
-Two decisions belong to whoever takes it:
+`Rendezvous` gained a public `current()` accessor exposing the session it currently believes
+it is serving — the same field `poll()` already updates on every re-key. `poll_rendezvous`
+now reads it inside the same lock scope it already holds and returns it. `call_tool_inner`
+passes that value into `UsageRecorder::new` in place of `self.cc_session_id.clone()`,
+falling back to the construction-time snapshot only when the rendezvous has no id of its
+own (no companion hook, or `SessionKey::Anonymous` at construction).
 
-1. **Historical rows.** 30.9% of existing rows carry a possibly-wrong label and nothing
-   distinguishes them. Option 3 from the 2026-08-16 file is still unimplemented and still
-   applies: a `session_attribution` column, or a documented cutoff date that every
-   consumer of `cc_session_id` honours. Without one, fixing the write path leaves a corpus
-   that is half-trustworthy with no way to tell which half.
-2. **Whether `session_id` should become the primary analysis key.** It is per-process and
-   never wrong; `cc_session_id` is per-conversation and sometimes wrong. Analyses that
-   group by `session_id` first and disambiguate by timestamp window are correct today.
+Cost: a field read inside a lock `poll_rendezvous` already takes on every call — no new I/O.
 
-Record the fix SHA **and** its patch-id (`git show <sha> | git patch-id --stable`).
+**Decision on the two items this file left open:**
 
+1. **Historical rows — fix write path only, no schema marker.** User's explicit call
+   (2026-08-20), against the "add a `session_attribution` column / cutoff" alternative.
+   The 30.9%-at-filing pool of pre-fix rows stays silently possibly-mis-attributed; nothing
+   in the schema distinguishes them from a correct row. Recorded in `unverified:` above so a
+   query can find this caveat instead of only prose. The *Workarounds* section's guidance
+   (group by `session_id`, disambiguate by `called_at` window) remains the right approach for
+   any analysis spanning the fix date.
+2. **Whether `session_id` becomes the primary analysis key — not decided, not blocking.**
+   Left as stated in the original Fix section: `session_id` is per-process and never wrong;
+   `cc_session_id` is per-conversation and, after this fix, wrong only for the narrow window
+   before the first rendezvous re-key of a process's life (or never, if a companion hook
+   never stamps it — see `unverified` note below).
 ## Tests added
 
-None yet. A regression test should assert that a `cc_session_id` change observed through
-the rendezvous mid-process changes the id written to `tool_calls` — the natural sibling of
-whatever test covers the ledger's re-arm on the same signal.
-
+`server::guide_hint_tests::a_tool_call_after_a_rendezvous_rekey_writes_the_new_cc_session_id`
+(`src/server.rs`) — constructs a server, makes one `tree` call, records the `cc_session_id`
+`usage.db` wrote, stamps the rendezvous slot with a new conversation id (the `/clear` /
+subagent-reuse mechanism), makes a second `tree` call, and asserts the two recorded ids
+differ and the second one is the newly stamped conversation — not the construction-time
+snapshot. Full gate green: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test --lib` (4136 passed, 0 failed, 7 ignored).
 ## Workarounds
 
 For any analysis over `usage.db`: **do not group by `cc_session_id` alone.** Group by
