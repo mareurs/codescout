@@ -11,7 +11,7 @@ tags:
 - reflective
 - backlog
 topic: capability-proposals
-entry_high_water_CAP: 9
+entry_high_water_CAP: 10
 entry_prefix: CAP
 ---
 
@@ -43,6 +43,7 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-6 | 2026-08-17 | proposed | small–medium | Derive TAXONOMY's append-recipe column from `entry_prefix` declarations — it drifted twice in one day |
 | CAP-7 | 2026-08-19 | proposed | small–medium | Make record decay detectable — three doctor checks so corrections travel (Layer 2) |
 | CAP-8 | 2026-08-19 | proposed | large | Content-addressed identity — a "gram" for entries, stored-not-derived ids for artifacts (Layer 3) |
+| CAP-10 | 2026-08-20 | proposed | medium | Practice rules — a curated, agent-agnostic rule set injected at the moment it applies |
 | CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then **S-A only** (S-B falsified 2026-08-20) and an in-band `friction()` self-report |
 
 ## CAP-1 — Session artifact-touch ledger
@@ -1125,6 +1126,69 @@ Six supporting defects were filed 2026-08-20 in `66654f53` — session-id freezi
 `friction_target` key omissions, `pika_observations` orphaning, worktree telemetry deletion,
 the unclassified-error head, and a 2.1-2.6x cost overcount in `cc.py`. Read them before
 trusting any number in this entry that they touch.
+## CAP-10 — Practice rules: a curated, agent-agnostic rule set injected at the moment it applies
+
+**Status:** open — proposed 2026-08-20, with measured evidence from the same day.
+
+**Valid:** conditional — until a delivery mechanism is chosen (Open decision 1)
+
+**Rests on:** codescout is agent-agnostic by design — a rule that only reaches Claude Code is not a codescout capability. See memory `conventions` § Agent-Agnostic Design.
+
+### The ask
+
+codescout has accumulated a body of **working rules** — how to trust a number, when a green result proves nothing, what makes a claim checkable. They are model-agnostic and hard-won, and they live in three places, none of which reaches the moment the rule applies:
+
+| Where they live | Why it does not fire |
+|---|---|
+| `CLAUDE.md` | Claude Code only; loaded once at session start, never re-surfaced at the moment of use |
+| `get_guide(topic)` | Delivers **tool contracts** (how to call `edit_code`), not **practice** (what makes a claim trustworthy) |
+| Session-log ledgers (`R-N`, `F-N`, `W-N`) | Durable and well-evidenced, but nothing surfaces them unprompted |
+
+The surfaces where these rules would fire are **third-party skills** — `superpowers:writing-plans`, `subagent-driven-development`, `brainstorming`. **We cannot edit them.** They live in a plugin cache (`~/.claude-sdd/plugins/cache/superpowers-marketplace/…`); an update overwrites any change, and the change would not travel to another machine, profile, or agent.
+
+So: a **curated, versioned set of practice rules, delivered by codescout, injected when the activity they govern begins.**
+
+### Why it matters — measured 2026-08-20
+
+Executing `docs/superpowers/plans/2026-08-20-statement-validity-layers-1-2.md` through `subagent-driven-development`, **six of six task briefs contained code defects**, every one from a single cause: the plan's Rust was written from `symbols(path=…)` overviews rather than from function bodies.
+
+| Task | Defect in the plan's code |
+|---|---|
+| 1 | `def_re` has one capture group, not the two assumed; the draft matched the raw `##` line, which the pattern cannot match |
+| 2 | `once_cell` is not a dependency; `RecoverableError::with_hint` returns `anyhow::Error`, not `Self` |
+| 3 | hand-rolled `today_iso()` when `chrono` was already used verbatim in two files; `ArtifactRow.abs_path` is `PathBuf`, not `String` |
+| 4+5 | the brief's test assumed occurrence-counting; `extract()` deduplicates citations per document |
+| 6 | hand-rolled date arithmetic **again**; `s.text` where `declared_section_text` was required; a "Consumes" line naming the wrong function; test helpers that do not exist |
+
+One rule would have prevented all six: **a plan that names a function must have opened it.** It belongs in `writing-plans`, which is not ours.
+
+The per-dispatch mitigation — telling every implementer "the brief is a draft, read the real signature first" — worked six times out of six. That is a workaround applied at the wrong end, by hand, once per dispatch, and it does not survive the session.
+
+### Substrate check (2026-08-20)
+
+Most of the mechanism already exists.
+
+- **`get_guide(topic)` already does just-in-time injection.** A topic auto-injects on the first tool call that touches it, and a per-conversation `guide_hints_emitted` ledger stops it re-sending. That ledger is keyed by **conversation identity**, persists to disk, and survives `/mcp` reconnects (`get_guide("workspace-state")` § Per-session state reset). The delivery mechanism is built and already load-bearing.
+- **The rules already exist as prose.** `docs/trackers/reconnaissance-patterns.md` (61 `R-N` entries), the session logs, and CLAUDE.md's Iron Rules. What is missing is curation and a trigger, not authorship.
+- **Promotion machinery is in flight.** `docs/superpowers/specs/2026-08-20-entry-validity-and-attestation-design.md` gives an entry a declared decay class, a durable route to its proof, and (Layer 5) an attestation record. **A practice rule is exactly a promoted Statement**, so that spec supplies the metadata rather than requiring a parallel scheme.
+- **The prompt-surface cap is the standing warning.** `src/prompts/README.md` pins a 1900-**character** slice cap precisely because always-resident prose stops being read. Whatever the curated corpus grows to, the injected slice must stay small.
+
+### Open decisions
+
+1. **How is the activity detected?** The real design question:
+   - **Explicit** — the agent calls `get_guide("practice:planning")`. Honest and agent-agnostic, but depends on the agent knowing to ask, which is the problem being solved.
+   - **Inferred from the tool sequence** — a `create_file` under `docs/superpowers/plans/` is a strong planning signal; a subagent dispatch is a delegation signal. Fires without being asked; risks firing wrongly.
+   - **Hook-driven** — Claude Code only. **Rejected on the ask's own terms**: agent-agnosticism is the whole reason this beats editing `CLAUDE.md`.
+2. **One namespace or two?** Practice rules inside `get_guide` risk diluting tool contracts, which are a different kind of claim with a different failure mode. A sibling tool costs a slot against `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
+3. **What stops this becoming the thing it warns about?** An unread wall of prose injected at the wrong moment is strictly worse than nothing: it consumes context and trains the reader to skip.
+4. **Curation — who promotes a rule into the injected set?** The `Promote-when` machinery the validity spec describes, pointed at a new target. Do not build a second promotion path.
+
+### Resume
+
+1. Settle Open decision 1. It determines whether this is a small change or a subsystem, and it needs no code to decide.
+2. Draft **three** rules only, from the strongest existing evidence, and measure whether injecting them changes behaviour before curating more. Candidates: *a plan that names a function must have opened it* (6/6 this session); *name what the predicate literally counts before reporting the number* (CLAUDE.md's Measurement rule — today's `{"ne": null}`, `split('\n')`, `status='archived'` and fence-toggle instances); *apply the mutation, do not reason about it* (validated at 6 datapoints in `W-4`).
+3. The eval harness is `prompt-engineering` (prompt-tdd), the same one that scores the reconnaissance trigger string. **An injected rule that does not measurably change behaviour is decoration.**
+
 ## Anti-goals
 
 - Not a wishlist. An entry without a substrate check ("what exists today, what is missing") is not

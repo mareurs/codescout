@@ -589,6 +589,38 @@ quality); here Fable is the *positive exemplar* to learn from.
 patterns feed Tool Usage Patterns (`f2ecdd76a6189efb`).
 
 ---
+### Practice Rules — Injecting codescout's Own Working Rules Into Skills We Don't Own
+
+**Proposal: `CAP-10`** in [`docs/trackers/capability-proposals.md`](trackers/capability-proposals.md).
+
+codescout's hard-won working rules — how to trust a number, when a green result proves
+nothing, what makes a claim checkable — are model-agnostic and live in three places that
+never reach the moment the rule applies: `CLAUDE.md` (Claude Code only, loaded once),
+`get_guide` (tool contracts, not practice), and the session-log ledgers (durable, never
+surfaced unprompted).
+
+The surfaces where they *would* fire are third-party skills — `superpowers:writing-plans`,
+`subagent-driven-development` — and **we cannot edit those**: they sit in a plugin cache
+that updates overwrite, and an edit would not travel to another machine, profile, or agent.
+
+**Measured 2026-08-20**, executing the Statement-validity plan through
+`subagent-driven-development`: **six of six task briefs contained code defects**, all from
+one cause — the plan's Rust was written from `symbols(path=…)` overviews rather than
+function bodies. Wrong capture indices, a crate that is not a dependency, a constructor's
+return type, a field's type, non-existent test helpers, and *two* independent hand-rolled
+reimplementations of a date function that already existed. One rule prevents all six:
+**a plan that names a function must have opened it** — and it belongs in `writing-plans`.
+
+Most of the mechanism exists already. `get_guide` does just-in-time injection with a
+per-conversation ledger that survives `/mcp` reconnects; the rules exist as prose in
+`reconnaissance-patterns.md` and the Iron Rules; and the in-flight
+[Statement-validity spec](superpowers/specs/2026-08-20-entry-validity-and-attestation-design.md)
+supplies the promotion metadata, since **a practice rule is exactly a promoted Statement**.
+What is missing is curation and a trigger.
+
+The open question is activity detection — explicit call, inference from the tool sequence,
+or a hook (rejected: Claude-Code-only defeats the point). See CAP-10's *Open decisions*.
+
 ## Contributor Skills
 
 Three Claude Code skills living in `.claude/skills/` within this repo. Contributors who open codescout in Claude Code get them automatically — no build step required. The design doc this referenced (2026-02-26-contributor-skills-design.md) is not in the
