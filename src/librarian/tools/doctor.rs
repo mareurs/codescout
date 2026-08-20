@@ -2326,8 +2326,9 @@ fn scan_cited_but_undeclared(
                 path.clone(),
                 format!(
                     "{} is cited {exposure}× from other files and declares no \
-                         **Valid:** class — add one; this is a worklist, not a verdict",
-                    s.id
+                         **Valid:** class — add one of: {}; this is a worklist, not a verdict",
+                    s.id,
+                    crate::librarian::statements::FORMS
                 ),
             ));
         }
@@ -2411,9 +2412,14 @@ fn scan_validity_unparseable(
                 Some(aid.clone()),
                 path.clone(),
                 format!(
-                    "{} declares a malformed **Valid:** line: {} — this is a worklist, \
+                    "{} declares a malformed **Valid:** line: {}.{} — this is a worklist, \
                          not a verdict",
-                    s.id, err.message
+                    s.id,
+                    err.message,
+                    err.hint
+                        .as_deref()
+                        .map(|h| format!(" {h}"))
+                        .unwrap_or_default()
                 ),
             ));
         }
@@ -7734,6 +7740,83 @@ root = "work/elsewhere/ghost"
         );
     }
 
+    /// The remediation text `parse_validity` already builds must reach the report.
+    ///
+    /// `RecoverableError` carries BOTH a `message` (what is wrong) and a `hint` (how to
+    /// fix it), and every arm of `parse_validity` populates the hint with [`FORMS`].
+    /// Until 2026-08-20 this check interpolated `err.message` alone, so an agent was told
+    /// its `**Valid:**` line was malformed and never told what a well-formed one looks
+    /// like — with the fix text sitting one field away, already written, in the same
+    /// struct. That is the failure this pins: not that the check fires, which
+    /// `validity_unparseable_reports_the_calendar_invalid_dates_dated_stale_skips`
+    /// already covers, but that its detail is SELF-TEACHING.
+    ///
+    /// Asserted on the three class names literally, not on `FORMS` itself: comparing the
+    /// detail against the same const that built it passes even if that const is gutted to
+    /// an empty string. The literals are what an agent actually needs to read.
+    #[test]
+    fn validity_unparseable_detail_carries_the_parsers_remediation_hint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-1 — calendar-invalid date\n\n**Valid:** dated 2026-02-30\n\n\
+             ## R-2 — condition nobody named\n\n**Valid:** conditional\n\n\
+             ## R-3 — unknown class\n\n**Valid:** conditionally speaking\n",
+        );
+
+        let (violations, _) = scan_validity_unparseable(&unscoped_ctx(), &cat.conn).unwrap();
+        assert_eq!(
+            violations.len(),
+            3,
+            "all three malformed shapes must be reported: {violations:#?}"
+        );
+
+        for v in &violations {
+            for form in ["invariant", "dated YYYY-MM-DD", "conditional"] {
+                assert!(
+                    v.detail.contains(form),
+                    "every malformed-declaration row must name the three valid forms so the \
+                     reader can fix it without leaving the report; {form:?} missing from: {:?}",
+                    v.detail
+                );
+            }
+        }
+
+        // The per-arm hint, not just the shared FORMS tail — R-1's hint is the only one
+        // that names the ISO layout, so a mutation collapsing all three arms onto one
+        // generic hint would still pass the loop above.
+        let r1 = violations
+            .iter()
+            .find(|v| v.detail.contains("R-1"))
+            .expect("R-1 must be reported");
+        assert!(
+            r1.detail.contains("Use `dated YYYY-MM-DD`"),
+            "the date arm's own remediation hint must survive into the detail: {:?}",
+            r1.detail
+        );
+        let r2 = violations
+            .iter()
+            .find(|v| v.detail.contains("R-2"))
+            .expect("R-2 must be reported");
+        assert!(
+            r2.detail.contains("Name the event that ends validity"),
+            "the bare-conditional arm's own remediation hint must survive into the \
+             detail: {:?}",
+            r2.detail
+        );
+
+        // The message half must not have been displaced by the hint.
+        assert!(
+            r1.detail.contains("not an ISO date"),
+            "the parser's error message must still be present alongside the hint: {:?}",
+            r1.detail
+        );
+    }
+
     #[test]
     fn validity_unparseable_skips_an_archived_definer_located_under_archive_path() {
         // Mirrors `conditional_past_due_skips_an_archived_definer_located_under_archive_path`
@@ -8028,6 +8111,52 @@ root = "work/elsewhere/ghost"
             !v[0].detail.contains("promoted"),
             "this check must never claim to know WHY an entry is cited — a promotion, \
              an eval-fixture list and a kin reference are syntactically identical"
+        );
+    }
+
+    /// "Add one" is not actionable unless the row says what "one" is.
+    ///
+    /// This check has no `RecoverableError` to draw a hint from — the entry declares
+    /// nothing, so nothing failed to parse — which is exactly why the forms have to be
+    /// named explicitly here. Until 2026-08-20 the detail ended `— add one`, and the two
+    /// most natural guesses at what to add (a bare `conditional`, or free text) are
+    /// precisely the shapes `parse_validity` refuses, so following this row's advice
+    /// converted an `entry_cited_from_outside_but_undeclared` row into a
+    /// `validity_unparseable` one.
+    ///
+    /// Asserted on the literals rather than on [`FORMS`] for the same reason as
+    /// `validity_unparseable_detail_carries_the_parsers_remediation_hint`: a const
+    /// compared against itself pins nothing.
+    #[test]
+    fn cited_but_undeclared_detail_names_the_three_forms() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-2 — undeclared but load-bearing\n\nprose with no class\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-2".to_string(), 20usize);
+
+        let (v, _) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
+        assert_eq!(v.len(), 1, "R-2 is load-bearing and undeclared: {v:#?}");
+        for form in ["invariant", "dated YYYY-MM-DD", "conditional"] {
+            assert!(
+                v[0].detail.contains(form),
+                "a row telling an author to \"add one\" must name the three forms it will \
+                 accept, or the likeliest guesses are the ones the parser refuses; \
+                 {form:?} missing from: {:?}",
+                v[0].detail
+            );
+        }
+        assert!(
+            !v[0].detail.contains("promoted"),
+            "naming the forms must not have reintroduced a claim about WHY the entry is \
+             cited"
         );
     }
 

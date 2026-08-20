@@ -24,7 +24,7 @@ pub enum Validity {
     Conditional { condition: String },
 }
 
-const FORMS: &str = "**Valid:** invariant | dated YYYY-MM-DD | conditional — <event>";
+pub(crate) const FORMS: &str = "**Valid:** invariant | dated YYYY-MM-DD | conditional — <event>";
 
 // Column-0 anchored by construction: prose and field share a vocabulary, so a bare
 // keyword match would also count sentences ABOUT the field, not just declarations of
