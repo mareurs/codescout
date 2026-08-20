@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-20
-closed:
+closed: 2026-08-20
 severity: medium
 owner: marius
 related: ["docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md"]
@@ -102,28 +102,52 @@ mis-diagnose this as a dropped write.
 
 ## Fix
 
-Not yet implemented, and the right shape is a design question rather than a patch:
+Fixed in `experiments` @ `04e8e2c0153606ef9ce20fc4d663e05da6913132` (patch-id
+`39a1c54c860b276715b924ba870766faef5136b8`). Chose **option 2** from the list below.
 
-1. **Aggregate on worktree teardown** — requires a teardown hook codescout does not
-   currently own; `ExitWorktree`/`git worktree remove` are not codescout-mediated.
-2. **Write worktree calls to the main project's DB**, tagged with the worktree root. Keeps
-   one durable store and makes worktree activity queryable, at the cost of blurring "which
-   project root did this call resolve against" unless a column carries it. Note
-   `project_root` already exists on `tool_calls`, so the tag may be free.
-3. **Accept and document** — declare worktree telemetry ephemeral by design and have
-   analyses state the gap rather than silently under-reporting.
+`UsageRecorder::write_content` resolves `project_root` from `with_project_at` exactly as
+before, but now redirects where the db is OPENED: `crate::util::path_security::worktree_main_root(&project_root)`
+(pure filesystem read of the `.git` gitdir pointer, no `git` subprocess, not feature-gated)
+returns the main checkout's root when `project_root` is a linked worktree; `db::open_db`
+is called against that root instead. `project_root` itself is left untouched in the
+`INSERT` — the row still names the worktree, so it stays distinguishable from the main
+checkout's own calls and analyses can still isolate worktree activity by
+`WHERE project_root LIKE '%.worktrees%'` or similar.
 
-Option 2 looks cheapest and reuses an existing column, but it changes where a call's
-telemetry lands, which touches the retention sweep's scope. Not decided.
+This fires for BOTH ways a call can resolve to a worktree root: a per-call `workspace=`
+override (the symptom this file measured), and a server whose own HOME project happens to
+be a worktree (e.g. `--project` pointed at one) — same code path, no extra branching
+needed, so the fix closes the root cause rather than only the measured symptom.
 
-Record the fix SHA **and** its patch-id (`git show <sha> | git patch-id --stable`).
+**Why option 2 over option 3 (accept and document):** the *Symptom* section measured up to
+79% of one session's telemetry silently gone with no marker distinguishing a torn-down
+worktree's calls from a call that was never logged — "populated-and-wrong" is the harder
+failure mode, but "silently absent with nothing to search for" is not better; a
+documented-gap fix leaves every future friction/cost analysis under-reporting with no way
+to detect it. Option 2 turned out to cost a 3-line redirect plus a fallback, because
+`worktree_main_root` already existed for the librarian's own worktree overlay and needed
+no new capability.
 
+**Why option 1 (aggregate on teardown) was never seriously in the running:** it needs a
+teardown hook codescout does not own — `ExitWorktree` / `git worktree remove` are not
+codescout-mediated — so it was ruled out at filing time, before this fix, on
+infrastructure grounds rather than cost.
+
+**Retention sweep interaction, resolved:** `write_record`'s sweep is
+`DELETE FROM tool_calls WHERE called_at < datetime('now','-30 days')` — no `project_root`
+predicate at all, so a db holding rows from multiple `project_root` values (main checkout
+plus N torn-down worktrees) is already the sweep's normal operating shape. Nothing to
+change there.
 ## Tests added
 
-None. A regression test for option 2 would assert that a call with a `workspace` override
-pointing into a registered worktree writes its row to the main project's `usage.db` with
-`project_root` set to the worktree.
-
+`usage::content_tests::record_content_pinned_into_a_worktree_writes_to_the_main_checkouts_db`
+(`src/usage/mod.rs`) — shapes a linked-worktree tempdir (a `.git` FILE with a
+`gitdir: <main>/.git/worktrees/<name>` pointer, the same shape `worktree_main_root`'s own
+unit test uses), pins one call into it via `workspace_override`, and asserts: (1) the
+worktree's own `.codescout/usage.db` is never created, and (2) the main checkout's
+`usage.db` gets exactly one row whose `project_root` names the worktree. Full gate green:
+`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test --lib`
+(4137 passed, 0 failed, 7 ignored).
 ## Workarounds
 
 Before removing a worktree that has seen codescout use, copy its
