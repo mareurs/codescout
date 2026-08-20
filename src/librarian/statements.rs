@@ -93,6 +93,54 @@ fn first_declaration_line<'a>(section_text: &'a str, re: &Regex) -> Option<&'a s
     None
 }
 
+/// Truncate an entry section's text at the first NESTED entry definition inside it.
+///
+/// `entry_sections` bounds a section at the next heading of the same-or-higher level,
+/// so a deeper child's definition CAN sit wholly inside its parent's section text.
+/// Measured 2026-08-20 against every entry in `docs/**/*.md`: 3 of 1101 sections
+/// actually contain a nested entry definition —
+/// `docs/superpowers/specs/2026-06-26-c1-output-buffer-dedup-design.md:C-1`,
+/// `docs/trackers/prompt-hamsa-audit-log.md:A-28`, and `:A-29`.
+///
+/// Parsing a `**Valid:**` declaration straight out of an untruncated parent would let
+/// [`parse_validity`]'s first-wins rule read the CHILD's declaration as the PARENT's,
+/// whenever the parent declares nothing of its own. That is the unsafe direction: it
+/// asserts a law nobody declared for the parent, where the correct read is the `dated`
+/// default. Truncating at the first nested entry's heading line removes the
+/// possibility entirely — a parent with no declaration of its own reads as `None`
+/// (the caller's `dated` default), never as its child's class.
+///
+/// **Call this before [`parse_validity`] or [`parse_rests_on`], never `section.text`
+/// directly.** It lives here rather than beside its first caller precisely because that
+/// rule is easy to miss: `s.text` where this was required is a defect this project has
+/// already shipped once (`docs/trackers/capability-proposals.md` § CAP-9 review, item 6),
+/// and a helper reachable only from `doctor.rs` invites the next consumer to repeat it.
+pub fn declared_section_text(
+    section: &crate::librarian::tools::link_scan::extract::EntrySection,
+    all: &[crate::librarian::tools::link_scan::extract::EntrySection],
+) -> String {
+    let cut = all
+        .iter()
+        .filter(|other| {
+            other.heading_line > section.heading_line && other.heading_line <= section.end_line
+        })
+        .map(|other| other.heading_line)
+        .min();
+
+    match cut {
+        Some(nested_line) => {
+            let keep = (nested_line - section.heading_line) as usize;
+            section
+                .text
+                .lines()
+                .take(keep)
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        None => section.text.clone(),
+    }
+}
+
 /// Parse a declared class. `Ok(None)` means the section declares nothing.
 pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, RecoverableError> {
     let Some(raw) = first_declaration_line(section_text, valid_re()) else {

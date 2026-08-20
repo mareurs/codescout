@@ -45,6 +45,249 @@ fn scope_summary(
         "scope_fallback": fallback,
     })
 }
+/// One Statement packed into an entry-grain context bundle.
+struct StatementNode {
+    reference: String,
+    display_path: String,
+    validity: String,
+    rests_on: Option<String>,
+    text: String,
+    /// `anchor`, `cites` (the anchor points at it) or `cited-by` (it points at the anchor).
+    direction: &'static str,
+}
+
+/// A slug's file, parsed into entry sections once and reused across neighbours.
+type SlugEntry = Option<(
+    String,
+    Vec<crate::librarian::tools::link_scan::extract::EntrySection>,
+)>;
+
+fn load_slug(cat: &crate::librarian::catalog::Catalog, slug: &str) -> Result<SlugEntry> {
+    use rusqlite::OptionalExtension;
+    let abs: Option<String> = cat
+        .conn
+        .query_row(
+            "SELECT abs_path FROM artifact WHERE slug = ?1",
+            rusqlite::params![slug],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(abs) = abs else {
+        return Ok(None);
+    };
+    let Ok(text) = std::fs::read_to_string(&abs) else {
+        // A catalogued row whose file is gone is `doctor`'s `missing_file`, not this
+        // surface's problem — pack what resolves and let the count show the shortfall.
+        return Ok(None);
+    };
+    Ok(Some((
+        abs,
+        crate::librarian::tools::link_scan::extract::entry_sections(&text),
+    )))
+}
+
+/// Render one section into a packed node, or `None` when the slug or entry does not resolve.
+fn statement_node(
+    cat: &crate::librarian::catalog::Catalog,
+    cache: &mut std::collections::HashMap<String, SlugEntry>,
+    root: Option<&std::path::Path>,
+    slug: &str,
+    local: &str,
+    direction: &'static str,
+) -> Result<Option<StatementNode>> {
+    use crate::librarian::statements::{
+        declared_section_text, parse_rests_on, parse_validity, Validity,
+    };
+
+    if !cache.contains_key(slug) {
+        let loaded = load_slug(cat, slug)?;
+        cache.insert(slug.to_string(), loaded);
+    }
+    let Some(Some((abs, sections))) = cache.get(slug) else {
+        return Ok(None);
+    };
+    let Some(section) = sections.iter().find(|s| s.id == local) else {
+        return Ok(None);
+    };
+
+    // Never `section.text` — a nested child's declaration would be read as this
+    // entry's. See `declared_section_text`.
+    let declared = declared_section_text(section, sections);
+    let validity = match parse_validity(&declared) {
+        Ok(Some(Validity::Invariant)) => "invariant".to_string(),
+        Ok(Some(Validity::Dated(d))) => format!("dated {d}"),
+        Ok(Some(Validity::Conditional { condition })) => format!("conditional — {condition}"),
+        // Absence is not an exemption: an undeclared entry already means decay. Say so
+        // rather than printing nothing, which reads as "no decay concern".
+        Ok(None) => "undeclared (defaults to decay)".to_string(),
+        // A malformed declaration is `doctor`'s `validity_unparseable` finding. Surfacing
+        // it here as if it were absent would hide a defect behind a plausible default.
+        Err(_) => "unparseable — see doctor(validity_unparseable)".to_string(),
+    };
+
+    let display_path = root
+        .and_then(|r| std::path::Path::new(abs).strip_prefix(r).ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| abs.clone());
+
+    Ok(Some(StatementNode {
+        reference: format!("{slug}:{local}"),
+        display_path,
+        validity,
+        rests_on: parse_rests_on(&declared),
+        text: section.text.clone(),
+        direction,
+    }))
+}
+
+/// Entry-grain anchor: pack the Statement itself plus the Statements on either side of it.
+///
+/// Returns `Ok(None)` when `anchor_id` does not name an entry, so the caller falls through
+/// to the unchanged file-grain path. **That fall-through is why this is a separate function
+/// rather than a branch threaded through `call`:** the spec requires a file-grain anchor's
+/// behaviour to be unchanged, and an early return makes that true by construction instead
+/// of by regression test.
+///
+/// Entry-ness is decided by RESOLUTION, not by shape. No second copy of the
+/// `[A-Z]{1,3}-\d+` grammar lives here, so this cannot drift from `link_scan::extract`'s
+/// idea of what an entry id is — and the condition it tests ("a slug owns this, and a
+/// section with this id exists") is exactly the condition under which packing can work.
+#[allow(clippy::too_many_arguments)]
+fn pack_entry_anchor(
+    ctx: &ToolContext,
+    anchor_id: &str,
+    char_cap: usize,
+    effective_scope: Scope,
+    current: Option<&crate::librarian::current_project::CurrentProject>,
+    scope_fallback: bool,
+) -> Result<Option<Value>> {
+    let Some((slug, local)) = anchor_id.rsplit_once(':') else {
+        return Ok(None);
+    };
+    if slug.is_empty() || local.is_empty() {
+        return Ok(None);
+    }
+
+    let cat = ctx.catalog.lock();
+    let root = current.map(|c| c.git_root.as_path());
+    let mut cache: std::collections::HashMap<String, SlugEntry> = Default::default();
+
+    let Some(anchor) = statement_node(&cat, &mut cache, root, slug, local, "anchor")? else {
+        return Ok(None);
+    };
+
+    // Outward needs the entry-grain accessor; `outgoing` filters on src_slug alone and
+    // would hand back every entry in the ledger. Inward needs no twin — `dst_ref` IS
+    // `<slug>:<local>`, so exact match is already entry grain.
+    let mut nodes: Vec<StatementNode> = Vec::new();
+    let mut unresolved = 0usize;
+    for row in crate::librarian::catalog::entry_cite::outgoing_from_entry(&cat, slug, local)? {
+        match row.dst_ref.rsplit_once(':') {
+            Some((s, l)) => match statement_node(&cat, &mut cache, root, s, l, "cites")? {
+                Some(n) => nodes.push(n),
+                None => unresolved += 1,
+            },
+            // A bare artifact id names a FILE, not a Statement. Counted, never packed:
+            // inventing a section for it would fabricate provenance the citation never
+            // claimed.
+            None => unresolved += 1,
+        }
+    }
+    for row in crate::librarian::catalog::entry_cite::incoming(&cat, &anchor.reference)? {
+        match statement_node(
+            &cat,
+            &mut cache,
+            root,
+            &row.src_slug,
+            &row.src_local,
+            "cited-by",
+        )? {
+            Some(n) => nodes.push(n),
+            None => unresolved += 1,
+        }
+    }
+    drop(cat);
+
+    nodes.sort_by(|a, b| {
+        a.direction
+            .cmp(b.direction)
+            .then(a.reference.cmp(&b.reference))
+    });
+    nodes.dedup_by(|a, b| a.reference == b.reference && a.direction == b.direction);
+
+    let render = |n: &StatementNode, budget: Option<usize>| -> String {
+        let rests = n
+            .rests_on
+            .as_deref()
+            .map(|r| format!("\n**Rests on:** {r}"))
+            .unwrap_or_default();
+        let mut body = n.text.clone();
+        if let Some(cap) = budget {
+            if body.len() > cap {
+                let mut cut = cap;
+                while !body.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                body.truncate(cut);
+                body.push_str(
+                    "\n\n… [truncated — reserved budget for neighbours; use \
+                     `artifact(get, id=…, heading=…)` for the full entry]",
+                );
+            }
+        }
+        format!(
+            "## {} · {}\n*{} · valid: {}*{}\n\n{}\n\n",
+            n.reference, n.direction, n.display_path, n.validity, rests, body
+        )
+    };
+
+    // Same reserve rule as the file-grain path, and for the same reason: a long anchor
+    // otherwise consumes the whole budget before a neighbour is considered.
+    // docs/issues/archive/2026-07-05-context-anchor-starves-neighbors.md
+    let anchor_reserve = (!nodes.is_empty()).then_some(char_cap / 2);
+    let mut markdown = render(&anchor, anchor_reserve);
+    let mut included_ids: Vec<String> = vec![anchor.reference.clone()];
+
+    for n in &nodes {
+        let section = render(n, None);
+        if (markdown.len() + section.len()) > char_cap {
+            break;
+        }
+        markdown.push_str(&section);
+        included_ids.push(n.reference.clone());
+        if markdown.len() >= char_cap {
+            break;
+        }
+    }
+
+    let candidates = 1 + nodes.len();
+    let included = included_ids.len();
+    let omitted = candidates.saturating_sub(included);
+    let mut overflow = json!({
+        "candidates": candidates,
+        "included": included,
+        "omitted": omitted,
+        "candidates_capped": false,
+        "grain": "entry",
+        // Edges whose endpoint is a file rather than a Statement, or whose entry no
+        // longer exists. Reported rather than folded into `omitted`, which means
+        // "did not fit": these would not have been packed at any budget.
+        "unresolved_edges": unresolved,
+    });
+    if omitted > 0 {
+        overflow["hint"] = json!(format!(
+            "{omitted} neighbouring Statement(s) omitted (token budget) — raise `max_tokens`."
+        ));
+    }
+
+    Ok(Some(json!({
+        "markdown": markdown,
+        "included_ids": included_ids,
+        "overflow": overflow,
+        "scope": scope_summary(effective_scope, current, scope_fallback),
+    })))
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     use crate::librarian::catalog::find::{find, FindOpts};
     use std::collections::HashMap;
@@ -58,6 +301,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // across every project on an explicit `scope="all"` is the point of it.
     let (effective_scope, scope_fallback) =
         resolve_scope(a.scope, current, UmbrellaPolicy::Literal)?;
+    // Entry-grain anchor (Layer 4). Returns `None` for anything that does not resolve to
+    // a Statement, so every file-grain anchor falls through to the path below with its
+    // behaviour untouched — the requirement holds by construction, not by regression test.
+    if let Some(ref anchor) = a.anchor_id {
+        if let Some(v) = pack_entry_anchor(
+            ctx,
+            anchor,
+            char_cap,
+            effective_scope,
+            current,
+            scope_fallback,
+        )? {
+            return Ok(v);
+        }
+    }
+
     // Set when candidate DISCOVERY (not the token budget) hit its cap — more
     // artifacts may match than were even considered.
     let mut candidates_capped = false;
@@ -798,6 +1057,244 @@ mod tests {
             ids.len(),
             4,
             "expected anchor + all 3 neighbors, got {ids:?}"
+        );
+    }
+
+    /// Seed a slugged artifact whose file lives under `root`.
+    fn seed_ledger(cat: &Catalog, root: &std::path::Path, name: &str, slug: &str, body: &str) {
+        std::fs::write(root.join(name), body).unwrap();
+        artifact::upsert(
+            cat,
+            &sample_row(&format!("r/{name}"), "r", name, name, None),
+        )
+        .unwrap();
+        cat.conn
+            .execute(
+                "UPDATE artifact SET slug=?1 WHERE id=?2",
+                rusqlite::params![slug, format!("r/{name}")],
+            )
+            .unwrap();
+    }
+
+    fn seed_edge(cat: &Catalog, src_slug: &str, src_local: &str, dst_ref: &str) {
+        crate::librarian::catalog::entry_cite::insert_with(
+            &cat.conn,
+            &crate::librarian::catalog::entry_cite::EntryCiteRow {
+                src_slug: src_slug.into(),
+                src_local: src_local.into(),
+                dst_ref: dst_ref.into(),
+                rel: "cites".into(),
+                origin: "scan".into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_entry_anchor_packs_the_statement_and_both_sides_of_it() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        seed_ledger(
+            &cat,
+            root,
+            "ledger.md",
+            "ledger",
+            "## W-1 — the anchor\n\
+             **Valid:** invariant\n\
+             anchor body\n\
+             \n\
+             ## W-2 — the entry that rests on the anchor\n\
+             **Valid:** dated 2026-08-01\n\
+             sibling body\n",
+        );
+        seed_ledger(
+            &cat,
+            root,
+            "other.md",
+            "other",
+            "## F-1 — what the anchor rests on\n\
+             **Valid:** invariant\n\
+             target body\n",
+        );
+
+        seed_edge(&cat, "ledger", "W-1", "other:F-1"); // anchor -> F-1
+        seed_edge(&cat, "ledger", "W-2", "ledger:W-1"); // W-2 -> anchor
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            v["overflow"]["grain"],
+            json!("entry"),
+            "the envelope must say which grain answered, or a caller cannot tell an \
+             entry pack from a file pack: {v:#?}"
+        );
+        let ids: Vec<String> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["ledger:W-1", "ledger:W-2", "other:F-1"],
+            "anchor first, then neighbours; BOTH directions are walked — outward needs \
+             the entry-grain accessor and inward is exact on dst_ref: {v:#?}"
+        );
+
+        let md = v["markdown"].as_str().unwrap();
+        assert!(md.contains("## ledger:W-1 · anchor"), "{md}");
+        assert!(
+            md.contains("## other:F-1 · cites"),
+            "the anchor's outward edge is labelled by direction: {md}"
+        );
+        assert!(
+            md.contains("## ledger:W-2 · cited-by"),
+            "and its inward edge is distinguishable from the outward one: {md}"
+        );
+        assert!(
+            md.contains("valid: invariant") && md.contains("valid: dated 2026-08-01"),
+            "every packed node carries its decay class: {md}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_colon_anchor_that_names_no_entry_falls_through_to_the_file_grain_path() {
+        // Entry-ness is decided by RESOLUTION, not by shape, so an unresolvable
+        // colon-bearing anchor must not be swallowed by the entry path — it has to reach
+        // the file-grain code with its behaviour unchanged. `grain` is absent there, which
+        // is the observable difference.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(&cat, root, "ledger.md", "ledger", "## W-1 — real\nbody\n");
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+
+        for anchor in ["nosuchslug:W-1", "ledger:W-9", "ledger:"] {
+            let v = call(&ctx, json!({"anchor_id": anchor})).await.unwrap();
+            assert!(
+                v["overflow"].get("grain").is_none(),
+                "`{anchor}` names no Statement and must fall through: {v:#?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_nested_childs_declaration_is_not_read_as_the_anchors() {
+        // `entry_sections` bounds a section at the next SAME-OR-HIGHER heading, so a
+        // deeper child's text sits wholly inside its parent's. Parsing the parent's raw
+        // `section.text` would let `parse_validity`'s first-wins rule report the CHILD's
+        // `invariant` as the PARENT's — asserting a law nobody declared.
+        //
+        // `statement_node` calls `declared_section_text` first, exactly as all four
+        // `doctor` scans do. This test exists because that copied discipline is otherwise
+        // untested HERE: the tests pinning it are named for `doctor`'s call sites, so a
+        // reviewer asking "is this consistent with its siblings?" gets a correct yes and
+        // never reaches "and is the consistency pinned?".
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        seed_ledger(
+            &cat,
+            root,
+            "ledger.md",
+            "ledger",
+            "## W-1 — parent that declares nothing of its own\n\
+             parent body\n\
+             \n\
+             ### W-2 — nested child\n\
+             **Valid:** invariant\n\
+             child body\n",
+        );
+        seed_edge(&cat, "ledger", "W-1", "ledger:W-2");
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+        let md = v["markdown"].as_str().unwrap();
+
+        let anchor_line = md
+            .lines()
+            .find(|l| l.contains("valid:") && md.find(l) < md.find("## ledger:W-2"))
+            .unwrap_or_default();
+        assert!(
+            anchor_line.contains("undeclared (defaults to decay)"),
+            "the parent declares nothing, so it must read as the decay default, never as \
+             its child's `invariant`. Got: {anchor_line:?}\n{md}"
+        );
+        assert!(
+            md.contains("## ledger:W-2 · cites"),
+            "and the child is still packed, with its own class: {md}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_oversized_entry_anchor_does_not_starve_its_neighbours() {
+        // The entry-grain twin of `anchor_neighbors_are_not_starved_by_oversized_anchor`.
+        // It exists because the half-budget reserve was COPIED from the file-grain path,
+        // and a copy inherits the sibling's discipline but not its tests — the sibling's
+        // test is named for the sibling. Disabling the reserve here left all 19 context
+        // tests green (confirmed by applying the mutation), which is the hole this closes.
+        //
+        // Ledgers are exactly where this bites: an entry can run for hundreds of lines
+        // while the Statements that rest on it are short, so the anchor is routinely the
+        // largest node in its own pack.
+        // docs/issues/archive/2026-07-05-context-anchor-starves-neighbors.md
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // One giant line, so no line-based preview cap can shrink it instead.
+        seed_ledger(
+            &cat,
+            root,
+            "ledger.md",
+            "ledger",
+            &format!("## W-1 — huge anchor\n{}\n", "x".repeat(2000)),
+        );
+        seed_ledger(
+            &cat,
+            root,
+            "other.md",
+            "other",
+            "## F-1 — small\na\n\n## F-2 — small\nb\n\n## F-3 — small\nc\n",
+        );
+        for t in ["F-1", "F-2", "F-3"] {
+            seed_edge(&cat, "ledger", "W-1", &format!("other:{t}"));
+        }
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1", "max_tokens": 400}))
+            .await
+            .unwrap();
+
+        let ids: Vec<String> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            ids.len(),
+            4,
+            "anchor + all three neighbours must fit; without the reserve the anchor eats \
+             the whole budget and every neighbour is dropped: {v:#?}"
+        );
+
+        let md = v["markdown"].as_str().unwrap();
+        assert!(
+            md.contains("… [truncated — reserved budget for neighbours"),
+            "and the truncation must be VISIBLE — a silently shortened Statement is \
+             indistinguishable from a short one, which is the lie this whole layer \
+             exists to avoid: {md}"
         );
     }
 

@@ -82,6 +82,27 @@ pub fn outgoing(cat: &Catalog, src_slug: &str) -> Result<Vec<EntryCiteRow>> {
     collect(cat, "WHERE src_slug = ?1", params![src_slug])
 }
 
+/// Outgoing edges of ONE entry, not of every entry in its ledger.
+///
+/// [`outgoing`] filters on `src_slug` alone, which is artifact grain: for
+/// `reconnaissance-patterns` it returns every entry's edges, hundreds of rows where an
+/// entry-grain caller wants a handful. The inward direction needs no twin because
+/// [`incoming`] is already exact — `dst_ref` IS `<slug>:<local>`, so matching it whole
+/// is entry grain by construction. That asymmetry is why the gap is easy to miss from a
+/// symbol listing: three functions exist, the signatures look complete, and only the
+/// `WHERE` clause says one of them is a column short.
+pub fn outgoing_from_entry(
+    cat: &Catalog,
+    src_slug: &str,
+    src_local: &str,
+) -> Result<Vec<EntryCiteRow>> {
+    collect(
+        cat,
+        "WHERE src_slug = ?1 AND src_local = ?2",
+        params![src_slug, src_local],
+    )
+}
+
 pub fn incoming(cat: &Catalog, dst_ref: &str) -> Result<Vec<EntryCiteRow>> {
     collect(cat, "WHERE dst_ref = ?1", params![dst_ref])
 }
@@ -151,6 +172,52 @@ mod tests {
         .unwrap();
         assert_eq!(outgoing(&cat, "tracker-a").unwrap().len(), 1);
         assert_eq!(incoming(&cat, "art-b-id").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn outgoing_from_entry_is_entry_grain_where_outgoing_is_artifact_grain() {
+        // The pair that makes the distinction visible. One ledger, two entries, one edge
+        // each. `outgoing` cannot tell them apart because it filters on `src_slug` only;
+        // an entry-grain anchor asking it for W-1's neighbours would be handed W-2's too.
+        //
+        // On the live corpus that is not a rounding error: `reconnaissance-patterns` holds
+        // hundreds of scan rows, so the artifact-grain answer buries the entry-grain one.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_slugged(&cat, "art-a", "tracker-a");
+        for r in [
+            row("tracker-a", "W-1", "other:F-1", "scan"),
+            row("tracker-a", "W-2", "other:F-2", "scan"),
+        ] {
+            insert_with(&cat.conn, &r).unwrap();
+        }
+
+        assert_eq!(
+            outgoing(&cat, "tracker-a").unwrap().len(),
+            2,
+            "artifact grain sees the whole ledger"
+        );
+
+        let w1 = outgoing_from_entry(&cat, "tracker-a", "W-1").unwrap();
+        assert_eq!(w1.len(), 1, "entry grain sees only W-1's edge");
+        assert_eq!(w1[0].dst_ref, "other:F-1");
+
+        let w2 = outgoing_from_entry(&cat, "tracker-a", "W-2").unwrap();
+        assert_eq!(w2.len(), 1);
+        assert_eq!(w2[0].dst_ref, "other:F-2");
+
+        assert!(
+            outgoing_from_entry(&cat, "tracker-a", "W-9")
+                .unwrap()
+                .is_empty(),
+            "an entry with no edges is empty, not the ledger's rows"
+        );
+        assert!(
+            outgoing_from_entry(&cat, "other-tracker", "W-1")
+                .unwrap()
+                .is_empty(),
+            "src_local alone must not match across ledgers — W-1 is namespaced per ledger \
+             and is defined in eight live session logs"
+        );
     }
 
     fn row(src_slug: &str, src_local: &str, dst_ref: &str, origin: &str) -> EntryCiteRow {

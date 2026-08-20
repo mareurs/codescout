@@ -1988,51 +1988,6 @@ fn entry_indegree(
 /// Also a guess; re-tune from the first month's output.
 const EXPOSURE_THRESHOLD: usize = 5;
 
-/// Truncate an entry section's text at the first NESTED entry definition inside it.
-///
-/// `entry_sections` bounds a section at the next heading of the same-or-higher level,
-/// so a deeper child's definition CAN sit wholly inside its parent's section text.
-/// Measured 2026-08-20 against every entry in `docs/**/*.md`: 3 of 1101 sections
-/// actually contain a nested entry definition —
-/// `docs/superpowers/specs/2026-06-26-c1-output-buffer-dedup-design.md:C-1`,
-/// `docs/trackers/prompt-hamsa-audit-log.md:A-28`, and `:A-29`.
-///
-/// Parsing a `**Valid:**` declaration straight out of an untruncated parent would let
-/// `parse_validity`'s first-wins rule read the CHILD's declaration as the PARENT's,
-/// whenever the parent declares nothing of its own. That is the unsafe direction: it
-/// asserts a law nobody declared for the parent, where the correct read is the `dated`
-/// default. Truncating at the first nested entry's heading line removes the
-/// possibility entirely — a parent with no declaration of its own reads as `None`
-/// (the caller's `dated` default), never as its child's class.
-///
-/// Shared by every check in this family that parses a declaration out of a section
-/// (Tasks 5-7): call this before `parse_validity`, never `section.text` directly.
-fn declared_section_text(
-    section: &crate::librarian::tools::link_scan::extract::EntrySection,
-    all: &[crate::librarian::tools::link_scan::extract::EntrySection],
-) -> String {
-    let cut = all
-        .iter()
-        .filter(|other| {
-            other.heading_line > section.heading_line && other.heading_line <= section.end_line
-        })
-        .map(|other| other.heading_line)
-        .min();
-
-    match cut {
-        Some(nested_line) => {
-            let keep = (nested_line - section.heading_line) as usize;
-            section
-                .text
-                .lines()
-                .take(keep)
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-        None => section.text.clone(),
-    }
-}
-
 /// A declared `conditional` whose named event may already have fired.
 ///
 /// **Reports a worklist, never a verdict.** Selection is syntactic and cheap — a
@@ -2050,7 +2005,7 @@ fn declared_section_text(
 /// finding, and staying silent here is what keeps the two checks from ever disagreeing
 /// about the same defect.
 ///
-/// **Truncates each section with [`declared_section_text`]** before parsing, so a
+/// **Truncates each section with [`declared_section_text`](crate::librarian::statements::declared_section_text)** before parsing, so a
 /// parent entry with no declaration of its own never inherits a nested child's.
 ///
 /// Read-only; there is no `fix=`. Discharging a conditional means judging whether the
@@ -2060,7 +2015,7 @@ fn scan_conditional_past_due(
     conn: &rusqlite::Connection,
     indegree: &std::collections::BTreeMap<String, usize>,
 ) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
-    use crate::librarian::statements::{parse_validity, Validity};
+    use crate::librarian::statements::{declared_section_text, parse_validity, Validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
@@ -2190,7 +2145,7 @@ fn iso_to_epoch_days(iso: &str) -> Option<i64> {
 /// [`scan_conditional_past_due`]: that is [`scan_validity_unparseable`]'s business;
 /// reporting it here too would duplicate the finding.
 ///
-/// **Truncates each section with [`declared_section_text`]** before parsing, so a parent
+/// **Truncates each section with [`declared_section_text`](crate::librarian::statements::declared_section_text)** before parsing, so a parent
 /// entry with no declaration of its own never inherits a nested child's.
 ///
 /// Takes `today_epoch_days` rather than computing `chrono::Utc::now()` itself, so the
@@ -2204,7 +2159,7 @@ fn scan_dated_stale(
     indegree: &std::collections::BTreeMap<String, usize>,
     today_epoch_days: i64,
 ) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
-    use crate::librarian::statements::{parse_validity, Validity};
+    use crate::librarian::statements::{declared_section_text, parse_validity, Validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
@@ -2301,7 +2256,7 @@ fn scan_dated_stale(
 /// promotion predicate mislabelled three of five entries in commit `9a982ed5`. That
 /// direction stays human; the `detail` string must not contain the word "promoted".
 ///
-/// **Truncates each section with [`declared_section_text`]**, never `s.text`, before
+/// **Truncates each section with [`declared_section_text`](crate::librarian::statements::declared_section_text)**, never `s.text`, before
 /// parsing — same rule as [`scan_conditional_past_due`] and [`scan_dated_stale`]: a
 /// parent with no declaration of its own must not inherit a nested child's. For this
 /// check specifically, skipping the truncation would fail in the UNSAFE direction: a
@@ -2323,7 +2278,7 @@ fn scan_cited_but_undeclared(
     conn: &rusqlite::Connection,
     indegree: &std::collections::BTreeMap<String, usize>,
 ) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
-    use crate::librarian::statements::parse_validity;
+    use crate::librarian::statements::{declared_section_text, parse_validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
@@ -2412,7 +2367,7 @@ fn scan_cited_but_undeclared(
 /// starts burying others the way `entry_cited_from_outside_but_undeclared` buried
 /// everything else pre-MF-1, gate it on `EXPOSURE_THRESHOLD` like its siblings.
 ///
-/// **Truncates each section with [`declared_section_text`]**, never `s.text` — same
+/// **Truncates each section with [`declared_section_text`](crate::librarian::statements::declared_section_text)**, never `s.text` — same
 /// rule as the other three: a parent with no declaration of its own must not inherit a
 /// nested child's malformed one.
 ///
@@ -2422,7 +2377,7 @@ fn scan_validity_unparseable(
     ctx: &ToolContext,
     conn: &rusqlite::Connection,
 ) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
-    use crate::librarian::statements::parse_validity;
+    use crate::librarian::statements::{declared_section_text, parse_validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
     let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
