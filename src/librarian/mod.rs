@@ -10,6 +10,7 @@ pub mod catalog;
 
 pub mod frontmatter;
 pub mod ids;
+pub mod statements;
 pub mod util;
 
 pub mod artifact_store;
