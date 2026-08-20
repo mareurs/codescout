@@ -103,6 +103,41 @@ Two options, both larger than the change that surfaced this:
 Option 1 is probably right, sequenced with its own measurement of the exposure delta. It
 should not ride along with the materializer that revealed it.
 
+### Correction, 2026-08-21 — this rationale omitted a resolution outcome
+
+The *Impact* caveat above lists the outcomes that stop a shadowed citation becoming an
+edge as "`Ambiguous`, `Dangling` or `CrossRepo`". **`SelfCite` is missing, and it was the
+one that dominated this file's own top-offenders table** — every ledger listed there is
+shadowed largely by ids it defines itself.
+
+That omission mattered twice over:
+
+- It **inflated the 1461**. Shadowed citations resolving `SelfCite` were, at the time this
+  was written, discarded before attribution regardless of the dedup, so they were not
+  recoverable by fixing the first-mention bug at all.
+- It **hid a cheap fix**. `SelfCite` being decided at file grain was a separate defect with
+  a fix confined to `link_scan`, touching no `extract` behaviour and therefore unable to
+  move exposure — shipped as `b750419a`,
+  `docs/issues/archive/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md`.
+  The two-options survey read as exhaustive and was not.
+
+This is the R-95 shape: a deferral rationale is written at the moment someone decides to
+stop, so nothing in it argues the work is cheaper than the decision to stop implies.
+
+### The estimate, replaced by a measurement
+
+With `SelfCite` fixed, the population this bug still blocks is directly observable rather
+than bounded. Of the 867 self-cite citations now reaching attribution, **68 attributed and
+799 did not** — and the 799 are overwhelmingly index-table mentions, i.e. exactly this bug.
+
+**799 is a measured floor on what fixing this would additionally unlock**, project-scoped,
+on the same instrument that reports the current 391 edges. It supersedes the 1461, which
+was corpus-wide, unfiltered by resolution, and inflated by the omission above. The two
+numbers describe different populations; do not compare them.
+
+The exemplar is `R-3` in `docs/trackers/reconnaissance-patterns.md`: cited from inside six
+entries' bodies, first mentioned on line 90 in the preamble, and still recording zero
+intra-ledger edges after `b750419a` for that reason alone.
 ## Fix
 
 Not yet. Tracked for Layer 3 follow-up; see `statement-validity-session-log:F-5` for the

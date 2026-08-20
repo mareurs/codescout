@@ -764,7 +764,7 @@ mod tests {
         // Before the split, `SelfCite` short-circuited before `entry_section_at` ran, so
         // EVERY intra-ledger edge was discarded, unattributed and uncounted. The whole
         // 4389-test suite was green in that state.
-        // docs/issues/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md
+        // docs/issues/archive/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
 

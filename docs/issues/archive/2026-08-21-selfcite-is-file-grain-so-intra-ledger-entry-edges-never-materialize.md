@@ -1,12 +1,13 @@
 ---
-id: '28df51dd0b6a86b0'
+id: de718d28ad65a035
 kind: bug
-status: open
+status: fixed
 title: entry-grain edges are dropped for every intra-ledger citation, because SelfCite is decided at file grain before attribution runs
 tags:
 - link_scan
 - entry-graph
 - statement-validity
+closed: 2026-08-21
 ---
 
 ## Symptom
@@ -96,12 +97,53 @@ the **325 attributed / 323 derived** the same run reports, not a prediction of t
 
 ## Fix
 
-Not yet applied. The shape is narrow and, unlike the first-mention bug, does **not** touch
-`extract` and therefore cannot move the exposure metric — `entry_indegree` computes from
-`extract()` directly and never reads `entry_cite`.
+Fixed on `experiments` in **`b750419a`**, patch-id **`b25db18090f7187b1ae87f079b74f318de17a447`**
+(the SHA dies on the next rebase; the patch-id survives rebase and cherry-pick).
 
-Sketch: have `SelfCite` carry its `dst_id` so `mod.rs` can attribute at entry grain while
-still refusing the file-grain edge (no self-loop in `desired`, `self_cites` count
-unchanged). Suppress only the true self-reference — a citation sitting inside the very
-entry that defines the token, i.e. where the resolved local id equals `src_local`.
+`Outcome::SelfCite` now carries `dst_id`, so one resolution serves both grains. The caller
+still refuses the file-grain edge — no `desired.insert`, `self_cites` unchanged — while
+`attribute_entry_edge` keeps the entry-grain one. The only same-file citation still refused
+is the true self-reference, where the citing entry IS the defining entry.
 
+**Measured live after the fix** (project-scoped `link_scan`, same server, freshness
+confirmed via `/proc/<pid>/exe` and the binary's baked-in SHA):
+
+| | before | after |
+|---|---:|---:|
+| `self_cites` | 867 | **867** |
+| `attributed` | 325 | 393 |
+| `derived` | 323 | **391** |
+| `entry_cite` rows, `origin='scan'` | 322 | **391** |
+| of those, intra-ledger | 0 | **68** |
+| self-loops | 0 | **0** |
+
+**68 new edges across 17 ledgers, a 21% larger entry graph.** `self_cites` unchanged is the
+load-bearing check: the file-grain verdict never moved, so exposure cannot have.
+
+The partition closes exactly, which is what makes the delta trustworthy rather than
+plausible: `attributed + outside_any_entry` went 1724 -> 2596, and the difference of 872 is
+867 self-cites joining the entry partition plus 5 citations from one newly-indexed file.
+Nothing appeared from nowhere.
+
+Mutation-verified — four applied to the real source, suite run, **all four killed**: drop the
+same-file guard (1 test), invert the sibling comparison (2), revert the fix (2), reintroduce
+the file-grain self-loop (1, caught via `edges_missing` reporting `led -> led`). Reverting
+the fix is *confirmed surviving on the prior tree* — the 4389-test suite was green with
+every intra-ledger edge discarded, which is why this needed new tests rather than a green
+run.
+
+Regression tests: `an_entry_citing_a_sibling_in_its_own_ledger_records_an_edge` and
+`an_entry_naming_itself_records_no_edge` (`src/librarian/tools/link_scan/mod.rs`).
+
+### What this does NOT fix
+
+The exemplar in *Symptom* above — `R-3` in `reconnaissance-patterns.md` — is **still
+unrecovered**, and correctly so. Its first in-document mention is line 90, in the preamble,
+so `extract`'s dedup hands attribution a line outside every entry and
+`entry_section_at` returns `None`. That is the first-mention bug
+(`2026-08-21-entry-attribution-follows-the-first-mention-only.md`), still open. The two
+suppressors are independent and this fix removes one of them.
+
+The 799 self-cites that resolved but did not attribute are now a **measured floor** on what
+fixing the first-mention bug would additionally unlock — replacing that file's guessed 1461
+upper bound with a number taken from the same instrument.

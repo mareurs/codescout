@@ -203,7 +203,7 @@ pub enum Outcome {
     /// `## R-41` is a real edge, and the caller needs the target to build it. Without the
     /// payload the entry layer cannot recover what the file layer already resolved, and
     /// every intra-ledger edge is lost before attribution runs
-    /// (`docs/issues/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md`).
+    /// (`docs/issues/archive/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md`).
     SelfCite {
         dst_id: String,
     },
