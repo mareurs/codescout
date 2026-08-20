@@ -12,7 +12,7 @@ topic: statement validity layers 1-2 — doctor checks, subagent review discipli
 entry_prefix:
 - F
 - W
-entry_high_water_W: 7
+entry_high_water_W: 8
 entry_high_water_F: 6
 ---
 
@@ -47,6 +47,7 @@ entry_high_water_F: 6
 | W-4 | 2026-08-20 | high | Require every implementer to report where the brief was wrong | A brief's bad advice loosens a date parser while appearing to tighten it | validated |
 | W-6 | 2026-08-21 | high | Scout the seam before consuming machinery a spec describes | Silent edge loss on prune, plus a materializer counting calls as rows | validated |
 | W-7 | 2026-08-21 | high | Measure the parameter before baking it into immutable data | A false collision worry shipped, and the cap set 10 chars past the knee | validated |
+| W-8 | 2026-08-21 | high | Reproduce before reading the fix plan — the plan may name the wrong mechanism | The expensive fix ships, takes an exposure recalibration, and the intra-ledger graph is still empty | validated |
 | W-5 | 2026-08-20 | med | Audit the surfaces that SERVE a concept, not the docs that describe it | Four checks ship saying "add one" without saying what one is, and the likeliest guesses are the shapes the parser refuses | validated |
 
 > Ids start at `F-2` / `W-3`, not `F-1` / `W-1`: the index rows were pre-filled before the
@@ -758,6 +759,61 @@ expectation, promote the pair as one rule covering both design-time and test-tim
 **Rests on:** this project's CLAUDE.md § Measurement — *"never state a count your instrument
 did not measure"* — extended one step earlier, to the parameter chosen before any
 instrument runs.
+
+## W-8 — running the reproduction found a SECOND mechanism, and the filed fix alone would have recovered zero
+
+**Valid:** invariant
+
+**Observed:** Re-entering my own bug file from the previous session
+(`entry-attribution-follows-the-first-mention-only`) to implement it. CLAUDE.md requires
+running the reproduction *before* reading the fix plan, on the grounds that the plan is a
+hypothesis about the reproduction. Promoted at four datapoints; this is the fifth, and it
+failed in a way the previous four did not.
+
+**Got:** The reproduction did not refine the fix — it found a **second, independent
+mechanism** the bug file never mentions. `resolve` decides self-citation at FILE grain and
+returns `Outcome::SelfCite`, which is matched before the `Edge` arm where
+`entry_section_at` lives. So for any citation whose target is defined in the same file, the
+citation never reaches attribution at all.
+
+Consequence, and this is the part reading the plan could not have produced: **fixing the
+filed bug alone recovers zero intra-ledger edges.** Every one of them is short-circuited
+one step earlier. A ledger's `**Kin:**`, `**Chain.**` and `kin R-3/R-28` lines — its
+densest, most deliberate edges, written by hand to assert a relationship between two
+entries — were 100% dropped, and would have stayed 100% dropped behind a passing test and a
+plausible changelog line.
+
+**Counterfactual:** I would have implemented option 1 of the filed plan (emit every
+occurrence, move the file-level guarantee out of `extract`), taken the exposure-metric
+recalibration that option carries, re-measured, and found the intra-ledger graph still
+empty — with the expensive change already shipped and the actual blocker still unlooked-at.
+
+**Why the plan could not have contained it.** The bug file's *Impact* caveat enumerates the
+outcomes that stop a shadowed citation becoming an edge: "`Ambiguous`, `Dangling` or
+`CrossRepo`". `SelfCite` is absent, and `SelfCite` dominated the file's own top-offenders
+table — every ledger listed there is shadowed largely by ids it defines itself. The
+rationale was internally coherent and cited a real measurement; the missing item is
+invisible from inside it, because a list you wrote reads as complete.
+
+That is [[reconnaissance-patterns:R-95]]'s second form exactly — *"Pick one of two, both
+bad" had a third option inside a type one of them already touched* — so this is a
+recurrence, not a new law. Recorded here rather than as a new R-N per the skill's own audit
+rule: a recurrence is a defect in the promoted text's reach, not a new entry.
+
+**And the omission had a price in the other direction too.** It made a cheap fix look
+expensive. The second mechanism was confined to `link_scan`, touched no `extract` behaviour,
+and therefore could not move the exposure metric that three shipped `doctor` checks are
+gated on — the very risk that justified deferring the whole thing. Shipped same session as
+`b750419a`: +68 intra-ledger edges across 17 ledgers, a 21% larger entry graph, with
+`self_cites` unchanged at 867 proving the file-grain verdict never moved.
+
+**Status:** validated
+
+**Promote-when:** a third instance where reproduction-before-plan surfaces a mechanism the
+plan does not name (as opposed to correcting a detail within the named one). At that point
+the CLAUDE.md rule's wording should widen from "the plan is a hypothesis about the
+reproduction" to name the enumeration failure specifically — the plan may be a hypothesis
+about the *wrong mechanism*, and its own completeness is the least testable thing in it.
 
 ## Template for new entries
 
