@@ -35,6 +35,7 @@ contents. The headline additions:
 | `artifact(action="graft")` | [artifact (action="graft")](../concepts/artifact-graft.md) |
 | Constitution trackers + `codescout constitution-check` | [Constitution Trackers](../concepts/constitution-trackers.md) |
 | `edit_markdown` miss diagnostics | [Miss Diagnostics](../tools/edit-markdown-miss-diagnostics.md) |
+| `**Valid:**` decay classes + four `doctor` checks | [Statement Validity](../concepts/statement-validity.md) |
 
 Writing the page into the main manual directly — rather than staging it here and
 moving it on graduation — is deliberate: the move step is what got skipped, and a

@@ -260,7 +260,8 @@ faithfully, because a brief reads as authority.
   branch built to catch claims that decay.
 - **A false absence about a test helper.** The fix round 1 brief asserted "there is no
   `sample_art` / `art_upsert`". `art_upsert` is an aliased import of
-  `catalog::artifact::upsert`, in scope in `doctor.rs`'s own test module at `:3197`, alongside
+  `catalog::artifact::upsert`, in scope in `src/librarian/tools/doctor.rs`'s own test module at
+  `:3197`, alongside
   `TestArtifactRowBuilder` and its `with_status`. The implementer worked around the phantom
   absence by hand-building rows; the round 2 brief corrected it at the bytes.
 - **A precedent citation that argued the opposite.** The fix round 1 brief cited
@@ -274,7 +275,8 @@ faithfully, because a brief reads as authority.
 **Mechanism:** each false claim was *inherited*, not invented — restated from a subagent's
 report or from the controller's own prior belief, and never re-verified at the bytes. The
 `art_upsert` one is the sharpest: a Task 7 report said it accurately and **locally** (true of
-`doctor.rs`), and the controller restated it one layer up as an absolute, where it was false.
+`src/librarian/tools/doctor.rs`), and the controller restated it one layer up as an absolute,
+where it was false.
 See `F-2`.
 
 **Impact:** high
@@ -306,9 +308,9 @@ summarising what prior rounds had established so the next agent would not re-der
 up, and the branch's own subject matter is exactly this failure:
 
 1. **`art_upsert`.** Task 7's implementer reported "`sample_art`/`art_upsert` don't exist" —
-   true of `doctor.rs`'s test module, where they had just been burned by a brief that
-   hallucinated them. Restated in the fix round 1 brief as an absolute, it was false:
-   `art_upsert` is imported at `doctor.rs:3197`. See `W-4`.
+   true of `src/librarian/tools/doctor.rs`'s test module, where they had just been burned by a
+   brief that hallucinated them. Restated in the fix round 1 brief as an absolute, it was false:
+   `art_upsert` is imported at `src/librarian/tools/doctor.rs:3197`. See `W-4`.
 2. **The impossible date, across the parser/check boundary.** Task 2's review deferred
    `dated 2026-99-99` as "accepted — shape-only, spec-compliant", correct **about the
    parser**. Task 6 then wrote a silent `continue` when the conversion fails, correct
@@ -333,7 +335,8 @@ carried in the surrounding context, not in the sentence — so restating the sen
 silently drops the qualifier that made it true.
 
 **Workaround:** Re-verify at the bytes before putting an inherited claim in a brief, and write
-the scope into the sentence ("not defined in `doctor.rs`", not "does not exist"). The
+the scope into the sentence ("not defined in `src/librarian/tools/doctor.rs`", not "does not
+exist"). The
 downstream catch is `W-4`'s required report field.
 
 **Severity:** med

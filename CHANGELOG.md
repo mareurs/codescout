@@ -6,6 +6,28 @@ All notable changes to codescout are documented here.
 
 ### Added
 
+- **Statement validity — a `**Valid:**` decay class on tracker entries, and four `doctor`
+  checks that rank what has gone stale by how much rests on it.** A tracker entry may declare
+  one of three classes — `invariant`, `dated YYYY-MM-DD`, or `conditional — <event>` — plus a
+  `**Rests on:**` line naming the durable route back to its proof. `librarian(action="doctor")`
+  gains `entry_conditional_past_due`, `entry_dated_stale`,
+  `entry_cited_from_outside_but_undeclared` and `validity_unparseable`; all four are read-only
+  (no `fix=`) and report a worklist, never a verdict. Malformed declarations are refused rather
+  than accepted: a bare `conditional` naming no event, an unknown class (`conditionally
+  speaking` fails on a word boundary, not a prefix), and a calendar-invalid date —
+  `dated 2026-02-30` is rejected by a real calendar parse, not only by a shape regex.
+
+  The first three checks are gated on citation exposure — how many *other* files cite the
+  entry — because an unranked list of every dated entry past a horizon is thousands of rows and
+  will be ignored, which is the same outcome as not shipping the check. **Exposure stays
+  cross-repo while the reported worklist is scoped to the active project**, so an entry that is
+  load-bearing precisely because another repo depends on it keeps its true exposure, and a
+  developer is still not handed another project's work. Scoped-out rows are counted in
+  `catalog_health.entry_validity_scoped_by_project` and named in the report hint rather than
+  silently dropped. `artifact(action="append_entry")` stamps `**Valid:** dated <today>` into
+  the section it writes unless the caller passes a class, in the same transaction as the
+  entry-id high-water mark. Docs: `docs/manual/src/concepts/statement-validity.md`.
+
 - **`librarian(action="doctor")` gains an `abs_path_outside_managed_roots` check.** Reports
   catalog rows whose `abs_path` falls under no configured root — the drift class behind the
   Windows `containing_root` failure below. Rows outside the active project's roots are

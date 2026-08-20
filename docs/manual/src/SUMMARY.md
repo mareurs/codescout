@@ -62,6 +62,7 @@
   - [Catalog GC & Repair](concepts/catalog-gc.md)
   - [Entry Citations](concepts/entry-citations.md)
   - [link_scan](concepts/link-scan.md)
+  - [Statement Validity](concepts/statement-validity.md)
   - [artifact (action="graft")](concepts/artifact-graft.md)
   - [Constitution Trackers](concepts/constitution-trackers.md)
 - [LSP Idle TTL](concepts/lsp-idle-ttl.md)
