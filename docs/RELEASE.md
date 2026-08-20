@@ -161,8 +161,15 @@ is an extractor regression wearing the costume of a docs improvement.
 
 ### Before cherry-pick: read the live output of any tool-facing change (required)
 
-`cargo rb` + `/mcp` establishes that the new code is *running*. It does not establish that
-what the code *says* is useful. For any change to tool-facing **output** — warnings, hints,
+`cargo rb` + `/mcp` establishes that the new code is *running* **in this session**. It does
+not establish that what the code *says* is useful — and it does nothing for any other
+session. Every Claude Code window already holding a codescout server keeps executing the
+binary it started from, serving that build's guides, prompt surfaces and guide routing,
+until it is reconnected. Measured 2026-08-21: **21 of 26 servers on this machine were
+running a deleted binary, the oldest 17 days old.** Nothing raises — the commits are on the
+branch, the binary on disk is current, the suite is green, and only `/proc` disagrees.
+Count it with [`scripts/stale-servers.sh`](../scripts/stale-servers.sh); the reconnect is
+not hygiene, it is the difference between one session and all of them. For any change to tool-facing **output** — warnings, hints,
 completeness notes, summaries, rendered text — invoke the tool once against this repository
 and read the bytes before the cherry-pick.
 

@@ -282,7 +282,7 @@ be treated as findings, not as a summary to re-derive.
 |----|------|---------|---------|------------------------|
 | R-106 | 2026-08-18 | hit (pre-edit) → rule | **A generated surface is ground truth about cost and about nothing else — read the generator before proposing the remedy.** Measured the live `tools/list` payload, found one 225-char `workspace` description repeated verbatim on 24 tools, and proposed a "free mechanical dedup, zero risk". The source holds exactly ONE copy: `inject_workspace_param` injects it into every `pinnable()` tool at list time | `src/server.rs:496-508` + `:1024-1026`; prompt-surface-compaction-session-log:F-2, :W-1; kin R-91, R-100 |
 | R-105 | 2026-08-18 | miss (human review) → rule | **A key derived from runtime state is a claim about that state's lifetime — enumerate the lifecycle events before proposing it.** Proposed parent-PID + parent-start-time as the agent-agnostic session key for the guide ledger and scouted it hard against ONE event (MCP subprocess respawn); never enumerated client *resume*, which restarts the parent while the conversation continues. The falsifying evidence was already in hand and unread | bug-fix-session-log:F-53; session 2c518eb6 spans 12 days / 9630 calls / 67 MCP procs under a 17h-old `claude` process; kin R-91, R-50 |
-| R-104 | 2026-08-17 | miss ×5 (self-caught) → rule | **A zero from a report is a claim about your query, not about the world — and it lies in three independent ways.** Five wrong conclusions in one session, from a wrong key name (searched `"token"` while the `dangling` array calls the field `raw` — half the population never searched), a wrong value vocabulary (filtered on `verdict != "ok"` against a five-value domain, printing *resolved* refs as problems), and cap truncation (ref absent from `findings[]`, but `n_refs_found` was 64 against a 50-entry window). Structural anchoring is necessary and insufficient: it protects the technique while the **domain** is guessed | 5 instances incl. `grep -c 'Status:'` counting prose about Status, and a `status: mitigated` "what's open" query 2.5× inflated by already-archived rows. Substrate moving to retire it: `f908e883` (`severity_legend`), `7c218338` (link_scan field unification). Kin R-101, R-103 |
+| R-104 | 2026-08-17 · 2026-08-21 | miss ×8 (self-caught) → **promote-when FIRED** | **A zero from a report is a claim about your query, not about the world — and it lies in three independent ways.** Five wrong conclusions in one session, from a wrong key name (searched `"token"` while the `dangling` array calls the field `raw` — half the population never searched), a wrong value vocabulary (filtered on `verdict != "ok"` against a five-value domain, printing *resolved* refs as problems), and cap truncation (ref absent from `findings[]`, but `n_refs_found` was 64 against a 50-entry window). Structural anchoring is necessary and insufficient: it protects the technique while the **domain** is guessed. **Widened 2026-08-21:** not about zeros and not about reports — about **who supplied the predicate**. A hand-built instrument (path, pattern, sort key, field name) answers in its own terms without complaint, and can return a full, plausible, WRONG answer with no zero involved. Remedy is a positive control, not care | 5 instances incl. `grep -c 'Status:'` counting prose about Status, and a `status: mitigated` "what's open" query 2.5× inflated by already-archived rows. Substrate moving to retire it: `f908e883` (`severity_legend`), `7c218338` (link_scan field unification) — and that prediction **held**: `counts.entry_edges` read cleanly on sight 2026-08-21. Three further instances that day were all hand-rolled shell, where no publisher can add a legend: a version-keyed cache path guessed flat (empty output, not even `0`), a backtick eaten by `grep -c "$s"`, and `sort` on `ps lstart` ordering by weekday name. Kin R-101, R-103 |
 | R-103 | 2026-08-17 | miss (peer-caught) → rule | **A blast-radius audit is not a correctness audit, and enumerating the call sites makes it feel like both.** Read all four callers of a changed eligibility rule and correctly guarded `resolve_link` — then missed a pre-existing defect in the exact `else` arm just read, because the question asked was only *"does my change break this caller?"*, never *"is this caller correct?"*. The suppressor: an in-code comment asserting cross-site parity that described **intent**, not behaviour — the cheapest false positive, sitting where you would look to verify | `da55100a` (the incomplete audit) vs `3faddb15` (peer session's correction, hours later). `FileMissing` carries gating severity, so the miss would have failed CI on a correct doc — the same class the parent bug was filed for. Kin R-101, R-102, R-104 |
 | R-102 | 2026-08-17 | miss ×3 (self-caught) → rule | **A root cause read from code is a hypothesis about which true statement is the OPERATIVE one; implementing the fix is the measurement.** Three bug files in one session, three root causes written from careful reading, all three wrong, not one caught by re-reading: a two-part predicate rebutted as though it had no command list, a correct mechanism with both prescriptions wrong, and a diagnostic that does not discriminate. Sharpest tell — a root cause asserting an **absence**; reading establishes presence, only a search establishes absence | 3 datapoints, one session: `2026-08-15-read-only-metadata-commands-blocked-on-source-paths`, `2026-08-15-read-file-force-ignored-on-full-reads`, `2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary`. The measured/inferred label is what kept all three cheap (`da55100a`). Kin R-101 (one layer in), R-103 |
 | R-101 | 2026-08-17 | miss (self-caught) → rule | **A test that DISTINGUISHES two hypotheses is not confirmation of one — state what the RIVAL hypothesis predicts before recording a verdict.** Ran a discriminating test on `include_str!` ref resolution and recorded it as *"confirmed — the base directory was the whole of it"*; the outcome actually **ruled out** the hypothesis it was read as confirming. The measurement was correct and already in hand, scored against one hypothesis in the direction committed to in prose two paragraphs above. Detector: for every `**Verdict:** confirmed`, complete *"under the rival hypothesis this test would have shown ___"* | `docs/issues/archive/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`; corrected in `da55100a`, which also found the sketched parser-side fix unreachable. The bug's *"inferred, not cited"* label is what made the wrong mechanism cheap. Kin R-102, R-103, R-104 |
@@ -3266,10 +3266,59 @@ window could not truncate — the four-line fixture in
 exists for exactly that reason. Kin to R-101: there the measurement was in hand and scored
 against one hypothesis; here the measurement was never of the thing being claimed.
 
-**Status:** open
+### 2026-08-21 — the criterion fired, and it fired outside this entry's own domain
 
-**Promote-when:** a sixth instance, OR the first time a *report* carries its own key/value
-legend and the reader still guesses. The substrate is already moving that way — `f908e883`
+Three more in one session, taking the count to **eight**. All three were instruments **I
+built myself**, not reports someone else produced — which is the widening, because every
+original instance was a query against a findings array whose keys, value domain and cap were
+somebody else's to publish.
+
+| Failure | Instance |
+|---|---|
+| **path guessed, not resolved** | Probed three plugin caches at `…/codescout-companion/skills/…`, got empty output from all three, and read it as *"the fix did not ship"*. The cache is version-keyed — `…/codescout-companion/<version>/skills/…` — so the path never existed, and `grep -c` on a missing file prints nothing at all. Note it did not even print `0`: **empty is not zero**, and I nearly reported it as one. |
+| **the shell ate the predicate** | `grep -c "$s"` where `$s` held a backtick returned `0` for a string that is present exactly once. Read as *"the `source.md` edit is not in the binary"*. |
+| **wrong sort algorithm — and NO zero involved** | Ranked processes by `ps lstart` through a lexical `sort`, which orders on **weekday name** (`Wed` > `Tue` > `Thu` > `Mon`). Confidently reported four two-day-old processes as the newest on a machine whose newest was 17 seconds old. |
+
+**Why the third matters more than the other two.** Instances 1 and 2 are the promoted Phase 1
+bullet's *scope* and *encoding* arms wearing new clothes, and in both a zero (or a blank) is
+what eventually raised the question. Instance 3 produced **no zero and no absence** — a full,
+plausible, correctly-formatted ranking that was entirely wrong. Neither this entry's wording
+(*"a zero from a report"*) nor the search-zero law (*"a search that finds nothing"*) reaches
+it, because nothing was missing.
+
+**The widened rule.** The failure is not about zeros, and not about reports. It is about **who
+supplied the predicate**. Whenever you hand-build an instrument — a path, a pattern, a sort
+key, a field name, a filter — that component came from memory, and the instrument will answer
+in its own terms without complaint. The remedy is not care and not re-reading: it is a
+**positive control** — before believing the result, make the instrument find or rank one case
+whose answer you already know. All three above were caught that way and by nothing else.
+
+**Knowing this entry did not prevent any of the three.** They were committed in a session that
+had read R-104 in full, quoted it back to the user, and cited it in an unrelated commit
+message — the same self-referential shape the Measurement iron rule already records about
+itself (*"two of the seven were committed while writing the entry that documents it"*). That
+is evidence for placement over wording: a law you can recite is not a law you apply.
+
+**Status:** promote-when — criterion FIRED 2026-08-21 at eight instances (five 2026-08-17,
+three 2026-08-21). Not yet on any target surface.
+
+**Promote-when:** **FIRED.** The original criterion was *"a sixth instance, OR the first time
+a report carries its own key/value legend and the reader still guesses"*, and the honest
+reading is that its prediction half **held**: self-describing output is retiring the
+report-shaped failures — `link_scan`'s `counts.entry_edges` was legible on sight on
+2026-08-21 with no legend needed. What it did not predict is that the failures would migrate
+to hand-rolled shell, where there is no publisher to add a legend.
+
+So the target is **not** `docs/PROGRESSIVE_DISCOVERABILITY.md`'s legend pattern as originally
+guessed — a legend cannot fix a sort you wrote yourself. Route instead to the reconnaissance
+skill's Phase 1, widening the existing *"a search that finds nothing is evidence about the
+search"* bullet to cover instruments that return a **wrong** answer rather than **no** answer,
+with the positive control as the remedy. Craft-shaped (true in any repo), so it goes via the
+skill sync flow rather than a codescout memory; the cross-repo half is filed as
+`claude-plugins:docs/issues/2026-08-21-zero-law-does-not-cover-wrong-answer-instruments.md`.
+
+(Original criterion, retained for the record:) a sixth instance, OR the first time a *report*
+carries its own key/value legend and the reader still guesses. The substrate is already moving that way — `f908e883`
 added `severity_legend` to `audit_doc_refs` and `7c218338` unified `link_scan`'s field names
 — so the honest test of this entry is whether self-describing output retires it. If it does,
 promote as a note on `docs/PROGRESSIVE_DISCOVERABILITY.md`'s legend pattern rather than as a

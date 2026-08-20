@@ -24,7 +24,7 @@ compared over time. That is the whole test, and it is deliberately narrow:
 
 ## Before you trust any probe on this page
 
-Three rules, each earned by a measured failure in this repo. They cost more to skip than
+Four rules, each earned by a measured failure in this repo. They cost more to skip than
 to follow.
 
 1. **Calibrate against a known-good instrument on the overlap before extending one.**
@@ -41,6 +41,18 @@ to follow.
    search, not about the world.** Check whether your filter selects *against* the
    population you are characterising — it has, here, more than once.
 
+4. **The predicate you supplied from memory is the one that fails silently — run a
+   positive control.** Rules 1–3 are about reading output someone else produced. This one
+   is about the instrument you just wrote: a path, a pattern, a sort key, a field name.
+   Three in one session, 2026-08-21 — a version-keyed plugin cache probed at a flat path
+   (empty output, **not** `0`, and nearly reported as one); a backtick eaten by
+   `grep -c "$s"`, returning `0` for a string present exactly once; and `sort` over
+   `ps lstart`, which orders by **weekday name** and ranked two-day-old processes as the
+   newest on a machine whose newest was 17 seconds old. **The third returned no zero at
+   all** — a complete, well-formatted, entirely wrong answer — which is why rule 3 does
+   not reach it. Before believing a result, make the instrument find or rank one case
+   whose answer you already know. (`reconnaissance-patterns:R-104`, widened.)
+
 The long form, with the incident list, is the **Measurement** iron rule in `CLAUDE.md`.
 
 ---
@@ -54,6 +66,7 @@ The long form, with the incident list, is the **Measurement** iron rule in `CLAU
 | [`scripts/run-tc-benchmark.py`](../scripts/run-tc-benchmark.py) · [`.sh`](../scripts/run-tc-benchmark.sh) | Retrieval quality — the TC suite, Qdrant stack only since Phase 7 | `./scripts/run-tc-benchmark.sh > /tmp/stack.json`, or the `.py` with `--binary` / `--project-path` | Scores against expected-file lists naming **codescout's own tree**, so any other corpus yields meaningless numbers. Results log: [`trackers/retrieval-benchmark.md`](trackers/retrieval-benchmark.md) |
 | [`scripts/sweep-bm25-boost.sh`](../scripts/sweep-bm25-boost.sh) · [`sweep-bm25-cr1200.sh`](../scripts/sweep-bm25-cr1200.sh) | Score table across `CODESCOUT_BM25_BOOST` values; the `cr1200` variant sweeps the current best cell and indexes once | `./scripts/sweep-bm25-boost.sh [binary]` | **The expected-file lists are relative to the PINNED bench corpus** (`.worktrees/bench`, detached at `ede25e69`) — not to current HEAD. Several of those paths have since been deleted or merged on `experiments`, so checking them against HEAD tells you nothing |
 | [`scripts/probe_entry_attribution.py`](../scripts/probe_entry_attribution.py) | Entry-grain citation attribution — whether a `PREFIX-N` citation belongs to the entry whose heading precedes it. Compares the naive nearest-preceding-heading rule against a section-bounded one and reports the disagreement rate | `python3 scripts/probe_entry_attribution.py --calibrate --fence-audit [--ground-truth N] [--json]` | The headline precision is **agreement between two algorithms**, with the bounded rule assumed correct — *not* a labelled set. `--ground-truth N` prints disagreement rows to check by hand. Scope is ledgers declaring `entry_prefix` under `docs/trackers/` excluding `archive/`, so it says nothing about specs, plans, bug files or ADRs, which also carry `PREFIX-N` tokens. Fence detection is a naive ``` toggle — an unbalanced fence silently inverts every line after it, so run `--fence-audit`. Baseline 2026-08-20: **87.9%**, errors 89% concentrated in four ledgers |
+| [`scripts/stale-servers.sh`](../scripts/stale-servers.sh) | Which running codescout servers execute a **deleted** binary — i.e. which Claude Code sessions are still serving a previous build's guides, prompt surfaces and guide routing. The process axis of the freshness law, made countable | `./scripts/stale-servers.sh` | Counts `/proc/<pid>/exe` resolving to `… (deleted)`; that is **not** a version comparison — a byte-identical rebuild also reads STALE, because the inode changed. `pgrep -x codescout` matches argv[0] exactly, so a server behind a wrapper is invisible. A deleted inode carries no version, so this says *not current*, never *which build*. Baseline 2026-08-21: **21 of 26 stale, oldest 17 days** |
 | [`scripts/extract-kotlin-tcs.py`](../scripts/extract-kotlin-tcs.py) | Mines `(query, expected_files)` ground-truth pairs from a project's `usage.db`: for each `semantic_search`, the files touched by `read_file`/`edit_file`/`symbols`/`edit_code` within 300s in the same session | `python3 scripts/extract-kotlin-tcs.py …` → JSON list | **The name is misleading** — nothing in it is Kotlin-specific; it reads any project's `usage.db`. The 300s same-session window is a *behavioural* ground truth, i.e. a heuristic, not a labelled set |
 
 ## Built-in `librarian` scans
