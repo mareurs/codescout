@@ -1,7 +1,7 @@
 ---
-id: c6f4cba0383bdb35
+id: 5a11ee0211756e71
 kind: bug
-status: open
+status: fixed
 title: a calendar-invalid dated Statement is invisible to all three validity checks
 tags:
 - doctor
@@ -9,6 +9,7 @@ tags:
 - validity
 - false-negative
 - silent-skip
+closed: 2026-08-20
 ---
 
 # BUG: a calendar-invalid `dated` Statement is invisible to all three validity checks
@@ -108,6 +109,29 @@ Not attempted. Two directions:
 The narrow fix does not preclude the structural one, and the two answer different
 questions: *what does the corpus contain* versus *what may be written*.
 
+
+## Fix Round 3 (2026-08-20)
+
+Shipped both directions from the two listed above, composed as the review's ship-then-fix
+verdict required: **Structural** (`parse_validity` now validates the calendar via
+`chrono::NaiveDate`, kept alongside the shape regex — see Resume note below) AND a new
+fourth check, `scan_validity_unparseable`, that reports any `**Valid:**` line
+`parse_validity` refuses (the check all three doc comments already deferred to by name).
+Neither alone closed this: tightening the parser alone would have converted the silent
+`Ok` into a silently-swallowed `Err`, which is exactly the review's stated reason for
+its ship-then-fix verdict rather than a merge block.
+
+**Fix SHA (experiments):** `954c6051` — `feat(doctor): validity_unparseable check + real
+calendar date validation`
+**Patch-id:** `d72dca2e4deeb75444f014677f3e43ec99b31c31`
+
+Regression tests: `dated_rejects_a_calendar_invalid_date_even_when_shape_valid`,
+`dated_still_accepts_every_shape_valid_calendar_valid_date`,
+`dated_rejects_non_padded_or_wrong_width_shapes` (`statements.rs`), and
+`validity_unparseable_reports_the_calendar_invalid_dates_dated_stale_skips` — the
+positive half proving R-8/R-9 (this bug's own repro shape) are now reported rather than
+still-invisible (`doctor.rs`). Gate: `cargo fmt` / `cargo clippy -D warnings` / `cargo
+test` green, 4365 passed / 45 ignored / 0 failed across 20 binaries.
 ## Tests added
 
 None yet. A regression test belongs with whichever fix lands, and the existing
@@ -135,4 +159,3 @@ spec-compliant" deferral recorded in Task 2's review before changing `ISO_RE`.
   this defeats
 - `docs/superpowers/plans/2026-08-20-statement-validity-layers-1-2.md` — the plan that
   shipped all three checks
-

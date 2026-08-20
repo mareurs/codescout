@@ -2344,9 +2344,9 @@ fn scan_cited_but_undeclared(
 /// their own doc comments. Before this check shipped, a malformed declaration was
 /// invisible to the whole family: the author tried to declare and failed, and their
 /// Statement read as healthy to every check that partitions on class. This closes
-/// `docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md`, whose
-/// filed instance (`dated 2026-02-30`) is one shape of this — the other is any value
-/// `parse_validity` refuses outright, which the filed bug did not cover.
+/// `docs/issues/archive/2026-08-20-impossible-date-hides-a-statement-from-every-check.md`,
+/// whose filed instance (`dated 2026-02-30`) is one shape of this — the other is any
+/// value `parse_validity` refuses outright, which the filed bug did not cover.
 ///
 /// **Ungated on exposure, unlike its three siblings.** The exposure gate exists to
 /// prioritise DECAY work — is a Statement's claim still true — which presupposes the
@@ -7650,7 +7650,8 @@ root = "work/elsewhere/ghost"
         // `validity_unparseable_reports_the_calendar_invalid_dates_dated_stale_skips`,
         // because a test that only asserts absence here cannot distinguish "correctly
         // routed elsewhere" from "still invisible", which is exactly the bug this round
-        // fixes (docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md).
+        // fixes
+        // (docs/issues/archive/2026-08-20-impossible-date-hides-a-statement-from-every-check.md).
         //
         // R-8's `2020-13-45` is a COMPOSITE violation — month 13 is out of 1..12 AND day
         // 45 is out of 1..31 — so a merely range-checked parser (reject month > 12, day
@@ -7666,7 +7667,7 @@ root = "work/elsewhere/ghost"
             "led",
             &p,
             "## R-8 — impossible date\n\n**Valid:** dated 2020-13-45\n\n\
-                 ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
+                     ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
         );
 
         let mut deg = std::collections::BTreeMap::new();
@@ -7679,7 +7680,7 @@ root = "work/elsewhere/ghost"
                 .0
                 .is_empty(),
             "both a composite-invalid and a range-valid-but-calendar-invalid date must \
-                 be skipped, not reported or panicked on"
+                     be skipped, not reported or panicked on"
         );
     }
 
@@ -7689,7 +7690,7 @@ root = "work/elsewhere/ghost"
         // R-8/R-9 is consistent with EITHER "correctly routed to
         // `scan_validity_unparseable`" or "still invisible to everything" — the exact
         // ambiguity that let
-        // docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md
+        // docs/issues/archive/2026-08-20-impossible-date-hides-a-statement-from-every-check.md
         // ship undetected. This asserts the first reading is the true one: both R-8 and
         // R-9 ARE reported, by name, here. `scan_validity_unparseable` is ungated on
         // exposure, so no `indegree` map is seeded or needed.
@@ -7701,7 +7702,7 @@ root = "work/elsewhere/ghost"
             "led",
             &p,
             "## R-8 — impossible date\n\n**Valid:** dated 2020-13-45\n\n\
-                 ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
+                     ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
         );
 
         let (violations, _) = scan_validity_unparseable(&unscoped_ctx(), &cat.conn).unwrap();

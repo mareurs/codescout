@@ -49,8 +49,8 @@ fn rests_re() -> &'static Regex {
 // which would silently start accepting shapes the old parser refused. This regex is
 // the shape gate; `chrono` (in `parse_validity`) is the calendar gate. Both are
 // required — neither alone closes
-// docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md, whose
-// root cause was a shape-only check that let a calendar-impossible date through.
+// docs/issues/archive/2026-08-20-impossible-date-hides-a-statement-from-every-check.md,
+// whose root cause was a shape-only check that let a calendar-impossible date through.
 fn iso_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap())
@@ -109,7 +109,7 @@ pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, Recoverabl
         // Shape gate (exact 4-2-2 digit width via `iso_re`) AND calendar gate
         // (`chrono::NaiveDate`, real Gregorian validity) — both required. Neither
         // alone closes
-        // docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md:
+        // docs/issues/archive/2026-08-20-impossible-date-hides-a-statement-from-every-check.md:
         // the shape-only regex let `dated 2026-02-30` through as `Ok(Some(Dated(..)))`,
         // and every consumer that later tried to convert it (`iso_to_epoch_days`)
         // silently `continue`d — the record stayed invisible to every check that
@@ -273,7 +273,7 @@ mod tests {
         // `2026-02-30` matched the old shape-only `^\d{4}-\d{2}-\d{2}$` regex, was
         // returned as `Ok(Some(Dated(..)))`, and every consumer then silently
         // dropped it — this is the fix for
-        // docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md.
+        // docs/issues/archive/2026-08-20-impossible-date-hides-a-statement-from-every-check.md.
         // A real calendar parse must refuse it at declaration time instead.
         for bad in ["2026-02-30", "2025-02-29", "2026-99-99", "2020-13-45"] {
             let result = parse_validity(&format!("**Valid:** dated {bad}\n"));
