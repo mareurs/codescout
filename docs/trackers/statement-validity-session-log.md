@@ -13,7 +13,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_W: 5
-entry_high_water_F: 4
+entry_high_water_F: 5
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -527,6 +527,70 @@ surfaces and gates them for tool-name drift; none of the three is what an agent 
 while triaging a worklist, and no gate could have caught a missing concept.
 
 ---
+
+## F-5 — entry_cite's PK excludes origin, so the spec's prune-and-rematerialize contract cannot own a duplicated edge
+
+**Observed:** 2026-08-20, pre-implementation scout of Layer 3b (the `origin='scan'`
+materializer), before touching `link_scan::call`.
+
+**When:** About to mirror the artifact-grain diff machinery (`diff::diff` / `diff::apply`,
+`links::by_rel`) for entry grain, and to add the prune-and-re-materialize pass the spec
+describes.
+
+**Expected (spec § Layer 3 → Resolution and materialization):** *"Rows are written to the
+existing `entry_cite` table with `origin='scan'`. The `origin` column exists today as a
+forward-compat placeholder that MVP only ever writes as `'write'`, so this is the use it
+was reserved for. Scanner-owned rows are pruned and re-materialized per scan;
+`origin='write'` rows are never touched by the scan."* Reads as a contract the existing
+schema and helpers already support.
+
+**Got (scouted reality):** Two gaps, one mechanical and one a measurement trap.
+
+1. **No prune path exists.** `src/librarian/catalog/entry_cite.rs` exposes exactly
+   `insert_with`, `outgoing`, `incoming`, `incoming_like` and a private `collect`. There is
+   no delete/prune of any kind, so "pruned and re-materialized per scan" is machinery to be
+   built, not reused. There is also no index on `origin` (only `idx_entry_cite_dst`), which
+   is fine at ~2000 rows but is a full scan.
+
+2. **`origin` is NOT in the primary key.** Live schema:
+   `PRIMARY KEY (src_slug, src_local, dst_ref, rel)`, with `origin TEXT NOT NULL DEFAULT
+   'write'`. Combined with `insert_with`'s documented `INSERT OR IGNORE`, an edge that a
+   user already wrote via `append_entry(cites=…)` and that the scan independently derives
+   from prose **collides on the PK and is silently ignored**. The row keeps
+   `origin='write'` forever.
+
+   The *behaviour* is correct and matches the spec's intent — an explicitly written edge is
+   never clobbered, and pruning `WHERE origin='scan'` correctly leaves it alone. The defect
+   is in what the scan can **report**: derived-edge count and rows-written count differ,
+   and `INSERT OR IGNORE` makes a no-op indistinguishable from a write. A materializer that
+   reports "N entry edges materialized" from its insert-attempt count would state a number
+   its instrument did not measure — the exact class this project's CLAUDE.md § Measurement
+   was written for, and the third time this work stream has produced one.
+
+**Probable cause:** The spec was written against the schema's *shape* (the `origin` column
+exists) without reading the PK it sits beside, and `insert_with`'s `INSERT OR IGNORE` is
+documented on the function rather than in the schema, so the interaction is invisible from
+either half alone.
+
+**Workaround:** Build the prune helper, and count rows actually written via
+`Connection::changes()` after each insert rather than counting attempts — report `derived`,
+`written` and `skipped_existing` as separate numbers so a write-owned duplicate is visible
+instead of inflating the materialized count.
+
+**Severity:** med — no data loss and no wrong edges; the cost is a plausible wrong number in
+the tool's own report, and one that would be believed because it comes from the tool that
+did the work. Caught before any code was written.
+
+**Status:** open
+
+**Valid:** dated 2026-08-20
+
+**Rests on:** `get_guide("tracker-conventions")`'s rule that entry ids key `entry_cite` rows
+and must never be re-keyed — the same invariant that makes `artifact.slug` immutable and
+gives `src_slug` its `ON DELETE CASCADE`.
+
+**Fix idea / Pointer:** Layer 3b, this work stream. `entry_cite.rs` needs
+`prune_scan_rows(conn, src_slugs)`; `link_scan::call`'s response needs the three-way count.
 
 ## Template for new entries
 
