@@ -223,6 +223,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         (chrono::Utc::now().date_naive() - epoch).num_days()
     };
     all_violations.extend(scan_dated_stale(&cat.conn, &indegree, today_epoch_days)?);
+    // Same shared `indegree`; the inverse question of the two checks above — a
+    // load-bearing entry that declares no class at all, rather than one whose
+    // declared class needs revisiting.
+    all_violations.extend(scan_cited_but_undeclared(&cat.conn, &indegree)?);
     // Needs both `ctx` (for the repo to resolve against) and the connection, so unlike
     // `scan_declared_project_roots` it runs inside the lock. Its health block is carried
     // out to `catalog_health` below, because a clean result over 54 of 350 archived files
@@ -2128,6 +2132,83 @@ fn scan_dated_stale(
     // the right fixture shape, the dependency on stability is removed instead.
     scored.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(scored.into_iter().map(|(_, v)| v).collect())
+}
+
+/// A Statement other files depend on that declares no decay class at all.
+///
+/// The inverse of the checks above: they read a declaration, this one reports its
+/// absence where absence costs something. These are the de-facto promotions — a
+/// Statement genuinely promoted and declared nowhere reads identically here to one
+/// nobody got around to declaring; this check cannot and does not distinguish them.
+///
+/// **It reports "load-bearing and undeclared", never "promoted".** Measured
+/// 2026-08-20: a promotion, an eval-fixture list, and a kin reference are
+/// syntactically identical — `grep -c '<id>'` counts any mention, and using it as a
+/// promotion predicate mislabelled three of five entries in commit `9a982ed5`. That
+/// direction stays human; the `detail` string must not contain the word "promoted".
+///
+/// **Truncates each section with [`declared_section_text`]**, never `s.text`, before
+/// parsing — same rule as [`scan_conditional_past_due`] and [`scan_dated_stale`]: a
+/// parent with no declaration of its own must not inherit a nested child's. For this
+/// check specifically, skipping the truncation would fail in the UNSAFE direction: a
+/// parent that declares nothing would read the child's declaration as its own and
+/// silently stop being reported, even though the parent itself is still undeclared.
+///
+/// **A malformed `**Valid:**` is swallowed here, not reported here.** Only `Ok(None)`
+/// (declares no class at all) is this check's business — a malformed declaration is a
+/// different, not-yet-shipped check's finding (`validity_unparseable`), and a
+/// well-formed declaration of any class means one of the checks above already covers
+/// this entry.
+///
+/// **Gated on `EXPOSURE_THRESHOLD`, using the same shared `indegree`** as
+/// [`scan_conditional_past_due`] and [`scan_dated_stale`] — one exposure computation,
+/// three consumers, so the population is priced consistently.
+///
+/// Read-only; there is no `fix=`. Reports a worklist, never a verdict.
+fn scan_cited_but_undeclared(
+    conn: &rusqlite::Connection,
+    indegree: &std::collections::BTreeMap<String, usize>,
+) -> Result<Vec<Violation>> {
+    use crate::librarian::statements::parse_validity;
+    use crate::librarian::tools::link_scan::extract::entry_sections;
+
+    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (aid, path) in rows {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let sections = entry_sections(&text);
+        for s in &sections {
+            let exposure = indegree.get(&s.id).copied().unwrap_or(0);
+            if exposure < EXPOSURE_THRESHOLD {
+                continue;
+            }
+            let declared = declared_section_text(s, &sections);
+            // Only a section that declares NOTHING is this check's business. A
+            // malformed declaration (`Err(_)`) is swallowed here too — not this
+            // check's finding — and any well-formed declared class means one of the
+            // checks above already has this entry covered.
+            if !matches!(parse_validity(&declared), Ok(None)) {
+                continue;
+            }
+            out.push(Violation::new(
+                "entry_cited_from_outside_but_undeclared",
+                Some(aid.clone()),
+                path.clone(),
+                format!(
+                    "{} is cited {exposure}× from other files and declares no \
+                         **Valid:** class — add one; this is a worklist, not a verdict",
+                    s.id
+                ),
+            ));
+        }
+    }
+    Ok(out)
 }
 
 /// `snapshot_drift`: an augmented tracker's `params` hold entry ids that its
@@ -7266,6 +7347,211 @@ root = "work/elsewhere/ghost"
             json!(1),
             "call() must wire a REAL entry_indegree, and a real `today`, into \
              scan_dated_stale, not an empty/placeholder map: {out:#?}"
+        );
+    }
+
+    // ---- scan_cited_but_undeclared ---------------------------------------------------
+
+    #[test]
+    fn cited_but_undeclared_reports_load_bearing_entries_with_no_class() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-1 — declared\n\n**Valid:** invariant\n\n\
+             ## R-2 — undeclared but load-bearing\n\nprose with no class\n\n\
+             ## R-3 — undeclared and unread\n\nalso nothing\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-1".to_string(), 20usize);
+        deg.insert("R-2".to_string(), 20usize);
+        deg.insert("R-3".to_string(), 1usize);
+
+        let v = scan_cited_but_undeclared(&cat.conn, &deg).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "R-1 declares a class; R-3 is below the gate: {v:#?}"
+        );
+        assert!(v[0].detail.contains("R-2"));
+        assert_eq!(v[0].check, "entry_cited_from_outside_but_undeclared");
+        assert!(
+            !v[0].detail.contains("promoted"),
+            "this check must never claim to know WHY an entry is cited — a promotion, \
+             an eval-fixture list and a kin reference are syntactically identical"
+        );
+    }
+
+    #[test]
+    fn cited_but_undeclared_fires_exactly_at_the_exposure_threshold() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-4 — at the line\n\nno class declared\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD);
+        assert_eq!(
+            scan_cited_but_undeclared(&cat.conn, &deg).unwrap().len(),
+            1,
+            "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
+        );
+
+        deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD - 1);
+        assert!(
+            scan_cited_but_undeclared(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "one below the threshold must not fire"
+        );
+    }
+
+    #[test]
+    fn cited_but_undeclared_does_not_read_a_nested_childs_declaration_as_the_parents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        // PV-2 (the parent) declares nothing itself; its nested child PV-8 sits WHOLLY
+        // inside PV-2's section text and DOES declare a class. Without truncating with
+        // `declared_section_text`, `parse_validity(s.text)` would read PV-8's declaration
+        // as PV-2's own and PV-2 would wrongly stop being reported as undeclared — the
+        // unsafe direction for THIS check (under-reporting a load-bearing gap), the
+        // mirror image of the unsafe direction for `scan_conditional_past_due` /
+        // `scan_dated_stale` (over-claiming a class nobody declared).
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "### PV-2 — parent, no declaration of its own\n\n\
+             prose about the parent\n\n\
+             #### PV-8 — nested child\n\n\
+             **Valid:** invariant\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("PV-2".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert("PV-8".to_string(), EXPOSURE_THRESHOLD);
+
+        let v = scan_cited_but_undeclared(&cat.conn, &deg).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "PV-2 declares nothing of its own and must still be reported despite PV-8's \
+             nested declaration; PV-8 itself declares invariant and must not appear: {v:#?}"
+        );
+        assert!(v[0].detail.contains("PV-2"));
+    }
+
+    #[test]
+    fn cited_but_undeclared_swallows_a_malformed_valid_line_rather_than_reporting_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-7 — malformed\n\n**Valid:** not-a-real-class\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
+
+        assert!(
+            scan_cited_but_undeclared(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "a malformed declaration is `validity_unparseable`'s finding, not this \
+             check's — it is not the same thing as declaring nothing"
+        );
+    }
+
+    #[test]
+    fn cited_but_undeclared_treats_a_token_absent_from_indegree_as_zero_exposure() {
+        // Same defect class pinned for `scan_conditional_past_due` and
+        // `scan_dated_stale`: `entry_indegree` omits uncited/ambiguous tokens rather
+        // than inserting a zero for them, so the missing-key branch of `unwrap_or(0)`
+        // is the majority case in the live corpus, not an edge case.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-52 — never mentioned in indegree\n\nno class declared\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-98".to_string(), EXPOSURE_THRESHOLD + 50);
+
+        assert!(
+            scan_cited_but_undeclared(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "a token with no entry in `indegree` at all must be treated as zero \
+             exposure, not skip the gate"
+        );
+    }
+
+    #[test]
+    fn cited_but_undeclared_ignores_entries_that_declare_any_class() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-10 — invariant\n\n**Valid:** invariant\n\n\
+             ## R-11 — dated\n\n**Valid:** dated 2020-01-01\n\n\
+             ## R-12 — conditional\n\n**Valid:** conditional — until X\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        for id in ["R-10", "R-11", "R-12"] {
+            deg.insert(id.to_string(), EXPOSURE_THRESHOLD + 10);
+        }
+
+        assert!(
+            scan_cited_but_undeclared(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "any declared class at all — invariant, dated, or conditional — takes an \
+             entry out of this check's business"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_wires_a_live_entry_indegree_into_scan_cited_but_undeclared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let led = tmp.path().join("led.md");
+        seed_ledger(&cat, "led", &led, "## R-1 — undeclared\n\nno class here\n");
+        // EXPOSURE_THRESHOLD distinct citing files, each a unique definer-free citer, so
+        // entry_indegree's real, computed-from-disk value clears the gate.
+        for i in 0..EXPOSURE_THRESHOLD {
+            let p = tmp.path().join(format!("citer-{i}.md"));
+            seed_ledger(&cat, &format!("citer-{i}"), &p, "see R-1\n");
+        }
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["summary"]["by_check"]["entry_cited_from_outside_but_undeclared"],
+            json!(1),
+            "call() must wire a REAL entry_indegree into scan_cited_but_undeclared, not \
+             an empty/placeholder map: {out:#?}"
         );
     }
 }
