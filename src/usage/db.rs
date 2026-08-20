@@ -209,10 +209,33 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             project_root,
         ],
     )?;
-    conn.execute(
-        "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days')",
-        [],
-    )?;
+    // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
+    // zero references in this crate), but usage.db is opened without
+    // `PRAGMA foreign_keys`, so its `ON DELETE CASCADE` never fires and a pruned
+    // parent leaves an orphaned observation behind instead. Exempt a referenced row
+    // from the sweep when the table exists; skip the exemption entirely on a
+    // project that has never seen the plugin run, rather than reference a table
+    // that isn't there.
+    // docs/issues/2026-08-20-pika-observations-orphaned-by-the-retention-sweep.md
+    let has_pika_observations = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pika_observations'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if has_pika_observations {
+        conn.execute(
+            "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days') \
+             AND id NOT IN (SELECT tool_call_id FROM pika_observations)",
+            [],
+        )?;
+    } else {
+        conn.execute(
+            "DELETE FROM tool_calls WHERE called_at < datetime('now', '-30 days')",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -1224,6 +1247,100 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after, 0);
+    }
+
+    #[test]
+    /// Regression for
+    /// docs/issues/2026-08-20-pika-observations-orphaned-by-the-retention-sweep.md:
+    /// `pika_observations` declares `ON DELETE CASCADE` but usage.db never enables
+    /// `PRAGMA foreign_keys`, so the sweep used to delete a referenced parent and leave
+    /// the observation pointing at a row that no longer exists. The sweep must now skip
+    /// a `tool_calls` row that a `pika_observations` row still points at.
+    fn retention_spares_a_row_referenced_by_a_pika_observation() {
+        let (_dir, conn) = tmp();
+        // Shape the plugin's table exactly as its own bootstrap SQL does — codescout
+        // does not own this DDL, it only has to detect the table by name.
+        conn.execute_batch(
+            "CREATE TABLE pika_observations (
+                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                 tool_call_id  INTEGER REFERENCES tool_calls(id) ON DELETE CASCADE,
+                 kind          TEXT,
+                 severity      TEXT
+             );",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed)
+             VALUES ('observed_tool', datetime('now', '-31 days'), 10, 'success', 0)",
+            [],
+        )
+        .unwrap();
+        let observed_id: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO pika_observations (tool_call_id, kind, severity) VALUES (?1, 'tool_bug', 'low')",
+            params![observed_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed)
+             VALUES ('unobserved_tool', datetime('now', '-31 days'), 10, 'success', 0)",
+            [],
+        )
+        .unwrap();
+
+        // Next write triggers the sweep.
+        write_record(
+            &conn,
+            "new_tool",
+            5,
+            "success",
+            false,
+            None,
+            "unknown",
+            None,
+            "test-session",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let observed_survives: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tool_calls WHERE tool_name = 'observed_tool'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            observed_survives, 1,
+            "a row a pika_observations row still points at must survive the sweep"
+        );
+
+        let unobserved_pruned: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tool_calls WHERE tool_name = 'unobserved_tool'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            unobserved_pruned, 0,
+            "an equally old row with no observation must still be pruned normally"
+        );
+
+        let orphaned_observations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pika_observations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            orphaned_observations, 1,
+            "the observation itself is untouched — codescout only spares its parent"
+        );
     }
 
     fn insert_call(conn: &Connection, tool: &str, latency: i64, outcome: &str, overflowed: bool) {
