@@ -259,6 +259,7 @@ pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<Str
     if base.is_empty() {
         base = "tracker".to_string();
     }
+    base = truncate_slug_base(&base, SLUG_BASE_MAX);
     let mut candidate = base.clone();
     let mut n = 2;
     loop {
@@ -285,6 +286,62 @@ pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<Str
         params![candidate, artifact_id],
     )?;
     Ok(candidate)
+}
+
+/// Longest base a minted slug may have, before any `-2`/`-3` dedup suffix.
+///
+/// A slug is **immutable once non-null** and `entry_cite.src_slug` FKs it, so the
+/// derivation is a one-way door: re-deriving later means re-keying a column that
+/// entry-grain citations depend on. It therefore has to be right before the backfill
+/// runs, not after. A slug is also not purely internal — `entry_cite.dst_ref` stores the
+/// `<slug>:<local>` form, so an over-long slug lands in a citation-shaped position.
+///
+/// **50 is measured, not guessed.** Simulating the real `slugify` over the 4104 unslugged
+/// rows of the live catalog, at caps of none/60/50/40/30:
+///
+/// | cap | rows needing a suffix | max collision depth | median len | max len |
+/// |---|---|---|---|---|
+/// | none | 115 | 10 | 44 | **232** |
+/// | 60 | 134 | 10 | 44 | 61 |
+/// | **50** | **173** | **10** | **41** | **52** |
+/// | 40 | 269 | 10 | 34 | 42 |
+/// | 30 | 532 | 10 | 25 | 32 |
+///
+/// Two things that table settles. **Truncation adds no collision depth** — the worst
+/// chain is 10 at every cap including none, because it comes from ten artifacts whose
+/// titles all slugify to `skill`, a string no cap touches. Capping cannot produce the
+/// long `-2…-47` chains the obvious objection predicts. And **the marginal cost of 50
+/// over 60 is 39 rows**, while 40 nearly triples the suffixed count for ten more
+/// characters, which is why the knee is here.
+const SLUG_BASE_MAX: usize = 50;
+
+/// Trim `base` to at most `cap` bytes, preferring to cut at a `-` boundary so the slug
+/// ends on a whole word.
+///
+/// Three cases, in order:
+///
+/// 1. Already within budget — returned untouched.
+/// 2. The cut lands **exactly** on a separator (`base[cap] == '-'`), so the first `cap`
+///    bytes are already whole words. Keep them. Without this case the next branch trims
+///    one more word off a base that needed no trimming at all.
+/// 3. Otherwise cut back to the last `-` inside the budget — but only if that leaves at
+///    least half the budget. A base whose first word is longer than `cap/2` would
+///    otherwise collapse to a stub, which is worse than a mid-word cut because stubs
+///    collide with each other.
+///
+/// `slugify` emits ASCII `[a-z0-9-]` only, so byte slicing is char-safe by construction.
+fn truncate_slug_base(base: &str, cap: usize) -> String {
+    if base.len() <= cap {
+        return base.to_string();
+    }
+    let cut = &base[..cap];
+    if base.as_bytes().get(cap) == Some(&b'-') {
+        return cut.to_string();
+    }
+    match cut.rfind('-') {
+        Some(i) if i >= cap / 2 => cut[..i].to_string(),
+        _ => cut.to_string(),
+    }
 }
 
 /// Whether `s` has the exact shape of a catalog artifact id: 16 lowercase hex chars.
@@ -588,6 +645,97 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ensure_slug(&cat.conn, "c").unwrap(), "zzzzbeefcafe1234");
+    }
+
+    #[test]
+    fn truncate_slug_base_cuts_on_a_dash_but_not_into_a_stub() {
+        // Under cap: untouched.
+        assert_eq!(truncate_slug_base("short-one", 50), "short-one");
+
+        // Over cap, cut landing EXACTLY on a separator: the first `cap` bytes are
+        // already whole words, so nothing more is trimmed. (Getting this wrong costs a
+        // word on every base whose length happens to align with the cap.)
+        let long = "configurable-anthropic-upstream-fail-open-headroom-trial-permanent";
+        let t = truncate_slug_base(long, 50);
+        assert_eq!(t, "configurable-anthropic-upstream-fail-open-headroom");
+        assert_eq!(t.len(), 50);
+        assert!(!t.ends_with('-'));
+
+        // Over cap, cut landing MID-word: trim back to the last dash.
+        let t = truncate_slug_base(long, 55);
+        assert_eq!(t, "configurable-anthropic-upstream-fail-open-headroom");
+        assert!(t.len() <= 55 && !t.ends_with('-'));
+
+        // No dash at all inside the budget: nothing to cut back to, so hard-cut.
+        let one_word = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bb";
+        assert_eq!(truncate_slug_base(one_word, 10), "aaaaaaaaaa");
+
+        // A dash exists but sits in the first half of the budget. Cutting back to it
+        // would leave a 2-char stub that collides with every other base starting "ab",
+        // so the hard cut wins. This is the case the `i >= cap / 2` guard exists for —
+        // the no-dash case above reaches the same result through a different branch and
+        // does NOT exercise it.
+        let early_dash = "ab-cccccccccccccccccccccccc";
+        assert_eq!(
+            truncate_slug_base(early_dash, 10),
+            "ab-ccccccc",
+            "an early dash must not collapse the base to a stub"
+        );
+    }
+
+    #[test]
+    fn ensure_slug_caps_the_base_and_dedups_the_collisions_capping_creates() {
+        // Two distinct long titles that agree on their first 50 characters. Uncapped
+        // they are distinct slugs; capped they collide, and the existing -2 machinery
+        // has to absorb it. Measured on the live catalog: capping at 50 turns 115
+        // already-suffixed rows into 173, and adds no collision depth.
+        let cat = Catalog::open_in_memory().unwrap();
+        upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("a")
+                .with_title(
+                    "Configurable Anthropic Upstream Fail Open Headroom Trial Permanent Gateway",
+                )
+                .build(),
+        )
+        .unwrap();
+        upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("b")
+                .with_title(
+                    "Configurable Anthropic Upstream Fail Open Headroom Trial Temporary Shim",
+                )
+                .build(),
+        )
+        .unwrap();
+
+        let a = ensure_slug(&cat.conn, "a").unwrap();
+        let b = ensure_slug(&cat.conn, "b").unwrap();
+        assert_eq!(a, "configurable-anthropic-upstream-fail-open-headroom");
+        assert!(
+            a.len() <= SLUG_BASE_MAX,
+            "base must be capped: {a} is {} chars",
+            a.len()
+        );
+        assert_eq!(
+            b, "configurable-anthropic-upstream-fail-open-headroom-2",
+            "capping creates a collision the dedup suffix must absorb"
+        );
+    }
+
+    #[test]
+    fn ensure_slug_leaves_a_short_title_completely_alone() {
+        // The cap must trim the tail only — the measured median is 44 chars and must
+        // pass through untouched, or the change is a rename of the whole corpus.
+        let cat = Catalog::open_in_memory().unwrap();
+        upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("a")
+                .with_title("Tool Usage Patterns")
+                .build(),
+        )
+        .unwrap();
+        assert_eq!(ensure_slug(&cat.conn, "a").unwrap(), "tool-usage-patterns");
     }
 
     /// Seed n artifacts sharing one title, in an order that is NOT abs_path order,
