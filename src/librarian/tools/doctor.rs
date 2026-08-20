@@ -7205,6 +7205,57 @@ root = "work/elsewhere/ghost"
         );
     }
 
+    #[test]
+    fn conditional_past_due_does_not_report_a_row_under_a_sibling_root() {
+        // Fix Round 2, M1: the scoping guard survived deletion because every scoping
+        // test for this check only exercised the `None` (no active project) arm.
+        // Mirrors `cited_but_undeclared_does_not_report_a_row_under_a_sibling_root`,
+        // plus an in-scope entry so the guard's INCLUDE direction is pinned too.
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let in_scope = active_root.join("led.md");
+        seed_ledger(
+            &cat,
+            "in-scope-led",
+            &in_scope,
+            "## R-80 — in scope\n\n**Valid:** conditional — until X\n",
+        );
+        let out_of_scope = sibling_root.join("led.md");
+        seed_ledger(
+            &cat,
+            "out-of-scope-led",
+            &out_of_scope,
+            "## R-81 — out of scope\n\n**Valid:** conditional — until Y\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-80".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert("R-81".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let (v, scoped_out) = {
+            let cat = ctx.catalog.lock();
+            scan_conditional_past_due(&ctx, &cat.conn, &deg).unwrap()
+        };
+        assert_eq!(
+            v.len(),
+            1,
+            "only the entry under the ACTIVE project's git_root may be reported: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id.as_deref(), Some("in-scope-led"), "{v:#?}");
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the sibling-root row must be COUNTED as scoped out, not silently dropped: \
+             {scoped_out:?}"
+        );
+    }
+
     // ---- scan_dated_stale -----------------------------------------------------------
 
     #[test]
@@ -7618,6 +7669,58 @@ root = "work/elsewhere/ghost"
             json!(1),
             "call() must wire a REAL entry_indegree, and a real `today`, into \
              scan_dated_stale, not an empty/placeholder map: {out:#?}"
+        );
+    }
+
+    #[test]
+    fn dated_stale_does_not_report_a_row_under_a_sibling_root() {
+        // Fix Round 2, M2: same gap as M1 — every scoping test for this check only
+        // exercised the `None` (no active project) arm. Mirrors
+        // `conditional_past_due_does_not_report_a_row_under_a_sibling_root`.
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let in_scope = active_root.join("led.md");
+        seed_ledger(
+            &cat,
+            "in-scope-led",
+            &in_scope,
+            "## R-82 — in scope\n\n**Valid:** dated 2020-01-01\n",
+        );
+        let out_of_scope = sibling_root.join("led.md");
+        seed_ledger(
+            &cat,
+            "out-of-scope-led",
+            &out_of_scope,
+            "## R-83 — out of scope\n\n**Valid:** dated 2020-01-01\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-82".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert("R-83".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let (v, scoped_out) = {
+            let cat = ctx.catalog.lock();
+            // 2026-08-20 as days since epoch — matches the other `scan_dated_stale`
+            // tests in this file, well past VALIDITY_HORIZON_DAYS for a 2020 date.
+            scan_dated_stale(&ctx, &cat.conn, &deg, 20_685).unwrap()
+        };
+        assert_eq!(
+            v.len(),
+            1,
+            "only the entry under the ACTIVE project's git_root may be reported: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id.as_deref(), Some("in-scope-led"), "{v:#?}");
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the sibling-root row must be COUNTED as scoped out, not silently dropped: \
+             {scoped_out:?}"
         );
     }
 
@@ -8044,6 +8147,87 @@ root = "work/elsewhere/ghost"
                 .unwrap()
                 .contains("scoped out"),
             "{out:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_accumulates_scoped_out_counts_per_root_across_checks_and_keeps_roots_distinct() {
+        // Fix Round 2, M7 + M10, composed per the brief: M7 is the call()-level fold
+        // `+= n` vs `= n` merging conditional_scoped/dated_scoped/cited_scoped — that
+        // only diverges when TWO DIFFERENT checks contribute to the SAME group key,
+        // since a single check's own scoped_out map already pre-accumulates same-key
+        // rows before this fold ever sees them. M10 is the group key itself collapsing
+        // to a constant. Root A gets a conditional AND a dated contribution (pins M7's
+        // accumulation); root B gets an unrelated cited-but-undeclared contribution
+        // under a DIFFERENT root (pins M10's per-root distinctness).
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_a = tmp.path().join("sibling-a");
+        let sibling_b = tmp.path().join("sibling-b");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_a).unwrap();
+        std::fs::create_dir_all(&sibling_b).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let cond_a = sibling_a.join("cond.md");
+        seed_ledger(
+            &cat,
+            "cond-a",
+            &cond_a,
+            "## RA-1 — conditional\n\n**Valid:** conditional — until X\n",
+        );
+        let dated_a = sibling_a.join("dated.md");
+        seed_ledger(
+            &cat,
+            "dated-a",
+            &dated_a,
+            "## RA-2 — dated\n\n**Valid:** dated 2020-01-01\n",
+        );
+        let cited_b = sibling_b.join("cited.md");
+        seed_ledger(
+            &cat,
+            "cited-b",
+            &cited_b,
+            "## RB-1 — undeclared\n\nno class\n",
+        );
+
+        // EXPOSURE_THRESHOLD real citers per entry — call() computes indegree from the
+        // real corpus, unlike the lower-level scan_* tests above which hand-build it.
+        for (idx, id) in ["RA-1", "RA-2", "RB-1"].into_iter().enumerate() {
+            for i in 0..EXPOSURE_THRESHOLD {
+                let p = tmp.path().join(format!("citer-{idx}-{i}.md"));
+                seed_ledger(
+                    &cat,
+                    &format!("citer-{idx}-{i}"),
+                    &p,
+                    &format!("see {id}\n"),
+                );
+            }
+        }
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        let scoped = out["catalog_health"]["entry_validity_scoped_by_project"]
+            .as_object()
+            .unwrap_or_else(|| panic!("scoped-out rows must be announced: {out:#?}"));
+        let root_a_key = sibling_a.to_string_lossy().into_owned();
+        let root_b_key = sibling_b.to_string_lossy().into_owned();
+        assert_eq!(
+            scoped.len(),
+            2,
+            "exactly two distinct project roots, not one collapsed bucket: {scoped:#?}"
+        );
+        assert_eq!(
+            scoped.get(&root_a_key),
+            Some(&json!(2)),
+            "root A gets contributions from TWO DIFFERENT checks (conditional + dated) — \
+             the call()-level fold must ACCUMULATE them, not overwrite: {scoped:#?}"
+        );
+        assert_eq!(
+            scoped.get(&root_b_key),
+            Some(&json!(1)),
+            "root B must be its OWN key, not merged into root A's: {scoped:#?}"
         );
     }
 }
