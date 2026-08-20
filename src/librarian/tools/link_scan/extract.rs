@@ -44,58 +44,69 @@ pub struct EntrySection {
     pub text: String,
 }
 
-/// Split a body into entry sections, sharing `def_re` and the fence/frontmatter
-/// skipping with [`extract`] so the two can never disagree about what a definition is.
+/// Split a body into entry sections, sharing `def_re`, the frontmatter byte-offset
+/// computation, and the fence-aware heading scan with [`extract`] — and with
+/// [`crate::librarian::preview::headings::parse`], the same shared ATX heading
+/// parser every other artifact-preview consumer already uses — so the three can
+/// never disagree about what a definition, a fence, or frontmatter is.
 ///
-/// `def_re()` captures only the entry token itself (group 1) — there is no separate
-/// hash-run group in the pattern — so the heading level is taken from the literal `#`
-/// run counted on each raw line, and `def_re` is matched against the text AFTER that
-/// run (the same substring `extract()` sees as the heading's inline text, since the
-/// markdown parser there strips the `#` prefix before handing text events over).
+/// Delegating fence-tracking to `headings::parse` (built on
+/// [`crate::util::markdown_fence::FenceState`]) rather than a hand-rolled
+/// `starts_with("```")` parity toggle is required, not incidental: a bare toggle
+/// flips on ANY line starting with backtick/tilde characters, including a longer
+/// backtick run nested inside an already-open fence whose info string itself
+/// contains backticks — exactly the shape CommonMark rejects as a closer (a closer
+/// may be followed only by whitespace; a backtick fence's info string may not
+/// contain a backtick) but a bare toggle does not know to reject. That shape is not
+/// hypothetical: it appears in this repo's own
+/// `docs/trackers/bug-fix-session-log.md:2909` (a four-backtick run wrapping a
+/// three-backtick block, the fixture behind
+/// `docs/issues/archive/2026-08-11-artifact-nested-fence-closes-outer-fence.md`), and
+/// a bare toggle desyncs there, silently dropping every definition for the rest of
+/// the file.
 pub fn entry_sections(text: &str) -> Vec<EntrySection> {
-    let lines: Vec<&str> = text.split('\n').collect();
-    // (level, 1-indexed line) for EVERY heading, entry or not — the bound is about
-    // headings in general, which is exactly what the naive rule ignored.
-    let mut headings: Vec<(usize, u32)> = Vec::new();
-    let mut defs: Vec<(String, usize, u32)> = Vec::new();
-    let mut fenced = false;
-    let mut in_frontmatter = false;
-    for (idx, raw) in lines.iter().enumerate() {
-        let lineno = (idx + 1) as u32;
-        let s = raw.trim();
-        if lineno == 1 && s == "---" {
-            in_frontmatter = true;
-            continue;
-        }
-        if in_frontmatter {
-            if s == "---" {
-                in_frontmatter = false;
-            }
-            continue;
-        }
-        if s.starts_with("```") || s.starts_with("~~~") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced {
-            continue;
-        }
-        let hashes = raw.len() - raw.trim_start_matches('#').len();
-        let is_heading = (1..=6).contains(&hashes) && raw.as_bytes().get(hashes) == Some(&b' ');
-        if is_heading {
-            headings.push((hashes, lineno));
-            if let Some(c) = def_re().captures(&raw[hashes..]) {
-                defs.push((c[1].to_string(), hashes, lineno));
-            }
-        }
-    }
+    // Frontmatter is excluded by LINE, not by re-deriving frontmatter rules from
+    // scratch: reuse the exact byte-offset computation `extract()` uses (same
+    // function, same `Err(_) => 0` fallback), then convert that offset to a line
+    // number with the `line_starts`/`line_of` helpers `extract()` already shares.
+    let frontmatter_end = match crate::librarian::frontmatter::parse(text) {
+        Ok((_, body)) => text.len() - body.len(),
+        Err(_) => 0,
+    };
+    let starts = line_starts(text);
+    // `line_of(starts, frontmatter_end)` is the 1-indexed line the body starts on;
+    // every heading strictly before it is inside frontmatter and does not count.
+    let frontmatter_last_line = line_of(&starts, frontmatter_end).saturating_sub(1);
+
+    let headings: Vec<crate::librarian::preview::headings::Heading> =
+        crate::librarian::preview::headings::parse(text)
+            .into_iter()
+            .filter(|h| h.line as u32 > frontmatter_last_line)
+            .collect();
+
+    // `str::lines()`, not `text.split('\n')`: the latter phantoms a trailing empty
+    // element for any text ending in '\n' — i.e. almost every real markdown file —
+    // which overcounts `last` by one (a definition on the true last line reads as
+    // ending one line past EOF) and would append a bogus empty final line to that
+    // section's `text`. `lines()` has no such trailing artifact either way.
+    let lines: Vec<&str> = text.lines().collect();
     let last = lines.len() as u32;
+
+    let defs: Vec<(String, usize, u32)> = headings
+        .iter()
+        .filter_map(|h| {
+            def_re()
+                .captures(&h.text)
+                .map(|c| (c[1].to_string(), h.level as usize, h.line as u32))
+        })
+        .collect();
+
     defs.into_iter()
         .map(|(id, level, heading_line)| {
             let end_line = headings
                 .iter()
-                .find(|(hl, hln)| *hln > heading_line && *hl <= level)
-                .map(|(_, hln)| hln - 1)
+                .find(|h| h.line as u32 > heading_line && h.level as usize <= level)
+                .map(|h| h.line as u32 - 1)
                 .unwrap_or(last);
             let text = lines[(heading_line as usize - 1)..(end_line as usize)].join("\n");
             EntrySection {
@@ -711,5 +722,234 @@ tail
         let s = entry_sections(md);
         assert_eq!(s.len(), 1, "the fenced heading defines nothing");
         assert_eq!(s[0].id, "R-1");
+    }
+
+    #[test]
+    fn entry_sections_do_not_define_a_heading_shaped_line_inside_frontmatter() {
+        // The `## R-1 ...` line is a valid YAML full-line comment, so the
+        // frontmatter block still parses; it must not be read as a heading.
+        let md = "\
+---
+kind: tracker
+## R-1 — hidden inside frontmatter, must not define
+entry_prefix: R
+---
+## R-2 — real
+body
+";
+        let s = entry_sections(md);
+        assert_eq!(
+            s.len(),
+            1,
+            "a heading-shaped line inside frontmatter must not define: {s:?}"
+        );
+        assert_eq!(s[0].id, "R-2");
+    }
+
+    #[test]
+    fn nested_heading_levels_are_captured_and_bound_the_section_correctly() {
+        let md = "\
+## R-1 — top
+alpha
+### R-2 — nested inside R-1
+beta
+## R-3 — sibling of R-1
+gamma
+";
+        let s = entry_sections(md);
+        assert_eq!(s.len(), 3);
+
+        assert_eq!(s[0].id, "R-1");
+        assert_eq!(s[0].level, 2);
+        assert_eq!(
+            s[0].end_line, 4,
+            "R-1 ends before ## R-3, a same-level heading; the ### R-2 \
+                 subsection is deeper and stays inside"
+        );
+        assert_eq!(
+            s[0].text,
+            "## R-1 — top\nalpha\n### R-2 — nested inside R-1\nbeta"
+        );
+
+        assert_eq!(s[1].id, "R-2");
+        assert_eq!(
+            s[1].level, 3,
+            "R-2's level must come from its own ### run, not R-1's"
+        );
+        assert_eq!(s[1].end_line, 4);
+        assert_eq!(s[1].text, "### R-2 — nested inside R-1\nbeta");
+
+        assert_eq!(s[2].id, "R-3");
+        assert_eq!(s[2].level, 2);
+        assert_eq!(
+            s[2].end_line, 6,
+            "R-3 has no following heading; it runs to EOF"
+        );
+        assert_eq!(s[2].text, "## R-3 — sibling of R-1\ngamma");
+    }
+
+    #[test]
+    fn last_entry_reaches_the_true_last_line_not_one_past_it() {
+        let md = "\
+## R-1 — first
+alpha
+## R-2 — last, ends the file
+";
+        let s = entry_sections(md);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[1].id, "R-2");
+        assert_eq!(s[1].heading_line, 3);
+        assert_eq!(
+            s[1].end_line, 3,
+            "the file has exactly 3 real lines; a phantom trailing line from \
+                 split('\\n') would push this to 4"
+        );
+        assert_eq!(s[1].text, "## R-2 — last, ends the file");
+    }
+
+    #[test]
+    fn hashtag_without_a_space_does_not_define_or_count_as_a_heading() {
+        let md = "\
+## R-1 — real
+#R-2 — no space after the hash, not a heading
+body
+";
+        let s = entry_sections(md);
+        assert_eq!(
+            s.len(),
+            1,
+            "a hash run with no following space is not an ATX heading"
+        );
+        assert_eq!(s[0].id, "R-1");
+        assert_eq!(
+            s[0].end_line, 3,
+            "the non-heading `#R-2` line must not bound R-1's section either"
+        );
+    }
+
+    #[test]
+    fn a_definition_shaped_line_that_is_not_a_heading_does_not_define() {
+        let md = "\
+## R-1 — real
+R-2 — this reads like a definition but has no leading `#`, it is prose
+body
+";
+        let s = entry_sections(md);
+        assert_eq!(
+            s.len(),
+            1,
+            "def_re must only fire on actual heading lines, gated by is_heading"
+        );
+        assert_eq!(s[0].id, "R-1");
+    }
+
+    #[test]
+    fn entry_sections_handle_unbalanced_nested_fence_like_extract_does() {
+        // The exact shape from docs/trackers/bug-fix-session-log.md:2909 (a
+        // four-backtick run wrapping a three-backtick block) — the regression
+        // fixture for docs/issues/archive/2026-08-11-artifact-nested-fence-closes-outer-fence.md.
+        // A bare `starts_with("```")` parity toggle desyncs on the embedded
+        // four-backtick line and silently drops R-2 for the rest of the file.
+        let md = "\
+## R-1 — first
+before
+```
+```` ```markdown ````
+inside
+```
+## R-2 — after the real close
+after
+";
+        let s = entry_sections(md);
+        let ids: Vec<&str> = s.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["R-1", "R-2"],
+            "the embedded four-backtick line must not desync fence parity"
+        );
+        assert_eq!(s[0].end_line, 6, "R-1 ends right before ## R-2");
+        assert_eq!(s[1].heading_line, 7);
+        assert_eq!(s[1].end_line, 8, "R-2 runs to the true EOF");
+    }
+    #[test]
+    fn entry_section_level_reflects_heading_depth() {
+        // Mixes a `##` and a `###` entry so `level` is pinned at more than one depth,
+        // and so the same-or-higher bound is exercised across differing levels: the
+        // nested ### section is closed by the following ## (higher, not merely equal).
+        let md = "\
+## R-1 — first
+alpha
+### R-2 — nested
+beta
+## R-3 — third
+gamma
+";
+        let s = entry_sections(md);
+        assert_eq!(s.len(), 3, "three entries defined");
+        assert_eq!(s[0].id, "R-1");
+        assert_eq!(s[0].level, 2, "R-1 is a level-2 heading");
+        assert_eq!(
+            s[0].end_line, 4,
+            "R-1's section absorbs the nested ### R-2 heading and runs to just before ## R-3"
+        );
+        assert_eq!(s[1].id, "R-2");
+        assert_eq!(
+            s[1].level, 3,
+            "R-2 is a level-3 heading nested inside R-1's section"
+        );
+        assert_eq!(
+            s[1].end_line, 4,
+            "R-2's section is bounded by the level-2 ## R-3, a SAME-OR-HIGHER heading"
+        );
+        assert_eq!(s[2].id, "R-3");
+        assert_eq!(s[2].level, 2);
+        assert_eq!(s[2].end_line, 6, "R-3 runs to EOF");
+    }
+
+    #[test]
+    fn entry_section_text_includes_its_final_line() {
+        // Pins the LAST line of `text` by exact equality (not `contains`, which the
+        // existing tests use on interior lines and so cannot catch a slice-end
+        // off-by-one). Covers both a mid-file section (bounded by the next heading)
+        // and an EOF-terminated final section.
+        let md = "\
+## R-1 — first
+alpha
+R-1-LAST-LINE
+## R-2 — second
+beta
+R-2-LAST-LINE
+";
+        let s = entry_sections(md);
+        assert_eq!(s.len(), 2);
+        assert_eq!(
+            s[0].text, "## R-1 — first\nalpha\nR-1-LAST-LINE",
+            "text must include the section's true final line, not stop one line early"
+        );
+        assert_eq!(
+            s[1].text, "## R-2 — second\nbeta\nR-2-LAST-LINE",
+            "the EOF-terminated final section must also include its true final line"
+        );
+    }
+
+    #[test]
+    fn entry_sections_do_not_define_from_a_definition_shaped_body_line() {
+        // A body line shaped like `def_re` (e.g. "R-5 — ...") is prose, not a heading,
+        // and must not define a section — the parity between extract() and
+        // entry_sections() that the review flagged as unverified.
+        let md = "\
+## R-1 — first
+alpha
+R-5 — this looks like a definition but is prose inside R-1's body, not a heading
+## R-2 — second
+gamma
+";
+        let s = entry_sections(md);
+        let ids: Vec<&str> = s.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["R-1", "R-2"],
+            "a definition-shaped line that is not an ATX heading must not define a section: {s:?}"
+        );
     }
 }
