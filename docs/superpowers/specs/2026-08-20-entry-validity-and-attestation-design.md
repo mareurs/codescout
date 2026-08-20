@@ -987,9 +987,9 @@ verification.
 | # | Layer | Ships on | Status |
 |---|---|---|---|
 | 0 | **Attribution probe** — measure nearest-preceding-heading precision on this corpus | — | **DONE 2026-08-20** — naive 87.9%; use the section-bound rule |
-| 1 | `**Valid:**` + `**Rests on:**`, default-is-decay, allocator stamping, `asserted_at` | — | **scheduled** |
-| 2 | Three doctor checks, gated on shared exposure | 1, and 3 for in-degree | **scheduled** (degraded exposure until 3) |
-| 3 | Slug bulk-mint → `origin='scan'` materializer, `rel='rests-on'` | 0 | designed, not scheduled |
+| 1 | `**Valid:**` + `**Rests on:**`, default-is-decay, allocator stamping, `asserted_at` | — | **SHIPPED 2026-08-20**, partially — see below |
+| 2 | **Four** doctor checks (not three), gated on shared exposure | 1 | **SHIPPED 2026-08-20** — one exposure term, not `max()` — see below |
+| 3 | Slug bulk-mint → `origin='scan'` materializer, `rel='rests-on'` | 0 | designed, not scheduled — **split it**, see below |
 | 4 | Entry-grain `context` anchor | 3 | designed, not scheduled |
 | 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | designed, not scheduled |
 | 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4, 5a | designed, not scheduled |
@@ -1000,12 +1000,69 @@ prior-art pass found nothing in the literature on its error rate. It is a probe,
 implementation: run the attribution over the corpus's 3985 extracted citations, hand-check
 a sample, report precision. Cheap, and it de-risks everything downstream.
 
-Layers 1–2 still deliver the measured win in §1. Layer 2 runs with a degraded exposure
-term (reads only, no in-degree) until Layer 3 lands, which is acceptable because
-`max()` degrades to the smaller signal rather than breaking.
-
 Layer 5b is what turns the rest from bookkeeping into a feedback loop, and its absence
 is already measured at 4086 artifacts reporting `freshness: unknown`.
+
+### Shipped state — reconciled against `src/` on 2026-08-20
+
+This section previously read `scheduled` for two layers that had shipped, and described
+the exposure term as the opposite of what was built. A status column that says
+`scheduled` about shipped code is the decay this document exists to detect, so it is
+corrected here rather than left as a known-stale note.
+
+**Layer 1 shipped in part.** Present: the three-form grammar, `parse_validity` /
+`parse_rests_on`, fence-skipping line-anchored detection, `entry_sections`, and the
+allocator's `**Valid:** dated <today>` stamp. **Absent:**
+
+- **`asserted_at` did not ship** — zero occurrences in `src/`. Bitemporal storage
+  (*Two clocks, never one*) remains designed-only, so a refutation cannot yet close an
+  interval.
+- **Default-is-decay is written but not in effect.** `resolve_validity` exists, is
+  tested, and has **zero production callers** — the only mentions outside its own module
+  are a `doctor.rs` doc comment explaining why `entry_dated_stale` deliberately uses
+  `parse_validity` instead, since guessing an undeclared entry's age is the one thing
+  that check must not do. The `Default` clock (last commit touching the heading's line
+  range) is unimplemented; the undeclared population routes to
+  `entry_cited_from_outside_but_undeclared` instead. **Decision 3's semantics therefore
+  hold on paper and nowhere in the code** — see
+  `docs/issues/2026-08-20-validity-spec-terminology-contradicts-decision-3.md`.
+
+**Layer 2 shipped four checks, and one exposure term.** `validity_unparseable` was added
+because all three original checks swallow `parse_validity`'s `Err`, which left a
+malformed declaration invisible to every worklist — including a calendar-invalid date,
+now refused by a real calendar parse rather than a shape regex.
+
+Exposure is **cross-file citation in-degree only**. This section formerly said Layer 2
+would run "reads only, no in-degree" until Layer 3 landed; the built order is the
+inverse, because `link_scan` already produced in-degree and the read counters are still
+leaking (Layer 5a). `max(reads, in-degree)` is not implemented — there is one term, and
+it degrades by being smaller, not by breaking.
+
+Two properties were added beyond the design and are worth carrying forward: the reported
+worklist is **scoped to the active project while the metric stays cross-repo** (an entry
+load-bearing because another repo depends on it keeps its true exposure), and rows
+filtered out that way are counted in `catalog_health.entry_validity_scoped_by_project`
+rather than dropped silently.
+
+**Layer 3's two halves are not equally ready — split them.** Measured 2026-08-20:
+
+- **Slug bulk-mint → `origin='scan'` materializer is well-fed.** `entry_cite` holds **13
+  rows, all `origin='write'`**; a corpus `link_scan` reports 4042 citations, 861
+  self-cites, 443 ambiguous and 557 dangling, leaving roughly two thousand resolvable
+  entry-grain rows. This is the provenance graph existing for the first time.
+- **`rel='rests-on'` has no input.** Fifteen `**Rests on:**` lines exist corpus-wide and
+  most are fenced examples in this spec, `docs/templates/session-log.md`, and the manual
+  page; at most ~7 are real declarations, 6 of them written the day Layer 1 shipped.
+  Building the materializer now ships machinery with nothing to chew on — the same
+  inertness the *Risks* section raises about Layer 2, but without Layer 2's fallback,
+  since an edge can only exist where an author wrote the line.
+
+**The bulk-mint carries a known migration hazard.** `artifact.slug` has already been
+dropped once by a table-copy migration (`migrate_v6::drop_legacy_and_stamp` rebuilt
+`artifact` without carrying it, taking `ux_artifact_slug` and dangling `entry_cite`'s FK
+with it). It self-heals on the next open, so a twice-opening idempotency test does not
+catch it. Minting ~4104 slugs is what would make a recurrence expensive; the invariant
+test belongs in the same change. See memory `catalog-sql-hazards`.
 ---
 
 ## Risks
