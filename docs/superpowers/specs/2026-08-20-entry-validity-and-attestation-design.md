@@ -1,19 +1,21 @@
 ---
 kind: spec
 status: active
-title: Entry Validity + Attestation — declared decay, an entry-grain graph, and proof-carrying verification
-owners: []
+title: Statements — validity, provenance, and attestation for tracker claims
 tags:
-  - librarian
-  - graph
-  - trackers
-  - validity
-  - attestation
+- librarian
+- graph
+- trackers
+- validity
+- attestation
+- statements
+- bitemporal
 ---
 
-# Entry Validity + Attestation
+# Statements — Validity, Provenance, and Attestation
 
-**Goal:** give a tracker *entry* a declared decay class, populate the entry-grain
+**Goal:** give every claim a tracker entry asserts — a **Statement** — a declared decay
+class and a durable route to its own proof, populate the entry-grain
 citation graph that already exists but is empty, serve entries as graph
 neighbourhoods, and make verification something the system asks for rather than
 something nobody ever does.
@@ -165,17 +167,98 @@ for one repo and says nothing about the corpus. It establishes feasibility, not 
 
 ---
 
+### 6. The read path leaks, and the leak is the progressive-disclosure buffer
+
+Measured 2026-08-20 against this repo's `.codescout/usage.db`. Each row names what the
+predicate literally counts.
+
+| Read path | Volume | Entry-grain attributable today? |
+|---|---|---|
+| `artifact(get)` **with** a `heading` | 264 | yes, exactly |
+| `artifact(get)` naming no heading | 457 (63% of 721) | no — reads every entry at once |
+| `read_markdown` on a **ledger** | refused | already closed (see below) |
+| `read_file` on an `@` handle | 669 — 317 line-range, 304 `json_path`, 48 whole | **no** — untracked |
+| `grep` content on a guarded ledger | ≤373 calls name a tracker/issue path | **no** — untracked |
+
+**The guard is already correct and already scoped.** `read_markdown` on
+`docs/trackers/prompt-surface-compaction-session-log.md` — a ledger with **no**
+augmentation row — is refused with the short form of the message, i.e. the
+`entry_prefix` reason firing rather than the augmentation reason. All **12** ledgers in
+`docs/trackers/*.md` that declare a namespace are read-guarded; the other 84 trackers
+are not, correctly, because they own no `PREFIX-N` namespace and therefore carry no
+Statement to count. (96 trackers total; 21 augmented, 75 plain.)
+
+**The buffer is the leak.** `artifact(get)` on a large ledger overflows to a `@tool_*`
+handle, and slices read off that handle are untracked. Observed in this session's own
+transcript, on this spec's own source material:
+
+```
+artifact(get, id=01291679…)            → @tool_1c73a348    counted, no grain
+read_file(@tool_1c73a348, $.body)      → @file_1c73b79a    untracked
+read_file(@file_1c73b79a, lines 1-100)                     untracked, entry-grain
+```
+
+One instrumented call, three untracked reads, two handle-hops deep. The mechanism that
+protects the context window is the one that destroys the read signal.
+
+**`grep` bypasses the guard.** A `grep(mode="content")` against
+`docs/trackers/capability-proposals.md` — whose `read_markdown` is refused — returned 12
+matches with full entry text and line numbers. Observed directly this session.
+
+**Consequence for the design, and it is a correction.** On
+`reconnaissance-patterns.md`, the ledger holding all nine promoted entries: **53**
+instrumented `artifact(get)` calls and **54 successful** direct `read_markdown` reads
+(plus 6 refused). About half the historical read traffic never touched the instrument —
+before counting the buffer or `grep` at all.
+
+So the entry-grain read distribution measured from `artifact(get)` alone — 232 distinct
+`(artifact, heading)` pairs ever read, maximum **3** for any single entry
+(`R-90`), with everything above 3 being a navigation heading like `## Index` — is a
+**floor from a leaky instrument**, not a fact about how much entries are read. An
+earlier draft of this spec concluded from it that read-count was unusable. That
+conclusion applied clause 3 of CLAUDE.md's Measurement rule to someone else's argument
+and not to its own: a zero is evidence about the search.
+
+**Both leaking paths already carry the grain.** A buffer slice names a `json_path` or a
+line range, and the server created the handle and knows which artifact and which call
+produced it. A `grep` match carries a path and a line number. Both resolve to an entry
+by nearest-preceding-heading — the identical attribution Layer 3 needs for citations.
+**One algorithm, three consumers**, no extra tool call and no extra context. This is why
+the design does not need the obvious alternative of asking the agent to report back what
+it read: that costs a round trip and context, and it can be forgotten, where
+server-side attribution cannot.
+## Terminology — entry vs. Statement
+
+- An **entry** is the markdown section: a `## <ID> — <title>` heading and its body. A
+  container, addressed as `<slug>:<local>`.
+- A **Statement** is the *claim* that entry asserts — something that can be true or
+  false. A Statement carries a validity class, a proof, and a route to re-derive that
+  proof.
+
+The distinction is load-bearing, and it is why this is not a pure rename of CAP-8's
+"gram". **Not every entry is a Statement.** A backlog item or a proposal asserts
+nothing and owes no proof; an observation, a measurement, or a law does. What makes an
+entry a Statement is that it declares a `**Valid:**` class — see Layer 1.
+
+"Gram" named an *identity*, which is the smaller half. CAP-8's own open decision 1
+already argues the point: *"`bug-fix-session-log:F-33` is legible and `gram:a3f9c2` is
+not, and this project's moat is the LLM-facing surface."* Identity is orthogonal — a
+Statement can later be content-addressed without any of this changing.
+
 ## Design decisions (brainstorm 2026-08-20)
 
-1. **Validity attaches to the ENTRY**, not to the gram and not to the edge. Ships
-   without CAP-8. Aimed at the four-datapoint class in §1. Accepted limitation: it
-   describes the claim, not the claim's bindings — see *Non-goals*.
+1. **Validity attaches to the ENTRY**, not to a content-hash identity and not to the
+   edge. Ships without CAP-8. Aimed at the four-datapoint class in §1. Accepted
+   limitation: it describes the claim, not the claim's bindings — see *Non-goals*.
 2. **The field carries a class plus a prose condition, adjudicated by an agent** — not
    a machine-runnable predicate for every entry. Most conditions in this corpus
    ("after the plan edit lands", "one more cluster", "pending a commit") are not
    expressible as a shell predicate, and demanding one would produce fakes. Selection
    is syntactic and cheap; judgement is the reader's. This is the D11 shape, whose own
    confidence column reads *"low by design"* for the same reason.
+   **Amended by decision 8:** the *condition* is interned as a first-class event with an
+   id and a `fired_at`, so one event firing closes every Statement waiting on it. Prose
+   alone gives N unjoinable strings.
 3. **Absence means decay, and a doctor check finds what absence hides.** An entry with
    no `**Valid:**` line MEANS `dated <its last commit>`. Write cost for the common case
    is zero and authors only write the line to *upgrade*. This is also forced by a
@@ -185,9 +268,33 @@ for one repo and says nothing about the corpus. It establishes feasibility, not 
    directly queryable. A non-null default sidesteps that entirely.
 4. **The graph is populated by backfill from prose, then packed entry-grain.**
    `link_scan::extract` already produces what is needed; see Layer 3.
-5. **Attestation taps the Nth reader with a deferred, recorded obligation** — serve in
-   full, enqueue the proof, and record the obligation when it is not discharged.
+5. **Attestation taps a Statement's Nth consumer with a deferred, recorded obligation**
+   — serve in full, enqueue the proof, and record the obligation when it is not
+   discharged.
+6. **The unit is a Statement, not a "gram".** See *Terminology* above.
+7. **A Statement's high-level route is prose that becomes an edge when it resolves.**
+   `**Rests on:**` takes one durable sentence. If it names something the resolver can
+   reach — an ADR path, an artifact id, another Statement's token — the scanner
+   materializes a `rests-on` edge; if not it stays prose and still does its job.
+   Chosen over an ADR-only reference because the arithmetic forbids it: **84 catalogued
+   ADRs against ~4000 entries** means most Statements have nothing to point at, and a
+   required field with no valid target pressures authors into writing thin ADRs. Chosen
+   over a pure homogeneous graph because that needs Layer 3 before it does anything.
+   This is CAP-8's own migration principle — *"Additive first … leave every existing
+   citation working. Big-bang re-keying is the rewrite trap."*
+8. **Close the read-path leaks, then trigger on `max(reads, rests-on in-degree)`.**
+   Reads measure what agents consult; in-degree measures what rests on a claim. They
+   are different properties and neither subsumes the other, so the trigger takes the
+   larger. Closing the leaks (§6) is worth doing independently of the trigger: a
+   counter that silently misses half its events is the instrument failure this project
+   files bugs about.
 
+**Two clocks, not one (folded in 2026-08-20 from the prior-art pass).** The vocabulary
+in decision 2 must not collapse *valid time* into *transaction time*. §1's motivating
+failure IS that collapse: `F-3` was true from when it was written until the plan edit
+landed, and we learned it was false weeks after that — three dates, one field. Layer 1
+therefore stores `asserted_at` separately, and refutation **closes an interval** rather
+than overwriting prose. See *Bitemporal storage* in Layer 1.
 ---
 
 ## Non-goals
@@ -290,6 +397,76 @@ This does **not** cover hand-written entries. Decision 3 covers those.
 
 ---
 
+### The high-level route — `**Rests on:**`
+
+A second line, sibling to `**Valid:**`, carrying **one durable sentence**:
+
+```
+**Rests on:** ADR 2026-07-10 — repair-and-continue input handling
+**Rests on:** verification must be event-sourced, not mtime-derived — mtime
+              cannot see inside a file
+```
+
+If the sentence names something the resolver can reach — an ADR rel_path, a 16-hex
+artifact id, another Statement's token — `link_scan` materializes an
+`entry_cite` row with `rel='rests-on'`. If it names nothing resolvable it stays prose
+and still does its job: a reader six months out can regenerate the proof from the
+intent after every `path:line` in the entry has rotted.
+
+**Why a separate relation and why it is free.** `entry_cite.rel` is `TEXT NOT NULL`
+with **no CHECK constraint** and sits **inside** the primary key
+`(src_slug, src_local, dst_ref, rel)`, so a `rests-on` edge coexists with a `cites`
+edge between the same pair rather than replacing it. The file-grain twin already runs
+nine relation types (`cites` 2743, `tracks` 11, `relates_to` 11, `implements` 8,
+`references` 6, `relates` 5, `worktree_of` 3, `remediates` 1, `amends` 1), so a typed
+vocabulary is established practice, not a new idea.
+
+**What it buys beyond durability.** In-degree over `rests-on` is the exposure signal
+decision 8 needs, and superseding an ADR mechanically identifies every Statement
+derived from it — invalidation **by derivation** rather than by elapsed time. Nothing
+in the system can answer *"what rests on this decision?"* today.
+
+**This structure is not invented here.** Measured across all 7 codescout ADRs: three
+carry the full `Decision / Revisit-when / Confidence / Sites (initial)` quartet, and
+they are the **three most recent** (2026-07-10, -07-20, -07-25); the four from May and
+June carry `## Decision` alone. The mapping is exact — `Decision` is the claim,
+`Confidence` (*"High on the boundary — verified live"*) is proof-carrying attestation,
+`Revisit-when` is `**Valid:** conditional`, and `Sites (initial)` is the rotting
+instance **already labelled as rotting by its own heading**. Three authors converged on
+it by practice. This layer propagates that shape down two orders of magnitude in grain,
+from 84 catalogued ADRs to ~4000 entries.
+
+It is also the third independent appearance of one law in this repo:
+
+| Positional (rots) | Durable (survives) | Surface |
+|---|---|---|
+| git SHA | `patch-id` | archived bug files |
+| `sha256(abs_path)` | `<slug>:<local>` | Stage-2 entry graph |
+| `Sites (initial)`, `path:line` | the Decision / `**Rests on:**` | this layer |
+
+### Bitemporal storage — two clocks, never one
+
+A Statement has **three** dates and the `**Valid:**` line holds one. `F-3` was true from
+when it was written, became false when the plan edit landed, and was discovered false
+weeks after that. Collapsing those is the motivating failure, not an edge case.
+
+Store, on the attestation row (Layer 5) rather than in prose:
+
+| Field | Meaning | Clock |
+|---|---|---|
+| `asserted_at` | when the claim was first made | transaction |
+| `valid_from` / `valid_until` | the interval the claim actually held | valid |
+| `recorded_at` | when we learned the interval had closed | transaction |
+
+`valid_until` is NULL while the Statement stands. **Refutation closes the interval; it
+never rewrites the prose.** This is standard bitemporal modelling (Snodgrass; SQL:2011
+temporal tables) and is what Zep/Graphiti applies to agent memory — every edge carries
+`(t_valid, t_invalid)` plus ingestion time, and a contradiction *invalidates* rather
+than deletes.
+
+The practical payoff is that the corpus can answer *"what did we believe on
+2026-06-14, and when did we find out otherwise?"* — which is exactly the question a
+post-mortem asks and the question a record that overwrites itself can never answer.
 ## Layer 2 — three doctor checks
 
 Shaped after the three checks CAP-7 shipped on 2026-08-19, so the surface, the
@@ -325,6 +502,20 @@ does at `doctor.rs:1629` and for the reason that comment *should* have given.
 
 **Every check reports a worklist, never a verdict.** The spec says so explicitly so no
 downstream reader infers automation that is not there.
+
+**One gate, shared with Layer 5.** These checks and the attestation tap must not
+produce work independently, or the two backlogs sum. The checks' population is
+`defaulted-or-stale` **AND** `exposure ≥ threshold` — the same exposure term Layer 5
+taps on. A `dated` Statement nothing reads and nothing rests on generates no work at
+all, ever.
+
+Two measured reasons this is not over-caution. **Marking is cheap and discharging is
+not**: as of June 2025 more than **604,000** English Wikipedia pages carried at least
+one `{{citation needed}}`, and that backlog is the steady state, not a transient.
+**Alert fatigue is a cliff, not a slope**: false positives run 18–86% of
+static-analysis warnings, and past a threshold developers stop reading the output
+entirely — converting a false-positive problem into false negatives. A checker that
+emits 4000 rows has the same effect as one that emits none, at higher cost.
 
 ---
 
@@ -395,19 +586,54 @@ worktree overlay both key on slugs, and minting 4000 of them changes what those 
 Bulk minting must be its own reviewed change with its own tests, sequenced before the
 materializer.
 
-### Sizing caveat
+### Sizing — measured on this corpus, not inherited from CAP-8
 
-CAP-8 reports 6321 cross-file entry citations at 43% resolving / 33% ambiguous / 24%
-dangling. **CAP-8 itself flags these as upper bounds**, contaminated because
-`link_scan` has no "mention" mode: a token written to *teach* citation syntax is
-extracted identically to one written to cite, and teaching examples land preferentially
-in the ambiguous and dangling buckets. Sample the real resolvable yield on this corpus
-before sizing the work. Sizing off the published number is precisely CLAUDE.md's
-Measurement clause 1 — a proxy reported as the target.
+`librarian(action="link_scan", write=false)`, project scope, run 2026-08-20 with
+`scan_truncated: false`:
 
+```
+artifacts_scanned .. 1089        edges_desired ..... 958
+citations .......... 3985        edges_unchanged ... 920      (96% already materialized)
+self_cites .........  853        edges_missing .....  38
+ambiguous ..........  430        edges_stale .......   2
+dangling ...........  556        cross_repo ........   7
+```
+
+**Resolved = 2139, derived by subtraction** — the tool reports the four minority classes
+and the total but not the resolved count directly, and the five classes sum to exactly
+3985. The `ambiguous` array's elements are one-per-occurrence
+(`{src_id, raw, kind, line, candidates, candidates_total}`), which is what makes that
+partition sound rather than a mix of deduped and undeduped counts.
+
+Excluding self-cites (n=3132): **68.3% resolve, 13.7% ambiguous, 17.8% dangling,
+0.2% cross-repo.**
+
+**These are NOT the figures the earlier draft cited, and they are not comparable to
+them.** CAP-8 reports 43% / 33% / 24% measured **umbrella-wide across 10 repos and 2
+umbrellas** at 6321 citations; the above is **project scope** at 3985. Different
+populations, both real. Size Layer 3 off the project-scope number when the work is
+project-scoped.
+
+CAP-8's contamination caveat still applies to both: `link_scan` has no "mention" mode,
+so a token written to *teach* citation syntax is extracted identically to one written
+to cite, and teaching examples land preferentially in the ambiguous and dangling
+buckets.
+
+**Two findings that make Layer 3 cheaper than the earlier draft assumed:**
+
+- **920 of 958 file-grain edges are already materialized** (96%), with 38 missing and 2
+  stale. The scan is close to a no-op at file grain; the work is entry grain.
+- **Every `ambiguous` element already carries a `line`.** The attribution substrate is
+  in `link_scan`'s live output, not something to build.
+
+And the attribution algorithm has **three consumers**, not one: entry-grain citation
+edges, buffer-slice read attribution, and `grep`-hit read attribution (§6). Its
+precision is therefore load-bearing for both the graph and the counter — and per the
+prior-art pass, nothing in the literature treats the nearest-preceding-heading
+heuristic, so its error rate must be measured here rather than cited.
 ---
 
-## Layer 4 — serve grams as context
+## Layer 4 — serve Statements as context
 
 `librarian(action="context")` gains an entry-grain anchor. When `anchor_id` is of the
 form `<slug>:<local>`:
@@ -436,51 +662,104 @@ not a replacement.
 
 ### Storage
 
-A separate slug-keyed table, following the precedent the Stage-2 design established and
-defended: `events` is keyed on `artifact_id` with no entry column, and
-`artifact_link.dst_id` FKs `artifact(id)` which is move-fragile.
+Two tables. The first is slug-keyed, following the precedent the Stage-2 design
+established and defended: `events` is keyed on `artifact_id` with no entry column, and
+`artifact_link.dst_id` FKs `artifact(id)`, which is move-fragile.
 
 ```sql
 CREATE TABLE IF NOT EXISTS entry_attestation (
-  src_slug         TEXT NOT NULL REFERENCES artifact(slug) ON DELETE CASCADE,
-  src_local        TEXT NOT NULL,
-  reads            INTEGER NOT NULL DEFAULT 0,   -- session-deduped
-  verifies         INTEGER NOT NULL DEFAULT 0,
-  last_verified_at INTEGER,
-  last_verdict     TEXT,                         -- 'held' | 'refuted' | 'inconclusive'
-  obligations_open INTEGER NOT NULL DEFAULT 0,
+  src_slug           TEXT NOT NULL REFERENCES artifact(slug) ON DELETE CASCADE,
+  src_local          TEXT NOT NULL,
+  -- bitemporal: two clocks, never one
+  asserted_at        INTEGER NOT NULL,   -- transaction: when the claim was made
+  valid_from         INTEGER NOT NULL,   -- valid:  interval start
+  valid_until        INTEGER,            -- valid:  NULL while the Statement stands
+  recorded_at        INTEGER,            -- transaction: when we learned it closed
+  -- exposure
+  reads              INTEGER NOT NULL DEFAULT 0,   -- session-deduped, all three paths
+  -- attestation
+  verifies           INTEGER NOT NULL DEFAULT 0,
+  last_verified_at   INTEGER,
+  last_verdict       TEXT,               -- 'held' | 'refuted' | 'inconclusive'
+  obligation_state   TEXT NOT NULL DEFAULT 'none',  -- 'none' | 'open' | 'in_flight'
+  obligations_missed INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (src_slug, src_local)
+);
+
+CREATE TABLE IF NOT EXISTS condition_event (
+  id         TEXT PRIMARY KEY,           -- interned; many Statements may reference one
+  label      TEXT NOT NULL,              -- "the jsonpath plan edit lands"
+  fired_at   INTEGER,                    -- NULL until it fires
+  created_at INTEGER NOT NULL
 );
 ```
 
 `ON DELETE CASCADE` off `artifact(slug)` is move-stable, which `artifact(id)` is not.
 
-### Counting reads
+**Why `condition_event` is a table and not prose.** A prose condition gives N unjoinable
+strings: three Statements each waiting on "the plan edit lands" are three separate
+conditions that must each be adjudicated separately, and the event fires against
+nothing. Interning it means **one `fired_at` closes every Statement that references
+it** — which is the whole value of an assumption label in an ATMS (de Kleer 1986), and
+the reason `conditional` becomes a mechanism rather than a comment.
 
-**Session-deduped.** `tool_calls` carries `session_id` and `cc_session_id`, so "5 reads"
-means five distinct sessions. Without dedup a single agent re-reading a ledger while
-working discharges the counter against itself, and the count stops meaning leverage.
+This borrows the *labelling* idea and deliberately not the machinery: ATMS label
+computation is exponential in assumptions, and nobody runs a truth-maintenance system
+over 4000 entries. A flat interned-event table with a `fired_at` is the 95% of the
+value at none of the cost.
+### Exposure — reads *and* in-degree, whichever is larger
 
-A read is *an entry being served into a context* — the Layer 4 packer and an explicit
-`artifact(action="get")` both count. That matches what the mechanism is for: the tap
-fires on entries agents actually internalise.
+The tap fires on `max(reads, rests-on in-degree)`. The two measure different properties
+and neither subsumes the other: reads measure what agents actually consult, in-degree
+measures what other Statements rest on. A claim everyone reads but nobody cites, and a
+claim nobody opens but forty things derive from, are both load-bearing.
 
+**Reads are counted from three attributed paths, session-deduped.** `tool_calls`
+carries `session_id` and `cc_session_id`, so "5 reads" means five distinct sessions —
+without dedup a single agent re-reading a ledger while working discharges the counter
+against itself, and the count stops meaning exposure.
+
+| Path | Attribution |
+|---|---|
+| `artifact(get, heading=…)` | exact, today |
+| `read_file` on an `@` handle with a `json_path` or line range | the server created the handle and knows its origin call and artifact; the slice spec gives the grain |
+| `grep(mode="content")` on a ledger | the match carries a path and a line number |
+
+All three resolve to an entry by nearest-preceding-heading — the same algorithm Layer 3
+uses for citations. Closing these two leaks is worth doing independently of the trigger
+(§6): about half the historical read traffic on the corpus's most-read ledger never
+touched the instrument.
+
+**A whole-artifact `artifact(get)` counts for no entry.** It has no grain, and counting
+it for all 61 entries would arm an entire ledger at once — which is a mass tap, not a
+signal. Under-counting a whole-read is the conservative error; the `max()` with
+in-degree is what stops that under-count mattering.
+
+**Deliberately NOT reset by successful verification in the spaced-repetition sense.**
+FSRS and SM-2 *lengthen* the interval on successful retrieval, because they model
+risk-of-being-forgotten. This models risk-of-being-wrong, so the sign is inverted: more
+exposure means sooner, not later. Stated explicitly because a reader fluent in spaced
+repetition will assume the opposite.
+
+**Known gaming surface.** Doctorow's *Metacrap* (2001) names it: *metrics influence
+results.* Once exposure gates an obligation, exposure becomes a thing to avoid — an
+agent that learns "opening this section costs me a proof" will read around it. The
+`max()` with in-degree is a partial defence (in-degree is not under the reader's
+control), but this is a watch-item with no designed mitigation, and it belongs in the
+first month's review rather than in a claim that it is handled.
 ### The tap
 
-**The threshold is 5 distinct sessions since the last passing attestation**, and like
-the Layer 2 horizon it is a guess with no measurement behind it. It is a *floor*, not a
-period: an entry verified at read 5 arms again at read 10. Two properties make the
-initial value low-stakes — a missed tap costs nothing but a louder banner (see *Making
-a deferred obligation stick*), and the counter is per-entry rather than per-ledger, so
-a busy ledger does not tap on every entry at once. Re-tune from the first month's
-`obligations_open` distribution.
+**Threshold: exposure ≥ 5 since the last passing appraisal**, where exposure is
+`max(reads, rests-on in-degree)`. Like the Layer 2 horizon it is a guess with no
+measurement behind it, and it is a *floor*, not a period — a Statement appraised at 5
+arms again at 10. Re-tune from the first month's distribution.
 
-Past the threshold, `librarian(action="context")` serves the entry **in full**, with a
-banner, and returns a `pending_attestations` array alongside the pack:
+Past the threshold, `librarian(action="context")` serves the Statement **in full**,
+with a banner, and returns a `pending_attestations` array alongside the pack:
 
 ```
-R-89 [invariant] · read 5/5 · last verified: never
-…entry served in full…
+R-89 [invariant] · exposure 7 (reads 3, rests-on 7) · last appraised: never
+…Statement served in full…
 
 pending_attestations: [
   { entry: "reconnaissance-patterns:R-89",
@@ -488,10 +767,25 @@ pending_attestations: [
     due:   "before end of turn" } ]
 ```
 
-This uses the channel `append_entry` already uses for `snapshot_missing` and
-`undefined_in_body` — response fields whose whole purpose is to tell an agent something
-it was about to miss.
+This is RFC 5861 `stale-while-revalidate`, and the correspondence is exact: serve the
+possibly-stale value immediately and in full, never block the reader, and predicate
+revalidation on *an incoming request* rather than on a timer. It uses the channel
+`append_entry` already uses for `snapshot_missing` and `undefined_in_body` — response
+fields whose whole purpose is to tell an agent something it was about to miss.
 
+**Coalescing is required, not optional.** RFC 5861's amplification rationale applies
+directly: without it, readers 6..N each incur an obligation for the same Statement
+while the first is still outstanding, and one hot Statement generates N proofs of the
+same fact. `obligation_state` moves `none → open → in_flight`, and a Statement already
+`open` or `in_flight` emits no new obligation.
+
+**Discharge rides the existing path.** Google's g3doc freshness dates work because
+discharge is "bump a date in a code review" — the *SWE at Google* account credits the
+in-band `Last reviewed by …` byline for adoption and calls review-through-the-normal-CR-path
+*"a low-cost means to ensure that a document is looked over from time to time."* Borrow
+the named-owner-in-band and the ride-the-existing-review-path properties. Do **not**
+borrow the stamp: g3doc's names no instrument, which is exactly the laundering the next
+section forbids, and it is age-triggered where this is exposure-triggered.
 ### What proof means, by class
 
 The validity class supplies the proof obligation lazily, at the one moment an agent is
@@ -506,7 +800,7 @@ already holding the entry:
 This is why decision 2 could safely decline a machine-runnable predicate at write time:
 the predicate is only ever demanded from entries that have proven load-bearing.
 
-### Proof-carrying, or it does not count
+### Proof-carrying, and the counter resets on the appraisal — not on the assertion
 
 **A `reviewed` event whose payload names no instrument does not reset the counter.**
 Without this the mechanism is a laundering machine: the claim acquires a verification
@@ -516,21 +810,56 @@ standing in for the target, returning a plausible value and no error). CLAUDE.md
 the general form: *"a review that reports findings without observed mutation pass/fail
 counts has not verified anything."*
 
-Required payload fields: `instrument` (what was run — command, query, or the named
-reasoning step for a counterexample search), `observed` (what it returned, verbatim),
-`verdict` (`held` | `refuted` | `inconclusive`). Any missing → the event is recorded as
-a `note`, not a `reviewed`, and the counter does not move.
+Required payload fields: `instrument` (the command, query, or named reasoning step, as
+invoked), `observed` (its raw output, verbatim), `verdict`
+(`held` | `refuted` | `inconclusive`). Any missing → the event is recorded as a `note`,
+not a `reviewed`, and neither the counter nor `obligation_state` moves.
 
-### A refutation is not a reset
+**Storing the raw invocation and its raw output is the load-bearing requirement, not
+the verdict.** This is proof-carrying code's independent-checker property (Necula,
+POPL '97): the artifact ships with something a *later, independent* party can re-check
+cheaply, rather than with an assurance. A verdict alone is an assurance.
 
-`last_verdict = 'refuted'` stops the entry being served as fact and routes it to the
-same worklist a fired `conditional` lands on. **Verification that fails is the
-highest-value output this mechanism produces** and must never be recorded identically
-to one that passes.
+**The attester must not emit its own results.** IETF RATS (RFC 9334) separates an
+Attester producing *Evidence* from a Verifier appraising it under an explicit
+*Appraisal Policy* and emitting *Attestation Results*. Here the reading agent is the
+Attester; the stored `instrument` + `observed` is the Evidence; the appraisal is what
+resets the counter. The reason this separation matters is empirical, not architectural:
+Huang et al., *LLMs Cannot Self-Correct Reasoning Yet* (ICLR 2024) finds that without
+external feedback, self-correction often makes performance **worse**. An agent that
+asserts and accepts in the same breath is the configuration that paper measures.
+
+**MVP position, stated as a limitation rather than solved.** A second appraising agent
+is out of scope for the first implementation. What ships instead is the cheapest thing
+that preserves the property: Evidence is stored in re-runnable form, so any later
+reader — human or agent, in any session — can re-execute the instrument and compare.
+The counter resets on a *re-runnable* attestation, which is weaker than an independent
+appraisal and strictly stronger than a stamp. Escalating to a second agent is a future
+decision with a named trigger: if `verifies` climbs while `refuted` stays at zero, the
+appraisals are not appraising.
+### A refutation closes an interval — it does not reset, and it does not overwrite
+
+`last_verdict = 'refuted'` does three things, in this order:
+
+1. **Closes the valid-time interval**: `valid_until` = the best estimate of when the
+   claim actually stopped holding (not "now" by default — the tap discovers the closure,
+   it does not cause it), and `recorded_at` = now.
+2. **Stops the Statement being served as fact**, routing it to the same worklist a fired
+   `condition_event` lands on.
+3. **Leaves the prose untouched.** The record of what was believed, and when, is the
+   asset. A refutation that rewrites the claim destroys the only evidence that the
+   belief was ever held — and post-mortems ask exactly that question.
+
+This is Wikidata's rank model and Zep/Graphiti's invalidation model: a contradicted
+statement is **demoted, never deleted**.
 
 `inconclusive` also does not reset the counter — it records that someone looked and
 could not tell, which is information, and leaves the tap armed.
 
+**Verification that fails is the highest-value output this mechanism produces** and must
+never be recorded identically to one that passes. It is also the health metric: if
+`verifies` climbs while `refuted` stays at zero across the corpus, the appraisals are
+theatre and the design has failed in the specific way it was built to avoid.
 ### Making a deferred obligation stick
 
 Decision 5 chose deferral over a gate. The honest weakness is that a suggestion which
@@ -609,104 +938,125 @@ verification.
 
 | # | Layer | Ships on | Status |
 |---|---|---|---|
-| 1 | `**Valid:**` field, default-is-decay, allocator stamping | — | **scheduled** |
-| 2 | Three doctor checks | 1 | **scheduled** |
-| 3 | Slug bulk-mint, then `origin='scan'` materializer | — | designed, not scheduled |
+| 0 | **Attribution probe** — measure nearest-preceding-heading precision on this corpus | — | **scheduled** — gates 3, 4, 5 |
+| 1 | `**Valid:**` + `**Rests on:**`, default-is-decay, allocator stamping, `asserted_at` | — | **scheduled** |
+| 2 | Three doctor checks, gated on shared exposure | 1, and 3 for in-degree | **scheduled** (degraded exposure until 3) |
+| 3 | Slug bulk-mint → `origin='scan'` materializer, `rel='rests-on'` | 0 | designed, not scheduled |
 | 4 | Entry-grain `context` anchor | 3 | designed, not scheduled |
-| 5 | `entry_attestation`, taps, proof-carrying `reviewed` | 3, 4 | designed, not scheduled |
+| 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | designed, not scheduled |
+| 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4, 5a | designed, not scheduled |
 
-Layers 1–2 deliver the entire measured win in §1 and touch no graph. Layer 5 is what
-turns the rest from bookkeeping into a feedback loop, and its absence is already
-measured at 4086 artifacts reporting `freshness: unknown`.
+**Layer 0 is new and it gates three others.** The nearest-preceding-heading heuristic
+feeds citation edges, buffer-read attribution and grep-read attribution, and the
+prior-art pass found nothing in the literature on its error rate. It is a probe, not an
+implementation: run the attribution over the corpus's 3985 extracted citations, hand-check
+a sample, report precision. Cheap, and it de-risks everything downstream.
 
+Layers 1–2 still deliver the measured win in §1. Layer 2 runs with a degraded exposure
+term (reads only, no in-degree) until Layer 3 lands, which is acceptable because
+`max()` degrades to the smaller signal rather than breaking.
+
+Layer 5b is what turns the rest from bookkeeping into a feedback loop, and its absence
+is already measured at 4086 artifacts reporting `freshness: unknown`.
 ---
 
 ## Risks
 
-- **Layer 3's sizing rests on a contaminated figure.** CAP-8's 43%-resolve is a
-  self-declared upper bound. Measure the real yield first.
-- **`conditional` adjudication is agent-judged** and always will be. Every surface must
-  say "worklist", never "verdict".
-- **Bulk slug minting touches `merge_worktree` and the worktree overlay.** Its own
-  change, its own review.
+Ordered by how much each would change the design if it fired.
+
+- **Exposure becomes a thing to game.** Doctorow's *Metacrap* (2001): *metrics influence
+  results.* An agent that learns "opening this section costs me a proof" reads around
+  it. `max()` with in-degree is a partial defence — in-degree is not under the reader's
+  control — but there is no designed mitigation. Watch it from week one.
+- **The appraisal could be theatre.** If `verifies` climbs while `refuted` stays at
+  zero, the mechanism is laundering rather than verifying. This is the single health
+  metric for the whole design and it should be on the first dashboard, not discovered
+  later.
+- **Attribution precision is unmeasured and now load-bearing three times over.** The
+  nearest-preceding-heading heuristic feeds citation edges, buffer-read attribution and
+  grep-read attribution. The prior-art pass found **nothing** in the literature on it —
+  citation-context extraction exists in scholarly NLP, but not this heuristic or its
+  error rate. Measure it on this corpus before any of the three consumers ships.
 - **Per-entry blame cost is unmeasured.** Decision 3's default depends on it; three
   options are named in Layer 1 and the choice is deferred to measurement.
-- **The tap could train perfunctory discharge.** Proof-carrying payloads are the
-  control; if `verifies` climbs while `refuted` stays at zero, that is the tell, and it
-  is worth watching from the first week rather than discovering later.
-
+- **Bulk slug minting touches `merge_worktree` and the worktree overlay.** 2 of 4087
+  artifacts have a slug today. Its own change, its own review, sequenced before the
+  materializer.
+- **`conditional` adjudication is agent-judged** and always will be. Every surface must
+  say "worklist", never "verdict".
+- **The corpus may not be big enough to matter.** 12 ledgers, ~4000 entries, one
+  maintainer. If exposure never reaches the threshold on more than a handful of
+  Statements, Layers 2 and 5 are inert and the honest outcome is to ship Layer 1 alone.
+  The first month's exposure distribution decides this, and it is cheap to find out.
 ## Prior art
 
-An external research pass was commissioned 2026-08-20 and its findings are **not yet
-folded in**; this section will be reconciled against it before Layer 1 is implemented.
-What follows is the *internal* prior art, read from
-`memory("research/agent-memory-frameworks")` (research dated 2026-05-25, exploratory,
-no spec or plan ever committed).
+Two passes: the project's own `memory("research/agent-memory-frameworks")` (2026-05-25)
+and a commissioned external pass (2026-08-20). Citations below were independently
+re-confirmed by that pass; items it could not verify are marked.
 
-### An invariant this design must not break
+### Internal — the invariant, and a recommendation that went unharvested
 
 **codescout is a passive embedder.** `Embedder` / `RemoteEmbedder::openai` are
-embeddings-only; there is no generative or chat client anywhere in the tree. The
-2026-05-25 pass identified this as the fork that kills otherwise-elegant designs: its
-Approach B (a native distillation pipeline modelled on TencentDB Agent Memory) mapped
-almost 1:1 onto librarian rows and was rejected anyway, because distillation requires
-an in-server LLM and that is an identity break.
+embeddings-only; there is no generative or chat client in the tree. The 2026-05-25 pass
+rejected an otherwise-elegant distillation design purely on that ground. Layer 5 honours
+it by construction: codescout counts, serves, and records — **the host agent makes every
+judgement**. That is the pass's own recommended shape (*host-driven scaffolding*).
 
-Layer 5 honours the invariant by construction. codescout never adjudicates anything: it
-counts reads, serves the entry with a banner, emits an obligation, and records what
-comes back. **The host agent does every judgement.** That is exactly Approach C —
-*host-driven scaffolding: keep codescout passive, the host LLM does generation via new
-tools* — which the pass recommended and which nothing has yet built on.
+That pass also mapped codescout against a memory-substrate taxonomy (cited there as
+arXiv 2603.07670; **not re-verified**) and concluded all three substrates are present
+and *"the ONLY real gap is Axis 3 — control policy."* **Layers 2 and 5 are that control
+policy** — the first in the system.
 
-### This design is the missing axis
+And its Approach C, piece 3, verbatim: *"Add `valid_until` / `superseded_by` to
+`ArtifactRow` → Zep-style temporal + Supermemory-style forgetting."* **87 days later
+nothing shipped**, and the recommendation itself went unharvested — an instance of §1's
+failure one level up. Two deliberate divergences: it was artifact-grain where §1's
+failures are all entries, and it *hid* decayed records where this spec flags them
+(hiding makes a decayed record indistinguishable from an absent one).
 
-That pass mapped codescout against the survey taxonomy in *Memory for Autonomous LLM
-Agents: Mechanisms, Evaluation, and Emerging Frontiers* (cited there as arXiv
-2603.07670; **not re-verified for this spec**), whose three orthogonal axes are
-temporal scope, substrate, and **control policy**. Its conclusion:
+### External — what maps onto which decision
 
-> codescout already spans ALL 3 substrate types … The ONLY real gap is **Axis 3 —
-> control policy**: every write is hand-authored (prompted self-control); no automated
-> consolidation or reflection.
+| Prior art | Maps to |
+|---|---|
+| **Bitemporal modelling / SQL:2011 temporal tables** (Snodgrass) — valid time vs. transaction time as independent axes | Layer 1 *Bitemporal storage* |
+| **Zep / Graphiti** — temporal KG for agent memory; edges carry `(t_valid, t_invalid)` + ingestion time; contradiction *invalidates*, never deletes. arXiv:2501.13956 | Layer 1, Layer 5 refutation |
+| **Doyle 1979 JTMS; de Kleer 1986 ATMS** — beliefs labelled by the assumptions they hold under | `condition_event` interning |
+| **AGM belief revision** (Alchourrón/Gärdenfors/Makinson 1985) | refutation semantics |
+| **RFC 5861 `stale-while-revalidate`** (now in RFC 9111) — serve stale in full, revalidate *because of an incoming request*, coalesce to avoid amplification | Layer 5 tap |
+| **Gray & Cheriton 1989, Leases** — validity is bounded and must be renewed | decision 3 |
+| **Adaptive TTL** — Alici et al. 2012 (ECIR); Basu et al. 2017 d-TTL/f-TTL (SIGMETRICS) — per-object TTL from access statistics | exposure-driven revalidation |
+| **Google g3doc freshness dates** (*SWE at Google*, ch. 10) — in-band "last reviewed by", discharge through the normal review path | Layer 5 discharge |
+| **Micropublications** (Clark, Ciccarese, Goble 2014) — claim → evidence → **method**, transitively closed | `**Rests on:**` + `instrument`/`observed` |
+| **Nanopublications / W3C PROV / PAV** — assertion, provenance and publication-info as separate graphs | Layer 1 field separation |
+| **Proof-carrying code** (Necula, POPL '97) — ship a re-checkable proof, not an assurance; the checker is small and independent | why `observed` is stored raw |
+| **IETF RATS, RFC 9334** — Attester emits Evidence; a Verifier appraises under an explicit policy and emits Results | appraisal ≠ assertion |
+| **Wikidata ranks + temporal qualifiers** (not directly fetched) | demote, never delete |
+| **Wikipedia verifiability / `{{citation needed}}`** | decision 3, and the backlog risk |
+| **NELL** (Mitchell et al., CACM 2018) — 120M confidence-weighted, provenance-carrying beliefs under never-ending curation | existence proof at scale |
+| **PPS / monetary-unit audit sampling** (PCAOB AS 2315) — selection probability scales with exposure | decision 8 |
+| **JIT comment-code inconsistency detection** (Panthaplackel et al., AAAI 2021) | a future automated `dated` checker |
+| **FSRS / SM-2** | decision 8, **with the sign inverted** |
+| **`eslint-plugin-unicorn/expiring-todo-comments`, dbt `deprecation_date` / source `warn_after`** | the machine-runnable subset of `dated` |
 
-Layers 2 and 5 are a control policy — the first one in the system. That is the frame to
-evaluate this design in, and it is a stronger claim than "add a field": the substrates
-have been complete for months and nothing decides *when* to act on them.
+### What the literature does not have
 
-### The same field was already recommended, and never built
+Four gaps, each a place where this design must **measure rather than cite**:
 
-Approach C's third piece, verbatim from the 2026-05-25 pass:
+1. **No formal treatment of read/exposure count as a staleness trigger for knowledge
+   claims** anywhere in KG-maintenance, documentation, or SE literature. Adaptive-TTL
+   caching and PPS audit sampling are analogies, not on-point results.
+2. **No named failure mode for "a cheap verification stamp launders unearned trust"** in
+   knowledge bases. The nearest verified result is Huang et al. on self-correction.
+3. **No published post-mortem quantifying the death of an annotation field.** §4's
+   1-use-in-4087 appears to be novel data.
+4. **Nothing on line-number citation attribution.** See *Risks*.
 
-> Add `valid_until` / `superseded_by` to `ArtifactRow` → Zep-style temporal +
-> Supermemory-style forgetting, reusing the `HIDDEN_STATUSES` filter.
-
-**87 days later nothing shipped**, and the recommendation itself went unharvested — an
-instance of the exact failure §1 of this spec describes, one level up. Two differences
-from what is proposed here, both deliberate:
-
-- That proposal is **artifact-grain** (`ArtifactRow`). This spec is entry-grain, because
-  §1's four failures are all *entries* inside files nobody would call stale.
-- It is a **hard expiry** (`valid_until`) plus a *hiding* mechanism (`HIDDEN_STATUSES`).
-  This spec declines both: a class-plus-condition instead of a timestamp (decision 2),
-  and flag-never-suppress instead of hiding (Layer 4). Hiding a decayed record makes it
-  indistinguishable from an absent one, which is strictly less information than today.
-
-### External systems already named internally
-
-Worth checking the commissioned research against, rather than rediscovering:
-
-- **Zep / Graphiti** — temporal knowledge graph with explicit *fact validity windows*.
-  The closest named prior art to Layers 1 and 4 combined.
-- **Supermemory** — MCP-native, explicit forgetting/expiry, explicitly targets coding
-  agents.
-- **Letta / MemGPT, Mem0, Cognee, LangMem** — other points on the substrate axis; none
-  noted as modelling validity rather than recency or importance.
-
-*Benchmark caveat carried from that pass:* the headline numbers quoted for these
-systems come from different benchmark families (agentic vs. LoCoMo / LongMemEval) and
-are **not comparable to each other**. The same pass also records that standard memory
-benchmarks are shallow — 85–94% of their questions need evidence from only two
-sessions — so none of them measures the property this spec is about.
+*Instrument caveat.* The `researcher` MCP returned adult-content and parcel-tracking
+sites as "sources" on one query, and produced a report on "attestation theatre" whose
+citations were a vendor marketing page and a notarisation service — discarded. Every
+citation above was confirmed through a separate search or fetch, and the two that were
+not are marked inline. Recorded here because a tool that returns plausible garbage
+without erroring is the exact failure class this spec exists to detect.
 ## References
 
 - `docs/superpowers/specs/2026-07-17-tracker-entry-graph-stage2-design.md` — Stage 2:
