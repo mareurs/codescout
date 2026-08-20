@@ -1960,13 +1960,21 @@ fn scan_conditional_past_due(
     use crate::librarian::statements::{parse_validity, Validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
-    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+    let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
     let mut out = Vec::new();
-    for (aid, path) in rows {
+    for (aid, path, status) in rows {
+        // An archived row is excluded from the REPORTED population, mirroring what
+        // `entry_indegree` already does on the citing side (Ruling 15/16) — otherwise
+        // an archived definer is reported here carrying the exposure its active twin
+        // earned, which is the double-attribution Ruling 14 exists to prevent,
+        // surviving one layer down. MF-2, 2026-08-20.
+        if row_is_archived(&path, &status) {
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -2073,16 +2081,21 @@ fn scan_dated_stale(
     use crate::librarian::statements::{parse_validity, Validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
-    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+    let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
     // Named to satisfy `clippy::type_complexity` — the tuple itself is the point: a
     // TOTAL sort key so no two rows can ever compare equal.
     type DatedStaleSortKey = (std::cmp::Reverse<usize>, String, String);
     let mut scored: Vec<(DatedStaleSortKey, Violation)> = Vec::new();
-    for (aid, path) in rows {
+    for (aid, path, status) in rows {
+        // An archived row is excluded from the REPORTED population — same guard as
+        // `scan_conditional_past_due` and `scan_cited_but_undeclared`; MF-2, 2026-08-20.
+        if row_is_archived(&path, &status) {
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -2172,13 +2185,18 @@ fn scan_cited_but_undeclared(
     use crate::librarian::statements::parse_validity;
     use crate::librarian::tools::link_scan::extract::entry_sections;
 
-    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+    let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
     let mut out = Vec::new();
-    for (aid, path) in rows {
+    for (aid, path, status) in rows {
+        // An archived row is excluded from the REPORTED population — same guard as
+        // `scan_conditional_past_due` and `scan_dated_stale`; MF-2, 2026-08-20.
+        if row_is_archived(&path, &status) {
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -6805,6 +6823,68 @@ root = "work/elsewhere/ghost"
     }
 
     #[test]
+    fn conditional_past_due_skips_an_archived_definer_located_under_archive_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive_dir = tmp.path().join("archive");
+        let p = archive_dir.join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-60 — archived by path\n\n**Valid:** conditional — until X\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-60".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        assert!(
+            scan_conditional_past_due(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "a definer located under an /archive/ path segment must not be reported \
+             even though its exposure clears the gate — mirrors entry_indegree's \
+             Ruling 15/16 on the citing side"
+        );
+    }
+
+    #[test]
+    fn conditional_past_due_reports_only_the_active_twin_when_a_token_has_an_archived_definer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let active = tmp.path().join("active.md");
+        let archived = tmp.path().join("archived.md");
+        seed_ledger(
+            &cat,
+            "active",
+            &active,
+            "## R-61 — active twin\n\n**Valid:** conditional — until Y\n",
+        );
+        std::fs::write(
+            &archived,
+            "## R-61 — archived twin\n\n**Valid:** conditional — until Y\n",
+        )
+        .unwrap();
+        let row = TestArtifactRowBuilder::new("archived")
+            .with_abs_path(&archived)
+            .with_status("archived")
+            .build();
+        art_upsert(&cat, &row).unwrap();
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-61".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let v = scan_conditional_past_due(&cat.conn, &deg).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "R-61 is defined in both an active and an archived file; only the active \
+             one may be reported — the archived twin must not double the finding: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id, Some("active".to_string()));
+    }
+
+    #[test]
     fn indegree_omits_a_token_with_more_than_one_definer() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
@@ -7321,6 +7401,67 @@ root = "work/elsewhere/ghost"
         );
     }
 
+    #[test]
+    fn dated_stale_skips_an_archived_definer_located_under_archive_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive_dir = tmp.path().join("archive");
+        let p = archive_dir.join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-62 — archived by path\n\n**Valid:** dated 2020-01-01\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-62".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        assert!(
+            scan_dated_stale(&cat.conn, &deg, 20_685)
+                .unwrap()
+                .is_empty(),
+            "a definer located under an /archive/ path segment must not be reported \
+             even though its exposure and age both clear the gate"
+        );
+    }
+
+    #[test]
+    fn dated_stale_reports_only_the_active_twin_when_a_token_has_an_archived_definer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let active = tmp.path().join("active.md");
+        let archived = tmp.path().join("archived.md");
+        seed_ledger(
+            &cat,
+            "active",
+            &active,
+            "## R-63 — active twin\n\n**Valid:** dated 2020-01-01\n",
+        );
+        std::fs::write(
+            &archived,
+            "## R-63 — archived twin\n\n**Valid:** dated 2020-01-01\n",
+        )
+        .unwrap();
+        let row = TestArtifactRowBuilder::new("archived")
+            .with_abs_path(&archived)
+            .with_status("archived")
+            .build();
+        art_upsert(&cat, &row).unwrap();
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-63".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "R-63 is defined in both an active and an archived file; only the active \
+             one may be reported: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id, Some("active".to_string()));
+    }
+
     #[tokio::test]
     async fn call_wires_a_live_entry_indegree_into_scan_dated_stale() {
         let tmp = tempfile::tempdir().unwrap();
@@ -7529,6 +7670,63 @@ root = "work/elsewhere/ghost"
             "any declared class at all — invariant, dated, or conditional — takes an \
              entry out of this check's business"
         );
+    }
+
+    #[test]
+    fn cited_but_undeclared_skips_an_archived_definer_located_under_archive_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive_dir = tmp.path().join("archive");
+        let p = archive_dir.join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-64 — archived by path, no class\n\nprose only\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-64".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        assert!(
+            scan_cited_but_undeclared(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "a definer located under an /archive/ path segment must not be reported \
+             even though its exposure clears the gate"
+        );
+    }
+
+    #[test]
+    fn cited_but_undeclared_reports_only_the_active_twin_when_a_token_has_an_archived_definer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let active = tmp.path().join("active.md");
+        let archived = tmp.path().join("archived.md");
+        seed_ledger(
+            &cat,
+            "active",
+            &active,
+            "## R-65 — active twin\n\nno class\n",
+        );
+        std::fs::write(&archived, "## R-65 — archived twin\n\nno class\n").unwrap();
+        let row = TestArtifactRowBuilder::new("archived")
+            .with_abs_path(&archived)
+            .with_status("archived")
+            .build();
+        art_upsert(&cat, &row).unwrap();
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-65".to_string(), EXPOSURE_THRESHOLD + 3);
+
+        let v = scan_cited_but_undeclared(&cat.conn, &deg).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "R-65 is defined in both an active and an archived file; only the active \
+             one may be reported: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id, Some("active".to_string()));
     }
 
     #[tokio::test]
