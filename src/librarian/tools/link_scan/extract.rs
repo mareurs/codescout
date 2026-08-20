@@ -120,6 +120,41 @@ pub fn entry_sections(text: &str) -> Vec<EntrySection> {
         .collect()
 }
 
+/// Which entry a line belongs to: the **innermost** section whose range contains it.
+///
+/// **Sections overlap by construction, so "innermost" is the rule, not a tie-break.**
+/// [`entry_sections`] bounds a section at the next heading of the same or higher level,
+/// so a `###` entry's section sits wholly *inside* its enclosing `##` entry's. A line in
+/// the child is contained by both, and taking the first or the outermost match
+/// attributes the child's citations to its parent.
+///
+/// That is the error [`entry_sections`]' own doc comment describes at the file level,
+/// arriving one level down: the measured 12.1% mis-attribution came from a container
+/// absorbing citations belonging to something more specific. Choosing the outermost here
+/// re-creates it inside the section tree instead of across it.
+///
+/// Innermost is found by the greatest `heading_line`. Ranking by deepest `level` is
+/// **equivalent, not worse**: [`entry_sections`] bounds a section at the next heading of
+/// the same or higher level, so two sections at one level can never overlap, and the
+/// sections containing a given line always form a chain of strictly increasing level.
+/// Both keys therefore pick the same section on every input this module can produce —
+/// verified by mutation, where swapping to `level` leaves the suite green.
+///
+/// `heading_line` is preferred because it does not *depend* on that invariant. If the
+/// bounding rule is ever relaxed and two containing sections come to share a level,
+/// position still separates them and depth no longer does.
+///
+/// Returns `None` for a line outside every entry — frontmatter, a preamble before the
+/// first definition, or a trailing `## Summary` that defines nothing. That is a real
+/// answer rather than a failure: such a citation belongs to the FILE and has no
+/// entry-grain source, and inventing one is exactly the absorption this avoids.
+pub fn entry_section_at(sections: &[EntrySection], line: u32) -> Option<&EntrySection> {
+    sections
+        .iter()
+        .filter(|s| line >= s.heading_line && line <= s.end_line)
+        .max_by_key(|s| s.heading_line)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CitationKind {
     EntryToken,
@@ -805,6 +840,84 @@ alpha
                  split('\\n') would push this to 4"
         );
         assert_eq!(s[1].text, "## R-2 — last, ends the file");
+    }
+
+    #[test]
+    fn nested_entry_sections_genuinely_overlap() {
+        // The premise `entry_section_at` rests on. If this ever stops holding — if
+        // `entry_sections` starts bounding a parent at its nested child — the innermost
+        // rule becomes dead code rather than a correction, and the next reader should
+        // find out from a failing test rather than by re-deriving it.
+        let md = "\
+## R-1 — parent
+prose citing A-1
+### R-2 — nested child
+prose citing A-2
+## R-3 — sibling
+";
+        let s = entry_sections(md);
+        let parent = s.iter().find(|x| x.id == "R-1").unwrap();
+        let child = s.iter().find(|x| x.id == "R-2").unwrap();
+        assert!(
+            child.heading_line > parent.heading_line && child.end_line <= parent.end_line,
+            "the ### child must sit wholly inside the ## parent: parent {}-{}, child {}-{}",
+            parent.heading_line,
+            parent.end_line,
+            child.heading_line,
+            child.end_line
+        );
+    }
+
+    #[test]
+    fn entry_section_at_picks_the_innermost_not_the_enclosing_entry() {
+        let md = "\
+## R-1 — parent
+prose citing A-1
+### R-2 — nested child
+prose citing A-2
+## R-3 — sibling
+prose citing A-3
+";
+        let s = entry_sections(md);
+
+        // Line 2 is only inside the parent.
+        assert_eq!(entry_section_at(&s, 2).unwrap().id, "R-1");
+        // Line 4 is inside BOTH R-1 and R-2. The child owns it — attributing it to R-1
+        // is the container-absorption error this function exists to prevent.
+        assert_eq!(
+            entry_section_at(&s, 4).unwrap().id,
+            "R-2",
+            "a citation inside a nested child belongs to the child, not its parent"
+        );
+        // The child's own heading line belongs to the child.
+        assert_eq!(entry_section_at(&s, 3).unwrap().id, "R-2");
+        // A sibling after the child is not absorbed by it.
+        assert_eq!(entry_section_at(&s, 6).unwrap().id, "R-3");
+    }
+
+    #[test]
+    fn entry_section_at_returns_none_outside_every_entry() {
+        // A citation in a preamble or a trailing non-defining section has no
+        // entry-grain source. `None` is the correct answer — manufacturing one is the
+        // 12.1% mis-attribution in a new form.
+        let md = "\
+preamble citing A-1
+## R-1 — only entry
+body
+## Summary
+trailing prose citing A-2
+";
+        let s = entry_sections(md);
+        assert!(
+            entry_section_at(&s, 1).is_none(),
+            "a preamble citation belongs to the file, not to an entry"
+        );
+        assert_eq!(entry_section_at(&s, 3).unwrap().id, "R-1");
+        assert!(
+            entry_section_at(&s, 5).is_none(),
+            "`## Summary` defines no entry, so the trailing citation must NOT be \
+             absorbed by the last real entry — that is the exact 12.1% mechanism"
+        );
     }
 
     #[test]
