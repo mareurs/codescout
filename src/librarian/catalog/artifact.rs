@@ -215,6 +215,20 @@ pub fn slugify(s: &str) -> String {
 /// Return `artifact.slug` for `artifact_id`, minting + persisting one if NULL.
 /// Base = slugify(title) or, if empty, slugify(abs_path file stem). Dedups with
 /// `-2`, `-3`, ... against the unique index. Assumes an open write context on `conn`.
+///
+/// **A minted slug is never 16 hex characters.** `entry_cite.dst_ref` is free TEXT
+/// holding *either* a 16-hex artifact id (the hex-id / rel_path citation forms) *or* a
+/// `<slug>:<local>` pair, and `gc::apply_rehome`'s `dst_ref` UPDATE tells them apart on
+/// exactly that shape — "a slug never equals an id, so it's correctly left untouched".
+/// Nothing enforced it. `slugify` emits `[a-z0-9-]`, so a title or stem of sixteen hex
+/// characters produces a slug indistinguishable from an id, and a rehome would then
+/// rewrite an entry-grain citation that merely *looked* like a file-grain one.
+///
+/// Measured 2026-08-20 before adding this: zero of 4106 catalogued artifacts have a
+/// title or stem that would slugify to that shape, so this guard changes no existing
+/// row. It is here because the bulk backfill ([`mint_missing_slugs`]) multiplies the
+/// population that could trip it from 2 to ~4106 in a single call, and the failure is
+/// silent — a rewritten `dst_ref`, not an error.
 pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<String> {
     let existing: Option<Option<String>> = conn
         .query_row(
@@ -248,6 +262,10 @@ pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<Str
     let mut candidate = base.clone();
     let mut n = 2;
     loop {
+        // Never hand out a slug shaped like an artifact id — see the doc comment.
+        // Suffixing rather than rejecting keeps the mint total: a caller asking for a
+        // slug always gets one, and `-2` is already the collision vocabulary.
+        let looks_like_id = looks_like_artifact_id(&candidate);
         let taken: bool = conn
             .query_row(
                 "SELECT 1 FROM artifact WHERE slug = ?1",
@@ -256,7 +274,7 @@ pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<Str
             )
             .optional()?
             .is_some();
-        if !taken {
+        if !taken && !looks_like_id {
             break;
         }
         candidate = format!("{base}-{n}");
@@ -267,6 +285,17 @@ pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<Str
         params![candidate, artifact_id],
     )?;
     Ok(candidate)
+}
+
+/// Whether `s` has the exact shape of a catalog artifact id: 16 lowercase hex chars.
+///
+/// `librarian::ids::artifact_id_from_abs` emits that shape, and several columns hold
+/// "an id OR something else" discriminated by it. Kept next to [`ensure_slug`] because
+/// the mint is the one place that could manufacture a counterfeit.
+fn looks_like_artifact_id(s: &str) -> bool {
+    s.len() == 16
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 pub fn delete(cat: &Catalog, id: &str) -> Result<bool> {
@@ -434,6 +463,52 @@ mod tests {
         assert_eq!(ensure_slug(&cat.conn, "a").unwrap(), "my-tracker");
         // Collision on the same base gets a numeric suffix.
         assert_eq!(ensure_slug(&cat.conn, "b").unwrap(), "my-tracker-2");
+    }
+
+    #[test]
+    fn ensure_slug_never_mints_a_slug_shaped_like_an_artifact_id() {
+        // `entry_cite.dst_ref` holds EITHER a 16-hex artifact id OR a `<slug>:<local>`
+        // pair, and `gc::apply_rehome` discriminates them by that shape alone. A title
+        // of sixteen hex characters slugifies to a counterfeit id, and the damage is a
+        // silently rewritten citation rather than an error.
+        let cat = Catalog::open_in_memory().unwrap();
+        upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("a")
+                .with_title("deadbeefcafe1234")
+                .build(),
+        )
+        .unwrap();
+        let s = ensure_slug(&cat.conn, "a").unwrap();
+        assert_ne!(
+            s, "deadbeefcafe1234",
+            "a 16-hex slug is indistinguishable from an artifact id in entry_cite.dst_ref"
+        );
+        assert_eq!(
+            s, "deadbeefcafe1234-2",
+            "suffix rather than reject: a caller asking for a slug must still get one"
+        );
+
+        // Seventeen hex chars is NOT id-shaped, so it is left alone — the guard keys on
+        // the exact shape, not on "looks hexish", which would refuse legitimate slugs.
+        upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("b")
+                .with_title("deadbeefcafe12345")
+                .build(),
+        )
+        .unwrap();
+        assert_eq!(ensure_slug(&cat.conn, "b").unwrap(), "deadbeefcafe12345");
+
+        // And a 16-char slug containing a non-hex letter is fine.
+        upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("c")
+                .with_title("zzzzbeefcafe1234")
+                .build(),
+        )
+        .unwrap();
+        assert_eq!(ensure_slug(&cat.conn, "c").unwrap(), "zzzzbeefcafe1234");
     }
 
     #[test]
