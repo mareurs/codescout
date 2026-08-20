@@ -1220,9 +1220,36 @@ Committed `9a982ed5`.
 
 ## Template for new entries
 
-<!-- Insert new sweep entries and HY-N entries above this line via:
-     edit_markdown(action="insert_before",
-                   heading="## Template for new entries",
-                   content="## Sweep YYYY-MM-DD\n...")
-     Update frontmatter in the same call:
-     edit_markdown(..., frontmatter={set: {"next-sweep-due": "YYYY-MM-DD"}}) -->
+<!-- Insert new sweep entries and HY-N entries above this line.
+
+  A SWEEP ENTRY has no monotonic id — it is dated, not `HY-N` — so it goes through
+  a plain body edit, and the frontmatter bump rides along in the SAME call:
+
+    artifact(action="update", id="7e498b6dcb45b924",
+             patch={body_edits: [{heading: "## Template for new entries",
+                                  action: "insert_before",
+                                  content: "## Sweep YYYY-MM-DD\n..."}],
+                    extra: {"next-sweep-due": "<today + sweep-interval-days>"}})
+
+  AN HY-N ENTRY is allocated by the server, and one call writes the section too:
+
+    artifact(action="append_entry", id="7e498b6dcb45b924", id_prefix="HY",
+             anchor_heading="## Template for new entries",
+             title="<title>", body="**Verdict:** hit | miss | proposal ...")
+
+  Passing `anchor_heading` + `title` + `body` together is what makes the server
+  write the section; omit any of the three and it only reserves the id. The
+  heading it writes is `## HY-N — <title>`, the only shape `link_scan` defines a
+  token in.
+
+  Never hand-grep the highest `HY-N`. This ledger has no index table — the
+  headings ARE the index — and a max read is stale by the time you write.
+
+  `edit_markdown` is refused here: the ledger declares `entry_prefix`.
+
+  SUPERSEDED 2026-08-20 — both paths above used to be one instruction telling you
+  to append via `edit_markdown(action="insert_before", ...)` with a
+  `frontmatter={set:{...}}` rider. That call is refused on this ledger, and the
+  HY-N half additionally hand-allocated its id. Fixed at the source in
+  codescout-companion 1.16.15; this comment is the instance that had been
+  hand-patched around it. -->

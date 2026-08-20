@@ -3339,38 +3339,48 @@ The same pass, run the other way round, produced the mirror-image finding and is
 
 <!-- Insert new R-N entries above this line.
 
-  1. GET THE ID FROM THE SERVER — do not compute it:
+  1. WRITE THE ENTRY — ONE CALL. The server allocates the id AND writes the
+     section:
 
-       artifact(action="append_entry", id="5696563f06b2c222", id_prefix="R")
+       artifact(action="append_entry", id="5696563f06b2c222", id_prefix="R",
+                anchor_heading="## Template for new entries",
+                title="<title>",
+                body="**Verdict:** hit | miss [×N] → rule · "
+                     "**Observed:** YYYY-MM-DD, <context>\n\n"
+                     "**Seam:** <what was unverified>\n\n"
+                     "<narrative>\n\n"
+                     "**Promote-when:** <falsifiable criterion>\n\n"
+                     "**Status:** open — <N datapoints>\n\n"
+                     "**Kin:** R-x, R-y\n")
 
-     No `entry_collection`: this is a prose ledger, so the call reserves the next
-     id under a transaction and writes nothing. The manual both-formats scan this
-     step used to prescribe is obsolete — and it WAS the race. A max read at the
-     start of a pass is stale by the time you write (R-98: a peer took R-97 with a
-     four-minute margin), and allocating from a stale max is how the first nine
-     collisions happened. Never suffix an id either: `R-72b` is not a valid entry
-     token at all, since digit→letter is not a word boundary.
+     No `entry_collection`: entries here are `## R-N` body sections, not params
+     rows. Passing `anchor_heading` + `title` + `body` TOGETHER is what makes the
+     server write the section itself — omit any of the three and it only reserves
+     the id, leaving the section yours to write.
 
-  2. WRITE THE SECTION. `edit_markdown` is refused here — the ledger is augmented —
-     so use:
+     The server formats the heading as `## R-N — <title>`, which is the only shape
+     `link_scan` defines a token in (`def_re` = `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`),
+     so `## R-100` alone defines NOTHING and every citation of it dangles. A first
+     cut of the 2026-08-17 archive migration used bare headings and pushed the
+     project's dangling count UP, 720 → 761. Letting the server write the heading
+     is what removes that failure mode rather than warning about it.
 
-       artifact(action="update", id="5696563f06b2c222", patch={body_edits: [
-         {heading: "## Template for new entries", action: "insert_before",
-          content: "## R-N — title\n\n"
-                   "**Verdict:** hit | miss [×N] → rule · "
-                   "**Observed:** YYYY-MM-DD, <context>\n\n"
-                   "**Seam:** <what was unverified>\n\n"
-                   "<narrative>\n\n"
-                   "**Promote-when:** <falsifiable criterion>\n\n"
-                   "**Status:** open — <N datapoints>\n\n"
-                   "**Kin:** R-x, R-y\n"}]})
+     Never compute the id, and never suffix one. A max read at the start of a pass
+     is stale by the time you write (R-98: a peer took R-97 with a four-minute
+     margin), and allocating from a stale max is how the first nine collisions
+     happened. `R-72b` is not a valid entry token at all, since digit→letter is not
+     a word boundary.
 
-     The heading must be `## R-N — <title>` exactly. `link_scan`'s `def_re` is
-     `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, so `## R-100` alone defines NOTHING and
-     every citation of it dangles. A first cut of the 2026-08-17 archive migration
-     used bare headings and pushed the project's dangling count UP, 720 → 761.
+     SUPERSEDED 2026-08-20 — this used to be TWO steps: reserve the id, then write
+     the section via `artifact(update, patch={body_edits:[…]})`, because
+     `append_entry` wrote nothing without `entry_collection` and `edit_markdown` is
+     refused on a guarded ledger. That two-step was an instance-level workaround,
+     and it carried its own failure mode — a reserved id whose section never
+     landed. An augmentation being present does not push this ledger off the
+     section-writing path; `append_entry`'s own `seed_prose` test pins that.
 
-  3. ADD THE INDEX ROW in the same call — five columns, matching the header:
+  2. ADD THE INDEX ROW — a SECOND call, after the entry lands, using the id
+     `append_entry` returned. Five columns, matching the header:
 
        | R-N | YYYY-MM-DD | verdict | pattern | evidence |
 
@@ -3380,6 +3390,8 @@ The same pass, run the other way round, produced the mirror-image finding and is
                 <(grep -o '^| R-[0-9]*b\?' <file> | sed 's/^| //'  | sort -u)
 
      Empty output = clean. This check found 13 orphaned bodies on 2026-08-16.
+     Write the row AFTER the section exists, never before: the allocator counts an
+     id claimed by an index row, so a pre-written row consumes the id it names.
 
   REQUIRED FIELDS — `**Status:**` IS NOT OPTIONAL. It is the disposition field,
   and it is the only thing that makes a fired `Promote-when` harvestable. Its

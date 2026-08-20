@@ -190,10 +190,16 @@ slash-command access via `/codescout-companion:reconnaissance`.
 
 **How to append (Claude):**
 ```
-edit_markdown("docs/trackers/<topic>-session-log.md",
-  action="insert_before", heading="## Template for new entries",
-  content="## F-N — <title>\n**Observed:** ...\n**Got:** ...")
-# Also append a row to the Index / Wins Index table at the top of the file.
+artifact(action="append_entry", id="<tracker artifact id>", id_prefix="F",
+  anchor_heading="## Template for new entries",
+  title="<one-line title>", body="**Observed:** ...\n\n**Got:** ...")
+# One write: the server allocates the id, writes `## F-N — <title>` (the only
+# heading shape link_scan accepts as a definition), records the high-water mark,
+# and stamps **Valid:** dated <today> unless the body declares a class.
+# THEN add the Index / Wins Index row, using the id the call returned — never
+# before, because a pre-written row consumes the id it names
+# (statement-validity-session-log:F-3). Do not hand-allocate by grepping: a
+# max-id is a fact about an instant, and a peer session can take it first.
 ```
 
 **User — browse:** open `docs/trackers/<topic>-session-log.md`. Index tables at the top

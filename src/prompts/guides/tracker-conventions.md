@@ -241,9 +241,21 @@ letters, a hyphen, digits, and **nothing else**.
   collision-resolution scheme built on `a`/`b` suffixes produces ids the graph
   cannot represent. If two entries share a number, give the later one a **fresh**
   id.
-- **Let the server allocate.** `artifact(action="append_entry", id_prefix="R", …)`
-  assigns the next id atomically. Hand-allocation races: a peer session in the same
-  checkout can take the id between your scan and your write.
+- **Let the server allocate, and let it write the section too.**
+  `artifact(action="append_entry", id_prefix="R", anchor_heading="## Template for
+  new entries", title=…, body=…)` assigns the next id atomically **and** writes
+  `## R-N — <title>` — the only shape that defines a citable token — in the same
+  file write. Passing `anchor_heading` + `title` + `body` together is what selects
+  that path; omit any of the three and the call only reserves the id, leaving the
+  section yours to write and a reserved-but-unwritten id as a live failure mode.
+  This holds for an **augmented** ledger too, as long as it declares no
+  `entry_collection` (its entries being body sections, not params rows).
+  Hand-allocation races: a peer session in the same checkout can take the id
+  between your scan and your write.
+- **Write the index row after, never before.** The allocator counts an id already
+  claimed by an index row, so a row written ahead of its section consumes the
+  number it names — which is why codescout's own `statement-validity-session-log`
+  starts at `F-2`/`W-3`.
 - If you must hand-allocate, scan **every** entry format the file uses, and re-scan
   in the same breath as the write — a max-id is a fact about an instant.
 - **From the MAIN checkout only.** `append_entry` refuses id allocation from a
