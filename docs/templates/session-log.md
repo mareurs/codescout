@@ -6,10 +6,36 @@
 >
 > **How to use:** Copy this file to `docs/trackers/<topic>-session-log.md`
 > in the active project on first reconnaissance pass. Append F-N / W-N
-> entries via `edit_markdown(action="insert_before", heading="## Template
-> for new entries", content=...)`. Add a row to the Index / Wins Index
-> table for each new entry — the indexes are the eval surface, the
-> sections are the evidence.
+> entries with:
+>
+> ```
+> artifact(action="append_entry", id="<artifact id>", id_prefix="F",
+>          anchor_heading="## Template for new entries",
+>          title="<one-line title>", body="**Observed:** ...")
+> ```
+>
+> One call, one write: the server allocates the next id, formats the
+> heading as `## F-N — <title>` (the only shape `link_scan` accepts as a
+> definition), records the ledger's high-water mark, and stamps
+> `**Valid:** dated <today>` unless your body declares a class. **Then**
+> add the Index / Wins Index row, using the id the call returned — the
+> indexes are the eval surface, the sections are the evidence.
+>
+> **Do not hand-allocate ids, and do not pre-write index rows.** A max-id
+> is a fact about an instant, and a peer session in the same checkout can
+> take the number between your scan and your write. Pre-written rows are
+> worse: the allocator counts an id claimed by an index row, so rows
+> written ahead of their sections consume the ids they name — which is why
+> codescout's `statement-validity-session-log` starts at `F-2`/`W-3`
+> rather than `F-1`/`W-1` (see `F-3` there).
+>
+> **`edit_markdown` is not the append path**, though it works at first.
+> This template ships without frontmatter, so a fresh copy is directly
+> editable — but once you declare `entry_prefix` to make the ledger
+> guarded (which `get_guide("tracker-conventions")` tells you to do), the
+> librarian guard refuses direct edits and only `append_entry` writes.
+> Reach for `edit_markdown` for the prose sections and the index tables,
+> never for allocating an entry.
 >
 > **Lifecycle:**
 > - Created at the start of a multi-session work stream.
@@ -111,8 +137,10 @@ Add a new category by writing it as a kebab-case string; no central registry nee
 
 ## F-N entry template
 
-Copy this block when appending a new friction. Allocate the next free
-ID. Add a matching row to the Index table.
+Pass this block as `append_entry`'s `body` (without the `## F-N — <title>`
+line — the server writes the heading from `title`). Add the matching Index
+row afterwards, using the id the call returned. Do not allocate the id
+yourself; see *How to use* above.
 
 ```markdown
 ## F-N — <one-line title>
@@ -145,9 +173,10 @@ instantiates>
 
 ## W-N entry template
 
-Copy this block when appending a new win. A win without a
-**Counterfactual** is marketing — name what would have happened
-without the pattern, with at least one piece of evidence.
+Pass this block as `append_entry`'s `body`, with `id_prefix="W"` — F-N and
+W-N have separate counters. A win without a **Counterfactual** is marketing
+— name what would have happened without the pattern, with at least one
+piece of evidence.
 
 ```markdown
 ## W-N — <one-line title>
@@ -206,8 +235,13 @@ Codified so the Index column means the same thing across sessions.
 
 ## Template for new entries
 
-<!-- Insert new F-N / W-N entries above this line via:
-     edit_markdown(action="insert_before",
-                   heading="## Template for new entries",
-                   content="## F-N — title\n...")
-     Also update the matching Index / Wins Index table row at the top. -->
+<!-- New F-N / W-N entries land above this line. This heading is the anchor:
+
+     artifact(action="append_entry", id="<artifact id>", id_prefix="F",
+              anchor_heading="## Template for new entries",
+              title="<one-line title>", body="**Observed:** ...")
+
+     The server allocates the id, writes `## F-N — <title>` at the ledger's
+     own level, records the high-water mark and stamps `**Valid:** dated
+     <today>` — one write. Then add the Index / Wins Index row with the id
+     it returned. Do not hand-allocate; do not pre-write the row. -->

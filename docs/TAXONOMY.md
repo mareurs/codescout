@@ -197,7 +197,10 @@ Full policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadenc
 Different prefixes use slightly different status enums:
 
 - **F-N statuses** — `open | mitigated | fixed-verified | wontfix-false-alarm | promoted-to-bug-tracker | pinned-as-eval-baseline` (canonical in `docs/templates/session-log.md`).
-- **W-N statuses** — `validated | promoted-to-permanent-docs | archived`.
+- **W-N statuses** — `validated | promotion-due | promoted-to-permanent-docs | archived`.
+  (`promotion-due` means the `Promote-when` criterion has **fired** and the text is not
+  yet on the target surface — an action item, not a resting state. It was missing from
+  this list until 2026-08-20 while `docs/templates/session-log.md` defined it.)
 - **U-N statuses** — `open | fixed-shipped | promoted | wontfix` (informal).
 - **H-N statuses** — `warn | deny | shipped | rejected`.
 - **R-N verdicts** — `hit | miss | proposal | promoted`.
@@ -207,3 +210,35 @@ Different prefixes use slightly different status enums:
 
 When in doubt, mirror the existing entries in that file — consistency beats
 correctness here.
+
+### `**Valid:**` — the one field whose vocabulary is the same everywhere
+
+`**Status:**` says where the *work* stands and varies per prefix. `**Valid:**` says
+whether the *claim* is still true, and takes the same three values in every ledger:
+
+```text
+**Valid:** invariant                   a law; no expiry
+**Valid:** dated 2026-08-20            true of an instant; every measured count
+**Valid:** conditional — <event>       true until that named event fires
+```
+
+There is no fourth, and no exemption: **declaring nothing is not "no claim here"** —
+absence is read as decay. What decides whether an undeclared entry is actually flagged
+is *exposure*, the number of other files citing it, so an uncited entry is left alone
+because nothing rests on it. A section the server writes via
+`artifact(action="append_entry")` is stamped `**Valid:** dated <today>` unless the
+caller passes a class.
+
+Malformed declarations are refused rather than accepted — a bare `conditional` naming
+no event, an unknown class (`conditionally speaking` fails on a word boundary, not a
+prefix), and a calendar-invalid date (`dated 2026-02-30`).
+`librarian(action="doctor")` reports these as `entry_conditional_past_due`,
+`entry_dated_stale`, `entry_cited_from_outside_but_undeclared` and
+`validity_unparseable` — read-only worklists, never verdicts.
+
+Its sibling `**Rests on:**` is one durable sentence naming the route back to the proof —
+an ADR, a decision, a principle, not a `path:line`. Parsed and stored today; no consumer
+reads it yet.
+
+Full treatment: [Statement Validity](manual/src/concepts/statement-validity.md).
+Authoring rules: `get_guide("tracker-conventions")` § Required fields.
