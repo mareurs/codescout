@@ -131,6 +131,49 @@ fn entry_dst_ref(
     }
 }
 
+/// Entry-grain attribution for one already-resolved citation.
+///
+/// Returns the `(src_slug, src_local, dst_ref)` triple that keys an `entry_cite` row, or
+/// `None` when the citation cannot be attributed to an entry — the caller counts those as
+/// `outside_any_entry`, which keeps `attributed + outside_any_entry` a partition of the
+/// resolved citations.
+///
+/// **Both `Edge` and `SelfCite` come through here, and that is the point.** File grain and
+/// entry grain disagree about self-citation, correctly: an artifact citing itself is a
+/// self-loop and no edge, while two entries in one ledger are two nodes, so `**Kin:** R-3`
+/// written inside `## R-41` is a genuine edge. The caller keeps the file-grain half of that
+/// distinction by not inserting a `SelfCite` into `desired`; this function keeps the
+/// entry-grain half by attributing it anyway.
+///
+/// The one case a same-file citation must still be refused is the **true** self-reference:
+/// the citation sits inside the very entry that defines the token, so `src_local ==
+/// dst_local`. Nothing rests on an entry naming itself, and a self-loop at entry grain
+/// would inflate that entry's own indegree.
+fn attribute_entry_edge(
+    sections: &[extract::EntrySection],
+    c: &extract::Citation,
+    src_id: &str,
+    dst_id: &str,
+    id_to_slug: &BTreeMap<String, String>,
+) -> Option<(String, String, String)> {
+    let src_section = extract::entry_section_at(sections, c.line)?;
+    let src_slug = id_to_slug.get(src_id)?;
+    let dst_ref = entry_dst_ref(c, dst_id, id_to_slug)?;
+
+    if src_id == dst_id {
+        match dst_ref.rsplit_once(':') {
+            // Intra-ledger, two different entries: a real edge.
+            Some((_, dst_local)) if dst_local != src_section.id => {}
+            // Either the entry citing itself, or a file-grain self-link
+            // (`ArtifactId` / `RelPathLink`) whose `dst_ref` names no entry at all.
+            // Neither is an edge between two distinct nodes.
+            _ => return None,
+        }
+    }
+
+    Some((src_slug.clone(), src_section.id.clone(), dst_ref))
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let args: Args = serde_json::from_value(args).map_err(|e| {
         RecoverableError::with_hint(
@@ -300,30 +343,35 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     // Entry grain, derived from the SAME resolution — assembly only.
                     // `resolve` already proved the target unique, so nothing here
                     // re-decides what a citation points at.
-                    match extract::entry_section_at(sections, c.line) {
-                        Some(src_section) => match (
-                            id_to_slug.get(&row.id),
-                            entry_dst_ref(c, &dst_id, &id_to_slug),
-                        ) {
-                            (Some(src_slug), Some(dst_ref)) => {
-                                edges_attributed += 1;
-                                desired_entry.insert((
-                                    src_slug.clone(),
-                                    src_section.id.clone(),
-                                    dst_ref,
-                                ));
-                            }
-                            // A slugless endpoint cannot key an entry_cite row
-                            // (`src_slug` FKs `artifact(slug)`). After the Layer 3a
-                            // backfill this is empty, but a row created since and not
-                            // yet minted would land here rather than error.
-                            _ => edges_outside_any_entry += 1,
-                        },
+                    match attribute_entry_edge(sections, c, &row.id, &dst_id, &id_to_slug) {
+                        Some(triple) => {
+                            edges_attributed += 1;
+                            desired_entry.insert(triple);
+                        }
                         None => edges_outside_any_entry += 1,
                     }
                     desired.insert((row.id.clone(), dst_id));
                 }
-                Some(resolve::Outcome::SelfCite) => self_cites += 1,
+                Some(resolve::Outcome::SelfCite { dst_id }) => {
+                    self_cites += 1;
+                    // FILE grain: deliberately no `desired.insert` — an artifact citing
+                    // itself is a self-loop, and excluding it is load-bearing for
+                    // exposure (`doctor::entry_indegree`: an entry's own `## Index` row
+                    // must not inflate its own reach).
+                    //
+                    // ENTRY grain: still possibly an edge. `attribute_entry_edge` keeps
+                    // the intra-ledger case and refuses only the true self-reference.
+                    // Before this split, every `**Kin:**` and `**Chain.**` cross-reference
+                    // a ledger wrote about its own entries was discarded here, unattributed
+                    // and uncounted.
+                    match attribute_entry_edge(sections, c, &row.id, &dst_id, &id_to_slug) {
+                        Some(triple) => {
+                            edges_attributed += 1;
+                            desired_entry.insert(triple);
+                        }
+                        None => edges_outside_any_entry += 1,
+                    }
+                }
                 Some(resolve::Outcome::Ambiguous { candidates, total }) => {
                     ambiguous_total += 1;
                     push_capped(
@@ -702,6 +750,140 @@ mod tests {
             json!(0),
             "W-1's genuine dependency on F-1 records NO entry edge, because a passing \
              mention above it consumed the only citation: {out:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_entry_citing_a_sibling_in_its_own_ledger_records_an_edge() {
+        // The intra-ledger case, which `resolve` classifies `SelfCite` because the CITING
+        // FILE defines the token. That verdict is right at file grain — an artifact citing
+        // itself is a self-loop — and wrong at entry grain, where F-1 and F-2 are two
+        // distinct nodes and `**Kin:**`/`**Chain.**` lines between them are the densest,
+        // most deliberate edges a ledger has.
+        //
+        // Before the split, `SelfCite` short-circuited before `entry_section_at` ran, so
+        // EVERY intra-ledger edge was discarded, unattributed and uncounted. The whole
+        // 4389-test suite was green in that state.
+        // docs/issues/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let p = tmp.path().join("ledger.md");
+        std::fs::write(
+            &p,
+            "## F-1 — the sibling that is cited\n\
+             \n\
+             body\n\
+             \n\
+             ## F-2 — the entry that rests on it\n\
+             \n\
+             this rests on F-1\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "led", &p, "ledger");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+        let e = &out["counts"]["entry_edges"];
+
+        assert_eq!(
+            out["counts"]["self_cites"],
+            json!(1),
+            "the file-grain verdict is unchanged — this IS a self-cite at file grain: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["edges_desired"],
+            json!(0),
+            "and it must still create NO file-grain edge; a `cites` row to itself is a \
+             self-loop, and excluding it is load-bearing for `entry_indegree` exposure: \
+             {out:#?}"
+        );
+        assert_eq!(
+            e["attributed"],
+            json!(1),
+            "but at ENTRY grain the citation sits inside F-2 and names F-1: {out:#?}"
+        );
+        assert_eq!(
+            e["outside_any_entry"],
+            json!(0),
+            "nothing was dropped as unattributable: {out:#?}"
+        );
+        assert_eq!(
+            e["derived"],
+            json!(1),
+            "F-2 → F-1 is one entry edge: {out:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_entry_naming_itself_records_no_edge() {
+        // The one same-file case that must STILL be refused. `attribute_entry_edge` keeps
+        // the intra-ledger edge only when the citing entry differs from the defining one;
+        // an entry naming itself is a self-loop at entry grain too, and counting it would
+        // let an entry inflate its own indegree — the exact failure `entry_indegree`'s
+        // same-file exclusion exists to prevent, reintroduced one level down.
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let p = tmp.path().join("ledger.md");
+        std::fs::write(
+            &p,
+            "## F-1 — an entry that names itself\n\
+             \n\
+             this entry, F-1, is about itself\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "led", &p, "ledger");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+        let e = &out["counts"]["entry_edges"];
+
+        assert_eq!(
+            out["counts"]["citations"],
+            json!(1),
+            "the body mention is a citation; the heading defines and does not self-cite: \
+             {out:#?}"
+        );
+        assert_eq!(
+            e["derived"],
+            json!(0),
+            "F-1 → F-1 is not an edge between two nodes: {out:#?}"
+        );
+        assert_eq!(
+            e["attributed"],
+            json!(0),
+            "and it is not counted as attributed either: {out:#?}"
+        );
+        assert_eq!(
+            e["outside_any_entry"],
+            json!(1),
+            "refused citations stay in the partition, so attributed + outside_any_entry \
+             still totals the resolved citations: {out:#?}"
         );
     }
 

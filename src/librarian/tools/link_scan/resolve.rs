@@ -194,7 +194,19 @@ pub enum Outcome {
     Edge {
         dst_id: String,
     },
-    SelfCite,
+    /// The citation's target is the CITING artifact itself.
+    ///
+    /// Carries `dst_id` — which is `src_id` — because self-citation is a file-grain
+    /// verdict serving two consumers with different grains. At file grain it is not an
+    /// edge: a `cites` row from an artifact to itself is a self-loop. At ENTRY grain two
+    /// entries in one ledger are two distinct nodes, so `**Kin:** R-3` written inside
+    /// `## R-41` is a real edge, and the caller needs the target to build it. Without the
+    /// payload the entry layer cannot recover what the file layer already resolved, and
+    /// every intra-ledger edge is lost before attribution runs
+    /// (`docs/issues/2026-08-21-selfcite-is-file-grain-so-intra-ledger-entry-edges-never-materialize.md`).
+    SelfCite {
+        dst_id: String,
+    },
     Ambiguous {
         candidates: Vec<String>,
         total: usize,
@@ -242,7 +254,9 @@ pub fn resolve(
             match candidates.as_slice() {
                 [only] => {
                     if only.as_str() == src_id {
-                        return Some(Outcome::SelfCite);
+                        return Some(Outcome::SelfCite {
+                            dst_id: only.clone(),
+                        });
                     }
                     if index.definers(token).iter().any(|d| &d.artifact_id == only) {
                         Some(Outcome::Edge {
@@ -265,7 +279,9 @@ pub fn resolve(
         }
         CitationKind::ArtifactId => {
             if citation.raw == src_id {
-                Some(Outcome::SelfCite)
+                Some(Outcome::SelfCite {
+                    dst_id: src_id.to_string(),
+                })
             } else if corpus.ids.contains(&citation.raw) {
                 Some(Outcome::Edge {
                     dst_id: citation.raw.clone(),
@@ -281,7 +297,7 @@ pub fn resolve(
             for candidate in normalize_link_target(src_rel_dir, &citation.raw) {
                 if let Some(id) = corpus.by_rel_path.get(&candidate) {
                     return Some(if id == src_id {
-                        Outcome::SelfCite
+                        Outcome::SelfCite { dst_id: id.clone() }
                     } else {
                         Outcome::Edge { dst_id: id.clone() }
                     });
@@ -292,7 +308,13 @@ pub fn resolve(
         CitationKind::EntryToken => {
             let definers = index.definers(&citation.raw);
             if definers.iter().any(|d| d.artifact_id == src_id) {
-                return Some(Outcome::SelfCite);
+                // The local definition wins when a token is defined here AND elsewhere:
+                // an entry citing a sibling in its own ledger means the sibling it can
+                // see. `dst_id` is therefore this artifact, and the entry layer narrows
+                // it to the specific entry.
+                return Some(Outcome::SelfCite {
+                    dst_id: src_id.to_string(),
+                });
             }
             match definers.len() {
                 0 => {
@@ -398,7 +420,14 @@ mod tests {
             &idx,
             &corpus,
         );
-        assert_eq!(got, Some(Outcome::SelfCite));
+        // The local definer wins, and the payload names it — `art-a`, not `art-b`.
+        // The entry layer needs that to build an intra-ledger edge.
+        assert_eq!(
+            got,
+            Some(Outcome::SelfCite {
+                dst_id: "art-a".into()
+            })
+        );
     }
 
     #[test]
@@ -712,7 +741,9 @@ mod tests {
                 &idx,
                 &corpus
             ),
-            Some(Outcome::SelfCite)
+            Some(Outcome::SelfCite {
+                dst_id: "59ebeebb6ed05c89".into()
+            })
         );
         // Stale id (v6-migration cost detector): always reported.
         assert_eq!(
@@ -921,7 +952,9 @@ mod tests {
                 &idx,
                 &corpus
             ),
-            Some(Outcome::SelfCite)
+            Some(Outcome::SelfCite {
+                dst_id: "bugfix-id".into()
+            })
         );
     }
 
