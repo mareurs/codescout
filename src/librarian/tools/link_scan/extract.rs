@@ -22,6 +22,93 @@ pub struct Definition {
     pub line: u32,
 }
 
+/// One entry's section: its defining heading plus every line up to (not including)
+/// the next heading of the SAME OR HIGHER level.
+///
+/// **Why the level bound and not "the next definition".** Measured 2026-08-20 over 12
+/// ledgers: attributing a citation to the nearest preceding definition, without the
+/// bound, is wrong on 12.1% of attributed citations — and the error is one mechanism,
+/// the LAST entry in a file absorbing every citation in the trailing `## Summary` /
+/// `## Template` sections. Four ledgers carried 109 of 123 errors. See
+/// `docs/superpowers/specs/2026-08-20-entry-validity-and-attestation-design.md`
+/// § Layer 3 → Attribution, and `scripts/probe_entry_attribution.py`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntrySection {
+    pub id: String,
+    pub level: usize,
+    /// 1-indexed line of the defining heading.
+    pub heading_line: u32,
+    /// 1-indexed last line of the section, inclusive.
+    pub end_line: u32,
+    /// The section's text, heading line included.
+    pub text: String,
+}
+
+/// Split a body into entry sections, sharing `def_re` and the fence/frontmatter
+/// skipping with [`extract`] so the two can never disagree about what a definition is.
+///
+/// `def_re()` captures only the entry token itself (group 1) — there is no separate
+/// hash-run group in the pattern — so the heading level is taken from the literal `#`
+/// run counted on each raw line, and `def_re` is matched against the text AFTER that
+/// run (the same substring `extract()` sees as the heading's inline text, since the
+/// markdown parser there strips the `#` prefix before handing text events over).
+pub fn entry_sections(text: &str) -> Vec<EntrySection> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    // (level, 1-indexed line) for EVERY heading, entry or not — the bound is about
+    // headings in general, which is exactly what the naive rule ignored.
+    let mut headings: Vec<(usize, u32)> = Vec::new();
+    let mut defs: Vec<(String, usize, u32)> = Vec::new();
+    let mut fenced = false;
+    let mut in_frontmatter = false;
+    for (idx, raw) in lines.iter().enumerate() {
+        let lineno = (idx + 1) as u32;
+        let s = raw.trim();
+        if lineno == 1 && s == "---" {
+            in_frontmatter = true;
+            continue;
+        }
+        if in_frontmatter {
+            if s == "---" {
+                in_frontmatter = false;
+            }
+            continue;
+        }
+        if s.starts_with("```") || s.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        let hashes = raw.len() - raw.trim_start_matches('#').len();
+        let is_heading = (1..=6).contains(&hashes) && raw.as_bytes().get(hashes) == Some(&b' ');
+        if is_heading {
+            headings.push((hashes, lineno));
+            if let Some(c) = def_re().captures(&raw[hashes..]) {
+                defs.push((c[1].to_string(), hashes, lineno));
+            }
+        }
+    }
+    let last = lines.len() as u32;
+    defs.into_iter()
+        .map(|(id, level, heading_line)| {
+            let end_line = headings
+                .iter()
+                .find(|(hl, hln)| *hln > heading_line && *hl <= level)
+                .map(|(_, hln)| hln - 1)
+                .unwrap_or(last);
+            let text = lines[(heading_line as usize - 1)..(end_line as usize)].join("\n");
+            EntrySection {
+                id,
+                level,
+                heading_line,
+                end_line,
+                text,
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CitationKind {
     EntryToken,
@@ -575,5 +662,54 @@ mod tests {
             .find(|c| c.raw == "F-9")
             .expect("F-9 cited");
         assert_eq!(f9.line, 5);
+    }
+
+    #[test]
+    fn entry_section_ends_at_next_same_or_higher_heading() {
+        let md = "\
+## R-1 — first
+alpha
+### a subheading inside R-1
+beta
+## R-2 — second
+gamma
+## Template for new entries
+delta
+";
+        let s = entry_sections(md);
+        assert_eq!(s.len(), 2, "two entries defined");
+        assert_eq!(s[0].id, "R-1");
+        assert_eq!(s[0].heading_line, 1);
+        assert_eq!(
+            s[0].end_line, 4,
+            "the ### subheading is INSIDE R-1; the section ends before ## R-2"
+        );
+        assert!(s[0].text.contains("a subheading inside R-1"));
+        assert_eq!(s[1].id, "R-2");
+        assert_eq!(
+            s[1].end_line, 6,
+            "R-2 ends before `## Template`, a same-level non-entry heading — \
+                 the last entry must NOT absorb the trailing sections"
+        );
+        assert!(!s[1].text.contains("delta"));
+    }
+
+    #[test]
+    fn entry_sections_skip_fences_and_frontmatter() {
+        let md = "\
+---
+kind: tracker
+entry_prefix: R
+---
+## R-1 — real
+body
+```
+## R-99 — inside a fence, defines nothing
+```
+tail
+";
+        let s = entry_sections(md);
+        assert_eq!(s.len(), 1, "the fenced heading defines nothing");
+        assert_eq!(s[0].id, "R-1");
     }
 }
