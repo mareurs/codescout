@@ -1716,6 +1716,17 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<std::collections::
 /// inflate its own exposure, which is a self-reference wearing exposure's clothes.
 /// `link_scan` already classifies these `SelfCite`.
 ///
+/// **A token with more than one definer contributes NO exposure at all** — its key is
+/// dropped from the returned map entirely, not merely zeroed. See the `retain` call at
+/// the bottom of this function for the full measured reasoning (F-1/W-1/F-2 definer
+/// counts, and the named CrossRepoToken follow-on that would restore this population's
+/// exposure without pooling). Ruling 2026-08-20.
+///
+/// **Citations from archived or superseded artifacts do not count toward exposure.**
+/// The DEFINING side is untouched — an archived file still defines its token — only the
+/// CITING side is filtered, same idiom as `DefinitionIndex::build`'s `active` flag in
+/// `link_scan/resolve.rs`. Ruling 2026-08-20.
+///
 /// **Both citation shapes count.** A bare `PV-12` extracts as `EntryToken`; a
 /// qualified `provenance-subsystem:PV-12` extracts as `CrossRepoToken`, because a
 /// file-stem qualifier and a repo qualifier are one syntactic shape extraction cannot
@@ -1735,28 +1746,39 @@ fn entry_indegree(
 ) -> Result<std::collections::BTreeMap<String, usize>> {
     use crate::librarian::tools::link_scan::extract::{entry_sections, extract, CitationKind};
 
-    let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
-    let paths: Vec<String> = stmt
-        .query_map([], |r| r.get(0))?
+    let mut stmt = conn.prepare("SELECT abs_path, status FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
     // Which paths DEFINE which tokens, gathered up front so a same-file citation can
     // be excluded before it is counted rather than filtered back out after the fact.
+    // Built from EVERY row regardless of status — the archived/superseded filter below
+    // touches only the CITING side; an archived definer still defines.
     let mut definer: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
         Default::default();
-    let mut bodies: Vec<(String, String)> = Vec::new();
-    for path in paths {
+    // (path, text, citable) — `citable` is false for archived/superseded rows, so a
+    // citation FROM one of them is gathered here but never counted below.
+    let mut bodies: Vec<(String, String, bool)> = Vec::new();
+    for (path, status) in rows {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
         for s in entry_sections(&text) {
             definer.entry(s.id).or_default().insert(path.clone());
         }
-        bodies.push((path, text));
+        // Same idiom as `DefinitionIndex::build`'s `active` flag
+        // (`link_scan/resolve.rs`): archived and superseded material is a historical
+        // snapshot, not part of "how much rests on this claim now".
+        let citable = !matches!(status.as_str(), "archived" | "superseded");
+        bodies.push((path, text, citable));
     }
 
     let mut deg: std::collections::BTreeMap<String, usize> = Default::default();
-    for (path, text) in &bodies {
+    for (path, text, citable) in &bodies {
+        if !citable {
+            continue; // archived/superseded citers do not add exposure
+        }
         for c in extract(text).citations {
             let token = match c.kind {
                 CitationKind::EntryToken => c.raw,
@@ -1772,18 +1794,35 @@ fn entry_indegree(
             *deg.entry(token).or_insert(0) += 1;
         }
     }
+
+    // A token with more than one definer contributes NO exposure. Measured 2026-08-20:
+    // `F-1` alone is defined in 113 separate sections (98 for `W-1`, 90 for `F-2`)
+    // because `F-N`/`W-N` are namespaced per work stream — each session log owns its own
+    // counter, and `F-1..F-5` are defined in all eight live logs (per
+    // `get_guide("tracker-conventions")`). Pooling their citations under one key is
+    // guessing which log a bare `F-1` means, at scale — 1611 of 1801 gate-clearing
+    // sections were clearing it on exposure earned by an UNRELATED ledger's citations,
+    // not their own. `link_scan::resolve::resolve` already refuses this guess for the
+    // identical shape: a bare `EntryToken` with >1 definer resolves to `Ambiguous`, never
+    // to a pooled edge. Retaining a multi-definer token here would make `entry_indegree`
+    // more confident than the resolver that owns the same ambiguity.
+    //
+    // Zero-definer tokens are NOT dropped by this filter (`.is_none_or` keeps them):
+    // that population is `scan_undefined_entries`'s question, not this one's, and
+    // dropping them here would silently reclassify an undefined-but-cited token as a
+    // definer collision instead.
+    //
+    // Named follow-on, not built here: a file-stem-qualified citation
+    // (`bug-fix-session-log:F-33`) already resolves to ONE specific definer via
+    // `corpus.by_stem` in `link_scan::resolve::resolve`'s `CrossRepoToken` arm. Counting
+    // those against their specific definer — rather than folding the qualifier into the
+    // bare token the way this function currently does — would restore real exposure for
+    // the F/W population without pooling. Not attempted here: it needs the `Corpus`/
+    // `by_stem` machinery `link_scan` builds, which this function does not have.
+    deg.retain(|token, _| definer.get(token).is_none_or(|d| d.len() <= 1));
+
     Ok(deg)
 }
-
-/// Days after which a declared `conditional` is worth re-reading.
-///
-/// Deliberately NOT `FRESHNESS_HORIZON_DEFAULT`: that is a commit-distance gate of 50
-/// whose own doc comment says every call site passes `topo_distance_from_head: None`,
-/// so it has never been exercised. 30 days is a guess — the verify-open cadence in
-/// `CLAUDE.md` uses 14 days for `Status: open`, and a decay horizon should run looser
-/// than a triage one. Re-tune from the first month's output.
-#[allow(dead_code)] // consumed by the dated-past-due check (Task 6), not yet shipped
-const VALIDITY_HORIZON_DAYS: i64 = 30;
 
 /// Cross-file citations below which a Statement is not worth anyone's attention.
 ///
@@ -1796,10 +1835,18 @@ const EXPOSURE_THRESHOLD: usize = 5;
 /// Truncate an entry section's text at the first NESTED entry definition inside it.
 ///
 /// `entry_sections` bounds a section at the next heading of the same-or-higher level,
-/// so a deeper child's definition sits WHOLLY inside its parent's section text — real
-/// in this corpus, not hypothetical: `docs/trackers/provenance-subsystem.md` defines
-/// both `### PV-2` and `#### PV-8` / `#### PV-25`, so `PV-2`'s raw section text
-/// contains both children's full bodies.
+/// so a deeper child's definition CAN sit wholly inside its parent's section text.
+/// Measured 2026-08-20 against every entry in `docs/**/*.md`: 3 of 1101 sections
+/// actually contain a nested entry definition —
+/// `docs/superpowers/specs/2026-06-26-c1-output-buffer-dedup-design.md:C-1`,
+/// `docs/trackers/prompt-hamsa-audit-log.md:A-28`, and `:A-29`. (An earlier draft of
+/// this comment named `docs/trackers/provenance-subsystem.md`'s `PV-2`/`PV-8` as a
+/// fourth case; that was wrong — an intervening same-level, non-entry heading
+/// (`### Defining sections for cited entries` at line 1019) bounds `PV-2`'s section at
+/// line 1018, before `PV-8` (line 1038) even starts, so `PV-8` never nests under `PV-2`
+/// at all. Corrected after review rather than left standing: a false example asserted
+/// as measured fact in the surface the next reader trusts is exactly the defect this
+/// feature exists to detect.)
 ///
 /// Parsing a `**Valid:**` declaration straight out of an untruncated parent would let
 /// `parse_validity`'s first-wins rule read the CHILD's declaration as the PARENT's,
@@ -6464,6 +6511,105 @@ root = "work/elsewhere/ghost"
                 .unwrap()
                 .is_empty(),
             "a malformed declaration is `validity_unparseable`'s finding, not this check's"
+        );
+    }
+
+    #[test]
+    fn indegree_omits_a_token_with_more_than_one_definer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let a = tmp.path().join("a.md");
+        let b = tmp.path().join("b.md");
+        let c = tmp.path().join("c.md");
+        // F-1 is defined in BOTH a.md and b.md — two unrelated per-work-stream session
+        // logs reusing the same low number, exactly the F-N/W-N collision Ruling 14
+        // exists for. c.md cites it from outside either.
+        seed_ledger(
+            &cat,
+            "a",
+            &a,
+            "## F-1 — stream A's first finding\n\nprose\n",
+        );
+        seed_ledger(
+            &cat,
+            "b",
+            &b,
+            "## F-1 — stream B's first finding\n\nprose\n",
+        );
+        seed_ledger(&cat, "c", &c, "cites F-1 from a third file\n");
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get("F-1"),
+            None,
+            "a token with 2 definers must contribute NO exposure — its key must be absent \
+         entirely, not merely zero: {deg:?}"
+        );
+    }
+
+    #[test]
+    fn indegree_excludes_archived_citers_but_still_allows_an_archived_definer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let a = tmp.path().join("a.md");
+        let b = tmp.path().join("b.md");
+        let c = tmp.path().join("c.md");
+
+        // The definer itself is archived. Ruling 15 leaves the defining side alone: an
+        // archived file still defines its token.
+        std::fs::write(&a, "## R-1 — the law\n\nprose\n").unwrap();
+        let row_a = TestArtifactRowBuilder::new("a")
+            .with_abs_path(&a)
+            .with_status("archived")
+            .build();
+        art_upsert(&cat, &row_a).unwrap();
+
+        // An active citer — must count.
+        seed_ledger(&cat, "b", &b, "see R-1\n");
+
+        // An archived citer — must NOT count.
+        std::fs::write(&c, "also see R-1\n").unwrap();
+        let row_c = TestArtifactRowBuilder::new("c")
+            .with_abs_path(&c)
+            .with_status("archived")
+            .build();
+        art_upsert(&cat, &row_c).unwrap();
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get("R-1").copied(),
+            Some(1),
+            "only b.md's active citation may count — a.md is still R-1's definer despite \
+         being archived, and c.md's archived citation must not add exposure: {deg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_wires_a_live_entry_indegree_into_scan_conditional_past_due() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let led = tmp.path().join("led.md");
+        seed_ledger(
+            &cat,
+            "led",
+            &led,
+            "## R-1 — exposed\n\n**Valid:** conditional — until the plan edit lands\n",
+        );
+        // EXPOSURE_THRESHOLD distinct citing files, each a unique definer-free citer, so
+        // entry_indegree's real, computed-from-disk value clears the gate.
+        for i in 0..EXPOSURE_THRESHOLD {
+            let p = tmp.path().join(format!("citer-{i}.md"));
+            seed_ledger(&cat, &format!("citer-{i}"), &p, "see R-1\n");
+        }
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["summary"]["by_check"]["entry_conditional_past_due"],
+            json!(1),
+            "call() must wire a REAL entry_indegree into scan_conditional_past_due, not an \
+         empty/placeholder map: {out:#?}"
         );
     }
 }
