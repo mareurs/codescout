@@ -12,8 +12,8 @@ topic: statement validity layers 1-2 — doctor checks, subagent review discipli
 entry_prefix:
 - F
 - W
-entry_high_water_W: 4
-entry_high_water_F: 3
+entry_high_water_W: 5
+entry_high_water_F: 4
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -36,12 +36,14 @@ entry_high_water_F: 3
 |----|------|---------:|----------|--------|-------|
 | F-2 | 2026-08-20 | med | subagent | open | A locally-true claim, restated one layer up, becomes false |
 | F-3 | 2026-08-20 | low | codescout-tool | fixed-verified | Pre-writing index rows in a new ledger consumes the ids they name |
+| F-4 | 2026-08-20 | med | architectural | promoted-to-bug-tracker | Gated doc surfaces were kept current; the routing that serves them was never checked |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-3 | 2026-08-20 | high | Apply mutations, never reason about them | Nine regression-guard holes ship, each one refactor from vanishing, with a green suite | promoted-to-permanent-docs |
 | W-4 | 2026-08-20 | high | Require every implementer to report where the brief was wrong | A brief's bad advice loosens a date parser while appearing to tighten it | validated |
+| W-5 | 2026-08-20 | med | Audit the surfaces that SERVE a concept, not the docs that describe it | Four checks ship saying "add one" without saying what one is, and the likeliest guesses are the shapes the parser refuses | validated |
 
 > Ids start at `F-2` / `W-3`, not `F-1` / `W-1`: the index rows were pre-filled before the
 > sections existed and the allocator counted them as claimed. See `F-3`.
@@ -66,6 +68,13 @@ recalled; and after the promotion, re-verified by predicate rather than by recal
 - **F-2** — fix idea is bound for the same surface as `W-4`; not yet a promotion.
 - **F-3** — resolved in place; the open question is only whether
   `docs/templates/session-log.md` should carry the warning.
+- **W-5** — *UNFIRED.* One datapoint. Promote at a second post-ship audit that finds a
+  runtime-surface gap the doc surfaces hid; target is `CLAUDE.md` § Prompt Surface
+  Consistency, which today names three surfaces and gates them only for tool-name drift.
+- **F-4** — not a promotion; filed as a bug
+  (`docs/issues/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`).
+  Its consequence is mitigated — the four checks now carry their own remediation text — but
+  the routing defect itself is open.
 ## Category conventions
 
 | Category | When to use |
@@ -395,6 +404,118 @@ state, and a row that names an id is a claim on it even though it defines nothin
 placeholder rows (`| F-1 | YYYY-MM-DD | … |`) are precisely the trap, since anyone copying the
 template and filling them in first hits this. TBD whether to fix the template or leave the
 lesson here.
+
+---
+
+## F-4 — Gated doc surfaces were kept current; the routing that serves them was never checked
+
+**Observed:** 2026-08-20, post-cohort prompt-surface audit of `ced75046..f1d862ae`
+(statement-validity layers 1–2).
+
+**When:** Asking, after the cohort shipped, whether an agent would actually encounter
+`**Valid:**` at the moment it needed it — as opposed to whether the concept is documented.
+
+**Expected:** Covered. The cohort updated `src/prompts/guides/tracker-conventions.md`
+(7 mentions of the cohort's identifiers) and `docs/templates/session-log.md` (4), so the
+authoring path was believed served.
+
+**Got:** Half true, and the false half is the half that matters. Coverage is genuine for
+`artifact`-mediated writes: `tracker-conventions` is auto-injected whenever
+`names_tracker_path` matches (`src/librarian/adapter.rs:182-205`) and is **not** in
+`PULL_ONLY_GUIDE_TOPICS` (`src/prompts/mod.rs:391`) — so it is not the reader-initiated
+surface it appears to be. But `librarian(action="doctor")` — the one call that *produces*
+entry-validity worklists — never matches. `names_tracker_path`
+(`src/librarian/adapter.rs:276-292`) reads only `abs_path`/`rel_path`, at the top level or
+one level into an `items` array; the doctor payload keys its rows under `violations`
+(`src/librarian/tools/doctor.rs:466`) and names the field `path`
+(`src/librarian/tools/doctor.rs:135`). So the agent holding 30
+`entry_cited_from_outside_but_undeclared` rows is handed `get_guide("librarian")`, which
+mentions the concept **zero** times, and never sees the guide that mentions it seven.
+
+**Probable cause:** The cohort answered "is the concept documented?" when the operative
+question is "does the surface that serves it fire on the call that needs it?" Nothing
+gates guide-routing against a new check family, and the routing predicate is keyed on a
+response *shape* that the new check family does not have.
+
+**Workaround:** Call `get_guide("tracker-conventions")` explicitly after any doctor run
+reporting `entry_*` / `validity_unparseable` rows. Independently, the four checks' `detail`
+strings now carry their own remediation text (see the W-N entry below), so a mis-routed
+agent can still fix the row from the report alone — that mitigates the consequence, not
+this defect.
+
+**Severity:** med — every entry-validity triage session gets the wrong guide, silently. No
+error, no missing output; just a worklist the reader has not been taught to act on.
+
+**Status:** promoted-to-bug-tracker
+
+**Valid:** conditional — until `names_tracker_path` routes doctor responses to `tracker-conventions`
+
+**Rests on:** A teaching surface is only as good as its trigger — coverage is a property of
+the routing, not of the text.
+
+**Fix idea / Pointer:**
+`docs/issues/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
+
+---
+
+## W-5 — Auditing what SERVES a concept found the fix text already written and discarded
+
+**Observed:** 2026-08-20, post-cohort prompt-surface audit of the statement-validity
+cohort (`ced75046..f1d862ae`), run as a separate pass after the cohort's own docs commit
+`f1d862ae` had already fixed the mdBook gap.
+
+**Pattern:** After a cohort ships a new concept, audit the surfaces that serve it **at
+runtime** — tool descriptions, guide-routing triggers, and the tool's own output strings —
+as a pass distinct from the docs that *describe* it. Rank findings by delivery, not by
+prose quality: always-on outranks gated-but-automatic, which outranks reader-initiated.
+
+**Counterfactual:** `parse_validity` builds a `RecoverableError` carrying **both** a
+`message` (what is wrong) and a `hint` (how to fix it), and every one of its three error
+arms populates that hint with `FORMS` — the three valid declarations
+(`src/librarian/statements.rs:27`, `:127`, `:149`, `:161`). `scan_validity_unparseable`
+interpolated `err.message` alone (`src/librarian/tools/doctor.rs:2416`). The remediation
+text was written, correct, and one struct field away from the report — for the entire
+cohort. `scan_cited_but_undeclared` had the matching gap: its detail ended `— add one`,
+with no statement of what "one" is.
+
+Without this audit both ship as-is, and the failure is worse than silence: an agent told to
+"add one" guesses, and two of the three natural guesses — a bare `conditional`, or free
+text — are **exactly** the shapes `parse_validity` refuses. The check would have converted
+its own `entry_cited_from_outside_but_undeclared` row into a `validity_unparseable` row,
+i.e. generated its own follow-on work. The concept's mdBook page
+(`docs/manual/src/concepts/statement-validity.md`, 171 lines, and genuinely good) would not
+have prevented any of it: it is served to no agent.
+
+**Confirming data points:**
+1. The discarded `err.hint`, above — fixed this session. Both mutations applied and
+   *observed*: reverting each detail string turns its own test red naming the exact
+   pre-fix output; restored, 4368 pass. (The mutation-apply discipline is [[W-3]]'s;
+   this is a further datapoint for it.)
+2. F-4 (this log) — the guide that teaches the concept is never routed to the call that
+   produces the rows. Same shape as the finding above: text current, delivery unchecked.
+3. `tools/list` measured at 56,266 / 56,266 characters — **zero** headroom — so the
+   always-on surface cannot absorb the concept without funding a trim elsewhere. A
+   docs-only audit surfaces neither the constraint nor the fact that `librarian`'s
+   `doctor` blurb still enumerates seven old checks and none of the four new ones.
+
+**Impact:** med — one shipped defect caught in the surface with the highest leverage per
+byte, plus a standing constraint (zero `tools/list` headroom) that any future coverage fix
+must respect.
+
+**Promote-when:** A second cohort's post-ship audit finds a runtime-surface gap that the
+doc surfaces hid. At 2 datapoints, promote to `CLAUDE.md` § Prompt Surface Consistency as:
+*a concept is covered when the surface that SERVES it fires on the call that needs it —
+check tool descriptions, guide-routing triggers, and tool output strings, not only the
+guides.*
+
+**Status:** validated
+
+**Valid:** dated 2026-08-20
+
+**Rests on:** The distinction between a surface that *describes* a concept and one that
+*serves* it at the moment of use. `CLAUDE.md` § Prompt Surface Consistency names three
+surfaces and gates them for tool-name drift; none of the three is what an agent reads
+while triaging a worklist, and no gate could have caught a missing concept.
 
 ---
 

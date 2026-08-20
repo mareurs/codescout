@@ -154,7 +154,11 @@ Not yet implemented. Two options, in preference order:
 
 Partially mitigated already: the four checks' `detail` strings now carry their
 own remediation text, so a mis-routed agent can still fix the row from the
-report alone. That is a mitigation of the *consequence*, not of this defect.
+report alone. That is a mitigation of the *consequence*, not of this defect —
+the routing is unchanged and `status` stays `open`.
+
+- Mitigation SHA (`experiments`): `ada22c94`
+- Mitigation patch-id: `dad17f3f1c43176bc0fe94dcc532f83ad6c9dcb9`
 
 ## Tests added
 
