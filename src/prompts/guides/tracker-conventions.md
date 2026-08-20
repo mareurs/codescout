@@ -370,13 +370,21 @@ that no heading defines.
 - Give the tracker a `params_schema` with `required` and `enum` where the shape has
   settled. A schema is what stops each author inventing their own entry shape.
 - **`**Valid:**` declares a decay class.** Declaring one is what makes an entry a
-  *Statement* — a claim that can be true or false and owes a proof; an entry that
-  declares none (a backlog item, a proposal) is not, and owes nothing. Three forms,
-  no fourth: `invariant` (a law), `dated YYYY-MM-DD` (true of an instant),
-  `conditional — <event>` (true until that fires). A bare `conditional` with no
-  event, or any other value, is refused — `conditionally speaking` does not parse
-  as the class it starts with, on a word-boundary check. The first declaration in a
-  section wins if there is more than one.
+  *Statement* — a claim that can be true or false and owes a proof. Declaring NONE
+  is **not** an exemption — absence means decay, so an undeclared entry already
+  means `dated <its last commit>` by default. What actually decides whether an
+  undeclared entry gets flagged today is exposure:
+  `entry_cited_from_outside_but_undeclared` only fires above the citation
+  threshold, so an uncited entry is left alone because nothing rests on it. A
+  section the server writes is stamped `**Valid:** dated <today>` unless the
+  caller passes a class. Three forms, no fourth: `invariant` (a law), `dated
+  YYYY-MM-DD` (true of an instant), `conditional — <event>` (true until that
+  fires). A bare `conditional` with no event, an unknown value, or a
+  calendar-invalid date (`dated 2026-02-30`) is refused — `conditionally
+  speaking` does not parse as the class it starts with, on a word-boundary
+  check — and caught by `librarian(action="doctor")`'s `validity_unparseable`
+  check if one already landed. The first declaration in a section wins if there
+  is more than one.
 - **`**Rests on:**` is the durable route back to the proof.** Code rots and
   `path:line` rots with it; an ADR, a decision, or a principle does not. Three of
   codescout's seven ADRs already converge on this shape by practice — `Decision` is
