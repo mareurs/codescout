@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 106
+entry_high_water_R: 107
 entry_prefix: R
 ---
 
@@ -3338,6 +3338,61 @@ The same pass, run the other way round, produced the mirror-image finding and is
 **Kin:** R-91, R-100 (self-caught refutation before filing), and law A.
 
 ---
+
+## R-107 — HIT — a spec's account of an existing table is a claim, and the constraint layer is where it is least likely to have been read
+
+**Verdict:** hit.
+
+**When:** 2026-08-21, before modifying `link_scan::call` (220 lines) to materialize
+entry-grain citations into `entry_cite`, per a spec that described the table's
+prune-and-re-materialize behaviour as something already supported.
+
+**What the scout read that the spec did not:** the live `sqlite_master` DDL and the whole
+of `entry_cite.rs`. Two gaps, both invisible from the spec and neither capable of raising
+an error:
+
+1. **No delete path existed.** The module had `insert_with`, `outgoing`, `incoming`,
+   `incoming_like` and a private `collect`. "Pruned and re-materialized per scan" was
+   machinery to build, not to call.
+2. **`origin` is not in the primary key** — `PRIMARY KEY (src_slug, src_local, dst_ref,
+   rel)`, with `origin` merely a column. Paired with `insert_with`'s `INSERT OR IGNORE`,
+   an edge the scan derives that a human already wrote is silently dropped and keeps
+   `origin='write'`. Correct precedence, but it makes *edges derived* and *rows written*
+   different numbers that look identical from the call site.
+
+**Why the spec missed it:** it was written against the table's **shape** (the `origin`
+column exists, reserved for exactly this) without reading the key beside it. The
+`INSERT OR IGNORE` semantics live in a doc comment on the function; the PK lives in the
+schema. Neither half reveals the interaction, and the spec's author had read one.
+
+**Downstream confirmation:** three mutations on the shipped code — delete the origin
+filter, delete the `src_slug` scope, hardcode `insert_with` to `Ok(1)` — were all CAUGHT
+by tests that only exist because the scout found the gaps. The third is defect 2 written
+out literally.
+
+**The generalisable form.** Reconnaissance already treats a *proposed fix* and a
+*prohibition* as claims about current state. A **spec's description of existing
+machinery** is the same kind of claim, and it has a characteristic blind spot: authors
+read the table's columns and the function's signature, both of which are visible from a
+symbol listing, and skip the PK, the unique indexes, the FK actions and the conflict
+clause — which are visible only in the DDL or buried in a doc comment. Read the DDL.
+
+**Proposal:** fold into Phase 1's seam-class list, next to the schema-migration-ordering
+bullet, as: *a spec that says "the existing table already supports X" is a claim about the
+constraint layer — read the DDL (`sqlite_master`, the migration, the `CREATE`), not just
+the struct and the function signatures. Conflict clauses (`INSERT OR IGNORE`), PK column
+sets, and FK actions decide behaviour that neither the row type nor the call site shows.*
+
+**Evidence:** `statement-validity-session-log:F-5` (the scout), `W-6` (the counterfactual),
+commit `7468902b` (the code the scout produced).
+
+**Status:** open — proposal not yet synced to SKILL.md.
+
+**Valid:** dated 2026-08-21
+
+**Rests on:** the reconnaissance skill's own principle that a claim about configuration
+reads as a fact rather than an assertion, and so slips past the reflex that would question
+a causal claim.
 
 ## Template for new entries
 

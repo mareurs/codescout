@@ -12,8 +12,8 @@ topic: statement validity layers 1-2 — doctor checks, subagent review discipli
 entry_prefix:
 - F
 - W
-entry_high_water_W: 5
-entry_high_water_F: 5
+entry_high_water_W: 7
+entry_high_water_F: 6
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -36,6 +36,8 @@ entry_high_water_F: 5
 |----|------|---------:|----------|--------|-------|
 | F-2 | 2026-08-20 | med | subagent | open | A locally-true claim, restated one layer up, becomes false |
 | F-3 | 2026-08-20 | low | codescout-tool | fixed-verified | Pre-writing index rows in a new ledger consumes the ids they name |
+| F-5 | 2026-08-20 | med | architectural | open | entry_cite's PK excludes origin, so prune-and-rematerialize cannot own a duplicated edge |
+| F-6 | 2026-08-21 | med | self-friction | fixed-verified | Having read a fact is not having applied it — extract's dedup |
 | F-4 | 2026-08-20 | med | architectural | fixed-verified | Gated doc surfaces were kept current; the routing that serves them was never checked |
 ## Wins Index
 
@@ -43,6 +45,8 @@ entry_high_water_F: 5
 |----|------|-------:|---------|----------------|--------|
 | W-3 | 2026-08-20 | high | Apply mutations, never reason about them | Nine regression-guard holes ship, each one refactor from vanishing, with a green suite | promoted-to-permanent-docs |
 | W-4 | 2026-08-20 | high | Require every implementer to report where the brief was wrong | A brief's bad advice loosens a date parser while appearing to tighten it | validated |
+| W-6 | 2026-08-21 | high | Scout the seam before consuming machinery a spec describes | Silent edge loss on prune, plus a materializer counting calls as rows | validated |
+| W-7 | 2026-08-21 | high | Measure the parameter before baking it into immutable data | A false collision worry shipped, and the cap set 10 chars past the knee | validated |
 | W-5 | 2026-08-20 | med | Audit the surfaces that SERVE a concept, not the docs that describe it | Four checks ship saying "add one" without saying what one is, and the likeliest guesses are the shapes the parser refuses | validated |
 
 > Ids start at `F-2` / `W-3`, not `F-1` / `W-1`: the index rows were pre-filled before the
@@ -63,6 +67,11 @@ recalled; and after the promotion, re-verified by predicate rather than by recal
   Written to `~/.claude/`, `~/.claude-sdd/` and `~/.claude-kat/` by editing one and copying,
   so the three cannot drift: all at md5 `ca9421bb556db7b76d61b10c376daefa`, 176 lines.
   `grep -c 'statement-validity-session-log:W-3'` returns 1 in each.
+- **W-6** — *UNFIRED, carried forward.* One work stream. Promote at a second where a
+  spec's account of an existing schema turns out incomplete at the constraint layer.
+- **W-7** — *UNFIRED, carried forward, and pairs with W-3.* Same law at a different
+  phase: apply the instrument rather than reasoning about what it would say — W-3 at test
+  time, W-7 at design time. Promote the pair as one rule at a third datapoint.
 - **W-4** — *UNFIRED, carried forward.* One work stream, three instances. Promote at a
   second independent work stream.
 - **F-2** — fix idea is bound for the same surface as `W-4`; not yet a promotion.
@@ -591,6 +600,164 @@ gives `src_slug` its `ON DELETE CASCADE`.
 
 **Fix idea / Pointer:** Layer 3b, this work stream. `entry_cite.rs` needs
 `prune_scan_rows(conn, src_slugs)`; `link_scan::call`'s response needs the three-way count.
+
+## W-6 — Scouting the seam before Layer 3b turned two silent defects into code that was written correctly the first time
+
+**Observed:** 2026-08-21, before writing the `origin='scan'` materializer.
+
+**Pattern:** Invoke reconnaissance at the seam — before modifying a 220-line function to
+consume machinery the spec *describes* — and read the actual schema, the actual helper
+surface, and the actual PK, rather than the spec's account of them.
+
+**Counterfactual:** Both gaps were invisible from the spec, and neither would have failed
+a test or raised an error. They would have shipped as a working feature reporting a wrong
+number.
+
+1. The spec calls prune-and-re-materialize a property of the existing table. `entry_cite`
+   had **no delete path at all** — `insert_with`, `outgoing`, `incoming`, `incoming_like`
+   and a private `collect`. The obvious implementation of "prune scanner-owned rows" is
+   `DELETE WHERE origin='scan'`, and mutation M-H later confirmed that deletes rows for
+   artifacts outside the scan's scope which this pass cannot re-derive — silent edge loss,
+   no error.
+2. `origin` is **not in the PK** (`src_slug, src_local, dst_ref, rel`). With
+   `INSERT OR IGNORE`, a scan-derived edge duplicating a hand-written one is dropped and
+   keeps `origin='write'`. Correct precedence — but *derived* and *written* then differ,
+   and counting insert calls would publish a figure the instrument never measured.
+
+**Confirming data points:**
+
+1. Both became code: `prune_scan_rows` is scoped to the slugs the pass extracted, and
+   `insert_with` returns rows-written so the response reports `derived` / `written` /
+   `skipped_existing` separately (`7468902b`).
+2. Mutation-verified: M-G (drop the origin filter), M-H (drop the src_slug scope) and M-I
+   (`insert_with` hardcoded to `Ok(1)`) were all CAUGHT — M-I is defect 2 written out
+   literally.
+3. The live run returned `skipped_existing: 0`, so `written == derived` **by coincidence**
+   on this corpus. The honest counter cost nothing and is the only reason that equality is
+   evidence rather than indistinguishable from the bug.
+
+**Impact:** high — a wrong count from the tool that did the work is the most believable
+kind, and defect 1 loses data silently.
+
+**Promote-when:** the reconnaissance skill already covers this; the specific lesson worth
+promoting is narrower — *a spec that describes existing machinery is a claim about the
+substrate, and the PK/constraint layer is where it is least likely to have been read.*
+Promote at a second work stream where a spec's account of a schema turns out incomplete.
+
+**Status:** validated
+
+**Valid:** dated 2026-08-21
+
+**Rests on:** `statement-validity-session-log:F-5`, which records both gaps and the scout
+that found them; and this project's CLAUDE.md § Measurement, whose rule the second gap
+would have violated.
+
+## F-6 — Having read a fact is not having applied it — the same session quoted extract's dedup and then designed against its opposite
+
+**Observed:** 2026-08-21, adding an `attributed` counter to the entry-grain materializer.
+
+**When:** Writing a doc comment and a test to justify reporting `attributed` beside
+`derived`.
+
+**Expected:** That one entry citing one target five times would produce five
+`attributed` and one `derived`, the deduplication happening in the materializer's
+`BTreeSet`.
+
+**Got:** `citations: 1`. `extract::push_citation` is
+`if seen.insert((kind, raw.clone()))` — **one citation per `(kind, raw)` per document**,
+keeping the first occurrence's line. So repeating a token inside an entry cannot inflate
+anything; the collapse happens upstream, and the only collapse left in the materializer is
+a bare token and its stem-qualified twin. Live corpus: 324 attributed → 322 derived, a
+collapse of exactly 2.
+
+**Probable cause — and this is the part worth keeping.** I had read that exact fact
+**earlier in the same session**, in `entry_indegree`'s doc comment, and had quoted it back
+in prose: *"a file-level count, not an occurrence-count… so one chatty file cannot inflate
+a token's apparent reach."* It was true, I understood it, and I still wrote a rationale
+that contradicted it — because when I read it the topic was *exposure*, and when I
+contradicted it the topic was *attribution*. The fact was filed under the wrong question.
+
+This is **not** `F-2` (a locally-true claim restated one layer up, losing its scope). The
+claim here never lost scope; it was simply not retrieved when a different question needed
+it. Re-reading more carefully would not have helped — I had already read it carefully. What
+caught it was running the test and seeing `citations: 1`.
+
+**Workaround:** None available at authoring time; the correction came from execution. The
+generalisable form: when a new consumer reads an existing data structure, re-read that
+structure's *producer* for invariants, even when — especially when — you have already read
+it this session for another reason. A shared `Vec` serving two consumers with opposite
+needs is the seam.
+
+**Severity:** med — the false rationale would have shipped in a doc comment, and the live
+numbers (324/322) would have quietly contradicted it forever. It also concealed a real
+defect for a while: the same dedup means a passing mention above an entry consumes the
+citation, now filed and measured at 1461 shadowed across 139 ledgers
+(`docs/issues/2026-08-21-entry-attribution-follows-the-first-mention-only.md`).
+
+**Status:** fixed-verified — doc comment corrected and the real collapse pinned by
+`entry_edges_reports_citation_grain_and_edge_grain_separately`; the underlying limitation
+pinned separately and filed (`1b19e0db`).
+
+**Valid:** dated 2026-08-21
+
+**Rests on:** the principle that execution is a different evidence channel from reading —
+this project's CLAUDE.md § Conclude Last, clause 5: *"a belief you already hold is exactly
+the thing your re-reading cannot audit."*
+
+**Fix idea / Pointer:** distinct enough from `F-2` to stay its own entry; if a third
+instance of "read it, didn't retrieve it" appears, the pair is worth promoting together as
+two failure modes of inherited facts.
+
+## W-7 — Measuring before implementing killed a false worry and moved the chosen number
+
+**Observed:** 2026-08-21, choosing the slug base cap before the 4105-row backfill.
+
+**Pattern:** When a parameter is about to be baked into immutable data, simulate the real
+algorithm over the real corpus at several candidate values *before* implementing — not to
+confirm the choice, but to find out what the choice is about.
+
+**Counterfactual:** Two independent errors, in opposite directions, both of which would
+have shipped and neither of which a review would have caught (both are judgement calls that
+read as reasonable).
+
+1. **A worry that was false.** I told the user truncation collisions would be "absorbed by
+   the existing dedup" — unmeasured — and privately expected `foo-2 … foo-47` chains. The
+   measurement: **max collision depth is 10 at every cap, including no cap at all**, because
+   the worst chain comes from ten artifacts whose titles all slugify to `skill`, a 5-char
+   string no cap can touch. Truncation adds *zero* depth. The objection could not occur.
+2. **A number that was wrong.** I had recommended ~40 chars from intuition. The table shows
+   40 nearly triples the suffixed count (269 vs a 115 baseline) to buy ten characters off a
+   tail that 50 already bounds at 52. The knee is at 50; I would have guessed past it.
+
+**Confirming data points:**
+
+1. The measurement table (none/60/50/40/30) is preserved in `SLUG_BASE_MAX`'s doc comment,
+   so the next person to question the constant reads the evidence rather than re-deriving it.
+2. Two further defects fell out of *writing* the code the measurement specified: the
+   exact-boundary bug (a cut landing on a separator trimmed one word too many), and mutation
+   M-F surviving because the stub test reached its answer through the `None` arm and never
+   exercised the guard it claimed to.
+3. The shipped result matched the predicted shape but not the predicted magnitude: 216 rows
+   suffixed against the probe's 173, because the probe simulated dedup over the unslugged
+   rows in isolation while the real mint also collides with pre-existing slugs. A floor, and
+   the shipped number sits just above it — which is the correct relationship between a
+   simulation and reality, and would have been a 43-row error had I published 173 as a fact.
+
+**Impact:** high — slugs are immutable and `entry_cite.src_slug` FKs them, so the
+derivation was a one-way door for 4105 rows.
+
+**Promote-when:** paired with `W-3`'s mutation discipline, this is the same underlying law
+at a different phase — *apply the instrument, do not reason about what it would say.* If a
+third work stream produces a pre-implementation measurement that inverts a stated
+expectation, promote the pair as one rule covering both design-time and test-time.
+
+**Status:** validated
+
+**Valid:** dated 2026-08-21
+
+**Rests on:** this project's CLAUDE.md § Measurement — *"never state a count your instrument
+did not measure"* — extended one step earlier, to the parameter chosen before any
+instrument runs.
 
 ## Template for new entries
 
