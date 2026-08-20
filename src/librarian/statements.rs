@@ -43,6 +43,14 @@ fn rests_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\*\*Rests on:\*\*[ \t]+(.+?)[ \t]*$").unwrap())
 }
 
+// Exact 4-2-2 digit width, no more, no less. `chrono::NaiveDate::parse_from_str`'s
+// `%Y-%m-%d` alone is MORE lenient than this on year/month/day width — measured
+// 2026-08-20: it parses `26-08-20`, `2026-8-20` and `2026-08-2` without complaint,
+// which would silently start accepting shapes the old parser refused. This regex is
+// the shape gate; `chrono` (in `parse_validity`) is the calendar gate. Both are
+// required — neither alone closes
+// docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md, whose
+// root cause was a shape-only check that let a calendar-impossible date through.
 fn iso_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap())
@@ -98,7 +106,21 @@ pub fn parse_validity(section_text: &str) -> Result<Option<Validity>, Recoverabl
 
     if let Some(d) = rest.strip_prefix("dated ") {
         let d = d.trim();
-        if !iso_re().is_match(d) {
+        // Shape gate (exact 4-2-2 digit width via `iso_re`) AND calendar gate
+        // (`chrono::NaiveDate`, real Gregorian validity) — both required. Neither
+        // alone closes
+        // docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md:
+        // the shape-only regex let `dated 2026-02-30` through as `Ok(Some(Dated(..)))`,
+        // and every consumer that later tried to convert it (`iso_to_epoch_days`)
+        // silently `continue`d — the record stayed invisible to every check that
+        // partitions on class. And `chrono`'s `%Y-%m-%d` ALONE is more lenient than
+        // the old shape check on digit width — measured 2026-08-20: it parses
+        // `26-08-20`, `2026-8-20` and `2026-08-2` without complaint — so dropping the
+        // shape regex in favor of `chrono` alone would silently start accepting
+        // shapes the old parser refused.
+        let is_valid_date =
+            iso_re().is_match(d) && chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok();
+        if !is_valid_date {
             return Err(RecoverableError {
                 message: format!("`**Valid:** dated {d}` is not an ISO date"),
                 hint: Some(format!(
@@ -244,6 +266,55 @@ mod tests {
             "must name the required shape: {t}"
         );
         assert!(t.contains("invariant"), "must name all three forms: {t}");
+    }
+
+    #[test]
+    fn dated_rejects_a_calendar_invalid_date_even_when_shape_valid() {
+        // `2026-02-30` matched the old shape-only `^\d{4}-\d{2}-\d{2}$` regex, was
+        // returned as `Ok(Some(Dated(..)))`, and every consumer then silently
+        // dropped it — this is the fix for
+        // docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md.
+        // A real calendar parse must refuse it at declaration time instead.
+        for bad in ["2026-02-30", "2025-02-29", "2026-99-99", "2020-13-45"] {
+            let result = parse_validity(&format!("**Valid:** dated {bad}\n"));
+            assert!(
+                result.is_err(),
+                "{bad} is calendar-invalid and must be Err, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dated_still_accepts_every_shape_valid_calendar_valid_date() {
+        for good in ["2026-08-20", "2024-02-29", "2000-01-01", "9999-12-31"] {
+            assert_eq!(
+                parse_validity(&format!("**Valid:** dated {good}\n")).unwrap(),
+                Some(Validity::Dated(good.to_string())),
+                "a real calendar date must still parse: {good}"
+            );
+        }
+    }
+
+    #[test]
+    fn dated_rejects_non_padded_or_wrong_width_shapes() {
+        // The old regex was `^\d{4}-\d{2}-\d{2}$` — exact 4-2-2 digit width, no
+        // more, no less. `chrono`'s `%Y-%m-%d` alone is MORE lenient than that on
+        // digit width (measured 2026-08-20: it accepts `26-08-20`, `2026-8-20`,
+        // `2026-08-2` without complaint), so the shape regex must stay in addition
+        // to the calendar check, not be replaced by it.
+        for bad in [
+            "26-08-20",
+            "2026-8-20",
+            "2026-08-2",
+            "02026-08-20",
+            "2026-08-200",
+        ] {
+            let result = parse_validity(&format!("**Valid:** dated {bad}\n"));
+            assert!(
+                result.is_err(),
+                "non-4-2-2-digit shape must still be refused: {bad} -> {result:?}"
+            );
+        }
     }
 
     /// A non-word boundary is required right after `conditional` — `conditionally

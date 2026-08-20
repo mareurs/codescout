@@ -235,19 +235,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // declared class needs revisiting.
     let (cited_violations, cited_scoped) = scan_cited_but_undeclared(ctx, &cat.conn, &indegree)?;
     all_violations.extend(cited_violations);
+    // The fourth partition of the family: a declaration that FAILED to parse at all
+    // (shape-invalid, calendar-invalid, or an unknown class). Unlike the three above,
+    // this one takes no `indegree` — it is deliberately ungated on exposure; see
+    // `scan_validity_unparseable`'s own doc comment for the reasoning and the measured
+    // population size that justifies it today.
+    let (unparseable_violations, unparseable_scoped) = scan_validity_unparseable(ctx, &cat.conn)?;
+    all_violations.extend(unparseable_violations);
     // Entry-validity rows scoped OUT of the report because they belong to a project
     // root other than the active one (Fix 2 for MF-1). A scoped-out row never becomes
     // a `Violation`, so `summary.total` cannot count it the way the
     // `abs_path_outside_managed_roots` sampler's elided rows are counted — this map is
-    // how the drop stays visible instead of silent. Combined across all three checks
+    // how the drop stays visible instead of silent. Combined across all four checks
     // rather than kept per-check: the reader-facing question is "how much of my
-    // worklist is actually mine", not which of the three checks it came from.
+    // worklist is actually mine", not which check it came from.
     let mut entry_validity_scoped_by_project: std::collections::BTreeMap<String, usize> =
         Default::default();
     for (group, n) in conditional_scoped
         .into_iter()
         .chain(dated_scoped)
         .chain(cited_scoped)
+        .chain(unparseable_scoped)
     {
         *entry_validity_scoped_by_project.entry(group).or_insert(0) += n;
     }
@@ -387,7 +395,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let n_projects = entry_validity_scoped_by_project.len();
         hint_parts.push(format!(
             "{total_scoped} entry-validity row(s) (entry_conditional_past_due / entry_dated_stale / \
-             entry_cited_from_outside_but_undeclared) scoped out of this report because they belong \
+             entry_cited_from_outside_but_undeclared / validity_unparseable) scoped out of this report because they belong \
              to {n_projects} other project root(s) — see catalog_health.entry_validity_scoped_by_project. \
              Exposure itself stays cross-repo (entry_indegree is not scoped); only the reported \
              worklist is limited to the active project, so a developer here is not handed other \
@@ -1985,10 +1993,10 @@ fn declared_section_text(
 /// once per `doctor` run by [`entry_indegree`] and shared with the checks that follow,
 /// so the population is priced consistently rather than recomputed per check.
 ///
-/// **A malformed `**Valid:**` is swallowed here, not reported here.** That is a
-/// different, not-yet-shipped check's business (`validity_unparseable`); reporting it
-/// here too would duplicate the finding, and staying silent here is what keeps the two
-/// checks from ever disagreeing about the same defect.
+/// **A malformed `**Valid:**` is swallowed here, not reported here.** That is
+/// [`scan_validity_unparseable`]'s business; reporting it here too would duplicate the
+/// finding, and staying silent here is what keeps the two checks from ever disagreeing
+/// about the same defect.
 ///
 /// **Truncates each section with [`declared_section_text`]** before parsing, so a
 /// parent entry with no declaration of its own never inherits a nested child's.
@@ -2127,8 +2135,8 @@ fn iso_to_epoch_days(iso: &str) -> Option<i64> {
 /// [`scan_conditional_past_due`], so the population is priced consistently.
 ///
 /// **A malformed `**Valid:**` is swallowed here, not reported here** — same split as
-/// [`scan_conditional_past_due`]: that is a different, not-yet-shipped check's business
-/// (`validity_unparseable`); reporting it here too would duplicate the finding.
+/// [`scan_conditional_past_due`]: that is [`scan_validity_unparseable`]'s business;
+/// reporting it here too would duplicate the finding.
 ///
 /// **Truncates each section with [`declared_section_text`]** before parsing, so a parent
 /// entry with no declaration of its own never inherits a nested child's.
@@ -2249,10 +2257,9 @@ fn scan_dated_stale(
 /// silently stop being reported, even though the parent itself is still undeclared.
 ///
 /// **A malformed `**Valid:**` is swallowed here, not reported here.** Only `Ok(None)`
-/// (declares no class at all) is this check's business — a malformed declaration is a
-/// different, not-yet-shipped check's finding (`validity_unparseable`), and a
-/// well-formed declaration of any class means one of the checks above already covers
-/// this entry.
+/// (declares no class at all) is this check's business — a malformed declaration is
+/// [`scan_validity_unparseable`]'s finding, and a well-formed declaration of any class
+/// means one of the checks above already covers this entry.
 ///
 /// **Gated on `EXPOSURE_THRESHOLD`, using the same shared `indegree`** as
 /// [`scan_conditional_past_due`] and [`scan_dated_stale`] — one exposure computation,
@@ -2321,6 +2328,92 @@ fn scan_cited_but_undeclared(
                     "{} is cited {exposure}× from other files and declares no \
                          **Valid:** class — add one; this is a worklist, not a verdict",
                     s.id
+                ),
+            ));
+        }
+    }
+    Ok((out, scoped_out))
+}
+
+/// A `**Valid:**` line that fails to parse — shape-invalid, calendar-invalid
+/// (`dated 2026-02-30`), or an unknown class.
+///
+/// The fourth partition of the validity-decay family, and the one that closes it.
+/// [`scan_conditional_past_due`], [`scan_dated_stale`], and [`scan_cited_but_undeclared`]
+/// each deliberately swallow `parse_validity`'s `Err` and defer to this check by name in
+/// their own doc comments. Before this check shipped, a malformed declaration was
+/// invisible to the whole family: the author tried to declare and failed, and their
+/// Statement read as healthy to every check that partitions on class. This closes
+/// `docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md`, whose
+/// filed instance (`dated 2026-02-30`) is one shape of this — the other is any value
+/// `parse_validity` refuses outright, which the filed bug did not cover.
+///
+/// **Ungated on exposure, unlike its three siblings.** The exposure gate exists to
+/// prioritise DECAY work — is a Statement's claim still true — which presupposes the
+/// declaration parsed in the first place. An unparseable declaration is a different
+/// failure, a malformed record rather than a stale one, and it costs the author
+/// something the moment it is written, regardless of who cites it yet. The population
+/// is bounded by how many sections declare `**Valid:**` at all, not by the full corpus —
+/// measured 2026-08-20, 1 of 2869 entry sections declares a `**Valid:**` line, so
+/// ungated is safe today. If that population grows large enough that this worklist
+/// starts burying others the way `entry_cited_from_outside_but_undeclared` buried
+/// everything else pre-MF-1, gate it on `EXPOSURE_THRESHOLD` like its siblings.
+///
+/// **Truncates each section with [`declared_section_text`]**, never `s.text` — same
+/// rule as the other three: a parent with no declaration of its own must not inherit a
+/// nested child's malformed one.
+///
+/// Read-only; there is no `fix=`. Reports a worklist, never a verdict — the fix is an
+/// author correcting the line, not this check guessing what was meant.
+fn scan_validity_unparseable(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
+    use crate::librarian::statements::parse_validity;
+    use crate::librarian::tools::link_scan::extract::entry_sections;
+
+    let mut stmt = conn.prepare("SELECT id, abs_path, status FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    // Scoped to the active project's git root — same precedent and same "no active
+    // project means no scoping" degradation as `scan_conditional_past_due`.
+    let cp = ctx.current_project.as_deref();
+    let mut out = Vec::new();
+    let mut scoped_out: std::collections::BTreeMap<String, usize> = Default::default();
+    for (aid, path, status) in rows {
+        // An archived row is excluded from the REPORTED population — same guard as
+        // the other three validity checks; MF-2, 2026-08-20.
+        if row_is_archived(&path, &status) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let sections = entry_sections(&text);
+        for s in &sections {
+            let declared = declared_section_text(s, &sections);
+            // This check's whole business is the Err arm the other three swallow.
+            let Err(err) = parse_validity(&declared) else {
+                continue;
+            };
+            if let Some(cp) = cp {
+                if super::containing_root(std::slice::from_ref(&cp.git_root), Path::new(&path))
+                    .is_none()
+                {
+                    *scoped_out.entry(outside_roots_group(&path)).or_insert(0) += 1;
+                    continue;
+                }
+            }
+            out.push(Violation::new(
+                "validity_unparseable",
+                Some(aid.clone()),
+                path.clone(),
+                format!(
+                    "{} declares a malformed **Valid:** line: {} — this is a worklist, \
+                         not a verdict",
+                    s.id, err.message
                 ),
             ));
         }
@@ -7546,9 +7639,18 @@ root = "work/elsewhere/ghost"
 
     #[test]
     fn dated_stale_skips_a_shape_valid_but_calendar_invalid_date() {
-        // `iso_re()` only checks `\d{4}-\d{2}-\d{2}` shape — these all pass the regex
-        // and reach `iso_to_epoch_days`, which must reject them via `chrono` rather than
-        // panicking or silently treating them as some other date.
+        // `parse_validity` now rejects a calendar-impossible date at declaration time
+        // (Fix Round 3, X-2 Half A) — these two never reach `iso_to_epoch_days` at all;
+        // `parse_validity(&declared)` itself returns `Err`, so `scan_dated_stale`'s
+        // `let Ok(Some(Validity::Dated(iso))) = ... else { continue }` guard swallows
+        // them the same way it swallows any other malformed declaration. This test only
+        // pins the negative half — that `scan_dated_stale` stays silent on them, not
+        // reported or panicked on. The positive half — that they ARE reported, by
+        // `scan_validity_unparseable` — is pinned separately by
+        // `validity_unparseable_reports_the_calendar_invalid_dates_dated_stale_skips`,
+        // because a test that only asserts absence here cannot distinguish "correctly
+        // routed elsewhere" from "still invisible", which is exactly the bug this round
+        // fixes (docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md).
         //
         // R-8's `2020-13-45` is a COMPOSITE violation — month 13 is out of 1..12 AND day
         // 45 is out of 1..31 — so a merely range-checked parser (reject month > 12, day
@@ -7564,7 +7666,7 @@ root = "work/elsewhere/ghost"
             "led",
             &p,
             "## R-8 — impossible date\n\n**Valid:** dated 2020-13-45\n\n\
-             ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
+                 ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
         );
 
         let mut deg = std::collections::BTreeMap::new();
@@ -7577,7 +7679,175 @@ root = "work/elsewhere/ghost"
                 .0
                 .is_empty(),
             "both a composite-invalid and a range-valid-but-calendar-invalid date must \
-             be skipped, not reported or panicked on"
+                 be skipped, not reported or panicked on"
+        );
+    }
+
+    #[test]
+    fn validity_unparseable_reports_the_calendar_invalid_dates_dated_stale_skips() {
+        // The positive half of the test above. `scan_dated_stale` staying silent on
+        // R-8/R-9 is consistent with EITHER "correctly routed to
+        // `scan_validity_unparseable`" or "still invisible to everything" — the exact
+        // ambiguity that let
+        // docs/issues/2026-08-20-impossible-date-hides-a-statement-from-every-check.md
+        // ship undetected. This asserts the first reading is the true one: both R-8 and
+        // R-9 ARE reported, by name, here. `scan_validity_unparseable` is ungated on
+        // exposure, so no `indegree` map is seeded or needed.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-8 — impossible date\n\n**Valid:** dated 2020-13-45\n\n\
+                 ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
+        );
+
+        let (violations, _) = scan_validity_unparseable(&unscoped_ctx(), &cat.conn).unwrap();
+        let ids: Vec<&str> = violations.iter().map(|v| v.path.as_str()).collect();
+        assert_eq!(
+            violations.len(),
+            2,
+            "both R-8 and R-9 must be reported, not just one: {violations:?}"
+        );
+        assert!(
+            violations.iter().all(|v| v.check == "validity_unparseable"),
+            "wrong check name: {violations:?}"
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.detail.contains("R-8") && v.detail.contains("not an ISO date")),
+            "R-8 must be reported with the parser's own error text: {violations:?}"
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.detail.contains("R-9") && v.detail.contains("not an ISO date")),
+            "R-9 must be reported with the parser's own error text: {violations:?}"
+        );
+        assert!(
+            ids.iter().all(|p| p.contains("led.md")),
+            "both rows must carry the seeded path: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn validity_unparseable_skips_an_archived_definer_located_under_archive_path() {
+        // Mirrors `conditional_past_due_skips_an_archived_definer_located_under_archive_path`
+        // — same guard (`row_is_archived`), same MF-2 precedent. Fix Round 3 mutation M1:
+        // deleting this skip is a confirmed-surviving mutation without this test.
+        let tmp = tempfile::tempdir().unwrap();
+        let archive_dir = tmp.path().join("archive");
+        let p = archive_dir.join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-61 — archived by path\n\n**Valid:** dated 2026-02-30\n",
+        );
+
+        assert!(
+            scan_validity_unparseable(&unscoped_ctx(), &cat.conn)
+                .unwrap()
+                .0
+                .is_empty(),
+            "a definer located under an /archive/ path segment must not be reported, \
+             even though its declaration is malformed"
+        );
+    }
+
+    #[test]
+    fn validity_unparseable_does_not_read_a_nested_childs_declaration_as_the_parents() {
+        // Mirrors `conditional_past_due_does_not_read_a_nested_childs_declaration_as_the_parents`.
+        // PV-2 (parent, level 3) declares nothing itself; its nested child PV-8 (level 4)
+        // sits WHOLLY inside PV-2's section text and carries a MALFORMED declaration.
+        // Without truncation (`declared_section_text`), PV-2's untruncated text would also
+        // contain PV-8's malformed line, and `parse_validity`'s first-line rule would read
+        // it as PV-2's OWN declaration too — reporting PV-2 a second time for a defect
+        // that is actually PV-8's alone. Fix Round 3 mutation M3: swapping
+        // `declared_section_text` for `s.text` is a confirmed-surviving mutation without
+        // this test.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "### PV-2 — parent, no declaration of its own\n\n\
+             prose about the parent\n\n\
+             #### PV-8 — nested child\n\n\
+             **Valid:** dated 2026-02-30\n",
+        );
+
+        let (v, _) = scan_validity_unparseable(&unscoped_ctx(), &cat.conn).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "PV-2 declares nothing of its own and must not inherit PV-8's malformed \
+             declaration: {v:#?}"
+        );
+        assert!(v[0].detail.contains("PV-8"), "{v:#?}");
+    }
+
+    #[tokio::test]
+    async fn call_wires_in_validity_unparseable_and_scopes_it_like_its_siblings() {
+        // Fix Round 3 mutation M5: dropping the `scan_validity_unparseable` call from
+        // `call()` is a confirmed-surviving mutation without an end-to-end test —
+        // `validity_unparseable_reports_the_calendar_invalid_dates_dated_stale_skips`
+        // calls the scan function directly and cannot see whether `call()` wires it in.
+        // This also exercises the scope guard end-to-end (Fix Round 3 mutation M2): a
+        // malformed declaration OUTSIDE the active project must be scoped out, contributing
+        // to `entry_validity_scoped_by_project` rather than the report, same as its three
+        // siblings.
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // Malformed, INSIDE the active project — must be reported.
+        let inside = active_root.join("led.md");
+        seed_ledger(
+            &cat,
+            "led-inside",
+            &inside,
+            "## R-70 — inside, malformed\n\n**Valid:** dated 2026-02-30\n",
+        );
+        // Malformed, OUTSIDE the active project — must be scoped out, not reported.
+        let outside = sibling_root.join("led.md");
+        seed_ledger(
+            &cat,
+            "led-outside",
+            &outside,
+            "## R-71 — outside, malformed\n\n**Valid:** dated 2026-99-99\n",
+        );
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["summary"]["by_check"]["validity_unparseable"],
+            json!(1),
+            "the in-project malformed declaration must be reported by name: {out:#?}"
+        );
+        let violations = out["violations"].as_array().unwrap();
+        assert!(
+            violations
+                .iter()
+                .filter(|v| v["check"] == "validity_unparseable")
+                .all(|v| v["detail"].as_str().unwrap().contains("R-70")),
+            "only R-70 (in-project) may appear, never R-71 (out-of-project): {out:#?}"
+        );
+        assert!(
+            out["catalog_health"]["entry_validity_scoped_by_project"]
+                .as_object()
+                .is_some_and(|m| !m.is_empty()),
+            "R-71 must be ANNOUNCED as scoped out, not silently dropped: {out:#?}"
         );
     }
 
