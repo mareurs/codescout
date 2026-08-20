@@ -40,7 +40,7 @@ entry_high_water_F: 3
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-3 | 2026-08-20 | high | Apply mutations, never reason about them | Nine regression-guard holes ship, each one refactor from vanishing, with a green suite | validated |
+| W-3 | 2026-08-20 | high | Apply mutations, never reason about them | Nine regression-guard holes ship, each one refactor from vanishing, with a green suite | promoted-to-permanent-docs |
 | W-4 | 2026-08-20 | high | Require every implementer to report where the brief was wrong | A brief's bad advice loosens a date parser while appearing to tighten it | validated |
 
 > Ids start at `F-2` / `W-3`, not `F-1` / `W-1`: the index rows were pre-filled before the
@@ -50,19 +50,17 @@ entry_high_water_F: 3
 ## Promotion status
 
 **Audited:** 2026-08-20, against the target surfaces themselves — opened and read, not
-recalled.
+recalled; and after the promotion, re-verified by predicate rather than by recall.
 
-- **W-3** — *already promoted, no action.* `~/.claude/CLAUDE.md` § *Subagent Dispatch*
-  carries the **Mutation-apply discipline** clause (validated 2026-08-18, 6 datapoints,
-  eduplanner-ui `calendar-insight-panel-session-log:W-4`, a different ledger's entry — qualified
-  by file stem because a bare `W-4` here would resolve to this ledger's own). This entry adds
-  9 datapoints from a second repo and a **new
-  mechanism** the existing clause does not name — copied-from-sibling code. That mechanism
-  is a promotion candidate; the base rule is not.
-  **Per-profile check still owed:** this machine runs three profiles (`~/.claude`,
-  `~/.claude-sdd`, `~/.claude-kat`), each with its own `CLAUDE.md`, and the clause was
-  verified only in `~/.claude/`. Three files that should be byte-identical have an md5 —
-  compare them before calling this promoted.
+- **W-3** — **PROMOTED 2026-08-20, all three profiles.** The base mutation-apply rule was
+  already in `~/.claude/CLAUDE.md` § *Subagent Dispatch* (validated 2026-08-18, 6 datapoints,
+  eduplanner-ui `calendar-insight-panel-session-log:W-4`). What this entry added is the
+  **copied-from-sibling mechanism** — where to aim mutations, and the instruction to observe
+  a mutation survive *before* writing the test that closes it. Neither was derivable from the
+  existing text.
+  Written to `~/.claude/`, `~/.claude-sdd/` and `~/.claude-kat/` by editing one and copying,
+  so the three cannot drift: all at md5 `ca9421bb556db7b76d61b10c376daefa`, 176 lines.
+  `grep -c 'statement-validity-session-log:W-3'` returns 1 in each.
 - **W-4** — *UNFIRED, carried forward.* One work stream, three instances. Promote at a
   second independent work stream.
 - **F-2** — fix idea is bound for the same surface as `W-4`; not yet a promotion.
@@ -218,11 +216,19 @@ pinned an already-pinned behaviour, left the real hole open, and reported green.
 
 **Impact:** high
 
-**Promote-when:** the base rule is already promoted (see *Promotion status*). The
-**copied-from-sibling mechanism** promotes at one more independent work stream, or
-immediately if a reviewer cites it as the reason they went looking.
+**Promote-when:** FIRED 2026-08-20 — promoted on the strength of 9 datapoints in one work
+stream rather than waiting for a second, because all nine share one mechanism and the rule
+is cheap to unwind if a second stream disagrees.
 
-**Status:** validated
+**Promoted-to:** `~/.claude/CLAUDE.md` § *Subagent Dispatch — Model Floor + Review Escalation*
+**Promoted-to:** `~/.claude-sdd/CLAUDE.md` § *Subagent Dispatch — Model Floor + Review Escalation*
+**Promoted-to:** `~/.claude-kat/CLAUDE.md` § *Subagent Dispatch — Model Floor + Review Escalation*
+
+**Verification:** all three profiles byte-identical at md5 `ca9421bb556db7b76d61b10c376daefa`
+(176 lines), and `grep -c 'statement-validity-session-log:W-3'` returns 1 in each — the
+promoted text back-cites this entry, so verification survives any rewording.
+
+**Status:** promoted-to-permanent-docs
 
 **Valid:** dated 2026-08-20
 
