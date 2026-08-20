@@ -216,6 +216,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // same population rather than recomputing it.
     let indegree = entry_indegree(&cat.conn)?;
     all_violations.extend(scan_conditional_past_due(&cat.conn, &indegree)?);
+    // Same shared `indegree`; today's date is computed once here rather than inside
+    // `scan_dated_stale` itself, so the horizon comparison stays deterministic under test.
+    let today_epoch_days = {
+        let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        (chrono::Utc::now().date_naive() - epoch).num_days()
+    };
+    all_violations.extend(scan_dated_stale(&cat.conn, &indegree, today_epoch_days)?);
     // Needs both `ctx` (for the repo to resolve against) and the connection, so unlike
     // `scan_declared_project_roots` it runs inside the lock. Its health block is carried
     // out to `catalog_health` below, because a clean result over 54 of 350 archived files
@@ -1985,6 +1992,126 @@ fn scan_conditional_past_due(
         }
     }
     Ok(out)
+}
+
+/// Horizon, in days, past a `dated` Statement's declared date before it counts as stale.
+///
+/// **A guess, not a measurement — 30 days, roughly a work-month.** There is no dataset
+/// yet of how long a `dated` Statement actually stays true; re-tune this once
+/// `entry_dated_stale` has produced a month of worklist resolutions to look at (how many
+/// flagged entries turned out to actually be stale vs still true at the horizon).
+///
+/// **Deliberately not the deleted `FRESHNESS_HORIZON_DEFAULT`.** That constant measured
+/// commit distance (`topo_distance_from_head`) — a different axis from calendar days —
+/// and its own doc comment recorded that every call site passed `None`, so it was never
+/// exercised before being removed for having no consumer. Reviving it here under a new
+/// name would just recreate an unexercised default; this is a fresh guess on a fresh
+/// axis, and it says so.
+const VALIDITY_HORIZON_DAYS: i64 = 30;
+
+/// Days since the Unix epoch (1970-01-01) for a `YYYY-MM-DD` string. `None` if `iso` is
+/// not a valid calendar date in that exact form (covers both a malformed shape and a
+/// shape-valid-but-impossible date like `2020-13-45` — `iso_re()` in `statements.rs`
+/// only checks digit shape, not calendar validity).
+///
+/// Uses `chrono`, which is already a workspace dependency (`chrono::Utc::now()` appears
+/// earlier in this same file's `call()`, and at `tools/update.rs:405`) — not a
+/// hand-rolled civil-date algorithm. A third hand-rolled date implementation next to a
+/// working `chrono` dependency is not worth the maintenance surface.
+fn iso_to_epoch_days(iso: &str) -> Option<i64> {
+    let d = chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d").ok()?;
+    let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    Some((d - epoch).num_days())
+}
+
+/// Declared `dated` Statements past [`VALIDITY_HORIZON_DAYS`], **ranked by exposure
+/// descending**.
+///
+/// **The ranking is load-bearing, not a nicety.** A decayed fact nothing cites costs
+/// nothing; one cited from a promoted skill costs a lot. An unranked list of every dated
+/// entry past the horizon is thousands of rows and will be ignored — the same outcome as
+/// not shipping the check, at higher cost.
+///
+/// **Declared `dated` only — parsed with `parse_validity`, never `resolve_validity`.**
+/// `resolve_validity`'s default-is-decay behavior treats an UNDECLARED entry as `dated
+/// <fallback>`, which is exactly the guessed age this check must not produce. An entry
+/// with no declaration is a different, not-yet-shipped check's business (Task 7, which
+/// reports it as undeclared rather than guessing its age).
+///
+/// **Gated on `EXPOSURE_THRESHOLD`, not run over every dated entry.** Same `indegree`
+/// map computed once per `doctor` run by [`entry_indegree`] and shared with
+/// [`scan_conditional_past_due`], so the population is priced consistently.
+///
+/// **A malformed `**Valid:**` is swallowed here, not reported here** — same split as
+/// [`scan_conditional_past_due`]: that is a different, not-yet-shipped check's business
+/// (`validity_unparseable`); reporting it here too would duplicate the finding.
+///
+/// **Truncates each section with [`declared_section_text`]** before parsing, so a parent
+/// entry with no declaration of its own never inherits a nested child's.
+///
+/// Takes `today_epoch_days` rather than computing `chrono::Utc::now()` itself, so the
+/// horizon comparison and the ranking are deterministic under test.
+///
+/// Read-only; there is no `fix=`. Reports a worklist, never a verdict — re-running the
+/// underlying measurement and judging whether the date is still true is the reader's.
+fn scan_dated_stale(
+    conn: &rusqlite::Connection,
+    indegree: &std::collections::BTreeMap<String, usize>,
+    today_epoch_days: i64,
+) -> Result<Vec<Violation>> {
+    use crate::librarian::statements::{parse_validity, Validity};
+    use crate::librarian::tools::link_scan::extract::entry_sections;
+
+    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut scored: Vec<(usize, Violation)> = Vec::new();
+    for (aid, path) in rows {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let sections = entry_sections(&text);
+        for s in &sections {
+            let exposure = indegree.get(&s.id).copied().unwrap_or(0);
+            if exposure < EXPOSURE_THRESHOLD {
+                continue;
+            }
+            let declared = declared_section_text(s, &sections);
+            // A malformed declaration, or a declared class other than `dated`
+            // (`invariant`/`conditional`), is not this check's finding — swallow it.
+            let Ok(Some(Validity::Dated(iso))) = parse_validity(&declared) else {
+                continue;
+            };
+            let Some(days) = iso_to_epoch_days(&iso) else {
+                continue;
+            };
+            let age = today_epoch_days - days;
+            if age < VALIDITY_HORIZON_DAYS {
+                continue;
+            }
+            scored.push((
+                exposure,
+                Violation::new(
+                    "entry_dated_stale",
+                    Some(aid.clone()),
+                    path.clone(),
+                    format!(
+                        "{} dated {iso} ({age}d old, exposure {exposure}) — re-run the \
+                         measurement and record the new figure; this is a worklist, not \
+                         a verdict",
+                        s.id
+                    ),
+                ),
+            ));
+        }
+    }
+    // `sort_by_key` is a stable sort: entries tied on exposure keep the order they were
+    // pushed in above (abs_path order, then in-file encounter order), rather than being
+    // reordered arbitrarily between runs.
+    scored.sort_by_key(|(exposure, _)| std::cmp::Reverse(*exposure));
+    Ok(scored.into_iter().map(|(_, v)| v).collect())
 }
 
 /// `snapshot_drift`: an augmented tracker's `params` hold entry ids that its
@@ -6751,6 +6878,264 @@ root = "work/elsewhere/ghost"
             json!(1),
             "call() must wire a REAL entry_indegree into scan_conditional_past_due, not an \
          empty/placeholder map: {out:#?}"
+        );
+    }
+
+    // ---- scan_dated_stale -----------------------------------------------------------
+
+    #[test]
+    fn dated_stale_ranks_by_exposure_descending() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-1 — low\n\n**Valid:** dated 2020-01-01\n\n\
+             ## R-2 — high\n\n**Valid:** dated 2020-01-01\n\n\
+             ## R-3 — fresh\n\n**Valid:** dated 2999-01-01\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-1".to_string(), 6usize);
+        deg.insert("R-2".to_string(), 40usize);
+        deg.insert("R-3".to_string(), 99usize);
+
+        // 2026-08-20 as days since epoch.
+        let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
+        let ids: Vec<String> = v
+            .iter()
+            .map(|x| x.detail.split_whitespace().next().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["R-2", "R-1"],
+            "R-3 is inside the horizon; the rest are ordered by exposure, because an \
+             unranked list of every dated entry will be ignored: {v:#?}"
+        );
+    }
+
+    #[test]
+    fn dated_stale_is_stable_on_exposure_ties() {
+        // Two entries with EQUAL exposure: a comparator that isn't a stable sort could
+        // legally reorder them between runs. `entry_sections` walks the ledger in file
+        // order, so R-21 (declared first) must still precede R-22 (declared second) when
+        // their exposure ties.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-21 — first\n\n**Valid:** dated 2020-01-01\n\n\
+             ## R-22 — second\n\n**Valid:** dated 2020-01-01\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-21".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert("R-22".to_string(), EXPOSURE_THRESHOLD);
+
+        let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
+        assert_eq!(v.len(), 2);
+        assert!(
+            v[0].detail.starts_with("R-21"),
+            "tied exposure must preserve encounter order: {v:#?}"
+        );
+        assert!(v[1].detail.starts_with("R-22"));
+    }
+
+    #[test]
+    fn dated_stale_horizon_gate_fires_exactly_at_the_line_not_one_day_short() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        // 2026-08-20 (epoch day 20_685) minus 30 days = 2026-07-21 (epoch day 20_655).
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-9 — at the line\n\n**Valid:** dated 2026-07-21\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-9".to_string(), EXPOSURE_THRESHOLD);
+
+        assert_eq!(
+            scan_dated_stale(&cat.conn, &deg, 20_685).unwrap().len(),
+            1,
+            "age == VALIDITY_HORIZON_DAYS must fire — the gate is `<`, not `<=`"
+        );
+        // One day younger (age 29, "today" = 2026-08-19) must NOT fire.
+        assert!(
+            scan_dated_stale(&cat.conn, &deg, 20_684)
+                .unwrap()
+                .is_empty(),
+            "one day inside the horizon must not fire"
+        );
+    }
+
+    #[test]
+    fn dated_stale_fires_exactly_at_the_exposure_threshold() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-4 — at the line\n\n**Valid:** dated 2020-01-01\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD);
+        assert_eq!(
+            scan_dated_stale(&cat.conn, &deg, 20_685).unwrap().len(),
+            1,
+            "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
+        );
+
+        deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD - 1);
+        assert!(
+            scan_dated_stale(&cat.conn, &deg, 20_685)
+                .unwrap()
+                .is_empty(),
+            "one below the threshold must not fire"
+        );
+    }
+
+    #[test]
+    fn dated_stale_does_not_read_a_nested_childs_declaration_as_the_parents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        // PV-3 (the parent, level 3) declares nothing itself; its nested child PV-9
+        // (level 4) sits WHOLLY inside PV-3's section text and declares `dated`.
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "### PV-3 — parent, no declaration of its own\n\n\
+             prose about the parent\n\n\
+             #### PV-9 — nested child\n\n\
+             **Valid:** dated 2020-01-01\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("PV-3".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert("PV-9".to_string(), EXPOSURE_THRESHOLD);
+
+        let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "PV-3 declares nothing of its own and must not inherit PV-9's declaration: {v:#?}"
+        );
+        assert!(v[0].detail.contains("PV-9"));
+    }
+
+    #[test]
+    fn dated_stale_ignores_invariant_and_conditional_declarations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-5 — invariant\n\n**Valid:** invariant\n\n\
+             ## R-6 — conditional\n\n**Valid:** conditional — until something happens\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-5".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert("R-6".to_string(), EXPOSURE_THRESHOLD);
+
+        assert!(
+            scan_dated_stale(&cat.conn, &deg, 20_685)
+                .unwrap()
+                .is_empty(),
+            "an invariant or conditional declaration is not this check's business — only \
+             `dated` is"
+        );
+    }
+
+    #[test]
+    fn dated_stale_swallows_a_malformed_valid_line_rather_than_reporting_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-7 — malformed\n\n**Valid:** not-a-real-class\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
+
+        assert!(
+            scan_dated_stale(&cat.conn, &deg, 20_685)
+                .unwrap()
+                .is_empty(),
+            "a malformed declaration is `validity_unparseable`'s finding, not this check's"
+        );
+    }
+
+    #[test]
+    fn dated_stale_skips_a_shape_valid_but_calendar_invalid_date() {
+        // `iso_re()` only checks `\d{4}-\d{2}-\d{2}` shape — month 13 / day 45 pass the
+        // regex and reach `iso_to_epoch_days`, which must reject them via `chrono` rather
+        // than panicking or silently treating them as some other date.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-8 — impossible date\n\n**Valid:** dated 2020-13-45\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-8".to_string(), EXPOSURE_THRESHOLD);
+
+        assert!(
+            scan_dated_stale(&cat.conn, &deg, 20_685)
+                .unwrap()
+                .is_empty(),
+            "a calendar-invalid date must be skipped, not reported or panicked on"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_wires_a_live_entry_indegree_into_scan_dated_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let led = tmp.path().join("led.md");
+        seed_ledger(
+            &cat,
+            "led",
+            &led,
+            "## R-1 — exposed\n\n**Valid:** dated 2000-01-01\n",
+        );
+        // EXPOSURE_THRESHOLD distinct citing files, each a unique definer-free citer, so
+        // entry_indegree's real, computed-from-disk value clears the gate.
+        for i in 0..EXPOSURE_THRESHOLD {
+            let p = tmp.path().join(format!("citer-{i}.md"));
+            seed_ledger(&cat, &format!("citer-{i}"), &p, "see R-1\n");
+        }
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["summary"]["by_check"]["entry_dated_stale"],
+            json!(1),
+            "call() must wire a REAL entry_indegree, and a real `today`, into \
+             scan_dated_stale, not an empty/placeholder map: {out:#?}"
         );
     }
 }
