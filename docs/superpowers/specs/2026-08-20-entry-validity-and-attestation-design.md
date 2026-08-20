@@ -521,7 +521,7 @@ emits 4000 rows has the same effect as one that emits none, at higher cost.
 
 ## Layer 3 — backfill the entry graph
 
-### Attribution
+### Attribution — measured 2026-08-20 (Layer 0)
 
 `link_scan::extract` (`src/librarian/tools/link_scan/extract.rs:128`) returns:
 
@@ -533,16 +533,64 @@ pub struct DocExtract {
 }
 ```
 
-**Both definitions and citations carry a line number.** Entry-grain attribution is
-therefore one comparison over data that already exists:
+**Both definitions and citations carry a line number**, so attribution is a comparison
+over data that already exists. The question Layer 0 answered is *which* comparison.
+
+#### The rule is section-bounded, NOT nearest-preceding-heading
 
 ```
-src_local(citation) = the definition with the greatest line ≤ citation.line
+WRONG:  src_local = the definition with the greatest line ≤ citation.line
+RIGHT:  src_local = that definition, but ONLY IF the citation is still inside its
+        section — which ends at the next heading of the SAME OR HIGHER level.
 ```
 
-A citation above the first definition belongs to no entry and is dropped — it is
-file-grain prose (a preamble, an index table), and `artifact_link` already covers it.
+**Measured over all 12 declared ledgers** (246 definitions, 1427 extracted citations):
 
+| | count |
+|---|---|
+| citations above the first definition — unattributed under **both** rules | 407 (28.5%) |
+| the two rules **agree** | 897 |
+| **naive rule attributes outside the owner's section** | **123** |
+| **naive precision on attributed citations** | **897/1020 = 87.9%** |
+
+**The 12.1% error is a tail effect and it is concentrated**: four ledgers carry 109 of
+the 123 errors (89%) — `structural-debt-refactor` 45, `2026-08-16-iron-law-gate-firing-audit`
+31, `reconnaissance-patterns` 17, `tracker-hygiene-log` 16.
+
+One mechanism produces nearly all of it: **the last entry in a file absorbs every
+citation in the trailing non-entry sections.** In the gate-firing audit, `GF-8` is
+defined at L129 and its section ends at L133, but the naive rule attributes every
+citation from L134 to end-of-file to it — an entire `## Summary`-style analysis tail,
+dozens of `IL-1` / `IL-2` / `IL-3` references, all landing on one unrelated entry.
+
+**This is the same bound Layer 1's `**Valid:**` parser already specifies.** The spec had
+the rule in one place and not the other; Layer 0's contribution is that they are one
+rule, and that skipping it costs 12.1%.
+
+#### The 28.5% that attributes to nothing is correct, not lost
+
+Citations above the first definition are index-table rows and preambles — the
+hand-maintained `## Index` tables the tracker guide describes. They belong to no entry
+and both rules say so. They are also same-file references, so `link_scan` already
+classifies them `SelfCite` (853 project-wide) and excludes them from edges. **In-degree
+must never count them**, or an entry's own index row inflates its exposure.
+
+#### Calibration (CLAUDE.md Measurement clause 4)
+
+The probe's extractor was calibrated against `link_scan`'s own output before being
+extended: on the 11 dangling `EntryToken` citations from `link_scan`'s sample that
+resolve to a readable file, the probe reproduces **11/11** `(token, line)` pairs, zero
+misses. Ratio 1.0 licenses the extension.
+
+**Honest limit on the 87.9%.** It is the *agreement rate between two algorithms*, with
+section-bounded assumed correct — it is not ground truth. Ground-truth checking was a
+24-row hand sample of naive attributions; exactly one of those rows fell in the
+disagreement set (the `GF-8` case above), and on that one, reading the source confirms
+the bounded rule. So: n=24 hand-checked, n=1 overlapping the disagreement, bounded
+correct there. A larger ground-truth sample is cheap and should be run before Layer 5
+resets any counter on this basis.
+
+Reproduce with `scripts/probe_entry_attribution.py`.
 ### Resolution and materialization
 
 Destination resolution uses `resolve::resolve`
@@ -938,7 +986,7 @@ verification.
 
 | # | Layer | Ships on | Status |
 |---|---|---|---|
-| 0 | **Attribution probe** — measure nearest-preceding-heading precision on this corpus | — | **scheduled** — gates 3, 4, 5 |
+| 0 | **Attribution probe** — measure nearest-preceding-heading precision on this corpus | — | **DONE 2026-08-20** — naive 87.9%; use the section-bound rule |
 | 1 | `**Valid:**` + `**Rests on:**`, default-is-decay, allocator stamping, `asserted_at` | — | **scheduled** |
 | 2 | Three doctor checks, gated on shared exposure | 1, and 3 for in-degree | **scheduled** (degraded exposure until 3) |
 | 3 | Slug bulk-mint → `origin='scan'` materializer, `rel='rests-on'` | 0 | designed, not scheduled |
@@ -972,11 +1020,15 @@ Ordered by how much each would change the design if it fired.
   zero, the mechanism is laundering rather than verifying. This is the single health
   metric for the whole design and it should be on the first dashboard, not discovered
   later.
-- **Attribution precision is unmeasured and now load-bearing three times over.** The
-  nearest-preceding-heading heuristic feeds citation edges, buffer-read attribution and
-  grep-read attribution. The prior-art pass found **nothing** in the literature on it —
-  citation-context extraction exists in scholarly NLP, but not this heuristic or its
-  error rate. Measure it on this corpus before any of the three consumers ships.
+- **Attribution precision: measured, and the naive rule is not good enough.** Layer 0
+  (2026-08-20) puts nearest-preceding-heading at **87.9%** on this corpus, with the
+  12.1% concentrated in four ledgers and produced by one mechanism — the last entry in a
+  file absorbing every citation in the trailing non-entry sections. The section-bound
+  rule fixes it and is already what Layer 1's parser specifies. **Residual risk:** 87.9%
+  is agreement between two algorithms, not ground truth; only 1 of the 24 hand-checked
+  rows fell in the disagreement set. Run a larger ground-truth sample before Layer 5
+  resets a counter on this basis. The prior-art pass found nothing in the literature on
+  this heuristic, so there is no external number to fall back on.
 - **Per-entry blame cost is unmeasured.** Decision 3's default depends on it; three
   options are named in Layer 1 and the choice is deferred to measurement.
 - **Bulk slug minting touches `merge_worktree` and the worktree overlay.** 2 of 4087
