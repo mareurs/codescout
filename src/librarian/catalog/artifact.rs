@@ -298,6 +298,85 @@ fn looks_like_artifact_id(s: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// One artifact that had no slug and now does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MintedSlug {
+    pub id: String,
+    pub abs_path: String,
+    pub slug: String,
+}
+
+/// Mint a slug for every artifact whose `slug` is NULL, in one transaction.
+///
+/// The backfill [`ensure_slug`] was always going to need: `entry_cite.src_slug` FKs
+/// `artifact(slug)`, so an entry-grain edge can only exist for a source that has one,
+/// and slugs are minted lazily on first `append_entry(cites=…)`. Measured 2026-08-20:
+/// **2 of 4106** catalogued artifacts had one.
+///
+/// **Delegates to [`ensure_slug`] per row rather than reimplementing the rule.** The
+/// base/fallback/dedup logic (title → file stem → `"tracker"`, `-2`/`-3` suffixes, the
+/// id-shape guard) lives in one place, so the bulk path and the lazy path cannot drift.
+/// A second implementation that agreed today and diverged later is the whole failure
+/// class this codebase keeps finding.
+///
+/// **Ordered by `abs_path`, and that is load-bearing rather than tidiness.** Dedup is
+/// first-come-first-served against the unique index, so iteration order decides which of
+/// six artifacts titled "Changelog" gets `changelog` and which get `changelog-2..6` —
+/// and a slug is immutable once non-null, so the order is baked in permanently on the
+/// first run. Without a total order the assignment would vary run to run and machine to
+/// machine. Measured on this corpus: 54 title values are shared by 139 rows (max group
+/// 10), and 105 rows have no title at all and resolve through the stem fallback.
+///
+/// **`confirm=false` rolls back rather than simulating.** The dry run executes the real
+/// mint and discards it, so the preview cannot disagree with what applying would do —
+/// a hand-written "what would happen" pass is a second implementation with the same
+/// drift risk as above.
+///
+/// Not scoped to a project, unlike `fix=repair_frontmatter_id`: that one WRITES FILES in
+/// whatever repo it sweeps, while this writes only machine-local catalog rows. Minting
+/// the whole corpus in one deterministic pass also makes assignment a pure function of
+/// (corpus, already-minted slugs) instead of depending on which repo happened to run it
+/// first.
+pub fn mint_missing_slugs(conn: &rusqlite::Connection, confirm: bool) -> Result<Vec<MintedSlug>> {
+    let pending: Vec<(String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, abs_path FROM artifact WHERE slug IS NULL ORDER BY abs_path, id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    let tx = conn.unchecked_transaction()?;
+    let mut minted = Vec::with_capacity(pending.len());
+    for (id, abs_path) in pending {
+        let slug = ensure_slug(&tx, &id)?;
+        minted.push(MintedSlug { id, abs_path, slug });
+    }
+    if confirm {
+        tx.commit()?;
+    } else {
+        tx.rollback()?;
+    }
+    Ok(minted)
+}
+
+/// `(with_slug, without_slug)` — the backfill's progress, for `catalog_health`.
+pub fn slug_coverage(conn: &rusqlite::Connection) -> Result<(usize, usize)> {
+    let with: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM artifact WHERE slug IS NOT NULL",
+        [],
+        |r| r.get(0),
+    )?;
+    let without: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM artifact WHERE slug IS NULL",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok((with as usize, without as usize))
+}
+
 pub fn delete(cat: &Catalog, id: &str) -> Result<bool> {
     Ok(cat
         .conn
@@ -509,6 +588,128 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ensure_slug(&cat.conn, "c").unwrap(), "zzzzbeefcafe1234");
+    }
+
+    /// Seed n artifacts sharing one title, in an order that is NOT abs_path order,
+    /// so a test asserting determinism is actually testing the ORDER BY rather than
+    /// insertion order happening to agree with it.
+    fn seed_titled(cat: &Catalog, rows: &[(&str, &str, &str)]) {
+        for (id, path, title) in rows {
+            let row = TestArtifactRowBuilder::new(id)
+                .with_title(*title)
+                .with_abs_path(*path)
+                .build();
+            upsert(cat, &row).unwrap();
+        }
+    }
+
+    #[test]
+    fn mint_missing_slugs_assigns_by_abs_path_order_not_insertion_order() {
+        // Dedup is first-come-first-served and a slug is immutable once set, so the
+        // iteration order permanently decides who gets the un-suffixed name. Insert
+        // deliberately backwards: if the mint followed insertion (or rowid) order,
+        // /z.md would take `shared` and this would fail.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_titled(
+            &cat,
+            &[
+                ("z", "/repo/z.md", "Shared"),
+                ("m", "/repo/m.md", "Shared"),
+                ("a", "/repo/a.md", "Shared"),
+            ],
+        );
+
+        let minted = mint_missing_slugs(&cat.conn, true).unwrap();
+        let by_id: std::collections::BTreeMap<&str, &str> = minted
+            .iter()
+            .map(|m| (m.id.as_str(), m.slug.as_str()))
+            .collect();
+        assert_eq!(by_id["a"], "shared", "/repo/a.md sorts first");
+        assert_eq!(by_id["m"], "shared-2");
+        assert_eq!(by_id["z"], "shared-3");
+    }
+
+    #[test]
+    fn mint_missing_slugs_dry_run_writes_nothing_but_reports_what_apply_would_do() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_titled(
+            &cat,
+            &[("a", "/repo/a.md", "Shared"), ("b", "/repo/b.md", "Shared")],
+        );
+
+        let preview = mint_missing_slugs(&cat.conn, false).unwrap();
+        assert_eq!(preview.len(), 2);
+        let (with, without) = slug_coverage(&cat.conn).unwrap();
+        assert_eq!(
+            (with, without),
+            (0, 2),
+            "confirm=false must leave every slug NULL"
+        );
+
+        // The preview is the real mint, rolled back — so applying must reproduce it
+        // exactly, not merely agree in count.
+        let applied = mint_missing_slugs(&cat.conn, true).unwrap();
+        assert_eq!(
+            applied, preview,
+            "a dry run that can disagree with the apply is a second implementation"
+        );
+        assert_eq!(slug_coverage(&cat.conn).unwrap(), (2, 0));
+    }
+
+    #[test]
+    fn mint_missing_slugs_is_idempotent_and_never_re_mints() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_titled(
+            &cat,
+            &[("a", "/repo/a.md", "One"), ("b", "/repo/b.md", "Two")],
+        );
+
+        let first = mint_missing_slugs(&cat.conn, true).unwrap();
+        assert_eq!(first.len(), 2);
+        let second = mint_missing_slugs(&cat.conn, true).unwrap();
+        assert!(
+            second.is_empty(),
+            "a second pass must mint nothing: slugs are immutable once non-null, and a \
+             re-mint would silently re-key entry_cite.src_slug"
+        );
+        assert_eq!(slug_coverage(&cat.conn).unwrap(), (2, 0));
+    }
+
+    #[test]
+    fn mint_missing_slugs_falls_back_to_the_file_stem_for_untitled_rows() {
+        // 105 of 4106 live rows have no title — auto-indexed READMEs with no
+        // frontmatter. They must still get a usable slug, not "tracker" collisions.
+        let cat = Catalog::open_in_memory().unwrap();
+        for (id, path) in [("a", "/repo/docs/alpha.md"), ("b", "/repo/docs/beta.md")] {
+            let mut row = TestArtifactRowBuilder::new(id).with_abs_path(path).build();
+            // A genuinely untitled row — NULL in the catalog, as an auto-indexed
+            // README with no frontmatter produces.
+            row.title = None;
+            upsert(&cat, &row).unwrap();
+        }
+        let minted = mint_missing_slugs(&cat.conn, true).unwrap();
+        let slugs: Vec<&str> = minted.iter().map(|m| m.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn mint_missing_slugs_leaves_an_already_minted_slug_alone() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_titled(
+            &cat,
+            &[("a", "/repo/a.md", "Shared"), ("b", "/repo/b.md", "Shared")],
+        );
+        // `b` is minted first, out of abs_path order, exactly as the lazy
+        // append_entry path would have done at some arbitrary earlier time.
+        assert_eq!(ensure_slug(&cat.conn, "b").unwrap(), "shared");
+
+        let minted = mint_missing_slugs(&cat.conn, true).unwrap();
+        assert_eq!(minted.len(), 1, "only the NULL row is touched");
+        assert_eq!(minted[0].id, "a");
+        assert_eq!(
+            minted[0].slug, "shared-2",
+            "the backfill yields to a slug that already exists rather than re-keying it"
+        );
     }
 
     #[test]

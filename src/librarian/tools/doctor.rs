@@ -278,6 +278,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let cutoff = crate::librarian::catalog::gc::visibility_cutoff_ms(&cat.conn, now_ms)?;
     let hidden_rows = crate::librarian::catalog::gc::hidden_count(&cat.conn, cutoff)?;
     let grace = crate::librarian::catalog::gc::grace_days(&cat.conn)?;
+    let (slugs_with, slugs_without) =
+        crate::librarian::catalog::artifact::slug_coverage(&cat.conn)?;
 
     // Move-candidate detection (Task 9): needs the ACTIVE repo's git root.
     // The librarian ToolContext exposes it as `current_project.git_root`,
@@ -429,6 +431,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let mut catalog_health = serde_json::Map::new();
     catalog_health.insert("hidden_rows".to_string(), json!(hidden_rows));
+    // Slug backfill progress. Reported unconditionally so the gap is visible before
+    // anyone needs it: `entry_cite.src_slug` FKs `artifact(slug)`, so every row without
+    // one is a source that cannot carry an entry-grain citation.
+    catalog_health.insert(
+        "slug_coverage".to_string(),
+        json!({ "with_slug": slugs_with, "without_slug": slugs_without }),
+    );
     catalog_health.insert("move_candidates".to_string(), json!(candidates.len()));
     if !candidates.is_empty() {
         let detail: Vec<Value> = candidates
@@ -761,9 +770,52 @@ async fn run_fix(
                               "skipped_collisions": stats.skipped_collisions },
             }))
         }
+        "mint_slugs" => {
+            // Layer 3a of the Statement spec: `entry_cite.src_slug` FKs
+            // `artifact(slug)`, so an entry-grain edge can only exist for a source
+            // that has a slug — and slugs are minted lazily on first
+            // `append_entry(cites=…)`. Measured 2026-08-20: 2 of 4106 rows had one.
+            //
+            // NOT scoped to a root, unlike `repair_frontmatter_id`: that one writes
+            // FILES in whatever repo it sweeps, while this writes only machine-local
+            // catalog rows. One deterministic corpus-wide pass also makes assignment a
+            // pure function of (corpus, already-minted slugs) rather than of which
+            // repo happened to run it first — and a slug is immutable once set, so
+            // that ordering is permanent.
+            let cat = ctx.catalog.lock();
+            let minted =
+                crate::librarian::catalog::artifact::mint_missing_slugs(&cat.conn, confirm)?;
+            let (with, without) = crate::librarian::catalog::artifact::slug_coverage(&cat.conn)?;
+            drop(cat);
+
+            // Sampled like `abs_path_outside_managed_roots`: the full list is ~4000
+            // rows and would bury the response. `totals` counts every one, and the
+            // elision is announced rather than applied silently.
+            const SAMPLE: usize = 10;
+            let sample: Vec<Value> = minted
+                .iter()
+                .take(SAMPLE)
+                .map(|m| json!({ "path": m.abs_path, "slug": m.slug }))
+                .collect();
+            let elided = minted.len().saturating_sub(sample.len());
+            Ok(json!({
+                "fix": "mint_slugs",
+                "mode": if confirm { "applied" } else { "dry_run" },
+                "minted": minted.len(),
+                "sample": sample,
+                "elided": elided,
+                "slug_coverage": { "with_slug": with, "without_slug": without },
+                "hint": if confirm {
+                    "slugs are immutable once minted — a re-run mints only rows still missing one."
+                } else {
+                    "dry run: the mint ran and was rolled back, so these are the exact slugs \
+                     confirm=true would assign. Re-run with confirm=true to keep them."
+                },
+            }))
+        }
         other => Err(RecoverableError::new(format!(
             "unknown fix '{other}' — expected 'prune_missing', 'reseat_worktree', \
-             'rehome', or 'repair_frontmatter_id'"
+             'rehome', 'repair_frontmatter_id', or 'mint_slugs'"
         ))),
     }
 }
@@ -8505,6 +8557,81 @@ root = "work/elsewhere/ghost"
             json!(1),
             "call() must wire a REAL entry_indegree into scan_cited_but_undeclared, not \
              an empty/placeholder map: {out:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn call_reports_slug_coverage_in_catalog_health() {
+        // Reported unconditionally, not gated on a threshold: every row without a slug
+        // is a source that cannot carry an entry-grain citation, and the number is how
+        // anyone knows the Layer 3a backfill has not run.
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let led = tmp.path().join("led.md");
+        seed_ledger(&cat, "led", &led, "## R-1 — a\n\nbody\n");
+
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["catalog_health"]["slug_coverage"]["without_slug"],
+            json!(1),
+            "the seeded artifact has no slug and must be counted: {out:#?}"
+        );
+        assert_eq!(
+            out["catalog_health"]["slug_coverage"]["with_slug"],
+            json!(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_slugs_dry_run_reports_without_writing_then_confirm_applies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        for name in ["alpha", "beta"] {
+            let p = tmp.path().join(format!("{name}.md"));
+            seed_ledger(&cat, name, &p, "## R-1 — a\n\nbody\n");
+        }
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let dry = call(&ctx, json!({ "fix": "mint_slugs" })).await.unwrap();
+        assert_eq!(dry["mode"], json!("dry_run"));
+        assert_eq!(dry["minted"], json!(2));
+        assert_eq!(
+            dry["slug_coverage"]["without_slug"],
+            json!(2),
+            "a dry run must leave every slug NULL: {dry:#?}"
+        );
+
+        let applied = call(&ctx, json!({ "fix": "mint_slugs", "confirm": true }))
+            .await
+            .unwrap();
+        assert_eq!(applied["mode"], json!("applied"));
+        assert_eq!(applied["minted"], json!(2));
+        assert_eq!(applied["slug_coverage"]["without_slug"], json!(0));
+
+        // Idempotent through the tool surface, not just the catalog function.
+        let again = call(&ctx, json!({ "fix": "mint_slugs", "confirm": true }))
+            .await
+            .unwrap();
+        assert_eq!(
+            again["minted"],
+            json!(0),
+            "slugs are immutable; a second apply must mint nothing: {again:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_fix_names_mint_slugs_among_the_valid_ones() {
+        // The error text is the only place a caller learns the fix vocabulary, so a
+        // new fix that is not listed there is undiscoverable.
+        let cat = Catalog::open_in_memory().unwrap();
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let err = call(&ctx, json!({ "fix": "nonsense" })).await.unwrap_err();
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("mint_slugs"),
+            "unknown-fix error must name every valid fix: {text}"
         );
     }
 
