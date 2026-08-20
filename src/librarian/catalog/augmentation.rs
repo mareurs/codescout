@@ -1068,10 +1068,27 @@ pub fn allocate_entry_id(
         None => updated,
         Some(s) => {
             let heading = "#".repeat(level);
+            let prose = s.body.trim_end();
+            // Every section the server writes is born with a declared decay class, the
+            // same way it is born with a def_re-conformant heading: by construction, not
+            // by convention. A caller that already declared one is left alone —
+            // double-stamping would make the parser's first-match rule pick between the
+            // caller's class and this one arbitrarily. A malformed declaration (e.g. an
+            // unparsable date) propagates the parser's own error via `?` — before any
+            // write happens — rather than being joined by a second `**Valid:**` line,
+            // which would make the malformed one authoritative under first-wins and
+            // leave the entry permanently unparseable. Repair only when exactly one
+            // interpretation is correct
+            // (docs/adrs/2026-07-10-repair-and-continue-input-handling.md); a malformed
+            // date has none.
+            let stamped = match crate::librarian::statements::parse_validity(prose)? {
+                Some(_) => prose.to_string(),
+                None => format!("**Valid:** dated {}\n\n{prose}", today_iso()),
+            };
             // Trailing blank line so the anchor heading that follows is not glued to
             // this section's last prose line. Caught by reading a mutation test's
             // failure output, which printed `the prose\n## Template for new entries`.
-            let section_text = format!("{heading} {id} — {}\n\n{}\n\n", s.title, s.body.trim_end());
+            let section_text = format!("{heading} {id} — {}\n\n{stamped}\n\n", s.title);
             crate::tools::markdown::edit_markdown::perform_section_edit_ext(
                 &updated,
                 &s.anchor_heading,
@@ -1112,6 +1129,14 @@ pub fn allocate_entry_id(
         heading_level: observed_level,
         section_written: section.is_some(),
     })
+}
+
+/// Today as `YYYY-MM-DD`, UTC. `chrono` is already a workspace dependency and this
+/// exact format is already used elsewhere in this module tree (`tools/update.rs`,
+/// `tools/legibility_scan/mod.rs`) — a hand-rolled civil-date formatter here would be
+/// exactly the duplication that drifts.
+fn today_iso() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
 }
 
 /// Resolve a user-supplied cite ref to a stable `entry_cite.dst_ref`.
@@ -2919,6 +2944,152 @@ mod tests {
         assert_eq!(
             ok.id, "R-8",
             "a refused placement must not burn the id it would have used"
+        );
+    }
+
+    /// New entries are born with a declared decay class the same way they are born
+    /// with a def_re-conformant heading: by construction, not by convention.
+    #[test]
+    fn allocator_stamps_a_default_validity_into_the_section_it_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: U\n---\n\n## U-1 — first\n\nx\n\n## Template for new entries\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "server wrote this".to_string(),
+            body: "the prose".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+        };
+        allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
+
+        let written = std::fs::read_to_string(&md).unwrap();
+        // Pins the exact stamped form: today's date (not some other format), a blank
+        // line separating the stamp from the prose (or the anchor heading glues to
+        // it), and the stamp landing BEFORE the prose, not after.
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        assert!(
+            written.contains(&format!("**Valid:** dated {today}\n\nthe prose")),
+            "a section the server writes must be born with today's date, blank-line \
+             separated, immediately ahead of the caller's prose:\n{written}"
+        );
+    }
+
+    /// `s.body.trim_end()` matters beyond cosmetics: the section must still end with
+    /// exactly the `\n\n` this file's own trailing-blank-line comment promises before
+    /// the anchor heading. A body that already carries trailing blank lines would
+    /// otherwise stack past that, gluing extra blank lines in front of the anchor
+    /// instead of exactly one.
+    #[test]
+    fn allocator_trims_trailing_whitespace_from_the_body_before_stamping() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: U\n---\n\n## U-1 — first\n\nx\n\n## Template for new entries\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "trailing whitespace".to_string(),
+            body: "the prose\n\n\n".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+        };
+        allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
+
+        let written = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            written.contains("the prose\n\n## Template for new entries"),
+            "trailing whitespace in the caller's body must be trimmed, leaving \
+             exactly one blank line before the anchor heading:\n{written}"
+        );
+    }
+
+    /// An explicit class is left alone — double-stamping would make the parser's
+    /// first-match rule pick between the caller's class and the stamped default
+    /// arbitrarily.
+    #[test]
+    fn allocator_does_not_double_stamp_a_caller_declared_class() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: U\n---\n\n## U-1 — first\n\nx\n\n## Template for new entries\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "a law".to_string(),
+            body: "**Valid:** invariant\n\nthe prose".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+        };
+        allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap();
+
+        let written = std::fs::read_to_string(&md).unwrap();
+        assert_eq!(
+            written.matches("**Valid:**").count(),
+            1,
+            "an explicit class must not be joined by a stamped default:\n{written}"
+        );
+        assert!(written.contains("**Valid:** invariant"));
+    }
+
+    /// A malformed `**Valid:**` (e.g. an unparsable date) has no correct repair:
+    /// joining it with a stamped default would make the malformed line authoritative
+    /// under first-wins (`parse_validity` takes the FIRST declaration), and
+    /// permanently unparseable. Refusing outright is the only interpretation that has
+    /// exactly one reading (docs/adrs/2026-07-10-repair-and-continue-input-handling.md).
+    /// Asserting the file is byte-identical pins "no id allocated, nothing written" —
+    /// same shape as `a_bad_anchor_writes_nothing_at_all_not_even_the_high_water_mark`.
+    #[test]
+    fn allocator_refuses_a_malformed_caller_declared_class_rather_than_double_stamping() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        let before = "---\nkind: tracker\nentry_prefix: U\n---\n\n## U-1 — first\n\nx\n\n## Template for new entries\n";
+        std::fs::write(&md, before).unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "a broken law".to_string(),
+            body: "**Valid:** dated notadate\n\nthe prose".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+        };
+        let err = allocate_entry_id(&mut cat, "art1", "U", Some(&section)).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("not an ISO date"),
+            "the parser's own error must propagate, not be swallowed: {text}"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            before,
+            "a refused stamp must leave the file byte-identical — no second `**Valid:**` line"
+        );
+
+        // And the id was not consumed: the next successful call still gets U-2.
+        let ok = allocate_entry_id(&mut cat, "art1", "U", None).unwrap();
+        assert_eq!(
+            ok.id, "U-2",
+            "a refused stamp must not burn the id it would have used"
         );
     }
 
