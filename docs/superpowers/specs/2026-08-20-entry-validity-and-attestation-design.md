@@ -1057,12 +1057,19 @@ rather than dropped silently.
   inertness the *Risks* section raises about Layer 2, but without Layer 2's fallback,
   since an edge can only exist where an author wrote the line.
 
-**The bulk-mint carries a known migration hazard.** `artifact.slug` has already been
-dropped once by a table-copy migration (`migrate_v6::drop_legacy_and_stamp` rebuilt
-`artifact` without carrying it, taking `ux_artifact_slug` and dangling `entry_cite`'s FK
-with it). It self-heals on the next open, so a twice-opening idempotency test does not
-catch it. Minting ~4104 slugs is what would make a recurrence expensive; the invariant
-test belongs in the same change. See memory `catalog-sql-hazards`.
+**The bulk-mint's migration hazard is historical and already guarded — do not re-add the
+guard.** `artifact.slug` was dropped once by a table-copy migration
+(`migrate_v6::drop_legacy_and_stamp` rebuilt `artifact` without carrying it, taking
+`ux_artifact_slug` and dangling `entry_cite`'s FK with it). It self-healed on the next
+open, so a twice-opening idempotency test did not catch it. Two tests close it today:
+`migration_v6_single_open_preserves_v9_entry_graph_shape` pins that specific column, and
+`every_schema_sql_artifact_column_survives_every_migration_path` generalises it by parsing
+the canonical column list out of `SCHEMA_SQL` and checking every column on every seeded
+migration path.
+
+What the bulk-mint changes is the **cost** of a recurrence, not its likelihood: two null
+slugs tolerate a dropped column silently, ~4104 populated ones with a live FK do not. See
+memory `catalog-sql-hazards`.
 ---
 
 ## Risks
