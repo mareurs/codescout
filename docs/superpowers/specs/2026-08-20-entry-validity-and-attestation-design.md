@@ -991,7 +991,7 @@ verification.
 | 2 | **Four** doctor checks (not three), gated on shared exposure | 1 | **SHIPPED 2026-08-20** — one exposure term, not `max()` — see below |
 | 3a | Slug bulk-mint (`doctor fix=mint_slugs`) | 0 | **SHIPPED 2026-08-20** — 4107/4107 minted |
 | 3b | `origin='scan'` entry-grain materializer | 3a | **SHIPPED 2026-08-21** — 322 edges; see below |
-| 3c | `rel='rests-on'` edges | 3b + declarations | **deferred, deliberately** — ~7 real declarations corpus-wide |
+| 3c | `rel='rests-on'` edges | 3b + declarations | **not building** — re-measured 2026-08-21: 1 resolvable declaration corpus-wide, and its edge already exists as `cites`. Revisit if resolvable declarations reach ~20 |
 | 4 | Entry-grain `context` anchor | 3 | designed, not scheduled |
 | 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | designed, not scheduled |
 | 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4, 5a | designed, not scheduled |
@@ -1106,6 +1106,27 @@ prevent an edge.
 - **`rel='rests-on'` has no input.** Fifteen `**Rests on:**` lines exist corpus-wide and
   most are fenced examples in this spec, `docs/templates/session-log.md`, and the manual
   page; at most ~7 are real declarations, 6 of them written the day Layer 1 shipped.
+
+  **Re-measured 2026-08-21 — the population grew and the part that matters did not.**
+  Instrument: a line-anchored grep for the parser's shape that does NOT skip fenced
+  blocks, so it over-counts; an upper bound, named as one. 21 lines now match; 6 are
+  literal template placeholders; **2** contain anything token-shaped; **1** is genuinely
+  resolvable in-corpus.
+
+  That one is `W-6`'s route to `statement-validity-session-log:F-5` — and **its edge
+  already exists as `cites`**, because a `**Rests on:**` line is body text that `extract`
+  scans like any other. So 3c would materialize one row duplicating an existing one under
+  a different `rel`. The other token-shaped line is the manual's `ADR-7` example, a prefix
+  no ledger owns. The rest name a principle, a file outside the repo, or a `get_guide`
+  topic — none of which `dst_ref` can key, and none of which is an authoring failure:
+  decision 7 says such routes stay prose and still do their job.
+
+  **Consequence for decision 8, which is the part worth carrying forward.** The Layer 5
+  tap fires on `max(reads, rests-on in-degree)`. With one edge corpus-wide that term
+  contributes nothing, so the tap is effectively `max(reads, 0)`. The reasoning behind
+  decision 8 is sound — a claim nobody opens but forty things derive from IS load-bearing
+  — but the signal has no input yet. Design Layer 5b knowing that, rather than discovering
+  it after the tap is built.
   Building the materializer now ships machinery with nothing to chew on — the same
   inertness the *Risks* section raises about Layer 2, but without Layer 2's fallback,
   since an edge can only exist where an author wrote the line.
