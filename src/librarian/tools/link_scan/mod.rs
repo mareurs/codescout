@@ -20,6 +20,8 @@ pub mod resolve;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use crate::librarian::catalog::entry_cite;
+
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -88,6 +90,47 @@ fn push_capped(v: &mut Vec<Value>, val: Value) {
     }
 }
 
+/// The `entry_cite.dst_ref` for a resolved citation — entry grain where the citation
+/// named an entry, file grain where it named a file.
+///
+/// The two forms are exactly the two `resolve_cite_ref` already accepts on the write
+/// path, so scanner rows and hand-written rows are the same shape and a reader never has
+/// to know which produced a row:
+///
+/// - `EntryToken` (`R-43`) and `CrossRepoToken` (`stem:R-43`) → `<dst_slug>:<TOKEN>`,
+///   the qualifier stripped because it is a *lookup* hint, not part of the identity.
+/// - `ArtifactId` and `RelPathLink` → the bare 16-hex artifact id. These name a FILE;
+///   inventing an entry for them would fabricate provenance the citation never claimed.
+///
+/// **Deliberately not `resolve_cite_ref`.** That function validates a `<slug>:<local>`
+/// by looking the local up in the destination's augmentation `entry_collection` — but
+/// most ledgers are prose, defining entries by heading with no params rows at all, and
+/// `link_scan` binds tokens to headings. Routing scan rows through it would reject every
+/// prose ledger while looking like a safety check. Validation here comes from
+/// `resolve::resolve`, which yields `Edge` only for a uniquely-resolving token.
+///
+/// `None` when the destination has no slug — such a row cannot be keyed, since
+/// `entry_cite.src_slug` FKs `artifact(slug)`.
+fn entry_dst_ref(
+    c: &extract::Citation,
+    dst_id: &str,
+    id_to_slug: &BTreeMap<String, String>,
+) -> Option<String> {
+    match c.kind {
+        extract::CitationKind::EntryToken | extract::CitationKind::CrossRepoToken => {
+            let token = match c.raw.rsplit_once(':') {
+                Some((_, t)) => t,
+                None => c.raw.as_str(),
+            };
+            let dst_slug = id_to_slug.get(dst_id)?;
+            Some(format!("{dst_slug}:{token}"))
+        }
+        extract::CitationKind::ArtifactId | extract::CitationKind::RelPathLink => {
+            Some(dst_id.to_string())
+        }
+    }
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let args: Args = serde_json::from_value(args).map_err(|e| {
         RecoverableError::with_hint(
@@ -143,20 +186,40 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     rows.truncate(limit);
 
     // ---- extraction pass (one body parse per artifact) ----
-    let mut extracts: Vec<(usize, extract::DocExtract)> = Vec::new();
+    // `entry_sections` is computed HERE, beside `extract`, because this is the only
+    // place holding the body text. Entry-grain attribution needs to know which entry
+    // encloses each citation's line, and re-reading every file later to answer that
+    // would double the I/O and risk the two passes seeing different bytes.
+    let mut extracts: Vec<(usize, extract::DocExtract, Vec<extract::EntrySection>)> = Vec::new();
     let mut unreadable: Vec<String> = Vec::new();
     for (i, row) in rows.iter().enumerate() {
         match std::fs::read_to_string(&row.abs_path) {
-            Ok(text) => extracts.push((i, extract::extract(&text))),
+            Ok(text) => {
+                let sections = extract::entry_sections(&text);
+                extracts.push((i, extract::extract(&text), sections));
+            }
             Err(_) => unreadable.push(row.id.clone()),
         }
     }
+
+    // Artifact id -> slug. `ArtifactRow` does not carry `slug`, and `entry_cite`
+    // is keyed by it on both sides (`src_slug` FKs `artifact(slug)`), so the map is
+    // fetched once rather than per citation.
+    let id_to_slug: BTreeMap<String, String> = {
+        let mut stmt = cat
+            .conn
+            .prepare("SELECT id, slug FROM artifact WHERE slug IS NOT NULL")?;
+        let pairs = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<(String, String)>>>()?;
+        pairs.into_iter().collect()
+    };
 
     // ---- corpus + definition index ----
     let index = resolve::DefinitionIndex::build(
         extracts
             .iter()
-            .map(|(i, ex)| (rows[*i].id.as_str(), rows[*i].status.as_str(), ex)),
+            .map(|(i, ex, _)| (rows[*i].id.as_str(), rows[*i].status.as_str(), ex)),
     );
     // Computed here rather than during resolution because it is a fact about the INDEX, not
     // about any one citation — and it must be reported even when every citation currently
@@ -194,7 +257,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let (mut ambiguous_total, mut dangling_total, mut cross_repo_total) = (0usize, 0usize, 0usize);
     let mut citations_total = 0usize;
 
-    for (i, ex) in &extracts {
+    // Entry-grain edges: (src_slug, src_local, dst_ref). A set because one entry citing
+    // one target twice is ONE edge, and because a stable order makes the emitted sample
+    // diffable across runs.
+    let mut desired_entry: BTreeSet<(String, String, String)> = BTreeSet::new();
+    // Citations that resolved to an edge but sit outside every entry section — a
+    // preamble, or a trailing `## Summary` that defines nothing. Counted rather than
+    // dropped silently: it is exactly the population entry-grain provenance cannot
+    // describe, and its size is what tells a reader whether that matters.
+    let mut edges_outside_any_entry = 0usize;
+
+    for (i, ex, sections) in &extracts {
         let row = &rows[*i];
         let rel_dir = git_root
             .as_ref()
@@ -205,6 +278,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         for c in &ex.citations {
             match resolve::resolve(c, &row.id, &rel_dir, &index, &corpus) {
                 Some(resolve::Outcome::Edge { dst_id }) => {
+                    // Entry grain, derived from the SAME resolution — assembly only.
+                    // `resolve` already proved the target unique, so nothing here
+                    // re-decides what a citation points at.
+                    match extract::entry_section_at(sections, c.line) {
+                        Some(src_section) => match (
+                            id_to_slug.get(&row.id),
+                            entry_dst_ref(c, &dst_id, &id_to_slug),
+                        ) {
+                            (Some(src_slug), Some(dst_ref)) => {
+                                desired_entry.insert((
+                                    src_slug.clone(),
+                                    src_section.id.clone(),
+                                    dst_ref,
+                                ));
+                            }
+                            // A slugless endpoint cannot key an entry_cite row
+                            // (`src_slug` FKs `artifact(slug)`). After the Layer 3a
+                            // backfill this is empty, but a row created since and not
+                            // yet minted would land here rather than error.
+                            _ => edges_outside_any_entry += 1,
+                        },
+                        None => edges_outside_any_entry += 1,
+                    }
                     desired.insert((row.id.clone(), dst_id));
                 }
                 Some(resolve::Outcome::SelfCite) => self_cites += 1,
@@ -233,7 +329,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     // ---- diff (and apply, in write mode) ----
-    let prunable: HashSet<String> = extracts.iter().map(|(i, _)| rows[*i].id.clone()).collect();
+    let prunable: HashSet<String> = extracts
+        .iter()
+        .map(|(i, _, _)| rows[*i].id.clone())
+        .collect();
     let existing = links::by_rel(&cat, diff::CITES_REL)?;
     let d = diff::diff(&existing, &desired, &prunable);
     let (added, pruned) = if args.write {
@@ -242,6 +341,46 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     } else {
         (0, 0)
     };
+
+    // ---- entry-grain materialization (write mode only) ----
+    // Prune-then-re-derive rather than diff: scanner rows are wholly a function of the
+    // prose, so re-deriving is the same work as computing a delta and cannot leave a
+    // stale row behind. Scoped to the slugs of the artifacts THIS pass extracted, never
+    // a bare `origin='scan'` sweep — see `entry_cite::prune_scan_rows`.
+    let mut entry_report = entry_cite::MaterializeReport {
+        derived: desired_entry.len(),
+        ..Default::default()
+    };
+    let mut entry_pruned = 0usize;
+    if args.write {
+        let scanned_slugs: std::collections::BTreeSet<String> = extracts
+            .iter()
+            .filter_map(|(i, _, _)| id_to_slug.get(&rows[*i].id).cloned())
+            .collect();
+        let now = chrono::Utc::now().timestamp_millis();
+        let tx = cat.conn.unchecked_transaction()?;
+        entry_pruned = entry_cite::prune_scan_rows(&tx, &scanned_slugs)?;
+        for (src_slug, src_local, dst_ref) in &desired_entry {
+            let wrote = entry_cite::insert_with(
+                &tx,
+                &entry_cite::EntryCiteRow {
+                    src_slug: src_slug.clone(),
+                    src_local: src_local.clone(),
+                    dst_ref: dst_ref.clone(),
+                    rel: diff::CITES_REL.to_string(),
+                    origin: entry_cite::ORIGIN_SCAN.to_string(),
+                    created_at: now,
+                },
+            )?;
+            // 0 means an existing row already covers this edge — almost always an
+            // `origin='write'` row the scan must not clobber, because `origin` is not
+            // in the PK. Counting calls instead of rows is the reporting defect
+            // `statement-validity-session-log:F-5` names.
+            entry_report.written += wrote;
+        }
+        entry_report.skipped_existing = entry_report.derived - entry_report.written;
+        tx.commit()?;
+    }
 
     // Human-reviewable edge lists (capped), with rel_paths for readability.
     let id_to_rel: BTreeMap<&str, String> = rows
@@ -278,6 +417,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "unreadable": unreadable.len(),
             "citations": citations_total,
             "self_cites": self_cites,
+            "entry_edges": {
+                "derived": entry_report.derived,
+                "written": entry_report.written,
+                "skipped_existing": entry_report.skipped_existing,
+                "pruned": entry_pruned,
+                "outside_any_entry": edges_outside_any_entry,
+            },
             "edges_desired": desired.len(),
             "edges_unchanged": d.unchanged,
             "edges_missing": d.to_add.len(),
@@ -320,6 +466,70 @@ mod tests {
             kind: CitationKind::EntryToken,
             line: 7,
         }
+    }
+
+    fn slug_map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn entry_dst_ref_uses_entry_grain_for_tokens_and_file_grain_for_files() {
+        let map = slug_map(&[("dstid0000000000", "target-tracker")]);
+
+        // A bare entry token names an ENTRY: `<dst_slug>:<TOKEN>`.
+        let c = Citation {
+            raw: "R-43".into(),
+            kind: CitationKind::EntryToken,
+            line: 7,
+        };
+        assert_eq!(
+            entry_dst_ref(&c, "dstid0000000000", &map).unwrap(),
+            "target-tracker:R-43"
+        );
+
+        // A stem-qualified token names the SAME entry — the qualifier is a lookup hint,
+        // not part of the identity, so it must not survive into dst_ref. Keeping it
+        // would make `stem:R-43` and `R-43` two different edges to one entry.
+        let c = Citation {
+            raw: "reconnaissance-patterns:R-43".into(),
+            kind: CitationKind::CrossRepoToken,
+            line: 7,
+        };
+        assert_eq!(
+            entry_dst_ref(&c, "dstid0000000000", &map).unwrap(),
+            "target-tracker:R-43"
+        );
+
+        // An artifact id or a rel_path link names a FILE. Inventing an entry for it
+        // would fabricate provenance the citation never claimed.
+        for kind in [CitationKind::ArtifactId, CitationKind::RelPathLink] {
+            let c = Citation {
+                raw: "whatever".into(),
+                kind,
+                line: 7,
+            };
+            assert_eq!(
+                entry_dst_ref(&c, "dstid0000000000", &map).unwrap(),
+                "dstid0000000000",
+                "{kind:?} names a file, so dst_ref is the bare artifact id"
+            );
+        }
+    }
+
+    #[test]
+    fn entry_dst_ref_is_none_when_the_destination_has_no_slug() {
+        // `entry_cite.src_slug` FKs `artifact(slug)`; a slugless endpoint cannot key a
+        // row. Empty after the Layer 3a backfill, but a row created since and not yet
+        // minted must degrade to "no entry edge" rather than error or fabricate one.
+        let c = Citation {
+            raw: "R-43".into(),
+            kind: CitationKind::EntryToken,
+            line: 7,
+        };
+        assert!(entry_dst_ref(&c, "unminted0000000", &BTreeMap::new()).is_none());
     }
 
     /// One shape for every finding array. `ambiguous` used to call the cited text
