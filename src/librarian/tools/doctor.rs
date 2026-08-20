@@ -2032,6 +2032,13 @@ fn iso_to_epoch_days(iso: &str) -> Option<i64> {
 /// entry past the horizon is thousands of rows and will be ignored — the same outcome as
 /// not shipping the check, at higher cost.
 ///
+/// **The sort key is TOTAL: `(Reverse(exposure), path, id)`.** No two rows can compare
+/// equal (an entry id is unique within its own path), so the output is deterministic by
+/// construction rather than by leaning on an implicit stable-sort guarantee. See the
+/// comment at the sort call for the measured reasoning: several smaller/less-adversarial
+/// tie shapes failed to expose a stable-vs-unstable difference before a 33-entry
+/// alternating-exposure fixture did.
+///
 /// **Declared `dated` only — parsed with `parse_validity`, never `resolve_validity`.**
 /// `resolve_validity`'s default-is-decay behavior treats an UNDECLARED entry as `dated
 /// <fallback>`, which is exactly the guessed age this check must not produce. An entry
@@ -2067,7 +2074,10 @@ fn scan_dated_stale(
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
-    let mut scored: Vec<(usize, Violation)> = Vec::new();
+    // Named to satisfy `clippy::type_complexity` — the tuple itself is the point: a
+    // TOTAL sort key so no two rows can ever compare equal.
+    type DatedStaleSortKey = (std::cmp::Reverse<usize>, String, String);
+    let mut scored: Vec<(DatedStaleSortKey, Violation)> = Vec::new();
     for (aid, path) in rows {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
@@ -2092,25 +2102,31 @@ fn scan_dated_stale(
                 continue;
             }
             scored.push((
-                exposure,
+                (std::cmp::Reverse(exposure), path.clone(), s.id.clone()),
                 Violation::new(
                     "entry_dated_stale",
                     Some(aid.clone()),
                     path.clone(),
                     format!(
                         "{} dated {iso} ({age}d old, exposure {exposure}) — re-run the \
-                         measurement and record the new figure; this is a worklist, not \
-                         a verdict",
+                             measurement and record the new figure; this is a worklist, not \
+                             a verdict",
                         s.id
                     ),
                 ),
             ));
         }
     }
-    // `sort_by_key` is a stable sort: entries tied on exposure keep the order they were
-    // pushed in above (abs_path order, then in-file encounter order), rather than being
-    // reordered arbitrarily between runs.
-    scored.sort_by_key(|(exposure, _)| std::cmp::Reverse(*exposure));
+    // The sort key is TOTAL — (Reverse(exposure), path, id) — so no two rows can ever
+    // compare equal (an entry id is unique within its own path). Determinism is then a
+    // property of the key, not of the sort algorithm's stability: swapping `sort_by`
+    // for `sort_unstable_by` here cannot change the output, because there is nothing
+    // left for either one to disagree about a tie on. Measured 2026-08-20: a 2-element
+    // tie, a 40/300-entry homogeneous-key block, and a 62-entry permutation with one
+    // embedded tied pair all failed to expose `sort_unstable_by_key` reordering ties; a
+    // 33-entry ledger alternating two exposure values did. Rather than keep hunting for
+    // the right fixture shape, the dependency on stability is removed instead.
+    scored.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(scored.into_iter().map(|(_, v)| v).collect())
 }
 
@@ -6678,6 +6694,36 @@ root = "work/elsewhere/ghost"
     }
 
     #[test]
+    fn conditional_past_due_treats_a_token_absent_from_indegree_as_zero_exposure() {
+        // Same defect class as `scan_dated_stale`'s identical `unwrap_or(0)` line
+        // (`entry_indegree` omits uncited/ambiguous tokens rather than inserting a
+        // zero for them, so the missing-key branch is the majority case in the live
+        // corpus). This adds a test to `scan_conditional_past_due` without touching its
+        // logic or any pre-existing test — pinning the defect CLASS, not a one-off.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-52 — never mentioned in indegree\n\n**Valid:** conditional — until \
+             something happens\n",
+        );
+
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-98".to_string(), EXPOSURE_THRESHOLD + 50);
+
+        assert!(
+            scan_conditional_past_due(&cat.conn, &deg)
+                .unwrap()
+                .is_empty(),
+            "a token with no entry in `indegree` at all must be treated as zero \
+             exposure, not skip the gate"
+        );
+    }
+
+    #[test]
     fn indegree_omits_a_token_with_more_than_one_definer() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
@@ -6914,36 +6960,77 @@ root = "work/elsewhere/ghost"
             "R-3 is inside the horizon; the rest are ordered by exposure, because an \
              unranked list of every dated entry will be ignored: {v:#?}"
         );
+
+        // The whole point of `detail` is that a reader can adjudicate without
+        // reopening the file — pin its content, not just membership/order. 2020-01-01
+        // to 2026-08-20 (epoch day 20_685) is 2423 days, verified independently via
+        // `python3 -c "(date(2026,8,20)-date(2020,1,1)).days"`.
+        assert!(
+            v[0].detail.contains("R-2 dated 2020-01-01"),
+            "detail must name the entry and its declared date: {:?}",
+            v[0].detail
+        );
+        assert!(
+            v[0].detail.contains("2423d old"),
+            "detail must carry the computed age in days: {:?}",
+            v[0].detail
+        );
+        assert!(
+            v[0].detail.contains("exposure 40"),
+            "detail must carry the exposure count: {:?}",
+            v[0].detail
+        );
+        assert!(
+            v[1].detail.contains("R-1 dated 2020-01-01"),
+            "{:?}",
+            v[1].detail
+        );
+        assert!(v[1].detail.contains("2423d old"), "{:?}", v[1].detail);
+        assert!(v[1].detail.contains("exposure 6"), "{:?}", v[1].detail);
     }
 
     #[test]
-    fn dated_stale_is_stable_on_exposure_ties() {
-        // Two entries with EQUAL exposure: a comparator that isn't a stable sort could
-        // legally reorder them between runs. `entry_sections` walks the ledger in file
-        // order, so R-21 (declared first) must still precede R-22 (declared second) when
-        // their exposure ties.
+    fn dated_stale_breaks_exposure_ties_deterministically_not_by_sort_stability() {
+        // 33 entries alternating EXPOSURE_THRESHOLD / EXPOSURE_THRESHOLD+1 — the
+        // reviewer-confirmed shape that actually manifests `sort_unstable_by_key`
+        // reordering equal keys (N=2, a 40/300-entry homogeneous block, and a
+        // 62-entry permutation with one embedded pair all failed to reproduce it).
+        // IDs are two-digit (R-10..R-42) so lexicographic string order equals numeric
+        // order, keeping the expected assertion hand-verifiable.
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("led.md");
         let cat = Catalog::open_in_memory().unwrap();
-        seed_ledger(
-            &cat,
-            "led",
-            &p,
-            "## R-21 — first\n\n**Valid:** dated 2020-01-01\n\n\
-             ## R-22 — second\n\n**Valid:** dated 2020-01-01\n",
-        );
 
+        let mut text = String::new();
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-21".to_string(), EXPOSURE_THRESHOLD);
-        deg.insert("R-22".to_string(), EXPOSURE_THRESHOLD);
+        let mut expected_evens = Vec::new();
+        let mut expected_odds = Vec::new();
+        for id in 10..=42 {
+            text.push_str(&format!("## R-{id} — e\n\n**Valid:** dated 2020-01-01\n\n"));
+            if id % 2 == 0 {
+                deg.insert(format!("R-{id}"), EXPOSURE_THRESHOLD + 1);
+                expected_evens.push(format!("R-{id}"));
+            } else {
+                deg.insert(format!("R-{id}"), EXPOSURE_THRESHOLD);
+                expected_odds.push(format!("R-{id}"));
+            }
+        }
+        seed_ledger(&cat, "led", &p, &text);
 
         let v = scan_dated_stale(&cat.conn, &deg, 20_685).unwrap();
-        assert_eq!(v.len(), 2);
-        assert!(
-            v[0].detail.starts_with("R-21"),
-            "tied exposure must preserve encounter order: {v:#?}"
+        assert_eq!(v.len(), 33);
+        let got: Vec<String> = v
+            .iter()
+            .map(|x| x.detail.split_whitespace().next().unwrap().to_string())
+            .collect();
+        let mut expected = expected_evens;
+        expected.extend(expected_odds);
+        assert_eq!(
+            got, expected,
+            "the higher-exposure tier (evens) must come first, each tier ascending by \
+             id — a total (Reverse(exposure), path, id) sort key, not encounter order \
+             or a stable-sort accident: {v:#?}"
         );
-        assert!(v[1].detail.starts_with("R-22"));
     }
 
     #[test]
@@ -7002,6 +7089,39 @@ root = "work/elsewhere/ghost"
                 .unwrap()
                 .is_empty(),
             "one below the threshold must not fire"
+        );
+    }
+
+    #[test]
+    fn dated_stale_treats_a_token_absent_from_indegree_as_zero_exposure() {
+        // `indegree.get(&s.id).copied().unwrap_or(0)` is the MAJORITY branch: only 168
+        // of 2869 live sections clear the exposure gate, so most tokens are entirely
+        // ABSENT from the map (not present-with-zero) — `entry_indegree` omits uncited
+        // and ambiguous tokens rather than inserting a zero for them. `deg` below never
+        // mentions "R-51" at all, pinning that the fallback for a missing key is 0
+        // (below the gate), not `usize::MAX` or anything else that would put every
+        // uncited entry above the gate.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-51 — never mentioned in indegree\n\n**Valid:** dated 2020-01-01\n",
+        );
+
+        // A populated but unrelated map — the absence of the KEY "R-51" is what's under
+        // test, not an empty map that could pass for an unrelated reason.
+        let mut deg = std::collections::BTreeMap::new();
+        deg.insert("R-99".to_string(), EXPOSURE_THRESHOLD + 50);
+
+        assert!(
+            scan_dated_stale(&cat.conn, &deg, 20_685)
+                .unwrap()
+                .is_empty(),
+            "a token with no entry in `indegree` at all must be treated as zero \
+             exposure, not skip the gate"
         );
     }
 
@@ -7086,9 +7206,16 @@ root = "work/elsewhere/ghost"
 
     #[test]
     fn dated_stale_skips_a_shape_valid_but_calendar_invalid_date() {
-        // `iso_re()` only checks `\d{4}-\d{2}-\d{2}` shape — month 13 / day 45 pass the
-        // regex and reach `iso_to_epoch_days`, which must reject them via `chrono` rather
-        // than panicking or silently treating them as some other date.
+        // `iso_re()` only checks `\d{4}-\d{2}-\d{2}` shape — these all pass the regex
+        // and reach `iso_to_epoch_days`, which must reject them via `chrono` rather than
+        // panicking or silently treating them as some other date.
+        //
+        // R-8's `2020-13-45` is a COMPOSITE violation — month 13 is out of 1..12 AND day
+        // 45 is out of 1..31 — so a merely range-checked parser (reject month > 12, day
+        // > 31) would also reject it; it cannot distinguish a real calendar check from a
+        // range check. R-9's `2026-02-30` is the discriminating case: day 30 is inside
+        // the generic 1..31 range, but no February has a 30th regardless of leap year —
+        // only a real calendar (`chrono::NaiveDate`) knows that.
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("led.md");
         let cat = Catalog::open_in_memory().unwrap();
@@ -7096,17 +7223,20 @@ root = "work/elsewhere/ghost"
             &cat,
             "led",
             &p,
-            "## R-8 — impossible date\n\n**Valid:** dated 2020-13-45\n",
+            "## R-8 — impossible date\n\n**Valid:** dated 2020-13-45\n\n\
+             ## R-9 — range-valid but no such day\n\n**Valid:** dated 2026-02-30\n",
         );
 
         let mut deg = std::collections::BTreeMap::new();
         deg.insert("R-8".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert("R-9".to_string(), EXPOSURE_THRESHOLD);
 
         assert!(
             scan_dated_stale(&cat.conn, &deg, 20_685)
                 .unwrap()
                 .is_empty(),
-            "a calendar-invalid date must be skipped, not reported or panicked on"
+            "both a composite-invalid and a range-valid-but-calendar-invalid date must \
+             be skipped, not reported or panicked on"
         );
     }
 
