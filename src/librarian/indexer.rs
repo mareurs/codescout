@@ -274,7 +274,7 @@ pub fn index_repo_sync(
             file_sha256: sha,
             confidence,
         };
-        artifact::upsert(cat, &row)?;
+        artifact::upsert_and_mint_slug(cat, &row)?;
 
         // (Re-)embed when content actually changed, OR when the caller
         // explicitly opted into a re-embed backfill via `force_embed` (e.g.
@@ -737,6 +737,41 @@ kind = "memory"
             index_repo_sync(&cat, &rules, &fixture, &ignore, false, false, false).unwrap();
         assert_eq!(r2.unchanged, 3);
         assert_eq!(r2.added, 0);
+    }
+
+    #[test]
+    fn reindex_mints_a_slug_for_every_newly_indexed_row() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = load_rules(
+            r#"
+[[rule]]
+glob = "**/docs/superpowers/specs/*.md"
+kind = "spec"
+status = "active"
+
+[[rule]]
+glob = "**/docs/research/*.md"
+kind = "memory"
+"#,
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/librarian/fixtures/repo_a");
+        index_repo_sync(&cat, &rules, &fixture, &ignore, false, false, false).unwrap();
+
+        let without_slug: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact WHERE slug IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            without_slug, 0,
+            "every row the walk touched must have a slug minted, not left for a manual backfill"
+        );
     }
 
     #[test]

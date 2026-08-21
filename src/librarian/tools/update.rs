@@ -551,7 +551,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         file_sha256: crate::librarian::util::sha_of_bytes(new_content.as_bytes()),
         confidence: row.confidence,
     };
-    artifact::upsert(&cat, &updated_row)?;
+    artifact::upsert_and_mint_slug(&cat, &updated_row)?;
 
     // Keep the entry-count report: a params patch replaces an array wholesale
     // (RFC 7396), so a caller re-sending a trimmed collection silently deletes the
@@ -770,6 +770,59 @@ mod tests {
         assert!(content.contains("title: New"), "file should have new title");
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.title.as_deref(), Some("New"));
+    }
+
+    #[tokio::test]
+    async fn update_mints_a_slug_for_a_row_that_was_never_given_one() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let full = tmp.path().join("doc.md");
+        std::fs::write(
+            &full,
+            "---\nid: aabbccdd11223344\nkind: spec\ntitle: Old\n---\ncontent\n",
+        )
+        .unwrap();
+        let row = artifact::ArtifactRow {
+            id: "aabbccdd11223344".into(),
+            abs_path: full.clone(),
+            kind: "spec".into(),
+            status: "active".into(),
+            title: Some("Old".into()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: None,
+            created_at: 0,
+            updated_at: 0,
+            file_mtime: 0,
+            file_sha256: String::new(),
+            confidence: 1.0,
+        };
+        artifact::upsert(&ctx.catalog.lock(), &row).unwrap();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": "aabbccdd11223344", "patch": {"title": "New"}}),
+        )
+        .await
+        .unwrap();
+
+        let slug: Option<String> = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT slug FROM artifact WHERE id='aabbccdd11223344'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            slug.as_deref(),
+            Some("new"),
+            "update() reaches the same upsert chokepoint as create() and must mint too"
+        );
     }
 
     #[tokio::test]

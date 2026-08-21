@@ -288,6 +288,21 @@ pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<Str
     Ok(candidate)
 }
 
+/// `upsert` plus an idempotent slug mint — the entry point for any call site that gives
+/// an artifact row its identity for the first time (create, update, reindex).
+///
+/// **Not for `mv`/`graft_rows`.** A move mints a fresh `id` for the same underlying
+/// artifact while the old row (with its existing slug) still exists until `graft_rows`
+/// deletes it — mint here first and `ensure_slug`'s dedup check finds the old row's slug
+/// still "taken" and hands the new row a needless `-2` suffix, permanently (slugs are
+/// immutable once minted). Moves carry the old slug forward explicitly in `graft_rows`
+/// instead. docs/issues/2026-08-21-create-mints-no-slug-so-new-entries-never-reach-the-entry-graph.md
+pub fn upsert_and_mint_slug(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
+    upsert(cat, row)?;
+    ensure_slug(&cat.conn, &row.id)?;
+    Ok(())
+}
+
 /// Longest base a minted slug may have, before any `-2`/`-3` dedup suffix.
 ///
 /// A slug is **immutable once non-null** and `entry_cite.src_slug` FKs it, so the
@@ -886,6 +901,27 @@ mod tests {
         let fetched = get(&cat, "id1").unwrap().unwrap();
         assert_eq!(fetched.status, "archived");
         assert_eq!(fetched.updated_at, 99);
+    }
+
+    #[test]
+    fn upsert_and_mint_slug_mints_where_bare_upsert_does_not() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let row = TestArtifactRowBuilder::new("id1")
+            .with_title("My Tracker")
+            .build();
+        upsert(&cat, &row).unwrap();
+        let bare: Option<String> = cat
+            .conn
+            .query_row("SELECT slug FROM artifact WHERE id='id1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(bare, None, "bare upsert must not mint a slug");
+
+        upsert_and_mint_slug(&cat, &row).unwrap();
+        let minted: Option<String> = cat
+            .conn
+            .query_row("SELECT slug FROM artifact WHERE id='id1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(minted.as_deref(), Some("my-tracker"));
     }
 
     #[test]

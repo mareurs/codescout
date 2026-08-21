@@ -317,7 +317,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         file_sha256: crate::librarian::util::sha_of_bytes(content.as_bytes()),
         confidence: 1.0,
     };
-    artifact::upsert(&ctx.catalog.lock(), &row)?;
+    artifact::upsert_and_mint_slug(&ctx.catalog.lock(), &row)?;
     if let Some(aug_spec) = &a.augment {
         let params_str = aug_spec
             .params
@@ -416,6 +416,36 @@ mod tests {
         let id = v["id"].as_str().unwrap();
         assert!(artifact::get(&ctx.catalog.lock(), id).unwrap().is_some());
     }
+
+    #[tokio::test]
+    async fn create_mints_a_slug_for_the_new_artifact() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/specs/x.md",
+                "kind": "spec", "title": "X Spec", "body": "hello"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap();
+        let slug: Option<String> = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT slug FROM artifact WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            slug.as_deref(),
+            Some("x-spec"),
+            "create() must mint a slug immediately, not leave it for a manual doctor sweep"
+        );
+    }
+
     /// A new bug must land in the answer to "what's open?". The two vocabularies are
     /// disjoint, and defaulting `kind: bug` to the tracker default `draft` put the row
     /// outside `find(kind="bug", status="open")` — so a bug written, committed and cited

@@ -81,8 +81,23 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
     //    on `artifact_augmentation`, which also cascade-deletes with the source).
     merge_augmentation(&tx, from_id, into_id, &mut report)?;
 
-    // 6. Delete source LAST — cascades any leftover dup links / edges / augmentation.
+    // 6. Carry the slug forward, then delete source LAST — cascades any leftover
+    //    dup links / edges / augmentation. Capture, THEN delete, THEN write: `slug`
+    //    is UNIQUE, so writing `from_id`'s slug onto `into_id` while `from_id` still
+    //    holds it would violate the index — both rows can't hold the same slug at
+    //    once, even mid-transaction. `into_id` keeps whatever slug it already had
+    //    (freshly minted or otherwise) when `from_id` had none.
+    let from_slug: Option<String> =
+        tx.query_row("SELECT slug FROM artifact WHERE id=?1", [from_id], |r| {
+            r.get(0)
+        })?;
     tx.execute("DELETE FROM artifact WHERE id=?1", [from_id])?;
+    if let Some(slug) = from_slug {
+        tx.execute(
+            "UPDATE artifact SET slug=?1 WHERE id=?2",
+            params![slug, into_id],
+        )?;
+    }
 
     tx.commit()?;
 
@@ -485,6 +500,30 @@ mod tests {
             })
             .unwrap();
         assert_eq!(src, 0);
+    }
+
+    #[test]
+    fn graft_carries_the_slug_forward_so_a_move_does_not_orphan_it() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        cat.conn
+            .execute("UPDATE artifact SET slug='my-tracker' WHERE id='from'", [])
+            .unwrap();
+
+        graft_rows(&mut cat, "from", "into").unwrap();
+
+        let slug: Option<String> = cat
+            .conn
+            .query_row("SELECT slug FROM artifact WHERE id='into'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            slug.as_deref(),
+            Some("my-tracker"),
+            "the slug must follow the artifact across the graft, not stay orphaned on the row this deletes"
+        );
     }
 
     fn reserve(cat: &Catalog, artifact_id: &str, prefix: &str, max_allocated: i64) {
