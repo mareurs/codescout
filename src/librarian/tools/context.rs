@@ -248,9 +248,29 @@ fn pack_entry_anchor(
         }
     }
     let mut nodes: Vec<StatementNode> = merged.into_values().collect();
+    // `mutual` first, then the one-way classes, each alphabetical.
+    //
+    // This is not a relevance heuristic pulled from air, and the two one-way classes are
+    // DELIBERATELY not ranked against each other: `cites` and `cited-by` answer different
+    // questions (proof route vs blast radius) and choosing between them is the caller's,
+    // not the packer's. Reciprocity is different — it is the one tie both authors asserted
+    // independently, and it is 12.4% of edges (`docs/trackers/context-performance.md`
+    // CTX-2).
+    //
+    // Ordering only decides anything for anchors that overflow, which is why
+    // `CTX-1` deferred it. Measured on the FIRST live call after shipping: plain
+    // alphabetical `direction` sorts `cited-by` < `cites` < `mutual`, so
+    // `reconnaissance-patterns:R-3` served eleven one-way citations and buried BOTH its
+    // mutual partners — which are its own documented chain. The deferral's own
+    // revisit-when fired immediately.
+    let rank = |d: &str| match d {
+        "mutual" => 0u8,
+        "cited-by" => 1,
+        _ => 2,
+    };
     nodes.sort_by(|a, b| {
-        a.direction
-            .cmp(b.direction)
+        rank(a.direction)
+            .cmp(&rank(b.direction))
             .then(a.reference.cmp(&b.reference))
     });
 
@@ -1425,6 +1445,73 @@ mod tests {
         assert!(
             !md.contains("· cites") && !md.contains("· cited-by"),
             "and neither one-way label survives for a mutual pair: {md}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mutual_neighbours_survive_the_budget_before_one_way_ones() {
+        // Ordering only decides anything for anchors that overflow — which is why CTX-1
+        // deferred it — but there it decides everything, and plain alphabetical `direction`
+        // sorts `cited-by` < `cites` < `mutual`, burying the strongest class LAST.
+        //
+        // Measured on the first live call after shipping: `reconnaissance-patterns:R-3`
+        // served 11 one-way citations and dropped BOTH its mutual partners (`R-77`, `R-79`)
+        // — its own documented chain. The deferral's revisit-when fired immediately.
+        //
+        // Note what is NOT ranked here: `cites` against `cited-by`. They answer different
+        // questions (proof route vs blast radius); that choice is the caller's.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        seed_ledger(&cat, root, "ledger.md", "ledger", "## W-1 — anchor\nbody\n");
+        // Eight fat one-way citers, alphabetically ahead of the mutual peer's ledger, plus
+        // one mutual peer. Only a few fit; the mutual one must be among them.
+        let mut aaa = String::new();
+        for i in 1..=8 {
+            aaa.push_str(&format!(
+                "## F-{i} — one-way citer {i}\n{}\n\n",
+                "z".repeat(3000)
+            ));
+        }
+        seed_ledger(&cat, root, "aaa.md", "aaa", &aaa);
+        seed_ledger(
+            &cat,
+            root,
+            "zzz.md",
+            "zzz",
+            "## M-1 — the mutual peer\nbody\n",
+        );
+
+        for i in 1..=8 {
+            seed_edge(&cat, "aaa", &format!("F-{i}"), "ledger:W-1");
+        }
+        seed_edge(&cat, "ledger", "W-1", "zzz:M-1");
+        seed_edge(&cat, "zzz", "M-1", "ledger:W-1");
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1", "max_tokens": 900}))
+            .await
+            .unwrap();
+
+        assert!(
+            v["overflow"]["omitted"].as_u64().unwrap() > 0,
+            "the fixture must actually overflow, or this pins nothing: {v:#?}"
+        );
+        let ids: Vec<String> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
+        assert!(
+            ids.contains(&"zzz:M-1".to_string()),
+            "the mutual peer must survive the cut despite sorting last alphabetically by \
+             BOTH direction and reference: {ids:?}"
+        );
+        assert_eq!(
+            ids[1], "zzz:M-1",
+            "and it must come first among neighbours, not merely survive: {ids:?}"
         );
     }
 

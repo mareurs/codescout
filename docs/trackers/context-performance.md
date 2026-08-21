@@ -125,10 +125,27 @@ simply wrong), not the budget lever an early reading of R-3 suggested.
 ### Optimization points NOT taken
 
 - **Raising `DEFAULT_MAX_TOKENS`** — taxes every other `context` caller to serve one anchor.
-- **Ordering policy.** Neighbours sort by `(direction, reference)`, which is arbitrary. It
-  mattered when only 2 of 25 were served; at 98% served it decides almost nothing. Revisit if
-  the served share drops. A relevance signal would come from Layer 5a's `reads`, not from
-  structure — see [[CTX-2]].
+- ~~**Ordering policy.**~~ **This deferral fired on the FIRST live call, and it is the most
+  useful thing in this entry.** The reasoning was sound corpus-wide and wrong exactly where
+  it mattered: ordering decides nothing at 98% served, but the anchors that *overflow* are
+  by definition the ones it decides everything for — and plain alphabetical `direction`
+  sorts `cited-by` < `cites` < **`mutual`**, putting the strongest class LAST.
+
+  Verified live at `711a25cf`: `reconnaissance-patterns:R-3` served 11 one-way `cited-by`
+  neighbours and dropped **both** its mutual partners, `R-77` and `R-79` — which are its own
+  documented chain (`R-3 → R-73b → R-77 → R-79`). The class the packer had just been taught
+  to label specially was the class it buried.
+
+  Fixed: `mutual` ranks first, then the one-way classes alphabetically. `cites` and
+  `cited-by` are **deliberately not ranked against each other** — they answer different
+  questions (proof route vs blast radius) and that choice belongs to the caller.
+
+  **The lesson is about deferrals, not ordering.** A deferral justified by an aggregate
+  ("98% served") is silent about the tail, and the tail is precisely the population the
+  deferred mechanism governs. Kin: [[reconnaissance-patterns:R-95]] — a deferral rationale is
+  a claim, and the least-audited kind.
+- **A relevance-based ordering** would come from Layer 5a's `reads`, not from structure — see
+  [[CTX-2]], which refutes every structural axis tried.
 - **Sweeping the budget itself.** The cap was swept at 16000 only.
 
 ## CTX-2 — neighbours cannot be classified into keep and drop — the differential-treatment hypothesis, refuted
