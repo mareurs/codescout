@@ -704,7 +704,7 @@ check a pointer that was never written"*:
 **Process deviation, recorded rather than hidden.** This SKILL.md's own rule is *"proposals
 confirmed across 2+ sweeps → PR"*. HY-11 had one sweep. It shipped anyway because an
 independent n=2 measurement corroborated it from outside the sweep process —
-`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`, re-opened the
+`docs/issues/archive/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`, re-opened the
 same day on its own pre-registered criterion. Corroboration from a second instrument is what
 the 2-sweep rule is a proxy for; if that reasoning proves wrong, D11's trust row starts at
 `individual` and will show it.
@@ -1182,7 +1182,7 @@ back-citation makes it mechanically detectable in both directions.
 - [[R-51]] carried `promote-ready` in its verdict, set **2026-08-04 and unharvested for
   sixteen days**, because nothing queries that state. That is the concrete answer to the
   re-open criterion on
-  `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` — *"an
+  `docs/issues/archive/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` — *"an
   unharvested `Promote-when` found to have cost something"* — produced by the sweep that bug
   provoked.
 - [[R-95]] promoted, and **the reasoning in this entry's first draft was wrong about why.**

@@ -1495,7 +1495,7 @@ for that state.
 self-confirming-trailer corollary.
 
 This entry is the concrete answer to the re-open criterion on
-`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`: *"re-open … if
+`docs/issues/archive/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`: *"re-open … if
 an unharvested `Promote-when` is found to have cost something."* It was found by the sweep
 that bug provoked, and it had been sitting in plain sight, marked ready, in a field no query
 read.
@@ -2647,7 +2647,7 @@ Characterising readiness by a count without reading the criterion is the same sh
 measurement rule this ledger keeps re-earning. The criterion fired on different evidence.
 
 The second cluster is this project's own
-`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`, closed
+`docs/issues/archive/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`, closed
 `wontfix` on four rationales, every one falsified within 24 hours:
 
 | Filed rationale | Measured 2026-08-20 |

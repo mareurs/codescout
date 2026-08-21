@@ -1,7 +1,7 @@
 ---
-id: '4295b95e60bafeb9'
+id: ce6432b7df21a2e8
 kind: bug
-status: open
+status: fixed
 title: 'BUG: no check detects a fired Promote-when that was never harvested, so a validated lesson never reaches the surface that would change behaviour'
 owners:
 - marius
@@ -12,7 +12,7 @@ tags:
 - record-legibility
 - process
 topic: record-legibility
-closed: ''
+closed: 2026-08-21
 opened: 2026-08-19
 owner: marius
 related:
@@ -80,6 +80,28 @@ severity: high
 > gap this bug is named for — no mid-stream detector — is still open. Whether that still
 > warrants `high` given how much of the blast radius is now covered by the manual sweep is a
 > call for whoever picks up step 2, not made here.
+> **Correction, same day — 2026-08-21.** The update immediately above is wrong about step 2.
+> Asked to file a companion-repo issue for it, I went to `claude-plugins` to write up "D11
+> fires only inside D10's step 1, gated to ≥21 days idle" — and found the live `SKILL.md`
+> already says the opposite: *"Unlike D10 this runs **every sweep**: D10 fires at ≥21 days
+> idle … and a lesson that failed to land is needed long before then."* `git log -S"Unlike"`
+> on that file: shipped in `claude-plugins:10dfe5d5` (2026-08-20 02:01:56), **the same evening
+> this bug was reopened at n=2** — the commit message names this bug file directly ("re-opened
+> at n=2") as the reason it shipped. Its spec is `tracker-hygiene-log:HY-11` in this repo.
+> `02352393`'s "D11's first sweep" (cited above) is that detector's first real run, not a
+> pending step.
+>
+> So the "Sequenced remedy, revised" section below was already fully executed within hours of
+> being written — the plan just never got a status update saying so, which given the subject
+> of this bug is worth sitting with for a second. **All three of steps 1–3 are now accounted
+> for:** 1 done (`02352393`), 2 done (`claude-plugins:10dfe5d5`, HY-11), 3 explicitly
+> deferred-by-design pending evidence 1–2 are insufficient — none seen. No claude-plugins issue
+> was filed; there is nothing left open to file it for.
+>
+> Verified at the bytes (`read_markdown` on the live `SKILL.md`, not recalled from this file's
+> own prose) before writing this — the exact mistake R-3 and this bug's own 2026-08-19
+> correction both already name: asserting a gap from a claim that was never re-checked against
+> the thing it claims about.
 ## The corrected design (2026-08-20, n=2)
 
 **Fix idea 3 — the profile-divergence md5 — would not have caught the second instance.**

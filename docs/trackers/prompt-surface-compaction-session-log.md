@@ -637,7 +637,7 @@ the files are byte-identical (`md5 08f0ef6cb5345a3df50a3f4b3b989a96`).
 
 **Anchor notes** — added 2026-08-20. Until then this entry's promotion claim named **no
 target at all**, which is exactly the defect
-`docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` describes,
+`docs/issues/archive/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md` describes,
 sitting unnoticed on the entry that provoked that bug.
 
 - **Target — all three, named individually:** `~/.claude/CLAUDE.md`,
@@ -1399,7 +1399,7 @@ representable and queryable rather than only narratable. What remains is a `doct
 fired-but-unharvested criteria, on the pattern
 that worked three times today — `terminal_status_with_caveat` made a stated caveat queryable,
 `archived_fix_sha_unresolvable` a broken anchor, `terminal_status_without_fix_anchor` a
-missing one. Filed as `docs/issues/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`.
+missing one. Filed as `docs/issues/archive/2026-08-19-no-check-detects-a-fired-unharvested-promote-when.md`.
 A profile-divergence check is the cheaper half and may not need `doctor` at all: three files
 that should be byte-identical have an md5.
 
