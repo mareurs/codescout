@@ -1134,6 +1134,30 @@ project is active, which memories exist, and whether the index is built.
 4. Re-measure `CLIENT_INSTRUCTIONS_CHAR_LIMIT`. It was measured once, on one client build,
    on 2026-08-16. If the real cliff has moved the arithmetic changes — but per R-89 that
    is a probe to run, not a hope to budget against.
+5. **Move `## Project Status` off the `instructions` channel entirely.** This is not a new
+   idea and this entry should not have presented four options as if it were the first look
+   at the problem — bug `e3437bd1ec116dec` (*mitigated*, not fixed) has proposed exactly
+   this since 2026-08-17, under the heading *"Still proposed, still the maintainer's
+   call"*, with the reasoning that *"putting unbounded content in a fixed channel remains
+   the design error."* It is the only option that dissolves the constraint rather than
+   rationing it, and it would free the whole 313-char budget.
+
+**A SCOUTING MISS, recorded because the process failure is the reusable part.** That bug
+file is this constraint's canonical account: it carries the 2048 measurement's provenance
+(BL-9), the `Substitutable`/`UserAuthored`/`Anchor` tier design, the standing reproduction,
+and option 5. It was found only AFTER the work, by reading `git log` for an unrelated
+reason. The activation bootstrap guide prescribes
+`artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating"]}})`
+before starting — but this bug is `mitigated`, a TERMINAL-looking status that the
+prescribed query filters out by construction, while the constraint it documents is fully
+live. A mitigated bug is precisely one whose root cause is still there.
+
+So the query to run before touching a surface with a known hard limit is the one that does
+not assume the limit was ever fixed:
+
+```
+artifact(action="find", kind="bug", query="<the surface>", include_archived=true)
+```
 
 **Status:** open
 
