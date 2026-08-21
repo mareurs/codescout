@@ -323,6 +323,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
+    // Artifact id -> rel_path, needed both for the human-reviewable edge lists below
+    // AND (moved up from there) to key the by-source breakdowns in the resolution
+    // pass — a triager reading `ambiguous_by_source` / `dangling_by_source` needs a
+    // path, not an id, to recognize "that's a guide explaining the syntax."
+    let id_to_rel: BTreeMap<&str, String> = rows
+        .iter()
+        .map(|r| {
+            let rel = git_root
+                .as_ref()
+                .and_then(|root| r.abs_path.strip_prefix(root).ok())
+                .map(|p| RepoPath::from(p).into_string())
+                .unwrap_or_else(|| r.abs_path.display().to_string());
+            (r.id.as_str(), rel)
+        })
+        .collect();
+
     // ---- resolution pass ----
     let mut desired: BTreeSet<(String, String)> = BTreeSet::new();
     let mut self_cites = 0usize;
@@ -330,6 +346,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut dangling: Vec<Value> = Vec::new();
     let mut cross_repo: Vec<Value> = Vec::new();
     let (mut ambiguous_total, mut dangling_total, mut cross_repo_total) = (0usize, 0usize, 0usize);
+    // Per-source counts for the same three arms, uncapped (unlike the `ambiguous` /
+    // `dangling` / `cross_repo` finding arrays above, which cap at FINDINGS_CAP) —
+    // the whole point is to make the TOTAL interpretable, so a source contributing
+    // past the cap must still show its true count.
+    // docs/issues/archive/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md
+    let mut ambiguous_by_source: BTreeMap<String, usize> = BTreeMap::new();
+    let mut dangling_by_source: BTreeMap<String, usize> = BTreeMap::new();
+    let mut cross_repo_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut citations_total = 0usize;
 
     // Entry-grain edges: (src_slug, src_local, dst_ref). A set because one entry citing
@@ -369,6 +393,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .map(|p| RepoPath::from(p).into_string())
             .unwrap_or_default();
         citations_total += ex.citations.len();
+        let src_rel = id_to_rel
+            .get(row.id.as_str())
+            .cloned()
+            .unwrap_or_else(|| row.id.clone());
         for c in &ex.citations {
             match resolve::resolve(c, &row.id, &rel_dir, &index, &corpus) {
                 Some(resolve::Outcome::Edge { dst_id }) => {
@@ -410,6 +438,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
                 Some(resolve::Outcome::Ambiguous { candidates, total }) => {
                     ambiguous_total += 1;
+                    *ambiguous_by_source.entry(src_rel.clone()).or_insert(0) += 1;
                     push_capped(
                         &mut ambiguous,
                         finding(
@@ -421,10 +450,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
                 Some(resolve::Outcome::Dangling) => {
                     dangling_total += 1;
+                    *dangling_by_source.entry(src_rel.clone()).or_insert(0) += 1;
                     push_capped(&mut dangling, finding(&row.id, c, json!({})));
                 }
                 Some(resolve::Outcome::CrossRepo) => {
                     cross_repo_total += 1;
+                    *cross_repo_by_source.entry(src_rel.clone()).or_insert(0) += 1;
                     push_capped(&mut cross_repo, finding(&row.id, c, json!({})));
                 }
                 None => {} // suppressed noise / foreign-jurisdiction links
@@ -487,17 +518,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     // Human-reviewable edge lists (capped), with rel_paths for readability.
-    let id_to_rel: BTreeMap<&str, String> = rows
-        .iter()
-        .map(|r| {
-            let rel = git_root
-                .as_ref()
-                .and_then(|root| r.abs_path.strip_prefix(root).ok())
-                .map(|p| RepoPath::from(p).into_string())
-                .unwrap_or_else(|| r.abs_path.display().to_string());
-            (r.id.as_str(), rel)
-        })
-        .collect();
     let edge_view = |pairs: &[(String, String)]| -> Vec<Value> {
         pairs
             .iter()
@@ -549,6 +569,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "ambiguous": ambiguous,
         "dangling": dangling,
         "cross_repo": cross_repo,
+        // Per-source breakdown of the three arms above, uncapped — the "attribute and
+        // subtract" reading: a triager checks which keys are guides/conventions docs
+        // explaining citation syntax (rather than genuinely broken references) and
+        // discounts those before trusting the raw total in `counts`.
+        "ambiguous_by_source": ambiguous_by_source,
+        "dangling_by_source": dangling_by_source,
+        "cross_repo_by_source": cross_repo_by_source,
         // Latent rather than broken, so it sits beside the citation arms rather than in
         // one: a declared namespace with a second active definer has no failing citation
         // *yet*, and the arms above only ever report a citation that already resolves

@@ -270,6 +270,110 @@ async fn ambiguous_and_dangling_report_without_edges() {
     assert_eq!(out["counts"]["dangling"], 2, "F-99 + stale id: {out}");
     assert!(edge_set(&ctx).is_empty());
 }
+#[tokio::test]
+async fn ambiguous_and_dangling_by_source_break_down_the_totals() {
+    // The bug this pins: `ambiguous`/`dangling` totals are un-interpretable health
+    // metrics when an unknown fraction of them comes from documentation *explaining*
+    // citation syntax rather than a genuinely broken reference. A per-source breakdown
+    // lets a triager see which sources to discount without changing extraction itself.
+    let dir = TempDir::new().unwrap();
+    let ctx = mk_ctx(dir.path().to_path_buf());
+    const ID_D: &str = "ddddddddddddddd4";
+    // Two ACTIVE definers of F-1 → every citation of it is ambiguous.
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/log1.md",
+        ID_A,
+        "## F-1 — in log one\n",
+    );
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/log2.md",
+        ID_B,
+        "## F-1 — in log two\n",
+    );
+    // c.md cites F-1 (ambiguous) once, plus F-99 and a stale hex id (dangling x2).
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/c.md",
+        ID_C,
+        "See F-1 and F-99 and `dddddddddddddddd` in UTF-8 text.\n",
+    );
+    // d.md is a SEPARATE source: cites F-1 again (ambiguous) and F-100, a KNOWN
+    // prefix with no definer (dangling) — an unknown prefix would be suppressed
+    // as noise rather than counted, so this must share the "F" prefix.
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/d.md",
+        ID_D,
+        "F-1 again, and also F-100 which nobody defines.\n",
+    );
+
+    let out = link_scan::call(&ctx, serde_json::json!({"write": true}))
+        .await
+        .unwrap();
+    assert_eq!(out["counts"]["ambiguous"], 2, "{out}");
+    assert_eq!(out["counts"]["dangling"], 3, "{out}");
+
+    let ambiguous_by_source = out["ambiguous_by_source"].as_object().unwrap();
+    assert_eq!(ambiguous_by_source["docs/c.md"], 1, "{out}");
+    assert_eq!(ambiguous_by_source["docs/d.md"], 1, "{out}");
+    let ambiguous_sum: i64 = ambiguous_by_source
+        .values()
+        .map(|v| v.as_i64().unwrap())
+        .sum();
+    assert_eq!(
+        ambiguous_sum,
+        out["counts"]["ambiguous"].as_i64().unwrap(),
+        "by-source breakdown must sum to the total: {out}"
+    );
+
+    let dangling_by_source = out["dangling_by_source"].as_object().unwrap();
+    assert_eq!(dangling_by_source["docs/c.md"], 2, "{out}");
+    assert_eq!(dangling_by_source["docs/d.md"], 1, "{out}");
+    let dangling_sum: i64 = dangling_by_source
+        .values()
+        .map(|v| v.as_i64().unwrap())
+        .sum();
+    assert_eq!(
+        dangling_sum,
+        out["counts"]["dangling"].as_i64().unwrap(),
+        "by-source breakdown must sum to the total: {out}"
+    );
+}
+
+#[tokio::test]
+async fn cross_repo_by_source_breaks_down_the_total() {
+    let dir = TempDir::new().unwrap();
+    let ctx = mk_ctx(dir.path().to_path_buf());
+    const ID_D: &str = "ddddddddddddddd4";
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/c.md",
+        ID_C,
+        "See other-repo:X-1 for context.\n",
+    );
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/d.md",
+        ID_D,
+        "Also other-repo:X-1 and sibling-repo:Y-2.\n",
+    );
+
+    let out = link_scan::call(&ctx, serde_json::json!({"write": true}))
+        .await
+        .unwrap();
+    assert_eq!(out["counts"]["cross_repo"], 3, "{out}");
+    let by_source = out["cross_repo_by_source"].as_object().unwrap();
+    assert_eq!(by_source["docs/c.md"], 1, "{out}");
+    assert_eq!(by_source["docs/d.md"], 2, "{out}");
+}
 
 #[tokio::test]
 async fn reindex_id_churn_cascade_is_healed_by_rescan() {
