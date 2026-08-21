@@ -1159,6 +1159,61 @@ not assume the limit was ever fixed:
 artifact(action="find", kind="bug", query="<the surface>", include_archived=true)
 ```
 
+**Options 3 and 4 are closed by measurement, 2026-08-21.**
+
+**Option 4 — the limit is real and exactly where it was recorded.** Probed through a live
+`claude -p` session using round five's stub MCP server, which can serve arbitrary
+`instructions` down the same path codescout's travel. The instrument is a ruler of
+contiguous `[[NNNN]]` markers, each exactly 8 characters, so every position lies inside a
+marker and the model reports a token it can READ rather than counting anything. Three
+runs: `[[2032]]`, `[[2040]]`, `[[2040]]`. `[[2040]]` occupies chars 2040-2047, so the last
+complete marker ends at exactly **2048**. `CLIENT_INSTRUCTIONS_CHAR_LIMIT` needs no change.
+
+**And the UNIT is confirmed too, which is the half that matters most here.** Two variants
+of the same ruler: pure ASCII (chars == bytes) and a `wide` variant carrying an em-dash
+every 10 chars (1.16x bytes per char). Both cut at the same CHARACTER offset. Had the
+limit been in bytes, `wide` would have cut ~235 chars earlier. This constant was wrong
+about precisely this unit once before — 2200 compared against `String::len()`, green
+throughout while the surface shipped truncated — so a probe that could not separate chars
+from bytes would have re-confirmed the old error just as confidently.
+
+**Option 3 was never an independent channel.** `build_system_prompt_draft()`'s output is
+surfaced as `## Custom Instructions` by `build_project_status_segments`
+(`src/prompts/mod.rs:225-229`) at `StatusPriority::UserAuthored` — a SEGMENT of the same
+2048-char channel, and a droppable one, since only `Anchor` is never dropped. An imperative
+placed there would sit in the same budget it is trying to escape and be among the first
+things trimmed. Strictly worse than the static slice.
+
+**A probe artefact, recorded because it nearly became a published claim.** The first ruler
+used 50-char strides with runs of dots between markers, and the model's reported tail
+length (53 chars) exceeded what the ruler holds between two markers (42). I dismissed the
+tail as unreliable — a model cannot copy a long run of identical characters — which was
+the right instinct for the wrong reason: 53 is exactly 40 dots (2008->2048) plus a 13-char
+`… [truncated]` string, present in the raw output of 4 of 4 runs at exactly the cut point.
+I first reported that marker as client-appended without having established it, then ran the
+control that settles it — serve instructions FAR under the cap and see whether it still
+appears:
+
+| instructions served | last marker reported | `… [truncated]` present |
+|---|---|---|
+| 400 chars (under cap) | `[[0392]]`, the true end | **no**, 0 of 2 runs |
+| 3000+ chars (over cap) | `[[2040]]`, the cut | **yes**, 4 of 4 runs |
+
+Presence tracks over-cap content exactly, so the marker rides in the delivered
+instructions rather than being a model artefact. The one dissenting run — asked for "the
+final 40 characters", it returned 40 clean ruler chars — is consistent: it reported the
+final 40 of the RULER, which is what the question named. The 2048 figure does not rest on
+any of this; the contiguous ruler was built to avoid the question, and it stands alone.
+
+**This falsifies a premise BL-9's design rests on, and it is worth someone re-reading.**
+Both `fit_dynamic_block`'s doc comment and bug `e3437bd1ec116dec` justify producer-side
+trimming with *"the client cuts from the tail at a fixed char count, mid-token, and says
+nothing — so anything not fitted here vanishes silently"*. On this client build it does
+not say nothing. Producer-side trimming is still the better mechanism — it chooses WHICH
+segment to lose and names it, where the client just cuts the tail — so nothing here argues
+for removing it. But one of its two stated justifications no longer holds, and a design
+comment that reads as false is how the next person mis-costs this trade.
+
 **Status:** open
 
 **Promote-when:** a decision is taken between options 1-4, or a fourth surface with push
