@@ -52,6 +52,34 @@ severity: high
 > 2026-08-18 instance, same class. At n=2 the design below is revised — and the fix that was
 > sequenced first turns out to be the weaker one.
 
+> **Updated 2026-08-21, checked against git history rather than recalled.** Step 0 (port
+> `Promotion status` into the template) and step 1 of the corrected-design remedy below are
+> both done:
+>
+> - **Step 1 — commit `02352393`** ("back-fill all 13 promotion claims and run D11's first
+>   sweep", 2026-08-20): 13/13 promotion claims now carry a line-start `**Promoted-to:**`
+>   field, each verified AT its target rather than transcribed from prose. Three defects found
+>   and repointed in the same pass (stale/superseded destinations read as open). Two honest
+>   non-greens recorded rather than smoothed over: a promotion into codescout memory
+>   `conventions` has no file-path anchor a sweep can read, and one archived pair anchors on
+>   content rather than a back-citation.
+> - Ledger-harvest work continued past that commit through today (R-95, R-51, R-101–R-108,
+>   W-6–W-9, several more `promoted`/`declined` verdicts on `reconnaissance-patterns.md`) —
+>   this thread is actively worked, not stale.
+>
+> **What remains is step 2 only:** the tracker-hygiene skill's claim-verification runs inside
+> D10 step 1, which fires only at ≥21 days idle — archive time, after the lesson was needed.
+> Making it run mid-stream (the session-log template already instructs "whenever a criterion
+> fires mid-stream," but nothing enforces that) is a skill-design change in
+> `codescout-companion` (`../claude-plugins/codescout-companion/`), not a codescout code
+> change — out of scope for this pass. Step 3 (a `doctor` check) stays explicitly deferred
+> until 1–2 prove insufficient.
+>
+> `status`/`severity` left unchanged: the concrete incidents (F-7, F-9 in
+> `prompt-surface-compaction-session-log.md`) are resolved and verified, but the structural
+> gap this bug is named for — no mid-stream detector — is still open. Whether that still
+> warrants `high` given how much of the blast radius is now covered by the manual sweep is a
+> call for whoever picks up step 2, not made here.
 ## The corrected design (2026-08-20, n=2)
 
 **Fix idea 3 — the profile-divergence md5 — would not have caught the second instance.**
