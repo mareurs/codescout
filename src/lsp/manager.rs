@@ -694,6 +694,7 @@ impl LspManager {
         // subsequent calls within the same session.
         #[cfg(unix)]
         if config.mux {
+            let mux_start_time = std::time::Instant::now();
             match self
                 .get_or_start_via_mux(language, workspace_root, config.clone())
                 .await
@@ -705,15 +706,28 @@ impl LspManager {
                         let mut clients = self.clients.lock().await;
                         clients.insert(key.clone(), client.clone());
                     }
-                    self.last_used.lock().await.insert(key, Instant::now());
+                    self.last_used
+                        .lock()
+                        .await
+                        .insert(key.clone(), Instant::now());
+                    self.record_lsp_success(
+                        &key,
+                        mux_start_time.elapsed().as_millis() as i64,
+                        "new_session",
+                    )
+                    .await;
                     return Ok(client);
                 }
                 Err(e) => {
+                    let key = LspKey::new(language, workspace_root);
+                    let handshake_ms = mux_start_time.elapsed().as_millis() as i64;
                     // If the mux failed because the workspace's LSP index lock is
                     // already held, a direct fallback would also fail to open the
                     // index AND leave a squatter that deadlocks every future mux.
                     // Surface the (now-actionable) error instead of poison-falling-back.
                     if mux_failure_is_index_contention(&e.to_string()) {
+                        self.record_lsp_failure(&key, handshake_ms, "new_session", &e.to_string())
+                            .await;
                         return Err(e);
                     }
                     // The stderr-signature check above is timing/log-routing fragile:
@@ -723,6 +737,8 @@ impl LspManager {
                     // (issues/2026-06-11-mux-failure-masks-rocksdb-lock-collision). Probe the
                     // index LOCK directly (detection-by-state) before falling back.
                     if kotlin_index_lock_held(language, workspace_root) {
+                        self.record_lsp_failure(&key, handshake_ms, "new_session", &e.to_string())
+                            .await;
                         return Err(crate::tools::RecoverableError::with_hint(
                             format!(
                                 "kotlin LSP index is locked by another process — the mux \
@@ -744,6 +760,8 @@ impl LspManager {
                         .map(|p| is_test_runner_exe(&p))
                         .unwrap_or(false); // fail closed: unresolved exe ⇒ treat as prod ⇒ refuse the fallback
                     if !exe_is_test {
+                        self.record_lsp_failure(&key, handshake_ms, "new_session", &e.to_string())
+                            .await;
                         return Err(crate::tools::RecoverableError::with_hint(
                             format!("mux startup failed for {language}: {e}"),
                             "codescout will not fall back to a direct LSP for a \
@@ -1073,6 +1091,60 @@ impl LspManager {
         Err(last_err.expect("connect failed at least once before exhausting rounds"))
     }
 
+    /// Record a successful LSP start to `lsp_events` — best-effort, never fails
+    /// the caller. Shared by `do_start` (direct pool) and `get_or_start`'s mux
+    /// dispatch, so both code paths that can obtain a working LSP client record
+    /// the same way. `reason` labels why this start happened (see
+    /// `write_lsp_event`); the mux path does not track eviction reasons the way
+    /// the direct pool does, so it always passes `"new_session"` — including for
+    /// a connect to an already-running mux, which simply reports a much lower
+    /// `handshake_ms` than a fresh spawn.
+    async fn record_lsp_success(&self, key: &LspKey, handshake_ms: i64, reason: &str) {
+        tracing::info!(
+            "LSP initialized in {}ms (language: {}, reason: {})",
+            handshake_ms,
+            key.language,
+            reason
+        );
+        let project_root_opt = self.project_root.clone();
+        #[cfg(test)]
+        let project_root_opt = self.project_root_for_test.clone().or(project_root_opt);
+        if let Some(root) = project_root_opt {
+            let lang = key.language.clone();
+            let reason = reason.to_string();
+            let rowid_result = tokio::task::spawn_blocking(move || {
+                let conn = crate::usage::db::open_db(&root)?;
+                crate::usage::db::write_lsp_event(&conn, &lang, &reason, handshake_ms)
+            })
+            .await;
+            if let Ok(Ok(rowid)) = rowid_result {
+                self.pending_first_response
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(key.clone(), rowid);
+            }
+        }
+    }
+
+    /// Record a failed LSP start to `lsp_events` — best-effort, never masks the
+    /// real error returned to the caller. See `record_lsp_success` for why this
+    /// is shared between the direct pool (`do_start`) and the mux dispatch.
+    async fn record_lsp_failure(&self, key: &LspKey, handshake_ms: i64, reason: &str, error: &str) {
+        let project_root_opt = self.project_root.clone();
+        #[cfg(test)]
+        let project_root_opt = self.project_root_for_test.clone().or(project_root_opt);
+        if let Some(root) = project_root_opt {
+            let lang = key.language.clone();
+            let reason = reason.to_string();
+            let error = error.to_string();
+            let _ = tokio::task::spawn_blocking(move || {
+                let conn = crate::usage::db::open_db(&root)?;
+                crate::usage::db::write_lsp_failure(&conn, &lang, &reason, handshake_ms, &error)
+            })
+            .await;
+        }
+    }
+
     /// Internal: actually start the LSP, update cache, and signal waiters.
     ///
     /// The `StartingCleanup` guard ensures the barrier entry is removed from
@@ -1135,30 +1207,7 @@ impl LspManager {
                     .remove(key)
                     .unwrap_or_else(|| "new_session".to_string());
                 let handshake_ms = start_time.elapsed().as_millis() as i64;
-                tracing::info!(
-                    "LSP initialized in {}ms (language: {}, reason: {})",
-                    handshake_ms,
-                    key.language,
-                    reason
-                );
-                let project_root_opt = self.project_root.clone();
-                #[cfg(test)]
-                let project_root_opt = self.project_root_for_test.clone().or(project_root_opt);
-                if let Some(root) = project_root_opt {
-                    let lang = key.language.clone();
-                    let reason_clone = reason.clone();
-                    let rowid_result = tokio::task::spawn_blocking(move || {
-                        let conn = crate::usage::db::open_db(&root)?;
-                        crate::usage::db::write_lsp_event(&conn, &lang, &reason_clone, handshake_ms)
-                    })
-                    .await;
-                    if let Ok(Ok(rowid)) = rowid_result {
-                        self.pending_first_response
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .insert(key.clone(), rowid);
-                    }
-                }
+                self.record_lsp_success(key, handshake_ms, &reason).await;
 
                 // Circuit-breaker: reset on success.
                 self.startup_failures
@@ -1197,24 +1246,8 @@ impl LspManager {
                         .get(key)
                         .cloned()
                         .unwrap_or_else(|| "new_session".to_string());
-                    let project_root_opt = self.project_root.clone();
-                    #[cfg(test)]
-                    let project_root_opt = self.project_root_for_test.clone().or(project_root_opt);
-                    if let Some(root) = project_root_opt {
-                        let lang = key.language.clone();
-                        let err_str = e.to_string();
-                        let _ = tokio::task::spawn_blocking(move || {
-                            let conn = crate::usage::db::open_db(&root)?;
-                            crate::usage::db::write_lsp_failure(
-                                &conn,
-                                &lang,
-                                &reason,
-                                handshake_ms,
-                                &err_str,
-                            )
-                        })
+                    self.record_lsp_failure(key, handshake_ms, &reason, &e.to_string())
                         .await;
-                    }
                 }
 
                 // Circuit-breaker: record failure, but skip if we're within the
@@ -2511,6 +2544,122 @@ mod tests {
             msg.contains("fuser"),
             "must route the human to the lock holder, got: {msg}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "spawns a python3 fcntl holder; diagnostic for the mux-dispatch test above"]
+    fn diag_kotlin_index_lock_held_with_planted_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let ws_hash = crate::socket_discovery::workspace_hash(ws);
+        let analyzer_dir = crate::lsp::servers::kotlin_analyzer_home(&ws_hash)
+            .join(".config/JetBrains/analyzer");
+        std::fs::create_dir_all(&analyzer_dir).unwrap();
+        let lock_path = analyzer_dir.join("LOCK");
+        std::fs::write(&lock_path, b"").unwrap();
+
+        let mut holder = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(format!(
+                "import fcntl,time; f=open(r'{}', 'r+'); \
+                 fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB); \
+                 print('held', flush=True); time.sleep(10)",
+                lock_path.display()
+            ))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn python3 lock holder");
+        {
+            use std::io::Read;
+            let mut buf = [0u8; 4];
+            let _ = holder.stdout.as_mut().unwrap().read(&mut buf);
+        }
+
+        let held = super::kotlin_index_lock_held("kotlin", ws);
+        eprintln!("DIAG analyzer_dir={:?} exists={}", analyzer_dir, analyzer_dir.exists());
+        eprintln!("DIAG held={held}");
+
+        let _ = holder.kill();
+        let _ = holder.wait();
+
+        assert!(held, "planted lock must be detected as held");
+    }
+
+
+
+    /// Regression for `docs/issues/2026-08-21-mux-lsp-cold-starts-not-recorded.md`:
+    /// `get_or_start`'s mux dispatch must record a `lsp_events` failure row when
+    /// `get_or_start_via_mux` errors — before this fix, `get_or_start_via_mux`
+    /// never called `do_start` (the only place `write_lsp_event`/`write_lsp_failure`
+    /// lived), so every mux-language cold start — success or failure — was
+    /// invisible to `lsp_events`. Plants a held kotlin analyzer index `LOCK` so
+    /// `kotlin_index_lock_held` deterministically trips the index-contention branch
+    /// regardless of how the mux spawn itself fails in this harness (a `cargo test`
+    /// binary can't actually speak the mux protocol) — that branch fires
+    /// independent of `is_test_runner_exe`, unlike the plain "refuse fallback" arm.
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "spawns a python3 fcntl holder + drives the mux dispatch path; gated like the posix_write_lock/mux tests"]
+    async fn get_or_start_mux_index_contention_records_lsp_failure_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+
+        let ws_hash = crate::socket_discovery::workspace_hash(ws);
+        let analyzer_dir = crate::lsp::servers::kotlin_analyzer_home(&ws_hash)
+            .join(".config/JetBrains/analyzer");
+        std::fs::create_dir_all(&analyzer_dir).unwrap();
+        let lock_path = analyzer_dir.join("LOCK");
+        std::fs::write(&lock_path, b"").unwrap();
+
+        // Hold a POSIX write-lock (the RocksDB lock family) from a separate
+        // process — same-process fcntl locks don't conflict with the probe.
+        let mut holder = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(format!(
+                "import fcntl,time; f=open(r'{}', 'r+'); \
+                 fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB); \
+                 print('held', flush=True); time.sleep(10)",
+                lock_path.display()
+            ))
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn python3 lock holder");
+        {
+            use std::io::Read;
+            let mut buf = [0u8; 4];
+            let _ = holder.stdout.as_mut().unwrap().read(&mut buf); // barrier: wait for "held"
+        }
+
+        let mgr = LspManager::new_for_test_with_root(ws).await;
+        let result = mgr.get_or_start("kotlin", ws, Some(true)).await;
+
+        let _ = holder.kill();
+        let _ = holder.wait();
+
+        eprintln!("DIAG result.is_ok()={}", result.is_ok());
+        if let Err(ref e) = result {
+            eprintln!("DIAG err={e}");
+        }
+
+        let msg = match result {
+            Ok(_) => panic!("mux dispatch must fail when the kotlin index LOCK is held"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            msg.contains("index is locked"),
+            "unexpected error, expected the index-contention message: {msg}"
+        );
+
+        // The regression: before this fix, no lsp_events row would exist here at all.
+        let conn = crate::usage::db::open_db(ws).unwrap();
+        let (outcome, error): (String, Option<String>) = conn
+            .query_row("SELECT outcome, error FROM lsp_events LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(outcome, "failed");
+        assert!(error.is_some());
     }
 
     #[cfg(unix)]

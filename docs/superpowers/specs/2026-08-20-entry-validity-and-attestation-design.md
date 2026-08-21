@@ -967,11 +967,34 @@ arms again at 10. Re-tune from the first month's distribution.
 > `entry_cited_from_outside_but_undeclared` are present in the response (a census, not a
 > truncated floor — `shown` caps the combined array at 75, and this check contributes 32
 > of them), and **zero** name an `F`/`W` token. Every one names another prefix — `TU-7`,
-> `B-1`, `CAP-5`, `H-2`, `H-5`. So the 96 `F`/`W` Statements carrying 442 entry-grain
+> `B-1`, `CAP-5`, `H-2`, `H-5`. So the 252 `F`/`W` Statements carrying 442 entry-grain
 > edges are already invisible to all three exposure-gated checks, today, and the tap
 > would inherit that exemption rather than introduce it. Fixing `entry_indegree`'s stale
 > deferral therefore repairs shipped behaviour as well as unblocking 5b — which is what
 > makes it a different option from "pick the other metric", not a refinement of it.
+>
+> **SHIPPED 2026-08-21, and the result corrects two numbers above.** `entry_indegree` is
+> now keyed `(defining file, token)` and resolves a stem-qualified citation against its
+> specific definer, mirroring `resolve` arm for arm — with one deliberate divergence,
+> pinned by test: an unresolvable qualifier falls back to the token half rather than being
+> dropped, because `call` narrows only the reported worklist and keeps the metric
+> cross-repo. Measured before/after on the live catalog: `F-9` now appears on the worklist
+> at 5 citing files, where **no** `F`/`W` Statement could appear at all before.
+>
+> Two corrections to the paragraph above, both unit errors, both worth keeping visible:
+>
+> - **252, not 96.** A Statement is a *(ledger, token)* pair — a `dst_ref`. Grouping by
+>   the bare token string gives 96, and that is what the earlier figure counted.
+> - **442 edges is not 442 exposure, and the worklist moved by 1.** `entry_cite` counts
+>   entry→entry edges; `entry_indegree` counts distinct citing **files**, and the gate is
+>   5 of them. Across all 252 F/W destinations `entry_cite`'s maximum distinct-citer count
+>   is **4**, and none reach 5 — `F-9` clears only because non-ledger citers (specs, bug
+>   files, READMEs) generate exposure here while generating no `entry_cite` row at all.
+>   So the mechanism is what changed; the population it prices grows as stem-qualified
+>   citation spreads, and `entry_cite` is a **floor** on citing files, never a count.
+>
+> This is `statement-validity-session-log:W-9` recurring inside the analysis that cites
+> it: a number measured in one unit and consumed in another.
 >
 > **And `entry_indegree`'s own deferral is now stale.** Its doc comment names the fix —
 > count a stem-qualified citation against its specific definer rather than folding it

@@ -1824,24 +1824,65 @@ fn row_is_archived(abs_path: &str, status: &str) -> bool {
     matches!(status, "archived" | "superseded") || abs_path.contains("/archive/")
 }
 
-/// Token → how many OTHER files cite it — files that do NOT define it.
+/// `(defining file, token)` → how many OTHER files cite that entry.
+///
+/// **Keyed by the DEFINER, not by the bare token, because per-work-stream namespaces
+/// reuse low numbers.** `F-1` is defined in every live session log. Folding all of their
+/// citations under one `F-1` key lets one ledger's traffic arm another's entries — and
+/// the previous defence against that, dropping any multi-definer token outright, traded
+/// a false-positive for a silent exemption of the entire `F`/`W` population. Measured
+/// 2026-08-21, before this change: all 32 rows of `entry_cited_from_outside_but_undeclared`
+/// named some other prefix and **not one** named an `F` or `W` entry, while `entry_cite`
+/// held 442 resolved entry-grain edges into 252 distinct `F`/`W` Statements. The fix is the
+/// one this function's own comment named and declined — resolve the qualified form against
+/// its specific definer — and what unblocked it was Layer 3b building the `by_stem`
+/// vocabulary this now mirrors.
+///
+/// **Resolution mirrors [`link_scan::resolve::resolve`](crate::librarian::tools::link_scan::resolve::resolve)
+/// arm for arm**, and must keep doing so: one materializes the edge, this one prices it,
+/// and a disagreement means an entry is gated on exposure it does not have (or vice
+/// versa).
+///
+/// | citation | counts toward |
+/// |---|---|
+/// | a token this very file defines | nothing — SelfCite; the local definition wins |
+/// | bare, exactly one definer | that definer, **active or archived** |
+/// | bare, several definers, exactly one active | the active one |
+/// | bare, several definers, zero or many active | nothing — Ambiguous |
+/// | `<stem>:TOKEN`, stem names one file that defines it | that file — resolved precisely |
+/// | `<qualifier>:TOKEN`, anything else | falls back to the bare rows above, on TOKEN |
+///
+/// A qualified citation names its target explicitly, so the active-vs-archived tie-break
+/// never applies to it — exactly as `resolve`'s `[only]` arm does not consult `active`.
+///
+/// **The fallback row is where this function deliberately DIVERGES from `resolve`, and it
+/// is not an oversight.** `resolve` answers "can this become an edge", so an unknown
+/// qualifier is `CrossRepo` and stops there — edges cannot span workspaces. This function
+/// answers "how exposed is this entry", and cross-repo exposure is real: [`call`]'s own
+/// comment states that narrowing the metric to the active project "would understate real
+/// cross-repo exposure and manufacture false negatives", which is why only the reported
+/// worklist is scoped while the metric stays global. So an unknown qualifier, a colliding
+/// stem, and a qualifier naming a file that lacks the entry all fall back to resolving the
+/// token half — precisely the behaviour that predates this rewrite. The ONLY thing that
+/// changed is that a qualifier uniquely naming a local definer now attributes there
+/// instead of pooling into the bare token.
 ///
 /// **This is a file-level count, not a citation-occurrence count, and that follows
 /// from `extract()`'s own dedup rather than from a choice made here.**
-/// `push_citation` inserts into a `BTreeSet<(CitationKind, raw)>` per document, so a
-/// file that mentions the same bare token five times still contributes exactly one
-/// `Citation` to `extract(text).citations`. Measured live while testing this function:
-/// a fixture file citing `R-1` twice in prose produced ONE citation, not two — the
-/// brief this was built from assumed occurrence-counting and its own test was wrong
-/// about the number for that reason. The metric this function actually computes is
-/// "how many other files reach this token at least once", which is arguably the
-/// better exposure signal anyway: it is what stops one chatty file inflating a
-/// token's apparent reach.
+/// `push_citation` keys on `(CitationKind, raw)` per document, so a file that mentions the
+/// same bare token five times still contributes exactly one `Citation` to
+/// `extract(text).citations`. Measured live while building the previous version: a fixture
+/// citing `R-1` twice in prose produced ONE citation, not two — the brief it was built from
+/// assumed occurrence-counting and its own test was wrong about the number for that reason.
+/// What this computes is "how many other files reach this entry at least once", which is
+/// the better exposure signal anyway: it stops one chatty file inflating an entry's reach.
+/// Note the corollary of keying on `raw`: a file citing both `R-3` and
+/// `reconnaissance-patterns:R-3` contributes two, because those are two distinct raws.
+/// Unchanged by this rewrite, and called out so it is not mistaken for a regression.
 ///
 /// **Exposure is a target-side count.** Which entry a citation came FROM requires
-/// attribution and slugs; which entry it points AT does not — that is what lets this
-/// check, and the ones built on it (Tasks 5-7), ship before the entry graph
-/// (`docs/superpowers/specs/2026-07-17-tracker-entry-graph-stage2-design.md`) exists.
+/// attribution and slugs; which entry it points AT does not — that is what let this
+/// check, and the ones built on it, ship before the entry graph existed.
 ///
 /// **Same-file citations are excluded, and that is load-bearing.** Measured
 /// 2026-08-20: 407 of 1427 ledger citations (28.5%) sit above the first definition —
@@ -1849,35 +1890,18 @@ fn row_is_archived(abs_path: &str, status: &str) -> bool {
 /// inflate its own exposure, which is a self-reference wearing exposure's clothes.
 /// `link_scan` already classifies these `SelfCite`.
 ///
-/// **A token with more than one definer contributes NO exposure UNLESS exactly one of
-/// those definers is active.** See the `retain` call at the bottom of this function for
-/// the full measured reasoning and the exact parity this now holds with
-/// `link_scan::resolve::resolve` (`resolve.rs:306-315`): a unique definer resolves even
-/// when archived (archived is not nonexistent), but where two or more artifacts define
-/// one token, the sole ACTIVE one wins — an archived co-definer never creates
-/// ambiguity, and it never breaks one either. Rulings 2026-08-20.
-///
 /// **Citations from archived artifacts do not count toward exposure** — see
 /// [`row_is_archived`]. The DEFINING side is untouched by that filter: an archived file
-/// still defines its token. Ruling 2026-08-20.
+/// still defines its token, and a unique archived definer still receives exposure.
+/// Ruling 2026-08-20.
 ///
-/// **Both citation shapes count.** A bare `PV-12` extracts as `EntryToken`; a
-/// qualified `provenance-subsystem:PV-12` extracts as `CrossRepoToken`, because a
-/// file-stem qualifier and a repo qualifier are one syntactic shape extraction cannot
-/// tell apart. Taking the token half of the qualified form is what stops a qualified
-/// citation reading as no citation at all — the same idiom [`corpus_cited_tokens`]
-/// uses.
-///
-/// **Computed fresh from the files**, for the same reason `corpus_cited_tokens` is: a
-/// check that reads a materialized table reports on whatever the last scan left
-/// behind. NOTE: `corpus_cited_tokens`'s own doc comment currently misattributes
-/// `entry_cite`'s writer to `link_scan` — already tracked at
-/// `docs/issues/2026-08-20-doctor-comment-misnames-entry-cite-writer.md`; `link_scan`
-/// has zero references to that table, and its only writer is `append_entry(cites=...)`.
-/// Not repeated here.
+/// **Computed fresh from the files**, deliberately, and this is why the entry graph is
+/// NOT read here even though it now holds the same resolutions: a check that reads a
+/// materialized table reports on whatever the last scan left behind. `entry_cite` is the
+/// right source for a *query*; it is the wrong source for a *gate*.
 fn entry_indegree(
     conn: &rusqlite::Connection,
-) -> Result<std::collections::BTreeMap<String, usize>> {
+) -> Result<std::collections::BTreeMap<(String, String), usize>> {
     use crate::librarian::tools::link_scan::extract::{entry_sections, extract, CitationKind};
 
     let mut stmt = conn.prepare("SELECT abs_path, status FROM artifact ORDER BY abs_path")?;
@@ -1887,18 +1911,31 @@ fn entry_indegree(
 
     // Which paths DEFINE which tokens, gathered up front so a same-file citation can
     // be excluded before it is counted rather than filtered back out after the fact.
-    // Built from EVERY row regardless of archived-ness — that filter touches only the
-    // CITING side (below) and the definer-vs-active split (further below); an archived
-    // definer still defines.
+    // Built from EVERY readable row regardless of archived-ness — that filter touches only
+    // the CITING side; an archived definer still defines.
     let mut definer: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
         Default::default();
-    // Paths that are NOT archived, so a defining set's active-vs-archived split (Ruling
-    // 16, below) can be computed without a second pass over the rows.
+    // Paths that are NOT archived, for the bare-token active-vs-archived tie-break.
     let mut active_paths: std::collections::BTreeSet<String> = Default::default();
+    // Qualifier vocabulary for `<stem>:<TOKEN>`, mirroring `Corpus.by_stem`'s build in
+    // `link_scan::mod` — keyed on file stem, PUSHED rather than inserted, because stems
+    // collide across directories and a collision must be reported rather than resolved.
+    //
+    // Built from every row INCLUDING ones that fail to read, unlike `definer` above. A
+    // row present in the catalog is a file a qualifier could have meant; omitting it
+    // would make a colliding stem look unique and resolve a citation to the wrong file.
+    // Suppressing is the safe direction, so unreadable rows still occupy their stem.
+    let mut by_stem: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     // (path, text, citable) — `citable` is false for archived rows, so a citation FROM
     // one of them is gathered here but never counted below.
     let mut bodies: Vec<(String, String, bool)> = Vec::new();
     for (path, status) in rows {
+        if let Some(stem) = Path::new(&path).file_stem().and_then(|s| s.to_str()) {
+            by_stem
+                .entry(stem.to_string())
+                .or_default()
+                .push(path.clone());
+        }
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -1912,70 +1949,78 @@ fn entry_indegree(
         bodies.push((path, text, citable));
     }
 
-    let mut deg: std::collections::BTreeMap<String, usize> = Default::default();
+    // Bare-token resolution — `resolve`'s `EntryToken` arm, and the fallback every
+    // unresolvable qualified form lands on. `None` means "contributes no exposure":
+    // undefined, self-cited, or ambiguous.
+    let resolve_bare = |token: &str, citer: &String| -> Option<String> {
+        // Zero definers is `scan_undefined_entries`' question, not this one's — and
+        // there would be no definer to key on regardless.
+        let defs = definer.get(token)?;
+        if defs.contains(citer) {
+            return None; // the local definition wins — SelfCite, never exposure
+        }
+        let mut it = defs.iter();
+        match (it.next(), it.next()) {
+            // Exactly one definer resolves even when archived — archived is not
+            // nonexistent (`get_guide("tracker-conventions")`).
+            (Some(only), None) => Some(only.clone()),
+            (Some(_), Some(_)) => {
+                let mut act = defs.iter().filter(|p| active_paths.contains(*p));
+                match (act.next(), act.next()) {
+                    (Some(one), None) => Some(one.clone()),
+                    // Zero or many active definers: Ambiguous. `link_scan` reports it;
+                    // nothing here guesses.
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    };
+
+    let mut deg: std::collections::BTreeMap<(String, String), usize> = Default::default();
     for (path, text, citable) in &bodies {
         if !citable {
             continue; // archived citers do not add exposure
         }
         for c in extract(text).citations {
-            let token = match c.kind {
-                CitationKind::EntryToken => c.raw,
-                CitationKind::CrossRepoToken => match c.raw.rsplit_once(':') {
-                    Some((_, t)) => t.to_string(),
+            let (dst, token) = match c.kind {
+                CitationKind::EntryToken => match resolve_bare(&c.raw, path) {
+                    Some(dst) => (dst, c.raw.clone()),
                     None => continue,
                 },
+                CitationKind::CrossRepoToken => {
+                    let Some((qualifier, token)) = c.raw.split_once(':') else {
+                        continue;
+                    };
+                    // A qualifier naming exactly one local file that DEFINES the token is
+                    // a within-repo qualified citation, and resolves precisely. This one
+                    // row is the whole change; every other shape falls through.
+                    let precise = match by_stem.get(qualifier).map(Vec::as_slice) {
+                        Some([only]) if definer.get(token).is_some_and(|d| d.contains(only)) => {
+                            Some(only.clone())
+                        }
+                        _ => None,
+                    };
+                    match precise {
+                        // Qualified citation of your own file — SelfCite.
+                        Some(only) if only == *path => continue,
+                        Some(only) => (only, token.to_string()),
+                        // Unknown qualifier (a genuine cross-repo reference), colliding
+                        // stem, or a named file that lacks the entry. All fall back to the
+                        // token half, which is what this function did before the rewrite —
+                        // see the doc comment on why dropping them would manufacture false
+                        // negatives the call site explicitly forbids.
+                        None => match resolve_bare(token, path) {
+                            Some(dst) => (dst, token.to_string()),
+                            None => continue,
+                        },
+                    }
+                }
                 _ => continue,
             };
-            if definer.get(&token).is_some_and(|d| d.contains(path)) {
-                continue; // same-file: SelfCite, never exposure
-            }
-            *deg.entry(token).or_insert(0) += 1;
+            *deg.entry((dst, token)).or_insert(0) += 1;
         }
     }
-
-    // A token with more than one definer contributes NO exposure, UNLESS exactly one of
-    // those definers is active. Measured 2026-08-20: `F-1` alone is defined in 113
-    // separate sections (98 for `W-1`, 90 for `F-2`) because `F-N`/`W-N` are namespaced
-    // per work stream — each session log owns its own counter, and `F-1..F-5` are
-    // defined in all eight live logs (per `get_guide("tracker-conventions")`). Pooling
-    // their citations under one key is guessing which log a bare `F-1` means, at scale —
-    // 1611 of 1801 gate-clearing sections were clearing it on exposure earned by an
-    // UNRELATED ledger's citations, not their own.
-    //
-    // The active-only refinement is not optional polish: `link_scan::resolve::resolve`
-    // (`resolve.rs:306-315`) resolves a bare `EntryToken` to the SOLE active definer when
-    // exactly one of several raw definers is active, and only falls back to `Ambiguous`
-    // when zero or more-than-one are. Treating EVERY multi-definer token as ambiguous
-    // here — the literal composition of "definers > 1 is ambiguous" with "citing side
-    // filters archived" — silently inverted that parity: a token defined once in an
-    // active artifact and once in an archived one read as ambiguous here while
-    // `resolve()` already resolves it. `get_guide("tracker-conventions")` states the rule
-    // this now follows: "A unique definer resolves even when its artifact is archived —
-    // archived is not nonexistent. Where two artifacts define one token, the sole active
-    // one wins."
-    //
-    // Zero-definer tokens are NOT dropped by this filter (`.is_none_or` keeps them, and
-    // a token with exactly one raw definer — active or archived — is unique before the
-    // active-count check ever runs): that population is `scan_undefined_entries`'s
-    // question, not this one's, and dropping it here would silently reclassify an
-    // undefined-but-cited token as a definer collision instead.
-    //
-    // Named follow-on, not built here: a file-stem-qualified citation
-    // (`bug-fix-session-log:F-33`) already resolves to ONE specific definer via
-    // `corpus.by_stem` in `link_scan::resolve::resolve`'s `CrossRepoToken` arm. Counting
-    // those against their specific definer — rather than folding the qualifier into the
-    // bare token the way this function currently does — would restore real exposure for
-    // the F/W population without pooling. Not attempted here: it needs the `Corpus`/
-    // `by_stem` machinery `link_scan` builds, which this function does not have.
-    deg.retain(|token, _| {
-        let Some(defs) = definer.get(token) else {
-            return true;
-        };
-        if defs.len() <= 1 {
-            return true;
-        }
-        defs.iter().filter(|p| active_paths.contains(*p)).count() == 1
-    });
 
     Ok(deg)
 }
@@ -2013,7 +2058,7 @@ const EXPOSURE_THRESHOLD: usize = 5;
 fn scan_conditional_past_due(
     ctx: &ToolContext,
     conn: &rusqlite::Connection,
-    indegree: &std::collections::BTreeMap<String, usize>,
+    indegree: &std::collections::BTreeMap<(String, String), usize>,
 ) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     use crate::librarian::statements::{declared_section_text, parse_validity, Validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
@@ -2045,7 +2090,12 @@ fn scan_conditional_past_due(
         };
         let sections = entry_sections(&text);
         for s in &sections {
-            let exposure = indegree.get(&s.id).copied().unwrap_or(0);
+            // Keyed by (defining file, token): `F-1` is defined in every session log,
+            // so a bare-token lookup would price this entry on other ledgers' traffic.
+            let exposure = indegree
+                .get(&(path.clone(), s.id.clone()))
+                .copied()
+                .unwrap_or(0);
             if exposure < EXPOSURE_THRESHOLD {
                 continue;
             }
@@ -2156,7 +2206,7 @@ fn iso_to_epoch_days(iso: &str) -> Option<i64> {
 fn scan_dated_stale(
     ctx: &ToolContext,
     conn: &rusqlite::Connection,
-    indegree: &std::collections::BTreeMap<String, usize>,
+    indegree: &std::collections::BTreeMap<(String, String), usize>,
     today_epoch_days: i64,
 ) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     use crate::librarian::statements::{declared_section_text, parse_validity, Validity};
@@ -2187,7 +2237,12 @@ fn scan_dated_stale(
         };
         let sections = entry_sections(&text);
         for s in &sections {
-            let exposure = indegree.get(&s.id).copied().unwrap_or(0);
+            // Keyed by (defining file, token): `F-1` is defined in every session log,
+            // so a bare-token lookup would price this entry on other ledgers' traffic.
+            let exposure = indegree
+                .get(&(path.clone(), s.id.clone()))
+                .copied()
+                .unwrap_or(0);
             if exposure < EXPOSURE_THRESHOLD {
                 continue;
             }
@@ -2276,7 +2331,7 @@ fn scan_dated_stale(
 fn scan_cited_but_undeclared(
     ctx: &ToolContext,
     conn: &rusqlite::Connection,
-    indegree: &std::collections::BTreeMap<String, usize>,
+    indegree: &std::collections::BTreeMap<(String, String), usize>,
 ) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     use crate::librarian::statements::{declared_section_text, parse_validity};
     use crate::librarian::tools::link_scan::extract::entry_sections;
@@ -2305,7 +2360,12 @@ fn scan_cited_but_undeclared(
         };
         let sections = entry_sections(&text);
         for s in &sections {
-            let exposure = indegree.get(&s.id).copied().unwrap_or(0);
+            // Keyed by (defining file, token): `F-1` is defined in every session log,
+            // so a bare-token lookup would price this entry on other ledgers' traffic.
+            let exposure = indegree
+                .get(&(path.clone(), s.id.clone()))
+                .copied()
+                .unwrap_or(0);
             if exposure < EXPOSURE_THRESHOLD {
                 continue;
             }
@@ -6844,6 +6904,14 @@ root = "work/elsewhere/ghost"
         TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
     }
 
+    /// The exposure-map key: `entry_indegree` counts against the file that DEFINES the
+    /// entry, so a test faking exposure must name the same definer or the scan looks up a
+    /// key that is not there. Taking the path explicitly is the point — `F-1` is defined
+    /// in every session log, and a bare token no longer identifies a Statement.
+    fn deg_key(path: &std::path::Path, token: impl Into<String>) -> (String, String) {
+        (path.to_string_lossy().into_owned(), token.into())
+    }
+
     #[test]
     fn indegree_counts_cross_file_citations_and_excludes_the_definer() {
         let tmp = tempfile::tempdir().unwrap();
@@ -6868,7 +6936,7 @@ root = "work/elsewhere/ghost"
 
         let deg = entry_indegree(&cat.conn).unwrap();
         assert_eq!(
-            deg.get("R-1").copied(),
+            deg.get(&deg_key(&a, "R-1")).copied(),
             Some(2),
             "b.md and c.md's citations both count — a.md defines R-1, so its own index \
          row and prose must not inflate its exposure"
@@ -6886,7 +6954,7 @@ root = "work/elsewhere/ghost"
 
         let deg = entry_indegree(&cat.conn).unwrap();
         assert_eq!(
-            deg.get("R-9").copied(),
+            deg.get(&deg_key(&a, "R-9")).copied(),
             Some(1),
             "a qualified `other:R-9` citation must be attributed to the token half, R-9 — \
          the same idiom corpus_cited_tokens uses"
@@ -6907,8 +6975,8 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-1".to_string(), 9usize);
-        deg.insert("R-2".to_string(), 1usize);
+        deg.insert(deg_key(&p, "R-1"), 9usize);
+        deg.insert(deg_key(&p, "R-2"), 1usize);
 
         let (v, _) = scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
@@ -6937,7 +7005,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-3".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-3"), EXPOSURE_THRESHOLD);
         assert_eq!(
             scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
@@ -6947,7 +7015,7 @@ root = "work/elsewhere/ghost"
             "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
         );
 
-        deg.insert("R-3".to_string(), EXPOSURE_THRESHOLD - 1);
+        deg.insert(deg_key(&p, "R-3"), EXPOSURE_THRESHOLD - 1);
         assert!(
             scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
@@ -6977,8 +7045,8 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("PV-2".to_string(), EXPOSURE_THRESHOLD);
-        deg.insert("PV-8".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "PV-2"), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "PV-8"), EXPOSURE_THRESHOLD);
 
         let (v, _) = scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
@@ -7002,7 +7070,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-7"), EXPOSURE_THRESHOLD);
 
         assert!(
             scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
@@ -7032,7 +7100,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-98".to_string(), EXPOSURE_THRESHOLD + 50);
+        deg.insert(deg_key(&p, "R-98"), EXPOSURE_THRESHOLD + 50);
 
         assert!(
             scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
@@ -7058,7 +7126,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-60".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&p, "R-60"), EXPOSURE_THRESHOLD + 3);
 
         assert!(
             scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg)
@@ -7095,7 +7163,7 @@ root = "work/elsewhere/ghost"
         art_upsert(&cat, &row).unwrap();
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-61".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&active, "R-61"), EXPOSURE_THRESHOLD + 3);
 
         let (v, _) = scan_conditional_past_due(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
@@ -7133,10 +7201,152 @@ root = "work/elsewhere/ghost"
 
         let deg = entry_indegree(&cat.conn).unwrap();
         assert_eq!(
-            deg.get("F-1"),
-            None,
+            (deg.get(&deg_key(&a, "F-1")), deg.get(&deg_key(&b, "F-1")),),
+            (None, None),
             "a token with 2 definers must contribute NO exposure — its key must be absent \
          entirely, not merely zero: {deg:?}"
+        );
+    }
+    /// The defect the definer-keying exists to remove. Before it, `F-1`'s two definers
+    /// made the bare token ambiguous and it contributed NO exposure at all — measured
+    /// 2026-08-21, that exempted 252 `F`/`W` Statements carrying 442 entry-grain edges
+    /// from all three exposure-gated checks, and all 32 live
+    /// `entry_cited_from_outside_but_undeclared` rows named some other prefix. A
+    /// stem-qualified citation names ONE definer, so it resolves.
+    ///
+    /// **The exemption's size and the worklist delta are different numbers, in different
+    /// units.** This function counts distinct citing FILES and the gate is 5 of them,
+    /// where those 442 are entry-to-entry EDGES — many from one file. Across all 252 F/W
+    /// destinations `entry_cite`'s maximum distinct-citer count is 4, so the immediate
+    /// effect of this fix on the reported worklist was a single row (`F-9`, at 5 citing
+    /// files, which clears only because non-ledger citers — specs, bug files, READMEs —
+    /// produce exposure here while producing no `entry_cite` row at all). The mechanism is
+    /// what changed; the population it will price grows as qualified citation spreads.
+    #[test]
+    fn indegree_attributes_a_stem_qualified_citation_to_its_specific_definer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let a = tmp.path().join("stream-a-log.md");
+        let b = tmp.path().join("stream-b-log.md");
+        let c = tmp.path().join("citer.md");
+        seed_ledger(
+            &cat,
+            "a",
+            &a,
+            "## F-1 — stream A's first finding\n\nprose\n",
+        );
+        seed_ledger(
+            &cat,
+            "b",
+            &b,
+            "## F-1 — stream B's first finding\n\nprose\n",
+        );
+        // Qualified by file STEM — the form `get_guide("tracker-conventions")`
+        // prescribes whenever several ledgers share a prefix.
+        seed_ledger(&cat, "c", &c, "see stream-a-log:F-1 for why\n");
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get(&deg_key(&a, "F-1")).copied(),
+            Some(1),
+            "the qualifier names stream-a-log, so the exposure is A's: {deg:?}"
+        );
+        assert_eq!(
+            deg.get(&deg_key(&b, "F-1")),
+            None,
+            "and B must not receive exposure it did not earn — pooling both ledgers under \
+             one `F-1` key is the whole defect this keying removes: {deg:?}"
+        );
+    }
+
+    /// A qualified citation of your OWN file is a SelfCite, decided exactly as
+    /// `resolve`'s `[only]` arm decides it. A hand-maintained `## Index` row that spells
+    /// its own ledger's stem must not inflate the entry it points at — 28.5% of ledger
+    /// citations sit in such rows.
+    #[test]
+    fn indegree_treats_a_qualified_citation_of_your_own_file_as_a_self_cite() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let own = tmp.path().join("own-log.md");
+        seed_ledger(
+            &cat,
+            "own",
+            &own,
+            "## Index\n| own-log:F-1 | x |\n\n## F-1 — the finding\n\nprose\n",
+        );
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get(&deg_key(&own, "F-1")),
+            None,
+            "a ledger citing its own entry by its own stem is a SelfCite, not exposure — \
+             otherwise an index row arms the gate on its own entry: {deg:?}"
+        );
+    }
+
+    /// Where this function deliberately DIVERGES from `resolve`, pinned so the
+    /// divergence cannot be "simplified" away into parity. `resolve` answers "can this be
+    /// an edge" and stops at `CrossRepo`; this one answers "how exposed is this entry",
+    /// and `call`'s own comment states that narrowing the metric to the active project
+    /// "would understate real cross-repo exposure and manufacture false negatives".
+    #[test]
+    fn indegree_falls_back_to_the_token_half_when_a_qualifier_does_not_resolve() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let def = tmp.path().join("the-law.md");
+        let unrelated = tmp.path().join("unrelated.md");
+        let c1 = tmp.path().join("c1.md");
+        let c2 = tmp.path().join("c2.md");
+        seed_ledger(&cat, "def", &def, "## R-9 — the law\n\nprose\n");
+        seed_ledger(&cat, "unrelated", &unrelated, "## Z-1 — other\n\nprose\n");
+        // A genuine CROSS-REPO reference: `codescout` names no file in this corpus.
+        seed_ledger(&cat, "c1", &c1, "see codescout:R-9 over there\n");
+        // A qualifier naming a real local file that does NOT define R-9 — Dangling to
+        // `resolve`, still exposure here.
+        seed_ledger(&cat, "c2", &c2, "see unrelated:R-9\n");
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            deg.get(&deg_key(&def, "R-9")).copied(),
+            Some(2),
+            "both unresolvable qualifiers fall back to the token half, which has exactly \
+             one definer — dropping them would manufacture the false negatives call() \
+             forbids: {deg:?}"
+        );
+    }
+    /// A colliding stem is reported, never guessed — the fourth mechanism copied from
+    /// `resolve`'s `CrossRepoToken` arm, and the one a `[only]` → `[only, ..]` slip drops
+    /// silently. Confirmed by mutation 2026-08-21: relaxing that slice pattern to take the
+    /// first candidate left all 156 doctor tests green until this test existed. `W-3`'s
+    /// shape again — the copy inherited the sibling's discipline but not its tests,
+    /// because those tests are named for `resolve`.
+    #[test]
+    fn indegree_does_not_guess_when_two_files_share_the_qualifiers_stem() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let dir_a = tmp.path().join("a");
+        let dir_b = tmp.path().join("b");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+        // Same STEM, different directories — `Corpus.by_stem` PUSHES rather than inserts
+        // for exactly this case, and so does the map built here.
+        let log_a = dir_a.join("log.md");
+        let log_b = dir_b.join("log.md");
+        let citer = tmp.path().join("citer.md");
+        seed_ledger(&cat, "log-a", &log_a, "## F-1 — A's finding\n\nprose\n");
+        seed_ledger(&cat, "log-b", &log_b, "## F-1 — B's finding\n\nprose\n");
+        seed_ledger(&cat, "citer", &citer, "see log:F-1\n");
+
+        let deg = entry_indegree(&cat.conn).unwrap();
+        assert_eq!(
+            (
+                deg.get(&deg_key(&log_a, "F-1")),
+                deg.get(&deg_key(&log_b, "F-1")),
+            ),
+            (None, None),
+            "`log` names two files, so the qualifier resolves to neither; the fallback then \
+             finds two active definers for the bare token and stays ambiguous. Guessing the \
+             first candidate would credit whichever path happens to sort first: {deg:?}"
         );
     }
 
@@ -7170,7 +7380,7 @@ root = "work/elsewhere/ghost"
 
         let deg = entry_indegree(&cat.conn).unwrap();
         assert_eq!(
-            deg.get("R-1").copied(),
+            deg.get(&deg_key(&a, "R-1")).copied(),
             Some(1),
             "only b.md's active citation may count — a.md is still R-1's definer despite \
          being archived, and c.md's archived citation must not add exposure: {deg:?}"
@@ -7203,8 +7413,8 @@ root = "work/elsewhere/ghost"
 
         let deg = entry_indegree(&cat.conn).unwrap();
         assert_eq!(
-            deg.get("R-2"),
-            None,
+            (deg.get(&deg_key(&a2, "R-2")), deg.get(&deg_key(&a3, "R-2")),),
+            (None, None),
             "R-2 has two definers and NEITHER is active — genuinely ambiguous per Ruling 16, \
          and must stay dropped even though both would-be definers are archived (not \
          undefined): {deg:?}"
@@ -7242,7 +7452,7 @@ root = "work/elsewhere/ghost"
 
         let deg = entry_indegree(&cat.conn).unwrap();
         assert_eq!(
-            deg.get("R-5").copied(),
+            deg.get(&deg_key(&active_def, "R-5")).copied(),
             Some(1),
             "one archived co-definer must not make an otherwise-unique active definer read \
          as ambiguous: {deg:?}"
@@ -7275,7 +7485,7 @@ root = "work/elsewhere/ghost"
 
         let deg = entry_indegree(&cat.conn).unwrap();
         assert_eq!(
-            deg.get("R-1").copied(),
+            deg.get(&deg_key(&def, "R-1")).copied(),
             Some(1),
             "the archive/-located citer must not add exposure even though its status is \
          `fixed`, not `archived`: {deg:?}"
@@ -7340,8 +7550,8 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-80".to_string(), EXPOSURE_THRESHOLD + 3);
-        deg.insert("R-81".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&in_scope, "R-80"), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&out_of_scope, "R-81"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &active_root);
         let (v, scoped_out) = {
@@ -7379,9 +7589,9 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-1".to_string(), 6usize);
-        deg.insert("R-2".to_string(), 40usize);
-        deg.insert("R-3".to_string(), 99usize);
+        deg.insert(deg_key(&p, "R-1"), 6usize);
+        deg.insert(deg_key(&p, "R-2"), 40usize);
+        deg.insert(deg_key(&p, "R-3"), 99usize);
 
         // 2026-08-20 as days since epoch.
         let (v, _) = scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685).unwrap();
@@ -7443,10 +7653,10 @@ root = "work/elsewhere/ghost"
         for id in 10..=42 {
             text.push_str(&format!("## R-{id} — e\n\n**Valid:** dated 2020-01-01\n\n"));
             if id % 2 == 0 {
-                deg.insert(format!("R-{id}"), EXPOSURE_THRESHOLD + 1);
+                deg.insert(deg_key(&p, format!("R-{id}")), EXPOSURE_THRESHOLD + 1);
                 expected_evens.push(format!("R-{id}"));
             } else {
-                deg.insert(format!("R-{id}"), EXPOSURE_THRESHOLD);
+                deg.insert(deg_key(&p, format!("R-{id}")), EXPOSURE_THRESHOLD);
                 expected_odds.push(format!("R-{id}"));
             }
         }
@@ -7482,7 +7692,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-9".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-9"), EXPOSURE_THRESHOLD);
 
         assert_eq!(
             scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
@@ -7515,7 +7725,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-4"), EXPOSURE_THRESHOLD);
         assert_eq!(
             scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -7525,7 +7735,7 @@ root = "work/elsewhere/ghost"
             "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
         );
 
-        deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD - 1);
+        deg.insert(deg_key(&p, "R-4"), EXPOSURE_THRESHOLD - 1);
         assert!(
             scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
                 .unwrap()
@@ -7557,7 +7767,7 @@ root = "work/elsewhere/ghost"
         // A populated but unrelated map — the absence of the KEY "R-51" is what's under
         // test, not an empty map that could pass for an unrelated reason.
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-99".to_string(), EXPOSURE_THRESHOLD + 50);
+        deg.insert(deg_key(&p, "R-99"), EXPOSURE_THRESHOLD + 50);
 
         assert!(
             scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
@@ -7587,8 +7797,8 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("PV-3".to_string(), EXPOSURE_THRESHOLD);
-        deg.insert("PV-9".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "PV-3"), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "PV-9"), EXPOSURE_THRESHOLD);
 
         let (v, _) = scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685).unwrap();
         assert_eq!(
@@ -7613,8 +7823,8 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-5".to_string(), EXPOSURE_THRESHOLD);
-        deg.insert("R-6".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-5"), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-6"), EXPOSURE_THRESHOLD);
 
         assert!(
             scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
@@ -7639,7 +7849,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-7"), EXPOSURE_THRESHOLD);
 
         assert!(
             scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
@@ -7684,8 +7894,8 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-8".to_string(), EXPOSURE_THRESHOLD);
-        deg.insert("R-9".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-8"), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-9"), EXPOSURE_THRESHOLD);
 
         assert!(
             scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
@@ -7956,7 +8166,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-62".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&p, "R-62"), EXPOSURE_THRESHOLD + 3);
 
         assert!(
             scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685)
@@ -7992,7 +8202,7 @@ root = "work/elsewhere/ghost"
         art_upsert(&cat, &row).unwrap();
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-63".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&active, "R-63"), EXPOSURE_THRESHOLD + 3);
 
         let (v, _) = scan_dated_stale(&unscoped_ctx(), &cat.conn, &deg, 20_685).unwrap();
         assert_eq!(
@@ -8061,8 +8271,8 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-82".to_string(), EXPOSURE_THRESHOLD + 3);
-        deg.insert("R-83".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&in_scope, "R-82"), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&out_of_scope, "R-83"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &active_root);
         let (v, scoped_out) = {
@@ -8102,9 +8312,9 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-1".to_string(), 20usize);
-        deg.insert("R-2".to_string(), 20usize);
-        deg.insert("R-3".to_string(), 1usize);
+        deg.insert(deg_key(&p, "R-1"), 20usize);
+        deg.insert(deg_key(&p, "R-2"), 20usize);
+        deg.insert(deg_key(&p, "R-3"), 1usize);
 
         let (v, _) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
@@ -8147,7 +8357,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-2".to_string(), 20usize);
+        deg.insert(deg_key(&p, "R-2"), 20usize);
 
         let (v, _) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(v.len(), 1, "R-2 is load-bearing and undeclared: {v:#?}");
@@ -8180,7 +8390,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-4"), EXPOSURE_THRESHOLD);
         assert_eq!(
             scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
@@ -8190,7 +8400,7 @@ root = "work/elsewhere/ghost"
             "exposure == EXPOSURE_THRESHOLD must fire — the gate is `<`, not `<=`"
         );
 
-        deg.insert("R-4".to_string(), EXPOSURE_THRESHOLD - 1);
+        deg.insert(deg_key(&p, "R-4"), EXPOSURE_THRESHOLD - 1);
         assert!(
             scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
                 .unwrap()
@@ -8223,8 +8433,8 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("PV-2".to_string(), EXPOSURE_THRESHOLD);
-        deg.insert("PV-8".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "PV-2"), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "PV-8"), EXPOSURE_THRESHOLD);
 
         let (v, _) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
@@ -8249,7 +8459,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-7".to_string(), EXPOSURE_THRESHOLD);
+        deg.insert(deg_key(&p, "R-7"), EXPOSURE_THRESHOLD);
 
         assert!(
             scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
@@ -8278,7 +8488,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-98".to_string(), EXPOSURE_THRESHOLD + 50);
+        deg.insert(deg_key(&p, "R-98"), EXPOSURE_THRESHOLD + 50);
 
         assert!(
             scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
@@ -8306,7 +8516,7 @@ root = "work/elsewhere/ghost"
 
         let mut deg = std::collections::BTreeMap::new();
         for id in ["R-10", "R-11", "R-12"] {
-            deg.insert(id.to_string(), EXPOSURE_THRESHOLD + 10);
+            deg.insert(deg_key(&p, id.to_string()), EXPOSURE_THRESHOLD + 10);
         }
 
         assert!(
@@ -8333,7 +8543,7 @@ root = "work/elsewhere/ghost"
         );
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-64".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&p, "R-64"), EXPOSURE_THRESHOLD + 3);
 
         assert!(
             scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg)
@@ -8365,7 +8575,7 @@ root = "work/elsewhere/ghost"
         art_upsert(&cat, &row).unwrap();
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-65".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&active, "R-65"), EXPOSURE_THRESHOLD + 3);
 
         let (v, _) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(
@@ -8388,7 +8598,7 @@ root = "work/elsewhere/ghost"
         seed_ledger(&cat, "led", &p, "## R-70 — in scope\n\nno class\n");
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-70".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&p, "R-70"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &root);
         let (v, scoped_out) = {
@@ -8418,7 +8628,7 @@ root = "work/elsewhere/ghost"
         seed_ledger(&cat, "led", &p, "## R-71 — out of scope\n\nno class\n");
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-71".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&p, "R-71"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &active_root);
         let (v, scoped_out) = {
@@ -8456,7 +8666,7 @@ root = "work/elsewhere/ghost"
         seed_ledger(&cat, "led", &p, "## R-74 — prefix lookalike\n\nno class\n");
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-74".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&p, "R-74"), EXPOSURE_THRESHOLD + 3);
 
         let ctx = ctx_rooted_at(cat, &active_root);
         let (v, scoped_out) = {
@@ -8479,7 +8689,7 @@ root = "work/elsewhere/ghost"
         seed_ledger(&cat, "led", &p, "## R-72 — no active project\n\nno class\n");
 
         let mut deg = std::collections::BTreeMap::new();
-        deg.insert("R-72".to_string(), EXPOSURE_THRESHOLD + 3);
+        deg.insert(deg_key(&p, "R-72"), EXPOSURE_THRESHOLD + 3);
 
         let (v, scoped_out) = scan_cited_but_undeclared(&unscoped_ctx(), &cat.conn, &deg).unwrap();
         assert_eq!(

@@ -40,7 +40,7 @@ entry_high_water_F: 8
 | F-6 | 2026-08-21 | med | self-friction | fixed-verified | Having read a fact is not having applied it — extract's dedup |
 | F-4 | 2026-08-20 | med | architectural | fixed-verified | Gated doc surfaces were kept current; the routing that serves them was never checked |
 | F-7 | 2026-08-21 | high | architectural | open | A capability premise about our OWN internals reads as recall, not assertion — so nothing audits it |
-| F-8 | 2026-08-21 | high | architectural | open | A correction lands where the error was found, not where it propagates — two retired terms left the tap's firing rule standing |
+| F-8 | 2026-08-21 | high | architectural | fixed-verified | A correction lands where the error was found, not where it propagates — two retired terms left the tap's firing rule standing |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -1030,7 +1030,7 @@ counted only among *cited* slugs.
 **Then measured directly rather than left as an inference.** `librarian(action="doctor")`,
 same day: all **32** rows of `entry_cited_from_outside_but_undeclared` are present in the
 response — a census, not a truncated floor — and **zero** name an `F`/`W` token; every one
-names another prefix (`TU-7`, `B-1`, `CAP-5`, `H-2`, `H-5`). So 96 `F`/`W` Statements
+names another prefix (`TU-7`, `B-1`, `CAP-5`, `H-2`, `H-5`). So 252 `F`/`W` Statements
 carrying 442 entry-grain edges are **already** invisible to all three exposure-gated checks.
 The exemption is shipped behaviour that 5b would inherit, not a risk 5b would introduce —
 which is exactly the distinction the write-up would have blurred had I stopped at the
@@ -1050,7 +1050,18 @@ on a corpus where nothing would look wrong — no error, no empty table, no fail
 metric the design names for exactly this failure (*"if `verifies` climbs while `refuted` stays at
 zero, the appraisals are theatre"*) reads clean, because neither counter ever moves.
 
-**Status:** open
+**Fixed 2026-08-21, and fixing it produced two unit errors of my own.** `entry_indegree`
+is now keyed `(defining file, token)`; `F-9` appears on the worklist where no `F`/`W`
+Statement could before. But the write-up above said **96** Statements where a Statement is
+a *(ledger, token)* pair and the count is **252** — 96 is the number of distinct token
+*strings*. And it implied 442 edges of suppressed exposure, where the gate reads distinct
+citing **files**: across all 252 destinations `entry_cite`'s maximum distinct-citer count
+is 4, none reach the threshold of 5, and the worklist moved by exactly **1**. Both are
+`statement-validity-session-log:W-9` — a number measured in one unit and consumed in
+another — committed inside the entry that cites W-9 as kin. The lesson survives the
+correction: the exemption was real and is gone; its *magnitude* was never what I said.
+
+**Status:** fixed-verified
 
 **Promote-when:** a second instance of a correction that was written at the error site and not
 propagated to a consumer **inside the same artifact**. At two, add to the reconnaissance skill's
