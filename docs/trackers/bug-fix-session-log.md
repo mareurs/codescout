@@ -2,12 +2,15 @@
 kind: tracker
 status: active
 title: Session Log — Bug-Fix Work Stream
-owners: []
 tags:
-  - session-log
-  - bug-fix
+- session-log
+- bug-fix
 topic: Multi-session bug-fix work stream — frictions and wins from closing open buffer/markdown bugs in docs/issues/
 time_scope: open-ended
+entry_prefix:
+- F
+- W
+entry_high_water_F: 57
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -103,6 +106,7 @@ time_scope: open-ended
 | F-54 | 2026-08-18 | med | process | mitigated | A dispatched subagent's full-suite run read a *concurrent* session's mid-edit working tree, saw a prompt-surface snapshot test fail, and reported it as a live failure — the shared-checkout analogue of the `src/prompts/README.md` shared-branch verify hazard |
 | F-55 | 2026-08-18 | med | codescout-tool | promoted-to-bug-tracker | `grep(glob=<abs path outside the project>)` returns `0 matches` instead of an error, and the warning blames hidden-path pruning — a cause it never checked, whose suggested fix cannot help. `path=` on the same file matches fine |
 | F-56 | 2026-08-18 | med | process | wontfix-false-alarm | Ran the pre-promotion gate from a clone under `/tmp` and got a **false red** — three librarian temp-write-guard tests invert there, and cargo's fail-fast then skipped 21 other test binaries, so the run was simultaneously falsely negative and silently incomplete |
+| F-57 | 2026-08-21 | med | process | mitigated | A concurrent Claude Code session's own commit swept up this session's uncommitted `resolver.rs`/`severity.rs` edits under an unrelated spec-work message — content verified intact, but no single clean commit exists to cite as the fix; same class as F-54 |
 
 ## Wins Index
 
@@ -4196,6 +4200,64 @@ stated rationale false, sweep the class corpus-wide and require the enumeration 
 count.*
 
 **Status:** validated — single strong datapoint with hard numbers (5 of 11), pending a second.
+
+## F-57 — A concurrent session's commit swept up this session's uncommitted code edits under an unrelated message
+
+**Observed:** 2026-08-21, mid-fix on the `audit_doc_refs` MCP-method-name bug
+(`docs/issues/2026-08-20-audit-doc-refs-reads-mcp-method-names-as-file-paths.md`). After
+`cargo fmt` and launching clippy + the full test suite in the background, ran `git status
+--short` before committing, as this project's git-safety discipline requires before every
+commit.
+
+**When:** Checking `git status` right before staging — the step that catches this, not a
+speculative check.
+
+**Expected:** `src/librarian/tools/audit_doc_refs/resolver.rs` and `severity.rs`, edited via
+`edit_code` this session and never committed, to show as `M` (modified, unstaged).
+
+**Got:** `git status --short` showed only the bug-tracker doc file as modified. The two Rust
+files were already byte-identical to my working tree — because they were already in `HEAD`,
+swept into two commits (`89eb83f0`, `f24c3788`) by a **concurrent Claude Code session**
+(same author name, but co-authored by "Claude Opus 5 (1M context)" — a different model/session
+instance, working unrelated `docs/superpowers/specs/` entry-validity work on the same
+checkout) that ran `git commit` while my edits sat uncommitted in the shared working tree.
+Confirmed via `git show <sha> -- <file>` that the landed content is exactly what this session
+wrote and tested — no data loss — but the commit messages and `Co-Authored-By` trailers now
+misattribute an unrelated fix, and there is no single clean commit to cite as "the fix" in the
+bug file (`git show <sha> | git patch-id --stable` needs one).
+
+**Probable cause:** the concurrent session almost certainly staged broadly (`git add -A` or
+`git commit -a`) rather than explicit paths — exactly the hazard `docs/RELEASE.md` §
+Concurrent-Work Rules already documents, and the same class as the prior instance recorded in
+`prompt-surface-compaction-session-log:W-9` ("on a checkout shared with at least two other
+agent sessions"). That instance's mitigation (`git add <explicit paths>` rather than `-A`)
+already protected *this* session's own commits throughout — the collision originated on the
+other session's side, which this session cannot control.
+
+**Severity:** med — no data loss and nothing gated on it, but real recovery cost: git-log
+archaeology to find where the code actually landed, and a reconstructed patch-id (`git diff
+<base>..<final> -- <files> | git patch-id --stable`, since no single commit is the fix alone)
+in place of the normal single-SHA citation the bug-tracker convention expects.
+
+**Workaround:** Before every commit, `git status --short` (already this session's practice) —
+if a file you edited but never committed is missing from the diff, `git log --stat` on recent
+commits to find where it landed, then `git show <sha> -- <file>` to verify content integrity
+before citing it. Never assume "not in `git status`" means "not yet done."
+
+**Status:** mitigated — verified content integrity, cited both commits + a reconstructed
+patch-id in the bug file, informed the user. Root cause (concurrent sessions on one checkout
+can still absorb each other's uncommitted work) is a property of shared-checkout multi-session
+use, not something one session's discipline alone can close.
+
+**Valid:** dated 2026-08-21
+
+True of this checkout's concurrent-session state at this moment; not a claim about any other
+repo or session.
+
+**Rests on:** `docs/RELEASE.md` § Concurrent-Work Rules; `prompt-surface-compaction-session-log:W-9`; kin to [[F-54]] in this same ledger — a dispatched subagent reading a concurrent session's mid-edit working tree. Same root cause (shared checkout, no isolation), different manifestation (there: a false test failure; here: a true fix silently misattributed).
+
+**Fix idea / Pointer:** None owed — the existing explicit-path-staging discipline is the
+correct standing mitigation and was already in effect. No new rule to promote.
 
 ## Template for new entries
 
