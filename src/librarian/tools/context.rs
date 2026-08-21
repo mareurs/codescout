@@ -41,6 +41,26 @@ const DEFAULT_MAX_TOKENS: usize = 4000;
 /// Re-tune from `docs/trackers/context-performance.md` if the corpus shape moves.
 const NEIGHBOUR_EXCERPT_BYTES: usize = 1000;
 
+/// Distinct citing Statements a claim needs before *reading* it incurs a proof obligation.
+///
+/// **Measured on the live entry graph 2026-08-21, not guessed.** At 5 the tap arms 8
+/// Statements corpus-wide — `SI-7` (9 citers), `R-3` and `R-19` (8), `R-77`/`R-79` (6),
+/// `R-50`/`R-95`/`R-49` (5) — which are the load-bearing lessons, and a population small
+/// enough that an obligation still means something. At 3 it would arm 91; at 2, 213. The
+/// design called this constant "a guess with no measurement behind it"; this is the
+/// measurement.
+///
+/// A **floor, not a period**: a Statement appraised at 5 arms again at 10.
+///
+/// Deliberately NOT `doctor`'s `EXPOSURE_THRESHOLD`, despite sharing a value today. That
+/// one prices a different population (every citing FILE, recomputed from disk) for a
+/// different purpose (a gate). This reads the materialized graph, because `entry_indegree`
+/// takes ~5s over 4113 files and an interactive read cannot pay that. The cost is that this
+/// UNDERCOUNTS — only ledger entries produce `entry_cite` rows, so a spec or bug file
+/// citing the Statement is invisible here — and undercounting is the conservative
+/// direction for an obligation.
+const ATTESTATION_EXPOSURE_THRESHOLD: usize = 5;
+
 const ANCHOR_MARKER: &str = "\n\n… [anchor truncated — reserved half the budget for its \
                              neighbours; use `artifact(get, id=…, heading=…)` for the full \
                              entry]";
@@ -160,6 +180,80 @@ fn statement_node(
     }))
 }
 
+/// What discharging a Statement's obligation requires, chosen by its declared decay class.
+///
+/// The class supplies the obligation **lazily**, at the one moment an agent is already
+/// holding the entry. That is what lets the design decline a machine-runnable predicate at
+/// write time: the predicate is only ever demanded from Statements that have proven
+/// load-bearing, so the cost falls on the few rather than on every author up front.
+fn proof_obligation(validity: &str) -> &'static str {
+    if validity.starts_with("invariant") {
+        // A tap on an invariant is a real test, because the entry claims never to expire.
+        "counterexample search — name a case where this fails"
+    } else if validity.starts_with("dated") {
+        "re-run the measurement and record the new figure"
+    } else if validity.starts_with("conditional") {
+        "check whether the named event has fired — binary"
+    } else {
+        // Undeclared or unparseable: there is no class to discharge against, so the
+        // obligation is to declare one. `doctor` reports the same population as a
+        // worklist; this says it to the reader holding the entry right now.
+        "declare a **Valid:** class — this Statement is load-bearing and has none"
+    }
+}
+
+/// The verdict of the most recent *evidence-carrying* appraisal of one Statement.
+///
+/// **Proof-carrying, and this check is the load-bearing half of the mechanism.** A
+/// `reviewed` event discharges only when its payload names this entry AND carries
+/// `instrument`, `observed` and `verdict`. Without that, the tap is a laundering machine:
+/// the claim acquires a verification stamp it did not earn and reads as *more* trustworthy
+/// than before it was ever checked — strictly worse than no mechanism at all. Storing the
+/// raw invocation and its raw output is what lets a later, independent reader re-check
+/// cheaply; a verdict alone is an assurance, not evidence.
+///
+/// An event missing any of the three is skipped rather than rejected — it stays in the log
+/// as a note, and simply does not move anything.
+///
+/// The verdict is returned rather than a bool because only `held` discharges. `refuted`
+/// closes a validity interval and belongs on a worklist, not in silence; `inconclusive`
+/// records that someone looked and could not tell, which is information and leaves the tap
+/// armed. Neither resets the counter.
+fn last_appraisal(
+    cat: &crate::librarian::catalog::Catalog,
+    artifact_id: &str,
+    reference: &str,
+) -> Result<Option<String>> {
+    for ev in crate::librarian::catalog::events::timeline_for_artifact(
+        cat,
+        artifact_id,
+        Some(&["reviewed"]),
+        None,
+        200,
+    )? {
+        let Ok(payload) = serde_json::from_str::<Value>(&ev.payload) else {
+            continue;
+        };
+        if payload.get("entry").and_then(Value::as_str) != Some(reference) {
+            continue;
+        }
+        let carries = |k: &str| {
+            payload
+                .get(k)
+                .and_then(Value::as_str)
+                .is_some_and(|s| !s.trim().is_empty())
+        };
+        if !(carries("instrument") && carries("observed") && carries("verdict")) {
+            continue;
+        }
+        return Ok(payload
+            .get("verdict")
+            .and_then(Value::as_str)
+            .map(str::to_string));
+    }
+    Ok(None)
+}
+
 /// Entry-grain anchor: pack the Statement itself plus the Statements on either side of it.
 ///
 /// Returns `Ok(None)` when `anchor_id` does not name an entry, so the caller falls through
@@ -213,7 +307,18 @@ fn pack_entry_anchor(
             None => unresolved += 1,
         }
     }
+    // Exposure for the tap, gathered from rows this function already needs — so the whole
+    // mechanism costs no extra query. Distinct SOURCE LEDGERS, not edges: one ledger citing
+    // the anchor from eight of its own entries is one voice, not eight.
+    let mut citers: std::collections::BTreeSet<String> = Default::default();
     for row in crate::librarian::catalog::entry_cite::incoming(&cat, &anchor.reference)? {
+        // Same-ledger citations are excluded, mirroring `entry_indegree`'s same-file rule:
+        // an entry citing a sibling inside its own ledger is the ledger talking to itself,
+        // not independent corroboration — and a hand-maintained `## Index` row is exactly
+        // that shape.
+        if row.src_slug != slug {
+            citers.insert(row.src_slug.clone());
+        }
         match statement_node(
             &cat,
             &mut cache,
@@ -226,6 +331,32 @@ fn pack_entry_anchor(
             None => unresolved += 1,
         }
     }
+
+    // The tap. RFC 5861 `stale-while-revalidate`, and the correspondence is exact: serve
+    // the possibly-stale value immediately and in full, never block the reader, and
+    // predicate revalidation on an incoming REQUEST rather than on a timer.
+    let exposure = citers.len();
+    let appraisal = if exposure >= ATTESTATION_EXPOSURE_THRESHOLD {
+        use rusqlite::OptionalExtension;
+        let aid: Option<String> = cat
+            .conn
+            .query_row(
+                "SELECT id FROM artifact WHERE slug = ?1",
+                rusqlite::params![slug],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match aid {
+            Some(aid) => last_appraisal(&cat, &aid, &anchor.reference)?,
+            None => None,
+        }
+    } else {
+        None
+    };
+    // Armed unless an evidence-carrying appraisal came back `held`. `refuted` and
+    // `inconclusive` deliberately leave it armed — see `last_appraisal`.
+    let armed =
+        exposure >= ATTESTATION_EXPOSURE_THRESHOLD && !matches!(appraisal.as_deref(), Some("held"));
     drop(cat);
 
     // Dedup by REFERENCE, never by (reference, direction). An entry that cites the anchor
@@ -328,7 +459,22 @@ fn pack_entry_anchor(
         whole
     };
 
-    let mut markdown = anchor_section;
+    // The banner rides IN the markdown, not only in the structured field, because the
+    // structured field is easy to skip and the whole point is that the reader is holding
+    // this Statement right now. It costs ~200 bytes of the budget, which is deliberate:
+    // an obligation nobody sees is the mechanism that got `reviewed` to 1 row corpus-wide.
+    let mut markdown = String::new();
+    if armed {
+        markdown.push_str(&format!(
+            "> ⚠ **{} · exposure {} citing Statements · last appraised: {}**\n\
+             > Proof owed before this is relied on: {}\n\n",
+            anchor.reference,
+            exposure,
+            appraisal.as_deref().unwrap_or("never"),
+            proof_obligation(&anchor.validity),
+        ));
+    }
+    markdown.push_str(&anchor_section);
     let mut included_ids: Vec<String> = vec![anchor.reference.clone()];
 
     for (n, section) in nodes.iter().zip(sections.iter()) {
@@ -366,12 +512,31 @@ fn pack_entry_anchor(
         ));
     }
 
-    Ok(Some(json!({
+    let mut out = json!({
         "markdown": markdown,
         "included_ids": included_ids,
         "overflow": overflow,
         "scope": scope_summary(effective_scope, current, scope_fallback),
-    })))
+    });
+    if armed {
+        // Same channel `append_entry` uses for `snapshot_missing` and `undefined_in_body`:
+        // a response field whose whole purpose is to tell an agent something it was about
+        // to miss. Emitted only when armed — an always-present empty array trains the
+        // reader to skip the key.
+        out["pending_attestations"] = json!([{
+            "entry": anchor.reference,
+            "validity": anchor.validity,
+            "exposure": exposure,
+            "last_verdict": appraisal,
+            "proof": proof_obligation(&anchor.validity),
+            "discharge": "artifact_event(action=\"create\", artifact_id=<the ledger>, \
+                          kind=\"reviewed\", payload={entry, instrument, observed, verdict}) \
+                          — all three evidence fields are required and only verdict=\"held\" \
+                          discharges. A verdict alone is an assurance, not evidence, and is \
+                          recorded without moving anything.",
+        }]);
+    }
+    Ok(Some(out))
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -1246,6 +1411,296 @@ mod tests {
         assert!(
             md.contains("valid: invariant") && md.contains("valid: dated 2026-08-01"),
             "every packed node carries its decay class: {md}"
+        );
+    }
+    /// Seed `n` distinct ledgers that each cite `dst_ref` exactly once.
+    fn seed_citers(cat: &Catalog, root: &std::path::Path, dst_ref: &str, n: usize) {
+        for i in 0..n {
+            let name = format!("citer-{i}.md");
+            let slug = format!("citer-{i}");
+            seed_ledger(
+                cat,
+                root,
+                &name,
+                &slug,
+                &format!("## C-{i} — citer {i}\n**Valid:** invariant\nbody\n"),
+            );
+            seed_edge(cat, &slug, &format!("C-{i}"), dst_ref);
+        }
+    }
+
+    fn seed_appraisal(cat: &Catalog, artifact_id: &str, id: &str, payload: Value) {
+        let row =
+            crate::librarian::catalog::events::TestEventRowBuilder::new(artifact_id, "reviewed")
+                .with_id(id)
+                .with_payload(payload.to_string())
+                .build();
+        crate::librarian::catalog::events::insert(cat, &row).unwrap();
+    }
+
+    fn anchor_ledger(cat: &Catalog, root: &std::path::Path, validity: &str) {
+        seed_ledger(
+            cat,
+            root,
+            "ledger.md",
+            "ledger",
+            &format!("## W-1 — the anchor\n**Valid:** {validity}\nanchor body\n"),
+        );
+    }
+
+    #[tokio::test]
+    async fn a_load_bearing_statement_arms_the_tap_and_says_what_would_discharge_it() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        anchor_ledger(&cat, root, "invariant");
+        seed_citers(&cat, root, "ledger:W-1", ATTESTATION_EXPOSURE_THRESHOLD);
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        let pending = v["pending_attestations"]
+            .as_array()
+            .expect("a Statement at the exposure floor must carry an obligation");
+        assert_eq!(pending.len(), 1, "{v:#?}");
+        assert_eq!(pending[0]["entry"], json!("ledger:W-1"));
+        assert_eq!(
+            pending[0]["exposure"],
+            json!(ATTESTATION_EXPOSURE_THRESHOLD),
+            "exposure is DISTINCT citing ledgers: {v:#?}"
+        );
+        assert_eq!(pending[0]["last_verdict"], json!(null), "{v:#?}");
+        assert!(
+            pending[0]["proof"]
+                .as_str()
+                .unwrap()
+                .contains("counterexample"),
+            "an invariant's obligation is a counterexample search — the class chooses the \
+             proof: {v:#?}"
+        );
+
+        let md = v["markdown"].as_str().unwrap();
+        assert!(
+            md.contains("last appraised: never"),
+            "the banner rides in the markdown too, because a structured field is easy to \
+             skip and the reader is holding this Statement right now: {md}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_tap_stays_silent_one_citation_below_the_floor() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        anchor_ledger(&cat, root, "invariant");
+        seed_citers(&cat, root, "ledger:W-1", ATTESTATION_EXPOSURE_THRESHOLD - 1);
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        assert!(
+            v.get("pending_attestations").is_none(),
+            "the key is ABSENT rather than an empty array — an always-present empty key \
+             trains the reader to skip it: {v:#?}"
+        );
+        assert!(
+            !v["markdown"].as_str().unwrap().contains("last appraised"),
+            "and no banner: {v:#?}"
+        );
+    }
+
+    /// A ledger's own entries citing each other are the ledger talking to itself — and a
+    /// hand-maintained `## Index` row is exactly that shape. 28.5% of ledger citations sit
+    /// above the first definition, so counting them would let a table of contents arm the
+    /// tap on every entry it lists.
+    #[tokio::test]
+    async fn same_ledger_citations_do_not_arm_the_tap() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut body = String::from("## W-1 — the anchor\n**Valid:** invariant\nanchor body\n");
+        for i in 0..(ATTESTATION_EXPOSURE_THRESHOLD + 3) {
+            body.push_str(&format!(
+                "\n## S-{i} — sibling {i}\n**Valid:** invariant\nb\n"
+            ));
+        }
+        seed_ledger(&cat, root, "ledger.md", "ledger", &body);
+        for i in 0..(ATTESTATION_EXPOSURE_THRESHOLD + 3) {
+            seed_edge(&cat, "ledger", &format!("S-{i}"), "ledger:W-1");
+        }
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        assert!(
+            v.get("pending_attestations").is_none(),
+            "{} same-ledger citations must not arm the tap: {v:#?}",
+            ATTESTATION_EXPOSURE_THRESHOLD + 3
+        );
+    }
+    /// One ledger citing the anchor from many of its own entries is ONE voice, not many.
+    /// Exposure asks how many independent parties depend on this claim; a single chatty
+    /// ledger is one party however many times it says so.
+    ///
+    /// Confirmed by mutation 2026-08-21: counting `(ledger, entry)` pairs instead of
+    /// distinct ledgers left all 29 context tests green until this test existed — every
+    /// other fixture happens to give each citing ledger exactly one edge, so the two
+    /// counts coincide and the distinction was asserted only in a comment.
+    #[tokio::test]
+    async fn one_ledger_citing_from_many_entries_counts_as_one_voice() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        anchor_ledger(&cat, root, "invariant");
+
+        let loud = ATTESTATION_EXPOSURE_THRESHOLD + 2;
+        let mut body = String::new();
+        for i in 0..loud {
+            body.push_str(&format!(
+                "## E-{i} — entry {i}\n**Valid:** invariant\nb\n\n"
+            ));
+        }
+        seed_ledger(&cat, root, "loud.md", "loud", &body);
+        for i in 0..loud {
+            seed_edge(&cat, "loud", &format!("E-{i}"), "ledger:W-1");
+        }
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        assert!(
+            v.get("pending_attestations").is_none(),
+            "{loud} edges from ONE ledger is exposure 1, not {loud} — otherwise a single \
+             chatty ledger arms the tap on everything it cites: {v:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_evidence_carrying_held_verdict_discharges_the_obligation() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        anchor_ledger(&cat, root, "invariant");
+        seed_citers(&cat, root, "ledger:W-1", ATTESTATION_EXPOSURE_THRESHOLD);
+        seed_appraisal(
+            &cat,
+            "r/ledger.md",
+            "ev-held",
+            json!({
+                "entry": "ledger:W-1",
+                "instrument": "cargo test --lib the_thing",
+                "observed": "3 passed; 0 failed",
+                "verdict": "held",
+            }),
+        );
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        assert!(
+            v.get("pending_attestations").is_none(),
+            "an appraisal carrying instrument + observed + verdict=held discharges: {v:#?}"
+        );
+    }
+
+    /// The laundering guard, and the single most load-bearing test in this file. A
+    /// `reviewed` event whose payload names no instrument and no observed output is an
+    /// ASSURANCE, not evidence. Letting it discharge would leave the claim wearing a
+    /// verification stamp it did not earn — reading as *more* trustworthy than before the
+    /// tap ever fired, which is strictly worse than having no mechanism at all.
+    #[tokio::test]
+    async fn a_verdict_without_evidence_does_not_discharge_anything() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        anchor_ledger(&cat, root, "invariant");
+        seed_citers(&cat, root, "ledger:W-1", ATTESTATION_EXPOSURE_THRESHOLD);
+        seed_appraisal(
+            &cat,
+            "r/ledger.md",
+            "ev-bare",
+            json!({"entry": "ledger:W-1", "verdict": "held"}),
+        );
+        // Present but empty is the same as absent — a blank instrument is not an
+        // instrument, and whitespace must not buy a discharge either.
+        seed_appraisal(
+            &cat,
+            "r/ledger.md",
+            "ev-blank",
+            json!({
+                "entry": "ledger:W-1",
+                "instrument": "   ",
+                "observed": "",
+                "verdict": "held",
+            }),
+        );
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        let pending = v["pending_attestations"]
+            .as_array()
+            .expect("a stamp with no evidence must leave the obligation standing");
+        assert_eq!(pending[0]["last_verdict"], json!(null), "{v:#?}");
+    }
+
+    /// `refuted` is the highest-value output the mechanism produces and must never be
+    /// recorded identically to a pass. It closes a validity interval and belongs on a
+    /// worklist — so the tap stays armed, and the banner says what the last look concluded.
+    #[tokio::test]
+    async fn a_refuted_verdict_leaves_the_tap_armed_and_names_itself() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        anchor_ledger(&cat, root, "dated 2026-01-01");
+        seed_citers(&cat, root, "ledger:W-1", ATTESTATION_EXPOSURE_THRESHOLD);
+        seed_appraisal(
+            &cat,
+            "r/ledger.md",
+            "ev-refuted",
+            json!({
+                "entry": "ledger:W-1",
+                "instrument": "re-ran the sweep",
+                "observed": "12, not 4",
+                "verdict": "refuted",
+            }),
+        );
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        let pending = v["pending_attestations"]
+            .as_array()
+            .expect("a refutation does not discharge");
+        assert_eq!(pending[0]["last_verdict"], json!("refuted"), "{v:#?}");
+        assert!(
+            pending[0]["proof"]
+                .as_str()
+                .unwrap()
+                .contains("measurement"),
+            "a dated claim's obligation is to re-run the measurement, not to hunt \
+             counterexamples: {v:#?}"
+        );
+        assert!(
+            v["markdown"]
+                .as_str()
+                .unwrap()
+                .contains("last appraised: refuted"),
+            "the banner must not read the same as one that was never looked at: {v:#?}"
         );
     }
 

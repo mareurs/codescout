@@ -1040,6 +1040,45 @@ while the first is still outstanding, and one hot Statement generates N proofs o
 same fact. `obligation_state` moves `none → open → in_flight`, and a Statement already
 `open` or `in_flight` emits no new obligation.
 
+> **SHIPPED 2026-08-21 — read-only, and with no new tables.** `librarian(action="context",
+> anchor_id="<slug>:<local>")` now arms a tap when the anchor's exposure reaches the floor,
+> emitting a `pending_attestations` array **and** a banner inside the markdown. The banner
+> is deliberately not only structured: a response field is easy to skip, and an obligation
+> nobody sees is the mechanism that got `reviewed` to 1 row corpus-wide.
+>
+> Four decisions worth recording, because each departs from the text above:
+>
+> - **Exposure is `entry_cite` in-degree, not `entry_indegree`.** Measured: a full
+>   `doctor` run takes **5.0s** over 4113 files, which an interactive read cannot pay. The
+>   materialized graph costs nothing here — `pack_entry_anchor` already fetches
+>   `incoming(anchor.reference)` to build neighbours, so the count is free. It undercounts
+>   (only ledger entries produce `entry_cite` rows, so a spec or bug file citing the
+>   Statement is invisible), and undercounting is the conservative direction for an
+>   obligation. A gate may pay 5s; a nudge may not.
+> - **The threshold is measured, not guessed.** At 5 the tap arms **8** Statements
+>   corpus-wide — `SI-7` (9 citers), `R-3`/`R-19` (8), `R-77`/`R-79` (6),
+>   `R-50`/`R-95`/`R-49` (5). At 3 it would arm 91; at 2, 213.
+> - **Exposure counts distinct citing LEDGERS, not edges**, and same-ledger citations are
+>   excluded — a hand-maintained `## Index` row is the ledger talking to itself. Both
+>   properties are pinned by tests written after mutation showed them unpinned.
+> - **"Serves the Statement in full" was NOT built.** It fights the measured anchor
+>   reserve (`char_cap / 2`), which exists because a long anchor otherwise starves every
+>   neighbour. Suspending that reserve for armed anchors is a budget change that deserves
+>   its own measurement, not a side effect of the tap.
+>
+> **Deliberately still absent:** `entry_attestation`, `condition_event`, bitemporal
+> `asserted_at`, and coalescing. Without storage there is no `obligation_state`, so a
+> Statement past the floor emits its obligation on **every** read until discharged — which
+> is the designed behaviour ("the banner gets louder on its own"), but it is un-coalesced,
+> and the amplification argument above still applies once several readers are involved.
+>
+> **Proof-carrying is enforced at READ time**, which is what makes the no-new-table version
+> honest rather than merely cheap. Discharge is an existing `artifact_event(kind="reviewed")`
+> whose payload carries `entry`, `instrument`, `observed` and `verdict`; an event missing
+> any of the three is skipped, so it stays in the log as a note and moves nothing. Only
+> `verdict="held"` discharges — `refuted` and `inconclusive` leave the tap armed, and the
+> banner reports which, so a refutation can never read the same as never-looked-at.
+
 **Discharge rides the existing path.** Google's g3doc freshness dates work because
 discharge is "bump a date in a code review" — the *SWE at Google* account credits the
 in-band `Last reviewed by …` byline for adoption and calls review-through-the-normal-CR-path
@@ -1207,7 +1246,7 @@ verification.
 | 3c | `rel='rests-on'` edges | 3b + declarations | **not building** — re-measured 2026-08-21: 1 resolvable declaration corpus-wide, and its edge already exists as `cites`. Revisit if resolvable declarations reach ~20 |
 | 4 | Entry-grain `context` anchor | 3 | **SHIPPED 2026-08-21** — two-pass packing; see below |
 | 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | **RETIRED 2026-08-21** — the leak is ~4 entry-grain reads per 30h in every era, and Layer 4's `context(anchor_id=<slug>:<local>)` names the entry in the call input, so the growth path arrives pre-attributed. Reopen only on the event trigger in §6 |
-| 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4 | designed, not scheduled — **no longer blocked on 5a** |
+| 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4 | **the TAP shipped 2026-08-21** — read-only, no new tables, proof-carrying enforced at read. Storage (`entry_attestation`, `condition_event`, coalescing, bitemporal `asserted_at`) still designed-only |
 
 **Layer 0 is new and it gates three others.** The nearest-preceding-heading heuristic
 feeds citation edges, buffer-read attribution and grep-read attribution, and the
