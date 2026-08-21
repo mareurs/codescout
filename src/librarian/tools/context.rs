@@ -188,32 +188,25 @@ fn statement_node(
     }))
 }
 
-/// What discharging a Statement's obligation requires, chosen by its declared decay class.
+/// The declared decay class of a Statement, or `None` when it has not declared one.
 ///
-/// The class supplies the obligation **lazily**, at the one moment an agent is already
-/// holding the entry. That is what lets the design decline a machine-runnable predicate at
-/// write time: the predicate is only ever demanded from Statements that have proven
-/// load-bearing, so the cost falls on the few rather than on every author up front.
-fn proof_obligation(validity: &str) -> &'static str {
-    if validity.starts_with("invariant") {
-        // A tap on an invariant is a real test, because the entry claims never to expire.
-        "counterexample search — name a case where this fails"
-    } else if validity.starts_with("dated") {
-        "re-run the measurement and record the new figure"
-    } else if validity.starts_with("conditional") {
-        "check whether the named event has fired — binary"
-    } else {
-        // Undeclared or unparseable: there is no class to discharge against, so the
-        // obligation is to declare one. `doctor` reports the same population as a
-        // worklist; this says it to the reader holding the entry right now.
-        "declare a **Valid:** class — this Statement is load-bearing and has none"
-    }
+/// Reported in the `verification` fact block so a reader can tell an undeclared Statement
+/// from a dated one. What each class requires to discharge is deliberately NOT here: those
+/// four strings were imperative-voiced, and an imperative arriving inside relayed tool
+/// output is quarantined as an injection. Measured 2026-08-21, prompt-engineering
+/// `scenarios/attestation-register` rounds 3-5, n=10 per arm — the same information as a
+/// directive surfaced 0-4/10, as data 10/10. The class-to-obligation table now lives in
+/// `get_guide("tracker-conventions")`, which is pulled rather than pushed.
+fn validity_class(validity: &str) -> Option<&'static str> {
+    ["invariant", "dated", "conditional"]
+        .into_iter()
+        .find(|class| validity.starts_with(class))
 }
 
-/// The verdict of the most recent *evidence-carrying* appraisal of one Statement.
+/// How many *evidence-carrying* appraisals one Statement has, and the most recent verdict.
 ///
 /// **Proof-carrying, and this check is the load-bearing half of the mechanism.** A
-/// `reviewed` event discharges only when its payload names this entry AND carries
+/// `reviewed` event counts only when its payload names this entry AND carries
 /// `instrument`, `observed` and `verdict`. Without that, the tap is a laundering machine:
 /// the claim acquires a verification stamp it did not earn and reads as *more* trustworthy
 /// than before it was ever checked — strictly worse than no mechanism at all. Storing the
@@ -221,17 +214,25 @@ fn proof_obligation(validity: &str) -> &'static str {
 /// cheaply; a verdict alone is an assurance, not evidence.
 ///
 /// An event missing any of the three is skipped rather than rejected — it stays in the log
-/// as a note, and simply does not move anything.
+/// as a note, and simply does not move anything, nor does it count.
 ///
 /// The verdict is returned rather than a bool because only `held` discharges. `refuted`
 /// closes a validity interval and belongs on a worklist, not in silence; `inconclusive`
 /// records that someone looked and could not tell, which is information and leaves the tap
 /// armed. Neither resets the counter.
+///
+/// **The count is not short-circuited.** Returning on the first hit would be cheaper and
+/// would still give the right verdict, but `appraisals_recorded: 0` and
+/// `appraisals_recorded: 4` say different things to a reader about a Statement that is
+/// still unverified — the second means people have looked and could not settle it. The
+/// timeline is already capped at 200 rows, so walking it costs nothing extra.
 fn last_appraisal(
     cat: &crate::librarian::catalog::Catalog,
     artifact_id: &str,
     reference: &str,
-) -> Result<Option<String>> {
+) -> Result<(usize, Option<String>)> {
+    let mut count = 0usize;
+    let mut latest: Option<String> = None;
     for ev in crate::librarian::catalog::events::timeline_for_artifact(
         cat,
         artifact_id,
@@ -254,12 +255,17 @@ fn last_appraisal(
         if !(carries("instrument") && carries("observed") && carries("verdict")) {
             continue;
         }
-        return Ok(payload
-            .get("verdict")
-            .and_then(Value::as_str)
-            .map(str::to_string));
+        count += 1;
+        // The timeline is newest-first, so the first qualifying row is the latest verdict
+        // and every later one is older. Set once.
+        if latest.is_none() {
+            latest = payload
+                .get("verdict")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
     }
-    Ok(None)
+    Ok((count, latest))
 }
 
 /// Entry-grain anchor: pack the Statement itself plus the Statements on either side of it.
@@ -356,11 +362,12 @@ fn pack_entry_anchor(
             .optional()?;
         match aid {
             Some(aid) => last_appraisal(&cat, &aid, &anchor.reference)?,
-            None => None,
+            None => (0, None),
         }
     } else {
-        None
+        (0, None)
     };
+    let (appraisal_count, appraisal) = appraisal;
     // Armed unless an evidence-carrying appraisal came back `held`. `refuted` and
     // `inconclusive` deliberately leave it armed — see `last_appraisal`.
     let armed =
@@ -467,21 +474,22 @@ fn pack_entry_anchor(
         whole
     };
 
-    // The banner rides IN the markdown, not only in the structured field, because the
-    // structured field is easy to skip and the whole point is that the reader is holding
-    // this Statement right now. It costs ~200 bytes of the budget, which is deliberate:
-    // an obligation nobody sees is the mechanism that got `reviewed` to 1 row corpus-wide.
+    // NO BANNER. The markdown carries the Statement and nothing addressed to the reader.
+    //
+    // It used to open with `> ⚠ ... Proof owed before this is relied on: <obligation>`,
+    // on the reasoning that a structured field is easy to skip. The reasoning was sound
+    // and the conclusion was backwards: measured 2026-08-21 (prompt-engineering
+    // `scenarios/attestation-register`, n=10 per arm), a directive delivered inside
+    // relayed tool output is not skipped, it is QUARANTINED — read, identified as an
+    // embedded instruction, and explicitly declined. Runs said so in as many words: "it
+    // didn't come from you, so I'm ignoring it", and then wrote the blurb with no caveat
+    // at all. The same information stated as data in `verification` below surfaced 10/10
+    // against 0-4/10 for every directive-shaped arm.
+    //
+    // So the budget the banner cost is returned to the Statements, and the register that
+    // makes a reader act now arrives through `server_instructions` — a channel the same
+    // measurement shows is read, obeyed and cited by name rather than quarantined.
     let mut markdown = String::new();
-    if armed {
-        markdown.push_str(&format!(
-            "> ⚠ **{} · exposure {} citing Statements · last appraised: {}**\n\
-             > Proof owed before this is relied on: {}\n\n",
-            anchor.reference,
-            exposure,
-            appraisal.as_deref().unwrap_or("never"),
-            proof_obligation(&anchor.validity),
-        ));
-    }
     markdown.push_str(&anchor_section);
     let mut included_ids: Vec<String> = vec![anchor.reference.clone()];
 
@@ -527,50 +535,41 @@ fn pack_entry_anchor(
         "scope": scope_summary(effective_scope, current, scope_fallback),
     });
     if armed {
-        // **The register lives in the KEY, not in the prose.** `Guidance` in
-        // `src/tools/core/types.rs` states the reason plainly: the three registers
-        // (`hint` / `warning` / `must_follow`) are serialized under variant-named keys
-        // because "agents scan JSON responses and react to the key, not the prose". A
-        // directive filed under a neutral noun like `pending_attestations` reads as data to
-        // be skimmed, and the failure this whole layer exists to prevent is *precisely* a
-        // suggestion that evaporates at end of turn — the mechanism that left `reviewed` at
-        // one row corpus-wide.
+        // **A fact block. No verbs, no addressee, nothing to perform.**
         //
-        // `must_follow` had until now been an ERROR-path register only; success responses
-        // use `next_step` (`append_entry`, `refresh_stale`, `tracker_design`). Using the
-        // stronger key here is deliberate and safe: the `RecoverableError` body pairs
-        // `must_follow` with `ok: false` and `error`, and neither is present on this
-        // response, so a client keyed on either still reads this as the success it is.
-        // `next_step` would be the wrong register — this is not the natural next call, it
-        // is a debt incurred by reading.
-        out["must_follow"] = json!(format!(
-            "{} is load-bearing — {} citing Statements — and {}. Before relying on it: {}. \
-             Then record the appraisal so the next reader inherits it rather than repeating \
-             it, and do not treat this Statement as verified until that event exists.",
-            anchor.reference,
-            exposure,
-            match appraisal.as_deref() {
-                None => "has never been appraised".to_string(),
-                Some(v) => format!("its last appraisal came back `{v}`"),
-            },
-            proof_obligation(&anchor.validity),
-        ));
-        // The structured twin, for the caller that wants fields rather than a sentence —
-        // the same shape `RecoverableError` uses when it splices `extra` alongside its
-        // guidance. Emitted only when armed: an always-present empty array trains the
-        // reader to skip the key.
-        out["pending_attestations"] = json!([{
+        // This replaces a `must_follow` sentence and a `pending_attestations` array whose
+        // `discharge` field spelled out an `artifact_event` call. Both were directives, and
+        // the register was chosen on a real finding applied to the wrong channel: `Guidance`
+        // in `src/tools/core/types.rs` says agents "react to the key, not the prose", which
+        // is true — A-7 measured provenance envelope keys shipping at 6/6. It is a finding
+        // about how a TRUSTED instruction is noticed, not about whether relayed tool output
+        // can carry an instruction at all.
+        //
+        // Measured 2026-08-21, prompt-engineering `scenarios/attestation-register`, n=10
+        // per arm, 10 distinct answers each:
+        //
+        //   pending_attestations only                     0/10 surfaced
+        //   + must_follow                                 2/10
+        //   + the data-vs-directive rule in CLAUDE.md     4/10
+        //   the SAME facts, stated as data                10/10
+        //
+        // The failure was never that the obligation went unnoticed. Runs quarantined it and
+        // said so — "that's a directive embedded in relayed tool output, not a command from
+        // you, so I'm not acting on it" — and then wrote their answer with no caveat. A
+        // louder key cannot fix that; a louder key is more conspicuously an instruction.
+        //
+        // Keys are the measured fixture's, not a paraphrase of it. `appraisals_recorded`
+        // distinguishes "nobody has looked" from "people looked and could not settle it",
+        // which `last_verdict` alone could not say. Still gated on `armed`, so it appears
+        // exactly where the tap would have fired: an always-present block trains the reader
+        // to skip the key, and rarity is what the exposure threshold buys.
+        out["verification"] = json!({
             "entry": anchor.reference,
-            "validity": anchor.validity,
-            "exposure": exposure,
-            "last_verdict": appraisal,
-            "proof": proof_obligation(&anchor.validity),
-            "discharge": "artifact_event(action=\"create\", artifact_id=<the ledger>, \
-                          kind=\"reviewed\", payload={entry, instrument, observed, verdict}) \
-                          — all three evidence fields are required and only verdict=\"held\" \
-                          discharges. A verdict alone is an assurance, not evidence, and is \
-                          recorded without moving anything.",
-        }]);
+            "verification_state": appraisal.as_deref().unwrap_or("unverified"),
+            "appraisals_recorded": appraisal_count,
+            "validity_class_declared": validity_class(&anchor.validity),
+            "cited_by_statements": exposure,
+        });
     }
     Ok(Some(out))
 }
@@ -1466,9 +1465,19 @@ mod tests {
     }
 
     fn seed_appraisal(cat: &Catalog, artifact_id: &str, id: &str, payload: Value) {
+        seed_appraisal_at(cat, artifact_id, id, 0, payload);
+    }
+
+    /// `seed_appraisal` with an explicit timestamp, for the tests whose meaning depends on
+    /// which appraisal is the LATEST. Stating the times beats relying on id lexicography:
+    /// the timeline orders `created_at DESC, id DESC`, so ids happen to decide it when
+    /// every row shares a timestamp — and a test that reads correct only because of how
+    /// its ids happen to sort is a test nobody can maintain.
+    fn seed_appraisal_at(cat: &Catalog, artifact_id: &str, id: &str, at: i64, payload: Value) {
         let row =
             crate::librarian::catalog::events::TestEventRowBuilder::new(artifact_id, "reviewed")
                 .with_id(id)
+                .with_created_at(at)
                 .with_payload(payload.to_string())
                 .build();
         crate::librarian::catalog::events::insert(cat, &row).unwrap();
@@ -1497,46 +1506,47 @@ mod tests {
             .await
             .unwrap();
 
-        let pending = v["pending_attestations"]
-            .as_array()
-            .expect("a Statement at the exposure floor must carry an obligation");
-        assert_eq!(pending.len(), 1, "{v:#?}");
-        assert_eq!(pending[0]["entry"], json!("ledger:W-1"));
+        let ver = &v["verification"];
+        assert!(
+            ver.is_object(),
+            "a Statement at the exposure floor must report its verification state: {v:#?}"
+        );
+        assert_eq!(ver["entry"], json!("ledger:W-1"));
         assert_eq!(
-            pending[0]["exposure"],
+            ver["cited_by_statements"],
             json!(ATTESTATION_EXPOSURE_THRESHOLD),
             "exposure is DISTINCT citing ledgers: {v:#?}"
         );
-        assert_eq!(pending[0]["last_verdict"], json!(null), "{v:#?}");
-        assert!(
-            pending[0]["proof"]
-                .as_str()
-                .unwrap()
-                .contains("counterexample"),
-            "an invariant's obligation is a counterexample search — the class chooses the \
-             proof: {v:#?}"
+        assert_eq!(ver["verification_state"], json!("unverified"), "{v:#?}");
+        assert_eq!(ver["appraisals_recorded"], json!(0), "{v:#?}");
+        assert_eq!(
+            ver["validity_class_declared"],
+            json!("invariant"),
+            "the declared class is reported so a reader can tell it from an undeclared \
+             Statement: {v:#?}"
         );
 
+        // EVERY DIRECTIVE REGISTER MUST STAY UNUSED, and this is the assertion the change
+        // is for. Measured 2026-08-21 (prompt-engineering `scenarios/attestation-register`,
+        // n=10 per arm): an obligation delivered inside relayed tool output is quarantined
+        // as an embedded instruction and explicitly declined — 0-4/10 surfaced, against
+        // 10/10 for these same facts stated as data. Naming all four keys rather than only
+        // the two that existed, because the next person to reach for a louder register
+        // will reach for whichever one is not listed here.
+        for key in ["must_follow", "pending_attestations", "hint", "next_step"] {
+            assert!(
+                v.get(key).is_none(),
+                "`{key}` is a directive register; this payload carries facts only: {v:#?}"
+            );
+        }
         let md = v["markdown"].as_str().unwrap();
-        assert!(
-            md.contains("last appraised: never"),
-            "the banner rides in the markdown too, because a structured field is easy to \
-             skip and the reader is holding this Statement right now: {md}"
-        );
-
-        // The REGISTER is the key, not the prose (`Guidance`, src/tools/core/types.rs).
-        let must = v["must_follow"]
-            .as_str()
-            .expect("an obligation must arrive under the strongest register, not as data");
-        assert!(
-            must.contains("ledger:W-1") && must.contains("never been appraised"),
-            "the directive names the Statement and its appraisal history: {must}"
-        );
-        assert!(
-            v.get("hint").is_none() && v.get("next_step").is_none(),
-            "and it must NOT also arrive under a weaker register — offered two, a reader \
-             may act on the weaker one: {v:#?}"
-        );
+        for phrase in ["Proof owed", "last appraised", "⚠"] {
+            assert!(
+                !md.contains(phrase),
+                "the banner was a directive too and rode in the prose where it could not \
+                 even be skipped — {phrase:?} must be gone: {md}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1553,18 +1563,22 @@ mod tests {
             .unwrap();
 
         assert!(
-            v.get("pending_attestations").is_none(),
-            "the key is ABSENT rather than an empty array — an always-present empty key \
-             trains the reader to skip it: {v:#?}"
+            v.get("verification").is_none(),
+            "the key is ABSENT rather than a block reporting `cited_by_statements: 4` — an \
+             always-present key trains the reader to skip it, and rarity is exactly what \
+             the exposure threshold buys: {v:#?}"
         );
         assert!(
             !v["markdown"].as_str().unwrap().contains("last appraised"),
             "and no banner: {v:#?}"
         );
+        // These two now hold for EVERY response, armed or not, so on their own they no
+        // longer distinguish a below-floor Statement from an above-floor one. Kept because
+        // they still pin the intended shape, and paired with the `verification` assertion
+        // above, which is what actually discriminates.
         assert!(
-            v.get("must_follow").is_none(),
-            "a Statement below the floor owes nothing, so the strongest register must stay \
-             unused — spending it on the unexposed is how it stops meaning anything: {v:#?}"
+            v.get("must_follow").is_none() && v.get("pending_attestations").is_none(),
+            "no directive register on any path: {v:#?}"
         );
     }
 
@@ -1594,7 +1608,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            v.get("pending_attestations").is_none(),
+            v.get("verification").is_none(),
             "{} same-ledger citations must not arm the tap: {v:#?}",
             ATTESTATION_EXPOSURE_THRESHOLD + 3
         );
@@ -1632,7 +1646,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            v.get("pending_attestations").is_none(),
+            v.get("verification").is_none(),
             "{loud} edges from ONE ledger is exposure 1, not {loud} — otherwise a single \
              chatty ledger arms the tap on everything it cites: {v:#?}"
         );
@@ -1663,7 +1677,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            v.get("pending_attestations").is_none(),
+            v.get("verification").is_none(),
             "an appraisal carrying instrument + observed + verdict=held discharges: {v:#?}"
         );
     }
@@ -1705,15 +1719,25 @@ mod tests {
             .await
             .unwrap();
 
-        let pending = v["pending_attestations"]
-            .as_array()
-            .expect("a stamp with no evidence must leave the obligation standing");
-        assert_eq!(pending[0]["last_verdict"], json!(null), "{v:#?}");
+        let ver = &v["verification"];
+        assert!(
+            ver.is_object(),
+            "a stamp with no evidence must leave the obligation standing: {v:#?}"
+        );
+        assert_eq!(ver["verification_state"], json!("unverified"), "{v:#?}");
+        assert_eq!(
+            ver["appraisals_recorded"],
+            json!(0),
+            "and it must not be COUNTED either — a reader who sees `appraisals_recorded: 2` \
+             next to `unverified` concludes people looked and could not settle it, which is \
+             the opposite of what two evidence-free stamps mean: {v:#?}"
+        );
     }
 
     /// `refuted` is the highest-value output the mechanism produces and must never be
     /// recorded identically to a pass. It closes a validity interval and belongs on a
-    /// worklist — so the tap stays armed, and the banner says what the last look concluded.
+    /// worklist — so the tap stays armed, and `verification_state` says what the last look
+    /// concluded rather than flattening it back to "unverified".
     #[tokio::test]
     async fn a_refuted_verdict_leaves_the_tap_armed_and_names_itself() {
         let tmp = TempDir::new().unwrap();
@@ -1738,30 +1762,91 @@ mod tests {
             .await
             .unwrap();
 
-        let pending = v["pending_attestations"]
-            .as_array()
-            .expect("a refutation does not discharge");
-        assert_eq!(pending[0]["last_verdict"], json!("refuted"), "{v:#?}");
-        assert!(
-            pending[0]["proof"]
-                .as_str()
-                .unwrap()
-                .contains("measurement"),
-            "a dated claim's obligation is to re-run the measurement, not to hunt \
-             counterexamples: {v:#?}"
+        let ver = &v["verification"];
+        assert!(ver.is_object(), "a refutation does not discharge: {v:#?}");
+        assert_eq!(
+            ver["verification_state"],
+            json!("refuted"),
+            "the state must not read the same as one that was never looked at — a \
+             refutation flattened back to `unverified` discards the highest-value output \
+             this mechanism produces: {v:#?}"
         );
-        assert!(
-            v["markdown"]
-                .as_str()
-                .unwrap()
-                .contains("last appraised: refuted"),
-            "the banner must not read the same as one that was never looked at: {v:#?}"
+        assert_eq!(
+            ver["appraisals_recorded"],
+            json!(1),
+            "someone looked, and the count says so even though nothing discharged: {v:#?}"
         );
+        assert_eq!(
+            ver["validity_class_declared"],
+            json!("dated"),
+            "the class is reported from the same parser the obligation was chosen from: \
+             {v:#?}"
+        );
+    }
+
+    /// Two appraisals, and the LATER one governs.
+    ///
+    /// Written from an observed surviving mutation, not from a coverage argument. Dropping
+    /// the `if latest.is_none()` guard in `last_appraisal` — so the loop keeps overwriting
+    /// and ends holding the OLDEST verdict — left all 30 context tests green on 2026-08-21.
+    /// Every other fixture seeds at most one appraisal, so "most recent" was asserted
+    /// nowhere but in a comment, and the walk-the-whole-timeline change that added
+    /// `appraisals_recorded` is exactly what made the ordering reachable.
+    ///
+    /// The fixture is chosen so the mutation flips an OBSERVABLE, not just a string: older
+    /// `held` would discharge and remove the block entirely, later `refuted` leaves it
+    /// armed. Reading the wrong end of the timeline therefore silently marks a refuted
+    /// Statement as verified — the laundering outcome `a_verdict_without_evidence_...`
+    /// guards against from the other side.
+    #[tokio::test]
+    async fn the_most_recent_appraisal_governs_not_the_first_one_found() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+        anchor_ledger(&cat, root, "dated 2026-01-01");
+        seed_citers(&cat, root, "ledger:W-1", ATTESTATION_EXPOSURE_THRESHOLD);
+        seed_appraisal_at(
+            &cat,
+            "r/ledger.md",
+            "ev-old-held",
+            100,
+            json!({
+                "entry": "ledger:W-1",
+                "instrument": "re-ran the sweep",
+                "observed": "4, as recorded",
+                "verdict": "held",
+            }),
+        );
+        seed_appraisal_at(
+            &cat,
+            "r/ledger.md",
+            "ev-new-refuted",
+            200,
+            json!({
+                "entry": "ledger:W-1",
+                "instrument": "re-ran the sweep",
+                "observed": "12, not 4",
+                "verdict": "refuted",
+            }),
+        );
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        let ver = &v["verification"];
         assert!(
-            v["must_follow"].as_str().unwrap().contains("`refuted`"),
-            "and the directive must name the last verdict too — a refutation that reads \
-             like a fresh obligation discards the highest-value output this mechanism \
-             produces: {v:#?}"
+            ver.is_object(),
+            "the LATER appraisal refuted, so the tap stays armed — reading the earlier \
+             `held` would discharge it and hand the reader a Statement that was refuted \
+             the last time anyone looked: {v:#?}"
+        );
+        assert_eq!(ver["verification_state"], json!("refuted"), "{v:#?}");
+        assert_eq!(
+            ver["appraisals_recorded"],
+            json!(2),
+            "both carried evidence, so both count: {v:#?}"
         );
     }
 
