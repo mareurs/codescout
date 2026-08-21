@@ -53,13 +53,13 @@
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
+| F-<n> | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
 
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-1 | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
+| W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
 
 ---
 

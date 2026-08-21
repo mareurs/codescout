@@ -2690,6 +2690,46 @@ mod tests {
         );
     }
 
+    /// The template's own `## Index` / `## Wins Index` example rows used to be
+    /// digit-shaped (`| F-1 | ... |`, `| W-1 | ... |`) — structurally
+    /// indistinguishable from a real claimed entry to `body_claimed_indices`, so
+    /// bootstrapping fresh from the template and allocating the first real F and
+    /// W entry returned `F-2`/`W-2`, never `F-1`/`W-1`. Fixed by using a
+    /// non-digit placeholder (`F-<n>`/`W-<n>`) that the allocator's `(\d+)`
+    /// capture cannot match.
+    /// docs/issues/archive/2026-08-21-session-log-template-example-row-burns-id.md
+    #[test]
+    fn fresh_session_log_template_bootstrap_allocates_f1_and_w1() {
+        let template_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/templates/session-log.md");
+        let template_body = std::fs::read_to_string(&template_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", template_path.display()));
+
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("session-log.md");
+        std::fs::write(
+            &md,
+            format!("---\nkind: tracker\nentry_prefix:\n  - F\n  - W\n---\n\n{template_body}"),
+        )
+        .unwrap();
+
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        assert_eq!(
+            allocate_entry_id(&mut cat, "art1", "F", None).unwrap().id,
+            "F-1",
+            "a fresh copy of the template must not pre-burn F-1 via its own example row"
+        );
+        assert_eq!(
+            allocate_entry_id(&mut cat, "art1", "W", None).unwrap().id,
+            "W-1",
+            "a fresh copy of the template must not pre-burn W-1 via its own example row"
+        );
+    }
+
     #[test]
     fn allocate_entry_id_requires_a_declared_ledger() {
         let dir = tempfile::tempdir().unwrap();
