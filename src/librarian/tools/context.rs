@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 use crate::librarian::catalog::{artifact, augmentation, links};
 use crate::librarian::filter::FilterNode;
@@ -26,6 +27,25 @@ struct Args {
 }
 
 const DEFAULT_MAX_TOKENS: usize = 4000;
+
+/// Per-neighbour byte cap used ONLY when an entry-grain neighbourhood does not fit whole.
+///
+/// Chosen by measurement, not by roundness (2026-08-21, 931 anchors / 1598 sections):
+/// 1000 bytes takes the fully-served share from 76% to **98%** at the default budget, and
+/// an excerpt that size still carries the entry's heading, its status line and the opening
+/// of its claim — which is what a neighbour is for. Neighbours answer *what rests on this
+/// and how widely*, a shape question; the anchor is the thing you came to read.
+///
+/// BYTES rather than lines is also measured: these ledgers run 40-200+ bytes per line, so
+/// the file-grain path's 30-line preview would leave 1074 of 1598 sections untouched.
+/// Re-tune from `docs/trackers/context-performance.md` if the corpus shape moves.
+const NEIGHBOUR_EXCERPT_BYTES: usize = 1000;
+
+const ANCHOR_MARKER: &str = "\n\n… [anchor truncated — reserved half the budget for its \
+                             neighbours; use `artifact(get, id=…, heading=…)` for the full \
+                             entry]";
+const EXCERPT_MARKER: &str = "\n\n… [excerpted — the neighbourhood exceeds the budget; use \
+                              `artifact(get, id=…, heading=…)` for the full entry]";
 
 fn scope_summary(
     scope: Scope,
@@ -208,14 +228,33 @@ fn pack_entry_anchor(
     }
     drop(cat);
 
+    // Dedup by REFERENCE, never by (reference, direction). An entry that cites the anchor
+    // AND is cited by it is ONE node — packing it under both labels duplicates its whole
+    // section. Measured 2026-08-21: 182 bidirectional rows (91 mutual pairs) corpus-wide,
+    // and for `reconnaissance-patterns:R-3` that was ~4.8KB of repeat inside a 16KB budget.
+    // `mutual` is also the more informative label: a reciprocal citation is a stronger tie
+    // than either direction alone.
+    let mut merged: BTreeMap<String, StatementNode> = BTreeMap::new();
+    for n in nodes {
+        match merged.get_mut(&n.reference) {
+            Some(existing) => {
+                if existing.direction != n.direction {
+                    existing.direction = "mutual";
+                }
+            }
+            None => {
+                merged.insert(n.reference.clone(), n);
+            }
+        }
+    }
+    let mut nodes: Vec<StatementNode> = merged.into_values().collect();
     nodes.sort_by(|a, b| {
         a.direction
             .cmp(b.direction)
             .then(a.reference.cmp(&b.reference))
     });
-    nodes.dedup_by(|a, b| a.reference == b.reference && a.direction == b.direction);
 
-    let render = |n: &StatementNode, budget: Option<usize>| -> String {
+    let render = |n: &StatementNode, budget: Option<usize>, marker: &str| -> String {
         let rests = n
             .rests_on
             .as_deref()
@@ -229,10 +268,7 @@ fn pack_entry_anchor(
                     cut -= 1;
                 }
                 body.truncate(cut);
-                body.push_str(
-                    "\n\n… [truncated — reserved budget for neighbours; use \
-                     `artifact(get, id=…, heading=…)` for the full entry]",
-                );
+                body.push_str(marker);
             }
         }
         format!(
@@ -245,15 +281,41 @@ fn pack_entry_anchor(
     // otherwise consumes the whole budget before a neighbour is considered.
     // docs/issues/archive/2026-07-05-context-anchor-starves-neighbors.md
     let anchor_reserve = (!nodes.is_empty()).then_some(char_cap / 2);
-    let mut markdown = render(&anchor, anchor_reserve);
+    let anchor_section = render(&anchor, anchor_reserve, ANCHOR_MARKER);
+
+    // Two passes, because neither fixed policy dominates. Measured 2026-08-21 over 931
+    // anchors (mean 3.0 neighbours, mean section 2.6KB): 76% of neighbourhoods fit WHOLE at
+    // the default budget, so excerpting unconditionally would degrade three anchors in four
+    // for nothing. The other 24% overflow badly — `R-3`'s neighbourhood is 80KB against a
+    // 16KB budget — and a 1000-byte excerpt takes the fully-served share to 98%.
+    //
+    // The cap is in BYTES, not lines, and that is measured too: these ledgers run 40-200+
+    // bytes per line, so a 30-line cap — what the file-grain path uses, correctly, for prose
+    // bodies — leaves 1074 of 1598 sections completely untouched. Copying the sibling's
+    // NUMBER without checking that its UNIT transfers was the trap here.
+    let whole: Vec<String> = nodes
+        .iter()
+        .map(|n| render(n, None, EXCERPT_MARKER))
+        .collect();
+    let whole_total = anchor_section.len() + whole.iter().map(String::len).sum::<usize>();
+    let excerpted = whole_total > char_cap;
+    let sections: Vec<String> = if excerpted {
+        nodes
+            .iter()
+            .map(|n| render(n, Some(NEIGHBOUR_EXCERPT_BYTES), EXCERPT_MARKER))
+            .collect()
+    } else {
+        whole
+    };
+
+    let mut markdown = anchor_section;
     let mut included_ids: Vec<String> = vec![anchor.reference.clone()];
 
-    for n in &nodes {
-        let section = render(n, None);
+    for (n, section) in nodes.iter().zip(sections.iter()) {
         if (markdown.len() + section.len()) > char_cap {
             break;
         }
-        markdown.push_str(&section);
+        markdown.push_str(section);
         included_ids.push(n.reference.clone());
         if markdown.len() >= char_cap {
             break;
@@ -269,6 +331,10 @@ fn pack_entry_anchor(
         "omitted": omitted,
         "candidates_capped": false,
         "grain": "entry",
+        // Which of the two packing modes ran. Reported rather than inferable: a reader
+        // cannot tell a whole section from a 1000-byte excerpt that happened to end at a
+        // paragraph, and "is this the entry or the top of it" changes what they do next.
+        "packing": if excerpted { "excerpted" } else { "whole" },
         // Edges whose endpoint is a file rather than a Statement, or whose entry no
         // longer exists. Reported rather than folded into `omitted`, which means
         // "did not fit": these would not have been packed at any budget.
@@ -1291,11 +1357,135 @@ mod tests {
 
         let md = v["markdown"].as_str().unwrap();
         assert!(
-            md.contains("… [truncated — reserved budget for neighbours"),
+            md.contains("… [anchor truncated — reserved half the budget"),
             "and the truncation must be VISIBLE — a silently shortened Statement is \
              indistinguishable from a short one, which is the lie this whole layer \
              exists to avoid: {md}"
         );
+        assert_eq!(
+            v["overflow"]["packing"],
+            json!("whole"),
+            "the neighbours themselves fit whole here; only the ANCHOR was capped, and the \
+             two are different mechanisms: {v:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_mutual_neighbour_is_packed_once_and_labelled_mutual() {
+        // An entry that cites the anchor AND is cited by it is ONE node. Keying the dedup
+        // on (reference, direction) — which is what this did first — packs its whole
+        // section twice. Measured 2026-08-21: 182 bidirectional rows corpus-wide, and for
+        // `reconnaissance-patterns:R-3` the repeat was ~4.8KB inside a 16KB budget.
+        //
+        // `mutual` is also the more informative label. A reciprocal citation is the
+        // strongest tie in the graph: both authors independently asserted the relationship.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        seed_ledger(&cat, root, "ledger.md", "ledger", "## W-1 — anchor\nbody\n");
+        seed_ledger(
+            &cat,
+            root,
+            "other.md",
+            "other",
+            "## F-1 — the mutual peer\nbody\n",
+        );
+        seed_edge(&cat, "ledger", "W-1", "other:F-1"); // anchor -> peer
+        seed_edge(&cat, "other", "F-1", "ledger:W-1"); // peer -> anchor
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        let ids: Vec<String> = v["included_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["ledger:W-1", "other:F-1"],
+            "the peer appears ONCE, not once per direction: {v:#?}"
+        );
+        assert_eq!(
+            v["overflow"]["candidates"],
+            json!(2),
+            "and it is counted once, so `omitted` cannot be computed against a phantom: \
+             {v:#?}"
+        );
+
+        let md = v["markdown"].as_str().unwrap();
+        assert!(
+            md.contains("## other:F-1 · mutual"),
+            "reciprocity is reported, not collapsed to one arbitrary direction: {md}"
+        );
+        assert!(
+            !md.contains("· cites") && !md.contains("· cited-by"),
+            "and neither one-way label survives for a mutual pair: {md}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_neighbourhood_that_does_not_fit_whole_is_excerpted_rather_than_dropped() {
+        // The two-pass policy, and the measurement behind it (2026-08-21, 931 anchors):
+        // 76% of neighbourhoods fit WHOLE at the default budget, so excerpting always would
+        // degrade three anchors in four for nothing. The other 24% overflow badly, and a
+        // 1000-byte excerpt takes the fully-served share to 98%.
+        //
+        // Before the two-pass, the overflow half simply lost neighbours off the end of the
+        // budget — `reconnaissance-patterns:R-3` served 2 of 24, and which 2 was decided by
+        // ledger spelling.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        seed_ledger(&cat, root, "ledger.md", "ledger", "## W-1 — anchor\nbody\n");
+        // Six neighbours of ~3KB each: 18KB of neighbourhood against a 16KB budget.
+        let mut other = String::new();
+        for i in 1..=6 {
+            other.push_str(&format!(
+                "## F-{i} — neighbour {i}\n{}\n\n",
+                "y".repeat(3000)
+            ));
+        }
+        seed_ledger(&cat, root, "other.md", "other", &other);
+        for i in 1..=6 {
+            seed_edge(&cat, "ledger", "W-1", &format!("other:F-{i}"));
+        }
+
+        let ctx = mk_ctx(root.to_path_buf(), cat);
+        let v = call(&ctx, json!({"anchor_id": "ledger:W-1"}))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            v["overflow"]["packing"],
+            json!("excerpted"),
+            "the mode must be REPORTED — a reader cannot tell a whole section from a \
+             1000-byte excerpt that happened to end at a paragraph, and 'is this the entry \
+             or the top of it' changes what they do next: {v:#?}"
+        );
+        assert_eq!(
+            v["overflow"]["omitted"],
+            json!(0),
+            "excerpting is what buys completeness: all six neighbours are present, where \
+             full-text packing would have dropped most of them: {v:#?}"
+        );
+
+        let md = v["markdown"].as_str().unwrap();
+        assert!(
+            md.contains("… [excerpted — the neighbourhood exceeds the budget"),
+            "and every shortened neighbour says so: {md}"
+        );
+        for i in 1..=6 {
+            assert!(
+                md.contains(&format!("## other:F-{i} ·")),
+                "F-{i} missing: {md}"
+            );
+        }
     }
 
     /// C1 of docs/issues/archive/2026-08-15-context-and-state-at-never-dedup-the-worktree-overlay.md.
