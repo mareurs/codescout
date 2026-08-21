@@ -2202,6 +2202,46 @@ text
             "augmented + visible-drift miss must nudge toward params: {hint:?}"
         );
     }
+    #[tokio::test]
+    async fn body_edits_preamble_sentinel_edits_a_guarded_artifacts_preamble() {
+        // The bug this pins: text before an artifact's first heading has no section
+        // to name, and `edit_markdown` is refused outright on a guarded (here:
+        // augmented) file — so a preamble correction had no write surface at all.
+        // `heading: "^"` is the reserved sentinel for that region.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = seed_with_augment(&ctx, "docs/trackers/vt.md", false, None).await;
+
+        call(
+            &ctx,
+            serde_json::json!({
+                "id": id,
+                "patch": { "body": "Stale header note.\n\n## State\n\nbody\n" }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let args = serde_json::json!({
+            "id": id,
+            "patch": { "body_edits": [{
+                "heading": "^",
+                "action": "edit",
+                "old_string": "Stale header note.",
+                "new_string": "Corrected header note.",
+            }]}
+        });
+        call(&ctx, args).await.unwrap();
+
+        let cat = ctx.catalog.lock();
+        let row = artifact::get(&cat, &id).unwrap().unwrap();
+        let content = std::fs::read_to_string(&row.abs_path).unwrap();
+        assert!(
+            content.contains("Corrected header note.\n\n## State"),
+            "{content}"
+        );
+        assert!(!content.contains("Stale header note."), "{content}");
+    }
 
     #[tokio::test]
     async fn body_edits_visible_drift_on_non_augmented_does_not_nudge_params() {

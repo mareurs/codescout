@@ -702,6 +702,16 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
     Ok(planned)
 }
 
+/// Reserved `heading` value naming the PREAMBLE region — text between frontmatter and
+/// the first heading — in `plan_scoped_edit`'s `action="edit"` path. No real heading text
+/// can equal this: `HeadingInfo::text` always carries its leading `#` markers.
+/// docs/issues/archive/2026-08-19-guarded-artifact-preamble-cannot-be-edited.md
+pub(crate) const PREAMBLE_SENTINEL: &str = "^";
+
+/// Human-readable label for the preamble region in `diagnose_scoped_miss`'s error text,
+/// standing in for `heading_query` when that query is `PREAMBLE_SENTINEL`.
+const PREAMBLE_LABEL: &str = "(preamble)";
+
 /// Plan the byte-span edit(s) that a heading-scoped `old_string` -> `new_string`
 /// replacement would produce, without applying them. Finds the section identified
 /// by `heading_query`, locates `old_string` within its byte range, and emits one
@@ -709,6 +719,14 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
 /// `replace_all` is true). Behavior-identical to the historical `perform_scoped_edit`
 /// (see that function's doc comment) -- `perform_scoped_edit` is now a thin wrapper
 /// delegating here + `apply_planned_edits`.
+///
+/// `heading_query == PREAMBLE_SENTINEL` (`"^"`) targets the PREAMBLE instead of a named
+/// section: the text between frontmatter and the first heading, which otherwise has no
+/// section to name and so is unreachable by this function at all. No real heading text
+/// can equal the bare sentinel — `HeadingInfo::text` always carries its `#` markers — so
+/// there is no collision to guard against. A file with no headings at all treats its
+/// entire content as the preamble.
+/// docs/issues/archive/2026-08-19-guarded-artifact-preamble-cannot-be-edited.md
 pub(crate) fn plan_scoped_edit(
     content: &str,
     off: &LineOffsets,
@@ -718,17 +736,26 @@ pub(crate) fn plan_scoped_edit(
     replace_all: bool,
     edit_index: usize,
 ) -> Result<Vec<PlannedEdit>> {
-    use crate::tools::file_summary::resolve_section_range;
+    use crate::tools::file_summary::{parse_all_headings, resolve_section_range};
 
-    let range =
-        resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    let lines: Vec<&str> = content.split('\n').collect();
-    let heading_idx = range.heading_line - 1;
-    let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
-
-    let sec_start = off.line_start(heading_idx);
-    let sec_end = off.line_start(end_idx);
+    let (sec_start, sec_end, diag_label) = if heading_query == PREAMBLE_SENTINEL {
+        let sec_end = parse_all_headings(content)
+            .first()
+            .map(|h| off.line_start(h.line - 1))
+            .unwrap_or(content.len());
+        (0, sec_end, PREAMBLE_LABEL)
+    } else {
+        let range =
+            resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let lines: Vec<&str> = content.split('\n').collect();
+        let heading_idx = range.heading_line - 1;
+        let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
+        (
+            off.line_start(heading_idx),
+            off.line_start(end_idx),
+            heading_query,
+        )
+    };
     let section = &content[sec_start..sec_end];
 
     if !section.contains(old_string) {
@@ -764,7 +791,7 @@ pub(crate) fn plan_scoped_edit(
             return Ok(edits);
         }
 
-        return Err(diagnose_scoped_miss(section, old_string, heading_query).into());
+        return Err(diagnose_scoped_miss(section, old_string, diag_label).into());
     }
 
     let mut edits = Vec::new();

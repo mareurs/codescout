@@ -931,6 +931,52 @@ fn scoped_edit_not_found() {
         err
     );
 }
+#[test]
+fn scoped_edit_preamble_sentinel_edits_text_before_first_heading() {
+    // The bug this pins: the text between frontmatter and the first heading has
+    // no section to name, so every write surface refuses it except a whole-body
+    // overwrite. `heading: "^"` is the reserved sentinel for that region.
+    let content = "Some preamble text.\nMore preamble.\n## First\nhello world\n";
+    let result = perform_scoped_edit(
+        content,
+        "^",
+        "Some preamble text.",
+        "Corrected preamble.",
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        "Corrected preamble.\nMore preamble.\n## First\nhello world\n"
+    );
+}
+
+#[test]
+fn scoped_edit_preamble_sentinel_does_not_reach_into_the_first_section() {
+    // "hello" appears in both the preamble and the first section's body — the
+    // sentinel must scope strictly to the preamble, same as a named heading
+    // scopes strictly to its own section.
+    let content = "hello preamble\n## First\nhello world\n";
+    let result = perform_scoped_edit(content, "^", "hello", "hi", false).unwrap();
+    assert_eq!(result, "hi preamble\n## First\nhello world\n");
+}
+
+#[test]
+fn scoped_edit_preamble_sentinel_not_found_reports_closest_match() {
+    let content = "Some preamble text.\n## First\nbody\n";
+    let err = perform_scoped_edit(content, "^", "nonexistent", "x", false).unwrap_err();
+    assert!(
+        err.to_string().contains("not found"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn scoped_edit_preamble_sentinel_with_no_headings_targets_whole_content() {
+    let content = "just prose\nno headings at all\n";
+    let result = perform_scoped_edit(content, "^", "prose", "text", false).unwrap();
+    assert_eq!(result, "just text\nno headings at all\n");
+}
 
 #[test]
 fn scoped_edit_miss_surfaces_rich_diagnostic() {
