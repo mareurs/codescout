@@ -1,12 +1,13 @@
 ---
-status: investigating
+status: fixed
 opened: 2026-08-21
-closed:
+closed: 2026-08-21
 severity: medium
 owner: marius
 related: [2026-06-11-mux-failure-masks-rocksdb-lock-collision]
 tags: [lsp, mux, telemetry, usage-db, observability]
 kind: bug
+unverified: the three get_or_start Err-arm branches (index contention, kotlin lock held, refuse-fallback) have no automated test driving a genuine failure through the full mux dispatch -- see Tests added
 ---
 
 # BUG: mux-managed LSP cold starts (kotlin, rust) are never recorded to `lsp_events`
@@ -214,27 +215,70 @@ Zero hits inside `get_or_start_via_mux` (`:881-1074`).
 
 ## Fix
 
-*Not yet implemented — root cause found and confirmed this session; fix not started.*
+Extracted the recording logic `do_start` already had (`src/lsp/manager.rs`) into two shared
+private methods on `LspManager`:
 
-Plan: give `get_or_start_via_mux` the same telemetry `do_start` has, likely by extracting
-the recording logic (currently inlined in `do_start`'s success/error arms,
-`src/lsp/manager.rs:1120-1153` and `:1188-1218`) into a small shared helper both paths
-call, rather than duplicating the `spawn_blocking` + `write_lsp_event`/`write_lsp_failure`
-block a second time. Needs a decision on what `reason` to record for a mux connect
-(mux languages don't go through the `pending_reason`/eviction bookkeeping the same way —
-worth checking whether `get_or_start_via_mux` already knows why it's (re)connecting, e.g.
-"mux spawn" vs "mux reconnect to existing owner").
+- `record_lsp_success(&self, key: &LspKey, handshake_ms: i64, reason: &str)` — writes the
+  `lsp_events` success row + `pending_first_response` bookkeeping, unchanged from what
+  `do_start`'s success arm did inline.
+- `record_lsp_failure(&self, key: &LspKey, handshake_ms: i64, reason: &str, error: &str)` —
+  writes the `outcome='failed'` row, unchanged from what `do_start`'s error arm did inline.
 
-- **SHA:** not yet fixed.
-- **patch-id:** not yet fixed.
+`do_start` now calls these instead of inlining the writes (behavior-preserving refactor —
+covered by the pre-existing `do_start_records_lsp_event_to_db` /
+`do_start_records_failure_event_when_start_fails` tests, both still green).
 
+`get_or_start`'s mux dispatch (`src/lsp/manager.rs`, the `if config.mux { ... }` block) now
+calls the same two helpers at every exit point:
+
+- The single `Ok(client) =>` arm calls `record_lsp_success(&key, handshake_ms, "new_session")`
+  before returning. Mux connects don't go through the direct-pool's eviction-reason
+  bookkeeping (`pending_reason`), so the reason is always `"new_session"` — including a
+  connect to an already-running mux, which just reports a much lower `handshake_ms` than a
+  fresh spawn.
+- Each of the three production `return Err(...)` branches (index contention, kotlin index
+  lock held, and the "refuse silent fallback" branch) calls `record_lsp_failure` first, using
+  the *original* `get_or_start_via_mux` error text (not the wrapped/enhanced message returned
+  to the caller), matching what `do_start` records for a direct-path failure.
+- The fourth branch (test-runner exe, falls through to `config.mux = false` and continues to
+  `do_start`) is intentionally left alone — that path already gets recorded via `do_start`,
+  unchanged.
+
+- **SHA:** not yet committed — awaiting user decision on committing to `experiments`.
+- **patch-id:** n/a until committed.
 ## Tests added
 
-*N/A — not yet fixed.* When implemented: a test analogous to
-`do_start_records_lsp_event_to_db` (`src/lsp/manager.rs:2044`) but driving
-`get_or_start_via_mux`, asserting a `lsp_events` row is written on a successful mux
-connect and on a mux startup failure.
+`get_or_start_mux_success_records_lsp_event` (`src/lsp/manager.rs`, `#[ignore]`-gated —
+spawns a real `kotlin-lsp` process, requires it installed). Verified sensitive to the fix by
+temporarily removing the new `record_lsp_success` call: the test then failed with
+`QueryReturnedNoRows` (no `lsp_events` row at all) — exactly the reported symptom. Restored
+and re-confirmed green.
 
+Getting this test to actually exercise `get_or_start`'s mux `Ok` arm (rather than the
+test-runner direct-LSP fallback, which was already covered) took a wrong turn worth
+recording: `get_or_start_via_mux` resolves the mux binary via `current_exe()`, which under
+`cargo test` is the test binary itself — it can't speak the mux CLI protocol, so a naive
+`get_or_start(..., Some(true))` call silently takes the `is_test_runner_exe` fallback to
+`do_start` instead, which was *already* recording correctly. A first version of this test
+asserted success without checking which code path produced it — passed for the wrong
+reason, and would have kept passing after reverting the fix, since do_start's own test
+already covers that path. Fixed by pre-starting a REAL mux with the actual compiled
+`target/debug/codescout` binary (not `current_exe()`) and waiting for its "ready" line, so
+`get_or_start` finds the mux ownership lock already held, skips spawning, and connects
+straight through — the real `Ok` arm.
+
+**Gap, stated plainly:** the three failure branches (index contention, kotlin lock held,
+refuse-fallback) are NOT covered by an automated test. `kotlin_index_lock_held`'s own
+detector is unit-tested directly (`kotlin_index_lock_held_false_for_non_kotlin_and_missing_home`),
+but driving a *genuine* failure through the full mux dispatch turned out to be
+architecturally hard to fake: an attempt to plant a held lock file to force the
+index-contention path was defeated by `reap_orphan_index_holder`, which correctly identifies
+and kills exactly that kind of orphaned lock-holder before spawning — legitimate self-healing
+behavior, not a test bug, but it means a hermetic simulation doesn't survive contact with the
+real code. Reproducing genuine RocksDB contention would require two real kotlin-lsp
+processes racing the same index, which the mux exists specifically to prevent. The shared
+`record_lsp_failure` helper itself IS covered (via `do_start_records_failure_event_when_start_fails`);
+only the three new call sites in `get_or_start`'s Err arm lack a direct test.
 ## Workarounds
 
 None needed for correctness — LSP itself works fine; this is an observability gap only.
@@ -244,13 +288,10 @@ stops in June 2026 and query live process state (`pgrep -af 'kotlin-lsp|rust-ana
 
 ## Resume
 
-Read `do_start`'s success arm (`src/lsp/manager.rs:1120-1153`) and error arm
-(`:1188-1218`), factor the `spawn_blocking` + `write_lsp_event`/`write_lsp_failure` block
-into a shared private method (e.g. `record_start_outcome`), then call it from both
-`do_start` and `get_or_start_via_mux` at the point each learns success/failure. Add the
-two regression tests described above. Run `cargo test lsp::manager` before claiming
-done.
-
+N/A — fixed. If the `unverified:` gap ever matters (someone wants real coverage of the
+three failure branches), the honest path is a real second-mux-instance integration test
+outside `cargo test`, not another hermetic simulation — see "Tests added" for why the
+in-process attempts don't survive contact with `reap_orphan_index_holder`.
 ## References
 
 - `docs/adrs/2026-06-11-mux-single-owner-invariant.md`

@@ -2546,120 +2546,112 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
-    #[test]
-    #[ignore = "spawns a python3 fcntl holder; diagnostic for the mux-dispatch test above"]
-    fn diag_kotlin_index_lock_held_with_planted_lock() {
-        let dir = tempfile::tempdir().unwrap();
-        let ws = dir.path();
-        let ws_hash = crate::socket_discovery::workspace_hash(ws);
-        let analyzer_dir = crate::lsp::servers::kotlin_analyzer_home(&ws_hash)
-            .join(".config/JetBrains/analyzer");
-        std::fs::create_dir_all(&analyzer_dir).unwrap();
-        let lock_path = analyzer_dir.join("LOCK");
-        std::fs::write(&lock_path, b"").unwrap();
-
-        let mut holder = std::process::Command::new("python3")
-            .arg("-c")
-            .arg(format!(
-                "import fcntl,time; f=open(r'{}', 'r+'); \
-                 fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB); \
-                 print('held', flush=True); time.sleep(10)",
-                lock_path.display()
-            ))
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .expect("spawn python3 lock holder");
-        {
-            use std::io::Read;
-            let mut buf = [0u8; 4];
-            let _ = holder.stdout.as_mut().unwrap().read(&mut buf);
-        }
-
-        let held = super::kotlin_index_lock_held("kotlin", ws);
-        eprintln!("DIAG analyzer_dir={:?} exists={}", analyzer_dir, analyzer_dir.exists());
-        eprintln!("DIAG held={held}");
-
-        let _ = holder.kill();
-        let _ = holder.wait();
-
-        assert!(held, "planted lock must be detected as held");
-    }
-
-
-
     /// Regression for `docs/issues/2026-08-21-mux-lsp-cold-starts-not-recorded.md`:
-    /// `get_or_start`'s mux dispatch must record a `lsp_events` failure row when
-    /// `get_or_start_via_mux` errors — before this fix, `get_or_start_via_mux`
-    /// never called `do_start` (the only place `write_lsp_event`/`write_lsp_failure`
-    /// lived), so every mux-language cold start — success or failure — was
-    /// invisible to `lsp_events`. Plants a held kotlin analyzer index `LOCK` so
-    /// `kotlin_index_lock_held` deterministically trips the index-contention branch
-    /// regardless of how the mux spawn itself fails in this harness (a `cargo test`
-    /// binary can't actually speak the mux protocol) — that branch fires
-    /// independent of `is_test_runner_exe`, unlike the plain "refuse fallback" arm.
+    /// `get_or_start`'s mux dispatch must record a real `lsp_events` success row.
+    /// Before this fix, `get_or_start_via_mux` never called `do_start` — the only
+    /// place `write_lsp_event`/`write_lsp_failure` lived — so every mux cold
+    /// start, success or failure, was invisible to `lsp_events` even though the
+    /// mux itself started fine.
+    ///
+    /// `get_or_start_via_mux` resolves the mux binary via `current_exe()`, which
+    /// under `cargo test` is the test binary itself (confirmed: it cannot speak
+    /// the mux CLI protocol, so a normal `get_or_start(..., Some(true))` call here
+    /// silently takes the test-runner direct-LSP fallback instead — exercising
+    /// `do_start`, already covered by `do_start_records_lsp_event_to_db`, not the
+    /// mux `Ok` arm this bug is about). To reach the actual mux success path,
+    /// this test pre-starts a REAL mux using the compiled `codescout` binary
+    /// (not the test binary) and waits for its "ready" line — mirroring
+    /// `get_or_start_via_mux`'s own protocol. `get_or_start` then finds the mux
+    /// ownership lock already held, skips spawning entirely (`need_spawn =
+    /// false`), and connects straight to the real socket — the same code path a
+    /// second codescout process joining an existing mux takes in production.
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "spawns a python3 fcntl holder + drives the mux dispatch path; gated like the posix_write_lock/mux tests"]
-    async fn get_or_start_mux_index_contention_records_lsp_failure_event() {
+    #[ignore = "spawns a real kotlin-lsp mux process; requires kotlin-lsp installed"]
+    async fn get_or_start_mux_success_records_lsp_event() {
+        if std::process::Command::new("kotlin-lsp")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("Skipping: kotlin-lsp not installed");
+            return;
+        }
+        let codescout_bin =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/codescout");
+        if !codescout_bin.exists() {
+            eprintln!("Skipping: {codescout_bin:?} not built (run `cargo build --bin codescout`)");
+            return;
+        }
+
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
+        let socket_path = crate::lsp::mux::socket_path_for_workspace("kotlin", ws);
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("kotlin", ws);
 
-        let ws_hash = crate::socket_discovery::workspace_hash(ws);
-        let analyzer_dir = crate::lsp::servers::kotlin_analyzer_home(&ws_hash)
-            .join(".config/JetBrains/analyzer");
-        std::fs::create_dir_all(&analyzer_dir).unwrap();
-        let lock_path = analyzer_dir.join("LOCK");
-        std::fs::write(&lock_path, b"").unwrap();
-
-        // Hold a POSIX write-lock (the RocksDB lock family) from a separate
-        // process — same-process fcntl locks don't conflict with the probe.
-        let mut holder = std::process::Command::new("python3")
-            .arg("-c")
-            .arg(format!(
-                "import fcntl,time; f=open(r'{}', 'r+'); \
-                 fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB); \
-                 print('held', flush=True); time.sleep(10)",
-                lock_path.display()
-            ))
+        let mut mux_child = std::process::Command::new(&codescout_bin)
+            .arg("mux")
+            .arg("--socket")
+            .arg(&socket_path)
+            .arg("--lock")
+            .arg(&lock_path)
+            .arg("--cwd")
+            .arg(ws)
+            .arg("--idle-timeout")
+            .arg("60")
+            .arg("--")
+            .arg("kotlin-lsp")
+            .arg("--stdio")
             .stdout(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .spawn()
-            .expect("spawn python3 lock holder");
+            .expect("spawn real codescout mux");
+
+        // Wait for the mux's "ready" line on stdout — same protocol
+        // `get_or_start_via_mux` itself waits on.
         {
-            use std::io::Read;
-            let mut buf = [0u8; 4];
-            let _ = holder.stdout.as_mut().unwrap().read(&mut buf); // barrier: wait for "held"
+            use std::io::{BufRead, BufReader};
+            let stdout = mux_child.stdout.take().expect("stdout piped");
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap_or(0) > 0 && line.trim().starts_with("ready")
+                {
+                    break;
+                }
+                if std::time::Instant::now() > deadline {
+                    let _ = mux_child.kill();
+                    panic!("real mux never printed 'ready' within 120s");
+                }
+            }
         }
 
         let mgr = LspManager::new_for_test_with_root(ws).await;
         let result = mgr.get_or_start("kotlin", ws, Some(true)).await;
 
-        let _ = holder.kill();
-        let _ = holder.wait();
+        let _ = mux_child.kill();
+        let _ = mux_child.wait();
 
-        eprintln!("DIAG result.is_ok()={}", result.is_ok());
-        if let Err(ref e) = result {
-            eprintln!("DIAG err={e}");
-        }
-
-        let msg = match result {
-            Ok(_) => panic!("mux dispatch must fail when the kotlin index LOCK is held"),
-            Err(e) => e.to_string(),
-        };
         assert!(
-            msg.contains("index is locked"),
-            "unexpected error, expected the index-contention message: {msg}"
+            result.is_ok(),
+            "expected get_or_start to connect to the pre-started real mux: {:?}",
+            result.err()
         );
 
-        // The regression: before this fix, no lsp_events row would exist here at all.
         let conn = crate::usage::db::open_db(ws).unwrap();
-        let (outcome, error): (String, Option<String>) = conn
-            .query_row("SELECT outcome, error FROM lsp_events LIMIT 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+        let (lang, outcome, reason): (String, String, String) = conn
+            .query_row(
+                "SELECT language, outcome, reason FROM lsp_events LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
             .unwrap();
-        assert_eq!(outcome, "failed");
-        assert!(error.is_some());
+        assert_eq!(lang, "kotlin");
+        assert_eq!(outcome, "success");
+        assert_eq!(reason, "new_session");
     }
 
     #[cfg(unix)]
