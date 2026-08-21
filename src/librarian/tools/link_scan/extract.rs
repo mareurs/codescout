@@ -389,7 +389,7 @@ pub fn extract(text: &str) -> DocExtract {
     // heading that parser finds but the event loop above missed, so `extract` agrees with
     // it by construction rather than by coincidence. Confirmed via the actual event
     // stream (`Start(HtmlBlock)` spanning the heading as `Html(...)`), not inferred.
-    // docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md
+    // docs/issues/archive/2026-08-20-extract-loses-heading-after-html-comment-block.md
     //
     // Deliberately partial: only the definition itself is backfilled. A citation
     // embedded in a swallowed heading's remainder text (rare — the common case is a
@@ -625,7 +625,7 @@ mod tests {
     /// `Html(...)` payload). `entry_sections` already avoids this by deriving
     /// headings from the shared line-oriented `headings::parse` instead of cmark's
     /// event stream; `extract` must agree, or an entry nothing can cite exists.
-    /// docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md
+    /// docs/issues/archive/2026-08-20-extract-loses-heading-after-html-comment-block.md
     #[test]
     fn heading_swallowed_by_a_preceding_html_comment_block_still_defines() {
         let text = "<!-- comment opens here\n\n## CAP-4 — a heading\n\nbody\n-->\n\nafter\n";

@@ -1,7 +1,7 @@
 ---
-id: d407da71bd52fa91
+id: 2104fc471db2f769
 kind: bug
-status: open
+status: fixed
 title: link_scan extract() loses a heading swallowed by a preceding HTML comment block
 tags:
 - link_scan
@@ -9,6 +9,7 @@ tags:
 - pulldown-cmark
 - citation-graph
 - html-block
+closed: 2026-08-21
 ---
 
 # BUG: `link_scan::extract()` loses a heading swallowed by a preceding HTML comment block
@@ -64,10 +65,18 @@ are emitted as `Event::Html`, not as heading events. `extract()` only treats a `
 match as a definition when it arrives inside a heading event, so the swallowed heading is
 invisible to it.
 
-*Inferred from the bisect result and from `extract()`'s heading-event gating — the
-pulldown_cmark event stream for this input was NOT dumped and read directly. Confirming
-the mechanism means printing the events around line 1159 and observing `Event::Html`
-covering line 1161.*
+**Confirmed 2026-08-21** by dumping the actual pulldown_cmark event stream for the
+reproduction shape (`<!-- comment opens here\n\n## CAP-4 — a heading\n\nbody\n-->`):
+
+```
+Start(HtmlBlock) @ 0..58 = "<!-- comment opens here\n\n## CAP-4 — a heading\n\nbody\n-->\n"
+Html(Borrowed("## CAP-4 — a heading\n")) @ 25..48 = "## CAP-4 — a heading\n"
+End(HtmlBlock) @ 0..58 = ...
+```
+
+The whole block — heading included — is one `Html` event; no `Event::Start(Tag::Heading)`
+ever fires for line 3. The hypothesis in this section was correct; it is no longer a
+hypothesis wearing a conclusion's clothes.
 
 Measured 2026-08-20 by the corpus comparison above (Task 1 review + re-review of
 `docs/superpowers/plans/2026-08-20-statement-validity-layers-1-2.md`).
@@ -98,20 +107,52 @@ by a hand-rolled fence toggle — was a defect in the new code and is fixed
 
 ## Fix
 
-Not attempted. Two directions, and the choice is not obvious:
+Applied — the Structural direction, made tractable by something the Narrow-vs-Structural
+framing below hadn't yet connected: `entry_sections()`'s own doc comment already states
+the intended end state ("so the three can never disagree") and already delegates heading
+detection to `crate::librarian::preview::headings::parse` — the same shared, line-oriented,
+fence-aware, **HTML-oblivious** ATX parser `entry_sections` uses. `extract()`'s definition
+loop now backfills from that same parser: after the main pulldown_cmark pass, any heading
+`headings::parse` finds whose line wasn't already captured as a definition gets added.
+Additive, not a rewrite — the existing event-driven pass still owns the common case
+(definition detection AND same-heading citation-scanning); the backfill only fires for the
+rare swallowed case.
 
-- **Narrow:** have `extract()` also scan `Event::Html` payloads for `def_re` matches at
-  line starts. Cheap, but re-implements heading detection inside HTML text and would then
-  match headings that really are inside a comment.
-- **Structural:** move `extract()` onto the same `librarian::preview::headings::parse`
-  that `entry_sections` now uses, so both derive definitions from one line-oriented
-  parser. Larger, but it is the direction Task 1's review already pushed the sibling
-  function, and it would make the two agree by construction rather than by coincidence.
+**Deliberately partial.** A citation embedded in a swallowed heading's *remainder* text
+(e.g. "## CAP-4 — title (see CAP-2)") is not scanned — recovering it would mean re-parsing
+`Event::Html` payloads for inline citations too, and the common real-world shape (per this
+bug's own reproduction) is a whole entry disappearing into the comment, not just its
+heading with a citation-bearing remainder. Left as a known, smaller gap.
 
-The structural option deserves its own decision because `extract()` is the citation
-graph's front door — `link_scan`, `doctor`'s `corpus_cited_tokens`, and
-`scan_undefined_entries` all read through it.
+**A second, pre-existing risk from the Narrow option turned out not to apply.**
+Using `headings::parse` (like `entry_sections` already does) means a heading-shaped line
+genuinely INSIDE an intentional HTML comment (someone deliberately hiding a draft entry)
+would also now get defined — the same behavior `entry_sections` already has today, so this
+fix makes `extract()` consistent with existing, already-shipped behavior rather than
+introducing a new risk class.
 
+**Original two directions, for the record:**
+
+- Narrow: scan `Event::Html` payloads for `def_re` matches directly. Not taken — would
+  have re-implemented heading detection inside HTML text from scratch, where
+  `headings::parse` already exists and is already the trusted comparand.
+- Structural: what shipped.
+
+- **SHA (experiments):** `e24b6ad8a2c521e20d5d383e1606ff4b199fa127`
+- **patch-id:** `f13a105e4e72382b455cd657c9713009fa345b98`
+## Tests added
+
+- `heading_swallowed_by_a_preceding_html_comment_block_still_defines` — the bug as
+  reproduced (unclosed `<!--`, heading, `-->`); asserts the definition is now found.
+- `entry_sections_and_extract_agree_on_the_live_corpus` (pre-existing, from the
+  statement-validity-layers-1-2 work) — its `CAP-4` known-exception carve-out was
+  removed per the test's own instructions once it stopped reproducing; it now asserts
+  full agreement across the whole `docs/**/*.md` corpus with zero exceptions.
+
+Both RED-first (new test failed with `left: []`; the corpus test failed exactly as its own
+failure message predicted — "the known CAP-4 exception ... did not reproduce this run").
+`cargo test --lib link_scan` — 71 passed. Full `cargo test` + `cargo clippy --all-targets
+-- -D warnings` clean on `experiments`.
 ## Tests added
 
 None. The corpus comparison that found this is not committed — see *Resume*.
@@ -143,4 +184,3 @@ Two independent next actions:
   `docs/issues/archive/2026-08-11-artifact-nested-fence-closes-outer-fence.md`
 - `docs/superpowers/specs/2026-08-20-entry-validity-and-attestation-design.md` — Layer 3
   depends on `extract()`'s definition set
-
