@@ -527,9 +527,37 @@ fn pack_entry_anchor(
         "scope": scope_summary(effective_scope, current, scope_fallback),
     });
     if armed {
-        // Same channel `append_entry` uses for `snapshot_missing` and `undefined_in_body`:
-        // a response field whose whole purpose is to tell an agent something it was about
-        // to miss. Emitted only when armed — an always-present empty array trains the
+        // **The register lives in the KEY, not in the prose.** `Guidance` in
+        // `src/tools/core/types.rs` states the reason plainly: the three registers
+        // (`hint` / `warning` / `must_follow`) are serialized under variant-named keys
+        // because "agents scan JSON responses and react to the key, not the prose". A
+        // directive filed under a neutral noun like `pending_attestations` reads as data to
+        // be skimmed, and the failure this whole layer exists to prevent is *precisely* a
+        // suggestion that evaporates at end of turn — the mechanism that left `reviewed` at
+        // one row corpus-wide.
+        //
+        // `must_follow` had until now been an ERROR-path register only; success responses
+        // use `next_step` (`append_entry`, `refresh_stale`, `tracker_design`). Using the
+        // stronger key here is deliberate and safe: the `RecoverableError` body pairs
+        // `must_follow` with `ok: false` and `error`, and neither is present on this
+        // response, so a client keyed on either still reads this as the success it is.
+        // `next_step` would be the wrong register — this is not the natural next call, it
+        // is a debt incurred by reading.
+        out["must_follow"] = json!(format!(
+            "{} is load-bearing — {} citing Statements — and {}. Before relying on it: {}. \
+             Then record the appraisal so the next reader inherits it rather than repeating \
+             it, and do not treat this Statement as verified until that event exists.",
+            anchor.reference,
+            exposure,
+            match appraisal.as_deref() {
+                None => "has never been appraised".to_string(),
+                Some(v) => format!("its last appraisal came back `{v}`"),
+            },
+            proof_obligation(&anchor.validity),
+        ));
+        // The structured twin, for the caller that wants fields rather than a sentence —
+        // the same shape `RecoverableError` uses when it splices `extra` alongside its
+        // guidance. Emitted only when armed: an always-present empty array trains the
         // reader to skip the key.
         out["pending_attestations"] = json!([{
             "entry": anchor.reference,
@@ -1495,6 +1523,20 @@ mod tests {
             "the banner rides in the markdown too, because a structured field is easy to \
              skip and the reader is holding this Statement right now: {md}"
         );
+
+        // The REGISTER is the key, not the prose (`Guidance`, src/tools/core/types.rs).
+        let must = v["must_follow"]
+            .as_str()
+            .expect("an obligation must arrive under the strongest register, not as data");
+        assert!(
+            must.contains("ledger:W-1") && must.contains("never been appraised"),
+            "the directive names the Statement and its appraisal history: {must}"
+        );
+        assert!(
+            v.get("hint").is_none() && v.get("next_step").is_none(),
+            "and it must NOT also arrive under a weaker register — offered two, a reader \
+             may act on the weaker one: {v:#?}"
+        );
     }
 
     #[tokio::test]
@@ -1518,6 +1560,11 @@ mod tests {
         assert!(
             !v["markdown"].as_str().unwrap().contains("last appraised"),
             "and no banner: {v:#?}"
+        );
+        assert!(
+            v.get("must_follow").is_none(),
+            "a Statement below the floor owes nothing, so the strongest register must stay \
+             unused — spending it on the unexposed is how it stops meaning anything: {v:#?}"
         );
     }
 
@@ -1709,6 +1756,12 @@ mod tests {
                 .unwrap()
                 .contains("last appraised: refuted"),
             "the banner must not read the same as one that was never looked at: {v:#?}"
+        );
+        assert!(
+            v["must_follow"].as_str().unwrap().contains("`refuted`"),
+            "and the directive must name the last verdict too — a refutation that reads \
+             like a fresh obligation discards the highest-value output this mechanism \
+             produces: {v:#?}"
         );
     }
 

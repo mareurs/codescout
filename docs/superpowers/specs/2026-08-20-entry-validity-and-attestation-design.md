@@ -1045,9 +1045,27 @@ same fact. `obligation_state` moves `none → open → in_flight`, and a Stateme
 
 > **SHIPPED 2026-08-21 — read-only, and with no new tables.** `librarian(action="context",
 > anchor_id="<slug>:<local>")` now arms a tap when the anchor's exposure reaches the floor,
-> emitting a `pending_attestations` array **and** a banner inside the markdown. The banner
-> is deliberately not only structured: a response field is easy to skip, and an obligation
-> nobody sees is the mechanism that got `reviewed` to 1 row corpus-wide.
+> emitting the obligation under **`must_follow`**, a `pending_attestations` array with the
+> structured twin, **and** a banner inside the markdown. The banner is deliberately not
+> only structured: a response field is easy to skip, and an obligation nobody sees is the
+> mechanism that got `reviewed` to 1 row corpus-wide.
+>
+> **The register lives in the key, and that is a correction to this section's own wording.**
+> The text above proposed `pending_attestations` alone. `Guidance`
+> (`src/tools/core/types.rs`) already establishes the vocabulary and its reason: the three
+> registers `hint` / `warning` / `must_follow` serialize under variant-named keys because
+> *"agents scan JSON responses and react to the key, not the prose."* A directive filed
+> under a neutral plural noun reads as data to skim — and the failure this layer exists to
+> prevent is exactly a suggestion that evaporates at end of turn. So the sentence goes
+> under `must_follow` and the fields stay under `pending_attestations`, mirroring how
+> `RecoverableError` splices `extra` alongside its guidance.
+>
+> Two properties of that choice, both pinned by test. `must_follow` had been an
+> **error-path** register only — success responses use `next_step` (`append_entry`,
+> `refresh_stale`, `tracker_design`) — and it is safe here because the error body pairs it
+> with `ok: false` and `error`, neither of which this response carries. And the directive
+> is emitted under **one** register only: a response offering both `must_follow` and a
+> weaker `hint` lets the reader act on the weaker one.
 >
 > Four decisions worth recording, because each departs from the text above:
 >
