@@ -1,16 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- edit-markdown
+- artifact
+- error-quality
+- recoverable-error
+closed: 2026-08-21
 opened: 2026-08-19
-closed:
-severity: medium
 owner: marius
 related: []
-tags:
-  - edit-markdown
-  - artifact
-  - error-quality
-  - recoverable-error
-kind: bug
+severity: medium
 ---
 
 # BUG: `diagnose_scoped_miss` has six bail-out causes and reports all six identically, so its closest-text recovery never reaches the caller
@@ -164,11 +164,30 @@ Deliberately NOT proposed: raising the caps. The caps are a performance guard, a
 defect is that their effect is unreportable, not that they are wrong. Raising them would
 mask the ambiguity rather than remove it.
 
+**Fixed 2026-08-21.** Gave each of the six causes its own `scoped_miss_tier` value and
+message — `old_string_empty`, `old_string_too_large`, `section_too_many_lines`,
+`section_too_many_bytes`, `old_string_longer_than_section`, `no_similar_match` (renamed
+from the ambiguous `no_close`, which stays gone — no caller matched on that literal string,
+only on `"visible_drift"` in `update.rs:450`, which is unchanged). Split the collapsed
+four-way `||` and dropped the dead `n == 0` branch (unreachable once `old_string.is_empty()`
+already returns). Bail-out precedence order preserved from the original code. Gate green:
+`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (4426 passed, 46
+ignored, 0 failed).
+
+**experiments** SHA: `8814c0afb7ef974fb41333bd450706e69d31dc2c`
+patch-id: `e25c6910eb007c35426379041b2750023975390b`
+
 ## Tests added
 
-None yet — bug is open. A fix must assert that each of the six causes yields a
-*distinguishable* message, and one test per cause is the natural shape. The mutation to
-watch: collapsing any two notes back to a shared string must red exactly one test.
+**Fixed 2026-08-21.** Five new tests in `src/tools/markdown/tests.rs`: one per
+previously-undistinguished cause (`diagnose_empty_old_string_gets_own_tier`,
+`diagnose_section_too_many_lines_gets_own_tier`, `diagnose_section_too_many_bytes_gets_own_tier`,
+`diagnose_old_string_longer_than_section_gets_own_tier`), plus
+`diagnose_causes_produce_pairwise_distinguishable_messages` as the mutation guard
+against the collapse creeping back — it asserts all six messages are pairwise `!=`.
+Two existing tests updated to expect the new tier names instead of the shared `no_close`
+(`diagnose_giant_old_string_bails_to_no_close_cheaply` → `old_string_too_large`;
+`diagnose_no_close_nudges_heading` → `no_similar_match`).
 
 ## Workarounds
 
