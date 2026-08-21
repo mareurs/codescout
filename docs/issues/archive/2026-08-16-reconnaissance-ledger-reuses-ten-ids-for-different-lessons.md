@@ -1,12 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- trackers
+- data-integrity
+- id-allocation
+- reconnaissance
+- citations
+closed: 2026-08-21
 opened: 2026-08-16
-closed:
-severity: high
 owner: marius
 related: []
-tags: [trackers, data-integrity, id-allocation, reconnaissance, citations]
-kind: bug
+severity: high
 ---
 
 # BUG: `reconnaissance-patterns.md` reuses 10 of its 91 ids for unrelated lessons, so 57 kin-citations are ambiguous
@@ -226,6 +231,45 @@ stop being possible) and **HY-9** / proposed detector D12 (a sweep that sees
 unresolvable citations at all). The entry-level rules are now in
 `get_guide("tracker-conventions")` § *Entry-level standard*, which states the id
 grammar and forbids suffixes.
+
+---
+
+## Status 2026-08-21 — fixed: renumbered instead of renamed
+
+**Re-measured before touching anything**, per this file's own Resume note and
+CLAUDE.md's "run the reproduction before reading the fix plan" rule — the file had
+grown substantially since the 2026-08-17 status (2,221 → 3,584 lines, R-91 → R-108),
+so the plan needed re-verifying against current state, not just re-reading. Current
+state confirmed: 4 suffixed ids still live in the main file (R-55b, R-57b, R-58b,
+R-76b) and 3 already relocated to the archive companion by the 2026-08-17 migration
+without being fixed (R-72b, R-73b, R-74b) — seven total, matching "seven of nine
+survive in-file."
+
+**Applied a fourth option this file didn't originally list: renumber to FRESH ids
+(R-109–R-115), not the earlier-instance-keeps-the-bare-number suffix scheme.**
+The 2026-08-17 status update had already falsified that scheme's own rationale —
+the bare-number instance usually resolved to nothing at the resolver, not to "what
+the citation most likely meant" — so preserving it further would have kept
+minting unrepresentable ids. Renamed 4 headings + 4 index rows in the live file, 3
+headings in the archive companion, and every real citation of the C-chain
+(`R-3 → R-73b → R-77 → R-79`) across `bug-fix-session-log.md`,
+`context-performance.md`, `prompt-hamsa-audit-log.md`, and three files in the
+`claude-plugins` companion repo. Left three pedagogical mentions of the literal
+string `R-72b` unchanged (`capability-proposals.md`, `tracker-conventions.md`,
+this file's own `## Template for new entries` section) — those illustrate the
+general "suffixes are invalid" rule and renaming the example string would break
+the point being made; they're also unextractable by construction, so they were
+never a false-citation risk. Bumped `entry_high_water_R` 108→115. Verified via
+`librarian(action="link_scan")`: none of the renamed tokens appear in `dangling`
+or `ambiguous`.
+
+codescout **experiments** commit: `94363d2f` (doc-only, no code changed — no SHA/patch-id
+gate applicable beyond the standard commit).
+claude-plugins **main** commit: `2d6cdbe`.
+
+What remains open, tracked elsewhere: CAP-5 (server-assigned ids to make this class
+of collision impossible) and HY-9/D12 (a sweep detecting unresolvable citations) —
+neither attempted here.
 
 ## References
 

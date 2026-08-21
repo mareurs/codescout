@@ -74,7 +74,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-29 | 1 | `append_entry` writes catalog-only state, so this very snapshot drifts silently — tool says success, git says clean | partial (`99aaf83f` + `6ff00eee` + `0dbfd0ee`): drift reported at write time and by `doctor`; hamsa reconciled; gate now needs majority coverage; **0 trackers adrift** | `0694a4a9946e10fe` |
 | BL-30 | 2 | FRICTION: adding one entry costs four bookkeeping sub-tasks — id, workflow, row format, re-render | done | `c3f08f7cb8b386fe` |
 | BL-31 | 2 | grep: `cap_grouped`'s file-diversity round-robin is unreachable, so overflow hints name walk-order files not hot ones | **done, archived** | `2a9fd7654cf82013` |
-| BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | open | `cdc375f4420aad6a` |
+| BL-32 | 3 | R-N ledger reused nine ids for unrelated lessons — split by suffix in `52fca682`; the hand-allocation cause is BL-30 | done | `a0251c34af7aa012` |
 | BL-33 | 1 | the librarian guard keys on YAML quoting, so 15 of 27 trackers (incl. this queue) are unprotected | **done, archived** | `e7353641aafe0098` |
 | BL-34 | 2 | repairing a frontmatter id re-serializes the whole block, reformatting hand-authored YAML | **done, archived** | `529a6c05895cc686` |
 | BL-36 | 1 | `artifact(update)` re-serializes the whole frontmatter block on a single-field patch — BL-34's mechanism at the mandated archive step | **done, archived** | `82ba248228301486` |
