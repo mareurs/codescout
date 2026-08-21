@@ -110,24 +110,24 @@ as an explained mechanism.
 
 ## Fix
 
-Not implemented. Options, none obviously best:
+Applied: capped the inferred-path severity from `Med` to `Low` in `severity::cap_inferred_path` (`src/librarian/tools/audit_doc_refs/severity.rs`) — Option 3 from the list below ("if the classification is a guess, low is more honest than med"), chosen as the smallest, lowest-risk change over Option 2 (promoting the filesystem check into the parser's classification stage, which would need `looks_like_path` to take repo-root context it doesn't have today).
 
-1. **Denylist the MCP method vocabulary** (`tools/list`, `tools/call`,
-   `resources/list`, `resources/read`, `prompts/get`, `notifications/*`).
-   Cheapest and immediately correct, but the archived sibling explicitly
-   rejected "adding a tenth denylist entry" as the wrong shape of fix.
-2. **Require a filesystem-plausible first segment** — a token whose leading
-   segment names no directory at the repo root is not a repo-relative path.
-   `tools/` does not exist at codescout's root. Generalizes past MCP names, and
-   is close to the `path_evidence` / `cap_inferred_path` machinery that
-   already exists from the sibling fix.
-3. **Cap it lower.** If the classification is a guess, `low` is more honest than
-   `med`. Does not reduce noise, only its weight.
+**Two things found only by tracing the actual call chain, not visible from the symptom alone:**
 
-Option 2 looks right, but note it would need to not regress refs to paths that
-are legitimately absent because the file moved — which is what a doc-ref audit
-is for.
+1. `verdict_with_drops_for_ref` calls `apply_drops` (archive/memory/issues/historical location-based drops) BEFORE `cap_inferred_path`. The original `sev == Severity::High` guard in `cap_inferred_path` meant it only fired when NOTHING had already dropped the severity — so for any ref inside `docs/trackers/**` (which `apply_drops` already drops to `Med` via `historical_drop`), the guard silently never fired. That is exactly the bug's own reproduction shape (`docs/trackers/statement-validity-session-log.md`, `docs/trackers/prompt-surface-compaction-session-log.md`) — the originally-proposed fix would have been a no-op against the bug's own repro. Changed the guard to fire whenever evidence is `Inferred`, regardless of what already ran, flooring severity at `Low`.
+2. That broader guard then collided with two more existing tests (`severity_drops_one_level_in_archive`, and a would-be conflict with any Memory/Issues drop): when a location-based drop already picked a specific reason (`archive_drop`, etc.), overwriting it with `inferred_path` loses the more informative explanation. Resolved by keeping the location-drop's reason when one applied (`reason != PolicyDefault`) and only overriding to `InferredPath` when nothing else already explained it — severity always floors at `Low`, but the reported *reason* stays whichever is more specific.
 
+Not implemented: Options 1 (denylist) and 2 (classification-stage promotion) from below — left as-is; this fix only changes severity weighting, so `n_refs_broken`'s count is unchanged, only its confidence label.
+## Tests added
+
+All in `src/librarian/tools/audit_doc_refs/resolver.rs`, same commit:
+
+- `mcp_method_name_ref_caps_to_low` — the bug as reported (`tools/list` cited from a `docs/trackers/**` file); asserts `Low` + reason stays `historical_drop`.
+- `resolver_ref_with_absent_root_segment_is_capped` (pre-existing, updated) — non-historical file, asserts `Low` + reason `inferred_path`.
+- `resolver_still_missing_when_basename_not_in_index` (pre-existing, updated) — bare name, non-historical file, asserts `Low` + reason `inferred_path`.
+- `severity_drops_one_level_in_archive` (pre-existing, updated) — bare name cited from `docs/archive/**`, asserts `Low` + reason stays `archive_drop` (the reason-preservation behavior).
+
+Written RED-first: the new test and the three pre-existing ones were all run against the unmodified code first (three already-passing tests had their severity assertion changed to the new expected value, then re-run to confirm they failed against old code for the stated reason, before the fix landed). `cargo test --lib audit_doc_refs` — 157 passed, 0 failed. Full `cargo test` + `cargo clippy --all-targets -- -D warnings` clean on `experiments`.
 ## Tests added
 
 None — not fixed. A fix should add a parser case asserting `tools/list` and
