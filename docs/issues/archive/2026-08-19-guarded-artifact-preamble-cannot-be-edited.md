@@ -1,7 +1,7 @@
 ---
-id: '5d3698a596706b32'
+id: 195f37475cc452e3
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: a guarded artifact''s preamble cannot be edited — body_edits is section-scoped and the text before the first heading has no section'
 owners:
 - marius
@@ -11,7 +11,7 @@ tags:
 - trackers
 - append-only
 topic: librarian-api
-closed: null
+closed: 2026-08-21
 opened: 2026-08-19
 owner: marius
 related: []
@@ -108,6 +108,32 @@ Not implemented. Candidates, roughly in increasing cost:
 Option 1 is the direct fix; option 3 is the one that would stop session logs putting
 decaying facts in an append-only region.
 
+**Fixed 2026-08-21 (Option 1, reserved sentinel).** `plan_scoped_edit` (shared by
+`edit_markdown` and `artifact(update, patch={body_edits})`) now recognizes
+`heading: "^"` as the preamble region — content from byte 0 up to the first heading, or
+the whole file if it has none. No real heading text can collide with it:
+`HeadingInfo::text` always carries its `#` markers, so a bare `"^"` can never be a
+heading's own text. Scoped to `action="edit"` only — `insert_before` on the first
+heading already covers appending NEW preamble content, per this file's own Workarounds
+section; the gap was specifically correcting EXISTING preamble text.
+
+**Status is `mitigated`, not `fixed`: Option 3 (moving volatile state out of preambles
+into queryable `extra` frontmatter) is not attempted.** That remains the fix that would
+stop this class of staleness at the source, per this file's own framing ("the one that
+would have prevented this file's header from carrying three ids that a same-day archive
+re-keyed"). Option 1 only makes the region reachable; it does not discourage volatile
+content from living there. Not filed as a separate bug — it's a design/policy question
+(where should volatile state live), not a capability gap, and doesn't block on this fix.
+
+**Also not done: schema documentation.** `patch.body_edits[].heading` (in
+`artifact.rs`'s `input_schema`, ~177 lines) and `edit_markdown`'s own `heading` /
+`edits[].heading` schema descriptions don't mention the sentinel yet. Skipped rather than
+risking a manual transcription error reproducing that much escaped JSON by hand for a
+discoverability nicety; the capability itself is tested end-to-end.
+
+**experiments** SHA: `4dda3c45e4bbd335a689bc2e2ab2adc2fba0ad9f`
+patch-id: `5c30bf0537d6e2636721543a86ee32e5573a591a`
+
 ## Tests added
 
 None — no fix applied.
@@ -140,4 +166,3 @@ re-keyed.
   same commit as the move" rule this makes awkward to honour
 - `get_guide("librarian")` § *Body Editing Surfaces* — the three surfaces, none of which
   covers the preamble
-
