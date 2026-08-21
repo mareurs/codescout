@@ -1,13 +1,14 @@
 ---
-id: '8784e5739e90fa37'
+id: 5e4d66560433f3e3
 kind: bug
-status: open
+status: fixed
 title: docs/templates/session-log.md's own example Index/Wins-Index row burns the id it displays, on the very first bootstrap
 tags:
 - session-log
 - append_entry
 - tracker-template
 - measurement
+closed: 2026-08-21
 ---
 
 ---
@@ -84,17 +85,49 @@ grammar, present in every fresh copy of this template.
 
 ## Fix
 
-Not implemented. Replace the example rows' `F-1` / `W-1` tokens with a
-non-matching placeholder shape — e.g. `F-<n>` / `W-<n>`, which the
-`\b[A-Z]{1,3}-\d+\b` grammar does not match (digit position holds a literal
-`<n>`, not `\d+`) — so the documentation no longer doubles as a claim. Apply
-the same fix to any other template/archetype shipping a literal `PREFIX-1`
-example row (check `reconnaissance-patterns-template.md` and
-`tracker-hygiene-log-template.md` in `codescout-companion`, which ship
-`R-N` / `HY-N` entry-template blocks with concrete-looking examples — those
-use `R-N`/`HY-N` literally rather than `R-1`/`HY-1`, so they may already be
-safe, but worth confirming against the same grammar).
+Applied — exactly the fix this bug's own write-up prescribed. Both example rows in
+`docs/templates/session-log.md` (`## Index`: `F-1` → `F-<n>`; `## Wins Index`: `W-1` →
+`W-<n>`) now use a placeholder shape `body_claimed_indices`'s `(\d+)` capture cannot
+match — verified directly against the actual regex
+(`(?:#{1,6}[ \t]+|\|[ \t]*)[`*\[]*{prefix}-(\d+)\b` in
+`src/librarian/catalog/augmentation.rs`), not assumed from the citation-resolver's
+grammar (a different, if similar, pattern).
 
+**Followed the "apply to any other template" instruction and found it was needed.**
+Checked `codescout-companion`'s `reconnaissance-patterns-template.md` and
+`tracker-hygiene-log-template.md`, which this bug flagged as "may already be safe."
+`tracker-hygiene-log-template.md` genuinely is safe — by design, not luck: it has no
+Index table at all (`## HY-N — <title>` headings ARE the index). But
+`reconnaissance-patterns-template.md` had the **exact same defect** (`| R-1 | ... |` in
+its `## Index` table) — the hedge was wrong there. Fixed in the same pass
+(`claude-plugins:21b8776`). Swept every other `*template*.md` in that repo for the
+same shape — clean, no further instances.
+
+**A related but out-of-scope observation, not chased here:** `body_claimed_indices`
+has no fence-awareness at all (unlike `headings::parse`, which is used elsewhere
+specifically to skip fenced code blocks) — it's a bare multi-line regex scan. The
+F-N/W-N/R-N entry-template blocks happen to be safe only because their examples use
+non-digit placeholders (`F-N`, not `F-1`), not because they're fenced. A tracker whose
+fenced *example* content used a real digit-shaped id would hit the same class of bug.
+Not investigated further — no known instance, and it's a different code path than this
+bug's own report.
+
+- **SHA (experiments):** `2af9e5b76f4d1c8f55c559a62463e80924825189`
+- **patch-id:** `1bf3b73fac600767bffd0be762b0d6fa1fa5cbc5`
+- **claude-plugins fix:** `21b8776` (main branch — that repo has no documented
+  protected-branch/experiments convention; verified before committing there).
+## Tests added
+
+`fresh_session_log_template_bootstrap_allocates_f1_and_w1` in
+`src/librarian/catalog/augmentation.rs` — reads the real
+`docs/templates/session-log.md` file (not a synthetic fixture), bootstraps it fresh
+with a declared `entry_prefix`, and asserts the first `allocate_entry_id` call for
+each of F and W returns `F-1` / `W-1`. Runs against the actual shipped template, so a
+future edit reintroducing a digit-shaped example row fails this test directly rather
+than needing a human to notice.
+
+`cargo test --lib augmentation::` — 73 passed. Full `cargo test` + `cargo clippy
+--all-targets -- -D warnings` clean on `experiments`.
 ## Tests added
 
 None — not fixed. Worth a regression test: bootstrap the template fresh,
@@ -118,4 +151,3 @@ regression test per *Tests added*.
 - `claude-plugins:docs/trackers/repo-hygiene-session-log.md:W-2` — the session's actual work (unrelated content, same session)
 - `docs/templates/session-log.md` — the file to fix
 - `get_guide("tracker-conventions")` § *Entry ids* — the general rule this is a bootstrap-time special case of
-
