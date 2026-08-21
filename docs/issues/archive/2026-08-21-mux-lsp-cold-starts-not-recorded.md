@@ -244,8 +244,8 @@ calls the same two helpers at every exit point:
   `do_start`) is intentionally left alone — that path already gets recorded via `do_start`,
   unchanged.
 
-- **SHA:** not yet committed — awaiting user decision on committing to `experiments`.
-- **patch-id:** n/a until committed.
+- **SHA:** `0994309af8ca4be1e7751748e57b3f90125ee8eb` (`experiments`)
+- **patch-id:** `642d74a28b4bd64d640cf8023b4368ff825fad0a`
 ## Tests added
 
 `get_or_start_mux_success_records_lsp_event` (`src/lsp/manager.rs`, `#[ignore]`-gated —
