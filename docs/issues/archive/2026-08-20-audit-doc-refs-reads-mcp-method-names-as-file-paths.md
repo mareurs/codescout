@@ -1,16 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- audit_doc_refs
+- lint-precision
+closed: 2026-08-21
 opened: 2026-08-20
-closed:
-severity: low
 owner: marius
 related:
-  - docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md
-tags:
-  - librarian
-  - audit_doc_refs
-  - lint-precision
-kind: bug
+- docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md
+severity: low
 ---
 
 > **KNOWN — same root cause as
@@ -118,6 +118,11 @@ Applied: capped the inferred-path severity from `Med` to `Low` in `severity::cap
 2. That broader guard then collided with two more existing tests (`severity_drops_one_level_in_archive`, and a would-be conflict with any Memory/Issues drop): when a location-based drop already picked a specific reason (`archive_drop`, etc.), overwriting it with `inferred_path` loses the more informative explanation. Resolved by keeping the location-drop's reason when one applied (`reason != PolicyDefault`) and only overriding to `InferredPath` when nothing else already explained it — severity always floors at `Low`, but the reported *reason* stays whichever is more specific.
 
 Not implemented: Options 1 (denylist) and 2 (classification-stage promotion) from below — left as-is; this fix only changes severity weighting, so `n_refs_broken`'s count is unchanged, only its confidence label.
+
+**Commit citation is non-standard — recorded honestly rather than smoothed over.** The code was written and tested in this session's own working tree, but never reached a commit of this session's own: a concurrent Claude Code session (same author name, different model instance) ran `git commit` twice while these edits sat uncommitted in the shared checkout, sweeping them into two of its own commits alongside unrelated `docs/superpowers/specs/` work (`89eb83f0` — the test additions + first severity.rs revision; `f24c3788` — the refinement to reason-preservation). Verified via `git show <sha> -- <file>` that the landed content matches exactly what this session wrote and tested; no content was lost or altered.
+
+- **SHAs (experiments), in landing order:** `89eb83f0eb55201beea3eb2c1d4ac0344d80f653`, then `f24c37887d6352e7eec167b205a902b6162a78cb` — neither commit is *only* this fix; both also carry the concurrent session's unrelated spec/tracker changes.
+- **patch-id:** reconstructed rather than taken from a single commit, since no single commit is this fix alone — `git diff d85c1572..f24c3788 -- src/librarian/tools/audit_doc_refs/{resolver,severity}.rs | git patch-id --stable` → `3745de7e3b5bd15d5b87313dffc619120762f0ab`. This identifies the *net* change to those two files across the range, not a single commit's diff; re-deriving it after any further edit to either file requires re-picking the base and range by hand, since there's no single SHA to `git show`.
 ## Tests added
 
 All in `src/librarian/tools/audit_doc_refs/resolver.rs`, same commit:
