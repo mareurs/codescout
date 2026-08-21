@@ -962,6 +962,17 @@ arms again at 10. Re-tune from the first month's distribution.
 > So choosing `entry_indegree` as 5b's exposure term silently exempts most of the
 > session-log corpus from ever arming the tap.
 >
+> **That is not a prediction about 5b — it is an observed property of shipped code.**
+> `librarian(action="doctor")`, run 2026-08-21: all **32** rows of
+> `entry_cited_from_outside_but_undeclared` are present in the response (a census, not a
+> truncated floor — `shown` caps the combined array at 75, and this check contributes 32
+> of them), and **zero** name an `F`/`W` token. Every one names another prefix — `TU-7`,
+> `B-1`, `CAP-5`, `H-2`, `H-5`. So the 96 `F`/`W` Statements carrying 442 entry-grain
+> edges are already invisible to all three exposure-gated checks, today, and the tap
+> would inherit that exemption rather than introduce it. Fixing `entry_indegree`'s stale
+> deferral therefore repairs shipped behaviour as well as unblocking 5b — which is what
+> makes it a different option from "pick the other metric", not a refinement of it.
+>
 > **And `entry_indegree`'s own deferral is now stale.** Its doc comment names the fix —
 > count a stem-qualified citation against its specific definer rather than folding it
 > into the bare token — and declines it because "it needs the `Corpus`/`by_stem`

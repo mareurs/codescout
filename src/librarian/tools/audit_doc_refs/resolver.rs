@@ -1181,7 +1181,7 @@ mod tests {
             &ctx(tmp.path(), &[]),
         );
         assert_eq!(r.verdict, Verdict::Missing);
-        assert_eq!(r.severity, Severity::Med);
+        assert_eq!(r.severity, Severity::Low);
         assert_eq!(r.severity_reason.as_str(), "archive_drop");
     }
     /// The project archives in place, so `archive/` appears at several depths.
@@ -2251,7 +2251,7 @@ mod tests {
             &ctx,
         );
         assert_eq!(r.verdict, Verdict::Missing);
-        assert_eq!(r.severity, Severity::Med, "inferred path must not gate CI");
+        assert_eq!(r.severity, Severity::Low, "inferred path must not gate CI");
         assert_eq!(r.severity_reason.as_str(), "inferred_path");
     }
 
@@ -2290,8 +2290,11 @@ mod tests {
 
     /// The bug as reported: an MCP method name (`tools/list`) is all-lowercase and
     /// slash-joined, so `is_path_segment` admits it as a path candidate. It resolves
-    /// to nothing (no `tools/` at the repo root) and used to cap only to `Med` —
-    /// still inflating `n_refs_broken` for a token that was never a path.
+    /// to nothing (no `tools/` at the repo root) and used to cap only to `Med` via
+    /// `docs/trackers/**`'s historical-drop — still inflating `n_refs_broken` for a
+    /// token that was never a path. The reported reason stays `historical_drop`
+    /// (the more specific, location-based explanation); the inferred-evidence floor
+    /// only changes the severity, not which reason is surfaced.
     /// docs/issues/2026-08-20-audit-doc-refs-reads-mcp-method-names-as-file-paths.md
     #[test]
     fn mcp_method_name_ref_caps_to_low() {
@@ -2303,7 +2306,7 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::Low);
-        assert_eq!(r.severity_reason.as_str(), "inferred_path");
+        assert_eq!(r.severity_reason.as_str(), "historical_drop");
     }
 
     #[test]

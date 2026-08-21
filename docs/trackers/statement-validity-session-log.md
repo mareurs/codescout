@@ -1027,6 +1027,16 @@ and 63 of 1056 edges (6%) for every other prefix. Choosing the shipped term woul
 most of the session-log corpus from ever arming the tap. A floor, not a count: definers were
 counted only among *cited* slugs.
 
+**Then measured directly rather than left as an inference.** `librarian(action="doctor")`,
+same day: all **32** rows of `entry_cited_from_outside_but_undeclared` are present in the
+response — a census, not a truncated floor — and **zero** name an `F`/`W` token; every one
+names another prefix (`TU-7`, `B-1`, `CAP-5`, `H-2`, `H-5`). So 96 `F`/`W` Statements
+carrying 442 entry-grain edges are **already** invisible to all three exposure-gated checks.
+The exemption is shipped behaviour that 5b would inherit, not a risk 5b would introduce —
+which is exactly the distinction the write-up would have blurred had I stopped at the
+definer-multiplicity proxy. Naming what the predicate counts said `>1 definer`; the question
+asked `does it reach the worklist`.
+
 **And a third stale deferral, found in passing.** `entry_indegree`'s doc comment names its own
 fix — count a stem-qualified citation against its specific definer instead of folding it into the
 bare token — and declines it because *"it needs the `Corpus`/`by_stem` machinery `link_scan`
