@@ -43,12 +43,20 @@ const NEIGHBOUR_EXCERPT_BYTES: usize = 1000;
 
 /// Distinct citing Statements a claim needs before *reading* it incurs a proof obligation.
 ///
-/// **Measured on the live entry graph 2026-08-21, not guessed.** At 5 the tap arms 8
-/// Statements corpus-wide — `SI-7` (9 citers), `R-3` and `R-19` (8), `R-77`/`R-79` (6),
-/// `R-50`/`R-95`/`R-49` (5) — which are the load-bearing lessons, and a population small
-/// enough that an obligation still means something. At 3 it would arm 91; at 2, 213. The
-/// design called this constant "a guess with no measurement behind it"; this is the
-/// measurement.
+/// **Measured on the live entry graph 2026-08-21, not guessed.** At 5 the tap arms **5**
+/// Statements corpus-wide — `SI-7` (9 citers), `R-19` and `R-3` (7), `R-77` and `R-79` (5)
+/// — which are the load-bearing lessons, and a population small enough that an obligation
+/// still means something. At 4 it would arm 13; at 3, 41; at 2, 144. The design called this
+/// constant "a guess with no measurement behind it"; this is the measurement.
+///
+/// **Those are the second figures, and the first ones are worth recording.** The original
+/// query counted every distinct `src_slug` per destination and reported 8 armed at this
+/// threshold. It did not exclude same-ledger citations — which the code below does — so it
+/// measured a different predicate from the one it was cited to justify. `R-50`, `R-95` and
+/// `R-49` reached 5 only by counting their own ledger's citations of them, and do not arm.
+/// Caught by probing the shipped tap and seeing it report exposure **7** for `R-3` where
+/// the query had said 8: the code was right and the measurement was wrong. Running a query
+/// is not the same as running the right one.
 ///
 /// A **floor, not a period**: a Statement appraised at 5 arms again at 10.
 ///

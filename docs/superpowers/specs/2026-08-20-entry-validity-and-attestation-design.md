@@ -1058,9 +1058,16 @@ same fact. `obligation_state` moves `none → open → in_flight`, and a Stateme
 >   (only ledger entries produce `entry_cite` rows, so a spec or bug file citing the
 >   Statement is invisible), and undercounting is the conservative direction for an
 >   obligation. A gate may pay 5s; a nudge may not.
-> - **The threshold is measured, not guessed.** At 5 the tap arms **8** Statements
->   corpus-wide — `SI-7` (9 citers), `R-3`/`R-19` (8), `R-77`/`R-79` (6),
->   `R-50`/`R-95`/`R-49` (5). At 3 it would arm 91; at 2, 213.
+> - **The threshold is measured, not guessed.** At 5 the tap arms **5** Statements
+>   corpus-wide — `SI-7` (9 citers), `R-19` and `R-3` (7), `R-77` and `R-79` (5). At 4 it
+>   would arm 13; at 3, 41; at 2, 144.
+>
+>   *An earlier draft of this bullet said 8, and named `R-50`/`R-95`/`R-49` among them.
+>   That query counted every distinct citing slug and did not exclude same-ledger
+>   citations, which the shipped code does — so it measured a different predicate from the
+>   one it was quoted to justify. Caught by probing the live tap and seeing exposure **7**
+>   for `R-3` where the query said 8. The code was right; the measurement was wrong, and
+>   running a query is not the same as running the right one.*
 > - **Exposure counts distinct citing LEDGERS, not edges**, and same-ledger citations are
 >   excluded — a hand-maintained `## Index` row is the ledger talking to itself. Both
 >   properties are pinned by tests written after mutation showed them unpinned.
