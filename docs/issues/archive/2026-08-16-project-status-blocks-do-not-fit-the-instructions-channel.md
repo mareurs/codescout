@@ -1,7 +1,7 @@
 ---
 id: e3437bd1ec116dec
 kind: bug
-status: mitigated
+status: fixed
 title: 'BUG: Kotlin warnings, the workspace table and Custom Instructions cannot fit the MCP instructions channel, so they never reach the model'
 tags:
 - prompt-surfaces
@@ -58,8 +58,17 @@ With BL-9's fitting in place, a Kotlin project's rendered instructions end:
 `build_with_system_prompt_appends_custom_section`. All three were retargeted from
 `build_server_instructions` to `build_project_status_block` on 2026-08-16 **precisely
 because the rendered surface no longer carries them** — the renderer is correct, the
-channel cannot deliver its output. Those three retargeted tests are the standing
+channel cannot deliver its output. Those three retargeted tests were the standing
 reproduction.
+
+**Superseded 2026-08-21.** All three are retargeted again, and one changed meaning rather
+than address: `build_with_kotlin_project_includes_kotlin_warnings` became
+`no_language_specific_warnings_are_pushed_at_any_project` — an inversion, since the block
+it asserted is gone. That test's history is the tell this bug should have been read by
+earlier: it had ALREADY been retargeted once, from `build_server_instructions` to the
+renderer, specifically so it could keep passing while the segment it described reached
+nobody. A test that survives a change by being pointed at a surface the user never
+receives is a signal, not a fix.
 
 ## Environment
 
@@ -142,6 +151,53 @@ because *the total never exceeds the channel* outranks segment integrity.
 `instructions` channel entirely. Nothing above makes `KOTLIN_KNOWN_ISSUES` or an unbounded
 custom prompt fit, and putting unbounded content in a fixed channel remains the design
 error.
+
+## RESOLVED 2026-08-21 — the carrier was chosen
+
+`113c10df` (patch-id `92ec3bea`, `experiments`) and `7c3245d7` (patch-id `f37302ff`,
+`experiments`).
+
+The `Substitutable` tier now rides `post_process`'s once-per-activation response banner —
+the mechanism the path-relative note already uses, which has no character ceiling and
+already handles the `--project` auto-activation case where no `activate` call ever happens.
+Measured after the move: 220 characters free in the persistent channel on an ordinary
+project, 143 with a worktree banner, and no trim at all. The three blocks this file is
+named for now arrive — verified live, not only by test: a `tree` call on 2026-08-21
+returned the workspace table and the Kotlin block in full.
+
+**Two deliberate divergences from what § Resume prescribed.** Recorded because the
+prescription was written before the constraint that changes it, and following it literally
+would have introduced a defect.
+
+1. **`build_server_instructions` is NOT static-only, and `fit_dynamic_block` /
+   `StatusPriority` are NOT deleted.** The plan assumed the split was about SIZE. It is
+   about PERSISTENCE: `server_instructions` rides the system prompt, re-sent on every
+   request, so it survives compaction — and a tool response does not. `Anchor` therefore
+   has to stay, because its absence causes a wrong WRITE and a response-carried banner
+   arrives too late for a first tool call that IS the write. `UserAuthored` stays for a
+   weaker but real version of the same argument. Both tiers can still overflow, so
+   `fit_dynamic_block` is still the guarantee that the channel never does.
+
+2. **The assertion § Resume asked for is inverted.** It said *"the assertion to add then is
+   that a Kotlin project's delivered surface contains `kotlin-lsp` again."* Instead the
+   block was deleted: `detect_fatal_stderr` (`src/lsp/client.rs`) already raises a
+   `RecoverableError` naming the condition and the remedy when it actually happens, which
+   the block's own last line conceded — *"codescout detects this and fails fast with a clear
+   error."* Its trigger was wrong too: `languages` is what a repo CONTAINS, so codescout —
+   a Rust project with Kotlin fixtures — served itself the block on every session, observed
+   live on 2026-08-21. Pre-loading an explanation of a self-announcing error is cost
+   without benefit at any trigger, so narrowing it to Kotlin-only projects would have kept
+   the cost and bought nothing.
+
+**The measurement § Resume warned would decay silently is now pinned.** That section noted
+`source_md_under_cap` caps the slice at 1900 rather than its actual 1711, so an edit could
+shrink the dynamic budget by ~190 characters without failing anything.
+`the_tier_split_leaves_real_headroom_in_the_persistent_channel` now asserts >=120 chars
+free on the worst ordinary case, which fails if the slice grows back into that space.
+
+**Also lifted:** `MAX_MEMORY_NAMES = 8`, whose stated reason was *"unbounded is exactly
+what a fixed channel cannot carry"* — falsified by this very move. It was withholding 14 of
+this repo's 22 memory names.
 ## Tests added
 
 In `src/prompts/mod.rs`, red observed before the fix:
@@ -173,30 +229,8 @@ segments. They remain this bug's standing reproduction for the part that is stil
 
 ## Resume
 
-**Pick the carrier for project status.** That is the whole remaining decision, and it is the
-maintainer's: the interim fix is in, so nothing is silently lost and the common case now
-fits, but `KOTLIN_KNOWN_ISSUES` and an unbounded custom prompt still cannot arrive at any
-position.
-
-**2026-08-21: closed as `mitigated`, carrier decision deferred deliberately.** Verified
-`fit_dynamic_block` (`src/prompts/mod.rs:267-329`) is live and matches this file's
-description exactly — priority tiers, per-drop label, the pre-BL-37 fallback branch. Asked
-the maintainer whether to design a new carrier now; the answer was to leave the interim fix
-in place rather than rush an MCP-surface architecture decision (which channel? a resource?
-the first tool response? each has different client-support and freshness tradeoffs) at the
-tail of an unrelated bug-sweep session. The remaining decision is exactly as described
-above and nothing about it has changed — re-read this section, not just this correction,
-when picking it up.
-
-When a carrier is chosen: move `build_project_status_segments`' output to it, leave
-`build_server_instructions` static-only, and delete `fit_dynamic_block` and the
-`StatusPriority` tiers — they exist only because the two share a channel. The assertion to
-add then is that a Kotlin project's *delivered* surface contains `kotlin-lsp` again.
-
-One measurement worth repeating first, because it decayed once already and silently: the
-289-char budget is `2048 − 48 − len(static slice)`, and the static slice moves whenever
-`src/prompts/source.md` is edited. `source_md_under_cap` pins the slice at ≤1900, not at
-1711, so a future edit can shrink the dynamic budget by ~190 chars without failing anything.
+N/A — fixed. See § RESOLVED under Fix for the carrier, the two deliberate divergences from
+what this section previously prescribed, and the live verification.
 ## References
 
 - `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md` — BL-9, where the 2048-char limit was measured

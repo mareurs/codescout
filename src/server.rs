@@ -764,9 +764,9 @@ impl CodeScoutServer {
         }
 
         // The `Substitutable` half of `## Project Status`, which the 2048-char instructions
-        // channel could not carry — on a Kotlin project with custom instructions several of
-        // these segments never arrived at all. Here they arrive whole: no fitting, no
-        // `MAX_MEMORY_NAMES` truncation by the carrier, no trim note.
+        // channel could not carry — with custom instructions present, several of these
+        // segments never arrived at all. Here they arrive whole: no fitting, no memory-name
+        // cap, no trim note.
         //
         // Status is fetched only when the gate is open, so the ordinary path costs one
         // relaxed atomic load and nothing else. The gate is claimed AFTER the block is

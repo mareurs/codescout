@@ -278,8 +278,9 @@ fn persistent_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
 /// Ephemeral-and-complete beats absent.
 ///
 /// No length cap and no fitting. That is the point of moving them: the response channel
-/// has no 2048-character ceiling, so the memory list is no longer truncated at
-/// `MAX_MEMORY_NAMES` by the carrier, and the workspace table arrives whole.
+/// has no 2048-character ceiling, so the memory list arrives in full — the 8-name cap that
+/// used to truncate it was deleted once this move falsified its rationale — and the
+/// workspace table arrives whole.
 pub fn build_status_response_block(status: &ProjectStatus) -> Option<String> {
     let body: String = build_project_status_segments(status)
         .iter()
