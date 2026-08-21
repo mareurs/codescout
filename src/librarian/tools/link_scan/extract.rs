@@ -376,6 +376,40 @@ pub fn extract(text: &str) -> DocExtract {
             _ => {}
         }
     }
+
+    // pulldown_cmark's CommonMark HTML-block rule can swallow an ATX heading whole: an
+    // unclosed `<!--` on an earlier line opens an HTML block that continues until its
+    // close condition, and every line in between — heading included — is emitted as one
+    // `Event::Html` payload, never as `Event::Start(Tag::Heading)`. `def_re` above only
+    // ever sees heading text inside a real heading event, so a swallowed heading defines
+    // nothing — and an entry `extract()` cannot define is an entry nothing can cite.
+    // `entry_sections` already sidesteps this by deriving headings from the shared
+    // line-oriented `headings::parse` (fence-aware, HTML-oblivious) instead of cmark's
+    // event stream — see its doc comment: "so the three can never disagree". Backfill any
+    // heading that parser finds but the event loop above missed, so `extract` agrees with
+    // it by construction rather than by coincidence. Confirmed via the actual event
+    // stream (`Start(HtmlBlock)` spanning the heading as `Html(...)`), not inferred.
+    // docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md
+    //
+    // Deliberately partial: only the definition itself is backfilled. A citation
+    // embedded in a swallowed heading's remainder text (rare — the common case is a
+    // whole entry, not just its heading, ending up inside the comment) is not scanned,
+    // since recovering it would mean re-parsing `Event::Html` payloads for inline
+    // citations too.
+    let frontmatter_last_line = line_of(&line_starts, frontmatter_end).saturating_sub(1);
+    for h in crate::librarian::preview::headings::parse(text) {
+        let line = h.line as u32;
+        if line <= frontmatter_last_line {
+            continue;
+        }
+        if let Some(m) = def_re().captures(&h.text) {
+            let token = m.get(1).unwrap().as_str().to_string();
+            if seen_defs.insert(token.clone()) {
+                out.definitions.push(Definition { token, line });
+            }
+        }
+    }
+
     out
 }
 
@@ -582,6 +616,27 @@ mod tests {
         );
         // A-11 (its own definition) is not a citation; F-8 is.
         assert_eq!(tokens(&ex, CitationKind::EntryToken), vec!["F-8"]);
+    }
+
+    /// pulldown_cmark's CommonMark HTML-block rule swallows an ATX heading that
+    /// follows an unclosed `<!--` on an earlier line: no `Event::Start(Tag::Heading)`
+    /// fires, so `def_re` never sees it — confirmed by dumping the event stream
+    /// (`Start(HtmlBlock)` spans the whole comment, heading included, as one
+    /// `Html(...)` payload). `entry_sections` already avoids this by deriving
+    /// headings from the shared line-oriented `headings::parse` instead of cmark's
+    /// event stream; `extract` must agree, or an entry nothing can cite exists.
+    /// docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md
+    #[test]
+    fn heading_swallowed_by_a_preceding_html_comment_block_still_defines() {
+        let text = "<!-- comment opens here\n\n## CAP-4 — a heading\n\nbody\n-->\n\nafter\n";
+        let ex = extract(text);
+        assert_eq!(
+            ex.definitions,
+            vec![Definition {
+                token: "CAP-4".into(),
+                line: 3
+            }]
+        );
     }
 
     #[test]
@@ -1192,31 +1247,14 @@ gamma
     /// and the direction of the difference, so a legitimate new-doc failure is
     /// diagnosable from the test output alone rather than mysterious.
     ///
-    /// One disagreement is a known, *named* exception, not a count budget: `CAP-4` in
-    /// `docs/trackers/capability-proposals.md` is a pre-existing `extract()` defect —
-    /// a pulldown_cmark HTML comment block swallows the following heading, so
-    /// `extract()` never sees it while `entry_sections` (a different, line-oriented
-    /// parser) does — filed at
-    /// `docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md`,
-    /// which prescribes this exact check. It predates this branch and is not fixed
-    /// here.
-    ///
-    /// The exception is matched by identity (file + the full id-set diff), not
-    /// counted: a bare "at most 1 disagreeing file" tolerance would stay green if
-    /// `CAP-4` got fixed and a different, real drift appeared in its place — same
-    /// count, wrong file, silent guard. Matching identity catches either failure mode
-    /// on its own: an unexpected file trips the first assertion regardless of how many
-    /// total disagreements there are, and `CAP-4` no longer appearing trips the
-    /// second — which is the loud failure this test should produce the day that bug is
-    /// fixed, as the prompt to delete the exception below.
+    /// **No exceptions left.** `CAP-4` in `docs/trackers/capability-proposals.md` was the
+    /// last one — a pulldown_cmark HTML comment block swallowed the following heading, so
+    /// `extract()` never saw it while `entry_sections` (a different, line-oriented parser)
+    /// did. Fixed by backfilling `extract()`'s definitions from the same `headings::parse`
+    /// `entry_sections` already uses, for any heading the cmark event stream missed. See
+    /// `docs/issues/archive/2026-08-20-extract-loses-heading-after-html-comment-block.md`.
     #[test]
     fn entry_sections_and_extract_agree_on_the_live_corpus() {
-        // A known, pre-existing extract() defect — not fixed here. See the doc
-        // comment above and
-        // docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md.
-        const KNOWN_EXCEPTION_PATH: &str = "docs/trackers/capability-proposals.md";
-        const KNOWN_EXCEPTION_SECTIONS_ONLY: &[&str] = &["CAP-4"];
-
         let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let docs_root = repo_root.join("docs");
         let mut files: Vec<std::path::PathBuf> = ignore::WalkBuilder::new(&docs_root)
@@ -1230,13 +1268,12 @@ gamma
         assert!(
             files.len() > 500,
             "expected docs/**/*.md to hold hundreds of markdown files; found {} — the \
-             walk is looking in the wrong place ({docs_root:?}) and every assertion \
-             below would pass vacuously",
+         walk is looking in the wrong place ({docs_root:?}) and every assertion \
+         below would pass vacuously",
             files.len()
         );
 
         let mut unexpected = Vec::new();
-        let mut known_exception_seen = false;
 
         for path in &files {
             let text = std::fs::read_to_string(path)
@@ -1257,7 +1294,7 @@ gamma
             if !overshooting.is_empty() {
                 unexpected.push(format!(
                     "{rel}: entry_sections() end_line runs past EOF for \
-                     {overshooting:?} (id, end_line, real_line_count)"
+                 {overshooting:?} (id, end_line, real_line_count)"
                 ));
             }
 
@@ -1274,47 +1311,21 @@ gamma
 
             let extract_only: Vec<&String> = extract_ids.difference(&section_ids).collect();
             let sections_only: Vec<&String> = section_ids.difference(&extract_ids).collect();
-            let sections_only_strs: Vec<&str> = sections_only.iter().map(|s| s.as_str()).collect();
-
-            if rel == KNOWN_EXCEPTION_PATH
-                && extract_only.is_empty()
-                && sections_only_strs == KNOWN_EXCEPTION_SECTIONS_ONLY
-            {
-                known_exception_seen = true;
-                continue;
-            }
 
             unexpected.push(format!(
                 "{rel}: extract()-only (extract() saw, entry_sections() missed)=\
-                 {extract_only:?}; entry_sections()-only (entry_sections() saw, \
-                 extract() missed)={sections_only:?}"
+             {extract_only:?}; entry_sections()-only (entry_sections() saw, \
+             extract() missed)={sections_only:?}"
             ));
         }
 
         assert!(
             unexpected.is_empty(),
-            "entry_sections() and extract() disagree beyond the known CAP-4 exception \
-             on {} file(s):\n  {}\n\n\
-             Each line names the file and, per reader, the ids only that reader saw — \
-             investigate why the two readers see different definitions there. Do not \
-             widen this into a count tolerance (see the doc comment above for why that \
-             is the wrong guard); if the corpus genuinely grew a new instance of the \
-             known CAP-4-shaped defect, name it explicitly alongside CAP-4 rather than \
-             loosening the check.",
+            "entry_sections() and extract() disagree on {} file(s):\n  {}\n\n\
+         Each line names the file and, per reader, the ids only that reader saw — \
+         investigate why the two readers see different definitions there.",
             unexpected.len(),
             unexpected.join("\n  ")
-        );
-
-        assert!(
-            known_exception_seen,
-            "the known CAP-4 exception ({KNOWN_EXCEPTION_PATH}, extract() dropping the \
-             heading after an HTML comment block, filed at \
-             docs/issues/2026-08-20-extract-loses-heading-after-html-comment-block.md) \
-             did not reproduce this run — either that pre-existing extract() defect has \
-             been fixed (delete KNOWN_EXCEPTION_PATH/KNOWN_EXCEPTION_SECTIONS_ONLY and \
-             this assertion) or the file/heading was renamed (update the constants above \
-             to match). Do not leave this test silently downgraded by removing the \
-             check instead."
         );
     }
 }
