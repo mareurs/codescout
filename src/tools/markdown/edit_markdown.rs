@@ -1047,6 +1047,12 @@ fn truncate_snippet(s: &str) -> String {
 /// the miss into a tier (whitespace-only / visible drift / no close match),
 /// and build a `RecoverableError` carrying a tier-adaptive hint plus
 /// `extra["scoped_miss_tier"]` for callers (Task 5) to route on.
+///
+/// Each bail-out cause gets its own tier value and message — a caller error
+/// (empty/oversized `old_string`), a declined search (section over the line or
+/// byte cap), and a genuine no-match are different problems with different
+/// fixes, and reporting them identically forces a blind retry regardless of
+/// which one actually happened.
 pub(crate) fn diagnose_scoped_miss(
     section: &str,
     old_string: &str,
@@ -1054,29 +1060,47 @@ pub(crate) fn diagnose_scoped_miss(
 ) -> RecoverableError {
     use serde_json::json;
 
-    let no_close = |extra_note: &str| {
+    let no_close = |extra_note: &str, tier: &str| {
         RecoverableError::with_hint(
             format!(
                 "old_string not found in section '{heading}'. The text must match exactly (whitespace-sensitive). {extra_note}"
             ),
             "old_string isn't in this section — verify the heading, or re-read the current section text and retry.",
         )
-        .with_extra("scoped_miss_tier", json!("no_close"))
+        .with_extra("scoped_miss_tier", json!(tier))
     };
 
+    if old_string.is_empty() {
+        return no_close("old_string is empty.", "old_string_empty");
+    }
+    if old_string.len() > OLD_STRING_CAP {
+        return no_close(
+            "old_string exceeds 8 KB, so no closest-match search was run — target a smaller, unique anchor.",
+            "old_string_too_large",
+        );
+    }
+
     let lines: Vec<&str> = section.split('\n').collect();
-    if old_string.is_empty()
-        || old_string.len() > OLD_STRING_CAP
-        || lines.len() > SECTION_LINE_CAP
-        || section.len() > SECTION_BYTE_CAP
-    {
-        return no_close("");
+    if lines.len() > SECTION_LINE_CAP {
+        return no_close(
+            "this section has more than 400 lines, so no closest-match search was attempted — re-read the section and copy an exact anchor.",
+            "section_too_many_lines",
+        );
+    }
+    if section.len() > SECTION_BYTE_CAP {
+        return no_close(
+            "this section is larger than 64 KB, so no closest-match search was attempted — re-read the section and copy an exact anchor.",
+            "section_too_many_bytes",
+        );
     }
 
     let old_lines: Vec<&str> = old_string.split('\n').collect();
     let n = old_lines.len();
-    if n == 0 || n > lines.len() {
-        return no_close("");
+    if n > lines.len() {
+        return no_close(
+            "old_string has more lines than the section itself, so it cannot match anything in it.",
+            "old_string_longer_than_section",
+        );
     }
 
     let mut best_idx = 0usize;
@@ -1090,7 +1114,10 @@ pub(crate) fn diagnose_scoped_miss(
         }
     }
     if best_score < SIM_THRESHOLD {
-        return no_close("");
+        return no_close(
+            "I looked, and nothing scored above 0.5 similarity.",
+            "no_similar_match",
+        );
     }
 
     let have_window = lines[best_idx..best_idx + n].join("\n");

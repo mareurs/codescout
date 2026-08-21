@@ -2986,16 +2986,16 @@ fn diagnose_giant_old_string_bails_to_no_close_cheaply() {
     // Pins the I1 perf guard: a section line HIGHLY similar to an OVERSIZED
     // old_string. Without the OLD_STRING_CAP guard the fuzzy pass scores ~1.0
     // and classifies `visible_drift`; WITH the guard, an old_string longer than
-    // the cap short-circuits to `no_close` BEFORE the O(n²) pass. Deleting the
-    // guard flips this to `visible_drift` and fails the assert.
+    // the cap short-circuits to `old_string_too_large` BEFORE the O(n²) pass.
+    // Deleting the guard flips this to `visible_drift` and fails the assert.
     let body_line = "y".repeat(9000); // > OLD_STRING_CAP (8192)
     let section = format!("## H\n{body_line}\n");
     let old_string = format!("{}z", "y".repeat(8999)); // len 9000, ~0.9999 similar
     let e = diagnose_scoped_miss(&section, &old_string, "## H");
     assert_eq!(
         e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
-        Some("no_close"),
-        "oversized old_string must short-circuit to no_close before the fuzzy pass"
+        Some("old_string_too_large"),
+        "oversized old_string must short-circuit before the fuzzy pass"
     );
 }
 
@@ -3006,10 +3006,98 @@ fn diagnose_no_close_nudges_heading() {
     let e = diagnose_scoped_miss(section, "completely unrelated content xyz", "## State");
     assert_eq!(
         e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
-        Some("no_close")
+        Some("no_similar_match")
     );
     assert!(
         e.to_string().to_lowercase().contains("heading"),
         "wrong-heading nudge: {e}"
     );
+}
+#[test]
+fn diagnose_empty_old_string_gets_own_tier() {
+    use super::edit_markdown::diagnose_scoped_miss;
+    let section = "## State\n\n_Last refresh: `ddf8215`_\n";
+    let e = diagnose_scoped_miss(section, "", "## State");
+    assert_eq!(
+        e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+        Some("old_string_empty")
+    );
+    assert!(
+        e.to_string().to_lowercase().contains("empty"),
+        "must name the actual cause: {e}"
+    );
+}
+
+#[test]
+fn diagnose_section_too_many_lines_gets_own_tier() {
+    use super::edit_markdown::diagnose_scoped_miss;
+    let section = format!("## H\n{}", "line\n".repeat(401));
+    let e = diagnose_scoped_miss(&section, "line", "## H");
+    assert_eq!(
+        e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+        Some("section_too_many_lines")
+    );
+    assert!(
+        e.to_string().contains("400"),
+        "must name the actual cause: {e}"
+    );
+}
+
+#[test]
+fn diagnose_section_too_many_bytes_gets_own_tier() {
+    use super::edit_markdown::diagnose_scoped_miss;
+    // One line, well under the 400-line cap, but over the 64 KB byte cap.
+    let section = format!("## H\n{}\n", "y".repeat(70_000));
+    let e = diagnose_scoped_miss(&section, "needle", "## H");
+    assert_eq!(
+        e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+        Some("section_too_many_bytes")
+    );
+    assert!(
+        e.to_string().contains("64"),
+        "must name the actual cause: {e}"
+    );
+}
+
+#[test]
+fn diagnose_old_string_longer_than_section_gets_own_tier() {
+    use super::edit_markdown::diagnose_scoped_miss;
+    let section = "## H\none\ntwo\n";
+    let old_string = "one\ntwo\nthree\nfour\nfive\n";
+    let e = diagnose_scoped_miss(section, old_string, "## H");
+    assert_eq!(
+        e.extra.get("scoped_miss_tier").and_then(|v| v.as_str()),
+        Some("old_string_longer_than_section")
+    );
+    assert!(
+        e.to_string().to_lowercase().contains("more lines"),
+        "must name the actual cause: {e}"
+    );
+}
+
+#[test]
+fn diagnose_causes_produce_pairwise_distinguishable_messages() {
+    // The bug this pins: six bail-out causes collapsed into one identical message.
+    // Any two causes sharing a message text means the collapse crept back in.
+    use super::edit_markdown::diagnose_scoped_miss;
+    let long_section = format!("## H\n{}", "line\n".repeat(401));
+    let big_section = format!("## H\n{}\n", "y".repeat(70_000));
+    let small_section = "## H\none\ntwo\n";
+    let cases = [
+        diagnose_scoped_miss(small_section, "", "## H"),
+        diagnose_scoped_miss(small_section, &format!("{}z", "y".repeat(8199)), "## H"),
+        diagnose_scoped_miss(&long_section, "line", "## H"),
+        diagnose_scoped_miss(&big_section, "needle", "## H"),
+        diagnose_scoped_miss(small_section, "one\ntwo\nthree\nfour\nfive\n", "## H"),
+        diagnose_scoped_miss(small_section, "totally unrelated text", "## H"),
+    ];
+    let messages: Vec<String> = cases.iter().map(|e| e.to_string()).collect();
+    for i in 0..messages.len() {
+        for j in (i + 1)..messages.len() {
+            assert_ne!(
+                messages[i], messages[j],
+                "causes {i} and {j} produced the same message"
+            );
+        }
+    }
 }
