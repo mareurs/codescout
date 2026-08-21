@@ -12,7 +12,7 @@ topic: statement validity layers 1-2 — doctor checks, subagent review discipli
 entry_prefix:
 - F
 - W
-entry_high_water_W: 8
+entry_high_water_W: 9
 entry_high_water_F: 6
 ---
 
@@ -48,6 +48,7 @@ entry_high_water_F: 6
 | W-6 | 2026-08-21 | high | Scout the seam before consuming machinery a spec describes | Silent edge loss on prune, plus a materializer counting calls as rows | validated |
 | W-7 | 2026-08-21 | high | Measure the parameter before baking it into immutable data | A false collision worry shipped, and the cap set 10 chars past the knee | validated |
 | W-8 | 2026-08-21 | high | Reproduce before reading the fix plan — the plan may name the wrong mechanism | The expensive fix ships, takes an exposure recalibration, and the intra-ledger graph is still empty | validated |
+| W-9 | 2026-08-21 | high | Copy ALL of a sibling's mechanisms, and re-derive its constants against the new corpus | A 30-line cap transplanted onto wrapped ledger prose leaves 1074 of 1598 sections untouched, behind a green suite | validated |
 | W-5 | 2026-08-20 | med | Audit the surfaces that SERVE a concept, not the docs that describe it | Four checks ship saying "add one" without saying what one is, and the likeliest guesses are the shapes the parser refuses | validated |
 
 > Ids start at `F-2` / `W-3`, not `F-1` / `W-1`: the index rows were pre-filled before the
@@ -815,6 +816,57 @@ plan does not name (as opposed to correcting a detail within the named one). At 
 the CLAUDE.md rule's wording should widen from "the plan is a hypothesis about the
 reproduction" to name the enumeration failure specifically — the plan may be a hypothesis
 about the *wrong mechanism*, and its own completeness is the least testable thing in it.
+
+## W-9 — a copy inherits the sibling's NUMBER but not its UNIT — three mechanisms taken one at a time
+
+**Valid:** invariant
+
+**Rests on:** `statement-validity-session-log:W-3` — a copy inherits the sibling's discipline
+but not its tests, because those tests are named for the sibling. This entry is its
+measurement twin: a copy also inherits the sibling's *constants* without their *assumptions*.
+
+**Observed:** 2026-08-21, Layer 4's entry-grain context packer. The file-grain packer beside
+it has **three** mechanisms that jointly make its budget work:
+
+1. an anchor reserve (half the budget, so a long anchor cannot starve neighbours);
+2. a **30-line preview** on every node;
+3. a value-ordering (`tracker → augmented → plain`).
+
+**Got:** I copied **one** — the anchor reserve, with its comment and its bug-file citation
+intact — and shipped. Each omission surfaced separately, and each was invisible to the
+question *"is this consistent with its sibling?"*, which answers **yes**:
+
+- the missing preview meant neighbours packed at full section length; **26% of anchors were
+  short-served**, and `reconnaissance-patterns:R-3` served 3 of 25;
+- the missing ordering meant selection was lexicographic, so the two neighbours that survived
+  came from one ledger and the breadth that made R-3 load-bearing was invisible;
+- the reserve I *did* copy was itself untested here — disabling it left all 19 context tests
+  green (`W-3`'s exact shape, third instance this session).
+
+**The part worth keeping is what happened when I went to fix it.** The obvious repair is to
+copy mechanism 2 — the 30-line preview. Measured first, and it is **wrong on this corpus**:
+ledger entries run **40–200+ bytes per line** against artifact bodies' ordinary prose, so a
+30-line cap leaves **1074 of 1598 sections completely untouched**. One neighbour,
+`reconnaissance-patterns-archived-entries:R-77`, is **ten lines and 2810 bytes** — a line cap
+cannot see it at all.
+
+The sibling's `30` is correct *for lines of prose*. Transplanted to wrapped ledger entries it
+measures nothing. The cap shipped in **bytes** (1000), chosen by a sweep and validated by
+reading an actual excerpt. Full data: `context-performance:CTX-1`.
+
+**Counterfactual:** copying the preview verbatim would have produced a green suite, a
+plausible commit message citing the sibling, and a fix that improved fit for a third of the
+corpus while leaving two-thirds untouched — and nothing would have prompted anyone to check,
+because the number came from working code.
+
+**Status:** validated
+
+**Promote-when:** a third instance of a transplanted constant whose unit did not transfer
+(this is the second — the first was the `dated` horizon copied from `FRESHNESS_HORIZON_DEFAULT`,
+which `doctor.rs` documents as *"deliberately not the deleted"* one for the same reason). At
+three, add a line to `W-3`'s promoted text in `~/.claude/CLAUDE.md`: when copying a sibling's
+discipline, copy **all** its mechanisms, and re-derive every constant against the new corpus
+rather than the old one.
 
 ## Template for new entries
 

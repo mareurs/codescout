@@ -30,6 +30,18 @@ After `librarian(action="doctor", fix="mint_slugs", confirm=true)` and a re-scan
 appear. **7 artifacts corpus-wide were slugless at that moment**, including two bug files
 archived earlier the same day.
 
+**It reproduced on the act of filing it.** Immediately after `mint_slugs` took coverage to
+4112/4112, creating *this bug file* left exactly one slugless artifact in the catalog:
+
+```
+SELECT id, abs_path FROM artifact WHERE slug IS NULL;
+1b2cdba306f4 | docs/issues/2026-08-21-create-mints-no-slug-so-new-entries-never-reach-the-entry-graph.md
+```
+
+So the reproduction is one call: `artifact(action="create", …)` then query for a NULL slug.
+No scan, no comparison, no fixture needed — which is worth stating plainly, because the
+*Impact* section below is about how hard the consequence is to notice, and that made the
+**cause** look harder to catch than it is.
 ## Root cause
 
 `entry_cite` is keyed by slug on both sides — `src_slug TEXT NOT NULL REFERENCES
@@ -77,4 +89,3 @@ Two guards worth keeping whichever way it lands:
 
 Interim: run `librarian(action="doctor", fix="mint_slugs", confirm=true)` after creating any
 artifact whose entries are meant to be citable.
-

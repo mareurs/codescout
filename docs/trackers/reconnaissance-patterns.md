@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 107
+entry_high_water_R: 108
 entry_prefix: R
 ---
 
@@ -3454,6 +3454,61 @@ commit `7468902b` (the code the scout produced).
 **Rests on:** the reconnaissance skill's own principle that a claim about configuration
 reads as a fact rather than an assertion, and so slips past the reflex that would question
 a causal claim.
+
+## R-108 — a deferral justified by an AGGREGATE is silent about the tail — and the tail is the population the deferred mechanism governs
+
+**Valid:** invariant
+
+**Verdict:** miss — caught on the first live call after shipping, not by the measurement that
+authorised the deferral.
+
+**Observed:** 2026-08-21, codescout Layer 4 (`librarian(action="context")` entry-grain
+anchor). Neighbour **ordering** was deferred with an explicit, honest, *measured*
+justification, recorded in `context-performance:CTX-1`:
+
+> Neighbours sort by `(direction, reference)`, which is arbitrary. It mattered when only 2 of
+> 25 were served; **at 98% served it decides almost nothing.**
+
+The 98% was real — swept over 931 anchors. The deferral still failed immediately.
+
+**Pattern that failed:** ordering only *does* anything for the anchors whose neighbourhood
+**overflows the budget**. Those are, by definition, the population the mechanism governs — and
+they are exactly the ones the 98% figure excludes. The aggregate was computed over the
+anchors where the deferred mechanism is inert, then used to license deferring it for the
+anchors where it is not.
+
+It cost immediately and specifically. Alphabetical `direction` sorts
+`cited-by` < `cites` < **`mutual`**, so the class the packer had just been taught to label as
+the strongest tie sorted **last**. On the first live call, [[R-3]] served eleven one-way
+citations and dropped **both** its mutual partners — [[R-77]] and [[R-79]], which are its own
+documented chain.
+
+**Pattern proposal:** when a deferral rests on an aggregate, **name the sub-population the
+deferred mechanism actually acts on, and check the aggregate was computed over THAT.** The
+tell is a rationale of the form *"X decides almost nothing, because metric M is high"* where
+M is high precisely when X is dormant. Two cheap checks:
+
+- **Invert the statistic.** "98% fit" means "2% overflow" — is the deferred thing about the
+  98 or the 2? If the 2, the number argues the opposite of what it was quoted for.
+- **Run the mechanism once on a member of the governed sub-population** before accepting the
+  deferral. One live call would have shown zero `mutual` labels in the pack.
+
+**Cost absorbed:** one commit (`f58ab393`), no user-visible damage — the defect was found by
+verifying live rather than by trusting the local test suite, which was green throughout.
+
+**Kin:** [[R-95]] — *a deferral rationale is a claim, and the least-audited kind*. This is not
+a recurrence of it but a **distinct failure mode**, and worth separating: R-95's instances are
+rationales that were never costed (a site count nobody re-ran, a binary nobody looked past).
+Here the rationale **was** costed, with a real sweep, and the measurement was sound — its
+*denominator* was wrong. A reviewer applying R-95 would ask "did anyone check this number?",
+get a truthful yes, and stop.
+
+**Promote-when:** a second instance where a measured aggregate licenses deferring a mechanism
+that only acts outside that aggregate's population. At two, this belongs in the reconnaissance
+SKILL.md next to R-95's bullet, phrased as the inversion check.
+
+**Status:** open — 1/1 datapoint. Recorded now because the mechanism is precise and the
+cheap check ("invert the statistic") is one sentence.
 
 ## Template for new entries
 
