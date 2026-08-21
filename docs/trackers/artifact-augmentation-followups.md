@@ -64,12 +64,23 @@ Status legend: `open` / `in-progress` / `done` / `blocked` / `dropped`
 
 > **Added 2026-08-18.** No `T-N` heading ever existed in this body, so `link_scan` never bound any
 > of these 21 tokens to a definition here. They were still body text, though, and 8 of them
-> (`T-14`..`T-21`) resolved as CITATIONS into `tool-usage-patterns.md`'s real `T-14`..`T-21`
-> entries — a false edge, confirmed live via `include_links=true`, not a shared-namespace
-> conflict (this file never declared `entry_prefix: T`). Renamed `T` → `AA` in the same pass to
-> remove the leak and give these 21 tasks their own citable headings for the first time. Numbers
-> are unchanged — `T-7` is now `AA-7`. Mechanism and evidence:
-> `docs/issues/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md`.
+> (`T-N` for N = 14 through 21) resolved as CITATIONS into `tool-usage-patterns.md`'s real `T-N`
+> entries in that same range — a false edge, confirmed live via `include_links=true`, not a
+> shared-namespace conflict (this file never declared `entry_prefix: T`). Renamed `T` → `AA` in
+> the same pass to remove the leak and give these 21 tasks their own citable headings for the
+> first time. Numbers are unchanged — the row that read `T-N` (N=7) now reads `AA-7`. Mechanism
+> and evidence:
+> `docs/issues/archive/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md`.
+>
+> **2026-08-21 correction.** This note previously quoted the two boundary tokens of that range
+> literally (`T` + hyphen + the number fourteen, and `T` + hyphen + the number twenty-one) as
+> evidence. Those quoted tokens kept resolving as a live citation into `tool-usage-patterns.md`
+> even after the T→AA rename fixed the other 19 — the exact self-citing-documentation defect
+> `docs/issues/archive/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md`
+> describes, recursively applied to this bug's own fix note (and this correction is written to
+> avoid the mistake a second time — no digit sequence immediately follows a hyphenated capital
+> letter anywhere in this paragraph). Rewritten above to the non-matching placeholder form `T-N`
+> (no digits, so `link_scan`'s `\b[A-Z]{1,3}-\d+\b` extractor does not tokenize it).
 
 ### AA-1 — Merge `feat/artifact-augmentation` → `experiments`
 `phase 0` · **done** · Merged 2026-05-01 as `3765e1b`.
