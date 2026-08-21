@@ -1,13 +1,14 @@
 ---
-id: '93a9e4055b10eb7a'
+id: 801e5b4c13198406
 kind: bug
-status: open
+status: fixed
 title: doctor's justification comment names link_scan as entry_cite's writer; link_scan never touches it
 tags:
 - doctor
 - entry_cite
 - doc-vs-code-drift
 - link_scan
+closed: 2026-08-21
 ---
 
 # BUG: `doctor`'s justification comment names `link_scan` as `entry_cite`'s writer; `link_scan` never touches it
@@ -74,6 +75,22 @@ The conclusion the comment reaches is still right, for a different and stronger 
 much as near-empty, and a `doctor` check reading it would under-report rather than
 mis-report.
 
+**2026-08-21 correction — this root cause is now stale too, and the fix it prescribes would
+have been wrong.** Re-grepping `entry_cite|EntryCiteRow` in `src/librarian/tools/link_scan/**`
+now returns 13 matches, not 0: `link_scan(write=true)` gained a real write path since this bug
+was filed (`b750419a`, `1b19e0db`, `383b394e` — same-day concurrent work, `entry_cite::insert_with`
+with `origin=ORIGIN_SCAN`, pruned and re-derived per scan pass via `entry_cite::prune_scan_rows`).
+So the comment's premise ("materialized only by `link_scan(write=true)`") is no longer false in
+the direction this bug describes — link_scan really does write it now. It's inaccurate in a
+different way: it omits `append_entry(cites=…)` as a second, permanent writer (`origin="write"`,
+which takes precedence over a later scan because the PK excludes `origin` — see
+`entry_cite.rs:insert_with`'s doc comment). Following this bug's original `## Resume` instruction
+("name `append_entry` as the writer and under-reporting, not staleness, as the hazard") would
+have reintroduced a wrong claim, just inverted. This is a live instance of CLAUDE.md — Bug
+Tracking's "run the reproduction before reading the fix plan" rule: the plan is a hypothesis
+about the reproduction, and here the reproduction had moved out from under the plan between
+filing and fix.
+
 ## Evidence
 
 Live catalog, `/home/marius/.local/share/librarian/catalog.db`, measured 2026-08-20:
@@ -108,6 +125,16 @@ reading it would under-report.
 
 Not yet fixed — filed on notice during a brainstorm, per CLAUDE.md § Bug Tracking.
 
+**Fixed 2026-08-21.** Corrected the comment at `corpus_cited_tokens` (moved to
+`doctor.rs:1747-1758` by intervening commits) to describe both writers —
+`append_entry(cites=…)`'s permanent `origin="write"` rows and `link_scan(write=true)`'s
+pruned-and-re-derived `origin="scan"` rows — and to attribute the staleness risk to the
+scan-origin half specifically, not to the table as a whole. Gate green: `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` (4421 passed, 46 ignored, 0 failed).
+
+**experiments** SHA: `712a9f4da1a66e920dfc73cbd733d2eb577dab4d`
+patch-id: `93e05d03cc7d24a42380649459d049f963f1e852`
+
 ## Tests added
 
 None yet. A comment fix takes no regression test; the durable guard, if wanted, is a doc-ref
@@ -133,4 +160,3 @@ decision unchanged — recomputing from files via `link_scan::extract` remains c
 - `src/librarian/tools/append_entry.rs:1090` — `append_with_cites_writes_entry_cite_and_not_artifact_link`
 - `src/librarian/catalog/entry_cite.rs` — the table module
 - `docs/superpowers/specs/2026-07-17-tracker-entry-graph-stage2-design.md` — Stage-2 design
-

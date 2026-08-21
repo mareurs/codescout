@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 57
+entry_high_water_F: 58
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -107,6 +107,7 @@ entry_high_water_F: 57
 | F-55 | 2026-08-18 | med | codescout-tool | promoted-to-bug-tracker | `grep(glob=<abs path outside the project>)` returns `0 matches` instead of an error, and the warning blames hidden-path pruning — a cause it never checked, whose suggested fix cannot help. `path=` on the same file matches fine |
 | F-56 | 2026-08-18 | med | process | wontfix-false-alarm | Ran the pre-promotion gate from a clone under `/tmp` and got a **false red** — three librarian temp-write-guard tests invert there, and cargo's fail-fast then skipped 21 other test binaries, so the run was simultaneously falsely negative and silently incomplete |
 | F-57 | 2026-08-21 | med | process | mitigated | A concurrent Claude Code session's own commit swept up this session's uncommitted `resolver.rs`/`severity.rs` edits under an unrelated spec-work message — content verified intact, but no single clean commit exists to cite as the fix; same class as F-54 |
+| F-58 | 2026-08-21 | low | plan-prose | mitigated | A same-day concurrent commit made a bug's own prescribed fix wrong before I got to it — `link_scan` gained a real `entry_cite` write path mid-day, inverting the bug's root cause |
 
 ## Wins Index
 
@@ -4258,6 +4259,40 @@ repo or session.
 
 **Fix idea / Pointer:** None owed — the existing explicit-path-staging discipline is the
 correct standing mitigation and was already in effect. No new rule to promote.
+
+## F-58 — A same-day concurrent commit made a bug's own prescribed fix wrong before I got to it
+
+**Observed:** Bug `93a9e4055b10eb7a` (doctor.rs comment misnaming `entry_cite`'s writer) was
+filed 2026-08-20 with root cause "`link_scan` never writes `entry_cite`" (grep evidence: 0
+matches) and a `## Resume` instruction to rename `link_scan` to `append_entry` in the comment.
+Re-grepping before editing (per [[reconnaissance]]) found 13 matches for `entry_cite` in
+`link_scan/mod.rs`, including a real `entry_cite::insert_with(...origin=ORIGIN_SCAN)` call site.
+
+**When:** 2026-08-21, picking up the bug from the open queue during a multi-bug sweep.
+
+**Got:** Between the bug's filing and my session, a *different concurrent session* shipped
+`b750419a` / `1b19e0db` / `383b394e` — giving `link_scan(write=true)` a real `entry_cite`
+write path (origin=`scan`, pruned/re-derived per pass) that didn't exist when the bug was
+filed. The bug's own prescribed fix ("`link_scan` never touches it, say `append_entry` is
+the sole writer") would have been **newly wrong** if applied verbatim — `link_scan` now does
+write it, just not as the sole writer, and not without the staleness caveat the comment
+already made (now correctly, for the scan-origin rows specifically).
+
+**Probable cause:** Multiple concurrent sessions actively shipping in the same area
+(`entry_cite` / entry-graph machinery) during the same day. A bug's root-cause section is a
+claim about the substrate *at filing time*; nothing re-validates it before someone acts on it.
+
+**Severity:** low — caught before the wrong fix landed, cost one extra grep + read pass.
+
+**Workaround:** Re-run the bug's own reproduction grep before trusting its root cause or
+`## Resume` instructions, even for same-day bugs — "same day" is not "same commit."
+
+**Status:** mitigated — no tooling change, just re-confirms CLAUDE.md's "run the reproduction
+before reading the fix plan" rule holds even at same-day timescales when multiple sessions
+are concurrently shipping in the same subsystem. See [[F-57]] for the sibling concurrent-
+session hazard (commits landing under me) this session already hit twice.
+
+**Valid:** dated 2026-08-21
 
 ## Template for new entries
 

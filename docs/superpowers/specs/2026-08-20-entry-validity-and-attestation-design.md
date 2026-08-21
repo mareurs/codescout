@@ -118,7 +118,10 @@ every failure in §1 lives never take that path. `artifact_link` has 2789 rows b
 > every live row carries `origin='write'`. The decision the comment defends is correct;
 > its stated reason is false, and it is exactly the premise one needs to reason about
 > backfilling. Filed as
-> `docs/issues/2026-08-20-doctor-comment-misnames-entry-cite-writer.md`.
+> `docs/issues/2026-08-20-doctor-comment-misnames-entry-cite-writer.md` (archived, fixed 2026-08-21 —
+> by then `link_scan(write=true)` had gained a real write path to `entry_cite`, so the fix ended up
+> correcting the comment in the opposite direction from what this measurement would suggest; see the
+> archived bug file's 2026-08-21 correction note).
 
 ### 4. Verification is a first-class concept that has happened once
 
@@ -1532,7 +1535,7 @@ without erroring is the exact failure class this spec exists to detect.
   slugs, `<slug>:<local>` ids, `entry_cite`, write-time `cites`
 - `docs/trackers/capability-proposals.md` — CAP-5 (shipped), CAP-7 (shipped), CAP-8
   (the gram, proposed)
-- `docs/issues/2026-08-20-doctor-comment-misnames-entry-cite-writer.md` — the comment
+- `docs/issues/archive/2026-08-20-doctor-comment-misnames-entry-cite-writer.md` — the comment
   correction found while writing this
 - `src/librarian/freshness.rs` — the artifact-grain ancestor of Layer 5
 - `src/librarian/tools/link_scan/extract.rs`, `.../resolve.rs` — the backfill substrate
