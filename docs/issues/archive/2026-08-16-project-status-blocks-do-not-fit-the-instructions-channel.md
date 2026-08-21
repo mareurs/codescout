@@ -1,13 +1,14 @@
 ---
-id: fd54f2ae3cc7bdc8
+id: e3437bd1ec116dec
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: Kotlin warnings, the workspace table and Custom Instructions cannot fit the MCP instructions channel, so they never reach the model'
 tags:
 - prompt-surfaces
 - server_instructions
 - mcp-channel
 - progressive-disclosure
+closed: 2026-08-21
 opened: 2026-08-16
 owner: marius
 related:
@@ -176,6 +177,16 @@ segments. They remain this bug's standing reproduction for the part that is stil
 maintainer's: the interim fix is in, so nothing is silently lost and the common case now
 fits, but `KOTLIN_KNOWN_ISSUES` and an unbounded custom prompt still cannot arrive at any
 position.
+
+**2026-08-21: closed as `mitigated`, carrier decision deferred deliberately.** Verified
+`fit_dynamic_block` (`src/prompts/mod.rs:267-329`) is live and matches this file's
+description exactly — priority tiers, per-drop label, the pre-BL-37 fallback branch. Asked
+the maintainer whether to design a new carrier now; the answer was to leave the interim fix
+in place rather than rush an MCP-surface architecture decision (which channel? a resource?
+the first tool response? each has different client-support and freshness tradeoffs) at the
+tail of an unrelated bug-sweep session. The remaining decision is exactly as described
+above and nothing about it has changed — re-read this section, not just this correction,
+when picking it up.
 
 When a carrier is chosen: move `build_project_status_segments`' output to it, leave
 `build_server_instructions` static-only, and delete `fit_dynamic_block` and the

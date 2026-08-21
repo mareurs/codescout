@@ -423,7 +423,8 @@ All notable changes to codescout are documented here.
   to the wrong branch. The note names what it dropped rather than only announcing that
   something went. The two genuinely oversized blocks (Kotlin known issues, an unbounded
   custom prompt) still cannot fit at any position; see
-  `docs/issues/2026-08-16-project-status-blocks-do-not-fit-the-instructions-channel.md`.
+  `docs/issues/archive/2026-08-16-project-status-blocks-do-not-fit-the-instructions-channel.md`
+  (mitigated and archived 2026-08-21).
 
 - **`append_entry` asserted a heading level it never read, and reported one of its three
   derivation inputs.** The reservation hint told every ledger to write `## <id> — <title>`
