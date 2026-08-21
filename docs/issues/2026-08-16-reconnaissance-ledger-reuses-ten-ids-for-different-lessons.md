@@ -20,9 +20,9 @@ entries cite each other 57 times, and a citation like "kin R-57" now resolves to
 two different rules depending on which instance the reader lands on.
 
 This is the collision predicted in
-`docs/issues/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md`
-(BL-30), which argued that hand-allocated ids race when two sessions grep for the
-next free number. It is no longer a prediction.
+`docs/issues/archive/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md`
+(BL-30, mitigated and archived 2026-08-21), which argued that hand-allocated ids race when
+two sessions grep for the next free number. It is no longer a prediction.
 
 ## Symptom (Effect)
 
@@ -230,6 +230,6 @@ grammar and forbids suffixes.
 ## References
 
 - `docs/trackers/reconnaissance-patterns.md`
-- `docs/issues/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md` — BL-30, predicted this
+- `docs/issues/archive/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md` — BL-30, predicted this
 - `docs/trackers/archive-cadence-policy.md` § Ratified — 2026-08-16
 - `docs/TAXONOMY.md` — the seven hand-allocated id prefixes

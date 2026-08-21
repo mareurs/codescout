@@ -1,12 +1,17 @@
 ---
-status: open
+kind: bug
+status: mitigated
+tags:
+- friction
+- trackers
+- librarian
+- agent-ergonomics
+- id-allocation
+closed: 2026-08-21
 opened: 2026-08-16
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [friction, trackers, librarian, agent-ergonomics, id-allocation]
-kind: bug
+severity: medium
 ---
 
 # BUG: adding one tracker entry makes the agent hand-resolve the next id, the row format, and the snapshot — three jobs the tool should own
@@ -274,6 +279,24 @@ carries the revised proposal: invert the dependency and extract the allocator so
 both a params writer and a body writer depend on it, rather than adding an
 `append_section` sibling that would encode a storage distinction as an API one.
 This bug remains the friction evidence; CAP-5 is the design.
+
+**2026-08-21: option (2) shipped (`d073425d`).** `artifact(action="find")` result rows
+now carry `entry_collection` for augmented artifacts — the collection name, or `null`
+when augmented-but-no-collection (body-section workflow); the key is absent entirely on
+a non-augmented row. Batched via `augmentation::get_batch` (one query for the page, not
+N+1). A caller deciding which `append_entry` shape to use no longer needs a separate
+`get` probe per candidate tracker.
+
+**Status is `mitigated`, not `fixed`: option (3) is still undone.** Regenerating the
+rendered snapshot from `render_template` needs its own design pass for the
+render-region anchoring question (the bug's own Fix section already found that
+`open-issue-work-queue.md`'s actual heading has drifted from what its template emits,
+so render-and-splice-by-heading-match cannot work as-is). Tracked by the sibling
+`docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md`
+(currently `mitigated`, not archived — out of scope for this closure, left untouched).
+
+**experiments** SHA: `d073425dbb93e97099a5fcba301f4e6261cb5126`
+patch-id: `3720f2da7b75ee4d43e2aeff5242e18fb1c5a260`
 
 ## References
 
