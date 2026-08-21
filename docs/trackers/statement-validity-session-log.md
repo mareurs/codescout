@@ -13,7 +13,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_W: 10
-entry_high_water_F: 8
+entry_high_water_F: 9
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -1067,6 +1067,78 @@ correction: the exemption was real and is gone; its *magnitude* was never what I
 propagated to a consumer **inside the same artifact**. At two, add to the reconnaissance skill's
 Phase 3: when you correct a claim, grep the artifact for every other statement that rests on the
 same premise before you close — the document is the blast radius, not the paragraph.
+
+## F-9 — server_instructions has no room for the measured imperative, and the documented escape hatch does not apply
+
+**Valid:** dated 2026-08-21
+
+**Observed:** The attestation-register evals (prompt-engineering, rounds 3-5, n=10 per
+arm) specify a two-part fix: the verification FACT in the payload, and an unconditional
+IMPERATIVE in a trusted push channel. The payload half shipped in `7fd7a7cc` (patch-id
+`50b5d487`). The imperative half does not fit, and the gap is not close.
+
+**Got:** `build_server_instructions(None)` renders at **1687 chars** against a
+`STATIC_SLICE_CHAR_BUDGET` of 1900, which reads like 213 chars of headroom. It is not.
+The binding constraint is `CLIENT_INSTRUCTIONS_CHAR_LIMIT` (2048) minus
+`CHANNEL_SAFETY_MARGIN` (48), and whatever the static slice does not use is the budget
+`fit_dynamic_block` has for the whole `## Project Status` block. Adding **101 bytes**
+collapsed it: three tests lost the semantic-index line, the onboarding hint and the
+worktree banner, because the `Anchor`-priority segments alone then overflowed and the
+fallback line-cut kept only the first.
+
+Measured, not reasoned — each figure is a test run:
+
+| static slice | dynamic budget | result |
+|---|---|---|
+| 1687 chars (today) | 313 | all 67 prompt tests green |
+| +101 bytes (one sentence, one heading) | ~212 | 3 substantive failures |
+| +155 bytes (two short sentences) | ~158 | 7 substantive failures |
+| +200 bytes (the measured b2-shaped text) | ~113 | 8 substantive failures |
+
+**Why the documented escape hatch does not apply.** `STATIC_SLICE_CHAR_BUDGET`'s own doc
+comment says: *"If you need to add content, author a `get_guide(topic)` entry and
+reference it from the slice — do not raise this number."* That is right for reference
+material and wrong for this. `get_guide` is a PULL channel, and the finding being applied
+is specifically that the imperative has to be PUSHED into a channel the model trusts —
+round five measured the server-instructions position at 0/10 quarantined and 6/10 cited
+as authority, which is the property a guide reference does not have. Moving it to a guide
+would satisfy the budget rule by deleting the mechanism.
+
+**Also observed, and the reason to distrust hand edits here.** Two `edit_markdown` calls
+on `source.md` landed content in the WRONG SURFACE: `insert_after heading="## Deeper
+guidance"` placed the section past `<!-- @end -->` and inside `onboarding_prompt`, where
+it would have shipped to nobody as server instructions while polluting the onboarding
+prompt. A later edit silently deleted one blank line from `onboarding_prompt` — caught
+only because `prompt_surfaces_onboarding_snapshot` is byte-exact (19122 -> 19121). The
+section-replace guard that refuses to drop surface markers is what caught the first;
+nothing but the snapshot caught the second.
+
+**What is NOT owed.** The presence win — 0-4/10 to 10/10 — comes entirely from the
+payload half and is shipped. The imperative buys PROMINENCE (median first-flag offset
+0.775 -> 0.614 in the server channel, exact permutation p=0.0045 vs the no-imperative
+arm). That is a real effect with an intermediate point estimate and n=10, and trading the
+Project Status block for it is a bad trade: that block is what tells a session which
+project is active, which memories exist, and whether the index is built.
+
+**Options, none taken:**
+
+1. Ship nothing further. The measured big win is already in.
+2. Cut existing slice content to make room. Every line is load-bearing by its own
+   history — the `get_guide` pointer list is what
+   `docs/issues/archive/2026-08-15-server-instructions-truncated-before-reaching-the-model.md`
+   was about, and the Iron Laws are the gate text.
+3. Put the imperative in `build_system_prompt_draft()` instead — a third surface, written
+   at onboarding into `.codescout/`, surfaced back as `## Custom Instructions`. It is
+   user-authored after onboarding, so it is plausibly trusted, but that is an ASSUMPTION:
+   the evals measured CLAUDE.md and MCP server instructions, not this.
+4. Re-measure `CLIENT_INSTRUCTIONS_CHAR_LIMIT`. It was measured once, on one client build,
+   on 2026-08-16. If the real cliff has moved the arithmetic changes — but per R-89 that
+   is a probe to run, not a hope to budget against.
+
+**Status:** open
+
+**Promote-when:** a decision is taken between options 1-4, or a fourth surface with push
+semantics and free space appears.
 
 ## Template for new entries
 
