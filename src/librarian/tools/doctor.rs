@@ -1746,11 +1746,15 @@ fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBacked
 
 /// Every entry token cited anywhere in the catalog, computed fresh from the files.
 ///
-/// **Deliberately not `entry_cite`.** That table is materialized only by
-/// `link_scan(write=true)`, so a check reading it would report against whatever the last
-/// scan happened to leave behind — a stale-substrate diagnostic of exactly the kind
-/// `doctor` exists to catch. `link_scan::extract` is a pure function over a body, so the
-/// citations are recomputed here with nothing to go stale. It is the same door
+/// **Deliberately not `entry_cite`.** That table has two writers with different freshness
+/// guarantees. `append_entry(cites=…)` writes an `origin="write"` row permanently at
+/// entry-creation time — the primary key excludes `origin`, so a later scan can never
+/// overwrite it. `link_scan(write=true)` materializes `origin="scan"` rows instead, pruned
+/// and re-derived only for the slugs that pass actually scanned. A check reading the table
+/// would therefore report against a mix of always-current rows and whatever the last scan
+/// happened to leave behind for whichever artifacts it covered — a stale-substrate diagnostic
+/// of exactly the kind `doctor` exists to catch. `link_scan::extract` is a pure function over
+/// a body, so the citations are recomputed here with nothing to go stale. It is the same door
 /// [`crate::librarian::catalog::augmentation::body_defined_indices`] uses for the
 /// *definition* half, which is what keeps the two halves of this check agreeing about what
 /// a citation and a definition are.
