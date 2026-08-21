@@ -773,6 +773,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             deduped_main_ids = pairs.into_iter().map(|(main_id, _)| main_id).collect();
         }
 
+        // Batched, not per-row: a caller deciding "append_entry(entry_collection=…)
+        // (rows) or append_entry(anchor_heading=…) (body sections)" needs this fact
+        // without a separate `get` probe per candidate tracker.
+        // docs/issues/archive/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md
+        let row_ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+        let augmentation_by_id = augmentation::get_batch(&cat, &row_ids)?;
+
         let items: Vec<Value> = rows
             .into_iter()
             .map(|r| {
@@ -786,6 +793,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 });
                 if overlay_ids.contains(&r.id) {
                     item["overlay"] = json!(true);
+                }
+                if let Some(aug) = augmentation_by_id.get(&r.id) {
+                    item["entry_collection"] = json!(aug.entry_collection);
                 }
                 item
             })
@@ -1598,6 +1608,74 @@ mod tests {
         let items = result["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "aug");
+    }
+    #[tokio::test]
+    async fn result_rows_surface_entry_collection_for_augmented_artifacts() {
+        // The bug this pins: nothing in a `find` result says whether a tracker takes
+        // append_entry(entry_collection=...) (rows) or append_entry(anchor_heading=...)
+        // (body sections), so a caller has to probe with a separate `get` first.
+        use crate::librarian::catalog::augmentation::{self, AugmentationRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("plain", "Plain")).unwrap();
+        artifact::upsert(&cat, &sample_row("rows", "Row-collection tracker")).unwrap();
+        artifact::upsert(&cat, &sample_row("prose", "Body-section tracker")).unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "rows".to_string(),
+                prompt: "p".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: Some("findings".to_string()),
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "prose".to_string(),
+                prompt: "p".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: None,
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+        let result = call(&ctx, json!({})).await.unwrap();
+        let items = result["items"].as_array().unwrap();
+        let by_id = |id: &str| items.iter().find(|it| it["id"] == id).unwrap();
+
+        assert_eq!(
+            by_id("rows")["entry_collection"],
+            json!("findings"),
+            "{items:?}"
+        );
+        assert_eq!(
+            by_id("prose")["entry_collection"],
+            json!(null),
+            "augmented with no collection must still report the key, as null: {items:?}"
+        );
+        assert!(
+            by_id("plain").get("entry_collection").is_none(),
+            "a non-augmented row must not carry the key at all: {items:?}"
+        );
     }
 
     #[tokio::test]
