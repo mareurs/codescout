@@ -870,8 +870,10 @@ authoritative instead of derived.
   dangling. The gram fixes the ambiguous share; it does **not** fix dangling (missing
   headings), and `doctor` says that population is already largely migrated.
 - **Caveat on the two figures above, added 2026-08-19.** They are **upper bounds**.
-  `docs/issues/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md`
-  records that `link_scan` has no "mention" mode: a token written to *teach* the syntax is
+  `docs/issues/archive/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md`
+  (mitigated 2026-08-21 with a per-source breakdown in `link_scan`'s own report; the caveat
+  below is unaffected since extraction itself is unchanged) records that `link_scan` has no
+  "mention" mode: a token written to *teach* the syntax is
   extracted identically to one written to *cite*. Every document explaining how citations
   work therefore injects its own examples into the graph — and those land preferentially in
   the **ambiguous** and **dangling** buckets, because a teaching example usually has many

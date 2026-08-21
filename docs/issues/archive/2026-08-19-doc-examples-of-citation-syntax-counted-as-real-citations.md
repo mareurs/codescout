@@ -1,14 +1,14 @@
 ---
-id: '6e2cafbb1dea1678'
+id: 95ba3264eeb92117
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: documentation examples of citation syntax are indistinguishable from citations, inflating link_scan''s diagnostic counts'
 tags:
 - librarian
 - link-scan
 - citations
 - diagnostics
-closed: ''
+closed: 2026-08-21
 opened: 2026-08-19
 owner: marius
 related:
@@ -126,6 +126,26 @@ Ordered by cost, none yet chosen:
 
 Option 3 is the one that addresses the stated defect; 2 is the one authors will ask for.
 
+**Mitigated 2026-08-21 (Option 3, attribute-and-subtract).** `librarian(action="link_scan")`
+now reports `ambiguous_by_source` / `dangling_by_source` / `cross_repo_by_source` — an
+uncapped per-source count map alongside the existing (`FINDINGS_CAP`-capped) finding
+arrays. A triager reads the map, recognizes which keys are guides/conventions docs
+explaining citation syntax, and discounts those before trusting the raw total in
+`counts`. Extraction itself is unchanged — this does not stop a teaching example from
+being extracted, it makes the resulting count interpretable, which was the actual stated
+defect ("not the count, but that the count cannot be interpreted").
+
+**Status is `mitigated`, not `fixed`, because the second consumer named in § *A second
+consumer* is untouched.** `doctor`'s `entry_without_definition` check calls
+`corpus_cited_tokens`, which calls the same `link_scan::extract` and inherits the same
+teaching-example-looks-like-a-citation defect for its cited/uncited partition — and that
+partition has no per-source breakdown today, because it was out of scope for this fix
+(the chosen option targeted link_scan's own report, not doctor's separate classifier).
+Filed as a follow-up: see References.
+
+**experiments** SHA: `d078a5516479e2fc7305b56553286e8ddf99edc2`
+patch-id: `a06bd14ac3459ffa0d5d5c86d5061935443ec1ce`
+
 ## Note on this file
 
 Written deliberately without emitting a matchable token — every example above is spelled
@@ -138,3 +158,4 @@ advertisement for the finding.
 - `src/librarian/tools/link_scan/extract.rs` — the extractor
 - `get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified*
 - `docs/issues/archive/2026-08-18-qualified-citation-silently-truncated-when-file-stem-exceeds-31-chars.md` — where this was noticed
+- `docs/issues/2026-08-21-doctor-cited-uncited-partition-inherits-doc-example-defect.md` — the follow-up covering the still-unaddressed `doctor` consumer
