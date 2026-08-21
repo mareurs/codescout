@@ -255,12 +255,91 @@ line range, and the server created the handle.
 >   content hash**, so one handle string can name two artifacts with identical bodies.
 >   Join session-scoped and recency-ordered, never on the handle string alone.
 >
-> B is weaker on **grain**, and that is the part to settle before choosing: a
-> `json_path` of `$.body` selects the whole body and attributes to no entry, while a
-> line range into a `$.body`-derived handle is body-relative and *is* attributable — by
-> re-parsing the artifact's headings, which drifts as the body is edited. A carries the
-> grain natively. The likely answer is B for the metric and A for new precision, but
-> that is a hypothesis, not the decision.
+> **Settled by measurement, 2026-08-21 — and the answer is neither.** The grain question
+> turned out to be decidable from `usage.db` without building either route. Walking the
+> whole chain, same-session-scoped:
+>
+> | | reads | artifacts |
+> |---|---:|---:|
+> | hop 1 — `read_file` on an artifact's `@tool_` handle | 228 | 48 |
+> | … `json_path = $.body` — whole body, **no grain** | 81 | 42 |
+> | … a bare line range on the JSON response | 7 | 6 |
+> | … everything else (`$.entries[*]`, `$.augmentation.*`, `$.preview.*`) | 140 | — |
+> | hop 1 reads that themselves minted a `@file_` handle | 44 | — |
+> | hop 2 — reads of those `@file_` handles | 42 | 21 |
+> | … carrying a line range — **the entry-grain population** | **38** | ≤21 |
+>
+> So the leak Layer 5a exists to close is **38 reads**. Set it against the path that
+> already attributes exactly — `artifact(get, heading=…)`: 273 calls (plus 106 using the
+> `headings` array), 240 distinct `(artifact, heading)` pairs, **267** distinct
+> `(artifact, heading, session)` triples, of which **57** name a heading carrying an
+> entry token rather than a navigation heading like `## Index`. Closing the leak moves
+> the entry-grain read population from 267 to roughly 305, and the per-entry maximum is
+> **6 distinct sessions** either way.
+>
+> **The "about half never touched the instrument" claim above was true in a different
+> unit than the metric consumes.** It counted *artifact*-grain traffic on one ledger — 53
+> instrumented `artifact(get)` against 54 direct `read_markdown`. At *entry* grain the
+> leak is 38 against 267. That is `statement-validity-session-log:W-9` recurring one
+> level up: a number measured in one unit and consumed in another.
+>
+> **Consequence.** `max(reads, in-degree)` would pair a term that maxes at 6 with one
+> already materialized at 1534 rows. Layer 5a changes no gate outcome, so it is
+> **descoped rather than built** — see the Sequencing table.
+>
+> **What the same measurement did find.** At *artifact* grain the leaked signal is real
+> and recoverable today with no code change at all: 228 reads over 48 artifacts, peak
+> **26 distinct sessions** on a single artifact, against a maximum of 6 for any single
+> `(artifact, heading)`. The join is sound — of 253 artifact-minted handles only **2**
+> recur across sessions, and session-scoping recovers 243 of 246 traces. If exposure
+> wants a read term now, artifact grain is the one that has data. §6 never considered it,
+> because it assumed entry grain was free.
+>
+> **The era objection, raised and tested.** An all-time count is a weak instrument here:
+> the tracker tooling that would *generate* entry-grain reads is recent, so a historical
+> total could be measuring an era rather than a mechanism. Re-cut by era — a 30-hour
+> window, the 30 hours before it, and everything older (≈16 days) — the corpus answers:
+>
+> | per window | last 30h | 30–60h | older (≈16d) |
+> |---|---:|---:|---:|
+> | all tool calls | 5210 | 4931 | 23550 |
+> | `artifact` calls | 238 | 342 | 2343 |
+> | `get(heading=…)` | 16 | 42 | 215 |
+> | … naming an entry token | 7 | 15 | 38 |
+> | `append_entry` | 22 | 25 | 90 |
+> | `get(entry_filter=…)` | 1 | 5 | 74 |
+> | **leaked entry-grain reads** | **4** | **4** | **30** |
+> | `context(anchor_id = <entry>)` | **4** | 0 | 0 |
+>
+> Three readings, and the third is the one that settles it.
+>
+> 1. **The leak is ~4 reads per 30 hours in every era.** The descope does not rest on an
+>    all-time total that a shifting distribution could invalidate; the recent window says
+>    the same thing. Four reads is not a trend in either direction — it is noise, and it
+>    is named as noise rather than read as one.
+> 2. **The distribution IS shifting, toward writes rather than grain-reads.**
+>    `append_entry` as a share of `artifact` calls: 3.8% → 7.3% → **9.2%**.
+>    `get(heading=…)`: 9.2% → 12.3% → **6.7%**. `entry_filter`: 3.2% → 1.5% → **0.4%**.
+>    Tracker work grew; it grew on the writing side.
+> 3. **Layer 4 made the growth path pre-attributed, which retires 5a rather than
+>    deferring it.** All five `anchor_id` calls ever recorded are in the table above, and
+>    the four recent ones are `reconnaissance-patterns:R-3` from two sessions inside 26
+>    hours — the feature's own smoke tests, by its author, against the one anchor
+>    `context-performance:CTX-1` flags as far-tail. So organic entry-grain reading has
+>    **not started**, and the last-30h window cannot test whether it will. But the path it
+>    will arrive on names the entry **in the call input** (`<slug>:<local>`): no buffer
+>    provenance, no nearest-preceding-heading attribution, no `usage.db` join. 5a's whole
+>    premise was that entry-grain reads arrive through leaky paths. Layer 4 built a
+>    non-leaky one and made it the ergonomic one.
+>
+> **Revisit on an event, not on a date.** "Re-run this in a while" is the deferral shape
+> `reconnaissance-patterns:R-95` warns about — nobody re-runs it, because its function is
+> to stop anyone looking. The condition that would actually reopen 5a: anchored `context`
+> calls exceeding ~20 in a 30-hour window across more than three distinct anchors, from
+> sessions that are not verifying Layer 4 itself. If that ever fires and those reads are
+> *still* landing on `read_file` handles rather than on `anchor_id`, the leak is real and
+> route B earns its cost. Until then it is a fix for traffic that does not exist, aimed at
+> a path the traffic has been given a reason not to use.
  A `grep` match carries a path and a line number. Both resolve to an entry
 by nearest-preceding-heading — the identical attribution Layer 3 needs for citations.
 **One algorithm, three consumers**, no extra tool call and no extra context. This is why
@@ -1033,8 +1112,8 @@ verification.
 | 3b | `origin='scan'` entry-grain materializer | 3a | **SHIPPED 2026-08-21** — 322 edges; see below |
 | 3c | `rel='rests-on'` edges | 3b + declarations | **not building** — re-measured 2026-08-21: 1 resolvable declaration corpus-wide, and its edge already exists as `cites`. Revisit if resolvable declarations reach ~20 |
 | 4 | Entry-grain `context` anchor | 3 | **SHIPPED 2026-08-21** — two-pass packing; see below |
-| 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | designed, not scheduled |
-| 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4, 5a | designed, not scheduled |
+| 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | **RETIRED 2026-08-21** — the leak is ~4 entry-grain reads per 30h in every era, and Layer 4's `context(anchor_id=<slug>:<local>)` names the entry in the call input, so the growth path arrives pre-attributed. Reopen only on the event trigger in §6 |
+| 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4 | designed, not scheduled — **no longer blocked on 5a** |
 
 **Layer 0 is new and it gates three others.** The nearest-preceding-heading heuristic
 feeds citation edges, buffer-read attribution and grep-read attribution, and the

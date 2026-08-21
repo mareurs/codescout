@@ -12,7 +12,7 @@ topic: statement validity layers 1-2 — doctor checks, subagent review discipli
 entry_prefix:
 - F
 - W
-entry_high_water_W: 9
+entry_high_water_W: 10
 entry_high_water_F: 7
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_F: 7
 | W-7 | 2026-08-21 | high | Measure the parameter before baking it into immutable data | A false collision worry shipped, and the cap set 10 chars past the knee | validated |
 | W-8 | 2026-08-21 | high | Reproduce before reading the fix plan — the plan may name the wrong mechanism | The expensive fix ships, takes an exposure recalibration, and the intra-ledger graph is still empty | validated |
 | W-9 | 2026-08-21 | high | Copy ALL of a sibling's mechanisms, and re-derive its constants against the new corpus | A 30-line cap transplanted onto wrapped ledger prose leaves 1074 of 1598 sections untouched, behind a green suite | validated |
+| W-10 | 2026-08-21 | high | Test the caveat you wrote into your own conclusion — a limitation you can price is a task | Layer 5a sits open forever on "revisit when the era changes", watching a trigger that cannot fire | validated |
 | W-5 | 2026-08-20 | med | Audit the surfaces that SERVE a concept, not the docs that describe it | Four checks ship saying "add one" without saying what one is, and the likeliest guesses are the shapes the parser refuses | validated |
 
 > Ids start at `F-2` / `W-3`, not `F-1` / `W-1`: the index rows were pre-filled before the
@@ -921,6 +922,64 @@ internals surviving into a sequencing decision unread. At two, the reconnaissanc
 *"a proposed fix is a claim about CURRENT STATE"* bullet should widen to name this sibling:
 a claim that our own system **already knows** something is the same class of unverified
 assertion, and is less audited than the others precisely because it sounds like recall.
+
+## W-10 — A caveat you write into your own conclusion is an untested hypothesis — and testing it retired the layer instead of deferring it
+
+**Valid:** invariant
+
+**Rests on:** `reconnaissance-patterns:R-95` — a deferral rationale is a claim, and the
+least-audited kind. This is its self-authored form, and `statement-validity-session-log:R-108`'s
+timeline twin: there the aggregate was silent about the tail of a *distribution*, here about
+the tail of a *timeline*.
+
+**Observed:** 2026-08-21, deciding Layer 5a. I measured the read leak all-time, concluded
+*descope*, and then wrote my own caveat into the conclusion: *"this is a historical count over
+an era in which entry-grain reading was not yet the normal access pattern — a small number here
+is evidence about the era, not the mechanism."* Then I stopped, and offered the conclusion with
+the hedge attached. The user did not accept the hedge: *"this measurement is also tricky since we
+added a lot of new work around trackers so the tool distribution will change slowly. lets look at
+the last 24-30h."*
+
+**Got:** four queries. Re-cut into a 30-hour window, the 30 hours before it, and everything older
+(≈16 days):
+
+- **The leak number did not move.** Leaked entry-grain reads per window: **4 / 4 / 30** — about
+  four per 30 hours in *every* era. So the hedge was wrong about the conclusion; the descope never
+  rested on an era-contaminated total.
+- **The distribution genuinely is shifting, and in the other direction.** `append_entry` as a share
+  of `artifact` calls went 3.8% → 7.3% → **9.2%**, while `get(heading=…)` went 9.2% → 12.3% →
+  **6.7%**. Tracker work grew on the *writing* side. The user's premise was right and its
+  consequence was the opposite of the one it was raised to support.
+- **And the era cut surfaced four rows the aggregate could never have shown.** Every
+  `librarian(context, anchor_id=…)` call ever recorded is five rows; four are in the last 30 hours,
+  all `reconnaissance-patterns:R-3`, from two sessions — Layer 4's own smoke tests, by its author.
+  Four calls out of **33,691**. No all-time statistic surfaces a four-row population.
+
+**Why that fourth bullet is the whole entry.** Those four rows say organic entry-grain reading has
+not started — but also that the path it will arrive on names the entry **in the call input**
+(`<slug>:<local>`), needing no buffer provenance, no nearest-preceding-heading attribution, no
+`usage.db` join. 5a exists on the premise that entry-grain reads arrive through leaky paths.
+Layer 4 built a non-leaky one and made it the ergonomic one. The layer is **retired**, not
+deferred — a strictly stronger verdict than the one the objection was challenging.
+
+**Why the hedge survived: it is self-certifying.** Writing *"this may be measuring the era"* feels
+like rigour — it is the sentence a careful person writes — so it discharges the discomfort that
+would otherwise prompt the check. An inherited deferral at least looks like someone else's
+unexamined claim. A caveat in your own conclusion looks like evidence you examined it. The tell is
+grammatical: a caveat that names a **cheap, specific** alternative cut (`by era`, `by session`,
+`by path`) and does not run it is a to-do wearing the costume of a limitation.
+
+**Counterfactual:** the hedge would have shipped as a live deferral with a false rationale —
+"revisit when the era changes" — and the era-change trigger would never have fired, because the
+thing that changed was `append_entry`, which the trigger does not watch. 5a would have sat open
+indefinitely on a premise that Layer 4 had already invalidated the day before.
+
+**Status:** validated
+
+**Promote-when:** a second instance of a self-authored caveat that was cheap to test and changed
+the verdict when tested. At two, add to CLAUDE.md's Measurement rule a fifth clause: *before
+publishing a number with a caveat, ask whether the caveat names a cut you could run in the next
+five minutes — if it does, run it; a limitation you can price is a task, not a limitation.*
 
 ## Template for new entries
 
