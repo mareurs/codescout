@@ -228,6 +228,28 @@ pub struct CodeScoutServer {
     /// `docs/trackers/codescout-usage-frictions.md` and the bug file at
     /// `docs/issues/archive/2026-05-28-path-annotation-spam.md`.
     path_note_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
+    /// Tracks whether the `## Project Status (details)` block has been emitted since the
+    /// last activation **or compaction**.
+    ///
+    /// Same novelty-gate shape as `path_note_emitted_since_activation`, and deliberately a
+    /// SEPARATE flag with a WIDER reset, because the two carry facts with different
+    /// lifetimes. The path note is redundant once the persistent surface names the root
+    /// (see that field's comment). This block is not redundant with anything: it holds the
+    /// `Substitutable` segments — languages, memories, index state, workspace topology,
+    /// Kotlin known issues — which used to live in `server_instructions` and moved here
+    /// because that channel is 2048 characters and they were the first thing dropped.
+    ///
+    /// It is conversation content, so `/compact` discards it. That is the whole reason the
+    /// reset also fires on `workspace(post_compact=true)`: without the compaction re-arm,
+    /// one `/compact` removes the block for the rest of the session and nothing brings it
+    /// back. `guide_hints_emitted` re-arms on the same signal for the same reason
+    /// (`src/tools/config/mod.rs`, `post_compact_rearms_guide_hints`).
+    ///
+    /// A client that never sends `post_compact` degrades to losing the block after its
+    /// first compaction — recoverable, and recoverable by exactly the route that makes
+    /// these segments `Substitutable` in the first place (`memory(action="list")`,
+    /// `index(action="status")`, `workspace(action="status")`).
+    status_block_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
     /// Tokio-clock instant of the most recent `call_tool`, watched by the optional
     /// idle-shutdown watchdog in `run()`.
     ///
@@ -452,6 +474,9 @@ impl CodeScoutServer {
             last_broadcast_caps: Arc::new(parking_lot::Mutex::new(None)),
             resources,
             path_note_emitted_since_activation: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            status_block_emitted_since_activation: Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            )),
             last_activity: Arc::new(parking_lot::Mutex::new(tokio::time::Instant::now())),
         }
     }
@@ -736,6 +761,28 @@ impl CodeScoutServer {
             call_result.content.push(Content::text(format!(
                 "\n[codescout] paths are relative to {root}"
             )));
+        }
+
+        // The `Substitutable` half of `## Project Status`, which the 2048-char instructions
+        // channel could not carry — on a Kotlin project with custom instructions several of
+        // these segments never arrived at all. Here they arrive whole: no fitting, no
+        // `MAX_MEMORY_NAMES` truncation by the carrier, no trim note.
+        //
+        // Status is fetched only when the gate is open, so the ordinary path costs one
+        // relaxed atomic load and nothing else. The gate is claimed AFTER the block is
+        // known to be non-empty, mirroring the root check above: consuming it to emit
+        // nothing would silently spend the one chance this session had.
+        if !self
+            .status_block_emitted_since_activation
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            if let Some(status) = self.agent.project_status().await {
+                if let Some(block) = crate::prompts::build_status_response_block(&status) {
+                    self.status_block_emitted_since_activation
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    call_result.content.push(Content::text(block));
+                }
+            }
         }
         call_result
     }
@@ -1082,10 +1129,28 @@ impl CodeScoutServer {
         // `input_for_record` rather than `req.arguments` because the latter
         // was already moved into `input` above; `input_for_record` is the
         // untouched clone `record_content` only borrowed.
-        if req.name == "workspace"
-            && input_for_record.get("action").and_then(|v| v.as_str()) == Some("activate")
-        {
+        let is_activate = req.name == "workspace"
+            && input_for_record.get("action").and_then(|v| v.as_str()) == Some("activate");
+        if is_activate {
             self.path_note_emitted_since_activation
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        // The status block re-arms on activation AND on compaction. Matched on request
+        // shape here rather than in `ProjectStatus::call`'s `post_compact` arm for a
+        // mechanical reason: the flag lives on `CodeScoutServer` and that handler has only
+        // `ToolContext`, which is why the activate reset is already here.
+        //
+        // `post_compact` is read WITHOUT requiring `action` to be absent — passing it with
+        // no action infers `action="status"` (`src/tools/config/mod.rs`), so a match that
+        // demanded a missing action would silently never fire on the common call.
+        let is_post_compact = req.name == "workspace"
+            && input_for_record
+                .get("post_compact")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+        if is_activate || is_post_compact {
+            self.status_block_emitted_since_activation
                 .store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
@@ -3658,6 +3723,184 @@ mod tests {
         assert!(
             !dir_b.path().join("docs/trackers/a.md").exists(),
             "artifact must NOT be created in the session-default workspace B"
+        );
+    }
+
+    /// The `Substitutable` half of `## Project Status` rides the first eligible response.
+    ///
+    /// These segments used to live in `server_instructions`, where the 2048-char ceiling
+    /// dropped them first — on a Kotlin project with custom instructions, several never
+    /// arrived at all. The response channel has no ceiling, so they arrive whole.
+    #[tokio::test]
+    async fn the_status_block_rides_the_first_eligible_response_then_stays_quiet() {
+        let (_dir, server) = make_server().await;
+        let payload = || CallToolResult::success(vec![Content::text("{}")]);
+        let joined = |r: &CallToolResult| -> String {
+            r.content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let first = server.post_process(payload(), "read_file", None).await;
+        let text = joined(&first);
+        assert!(
+            text.contains("## Project Status (details)"),
+            "the first eligible response must carry the substitutable block, got:\n{text}"
+        );
+        assert!(
+            text.contains("Semantic index:"),
+            "and it must carry the segments themselves, not just a heading:\n{text}"
+        );
+
+        // Its own heading, deliberately not a second `## Project Status`: the persistent
+        // half is fixed at activation while this one is re-rendered per emission, so two
+        // blocks under one title would read as a contradiction the moment they disagree.
+        assert!(
+            !text.contains("**Active project:**"),
+            "anchors stay in the persistent channel; duplicating them here spends the \
+             budget the split exists to free:\n{text}"
+        );
+
+        for tool_name in ["read_file", "tree", "symbols", "grep"] {
+            let again = server.post_process(payload(), tool_name, None).await;
+            assert!(
+                !joined(&again).contains("## Project Status (details)"),
+                "tool '{tool_name}' must not re-emit it inside one activation window"
+            );
+        }
+    }
+
+    /// **Compaction re-arms it, and the re-armed block rides the compaction call's own
+    /// response.** This is the test the whole carrier decision turns on.
+    ///
+    /// The block is conversation content, which is exactly what `/compact` discards —
+    /// unlike `server_instructions`, which rides the system prompt and is re-sent on every
+    /// request. Without this re-arm, one compaction removes the block for the rest of the
+    /// session and nothing brings it back: strictly worse than the channel it moved off.
+    /// `guide_hints_emitted` re-arms on the same signal for the same reason
+    /// (`post_compact_rearms_guide_hints`); this makes the two agree.
+    ///
+    /// The re-delivery is IMMEDIATE, not deferred to the next call, and that falls out of
+    /// where the reset sits: `call_tool_inner` resets the flag just before invoking
+    /// `post_process` on that same call, so the `workspace(post_compact=true)` response is
+    /// itself the first eligible response of the new window. Same ordering the
+    /// `path_note_emitted_since_activation` comment describes for `activate` — where it was
+    /// a bug to reset later, here it is exactly what you want: the agent that just told the
+    /// server it compacted gets the block back in the reply.
+    #[tokio::test]
+    async fn a_compaction_rearms_the_status_block() {
+        let (_dir, server) = make_server().await;
+        let payload = || CallToolResult::success(vec![Content::text("{}")]);
+        let has_block = |r: &CallToolResult| -> bool {
+            r.content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .any(|t| t.contains("## Project Status (details)"))
+        };
+
+        assert!(has_block(
+            &server.post_process(payload(), "read_file", None).await
+        ));
+        assert!(!has_block(
+            &server.post_process(payload(), "read_file", None).await
+        ));
+
+        // The compaction signal, sent the way the companion hook sends it: `post_compact`
+        // with no `action`, which infers `action="status"`. A reset keyed on a MISSING
+        // action would never fire on this, the common call.
+        let req = CallToolRequestParams::new("workspace").with_arguments(
+            serde_json::from_value(serde_json::json!({"post_compact": true})).unwrap(),
+        );
+        let compaction_response = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+
+        assert!(
+            has_block(&compaction_response),
+            "post_compact must re-arm the block AND carry it in its own response — \
+             compaction summarized it out of context and nothing else re-delivers it"
+        );
+        assert!(
+            !has_block(&server.post_process(payload(), "read_file", None).await),
+            "and the gate is then consumed again, so the block does not repeat on every \
+             call for the rest of the window"
+        );
+    }
+
+    /// Both shapes of the compaction signal re-arm it.
+    ///
+    /// Written from an observed surviving mutation, not from a coverage argument. Adding
+    /// `action.is_none()` to the reset condition — the exact trap the code comment warns
+    /// about — left `a_compaction_rearms_the_status_block` green, because that test's
+    /// fixture sends `post_compact` with no action and the extra clause is invisible to it.
+    /// A comment describing a hazard is not a test for it.
+    ///
+    /// Both shapes are real: the companion hook sends `{post_compact: true}` bare, and
+    /// `post_compact_rearms_guide_hints` — the sibling this mechanism is modelled on —
+    /// sends `{action: "status", post_compact: true}`. The tool accepts either, inferring
+    /// `action="status"` when absent, so a reset that handles only one silently drops the
+    /// re-arm for half of its callers.
+    #[tokio::test]
+    async fn both_shapes_of_the_compaction_signal_rearm_the_status_block() {
+        let has_block = |r: &CallToolResult| -> bool {
+            r.content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .any(|t| t.contains("## Project Status (details)"))
+        };
+
+        for args in [
+            serde_json::json!({"post_compact": true}),
+            serde_json::json!({"action": "status", "post_compact": true}),
+        ] {
+            let (_dir, server) = make_server().await;
+            let payload = || CallToolResult::success(vec![Content::text("{}")]);
+
+            // Consume the gate.
+            let _ = server.post_process(payload(), "read_file", None).await;
+            assert!(!has_block(
+                &server.post_process(payload(), "read_file", None).await
+            ));
+
+            let req = CallToolRequestParams::new("workspace")
+                .with_arguments(serde_json::from_value(args.clone()).unwrap());
+            let response = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+
+            assert!(
+                has_block(&response),
+                "compaction signalled as {args} must re-arm the status block"
+            );
+        }
+    }
+
+    /// `run_command` returns before the gate is consulted, so raw shell output stays
+    /// verbatim — and, critically, the gate is NOT consumed. A `run_command` first call
+    /// must not cost the session its one status block; the next eligible tool gets it.
+    #[tokio::test]
+    async fn run_command_neither_carries_the_status_block_nor_consumes_the_gate() {
+        let (_dir, server) = make_server().await;
+        let payload = || CallToolResult::success(vec![Content::text("{}")]);
+        let has_block = |r: &CallToolResult| -> bool {
+            r.content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .any(|t| t.contains("## Project Status (details)"))
+        };
+
+        assert!(
+            !has_block(&server.post_process(payload(), "run_command", None).await),
+            "raw shell output must stay verbatim"
+        );
+        assert!(
+            has_block(&server.post_process(payload(), "read_file", None).await),
+            "and the gate must survive it — otherwise an agent whose first call is \
+             run_command silently loses the block for the whole session"
         );
     }
 

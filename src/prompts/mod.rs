@@ -55,7 +55,11 @@ pub fn build_server_instructions(project_status: Option<&ProjectStatus>) -> Stri
     let mut instructions = SERVER_INSTRUCTIONS.to_string();
 
     if let Some(status) = project_status {
-        let segments = build_project_status_segments(status);
+        // Persistent tiers only. The `Substitutable` segments now ride the first tool
+        // response (`build_status_response_block`), which has no character ceiling —
+        // see `persistent_status_segments` for why the split is by what-breaks-if-lost
+        // rather than by size.
+        let segments = persistent_status_segments(status);
         instructions.push_str(&fit_dynamic_block(&instructions, &segments));
     }
 
@@ -231,6 +235,57 @@ fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
     }
 
     segs
+}
+
+/// The segments that earn a place in the **persistent** channel.
+///
+/// `server_instructions` rides the MCP `initialize.instructions` field, which the client
+/// puts in the system prompt — re-sent on every request, so it survives compaction and
+/// context eviction. That persistence is the scarce thing here, not the bytes: the whole
+/// channel is 2048 characters and there is no second push-and-persist surface, so what
+/// stays is decided by *what breaks if it is lost mid-session*, not by what is useful.
+///
+/// `Anchor` stays because its absence causes a wrong WRITE — an agent that compacts and
+/// then commits must still know it is on a worktree branch, and a response-carried banner
+/// cannot help there because the first tool call can itself be the write.
+///
+/// `UserAuthored` stays because it is the user's own project rules and nothing else
+/// surfaces them; losing those to a compaction is worse than losing a memories list. It
+/// can still overflow to the response channel when it does not fit, which is strictly
+/// better than today, where it is dropped outright.
+fn persistent_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
+    build_project_status_segments(status)
+        .into_iter()
+        .filter(|s| s.priority != StatusPriority::Substitutable)
+        .collect()
+}
+
+/// The `Substitutable` segments, rendered for the tool-response channel.
+///
+/// Returns `None` when there is nothing to say. These are the segments whose own tier
+/// definition is *"reachable on demand elsewhere"*, which is exactly the property that
+/// makes them safe to deliver in conversation content rather than in the system prompt:
+/// if a compaction eats them, the cost is a `memory(action="list")` call, not a wrong
+/// write. They are also the segments that today are dropped FIRST and therefore often
+/// never arrive at all — on a Kotlin project with custom instructions, several never fit.
+/// Ephemeral-and-complete beats absent.
+///
+/// No length cap and no fitting. That is the point of moving them: the response channel
+/// has no 2048-character ceiling, so the memory list is no longer truncated at
+/// `MAX_MEMORY_NAMES` by the carrier, and the workspace table arrives whole.
+pub fn build_status_response_block(status: &ProjectStatus) -> Option<String> {
+    let body: String = build_project_status_segments(status)
+        .iter()
+        .filter(|s| s.priority == StatusPriority::Substitutable)
+        .map(|s| s.text.as_str())
+        .collect();
+    if body.trim().is_empty() {
+        return None;
+    }
+    // Its own heading rather than a second `## Project Status`: two blocks under one
+    // title read as a contradiction when they disagree, and they will disagree — this
+    // one is re-rendered per emission while the persistent half is fixed at activation.
+    Some(format!("\n## Project Status (details)\n{body}"))
 }
 
 /// Render the dynamic `## Project Status` suffix. Split out from
@@ -788,16 +843,37 @@ mod tests {
             result.contains("**Active project:** my-project at `/home/user/my-project`"),
             "missing Active project banner, got:\n{result}"
         );
-        assert!(result.contains("rust, python"));
-        assert!(result.contains("architecture, conventions"));
-        assert!(result.contains("Semantic index:** Built"));
         // Without worktree info present, NO worktree line should appear.
         assert!(
             !result.contains("Worktree:"),
             "non-worktree project must not emit a Worktree line, got:\n{result}"
         );
+
+        // THE SPLIT, asserted from both sides. Languages / memories / index are
+        // `Substitutable` and now ride the tool response, so the persistent channel must
+        // NOT carry them — and the response block must. Asserting only the second half
+        // would pass with the segments duplicated in both, which is the failure mode this
+        // change exists to remove: the same content spending the one persistent budget
+        // twice.
+        for absent in [
+            "rust, python",
+            "architecture, conventions",
+            "Semantic index",
+        ] {
+            assert!(
+                !result.contains(absent),
+                "`{absent}` is Substitutable and must not spend instructions budget, got:\n{result}"
+            );
+        }
+        let block = build_status_response_block(&status).expect("substitutable block");
+        assert!(block.contains("rust, python"), "{block}");
+        assert!(block.contains("architecture, conventions"), "{block}");
+        assert!(block.contains("Semantic index:** Built"), "{block}");
     }
 
+    /// The onboarding and index nudges are `Substitutable`, so they moved with their tier.
+    /// Retargeted rather than deleted: the behaviour under test — an empty project is told
+    /// what to run — is unchanged, only the carrier moved.
     #[test]
     fn build_with_no_memories_suggests_onboarding() {
         let status = ProjectStatus {
@@ -810,9 +886,61 @@ mod tests {
             workspace: None,
             worktree: None,
         };
+        let block = build_status_response_block(&status).expect("nudges are substitutable");
+        assert!(block.contains("run `onboarding`"), "{block}");
+        assert!(block.contains("run `index(action='build')`"), "{block}");
+
+        // And the anchor still arrives on the persistent channel, so an agent knows which
+        // project the nudges are about even after a compaction eats the block.
         let result = build_server_instructions(Some(&status));
-        assert!(result.contains("run `onboarding`"));
-        assert!(result.contains("run `index(action='build')`"));
+        assert!(
+            result.contains("**Active project:** new-project at `/tmp/new`"),
+            "{result}"
+        );
+    }
+
+    /// The response block carries no anchors — they are the persistent channel's job, and
+    /// duplicating them would be the same double-spend from the other direction. A separate
+    /// test because it is the half a future edit is likelier to break: adding a segment to
+    /// `build_project_status_segments` and forgetting its priority silently files it under
+    /// whichever variant is declared first, which is `Substitutable`.
+    #[test]
+    fn the_response_block_carries_no_anchor_or_user_authored_segments() {
+        let status = ProjectStatus {
+            name: "my-project".into(),
+            path: "/home/user/my-project".into(),
+            languages: vec!["rust".into()],
+            memories: vec!["architecture".into()],
+            has_index: true,
+            system_prompt: Some("Always run the integration suite.".into()),
+            workspace: None,
+            worktree: Some(WorktreeInfo {
+                branch: Some("feat/x".into()),
+                main_repo: Some(std::path::PathBuf::from("/tmp/main")),
+                name: Some("x".into()),
+            }),
+        };
+        let block = build_status_response_block(&status).expect("substitutable block");
+        assert!(
+            !block.contains("Active project"),
+            "the anchor must stay in the persistent channel: {block}"
+        );
+        assert!(
+            !block.contains("Worktree:"),
+            "the worktree banner is the one segment whose absence causes a wrong WRITE, and \
+             a response-carried copy arrives too late for a first call that IS the write: \
+             {block}"
+        );
+        assert!(
+            !block.contains("Custom Instructions"),
+            "UserAuthored stays persistent while it fits — the user's own rules are worth \
+             more than a memories list when a compaction takes one of them: {block}"
+        );
+
+        // The persistent side carries exactly those three.
+        let result = build_server_instructions(Some(&status));
+        assert!(result.contains("**Worktree:** branch `feat/x`"), "{result}");
+        assert!(result.contains("## Custom Instructions"), "{result}");
     }
 
     #[test]
@@ -937,14 +1065,19 @@ mod tests {
         assert!(custom_pos > status_pos);
     }
 
-    /// BL-37 interim fix. `fit_dynamic_block` dropped from the TAIL, and the tail is where
-    /// the user's own text lives — so `## Custom Instructions` was sacrificed first and the
-    /// memories list, which `memory(action="list")` reproduces on demand, was kept longest.
-    /// That is the worst available order: it discards what only this channel carries and
-    /// preserves what another surface already offers.
+    /// BL-37 established that the user's own text must outlive a memories list that
+    /// `memory(action="list")` reproduces on demand. That decision is unchanged; what
+    /// changed is how it is EXPRESSED.
     ///
-    /// The first assertion is the control. Without it a fixture that happens to fit would
-    /// pass this test while exercising none of the trimming path.
+    /// It used to be a drop ORDER inside one channel — both segments competed for the same
+    /// 2048 characters and `UserAuthored` was dropped later than `Substitutable`. Since the
+    /// tier split they no longer compete: `Substitutable` moved to the tool response and
+    /// `UserAuthored` kept the persistent channel, so the same judgement is now a CHANNEL
+    /// ASSIGNMENT. The old form is unreachable — `fit_dynamic_block` never sees a
+    /// substitutable segment any more — so asserting it would assert nothing.
+    ///
+    /// Retargeted rather than deleted, because the decision it guards is still live and
+    /// still the one a future edit could quietly reverse by re-tiering a segment.
     #[test]
     fn an_overflowing_status_keeps_the_user_s_own_text_over_a_substitutable_list() {
         let status = ProjectStatus {
@@ -969,37 +1102,43 @@ mod tests {
 
         let rendered = build_server_instructions(Some(&status));
         assert!(
-            rendered.contains("trimmed"),
-            "the fixture must overflow the channel or this test proves nothing; got:\n{rendered}"
+            rendered.contains("Always run the integration suite before pushing."),
+            "the user's own instructions hold the persistent channel — it is the only \
+             surface that survives a compaction, and nothing else shows them to the agent; \
+             got:\n{rendered}"
         );
         assert!(
-            rendered.contains("Always run the integration suite before pushing."),
-            "the user's own instructions must outlive a memories list that \
-             `memory(action=\"list\")` reproduces on demand; got:\n{rendered}"
+            !rendered.contains("architecture, conventions"),
+            "and the memories list must NOT be there competing for it: \
+             `memory(action=\"list\")` reproduces it on demand; got:\n{rendered}"
+        );
+
+        let block = build_status_response_block(&status).expect("substitutable block");
+        assert!(
+            block.contains("architecture, conventions"),
+            "the list is not lost, only re-homed — and it arrives WHOLE here, where the \
+             old channel truncated it: {block}"
         );
     }
 
-    /// The worktree banner is the other segment nothing else supplies, and its absence is
-    /// not merely inconvenient: an agent that assumes the activated root is the canonical
-    /// checkout commits to the wrong branch. It must outlive every substitutable line.
+    /// The worktree banner is the segment nothing else supplies, and its absence is not
+    /// merely inconvenient: an agent that assumes the activated root is the canonical
+    /// checkout commits to the wrong branch. It must outlive everything else in the
+    /// persistent channel.
+    ///
+    /// The fixture changed with the tier split. Overflowing used to be easy — a memories
+    /// list and a language list were enough. Now only `UserAuthored` competes with the
+    /// anchors, so forcing the trimming path takes a genuinely large custom prompt. Same
+    /// invariant, and the control below is what proves the fixture still reaches it.
     #[test]
     fn an_overflowing_status_keeps_the_worktree_banner() {
         let status = ProjectStatus {
             name: "my-project".into(),
             path: "/tmp/wt/my-project".into(),
             languages: vec!["rust".into(), "python".into(), "typescript".into()],
-            memories: vec![
-                "architecture".into(),
-                "conventions".into(),
-                "development-commands".into(),
-                "domain-glossary".into(),
-                "gotchas".into(),
-                "language-patterns".into(),
-                "onboarding".into(),
-                "project-overview".into(),
-            ],
+            memories: vec!["architecture".into(), "conventions".into()],
             has_index: true,
-            system_prompt: Some("Always run the integration suite before pushing.".into()),
+            system_prompt: Some("Always run the integration suite before pushing. ".repeat(20)),
             workspace: None,
             worktree: Some(WorktreeInfo {
                 branch: Some("feat/x".into()),
@@ -1017,12 +1156,24 @@ mod tests {
             rendered.contains("**Worktree:**"),
             "a dropped worktree banner sends commits to the wrong branch; got:\n{rendered}"
         );
+        assert!(
+            rendered.chars().count() <= CLIENT_INSTRUCTIONS_CHAR_LIMIT - CHANNEL_SAFETY_MARGIN,
+            "and the hard guarantee still holds under the new tiering; got {} chars",
+            rendered.chars().count()
+        );
     }
 
     /// A trim that says only "something went" tells the agent to distrust the whole block.
-    /// One that names the segment tells it which route to take instead —
-    /// `memory(action="list")`, `get_guide("workspace-state")`, memory `gotchas`. The
-    /// naming is the difference between a warning and an instruction.
+    /// One that names the segment tells it which route to take instead. The naming is the
+    /// difference between a warning and an instruction.
+    ///
+    /// The fixture had to change and the reason is the point of the tier split. This test
+    /// used to force a trim with 30 memories and a Kotlin project, and asserted the note
+    /// named `kotlin known issues` — because the Kotlin block *"cannot fit at any position,
+    /// so the agent's only chance of knowing it exists is being told it went."* That is no
+    /// longer true: the block is `Substitutable`, so it now arrives whole on the response
+    /// channel. Being told what you lost was always second best to not losing it, and the
+    /// companion assertion below is the one that matters now.
     #[test]
     fn a_trim_names_what_it_dropped() {
         let status = ProjectStatus {
@@ -1031,7 +1182,8 @@ mod tests {
             languages: vec!["rust".into(), "kotlin".into()],
             memories: (0..30).map(|i| format!("memory-topic-{i}")).collect(),
             has_index: true,
-            system_prompt: None,
+            // The only droppable segment left in the persistent channel, sized to force it.
+            system_prompt: Some("Always run the integration suite before pushing. ".repeat(20)),
             workspace: None,
             worktree: None,
         };
@@ -1042,10 +1194,22 @@ mod tests {
             "the note must name the losses, not just announce one; got:\n{rendered}"
         );
         assert!(
-            rendered.contains("kotlin known issues"),
-            "the Kotlin block is the largest droppable segment and cannot fit at any \
-             position — the agent's only chance of knowing it exists is being told it \
-             went; got:\n{rendered}"
+            rendered.contains("custom instructions"),
+            "with the substitutable tier re-homed, custom instructions is the only segment \
+             a trim can still take — and the agent has no other route to it, so being told \
+             is the whole remedy; got:\n{rendered}"
+        );
+
+        // The improvement the split bought, asserted so a regression is visible: the Kotlin
+        // block used to be the first thing dropped and is now delivered in full.
+        let block = build_status_response_block(&status).expect("substitutable block");
+        assert!(
+            block.contains("kotlin"),
+            "the Kotlin known-issues block must ARRIVE, not be named in a trim note: {block}"
+        );
+        assert!(
+            !block.contains("trimmed"),
+            "and the response channel has no cap, so nothing there is trimmed: {block}"
         );
     }
 
@@ -1845,6 +2009,10 @@ mod redesign_invariants {
 
     /// A status block that fits must not be touched: the trim exists for the overflow
     /// case, and a note on every session would be noise that teaches nothing.
+    ///
+    /// Retargeted for the tier split — the memories line it used to look for in the
+    /// rendered instructions now rides the response channel. Both halves are asserted so
+    /// the test still distinguishes "nothing was trimmed" from "nothing was rendered".
     #[test]
     fn a_status_block_that_fits_is_left_alone() {
         let status = ProjectStatus {
@@ -1858,10 +2026,71 @@ mod redesign_invariants {
             worktree: None,
         };
         let rendered = build_server_instructions(Some(&status));
-        assert!(rendered.contains("- **Memories:** architecture, conventions\n"));
+        assert!(
+            rendered.contains("- **Active project:** x at `/tmp/x`\n"),
+            "{rendered}"
+        );
         assert!(
             !rendered.contains("status trimmed"),
             "no trim note when nothing was trimmed"
+        );
+        let block = build_status_response_block(&status).expect("substitutable block");
+        assert!(
+            block.contains("- **Memories:** architecture, conventions\n"),
+            "{block}"
+        );
+    }
+
+    /// What the tier split actually bought, pinned as a number rather than described.
+    ///
+    /// Before the split a realistic render consumed the whole 2000-char usable budget and
+    /// trimmed; the `Substitutable` segments were the first casualties. With them re-homed
+    /// to the tool response, only the anchors ride the persistent channel, and what is left
+    /// over is the room any future addition to `server_instructions` has to work with.
+    ///
+    /// The floor is deliberately loose — it exists to catch a REGRESSION (someone growing
+    /// the static slice back into this space), not to pin an exact figure that would churn
+    /// on every wording change.
+    #[test]
+    fn the_tier_split_leaves_real_headroom_in_the_persistent_channel() {
+        let base = ProjectStatus {
+            name: "codescout".into(),
+            path: "/home/marius/work/claude/codescout".into(),
+            languages: vec!["rust".into(), "markdown".into()],
+            memories: (0..18).map(|i| format!("memory-topic-{i}")).collect(),
+            has_index: true,
+            system_prompt: None,
+            workspace: None,
+            worktree: None,
+        };
+        let usable =
+            crate::prompts::CLIENT_INSTRUCTIONS_CHAR_LIMIT - crate::prompts::CHANNEL_SAFETY_MARGIN;
+
+        let plain = build_server_instructions(Some(&base));
+        assert!(
+            !plain.contains("trimmed"),
+            "a perfectly ordinary project must no longer trim anything:\n{plain}"
+        );
+        let plain_free = usable - plain.chars().count();
+
+        let wt = ProjectStatus {
+            worktree: Some(WorktreeInfo {
+                branch: Some("experiments".into()),
+                main_repo: Some(std::path::PathBuf::from(
+                    "/home/marius/work/claude/codescout",
+                )),
+                name: Some("bench".into()),
+            }),
+            ..base
+        };
+        let with_wt = build_server_instructions(Some(&wt));
+        let wt_free = usable - with_wt.chars().count();
+
+        assert!(
+            wt_free >= 120,
+            "the worst ordinary case (worktree banner present) must keep >=120 chars free; \
+             got {wt_free} (plain: {plain_free}). If this fails because the static slice \
+             grew, that is the regression — move the addition to a guide."
         );
     }
 
