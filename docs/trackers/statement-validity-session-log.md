@@ -13,7 +13,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_W: 9
-entry_high_water_F: 6
+entry_high_water_F: 7
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -39,6 +39,7 @@ entry_high_water_F: 6
 | F-5 | 2026-08-20 | med | architectural | open | entry_cite's PK excludes origin, so prune-and-rematerialize cannot own a duplicated edge |
 | F-6 | 2026-08-21 | med | self-friction | fixed-verified | Having read a fact is not having applied it — extract's dedup |
 | F-4 | 2026-08-20 | med | architectural | fixed-verified | Gated doc surfaces were kept current; the routing that serves them was never checked |
+| F-7 | 2026-08-21 | high | architectural | open | A capability premise about our OWN internals reads as recall, not assertion — so nothing audits it |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -867,6 +868,59 @@ which `doctor.rs` documents as *"deliberately not the deleted"* one for the same
 three, add a line to `W-3`'s promoted text in `~/.claude/CLAUDE.md`: when copying a sibling's
 discipline, copy **all** its mechanisms, and re-derive every constant against the new corpus
 rather than the old one.
+
+## F-7 — A capability premise about our OWN internals reads as recall, not assertion — so nothing audits it
+
+**Valid:** invariant
+
+**Rests on:** `statement-validity-session-log:F-4` — a surface was kept rigorously current
+while the mechanism that *serves* it went unchecked. Same shape one layer down; here the
+rigour and the blind spot sit in the same paragraph.
+
+**Observed:** 2026-08-21, resuming into Layer 5a. §6 of the design spec states, as the
+reason 5a is cheap: *"the server created the handle and knows which artifact and which call
+produced it."* Everything downstream leans on it — 5a is sequenced as the cheap unblocker,
+and 5b's `max(reads, in-degree)` exposure term consumes what 5a produces.
+
+**Got:** the server does not know. `OutputBuffer::store_tool`
+(`src/tools/output_buffer.rs:303`) writes `command = <tool name>` and `source_path: None`,
+so an `@tool_*` minted by `artifact(get)` records only that *some* call to `artifact` made
+it. `store_file` (`src/tools/output_buffer.rs:279`) then drops provenance again on every
+buffer-to-buffer hop, and does so **deliberately** — a `@`-prefixed path would be `stat`-ed
+by `get_with_refresh_flag` and evict the entry on first read. Two function bodies falsified
+the premise. Neither had been opened.
+
+**Why it survived: the claim is about our own internals.** A claim about an external API
+gets checked, because nobody trusts their memory of someone else's contract. *"The server
+knows X"* is a claim about code the author owns, so it gets **recalled instead of looked
+up** — and it arrives in the grammar of an implementation detail rather than of an
+assumption. This is `reconnaissance-patterns:R-95` with the sign inverted: R-95's rationales
+run *inflated* because they justify stopping, and nobody drafts an estimate that makes the
+work sound easier at the moment they decide to stop. This one runs *deflated*, because it
+justifies building.
+
+**The self-reference is the sharpest part.** That same section applies CLAUDE.md's
+Measurement clause 3 explicitly and correctly — to someone else's argument: *"An earlier
+draft of this spec concluded from it that read-count was unusable. That conclusion applied
+clause 3 … to someone else's argument and not to its own: a zero is evidence about the
+search."* The discipline was in the paragraph. It was facing outward.
+
+**Counterfactual:** cheap to catch, had anyone opened the file — an implementer would have
+gone looking for a field that does not exist and found out in a minute. Expensive as
+*sequencing*: 5a sits where it sits **because** it was believed free, so both 5b's schedule
+and the `max()` exposure term rest on a field that was never built. The correction now in
+§6 records two routes, and the one that looks likely to survive — reconstructing
+attribution from `usage.db`'s `input_json` / `output_json`, measured at 267 handle-minting
+`artifact` calls and 1097 handle reads on this project — is a different implementation, in
+a different module, from the one the premise implied.
+
+**Status:** open
+
+**Promote-when:** a second instance of a **capability** premise about codescout's own
+internals surviving into a sequencing decision unread. At two, the reconnaissance skill's
+*"a proposed fix is a claim about CURRENT STATE"* bullet should widen to name this sibling:
+a claim that our own system **already knows** something is the same class of unverified
+assertion, and is less audited than the others precisely because it sounds like recall.
 
 ## Template for new entries
 

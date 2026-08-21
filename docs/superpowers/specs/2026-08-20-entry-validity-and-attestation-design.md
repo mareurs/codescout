@@ -220,8 +220,48 @@ conclusion applied clause 3 of CLAUDE.md's Measurement rule to someone else's ar
 and not to its own: a zero is evidence about the search.
 
 **Both leaking paths already carry the grain.** A buffer slice names a `json_path` or a
-line range, and the server created the handle and knows which artifact and which call
-produced it. A `grep` match carries a path and a line number. Both resolve to an entry
+line range, and the server created the handle.
+
+> **Correction — measured 2026-08-21, and it is the premise that made 5a look free.**
+> The server creates the handle but does **not** record which artifact produced it.
+> `OutputBuffer::store_tool` (`src/tools/output_buffer.rs:303`) writes
+> `command = <tool name>` and `source_path: None` — so an `@tool_*` minted by
+> `artifact(get)` knows only that *some* call to `artifact` made it.
+> `store_file` (`src/tools/output_buffer.rs:279`) then drops provenance again on every
+> buffer-to-buffer hop, and does so **deliberately**: a `@`-prefixed path would be
+> `stat`-ed by `get_with_refresh_flag` and evict the entry on first read. The one
+> leaking case that *is* attributable today is a handle minted from a real filesystem
+> path, which carries `source_path`.
+>
+> The `command` field does preserve the hop chain (`@file_b.command == "@tool_a"`), so
+> the chain is walkable — it just terminates at the string `"artifact"`.
+>
+> **Two routes, neither free, not yet chosen.**
+>
+> - **A — carry provenance forward.** Give `BufferEntry` an artifact-identity field,
+>   populate it at the librarian `get` site, propagate it across hops. Exact, and it
+>   fixes the grain at the source. Buys **no history**: every read already recorded
+>   stays unattributable.
+> - **B — reconstruct from `usage.db`.** `tool_calls` already stores `input_json`,
+>   `output_json`, `session_id` and `cc_session_id`, so the minting call's artifact id
+>   and the handle it returned are both on disk, as is every later call naming that
+>   handle. Needs no change to `OutputBuffer` at all and works **retroactively**.
+>   Measured on this project's `.codescout/usage.db` on 2026-08-21: 2905 `artifact`
+>   calls, **267** with a `@tool_` handle in `output_json`; 3398 `read_file` calls,
+>   **1097** naming an `@` handle in `input_json`. (`instr()`, not `LIKE` — `_` is a
+>   single-character wildcard in SQL `LIKE` and would have over-counted.)
+>   Two constraints the join must respect: handle ids are a **32-bit truncated
+>   timestamp** (`format!("@tool_{:08x}", …)`), and `store_tool` **deduplicates by
+>   content hash**, so one handle string can name two artifacts with identical bodies.
+>   Join session-scoped and recency-ordered, never on the handle string alone.
+>
+> B is weaker on **grain**, and that is the part to settle before choosing: a
+> `json_path` of `$.body` selects the whole body and attributes to no entry, while a
+> line range into a `$.body`-derived handle is body-relative and *is* attributable — by
+> re-parsing the artifact's headings, which drifts as the body is edited. A carries the
+> grain natively. The likely answer is B for the metric and A for new precision, but
+> that is a hypothesis, not the decision.
+ A `grep` match carries a path and a line number. Both resolve to an entry
 by nearest-preceding-heading — the identical attribution Layer 3 needs for citations.
 **One algorithm, three consumers**, no extra tool call and no extra context. This is why
 the design does not need the obvious alternative of asking the agent to report back what
@@ -770,7 +810,7 @@ against itself, and the count stops meaning exposure.
 | Path | Attribution |
 |---|---|
 | `artifact(get, heading=…)` | exact, today |
-| `read_file` on an `@` handle with a `json_path` or line range | the server created the handle and knows its origin call and artifact; the slice spec gives the grain |
+| `read_file` on an `@` handle with a `json_path` or line range | **not attributable as built** — the handle records a tool name, not an artifact; see the correction in §6 for the two routes |
 | `grep(mode="content")` on a ledger | the match carries a path and a line number |
 
 All three resolve to an entry by nearest-preceding-heading — the same algorithm Layer 3
@@ -992,7 +1032,7 @@ verification.
 | 3a | Slug bulk-mint (`doctor fix=mint_slugs`) | 0 | **SHIPPED 2026-08-20** — 4107/4107 minted |
 | 3b | `origin='scan'` entry-grain materializer | 3a | **SHIPPED 2026-08-21** — 322 edges; see below |
 | 3c | `rel='rests-on'` edges | 3b + declarations | **not building** — re-measured 2026-08-21: 1 resolvable declaration corpus-wide, and its edge already exists as `cites`. Revisit if resolvable declarations reach ~20 |
-| 4 | Entry-grain `context` anchor | 3 | designed, not scheduled |
+| 4 | Entry-grain `context` anchor | 3 | **SHIPPED 2026-08-21** — two-pass packing; see below |
 | 5a | **Close the read leaks** — buffer-slice + `grep` attribution | 0 | designed, not scheduled |
 | 5b | `entry_attestation`, `condition_event`, taps, coalescing, proof-carrying appraisal | 3, 4, 5a | designed, not scheduled |
 
@@ -1146,6 +1186,33 @@ slugs tolerate a dropped column silently, ~4104 populated ones with a live FK do
 memory `catalog-sql-hazards`.
 ---
 
+**Layer 4 shipped 2026-08-21** — `ad21910f` (entry-grain anchor), `711a25cf` (two-pass
+packing), `f58ab393` (mutual-first ordering). `librarian(action="context", anchor_id=…)`
+now detects an entry-grain anchor and returns before the file-grain `candidates_capped`
+path, serving the anchor Statement with the Statements either side of it. Neighbours are
+deduplicated **by reference** rather than by edge, so an artifact that both cites and is
+cited by the anchor appears once as `mutual`; ordering is mutual → cited-by → cites, then
+lexicographic. The `overflow` block reports `grain`, `packing`, and `unresolved_edges`.
+
+**The packing policy was chosen from a sweep, not copied from the sibling.** The
+file-grain packer's constant does not transfer: it is a *line* budget over whole
+documents where this is a *byte* budget over sections, and bytes-per-line spans roughly
+5× across this corpus. Two passes — serve every neighbour whole when the anchor section
+plus all neighbour sections fit the caller's budget, else excerpt each neighbour to
+`NEIGHBOUR_EXCERPT_BYTES`. The sweep behind that constant, the fully-served-anchor rates
+it moves, the neighbourhood-size distribution, and the one optimization point
+deliberately not taken are recorded in `docs/trackers/context-performance.md` (`CTX-1`),
+alongside the refuted hypothesis that neighbour classes deserve differential treatment
+(`CTX-2`).
+
+**Read those numbers with the tracker's own caveat.** They describe the entry graph as of
+the last `link_scan` — a fact about an instant, not a property of the corpus. Two carry
+into Layer 5 regardless: the deferral recorded in `CTX-1` **fired on the feature's first
+live call** (`R-108`), and the anchor whose behaviour is most tempting to tune from sits
+in the far tail of the neighbourhood distribution rather than near its centre.
+
+**Layer 3c was closed by measurement rather than deferred** — see the re-measurement
+above. That leaves **5a as the next scheduled build**, and it gates 5b.
 ## Risks
 
 Ordered by how much each would change the design if it fired.
