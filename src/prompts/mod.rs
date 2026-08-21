@@ -11,17 +11,6 @@ pub mod source;
 pub const SERVER_INSTRUCTIONS: &str =
     include_str!(concat!(env!("OUT_DIR"), "/server_instructions.md"));
 
-/// Kotlin-specific known issues — only injected for projects with Kotlin.
-const KOTLIN_KNOWN_ISSUES: &str = "\n\n## Language Support — Known Issues\n\n\
-### Kotlin (kotlin-lsp)\n\n\
-kotlin-lsp (JetBrains) has a **single workspace session** limitation: only one \
-kotlin-lsp process can serve a given project directory at a time. If another \
-codescout instance or editor is already running kotlin-lsp for the same project, \
-new instances will fail with:\n\n\
-> \"Multiple editing sessions for one workspace are not supported yet\"\n\n\
-codescout detects this and fails fast with a clear error. **Workaround:** close \
-the other session first, or use a single codescout instance for Kotlin projects.";
-
 /// The MEASURED client limit for MCP `initialize.instructions`, in **characters**.
 ///
 /// Claude Code cuts the field at exactly 2048 chars. Measured 2026-08-16 by locating a
@@ -105,10 +94,6 @@ struct StatusSegment {
 /// Render the dynamic suffix as droppable segments. See [`build_project_status_block`]
 /// for the concatenated form, which is what the renderer's own tests assert on.
 fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
-    /// Memory topic lists grow without bound (18 on this repo), and unbounded is exactly
-    /// what a fixed channel cannot carry. The names are a pointer, not the content.
-    const MAX_MEMORY_NAMES: usize = 8;
-
     let mut segs: Vec<StatusSegment> = Vec::new();
 
     segs.push(StatusSegment {
@@ -157,13 +142,20 @@ fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
     }
 
     let memories = if !status.memories.is_empty() {
-        // Bare list — the action verb is documented on the `memory` tool itself.
-        let shown = status.memories.len().min(MAX_MEMORY_NAMES);
-        let mut names = status.memories[..shown].join(", ");
-        if status.memories.len() > shown {
-            names.push_str(&format!(", +{} more", status.memories.len() - shown));
-        }
-        format!("- **Memories:** {names}\n")
+        // Bare list, ALL of it — the action verb is documented on the `memory` tool itself.
+        //
+        // This used to cap at 8 names and append "+N more". That cap's stated reason was
+        // *"unbounded is exactly what a fixed channel cannot carry"* — true when written,
+        // and falsified by the tier split that moved this segment to the tool response,
+        // which has no character ceiling. A cap whose rationale has been removed is just
+        // 14 hidden memory names: precisely the pointers an agent needs to decide what to
+        // read, withheld to protect a budget this segment no longer spends.
+        //
+        // Nothing here bounds it now, and nothing needs to: `fit_dynamic_block` still
+        // guarantees the persistent channel never overflows, so even re-tiering this
+        // segment back to a persistent tier would degrade to a trim rather than a
+        // truncation.
+        format!("- **Memories:** {}\n", status.memories.join(", "))
     } else {
         "- **Memories:** None yet — run `onboarding` to create project memories\n".to_string()
     };
@@ -217,14 +209,29 @@ fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
         }
     }
 
-    // Language-specific warnings — only injected when the project uses the language.
-    if status.languages.iter().any(|l| l == "kotlin") {
-        segs.push(StatusSegment {
-            text: KOTLIN_KNOWN_ISSUES.to_string(),
-            label: "kotlin known issues",
-            priority: StatusPriority::Substitutable,
-        });
-    }
+    // NO LANGUAGE-SPECIFIC WARNINGS. `KOTLIN_KNOWN_ISSUES` used to be injected here for any
+    // project whose `languages` contained "kotlin", and it is removed rather than narrowed.
+    //
+    // The trigger was wrong: `languages` is what the repo CONTAINS, not what it is written
+    // in. codescout is a Rust project with Kotlin fixtures, so it served itself ~600
+    // characters about a JetBrains LSP limitation on every single session — and while this
+    // segment lived in the 2048-char instructions channel, it was the largest droppable
+    // thing in it, so it was also the first casualty of every trim. It cost the most and
+    // was delivered least.
+    //
+    // But narrowing the trigger to Kotlin-only projects would still have been wrong,
+    // because the block buys nothing at any trigger. `detect_fatal_stderr`
+    // (`src/lsp/client.rs`) already returns a `RecoverableError` naming the exact condition
+    // AND what to do — "Another codescout instance or editor is already serving this
+    // project with kotlin-lsp ... Stop the other session and retry." That is more
+    // actionable than the block, arrives only when it is true, and is pinned by
+    // `detect_fatal_stderr_flags_kotlin_multi_session`. The block's own last line conceded
+    // the point: "codescout detects this and fails fast with a clear error."
+    //
+    // Pre-loading an explanation of a self-announcing error is the anti-pattern. If a new
+    // language issue is genuinely NOT self-announcing, it belongs in memory `gotchas` and
+    // `get_guide` — pull channels, read when the topic is live — not pushed at every
+    // session that happens to contain one file of that language.
 
     if let Some(prompt) = &status.system_prompt {
         segs.push(StatusSegment {
@@ -1425,9 +1432,24 @@ mod tests {
         assert!(prompt.contains("frontend"));
     }
 
+    /// No project gets language-specific warnings pushed at it any more, and the fixture
+    /// here is the one that used to trigger them.
+    ///
+    /// The inverse of what this test used to assert. It was
+    /// `build_with_kotlin_project_includes_kotlin_warnings`, and it had already been
+    /// retargeted once — from `build_server_instructions` to the renderer — so it could keep
+    /// passing while the segment it described was trimmed away before reaching anyone. A
+    /// test that survives by being pointed at a surface nobody receives is a signal.
+    ///
+    /// Removed rather than narrowed to Kotlin-only projects, because the block bought
+    /// nothing at any trigger: `detect_fatal_stderr` (`src/lsp/client.rs`) raises a
+    /// `RecoverableError` naming the condition and the fix at the moment it happens. The
+    /// block conceded this in its own last line — "codescout detects this and fails fast
+    /// with a clear error". Pre-loading an explanation of a self-announcing error is cost
+    /// without benefit.
     #[test]
-    fn build_with_kotlin_project_includes_kotlin_warnings() {
-        let status = ProjectStatus {
+    fn no_language_specific_warnings_are_pushed_at_any_project() {
+        let kotlin = ProjectStatus {
             name: "test".into(),
             path: "/tmp/test".into(),
             languages: vec!["kotlin".into(), "java".into()],
@@ -1437,13 +1459,33 @@ mod tests {
             workspace: None,
             worktree: None,
         };
-        // Renderer-level, for the same reason as the workspace-table test above: the
-        // Kotlin block exceeds what the 2048-char instructions channel can carry next to
-        // the static slice, so the shipped surface trims it with a note (BL-9).
-        let block = build_project_status_block(&status);
         assert!(
-            block.contains("kotlin-lsp"),
-            "Kotlin project must include Kotlin known issues"
+            !build_project_status_block(&kotlin).contains("kotlin-lsp"),
+            "a Kotlin project must not be pushed an explanation of an error that already \
+             explains itself"
+        );
+        assert!(
+            !build_server_instructions(Some(&kotlin)).contains("kotlin-lsp"),
+            "and it must not reach the persistent channel"
+        );
+        assert!(
+            !build_status_response_block(&kotlin)
+                .unwrap_or_default()
+                .contains("kotlin-lsp"),
+            "nor the response channel — removing the segment means removing it, not \
+             re-homing it somewhere less visible"
+        );
+
+        // The TRIGGER was the real defect, and this pins it: `languages` is what a repo
+        // CONTAINS, not what it is written in. codescout is a Rust project with Kotlin
+        // fixtures, and on 2026-08-21 it was observed serving itself this block live.
+        let rust_with_fixtures = ProjectStatus {
+            languages: vec!["rust".into(), "kotlin".into(), "markdown".into()],
+            ..kotlin
+        };
+        assert!(
+            !build_project_status_block(&rust_with_fixtures).contains("kotlin-lsp"),
+            "a Rust project that merely contains .kt fixtures is not a Kotlin project"
         );
     }
 
@@ -1547,25 +1589,6 @@ mod tests {
         // rather than panicking on a missing path.
         let dir = tempfile::tempdir().unwrap();
         assert!(detect_worktree_info(dir.path()).is_none());
-    }
-
-    #[test]
-    fn build_without_kotlin_excludes_kotlin_warnings() {
-        let status = ProjectStatus {
-            name: "test".into(),
-            path: "/tmp/test".into(),
-            languages: vec!["rust".into()],
-            memories: vec![],
-            has_index: false,
-            system_prompt: None,
-            workspace: None,
-            worktree: None,
-        };
-        let result = build_server_instructions(Some(&status));
-        assert!(
-            !result.contains("kotlin-lsp"),
-            "Non-Kotlin project must not include Kotlin known issues"
-        );
     }
 
     #[test]
