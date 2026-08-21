@@ -1,5 +1,5 @@
 ---
-id: '51c76e8c6289350b'
+id: 5d15417cddbc760c
 kind: bug
 status: fixed
 title: 'BUG: three ledgers own prefix T, and zero-padding is the only thing keeping their tokens apart'
@@ -236,12 +236,13 @@ can:
 > a shared-prefix backfill by inspecting the *new edges*, not by watching `dangling` drop.
 
 The still-live half — `artifact-augmentation-followups`' eight rows mis-binding to
-`tool-usage-patterns`, which this rename correctly did not touch — is filed separately as
-`docs/issues/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md`.
+`tool-usage-patterns`, which this rename correctly did not touch — was filed separately as
+`docs/issues/archive/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md`
+(fixed and archived 2026-08-21).
 ## References
 
 - `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md` (BL-39 — the backfill that surfaced this)
 - `docs/issues/archive/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md` (BL-41 — declared prefixes now widen the gate; archived `fixed` 2026-08-18)
 - `get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified*
 - `docs/trackers/structural-debt-refactor.md` SD-2 (why a prose-enforced co-change contract is the shape to avoid)
-- `docs/issues/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md` (the row-token leak this investigation uncovered — still open, and the reason step (3) was dropped)
+- `docs/issues/archive/2026-08-18-row-only-ids-bind-as-citations-to-whoever-owns-the-prefix.md` (the row-token leak this investigation uncovered — fixed and archived 2026-08-21, and the reason step (3) was dropped)

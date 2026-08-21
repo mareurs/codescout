@@ -39,7 +39,7 @@ De-prescribe and delete, don't stack instructions (FND-9). Prefer removing scaff
 >
 > **Renamed `T` → `FT` on 2026-08-18, and the namespace is now exclusive.** This ledger previously declared `entry_prefix: T`, which `docs/trackers/tool-usage-patterns.md` also owns — spelling its first thirteen entries zero-padded (`T-001`…`T-013`) and its later ones unpadded (`T-14`…`T-24`). The two token spaces were disjoint only *by accident of that padding*; nothing recorded or enforced it, and `link_scan`'s `prefix_conflicts` check reported the overlap the moment that check existed. `tool-usage-patterns` has the stronger claim — `CLAUDE.md` hard-codes `id_prefix="T"` for it, it holds 24 entries to this ledger's 12, and it is cited far more widely — so this ledger gave up `T`. `FT` has a single definer and no ceiling: extend it freely.
 >
-> Mechanism: `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`. Prefix collision and this rename: `docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`.
+> Mechanism: `docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`. Prefix collision and this rename: `docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`.
 
 ### FT-1 — Slim the 42 KB per-session CLAUDE.md (dead tool names, 4× rule duplication, relocate forensics)
 

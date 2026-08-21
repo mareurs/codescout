@@ -411,7 +411,8 @@ the user's own checkout, with 9 modified files from a concurrent session on
    its later ones `T-14`..`T-24`, and the resolver matches **token strings**, so the spaces are
    disjoint and `T-1`..`T-12` were always safe. The wrong version of this belief nearly blocked
    correct work; filed the real hazard as
-   `docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`,
+   `docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`
+   (fixed and archived 2026-08-21),
    because the disjointness is a formatting accident that nothing records or enforces, and two
    ordinary edits would break it.
 2. The closing report's `dangling` 547 and `ledger_defines_nothing` 8 both read one lower when

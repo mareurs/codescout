@@ -1,7 +1,7 @@
 ---
-id: b90140b87dbc0442
+id: 773710608f0c6878
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a row-only ledger''s ids bind as citations to whoever owns the prefix, and no count moves'
 tags:
 - link-scan
@@ -10,6 +10,7 @@ tags:
 - ledger
 - silent-failure
 topic: tracker-entry-identity
+closed: 2026-08-21
 ---
 
 # BUG: a row-only ledger's ids bind as citations to whoever owns the prefix, and no count moves
@@ -118,6 +119,27 @@ Two candidates; both are content decisions, so neither is applied here.
 
 (1) is preferred: it is the standard, and the file is still `active`.
 
+**Fixed.** Option (1) was applied the same day this bug was filed (`61a1ebf3`,
+`entry_prefix: AA`, `entry_high_water_AA: 21`, one `## AA-N — <title>` heading per entry) —
+before this file was ever updated to say so, which is why it sat `open` for three days
+after the fix landed.
+
+**2026-08-21: found and fixed a recursive instance of the same defect.** The fix's own
+explanatory note (added in `61a1ebf3`) quoted the two boundary tokens of the affected range
+literally in backticks as evidence — exactly the self-citing-documentation shape
+`docs/issues/archive/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md`
+describes. Those two quoted tokens kept resolving as a live `cites` edge into
+`tool-usage-patterns.md` even after the other 19 were fixed — confirmed via
+`artifact(get, id="aabef87ec988dc1d", include_links=true)` still showing one outgoing edge.
+Rewrote the note to the non-matching placeholder form `T-N` (`9868a4b7`), verified via
+`librarian(action="link_scan")` that the edge is now stale, then pruned it with `write=true`.
+Also fixed the augmentation's own refresh prompt, which still referenced the pre-rename
+`T-19`/`T-20` task names.
+
+**experiments** SHAs: `61a1ebf31e77d2eaaf4568b6368cf601eda05140` (original T→AA rename),
+`9868a4b7352287c60d459c4ff2c0693fc43bc338` (recursive note fix)
+patch-ids: `50f1c3e3efe0bbd1f95e7fd2fc4a770765236afc`, `0378d281672decb2f69fad2680bf400cd0d35bd6`
+
 ## A detector gap worth its own decision
 
 `prefix_conflicts` is right not to fire here — an undeclared file makes no claim to contradict,
@@ -127,7 +149,8 @@ candidate narrow check: **an artifact with ≥N `PREFIX-M` rows, no defining hea
 them, and no `entry_prefix`, where some *other* artifact defines that prefix.** All four
 conjuncts are needed — the last is what separates a wrong edge from a harmless private
 numbering. Not filed as a fix here because it needs its own false-positive measurement pass
-across the corpus.
+across the corpus. Still not filed as of this bug's closure (2026-08-21) — the detector
+gap is a separate, larger investigation than the one instance this bug fixed.
 
 ## Resume
 

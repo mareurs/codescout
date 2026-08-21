@@ -134,7 +134,7 @@ impl DefinitionIndex {
     /// danglings and `dangling` rose 477 → 542. **A falling `dangling` is not evidence of
     /// repair when a namespace gains a definer**: "citations repaired" and "citations
     /// mis-bound" move that number in the same direction.
-    /// docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md
+    /// docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md
     ///
     /// A declared prefix that defines nothing is deliberately silent here:
     /// `ledger_defines_nothing` owns that case, and its entries are uncitable regardless of
@@ -634,7 +634,7 @@ mod tests {
     /// zero-padded. Nothing recorded that invariant, and two ordinary edits broke it.
     /// Fixed the same day by renaming the fable ledger to `FT`, so the corpus reports 0
     /// now and this fixture is the only surviving record of the shape.
-    /// docs/issues/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md
+    /// docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md
     #[test]
     fn a_declared_prefix_with_a_second_active_definer_is_a_conflict() {
         let owner = DocExtract {
