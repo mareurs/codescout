@@ -1,7 +1,7 @@
 ---
 id: '5d7f5c0a41d0b6f3'
 kind: tracker
-status: draft
+status: active
 title: Context Performance — packing measurements and optimization points
 tags:
 - context
