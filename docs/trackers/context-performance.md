@@ -133,7 +133,7 @@ simply wrong), not the budget lever an early reading of R-3 suggested.
 
   Verified live at `711a25cf`: `reconnaissance-patterns:R-3` served 11 one-way `cited-by`
   neighbours and dropped **both** its mutual partners, `R-77` and `R-79` — which are its own
-  documented chain (`R-3 → R-73b → R-77 → R-79`). The class the packer had just been taught
+  documented chain (`R-3 → R-113 → R-77 → R-79`). The class the packer had just been taught
   to label specially was the class it buried.
 
   Fixed: `mutual` ranks first, then the one-way classes alphabetically. `cites` and
@@ -175,7 +175,7 @@ companion, 84 unrelated.**
 
 `reconnaissance-patterns:R-3` is the clean case. Seven of its 22 neighbours live in
 `reconnaissance-patterns-archived-entries`, and two of those — `R-77` and `R-79` — are its
-**mutual** partners and its own documented chain (`R-3 → R-73b → R-77 → R-79`). Its most
+**mutual** partners and its own documented chain (`R-3 → R-113 → R-77 → R-79`). Its most
 relevant neighbours are archived, because this project's compaction discipline *moves related
 history there on purpose*. `get_guide("tracker-conventions")` states it directly: *"archived
 is not nonexistent."*

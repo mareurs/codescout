@@ -4186,7 +4186,7 @@ the next task's implementer reads while working on the sibling API.
 **Confirming data points:**
 1. W-9 (2026-05-15) — spot-check sibling callers of a just-fixed shared helper before closing the
    bug class. Same principle, code side.
-2. R-3 / R-73b / R-77 / R-79 in `docs/trackers/reconnaissance-patterns.md` — "a search that finds
+2. R-3 / R-113 / R-77 / R-79 in `docs/trackers/reconnaissance-patterns.md` — "a search that finds
    nothing is evidence about the search, not about the world." This entry is the positive form:
    a search that finds *something* is also evidence about the search.
 3. W-48 (this entry) — 11 sites, 5 found by review, method-questioning found the rest.

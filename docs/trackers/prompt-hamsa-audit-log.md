@@ -543,7 +543,7 @@ band) and the taxonomy needed exactly one addition, giving seven laws against a 
 fall in one connected component. Not a method failure — everything is kin to everything *because*
 these are seven laws restated with different nouns, so the hairball is the evidence for distillation
 and a clean graph would have argued against it. Strongest single finding: the C-chain runs
-R-3 → R-73b → R-77 → R-79 → R-87 and the entries themselves label those "third", "fourth",
+R-3 → R-113 → R-77 → R-79 → R-87 and the entries themselves label those "third", "fourth",
 "fifth" recurrence — the ledger recording its own failures to prevent, five deep, on one law.
 Two measurement corrections were caught mid-pass before acting on either.
 

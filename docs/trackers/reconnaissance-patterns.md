@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 108
+entry_high_water_R: 115
 entry_prefix: R
 ---
 
@@ -87,7 +87,7 @@ fixtures, or a second hand-written copy.
 **Law.** Absence is a claim about coverage. A file-scoped grep cannot prove
 "never", a bounded search cannot authorise a deletion, and a view is not the set.
 
-**Chain.** R-3 → R-73b → R-77 → R-79 → R-87 — the entries themselves label these
+**Chain.** R-3 → R-113 → R-77 → R-79 → R-87 — the entries themselves label these
 "third", "fourth", "fifth" recurrence. This is the law the ledger has failed
 hardest to internalise.
 
@@ -118,7 +118,7 @@ the function.
 already discovered do not travel unless written down; a SHA in a brief is a claim
 with an expiry date.
 
-**Exemplars.** R-9, R-68, R-72b.
+**Exemplars.** R-9, R-68, R-112.
 
 ---
 
@@ -196,7 +196,7 @@ be treated as findings, not as a summary to re-derive.
 
 1. **Three supersessions for R-67..R-91 are NOT applied.** The classifier that
    found them labelled collisions `a`/`b` by reading order while this file's
-   suffixes go by date, so its `R-73b` and this file's `R-73b` are different
+   suffixes go by date, so its `R-73b` and this file's `R-113` are different
    entries. They need per-entry re-identification against the suffixed file
    before archiving — acting on that mapping would let the id-collision defect
    corrupt the cleanup meant to fix it.
@@ -271,6 +271,14 @@ be treated as findings, not as a summary to re-derive.
 > heading-only grep is what caused this.
 > (`docs/issues/2026-08-16-reconnaissance-ledger-reuses-ten-ids-for-different-lessons.md`)
 >
+> **2026-08-21 correction.** The seven suffixed ids that survived (R-55b, R-57b, R-58b, R-72b,
+> R-73b, R-74b, R-76b) were STILL not valid entry tokens under this grammar — suffixing never
+> fixes that, regardless of which instance keeps the bare number. Renumbered to fresh ids
+> (R-109–R-115) instead, since the "preserve which instance a citation meant" benefit this
+> note describes turned out to be false at the resolver: the bare-number instance was usually
+> the row-only one, so citations resolved to nothing rather than to the intended lesson. See
+> `docs/issues/archive/2026-08-16-reconnaissance-ledger-reuses-ten-ids-for-different-lessons.md`.
+>
 > **Seven of the nine survive in-file (checked 2026-08-16).** R-56b and R-59b were
 > split by `52fca682` and then archived by `b6bb6377`, the first R-N archive pass —
 > so a both-formats count returns seven, not nine. The list above is the *record of
@@ -286,9 +294,9 @@ be treated as findings, not as a summary to re-derive.
 | R-103 | 2026-08-17 | miss (peer-caught) → rule | **A blast-radius audit is not a correctness audit, and enumerating the call sites makes it feel like both.** Read all four callers of a changed eligibility rule and correctly guarded `resolve_link` — then missed a pre-existing defect in the exact `else` arm just read, because the question asked was only *"does my change break this caller?"*, never *"is this caller correct?"*. The suppressor: an in-code comment asserting cross-site parity that described **intent**, not behaviour — the cheapest false positive, sitting where you would look to verify | `da55100a` (the incomplete audit) vs `3faddb15` (peer session's correction, hours later). `FileMissing` carries gating severity, so the miss would have failed CI on a correct doc — the same class the parent bug was filed for. Kin R-101, R-102, R-104 |
 | R-102 | 2026-08-17 | miss ×3 (self-caught) → rule | **A root cause read from code is a hypothesis about which true statement is the OPERATIVE one; implementing the fix is the measurement.** Three bug files in one session, three root causes written from careful reading, all three wrong, not one caught by re-reading: a two-part predicate rebutted as though it had no command list, a correct mechanism with both prescriptions wrong, and a diagnostic that does not discriminate. Sharpest tell — a root cause asserting an **absence**; reading establishes presence, only a search establishes absence | 3 datapoints, one session: `2026-08-15-read-only-metadata-commands-blocked-on-source-paths`, `2026-08-15-read-file-force-ignored-on-full-reads`, `2026-08-17-allocate-outcome-frontmatter-max-dropped-at-the-mcp-boundary`. The measured/inferred label is what kept all three cheap (`da55100a`). Kin R-101 (one layer in), R-103 |
 | R-101 | 2026-08-17 | miss (self-caught) → rule | **A test that DISTINGUISHES two hypotheses is not confirmation of one — state what the RIVAL hypothesis predicts before recording a verdict.** Ran a discriminating test on `include_str!` ref resolution and recorded it as *"confirmed — the base directory was the whole of it"*; the outcome actually **ruled out** the hypothesis it was read as confirming. The measurement was correct and already in hand, scored against one hypothesis in the direction committed to in prose two paragraphs above. Detector: for every `**Verdict:** confirmed`, complete *"under the rival hypothesis this test would have shown ___"* | `docs/issues/archive/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`; corrected in `da55100a`, which also found the sketched parser-side fix unreachable. The bug's *"inferred, not cited"* label is what made the wrong mechanism cheap. Kin R-102, R-103, R-104 |
-| R-55b | 2026-08-08 | miss | A host-specific symptom accepted as the norm without sweeping the other hosts | 9 of 15 declared roots swept; all nine had zero untracked entries |
-| R-57b | 2026-08-08 | miss | An identifier's shape says nothing about whether the thing exists — check its declared root | caught by an unrelated tool response an hour after the claim was published |
-| R-58b | 2026-08-08 | hit | Before fixing a heuristic, grep for other copies of it — `references()` cannot see a duplicated closure | `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md` |
+| R-109 | 2026-08-08 | miss | A host-specific symptom accepted as the norm without sweeping the other hosts | 9 of 15 declared roots swept; all nine had zero untracked entries |
+| R-110 | 2026-08-08 | miss | An identifier's shape says nothing about whether the thing exists — check its declared root | caught by an unrelated tool response an hour after the claim was published |
+| R-111 | 2026-08-08 | hit | Before fixing a heuristic, grep for other copies of it — `references()` cannot see a duplicated closure | `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md` |
 | R-87 | 2026-08-15 | hit | Before designing an abstraction, scout for the dispatch point that already exists | SD-1b |
 | R-88 | 2026-08-15 | hit | The instrument that nominates a refactor group also fixes its axis, and that axis can be orthogonal to the real duplication | SD-3 + SD-10; `legibility_scan` tier-1 group, premise falsified by live A/B |
 | R-89 | 2026-08-16 | miss ×3 | A tool's output is evidence about the code only if the running build contains it | SD-1b; `5917e37e`, `7c91cdf7` |
@@ -333,7 +341,7 @@ be treated as findings, not as a summary to re-derive.
 | R-39 | 2026-07-10 | hit | Adding a tool param/alias is additive-safe in codescout: every `*_schema_*` test is positive-presence (`props["x"].is_object()` / `contains_key`), none enumerate the exact prop set, and no `input_schema()` sets `additionalProperties:false` — so a new prop can't break a snapshot, and an unknown key flows through to `call()` (the very mechanism the alias fix relies on). | param-alias-ergonomics session (this session); 3038 lib passed / 0 failed; kin R-28/R-36 |
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
-| R-76b | 2026-08-15 | miss ×2 → rule | **Aggregate behaviour data is a screen, not a verdict — and it is wrong in BOTH directions.** An audit of 53,916 recorded tool calls ranked failures by frequency and by "what tool came next". Reading the actual arguments of ~12 instances overturned two conclusions. (a) **Overstated:** every rejection of a `json_path` wildcard was scored a successful recovery because the next call returned `success`. The arguments showed what those recoveries were — `$.items[*].abs_path` → read 393 raw lines; `$.entries[*].id` → `$.entries[4].id` one element per call; another → abandon the buffer and re-query upstream; another → grep the buffer. A green outcome column concealed a degraded workaround every time: it records that the call returned, never that the agent got what it asked for. (b) **Understated:** a guard scored at 35% "same-tool recovery" was in fact working — its correct recovery is a DIFFERENT tool (`symbols(include_body)` on the exact symbol wanted), which the same-tool metric counts as failure. Same-tool and adjacent-call metrics systematically penalise every guard whose right answer is another tool or needs a lookup first (widening one route's window from 1 call to 3 moved compliance 45% → 74%). And the sharpest defect was invisible to all aggregation: bucketing the refused ranges showed 69 of 244 were canonical imports reads (`1-20`, `1-30`), refused by a guard whose recommended alternative structurally cannot return imports. **Rule:** before filing or closing anything from aggregate counts, read the arguments of ten instances — and check whether the payload that would show intent is even being recorded. | 2026-08-15 tool-usage investigation TU-11; `docs/trackers/2026-08-15-tool-usage-investigation.md`. Kin R-50 (the view is not the set — this is its behavioural-telemetry form), R-75 (verify the artifact produced, not the exit code) |
+| R-115 | 2026-08-15 | miss ×2 → rule | **Aggregate behaviour data is a screen, not a verdict — and it is wrong in BOTH directions.** An audit of 53,916 recorded tool calls ranked failures by frequency and by "what tool came next". Reading the actual arguments of ~12 instances overturned two conclusions. (a) **Overstated:** every rejection of a `json_path` wildcard was scored a successful recovery because the next call returned `success`. The arguments showed what those recoveries were — `$.items[*].abs_path` → read 393 raw lines; `$.entries[*].id` → `$.entries[4].id` one element per call; another → abandon the buffer and re-query upstream; another → grep the buffer. A green outcome column concealed a degraded workaround every time: it records that the call returned, never that the agent got what it asked for. (b) **Understated:** a guard scored at 35% "same-tool recovery" was in fact working — its correct recovery is a DIFFERENT tool (`symbols(include_body)` on the exact symbol wanted), which the same-tool metric counts as failure. Same-tool and adjacent-call metrics systematically penalise every guard whose right answer is another tool or needs a lookup first (widening one route's window from 1 call to 3 moved compliance 45% → 74%). And the sharpest defect was invisible to all aggregation: bucketing the refused ranges showed 69 of 244 were canonical imports reads (`1-20`, `1-30`), refused by a guard whose recommended alternative structurally cannot return imports. **Rule:** before filing or closing anything from aggregate counts, read the arguments of ten instances — and check whether the payload that would show intent is even being recorded. | 2026-08-15 tool-usage investigation TU-11; `docs/trackers/2026-08-15-tool-usage-investigation.md`. Kin R-50 (the view is not the set — this is its behavioural-telemetry form), R-75 (verify the artifact produced, not the exit code) |
 | R-75 | 2026-08-13 | miss → rule | **A process-level env scrub is not configuration isolation — a program that reads config from disk reconstitutes what you removed, and the result looks like success.** An end-to-end probe launched under `env -i` with three explicit `CODESCOUT_*` vars was treated as hermetic on that basis. `main.rs` calls `load_startup_env`, which reads `~/.config/codescout/.env` (here a symlink to the repo's own `.env.amd`) and fills every key the caller left **unset** — so a url that had just been scrubbed came back, and the retrieval path silently discarded the `local-dir:` model in its favour. Exit **0**, `added=5`, no warning; the only tell was the artifact's shape, `FLOAT[768]` where the local model is 384-dimensional. This is the substrate rule (read what world the tool read, not just its verdict) failing where it was most needed: the negative control — does this run still succeed when I make the config source *provably* absent? — was never run. The repo already knew the escape (`tests/cli_artifact.rs:18-24` sets `CODESCOUT_ENV_FILE` to a nonexistent path for exactly this reason) and it was not consulted. **Rule:** before believing an isolated run, name every layer that can supply config — process env, dotenv, user config, project config, compiled default — and neutralise or observe each; then verify the *artifact produced*, not the exit code. Note the compensation: chasing the impossible dimension is what exposed the real defect, so the sloppy probe still paid — but it would have paid as a false "verified" had the dimension gone unread. | local-onnx-embedding session log F-7 + W-5; `docs/issues/2026-08-13-url-silently-overrides-local-dir-model.md` (fixed `38e0980b`). Kin R-50 (the view is not the set), R-6 (scout the substrate before mechanism design) |
 | R-54 | 2026-08-05 | miss → rule | **Before counting rows, ask what one row IS and whether two rows can contain the same underlying event — and never let "zero observed" become "empty" without stating n.** A corpus of 63,574 rows was 444 sessions: each row was one request re-sending the whole conversation (143 per session, 165× double-count). A 64-row sample was 34 effective sessions; a top band of 13 rows was 6. Nesting is invisible downstream because the duplicated content is genuinely present in both rows. Sibling of R-53: that one guards what the corpus is MADE OF, this one guards what a ROW MEANS | provenance-probe F-14 + W-10; PV-65; PV-66 |
 | R-53 | 2026-08-04 | miss → rule | **A corpus's composition is a seam — census it by producing tool before you measure it, and when you stratify by a magnitude, ask what makes things big.** One tool contributed 59.8% of all tool-result bytes as base64 image data that `json.dumps` had stringified into the text denominator; it also defined the top band of a size-stratified sample (11/13 sessions), so the magnitude axis was a producer axis in disguise. Invisible to thirteen rounds of internal checks — contamination moved numerator and denominator together. Caught only when the corpus owner said the traffic was not representative | provenance-probe F-13 + W-9; PV-61; PV-62 |
@@ -419,7 +427,7 @@ defaults to workspace root, not the file being modified."
 
 **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
 § Phase 1 — Scout. D11-verified 2026-08-20 in the **served** `1.16.13` cache: back-citation
-*"(R-3 → R-73b → R-77 → R-79 in codescout's `docs/trackers/reconnaissance-patterns.md` …)"*
+*"(R-3 → R-113 → R-77 → R-79 in codescout's `docs/trackers/reconnaissance-patterns.md` …)"*
 present, 1 occurrence. The bullet has been rewritten and extended repeatedly since 2026-05
 and the anchor still resolves — a verbatim quote would have needed re-syncing each time.
 
@@ -1783,7 +1791,7 @@ this probe lived in those two artifacts, and both were readable in under a minut
 ---
 
 
-## R-55b — Miss: a host-specific symptom accepted as the norm without sweeping the other hosts
+## R-109 — Miss: a host-specific symptom accepted as the norm without sweeping the other hosts
 
 **Verdict:** miss (caught by a later sweep, not by the scout that should have run first)
 
@@ -1799,11 +1807,11 @@ The cheap check was a sweep of the population the claim generalises over. `~/.co
 
 **Promote-when:** a second instance where a single-host symptom was generalised without a sweep. Pairs with R-38 (a concurrent session had already measured it) — both are "widen the evidence base before theorising".
 
-## R-57b — Miss: an identifier's shape says nothing about whether the thing exists — check its declared root
+## R-110 — Miss: an identifier's shape says nothing about whether the thing exists — check its declared root
 
 > **Id split 2026-08-16.** This entry reused a number already taken by a
 > different lesson. `R-57` (index row, 2026-08-06) is *"when the seam is a TOOL,
-> the scout is one real invocation whose output you read"*. This one is `R-57b`.
+> the scout is one real invocation whose output you read"*. This one is `R-110`.
 > A citation of bare `R-57` written before 2026-08-08 means the other.
 
 **Verdict:** miss (caught by an unrelated tool response an hour after the claim was committed and published)
@@ -1841,7 +1849,7 @@ Pairs with R-26 (a grep line-match locates a symbol, it does not confirm a mecha
 family: a real observation at a location you chose, mistaken for evidence about the thing you
 were actually asking about.
 
-## R-58b — Hit: before fixing a heuristic, grep for other copies of it — `references()` cannot see a duplicated closure
+## R-111 — Hit: before fixing a heuristic, grep for other copies of it — `references()` cannot see a duplicated closure
 
 **Verdict:** hit
 
@@ -2050,7 +2058,7 @@ group. At two, promote step 2 into this skill's Phase 1 as a named seam class
 (*instrument-nominated group*), since it is craft-shaped — it holds for any
 ranking tool that scores symbols independently, not just this repo's.
 
-## R-76b — Aggregate behaviour data is a screen, not a verdict
+## R-115 — Aggregate behaviour data is a screen, not a verdict
 
 **Observed:** 2026-08-15, auditing codescout's tool surface across 13 merged `usage.db` corpora
 (53,916 calls, 460 sessions).
@@ -2514,9 +2522,9 @@ never authorise a deletion**.
 
 **The audit found its own precedent false.** The `Outgrown` mode's worked example
 — written the previous day, by the same hand — claimed *"a **fifth** self-labelled
-recurrence"* over the chain `R-73b → R-77 → R-79 → R-87`. What the entries
+recurrence"* over the chain `R-113 → R-77 → R-79 → R-87`. What the entries
 actually self-label: R-77 says *"third instance"*, R-79 says *"fourth recurrence
-of R-77"*, and the first two are folded inside R-73b. That is **four**. And
+of R-77"*, and the first two are folded inside R-113. That is **four**. And
 **R-87 is the law's *hit*** — the scout ran and found the abstraction already
 there — not a fifth failure. Corrected in the same commit. Mode 1 (**False**)
 firing against one-day-old text, inside the section that defines mode 1.
@@ -2561,7 +2569,7 @@ failure — in the one paragraph a future agent reads to decide whether *their*
 promoted law is outgrown. The wrong lesson would have been: recurrences are
 inevitable, five of them are normal.
 
-**Kin:** R-3, R-73b, R-77, R-79 (the chain), R-50 (the view is not the set), R-87
+**Kin:** R-3, R-113, R-77, R-79 (the chain), R-50 (the view is not the set), R-87
 (the hit), R-89 (the unreachable case audited alongside).
 
 ## R-94 — A wiring inventory is not a delivery inventory, and it is wrong in both directions
@@ -2775,7 +2783,7 @@ test never could fail. This is the DYNAMIC form — it could fail yesterday and 
 a side effect of a change elsewhere in the tree. Same consequence, but there is no authoring
 defect to find, and review cannot see it because **the test file did not change**.
 
-**Kin:** R-70 → R-73 → R-76 (the D chain), R-3/R-73b/R-77/R-79 (law C, whose false zeros ran
+**Kin:** R-70 → R-73 → R-76 (the D chain), R-3/R-113/R-77/R-79 (law C, whose false zeros ran
 three times in the same session).
 
 ### Addendum 2026-08-16 — the NARROWING direction, and why minimal fixtures cluster on thresholds

@@ -554,7 +554,7 @@ is four and belongs in `SKILL.md` rather than here.
 
 **Status:** archived 2026-08-17 — compacted from the index row of `docs/trackers/reconnaissance-patterns.md`. No body section was ever written for this entry; this section exists so that citations of R-71 resolve (HY-9 / proposed D12).
 
-## R-72b — A git SHA in a subagent brief is a claim with an expiry date — re-derive HEAD at dispatch, and
+## R-112 — A git SHA in a subagent brief is a claim with an expiry date — re-derive HEAD at dispatch, and
 
 **Verdict:** miss · **Observed:** 2026-08-13
 
@@ -562,9 +562,9 @@ is four and belongs in `SKILL.md` rather than here.
 
 **Evidence:** release-promotion F-34
 
-**Status:** archived 2026-08-17 — compacted from the index row of `docs/trackers/reconnaissance-patterns.md`. No body section was ever written for this entry; this section exists so that citations of R-72b resolve (HY-9 / proposed D12).
+**Status:** archived 2026-08-17 — compacted from the index row of `docs/trackers/reconnaissance-patterns.md`. No body section was ever written for this entry; this section exists so that citations of R-112 resolve (HY-9 / proposed D12).
 
-## R-73b — Before reasoning about whether a mechanism exists, grep the layer that would own it
+## R-113 — Before reasoning about whether a mechanism exists, grep the layer that would own it
 
 **Verdict:** miss · **Observed:** 2026-08-13
 
@@ -572,9 +572,9 @@ is four and belongs in `SKILL.md` rather than here.
 
 **Evidence:** release-promotion F-35
 
-**Status:** archived 2026-08-17 — compacted from the index row of `docs/trackers/reconnaissance-patterns.md`. No body section was ever written for this entry; this section exists so that citations of R-73b resolve (HY-9 / proposed D12).
+**Status:** archived 2026-08-17 — compacted from the index row of `docs/trackers/reconnaissance-patterns.md`. No body section was ever written for this entry; this section exists so that citations of R-113 resolve (HY-9 / proposed D12).
 
-## R-74b — Before recommending at a trait boundary, enumerate the implementors and read the second one
+## R-114 — Before recommending at a trait boundary, enumerate the implementors and read the second one
 
 **Verdict:** hit · **Observed:** 2026-08-13
 
@@ -582,7 +582,7 @@ is four and belongs in `SKILL.md` rather than here.
 
 **Evidence:** release-promotion F-36; caught by applying architecture-snow-lion Self-Trap 2
 
-**Status:** archived 2026-08-17 — compacted from the index row of `docs/trackers/reconnaissance-patterns.md`. No body section was ever written for this entry; this section exists so that citations of R-74b resolve (HY-9 / proposed D12).
+**Status:** archived 2026-08-17 — compacted from the index row of `docs/trackers/reconnaissance-patterns.md`. No body section was ever written for this entry; this section exists so that citations of R-114 resolve (HY-9 / proposed D12).
 
 ## R-72 — A plan's code block is a claim about an API, and the workspace usually already holds the
 
@@ -753,4 +753,3 @@ is four and belongs in `SKILL.md` rather than here.
 **Evidence:** release-promotion W-8; the harness as specified would have instrumented LSP readiness, i.e. the wrong variable; correct instrument is the resolved `root` per 0-match. Kin R-57, R-50 (the view is not the set)
 
 **Status:** archived 2026-08-17 — compacted from the index row of `docs/trackers/reconnaissance-patterns.md`. No body section was ever written for this entry; this section exists so that citations of R-59 resolve (HY-9 / proposed D12).
-
