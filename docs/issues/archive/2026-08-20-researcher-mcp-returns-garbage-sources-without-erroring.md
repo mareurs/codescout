@@ -1,13 +1,14 @@
 ---
-id: d1af12793d90f5ae
+id: 23bd599cb74a1f12
 kind: bug
-status: open
+status: wontfix
 title: researcher MCP returns off-topic domains as sources and cites vendor marketing as evidence
 tags:
 - researcher-mcp
 - external-tool
 - measurement
 - source-quality
+closed: 2026-08-21
 ---
 
 # BUG: `researcher` MCP returns off-topic domains as sources and cites vendor marketing as evidence
@@ -77,7 +78,14 @@ be are marked inline.
 
 ## Hypotheses tried
 
-None. Filed on notice during a brainstorm; no investigation performed.
+None at filing time. **2026-08-21:** ran the file's own `## Resume` repro —
+`research("attestation theatre", intent="academic", mode="report", raw_json=true)` from a
+top-level session (not a subagent), twice in a row. Both calls returned
+`Error: Vertex response contained no text candidate` — a hard error, not the garbage-but-successful
+result the bug describes. This does not confirm or refute either retrieval-side/synthesis-side
+hypothesis; it is a third, unrelated failure mode (the underlying model call itself failing),
+and chasing it further would mean debugging a different defect in a repo this tracker doesn't
+govern. The original symptom (silent success with off-topic sources) was not reproduced today.
 
 ## Fix
 
@@ -90,6 +98,13 @@ covers exactly this shape (*"a tool's own output as much as a hand-rolled comman
 heuristic whose assumption the data violates degrades a value rather than raising"*).
 What this instance adds is that it applies to *retrieval* tools, where the degraded value
 is a citation, and a fabricated citation is the most publishable kind of wrong number.
+
+**Disposition (2026-08-21):** closing as `wontfix` from codescout's side. The `researcher`
+server's source lives outside this repo (`/home/marius/work/claude/researcher` on this
+machine, confirmed present) — a real fix belongs to that repo's own tracker, not this one.
+The codescout-side mitigation (independent per-citation re-verification before any citation
+is used as evidence) is already in place and is the durable artifact of this bug. No
+codescout code changes as a result of this bug.
 
 ## Tests added
 
@@ -114,4 +129,3 @@ retrieval is dirty, it is in the domain filter.
 
 - `docs/superpowers/specs/2026-08-20-entry-validity-and-attestation-design.md` § Prior art
 - CLAUDE.md § *Measurement — Never State a Count Your Instrument Did Not Measure*
-
