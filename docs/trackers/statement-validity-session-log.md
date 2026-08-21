@@ -13,7 +13,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_W: 10
-entry_high_water_F: 7
+entry_high_water_F: 8
 ---
 
 > **Work stream:** Layers 1–2 of
@@ -40,6 +40,7 @@ entry_high_water_F: 7
 | F-6 | 2026-08-21 | med | self-friction | fixed-verified | Having read a fact is not having applied it — extract's dedup |
 | F-4 | 2026-08-20 | med | architectural | fixed-verified | Gated doc surfaces were kept current; the routing that serves them was never checked |
 | F-7 | 2026-08-21 | high | architectural | open | A capability premise about our OWN internals reads as recall, not assertion — so nothing audits it |
+| F-8 | 2026-08-21 | high | architectural | open | A correction lands where the error was found, not where it propagates — two retired terms left the tap's firing rule standing |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -980,6 +981,71 @@ indefinitely on a premise that Layer 4 had already invalidated the day before.
 the verdict when tested. At two, add to CLAUDE.md's Measurement rule a fifth clause: *before
 publishing a number with a caveat, ask whether the caveat names a cut you could run in the next
 five minutes — if it does, run it; a limitation you can price is a task, not a limitation.*
+
+## F-8 — A correction lands where the error was found, not where it propagates — two retired terms left the tap's firing rule standing
+
+**Valid:** invariant
+
+**Rests on:** `statement-validity-session-log:F-4` — gated doc surfaces were kept current while
+the routing that serves them went unchecked. Same mechanism inside one document: the correction
+was written, correctly, at the site of the error, and never walked to the site that consumes it.
+
+**Observed:** 2026-08-21, scouting Layer 5b before building it. Its tap fires on
+`exposure >= 5`, where `exposure = max(reads, rests-on in-degree)`.
+
+**Got:** both terms are empty, and each was emptied by a decision recorded elsewhere in the
+same document.
+
+- **`reads`** has no counter — no table, no column, nothing increments. Layer 5a, which was to
+  supply it, was retired earlier the same day at ~4 recoverable reads per 30 hours.
+- **`rests-on in-degree` is zero rows, not merely unimplemented.** `SELECT rel, COUNT(*) FROM
+  entry_cite GROUP BY rel` returns `cites` and nothing else, for both origins; `artifact_link`
+  carries eight rel values and `rests-on` is not among them. Layer 3c, its source, was
+  cancelled by measurement — one resolvable declaration corpus-wide.
+
+**The document already knew, in the wrong place.** The shipped-state note under Layer 2 says
+plainly: *"`max(reads, in-degree)` is not implemented — there is one term, and it degrades by
+being smaller, not by breaking."* That note is correct, and it is ~200 lines away, under a
+different heading, describing **shipped** code. The tap section is what an implementer opens to
+build 5b. Neither retirement — 3c's, from the day before, nor 5a's, from four hours earlier —
+walked forward to the consumer.
+
+**Why this shape is worse than a plain stale claim.** A correction *feels* discharged the moment
+it is written: the author has confronted the error, recorded it honestly, and moved on. That
+felt-completeness is what stops the second step. And the surviving text is not obviously stale —
+`max(reads, rests-on in-degree)` reads as a considered design, so it recruits no suspicion. Two
+independent cancellations, ten days of design work between them, and the formula they both empty
+still sits in the section that would have been implemented next.
+
+**The scout also found the fix.** The term with data is `cites` in-degree, and the real decision
+is which **grain**: `entry_indegree` (shipped, gates three `doctor` checks, recomputed from files,
+never reads `entry_cite`) versus `entry_cite` in-degree (1539 rows, 654 entry destinations).
+They rank differently and are not interchangeable. Measured among cited destinations: the `F`/`W`
+family holds 96 tokens and 442 edges, of which **at least 33 tokens carrying at least 339 edges
+(77%) have more than one definer** — the condition `entry_indegree` drops on — against 7 tokens
+and 63 of 1056 edges (6%) for every other prefix. Choosing the shipped term would silently exempt
+most of the session-log corpus from ever arming the tap. A floor, not a count: definers were
+counted only among *cited* slugs.
+
+**And a third stale deferral, found in passing.** `entry_indegree`'s doc comment names its own
+fix — count a stem-qualified citation against its specific definer instead of folding it into the
+bare token — and declines it because *"it needs the `Corpus`/`by_stem` machinery `link_scan`
+builds, which this function does not have."* Layer 3b built exactly that machinery, and
+`entry_cite` holds its resolved output. `reconnaissance-patterns:R-95` again: a deferral
+rationale is a claim about current state, and this one expired the day 3b shipped.
+
+**Counterfactual:** 5b implemented against the written formula produces a tap that never fires,
+on a corpus where nothing would look wrong — no error, no empty table, no failing test. The
+`max()` returns 0 for every Statement, `obligation_state` stays `none` forever, and the health
+metric the design names for exactly this failure (*"if `verifies` climbs while `refuted` stays at
+zero, the appraisals are theatre"*) reads clean, because neither counter ever moves.
+
+**Status:** open
+
+**Promote-when:** a second instance of a correction that was written at the error site and not
+propagated to a consumer **inside the same artifact**. At two, add to the reconnaissance skill's
+Phase 3: when you correct a claim, grep the artifact for every other statement that rests on the
+same premise before you close — the document is the blast radius, not the paragraph.
 
 ## Template for new entries
 

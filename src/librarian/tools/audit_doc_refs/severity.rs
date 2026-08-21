@@ -67,6 +67,20 @@ impl PathEvidence {
 /// classification was certain.
 ///
 /// See `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
+///
+/// **Capped to `Low`, not `Med`, and applied regardless of what already ran.**
+/// An unanchored slash-joined token whose root segment doesn't exist in the
+/// repo isn't just "maybe elsewhere" — the classifier's own discriminator
+/// (capitalization) already had nothing to go on, so this is a guess stacked
+/// on a guess. All-lowercase two-segment idioms like `tools/list` (an MCP
+/// method name, not a path) hit exactly this branch — but only when this runs
+/// at all: `verdict_with_drops_for_ref` calls `apply_drops` FIRST, and its
+/// `docs/trackers/**` historical-drop already lands `Med` before this ever
+/// sees the ref, so the original `sev == High` guard silently no-opped for
+/// every session-log tracker — the exact files the bug was filed from. Gate
+/// on `sev != Low` instead: apply on top of whatever already dropped it, not
+/// only when nothing has. See
+/// `docs/issues/2026-08-20-audit-doc-refs-reads-mcp-method-names-as-file-paths.md`.
 pub fn cap_inferred_path(
     verdict: Verdict,
     evidence: PathEvidence,
@@ -78,9 +92,9 @@ pub fn cap_inferred_path(
     // extension alone, so a miss there is equally a guess.
     if matches!(verdict, Verdict::Missing | Verdict::FileMissing)
         && evidence == PathEvidence::Inferred
-        && sev == Severity::High
+        && sev != Severity::Low
     {
-        return (Severity::Med, SeverityReason::InferredPath);
+        return (Severity::Low, SeverityReason::InferredPath);
     }
     (sev, reason)
 }

@@ -2284,7 +2284,25 @@ mod tests {
             &ctx(tmp.path(), &[]),
         );
         assert_eq!(r.verdict, Verdict::Missing);
-        assert_eq!(r.severity, Severity::Med);
+        assert_eq!(r.severity, Severity::Low);
+        assert_eq!(r.severity_reason.as_str(), "inferred_path");
+    }
+
+    /// The bug as reported: an MCP method name (`tools/list`) is all-lowercase and
+    /// slash-joined, so `is_path_segment` admits it as a path candidate. It resolves
+    /// to nothing (no `tools/` at the repo root) and used to cap only to `Med` —
+    /// still inflating `n_refs_broken` for a token that was never a path.
+    /// docs/issues/2026-08-20-audit-doc-refs-reads-mcp-method-names-as-file-paths.md
+    #[test]
+    fn mcp_method_name_ref_caps_to_low() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let r = resolve_ref(
+            &cand("tools/list", "docs/trackers/x.md", RefKind::FilePath),
+            &ctx(tmp.path(), &[]),
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
+        assert_eq!(r.severity, Severity::Low);
         assert_eq!(r.severity_reason.as_str(), "inferred_path");
     }
 

@@ -921,6 +921,66 @@ first month's review rather than in a claim that it is handled.
 measurement behind it, and it is a *floor*, not a period — a Statement appraised at 5
 arms again at 10. Re-tune from the first month's distribution.
 
+> **Correction — scouted 2026-08-21, before implementing: as written, this tap can never
+> fire, because BOTH of its terms are empty.** Measured against the live catalog:
+>
+> - **`reads` has no counter.** No table, no column, nothing increments. Layer 5a — the
+>   layer that was to supply it — is retired (§6), and the leaked population it would
+>   have recovered is ~4 reads per 30 hours.
+> - **`rests-on in-degree` is literally zero rows.** `SELECT rel, COUNT(*) FROM
+>   entry_cite GROUP BY rel` returns `cites` and nothing else, for both origins;
+>   `artifact_link` carries `cites`, `tracks`, `relates_to`, `implements`, `references`,
+>   `relates`, `remediates`, `amends` — **no `rests-on`**. Layer 3c, the source of that
+>   term, was cancelled by measurement: one resolvable declaration corpus-wide, and its
+>   edge already exists as `cites`.
+>
+> **Neither cancellation propagated here.** The shipped-state note under Layer 2 does say
+> "`max(reads, in-degree)` is not implemented — there is one term", and that note is
+> correct about the layer it corrects. It sits ~200 lines from this section, under a
+> different heading, describing shipped code — while *this* section is the one an
+> implementer reads to build 5b. A correction lands where the error was found, not where
+> it propagates.
+>
+> **The term that has data is `cites` in-degree**, and the open decision is which
+> **grain** of it 5b consumes, because the two rank differently and are not
+> interchangeable:
+>
+> | | `entry_indegree` (shipped) | `entry_cite` in-degree (Layer 3b) |
+> |---|---|---|
+> | source | recomputed from files each run; **never reads `entry_cite`** | materialized table, 1539 `origin='scan'` rows |
+> | grain | token → count of *files* citing it | entry → count of citing *entries* |
+> | destinations | tokens | **654** distinct `<slug>:<local>` |
+> | consumers | gates 3 shipped `doctor` checks | nothing yet |
+> | multi-definer tokens | **dropped** unless exactly one definer is active | resolved, because a stem-qualified citation names one definer |
+>
+> That last row is the whole difference, and it is measured, not argued. Among cited
+> destinations: the `F`/`W` family holds 96 distinct tokens and 442 edges, of which **at
+> least 33 tokens carrying at least 339 edges (77%) have more than one definer** — the
+> condition `entry_indegree` drops on. (A floor: definers are counted here only among
+> *cited* slugs, so a ledger that defines `F-1` and is never cited for it does not
+> appear.) For every other prefix the same figure is 7 tokens and 63 of 1056 edges (6%).
+> So choosing `entry_indegree` as 5b's exposure term silently exempts most of the
+> session-log corpus from ever arming the tap.
+>
+> **And `entry_indegree`'s own deferral is now stale.** Its doc comment names the fix —
+> count a stem-qualified citation against its specific definer rather than folding it
+> into the bare token — and declines it because "it needs the `Corpus`/`by_stem`
+> machinery `link_scan` builds, which this function does not have." Layer 3b built
+> exactly that, and `entry_cite` holds its resolved output. `reconnaissance-patterns:R-95`:
+> a deferral rationale is a claim about current state, and this one has expired.
+>
+> **Two premises checked and holding**, recorded so the next scout does not re-check
+> them: `events.kind`'s CHECK constraint already admits `'reviewed'` and `'verdict'`, so
+> the appraisal event needs no migration (and `reviewed` still stands at exactly **1**
+> row corpus-wide, as §4 claims); and `entry_cite.src_slug REFERENCES artifact(slug) ON
+> DELETE CASCADE` proves the slug-keyed, move-stable precedent `entry_attestation` copies,
+> with slugs now at 4113/4113. `asserted_at` remains absent from `src/`.
+>
+> **One naming defect to settle while editing:** the schema above declares
+> `obligations_missed`; *Making a deferred obligation stick* says the un-discharged count
+> is `obligations_open`. One concept, two names, and `doctor` is specified to report the
+> second.
+
 Past the threshold, `librarian(action="context")` serves the Statement **in full**,
 with a banner, and returns a `pending_attestations` array alongside the pack:
 
