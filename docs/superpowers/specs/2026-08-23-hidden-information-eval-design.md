@@ -107,6 +107,40 @@ comparison a clean tool-set-A-vs-B rather than "does the agent fall back to grep
 The both-available configuration is a legitimate third arm later; it is not this
 study.
 
+### How the denial is actually enforced (F-7)
+
+Reconnaissance after this spec was approved found the harness **cannot do this
+today**. `SessionConfig` carries only `permission_mode` (default
+`bypassPermissions`, `src/prompt_tdd/adapters/claude_code.py:51`), which governs
+prompting, not tool availability. There is no allow/deny plumbing anywhere in
+`src/prompt_tdd/`, and the plugin-free profile's `settings.json` is `{}`.
+
+The capability exists one layer down. Claude Code 2.1.241 offers
+`--disallowedTools`, `--allowedTools`, and `--tools` (`""` disables all built-ins).
+So this is a passthrough, not a redesign: add a `disallowed_tools` field to
+`SessionConfig`, read it in `cli.py:69`, and emit it at `claude_code.py:174` and
+`:361` — the same four sites `permission_mode` already threads through.
+
+**Prerequisite task.** The passthrough lands before phase 1, not during it.
+
+**Use `--disallowedTools` with an explicit list, not `--tools ""`.** The latter is
+documented as covering "the built-in set", which *implies* MCP tools survive it —
+but that is read off a help string, not measured. The explicit deny-list does not
+depend on the distinction.
+
+**And enforce detection independently of enforcement.** The checker must fail any
+`hidden-cs` run whose `tool_names` include a native file tool, as its own class
+(`native-tool-used`), mirroring the `no-mcp-tool-used` veto already in
+`check_nullctl.py`. This stays in place *after* the passthrough works, because a
+passthrough that silently stops working looks exactly like compliance.
+
+The reason both are required: every existing arm in `scenarios/surface-budget/`
+restricts tools by prompt instruction alone ("Do not use Bash, Read, Grep, Glob,
+Edit or Write"). Following that precedent here would leave `hidden-cs` enforced by
+request, and a run that ignored the request would contaminate the arm without
+moving recall, precision, F1 or tokens — none of which look at which tools produced
+the answer.
+
 Both arms: identical fixture bytes, identical prompt, identical turn cap, same model.
 
 **Controls, both required before any result is believed:**

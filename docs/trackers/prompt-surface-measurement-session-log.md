@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 6
-entry_high_water_W: 3
+entry_high_water_F: 7
+entry_high_water_W: 4
 entry_prefix:
 - F
 - W
@@ -34,6 +34,7 @@ surfaces, not the definition.
 | F-4 | Every augmentation in the catalog is gone | open |
 | F-5 | A stale recon finding was relayed as current | fixed |
 | F-6 | 400k of context with no tracker or librarian use | fixed |
+| F-7 | Spec asserted per-arm tool denial the harness cannot do | open |
 
 ## Wins Index
 
@@ -42,6 +43,7 @@ surfaces, not the definition.
 | W-1 | Adversarial verify caught four fabricating checkers | validated |
 | W-2 | Re-measuring beat withdrawing | validated |
 | W-3 | Reading the surface README before compacting it | validated |
+| W-4 | Scouting the runtime's capability surface before planning | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -240,6 +242,122 @@ that prompted the work.
   existing 14-step plan was reviewed unsound.
 - **Restore the augmentations** once F-4's fix direction is decided.
 
+## F-7 — Spec asserted per-arm tool denial the harness cannot do, and the existing precedent is unenforced
+
+**Valid:** conditional — until a tool-restriction passthrough lands in `SessionConfig`
+**Status:** open
+**Severity:** high
+
+**When:** 2026-08-23, pre-plan reconnaissance for the hidden-information eval spec
+(`556cc34167321863`, committed `f4d3d7b2`), before writing any implementation plan.
+
+**Expected (spec § 2):** the `hidden-cs` arm runs "codescout MCP only; native
+`Read`/`Grep`/`Glob` denied". Written as if the harness supports per-arm tool
+restriction.
+
+**Got (scouted reality):** it does not. `grep` for
+`allowed_tools|disallowed_tools|allowedTools|permission_mode|deny` across
+`prompt-engineering/src/**/*.py` and every scenario YAML returns **four** hits, all
+`permission_mode` — `src/prompt_tdd/adapters/claude_code.py:51` (default
+`"bypassPermissions"`), `:174` and `:361` (the two subprocess arg builders), and
+`src/prompt_tdd/cli.py:69` (the loader). `permission_mode` governs *prompting*, not
+tool availability. `~/.prompt-tdd/profiles/plugin-free/settings.json` is `{}`, so no
+deny rules there either.
+
+**The capability exists one layer down.** Claude Code 2.1.241 offers three flags the
+harness never passes:
+
+- `--disallowedTools, --disallowed-tools <tools...>` — deny-list, pattern syntax
+  (`"Bash(git *) Edit"`)
+- `--allowedTools, --allowed-tools <tools...>` — allow-list, same syntax
+- `--tools <tools...>` — "the list of available tools **from the built-in set**;
+  `""` disables all tools, `"default"` uses all"
+
+So the fix is a passthrough, not a redesign: a `tools` / `disallowed_tools` field on
+`SessionConfig`, read in `cli.py:69`, emitted at `claude_code.py:174` and `:361`.
+Four sites, mirroring exactly how `permission_mode` is already threaded.
+
+**Probable cause:** the spec was written from the eval's requirements without
+scouting the runtime's capability surface. The arm definition named a behaviour;
+nobody checked the harness could produce it.
+
+**Why severity is high, not med.** The likely failure is not a stall. Every existing
+arm in `scenarios/surface-budget/` already restricts tools by **prompt instruction**
+— the smoke scenario's message reads "Do not use Bash, Read, Grep, Glob, Edit or
+Write." An implementer hitting the gap would most plausibly follow that precedent,
+and `hidden-cs` would then be enforced only by asking nicely. Any run where the model
+reaches for `Read` anyway silently contaminates the arm, and **nothing in the
+currently-specified metrics would reveal it** — the spec scores recall, precision and
+tokens, none of which notice which tools produced the answer. That is a silent path
+from a soft constraint to a wrong headline finding about whether codescout helps.
+
+**Mitigation available today, and it should be in the spec regardless of the
+passthrough:** `surface_lib.collect_facts()` already records `tool_names` per run.
+A checker veto — fail any `hidden-cs` run that used a native file tool, as its own
+class — mirrors the existing `no-mcp-tool-used` veto in `check_nullctl.py` and turns
+silent contamination into a loud, countable failure. Enforcement and detection are
+independent; ship the detection even after the passthrough lands, because a
+passthrough that silently stops working looks exactly like compliance.
+
+**Unverified:** whether `--tools ""` leaves MCP tools intact. The help says "from the
+built-in set", which implies MCP tools are out of its scope, but that is read off a
+help string, not measured. `--disallowedTools` with an explicit list avoids depending
+on the distinction and is the safer choice until someone measures it.
+
+**Fix idea / Pointer:** spec § 2 updated in the same session to name the real
+mechanism and add the veto. Harness passthrough is a prerequisite task for the
+implementation plan, not part of the eval itself.
+
+## W-4 — Scouting the runtime's capability surface before planning caught an unbuildable arm
+
+**Valid:** dated 2026-08-23
+**Status:** validated
+
+**Observed:** 2026-08-23, immediately after the hidden-information eval spec was
+approved and committed (`f4d3d7b2`), before writing its implementation plan.
+
+**Pattern:** when a spec's design names a *runtime behaviour* — "this arm runs with
+X denied", "this run is capped at N turns", "this arm uses model Y" — scout whether
+the harness can actually produce that behaviour, before the plan is written. Design
+review checks whether the experiment answers the question. It does not check whether
+the runtime can run the experiment, and those are different failures caught by
+different readers.
+
+The scout is cheap and mechanical: grep the runner for the knob, and read the
+underlying CLI's flag list for the capability. Two calls found both the gap and its
+fix.
+
+**Counterfactual, concrete.** Without it, the implementation plan would have
+specified `hidden-cs` as "native tools denied" and the implementer would have hit a
+harness with no such field. The available precedent is prompt-instruction
+enforcement — every existing `scenarios/surface-budget/` arm restricts tools by
+asking ("Do not use Bash, Read, Grep, Glob, Edit or Write"), so following it is the
+path of least resistance and looks correct.
+
+The eval would then have run with an arm enforced only by request. Cost if that
+reached phase 2: **32+ runs at $40–100**, producing a headline about whether
+codescout helps that is partly an artifact of the model reaching for `Read` in the
+arm where it was supposed to be unavailable — and none of the specified metrics
+(recall, precision, F1, tokens) would have shown it, because none of them look at
+which tools produced the answer. The failure would have been invisible in exactly
+the way the four fabricating checkers (W-1) were: a clean number from a broken
+setup.
+
+**Confirming data points:**
+1. W-1 (this log) — adversarial verify caught four checkers producing clean numbers
+   from broken processes. Same failure class, caught at a different stage.
+2. F-7 (this log) — this scout; the arm was unbuildable as specified and the
+   fallback was silently wrong rather than loud.
+
+**Impact:** high — prevented a contaminated arm in a $40–100 measurement whose
+contamination would not have been detectable after the fact.
+
+**Promote-when:** a second spec-stage scout catches a runtime-capability gap that
+design review passed. At two datapoints, promote to the reconnaissance skill as a
+craft-shaped rule — "a design that names runtime behaviour is a seam; scout the
+runner before writing the plan" — since it is true of any harness in any language,
+not just this one.
+
 ## Template for new entries
 
 ```
@@ -249,4 +367,3 @@ that prompted the work.
 **Observed:** …
 **Rests on:** …
 ```
-
