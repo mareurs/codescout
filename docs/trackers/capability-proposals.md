@@ -386,6 +386,8 @@ build/test/clippy. Those are genuine long work, not hand-rolled waiting — but 
 
 **Status:** partially shipped · **Opened:** 2026-08-17 · **Updated:** 2026-08-18
 
+**Valid:** conditional — until append_section's heading-shape validation (defect class 2) ships
+
 **The problem.** Entry ids in prose ledgers are allocated by the agent: scan the file for
 the max `PREFIX-N`, add one, write the entry. That read-then-write is not atomic, and it is
 the source of every id defect measured on this repo on 2026-08-16/17:

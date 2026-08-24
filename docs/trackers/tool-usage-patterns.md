@@ -199,6 +199,8 @@ chosen-but-unimplemented fix candidates, preconditions on landing, and cross-cha
 ordering decisions. Filed as R-55 (`miss → proposal`) in
 `docs/trackers/reconnaissance-patterns.md`; narrative in F-2 of
 `docs/trackers/release-promotion-session-log.md`.
+
+**Valid:** dated 2026-08-06
 ## run_command observations
 
 ### T-013 — `cargo test 2>&1 | tail -25`, then grepping that 25-line buffer as proof of a clean 3400-test suite
@@ -277,6 +279,8 @@ authoritative. Suggested widening: *"tools, APIs, and any function whose output 
 are about to assert on."* Paired with W-1 in
 `docs/trackers/release-promotion-session-log.md`.
 
+**Valid:** dated 2026-08-06
+
 ### T-16 — Reporting a three-command local subset as "the gate"
 
 **Tool:** `run_command` · **Verdict:** debatable · **Observed:** 2026-08-06.
@@ -307,6 +311,8 @@ mention of feature configs or of consulting CI at all. Partially closed: `docs/R
 now carries a *Large-Cohort Promotion* section listing all five steps with the ancestry
 check first. Residual is a single local alias that runs all five — ROADMAP standing backlog;
 narrative in F-3.
+
+**Valid:** dated 2026-08-06
 ## read_file observations
 
 ### T-17 — Following the overflow hint literally, into an unsupported grammar

@@ -41,6 +41,8 @@ that every declared column + every required index (`ux_artifact_slug`, …) surv
 `pragma_foreign_key_check` is empty. Reuses `column_exists`, `SCHEMA_SQL`, seed fixtures — only
 a tiny `parse_create_table_columns` helper is new. Cheap-and-robust; `cargo test`-gated for free.
 
+**Valid:** dated 2026-07-17
+
 ### I-2 — LIKE-escape helper + gate (defect #5)
 The escape idiom is copy-pasted in ~5 inline sites across two idioms with no shared helper
 (see bug `docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md`). Extract
@@ -48,12 +50,16 @@ The escape idiom is copy-pasted in ~5 inline sites across two idioms with no sha
 through it; add a source-scan `#[test]` (mirroring `claude_md_contains_no_deprecated_tool_names`)
 asserting every `LIKE` literal has a paired `ESCAPE` clause.
 
+**Valid:** dated 2026-07-17
+
 ### I-3 — Mutation testing at the ship boundary (defects #2/#3/#4)
 `cargo-mutants` is not yet a repo dev-dependency. Add a diff-scoped `cargo mutants --in-diff <range>`
 pass to the Standard Ship Sequence in `docs/RELEASE.md` (pre-cherry-pick to master). Surviving
 mutants = untested behavior. Diff-scoping keeps cost tractable; ship-boundary cadence keeps it
 off the per-edit hot path. This is the only mechanism that would have caught the non-discriminating
 guard test (#2).
+
+**Valid:** dated 2026-07-17
 
 ### I-4 — Standing review-lens bullets (defects #2/#3/#4/#1)
 The superpowers `task-reviewer-prompt.md` / `code-reviewer.md` carry only a generic
@@ -64,6 +70,8 @@ cross-migration-seam check. **Ownership caveat:** superpowers is a marketplace p
 not owned) — editing the cache is ephemeral. Durable home is the owned buddy `testing-snow-leopard`
 (carries the lenses as doctrine); the superpowers edit is an upstream suggestion.
 
+**Valid:** dated 2026-07-17
+
 ### I-5 — Durable recall (all defects)
 codescout memories: `catalog-sql-hazards` (#1, #5) and `test-design-discipline` (#2/#3/#4) —
 DONE 2026-07-17. Pending: `testing-snow-leopard` SKILL.md gains L3 (assert-on-cause), L4
@@ -71,6 +79,8 @@ DONE 2026-07-17. Pending: `testing-snow-leopard` SKILL.md gains L3 (assert-on-ca
 (schema-migration ordering; writer-shape↔reader-surfacing). **Eval caveat:** the reconnaissance
 edit is a scout-behavior change → requires re-scoring `docs/evals/reconnaissance-output.md`
 (baseline n=0). The superpowers/testing-snow-leopard edits are not eval-gated.
+
+**Valid:** dated 2026-07-17
 
 ### I-6 — Untested-new-symbol detector (deferred, low-yield)
 Buildable cheaply from `call_graph(direction=callers)` + a `tests/` name-path heuristic, but only

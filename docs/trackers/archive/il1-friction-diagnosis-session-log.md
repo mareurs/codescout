@@ -1,5 +1,6 @@
 ---
 status: archived
+kind: tracker
 ---
 # IL1 Friction Diagnosis — Session Log
 

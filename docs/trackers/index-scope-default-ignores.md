@@ -10,6 +10,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md
 - docs/issues/archive/2026-04-18-memory-leak-x-session-freeze.md
+kind: tracker
 ---
 
 # Tracker: indexing scope — default-ignore globs (deferred)

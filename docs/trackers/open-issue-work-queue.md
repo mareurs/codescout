@@ -219,6 +219,8 @@ commit's? Option 3 is spent; do not re-raise it.
 ### BL-25 — the byte cap evicts rules into get_guide topics nothing triggers
 **done** — 7 of 10 guides (~46 KB) had no trigger at all.
 
+**Valid:** dated 2026-08-18
+
 ### BL-26 — get_guide("librarian-runtime") said a move preserves the id
 **done** — one fact in four files; an earlier pass repaired three and missed this one.
 

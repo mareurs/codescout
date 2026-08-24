@@ -1,5 +1,6 @@
 ---
 status: archived
+kind: tracker
 ---
 # Session Log — Tracker-as-Skill / Prompt-Surface
 

@@ -1,6 +1,7 @@
 ---
 status: active
 title: Session Log — Structural Edit Gate
+kind: tracker
 ---
 # Session Log — Template
 

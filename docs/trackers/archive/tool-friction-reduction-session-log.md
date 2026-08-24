@@ -1,5 +1,6 @@
 ---
 status: archived
+kind: tracker
 ---
 # Session Log — Tool Friction Reduction (2026-07-09)
 

@@ -116,6 +116,8 @@ word** — so a caller could not learn that what they asked for is not a thing t
 does. The overflow hint now says so and names the call that works; the schema says it
 before the call is spent. Same fix shape as B-5's `Showing 400 of 400`: the tool's answer
 had to describe its own limits, not change.
+
+**Valid:** dated 2026-08-17
 ## B-2 — the buffered full-read summary carries no incompleteness signal
 
 **Reported:** 2026-08-10, D2 in his design doc. He called this the defect that

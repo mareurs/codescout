@@ -88,6 +88,8 @@ from a blocking one:
 `il3_pipe_to_trimmer` the lowest (3%) on 262. The difference is that the latter's message states a
 concrete corrective action. That single comparison is the investigation's main analytic result.
 
+**Valid:** dated 2026-08-15
+
 ## TU-5 — the blind spot in the measurement itself
 
 **855 of 2,751 errors (31%) have `err_family IS NULL`**, so every ranking above describes 69% of the

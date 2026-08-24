@@ -131,6 +131,8 @@ The `.cmd` assumption held only for npm shims; the resolver now PATH-probes `.cm
 `lsp` · **deferred** · 2026-06-09 · `docs/trackers/archive/vdi-reliability-session-log.md` (F-3)
 `spawn()` is a synchronous `CreateProcessW` and needs `spawn_blocking`; the init handshake is already bounded.
 
+**Valid:** dated 2026-06-09
+
 ### WIN-6 — peer module does not compile on Windows
 `platform-gated` · **fixed** · 2026-06-09 · `5f8911b2`
 Unix domain sockets have no Windows equivalent here; the module is gated behind `cfg(unix)`.
@@ -215,9 +217,13 @@ Same class again, and `go` has no library binding — so GOMODCACHE is re-derive
 `retrieval-stack` · **fixed** · 2026-06-16 · `docs/plans/2026-06-16-two-stack-retrieval-lite.md`
 WIN-22's remote-embeddings fix was necessary but not sufficient without a daemon-free stack. Phases 0-4 all shipped to master; closed 2026-07-02 by a verify-open pass.
 
+**Valid:** dated 2026-07-02
+
 ### WIN-27 — first full wine suite showed 20 pre-existing failures
 `test-portability` · **open** · 2026-07-02 · `docs/issues/archive/2026-07-02-windows-gnu-wine-20-test-failures.md`
 The 8-test `guide_hint` cluster was fixed 2026-07-05 and un-skipped; 12 remain skipped as emulation quirks.
+
+**Valid:** dated 2026-07-02
 
 ### WIN-28 — nine real-Windows failures, zero product defects
 `test-portability` · **fixed** · 2026-08-06 · `docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`

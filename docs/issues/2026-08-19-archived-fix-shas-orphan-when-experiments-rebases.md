@@ -122,3 +122,8 @@ recording it.
 - `docs/RELEASE.md` — cherry-pick vs fast-forward.
 - [2026-08-19 run_command rewrites pipes inside heredoc content](archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md) — surfaced by this pass; would have written 53 broken resolution commands.
 - [2026-08-18 qualified citation silently truncated past 31 chars](archive/2026-08-18-qualified-citation-silently-truncated-when-file-stem-exceeds-31-chars.md) — sibling positional-identity failure, on the citation qualifier rather than the fix pointer.
+
+## Fix provenance
+
+- **SHA:** `c757cbb4`
+- **patch-id:** `4e19a177e02ca8e74a44dc700e18102a9862ad25`

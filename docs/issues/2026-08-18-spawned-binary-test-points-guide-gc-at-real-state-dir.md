@@ -221,3 +221,8 @@ Do **not** go looking for a master-side SHA: promotion is a fast-forward, so `45
 - `docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md` § 2 — the storage move
 - `.superpowers/sdd/2026-08-18-guide-ledger-phase-a-storage/progress.md` — Ruling 21 (the
   injection seam) and the enumeration history
+
+## Fix provenance
+
+- **SHA:** `45918ca8`
+- **patch-id:** `09d0f1b5031bd99277bb6a5aa7c790d500b38854`

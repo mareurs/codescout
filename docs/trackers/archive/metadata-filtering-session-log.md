@@ -1,6 +1,6 @@
 ---
 id: null
-kind: null
+kind: tracker
 status: archived
 title: Session Log — Metadata Filtering
 owners: []

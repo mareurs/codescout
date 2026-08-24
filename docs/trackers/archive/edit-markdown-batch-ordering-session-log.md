@@ -1,6 +1,7 @@
 ---
 status: archived
 title: Session Log — edit_markdown Batch Ordering
+kind: tracker
 ---
 # Session Log — Template
 

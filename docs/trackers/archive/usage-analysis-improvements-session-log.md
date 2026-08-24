@@ -1,5 +1,6 @@
 ---
 status: archived
+kind: tracker
 ---
 # Session Log — Usage-Analysis Improvements (2026-05-27)
 

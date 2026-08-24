@@ -1,6 +1,6 @@
 ---
 id: null
-kind: null
+kind: tracker
 status: archived
 title: I1 Refactor — Session Friction Log
 owners: []

@@ -9,6 +9,7 @@ tags:
 - snapshot-stale
 - windows-platform-support
 topic: tracker-entry-identity
+no_fix_commit: true
 ---
 
 ## Summary
@@ -113,3 +114,7 @@ been done.
 - `docs/issues/archive/2026-08-18-no-check-detects-a-body-that-has-run-ahead-of-params.md` (BL-40 — the existence half this defect's content half sits beside)
 - `docs/trackers/open-issue-work-queue.md` BL-42 (the data repair whose execution surfaced this)
 
+
+## Fix provenance
+
+no commit — repaired live via update_entry against the machine-local catalog; the underlying code gap is unfixed

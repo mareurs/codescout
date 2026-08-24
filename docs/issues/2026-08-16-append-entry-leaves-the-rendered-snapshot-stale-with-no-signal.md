@@ -365,3 +365,8 @@ the false positive); `append_entry` already reads the body; and
 - `docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md`
   — the adjacent write-safety defect; the snapshot is what made recovery possible there
 - `docs/trackers/open-issue-work-queue.md` — the tracker this was measured on
+
+## Fix provenance
+
+- **SHA:** `99aaf83f`
+- **patch-id:** `5b399449af64adba19c2204088255c502d903cc6`

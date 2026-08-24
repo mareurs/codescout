@@ -222,3 +222,8 @@ still unreviewed by anyone; run `codescout doctor` there.
 - `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md` — the other cause, fixed in `c0bdeec7`
 - `.gitignore:28` — why the config is unreviewable
 - PR https://github.com/mareurs/codescout/pull/11
+
+## Fix provenance
+
+- **SHA:** `f632e7ef`
+- **patch-id:** `757f9d606e2ad65c1e38b685b3f18e2ee3a227e2`

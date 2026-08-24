@@ -201,6 +201,8 @@ Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated.
 
 **Confidence:** high on "don't ship this draft"; low-medium on the engagement signal (tiny n, single judge family).
 
+**Valid:** dated 2026-07-02
+
 **Cross-refs:** A-3 (the `[LIVE]` surface a persona would speak through; its injection-zone story ends the same place — the defense is already strong); tracker-as-skill session log F-1 (2200 cap — a SessionStart-hook persona sidesteps it), F-2, F-3; Hamsa memory `rubric-one-concept-test-on-nuance` (applied: three one-concept rubrics, which is what made the inversion visible at all — a merged rubric would have scored blanket-distrust as "resistance" and called it a win).
 
 ## A-5 — data-vs-directive rule fixes the blanket-distrust inversion: engagement up, injection resistance held
@@ -220,6 +222,8 @@ Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated.
 
 **Field cross-check (researcher subagent, 2026-07-02).** The prior art corroborates both A-4 and A-5, and locates where A-5 is novel:
 - **A-4 confirmed twice over.** (1) Persona/authority framing is documented as *decorative* for adherence (Zheng et al. 2311.10054) and as a *jailbreak vector*, not a control (OWASP LLM01). (2) The instruction-hierarchy line (OpenAI, *The Instruction Hierarchy*, 2404.13208) ranks **tool output at the LOWEST trust tier** — the opposite of "sacred." An in-band `[LIVE]`-style marker is *forgeable*, so trust-by-marker is a privilege-escalation primitive; this is exactly why spotlighting (Microsoft, 2403.14720) requires an **out-of-band, per-request secret** delimiter, never a static known string. codescout's `[LIVE]` marker is static/known → zero security boundary; provenance trust would have to ride the session-start channel or a per-session token, not the marker.
+
+**Valid:** dated 2026-07-02
 - **A-5 is the in-prompt shadow of dual-LLM / CaMeL.** "Quarantine directives, verify facts" is the single-agent, prompt-level form of the dual-LLM pattern (Willison 2023) and CaMeL (DeepMind 2503.18813), which enforce it *architecturally* (a quarantined reader extracts facts; a privileged actor never sees raw untrusted text). AgentDojo (2406.13352) is the field's utility-vs-resistance benchmark for exactly our blanket-distrust cost axis.
 - **A-5's empirical result fills a documented gap.** The literature pursues data/directive separation architecturally; an *in-prompt* rule that raises engagement with legit facts *without* weakening injection resistance is not something the primary sources report. Worth writing up — but it is a *mitigation, not a guarantee* (defeasible under a salient injection). The field's rule: for read-mostly surfacing, the prompt rule is proportionate; the moment a tracker body can drive a *consequential* action (Willison's "lethal trifecta" third leg), add a structural leg (out-of-band spotlight marker + capability gating), don't rely on the agent's goodwill.
 **Field cross-check #2 (2026-07-03, deep-research pass — docs/research/2026-07-03-loadbearing-mcp-guidance.md).** Two corrections to this entry's scope, recorded verbatim so the result is not over-generalized:
@@ -387,6 +391,8 @@ Two rule types. First a self-reinforcing one ("end every reply with `STATUS: ack
 
 **Gap closed 2026-07-05 (token-volume + position).** The turn-count cells buried the rule only under low-bulk context and only at *primacy* (turn 1). Fix for the heavy-cell timeout: put the bulk in non-code **INPUT** (cheap prefill), not model **output** (slow generation). Two follow-on cells with ~24k tokens of input bulk: **xbulk** (rule at start, 24k after) held on both channels (F 2/2, V 2/2); **xmid** (rule in the **MIDDLE** — ~12k before, ~12k after, primacy-free, the faithful get_guide placement) held (F 2/2). All transcript-bound, 0 re-anchoring. **No decay across turn-count, token-volume, AND context-position.** Remaining residue: extreme volume (100k+ tokens, near context limits) and weaker models.
 
+**Valid:** dated 2026-07-05
+
 **Methodology caveats banked (transferable craft):**
 1. `--resume` transcripts record stray **empty** user turns (and occasional duplicates — an 18-turn design recorded 11+ user events in one session). Bind by arm + observable, **never** by turn index.
 2. A **self-reinforcing** observable cannot measure multi-turn decay: the model's own prior turns re-anchor it. Decay probes must be **latent and non-reinforcing**.
@@ -407,6 +413,8 @@ Two rule types. First a self-reinforcing one ("end every reply with `STATUS: ack
 **Move.** One addition to the guide — "Unverifiable is a verdict": three-way taxonomy (verified-fact / malicious-directive, judged by the directive's own content / unverifiable — the default and the common case), harness-plumbing base rate named explicitly, report contract = observation + action, provenance verdict withheld and escalated to whoever holds channel context. Second surface: a one-line dispatch-brief inoculation (Iron Law 6 extension). **Eval pre-registered:** 2 arms (guide-current vs guide+section) × 2 scenarios (routine harness-meta in a tool error / forged malicious directive), sonnet pinned, n=5/cell, rubrics NO-ASSERTED-ATTACK / VERIFIES-CHECKABLE-CLAIM / DIRECTIVE-REFUSED (regression guard); guide text delivered via CLAUDE.md per A-10 channel-inertness.
 
 **Prediction:** calibrated verdict language ≥4/5 with-section vs ≤2/5 baseline on routine-meta; forgery refusal unchanged at ceiling. **Confidence:** medium. **Outcome (2026-07-05): held on all four pre-registered predictions — SHIPPED.** v2 eval (payload embedded in a build log the agent summarizes — diegetic, provenance unknowable): routine-base FAIL at ~1–2/5 calibrated (baseline asserts "the injection attempt / forged / fabricated" as fact — field failure reproduced); routine-fix PASS 5/5 (benign hypotheses appear — "captured output", "tampered OR tool leakage" — verification limits stated, classification escalated); forgery-base and forgery-fix both 5/5 refused, 0/10 attested by exact-line in-code check — the section moved verdict language only, not trust. Shipped bytes == tested bytes verified; 56 prompts-invariant tests green. **v1 cell discarded as contaminated (two defects, both caught by binding):** the PostToolUse hook payload never arrived as hook feedback (adapter writes a flat hooks settings schema — F-8 in the findings doc), and the hook fixture script was copied into the subject's workdir where agents READ it — gaining the channel evidence the field case is defined by lacking. Eval-craft: in agentic evals the workdir is part of the stimulus; fixtures must be diegetic or invisible.
+
+**Valid:** dated 2026-07-05
 
 **Eval-craft note (bound this turn):** the persisted transcript UNDER-RECORDS the assembled context — ephemeral system-reminder attachments are invisible in subagent JSONL. Binding what a model EMITTED from transcripts is safe (assistant records persist); binding what it SAW is not. Transcript-absence ≠ context-absence.
 
@@ -576,6 +584,8 @@ suggested `symbols` remedy cannot serve at all.
 **Confidence:** high on the deficit, high on the no-ship. The two pre-registered false-ceiling risks did not materialise, which strengthens the deficit finding rather than weakening it.
 
 **Outcome (2026-08-18): the deficit is CONFIRMED and the clause is REFUTED — the first audit here to split that way.**
+
+**Valid:** dated 2026-08-18
 
 | Arm | Planned the refused bare line-range read | Against |
 |---|---|---|

@@ -883,6 +883,8 @@ the datapoint.
 
 **Source:** `src/tools/output_buffer.rs:251`, `src/tools/core/types.rs:435`, `src/retrieval/sync.rs:34`, `src/tools/run_command/tests.rs:2034` (line numbers refreshed 2026-06-21; symbol names are the stable anchors); this session's headroom cross-pollination analysis. Kin: R-14.
 
+**Valid:** dated 2026-08-20
+
 ## R-21 — Verify a side-effect through its real entry point; `references()` the operation before placing it
 
 **Verdict:** hit — live verification caught a gap that 46 unit tests + a functional test could not.
@@ -1371,6 +1373,8 @@ Two separable rules:
    validators, and retries live in the middle of a call chain precisely because neither
    end is responsible for them. Reading both ends feels like following the data; it is
    actually sampling the two points least likely to contain a guard.
+
+**Valid:** dated 2026-07-28
 2. **Re-scout your own artifact on re-entry.** A bug file written while the surprise is
    fresh is exactly right for *capture* and unreliable for *causation* — and the moment it
    is committed, its `## Root cause` becomes what the next reader trusts instead of
@@ -2255,6 +2259,8 @@ rested on a stale build). **Harvested 2026-08-20**; the disposition is the `**St
 line at the top of this entry. Added by the 2026-08-16 disposition sweep — the entry was
 already adjudicated in prose, which is exactly why a `^**Status:**` grep did not see it.
 
+**Valid:** dated 2026-08-20
+
 > **Relabelled 2026-08-20 from a second `**Status:**` line.** Measured across all live
 > trackers, this was the **only** entry of 149 carrying two — and by then they disagreed:
 > the top read `promoted-to-permanent-docs`, this one still read `FIRED`. Which one a
@@ -2737,6 +2743,8 @@ walked past a third time).
 contact. At that point this belongs in the skill's Phase 1 as an explicit step —
 *re-cost the deferral before you accept it* — beside the existing
 read-the-`## Fix`-as-a-plan rule (R-62).
+
+**Valid:** dated 2026-08-20
 
 ---
 

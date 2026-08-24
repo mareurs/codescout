@@ -161,6 +161,8 @@ a row in `tool_calls`. Hookify catches it pre-call.
   in-server rejection within the turn — memory route too slow;
   substrate route required.
 
+**Valid:** dated 2026-05-24
+
 
 
 ---
@@ -248,6 +250,8 @@ That makes the companion compression-reminder load-bearing as the **post-compact
 **Notes:**
 - The audit tool already classifies findings as `verdict ∈ {missing, ambiguous_basename, resolved_basename}`. CI should only fail on `verdict=missing severity≥med`; `ambiguous_basename` is informational (could be a basename collision; not necessarily wrong); `resolved_basename` is OK.
 - Once active, this hook closes the loop on U-7 by making the failure mode loud at PR time instead of session time. The companion to H-3 (which catches tool-name drift in companion surfaces): H-5 catches path/link/symbol drift in doc surfaces.
+
+**Valid:** dated 2026-05-24
 
 
 ### H-6 — Audit classifier: reader-side / placeholder path FP class

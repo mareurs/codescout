@@ -1,6 +1,6 @@
 ---
 id: null
-kind: null
+kind: tracker
 status: archived
 title: LSP tools (hover / goto_definition) high error rate
 owners: []

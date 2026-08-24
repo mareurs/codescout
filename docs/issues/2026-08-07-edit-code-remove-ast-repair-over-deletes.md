@@ -244,3 +244,8 @@ since `symbols()` clearly resolves its extent even when the insert path cannot.
 - `src/ast/parser.rs` — `has_syntax_errors`, the predicate Fix step 1 would use
 - BUG-021 (parallel writes) — the hook warning present at the time
 - F-19 / F-18 in `docs/trackers/release-promotion-session-log.md` — same session
+
+## Fix provenance
+
+- **SHA:** `c551f19b`
+- **patch-id:** `ce19b400eb39d09f7c9cd4ed9a2ec8220ac5d31f`

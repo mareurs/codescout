@@ -143,3 +143,8 @@ record the SHA with the cross-repo `codescout-companion:` prefix rather than a b
 - `docs/architecture/companion-plugin.md` — hook inventory
 - `src/tools/rendezvous.rs` — the slot format and `poll`'s mtime short-circuit
 - `src/util/fs.rs:108-113` — the XDG-spec handling the hook now mirrors
+
+## Fix provenance
+
+- **SHA:** `codescout-companion:b8ffa8b`
+- **patch-id:** not computable from this repo (fix lives in codescout-companion)
