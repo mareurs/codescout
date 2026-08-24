@@ -1398,22 +1398,24 @@ pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
         .unwrap_or(1)
 }
 
-/// Shallow RFC 7396 merge-patch applied in place to `target`. `null` keys in the
-/// patch delete; non-null values overwrite the corresponding target key entirely.
-/// Nested objects are overwritten in full (not recursively merged).
+/// RFC 7396 JSON Merge Patch applied in place to `target`. `null` keys in the
+/// patch delete; when both the existing value and the patch value at a key are
+/// objects, they merge recursively (this function calls itself); otherwise the
+/// patch value replaces the target's value for that key entirely.
 ///
-/// **Arrays are replaced wholesale, and params are no longer flat.** This comment
-/// used to justify the shallow merge with "artifact params are expected to be flat
-/// key-value objects". That was true when it was written and is not any more:
-/// `entry_collection` makes params the home for arrays of entry rows, and two of
-/// the archetypes `tracker_design` recommends are built on exactly that shape. So
-/// a patch carrying one row of a collection deletes every other row — legitimate
-/// for a bulk rewrite, catastrophic for the one-row edit it looks like.
+/// **Arrays are replaced wholesale, and params are no longer flat.** RFC 7396
+/// does not merge arrays element-wise — a patch value that is an array (or any
+/// other non-object) always replaces the corresponding target value outright.
+/// `entry_collection` makes params the home for arrays of entry rows, and two
+/// of the archetypes `tracker_design` recommends are built on exactly that
+/// shape. So a patch carrying one row of a collection still deletes every
+/// other row — legitimate for a bulk rewrite, catastrophic for the one-row
+/// edit it looks like.
 ///
-/// Two things now stand between a caller and that outcome, because the semantics
-/// here deliberately did not change: [`update_entry`] gives a one-row edit its own
-/// path, and [`merge_params`] reports `entries_before`/`entries_after` so a
-/// wholesale replace is visible rather than silent.
+/// Two things stand between a caller and that outcome: [`update_entry`] gives
+/// a one-row edit its own path, and [`merge_params`] reports
+/// `entries_before`/`entries_after` so a wholesale replace is visible rather
+/// than silent.
 /// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
 ///
 /// Non-object patches are silent no-ops. Callers MUST reject them at their own
@@ -1423,13 +1425,22 @@ pub(crate) fn next_index(existing_ids: &[String], id_prefix: &str) -> u64 {
 /// top-level array report success while discarding the whole payload
 /// (docs/issues/archive/2026-07-02-artifact-augment-params-path-bare-array-silent-noop.md).
 pub fn apply_merge_patch(target: &mut Value, patch: &Value) {
-    if let (Value::Object(t), Value::Object(p)) = (target, patch) {
-        for (k, v) in p {
-            if v.is_null() {
-                t.remove(k);
-            } else {
-                t.insert(k.clone(), v.clone());
+    let (Value::Object(t), Value::Object(p)) = (target, patch) else {
+        return;
+    };
+    for (k, v) in p {
+        if v.is_null() {
+            t.remove(k);
+        } else if v.is_object() {
+            let entry = t
+                .entry(k.clone())
+                .or_insert(Value::Object(Default::default()));
+            if !entry.is_object() {
+                *entry = Value::Object(Default::default());
             }
+            apply_merge_patch(entry, v);
+        } else {
+            t.insert(k.clone(), v.clone());
         }
     }
 }
@@ -1658,6 +1669,28 @@ mod tests {
         let row = get(&cat, "art1").unwrap().unwrap();
         let params: Value = serde_json::from_str(&row.params).unwrap();
         assert!(params.get("format").is_none());
+    }
+
+    /// RFC 7396 merge-patch is recursive: a patch naming one branch of a nested
+    /// object must leave untouched sibling branches under the same top-level key
+    /// alone. docs/trackers/bug-artifact-augment-shallow-merge.md (changelog-reader).
+    #[test]
+    fn merge_params_recursively_merges_nested_objects() {
+        let cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &sample_art("art1")).unwrap();
+        let mut a = aug("art1");
+        a.params = json!({"a": {"x": 1, "y": 2}, "b": "top-level-value"}).to_string();
+        upsert(&cat, &a).unwrap();
+        let patch = json!({"a": {"x": 99}});
+        merge_params(&cat, "art1", &patch).unwrap();
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(params["a"]["x"], 99);
+        assert_eq!(
+            params["a"]["y"], 2,
+            "sibling field under the patched key must survive"
+        );
+        assert_eq!(params["b"], "top-level-value");
     }
 
     /// Seeds an artifact whose params hold a three-row `tasks` entry collection.
