@@ -1,4 +1,6 @@
-use super::index::format_index_status;
+use super::index::{
+    already_running_elsewhere_response, format_index_status, running_elsewhere_indexing_block,
+};
 use super::semantic_search::{
     apply_file_diversity_cap, format_search_result_item, format_semantic_search,
 };
@@ -769,4 +771,25 @@ fn index_is_write_depends_on_action() {
     assert!(Index.is_write(&json!({ "action": "build" })));
     assert!(!Index.is_write(&json!({ "action": "status" })));
     assert!(!Index.is_write(&json!({})));
+}
+
+#[test]
+fn already_running_elsewhere_response_names_the_holder_pid() {
+    let v = already_running_elsewhere_response(Some(4242));
+    assert_eq!(v["status"], "already_running_elsewhere");
+    assert_eq!(v["holder_pid"], 4242);
+}
+
+#[test]
+fn already_running_elsewhere_response_allows_an_unknown_holder_pid() {
+    let v = already_running_elsewhere_response(None);
+    assert_eq!(v["status"], "already_running_elsewhere");
+    assert_eq!(v["holder_pid"], serde_json::Value::Null);
+}
+
+#[test]
+fn running_elsewhere_indexing_block_names_the_holder_pid() {
+    let v = running_elsewhere_indexing_block(Some(4242));
+    assert_eq!(v["status"], "running_elsewhere");
+    assert_eq!(v["holder_pid"], 4242);
 }

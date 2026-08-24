@@ -245,7 +245,17 @@ impl Tool for IndexProject {
         }
         // ────────────────────────────────────────────────────────────────
 
-        // Guard against concurrent runs.
+        // Resolve project_id up front — sync_project needs it as the
+        // multi-tenant namespace inside the shared Qdrant collection, and the
+        // cross-process lock peek just below needs it too.
+        let project_id = ctx
+            .agent
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                Ok(p.project_id().to_string())
+            })
+            .await?;
+
+        // Guard against concurrent runs — same agent process.
         {
             let mut state = ctx.agent.indexing.lock().unwrap_or_else(|e| e.into_inner());
             if matches!(*state, IndexingState::Running { .. }) {
@@ -254,6 +264,16 @@ impl Tool for IndexProject {
                     "hint": "Use index(action='status') to check progress."
                 }));
             }
+
+            // Guard against concurrent runs — a DIFFERENT process. Checked
+            // synchronously, before committing to `Running`, so a doomed spawn
+            // never corrupts `ctx.agent.indexing` with a stale `Failed(...)` that
+            // has nothing to do with this agent's own request. See
+            // docs/issues/2026-08-24-index-status-lock-contention-reads-as-failed.md.
+            if let Some(holder_pid) = crate::retrieval::index_lock::peek(&project_id) {
+                return Ok(already_running_elsewhere_response(holder_pid));
+            }
+
             *state = IndexingState::Running {
                 done: 0,
                 total: 0,
@@ -271,15 +291,6 @@ impl Tool for IndexProject {
             p.report(0, None).await;
             p.report_text("indexing project").await;
         }
-
-        // Resolve project_id up front — sync_project needs it as the
-        // multi-tenant namespace inside the shared Qdrant collection.
-        let project_id = ctx
-            .agent
-            .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                Ok(p.project_id().to_string())
-            })
-            .await?;
 
         // Patterns for the index walk (defaults if no config). Fetched here so the
         // spawned sync task can capture them; the indexer prunes these dirs.
@@ -403,6 +414,22 @@ impl Tool for IndexProject {
                             total_chunks: 0,
                         }
                     }
+                    Err(e)
+                        if e.downcast_ref::<crate::retrieval::index_lock::LockHeldError>()
+                            .is_some() =>
+                    {
+                        // Lost the lock race in the narrow window between this
+                        // task's pre-spawn peek (IndexProject::call) and its own
+                        // acquire attempt inside sync_project. Benign — someone
+                        // else is genuinely indexing — so step back to Idle
+                        // rather than freezing at Failed(...) for a request this
+                        // agent effectively withdrew.
+                        tracing::info!(
+                            "sync task deferred: lost the index lock race after \
+                             passing the pre-spawn peek"
+                        );
+                        IndexingState::Idle
+                    }
                     Err(e) => {
                         tracing::error!(error = %e, "sync task failed");
                         IndexingState::Failed(e.to_string())
@@ -508,7 +535,15 @@ impl Tool for IndexStatus {
             use crate::agent::IndexingState;
             let state = ctx.agent.indexing.lock().unwrap_or_else(|e| e.into_inner());
             match &*state {
-                IndexingState::Idle => {}
+                IndexingState::Idle => {
+                    // This agent isn't indexing, but a different process might
+                    // be — surface that instead of silence, the same blind spot
+                    // this bug fixed for the build side. See
+                    // docs/issues/2026-08-24-index-status-lock-contention-reads-as-failed.md.
+                    if let Some(holder_pid) = crate::retrieval::index_lock::peek(&project_id) {
+                        result["indexing"] = running_elsewhere_indexing_block(holder_pid);
+                    }
+                }
                 IndexingState::Running {
                     done,
                     total,
@@ -741,4 +776,29 @@ pub(crate) fn resolve_done_total(result: &Value, key: &str, fallback: usize) -> 
         .get(key)
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(fallback as u64)
+}
+
+/// The response for a `build` request that never started because a different
+/// process already holds this project's index lock. Mirrors the neighboring
+/// same-agent-process `{"status": "already_running"}` shape used when this
+/// agent's own `ctx.agent.indexing` is already `Running`.
+pub(crate) fn already_running_elsewhere_response(holder_pid: Option<u32>) -> Value {
+    json!({
+        "status": "already_running_elsewhere",
+        "holder_pid": holder_pid,
+        "hint": "Another process already holds this project's index lock and is \
+                 indexing it. Use index(action='status') — chunk_count/file_count \
+                 reflect its live progress even though this request did not start \
+                 a new job.",
+    })
+}
+
+/// The `indexing` block `IndexStatus` reports when this agent is `Idle` but a
+/// different process currently holds the project's index lock — the truthful
+/// alternative to reporting nothing, which is what an `Idle` agent saw before.
+pub(crate) fn running_elsewhere_indexing_block(holder_pid: Option<u32>) -> Value {
+    json!({
+        "status": "running_elsewhere",
+        "holder_pid": holder_pid,
+    })
 }

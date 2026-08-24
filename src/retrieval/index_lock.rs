@@ -45,6 +45,39 @@ impl Drop for IndexLock {
     }
 }
 
+/// The specific, downcastable cause behind an [`acquire_in`] failure: the lock is
+/// currently held by someone else. `acquire_in` wraps this in `anyhow::Error` like any
+/// other failure, so a caller that only wants the diagnostic text sees no difference —
+/// but a caller that needs to tell "someone else is already indexing" apart from a
+/// genuine I/O error (permissions, disk full, ...) can `downcast_ref::<LockHeldError>()`
+/// instead of matching on message text.
+#[derive(Debug)]
+pub struct LockHeldError {
+    pub project_id: String,
+    pub path: PathBuf,
+    /// Best-effort — the PID line is written only after the holder acquires the lock,
+    /// so it can be absent, and it is read without holding the lock so it can be stale
+    /// by the time the caller looks. `None` means "couldn't determine", never "no holder".
+    pub holder_pid: Option<u32>,
+}
+
+impl std::fmt::Display for LockHeldError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "another codescout index is already running for project '{}' \
+             (lock file: {} — its first line is the holder's PID). The holder may be \
+             a CLI `codescout index` run OR an in-process background index (e.g. an \
+             MCP server's auto-index task) — check the PID, don't assume `pgrep -af \
+             'codescout index'` will show it.",
+            self.project_id,
+            self.path.display()
+        )
+    }
+}
+
+impl std::error::Error for LockHeldError {}
+
 /// Deterministic lock-file path for `project_id`, sited in `dir`.
 ///
 /// Split out of [`lock_path`] purely as a test seam: the tests below must not
@@ -87,16 +120,19 @@ pub fn acquire_in(dir: &Path, project_id: &str) -> Result<IndexLock> {
         .open(&path)
         .with_context(|| format!("failed to open index lock file: {}", path.display()))?;
 
-    file.try_lock_exclusive().with_context(|| {
-        format!(
-            "another codescout index is already running for project '{project_id}' \
-             (lock file: {} — its first line is the holder's PID). The holder may be \
-             a CLI `codescout index` run OR an in-process background index (e.g. an \
-             MCP server's auto-index task) — check the PID, don't assume `pgrep -af \
-             'codescout index'` will show it.",
-            path.display()
-        )
-    })?;
+    if file.try_lock_exclusive().is_err() {
+        // Read the holder's PID without holding the lock — best-effort, and
+        // decoupled from `file`'s write-only handle above.
+        let holder_pid = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| s.lines().next().and_then(|l| l.trim().parse::<u32>().ok()));
+        return Err(LockHeldError {
+            project_id: project_id.to_string(),
+            path,
+            holder_pid,
+        }
+        .into());
+    }
 
     // PID for diagnostics, mirroring src/lsp/mux/process.rs:81. Only after the
     // lock is held, so we never clobber another holder's record. Best-effort:
@@ -106,6 +142,29 @@ pub fn acquire_in(dir: &Path, project_id: &str) -> Result<IndexLock> {
     let _ = writeln!(&file, "{}", std::process::id());
 
     Ok(IndexLock { file, path })
+}
+
+/// Non-blocking check: is `project_id`'s index lock currently held by someone else?
+///
+/// `Some(holder_pid)` if held (the inner `Option` is the same best-effort PID read
+/// [`acquire_in`]'s error carries); `None` if free, **or** if the check itself failed
+/// for an unrelated reason (e.g. the lock dir is unwritable). Callers that treat `None`
+/// as "proceed as if free" are correct either way: a genuine acquire attempt right
+/// after is the actual source of truth, and this is only an optimization to avoid
+/// spawning work that is doomed to immediately lose that race.
+///
+/// Test seam, mirroring [`acquire_in`]. Production goes through [`peek`].
+pub fn peek_in(dir: &Path, project_id: &str) -> Option<Option<u32>> {
+    match acquire_in(dir, project_id) {
+        Ok(_lock) => None, // acquired and immediately dropped below -> was free
+        Err(e) => e.downcast_ref::<LockHeldError>().map(|le| le.holder_pid),
+    }
+}
+
+/// Non-blocking check: is `project_id`'s index lock currently held by someone else?
+/// See [`peek_in`] for the exact semantics.
+pub fn peek(project_id: &str) -> Option<Option<u32>> {
+    peek_in(&crate::socket_discovery::per_user_runtime_dir(), project_id)
 }
 
 /// Acquire the exclusive index lock for `project_id`, or fail immediately.
@@ -167,6 +226,45 @@ mod tests {
             msg.contains("already running"),
             "error must tell the operator what is happening, got: {msg}"
         );
+    }
+
+    #[test]
+    fn second_acquire_fails_with_a_downcastable_lock_held_error_naming_the_holder_pid() {
+        let dir = scratch();
+        let _first = acquire_in(dir.path(), "contend-typed").expect("first acquire must succeed");
+        let second = acquire_in(dir.path(), "contend-typed");
+        let err = second.expect_err(
+            "a second acquire for the same project_id must fail while the first is held",
+        );
+        let lock_err = err
+            .downcast_ref::<LockHeldError>()
+            .expect("error must downcast to LockHeldError, not just a string-formatted context");
+        assert_eq!(lock_err.holder_pid, Some(std::process::id()));
+    }
+
+    #[test]
+    fn peek_in_returns_none_when_free() {
+        let dir = scratch();
+        assert_eq!(peek_in(dir.path(), "peek-free"), None);
+    }
+
+    #[test]
+    fn peek_in_returns_holder_pid_when_locked() {
+        let dir = scratch();
+        let _held = acquire_in(dir.path(), "peek-held").expect("acquire must succeed");
+        assert_eq!(
+            peek_in(dir.path(), "peek-held"),
+            Some(Some(std::process::id()))
+        );
+    }
+
+    #[test]
+    fn peek_in_does_not_leave_the_lock_held() {
+        let dir = scratch();
+        assert_eq!(peek_in(dir.path(), "peek-then-acquire"), None);
+        // peek must release immediately — a real acquire right after must still succeed.
+        let acquired = acquire_in(dir.path(), "peek-then-acquire");
+        assert!(acquired.is_ok(), "peek must not leave the lock held");
     }
 
     #[test]
