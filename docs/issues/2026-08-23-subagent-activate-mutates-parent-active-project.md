@@ -116,6 +116,70 @@ message is misdirecting.
 Identical. This falsifies the first hypothesis (below) and is why the root cause is only
 half established.
 
+
+### E-4 — recurs under a *same-repo* subagent that reported restoring the home project
+
+**2026-08-23, SDD execution of the hidden-information eval plan** (this repo, branch
+`experiments`). Two further occurrences, both during a subagent-driven run where the
+subagents worked in the sibling `prompt-engineering` repo:
+
+1. The Task 1 implementer's final message ended with *"Home project restored."* The
+   parent's very next `edit_markdown` on its own SDD ledger — a file under
+   `codescout/.superpowers/`, i.e. squarely inside the home project — was refused with
+   `File writes are disabled for this project`. Recovered with
+   `workspace(action="activate", path=<codescout>, read_only=false)`.
+2. Same shape after the Task 1 reviewer returned.
+
+Three things this adds to E-1..E-3:
+
+- **A subagent's own "restored" claim is not a restoration of the write bit.** Whatever
+  the subagent restored, `read_only` came back true. So the parent cannot delegate
+  recovery to subagent discipline, and "brief subagents to restore" is not a sufficient
+  workaround.
+- **The failure lands arbitrarily far from its cause.** It surfaces on the parent's next
+  *write*, which in a dispatch-heavy session can be many tool calls and one or more
+  notifications after the offending `activate`. Nothing links the two in the transcript.
+- **A read-only parent still reads fine**, so every diagnostic the parent runs before its
+  next write succeeds — the session looks healthy right up to the refusal.
+
+Practical consequence for any controller-style session: after **every** subagent
+returns, treat the write bit as suspect. Cheapest guard is to re-assert it before the
+first write of each turn rather than to detect the refusal and recover.
+
+### E-5 — a **read-only** reviewer subagent flips it, mid-flight, four calls after the parent re-asserted the write bit
+
+**2026-08-23, same SDD run, third recurrence.** The strongest form of the evidence so far,
+because it removes every remaining explanation but one.
+
+Sequence, exactly as it happened in the parent:
+
+1. `workspace(activate, path=<codescout>, read_only=false)` → `read_only: false` confirmed
+   in the response.
+2. `read_markdown` on a plugin template — fine.
+3. `run_command` writing a diff file via shell redirect — **succeeded** (shell writes do not
+   go through the guard, so they are not a signal either way).
+4. Dispatched a **re-reviewer** subagent whose prompt said, verbatim: *"Your review is
+   read-only on this checkout. Do not mutate the working tree, the index, HEAD, or branch
+   state in any way."*
+5. `run_command` with two `ls` calls — fine (a read).
+6. `edit_markdown` on the parent's own ledger → `File writes are disabled for this project`.
+
+What this rules out:
+
+- **Not caused by the subagent writing anything.** It was instructed not to, and a reviewer
+  has no reason to. Merely *activating* a project to read it is sufficient.
+- **Not caused by subagent exit or cleanup.** The refusal arrived while the re-reviewer was
+  still running. The window opens at the subagent's `activate`, not at its return.
+- **Not a stale parent activation.** The parent had re-asserted `read_only=false` four tool
+  calls earlier and received an explicit `"read_only": false` in the response.
+- **Not detectable by reading.** Steps 2 and 5 both succeeded; every read-shaped diagnostic
+  a parent might run to check its own health passes while the write bit is off.
+
+Consequence for the workaround section: "brief subagents not to mutate state" does not
+help, because no mutation is required. The only reliable guard available to a controller
+today is to re-assert `read_only=false` **immediately before each write**, treating the
+bit as unowned for the whole duration of any dispatch — which is three occurrences in one
+session, all recovered, none prevented.
 ## Hypotheses tried
 
 1. **Hypothesis:** the subagent activated the sibling repo in read-only mode.
