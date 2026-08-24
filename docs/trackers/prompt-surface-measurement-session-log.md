@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 7
-entry_high_water_W: 4
+entry_high_water_F: 9
+entry_high_water_W: 7
 entry_prefix:
 - F
 - W
@@ -34,7 +34,9 @@ surfaces, not the definition.
 | F-4 | Every augmentation in the catalog is gone | open |
 | F-5 | A stale recon finding was relayed as current | fixed |
 | F-6 | 400k of context with no tracker or librarian use | fixed |
-| F-7 | Spec asserted per-arm tool denial the harness cannot do | open |
+| F-7 | Spec asserted per-arm tool denial the harness cannot do | fixed |
+| F-8 | Eight assertions in one task passed for the wrong reason, all the same shape | promoted-to-permanent-docs |
+| F-9 | Five API drops stranded uncommitted subagent work | mitigated |
 
 ## Wins Index
 
@@ -44,6 +46,9 @@ surfaces, not the definition.
 | W-2 | Re-measuring beat withdrawing | validated |
 | W-3 | Reading the surface README before compacting it | validated |
 | W-4 | Scouting the runtime's capability surface before planning | validated |
+| W-5 | Measuring the predicate family before fixing beat four rounds of fix-then-discover | promoted-to-permanent-docs |
+| W-6 | A subagent's combination search found what a 27-predicate single sweep declared clean | promoted-to-permanent-docs |
+| W-7 | Reading the file settled two agent disagreements | promoted-to-permanent-docs |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -308,6 +313,30 @@ on the distinction and is the safer choice until someone measures it.
 mechanism and add the veto. Harness passthrough is a prerequisite task for the
 implementation plan, not part of the eval itself.
 
+
+**FIXED 2026-08-24.** Shipped as Task 1 of the hidden-information eval plan, in
+`prompt-engineering` on `master`. `SessionConfig.disallowed_tools: str` plus a module-level
+`_tool_flags(session) -> list[str]`, threaded through **both** `claude -p` arg builders and
+the YAML loader.
+
+| commit | patch-id | what |
+|---|---|---|
+| `772fecd` | `b0838894162ffc1abbc214fc5467c13ed339ea18` | the passthrough |
+| `2c607f4` | `107d0992539cf480f1cd38dca08a5eade79d3bab` | regression cover for the three wiring lines |
+
+The second commit is the load-bearing half. The first review found that deleting any one of
+the three wiring lines left the entire new test file green — the helper was well tested and
+the helper is not what can silently vanish. Cover now asserts flag **and values together**
+positionally, across both the single-turn and multi-turn paths, because `_evaluate_handler`
+returns via `_run_history_turns` before its own `cmd` reaches `subprocess.run`, so a
+history-only test exercises one call site twice and the other not at all.
+
+Probed against the real CLI before relying on it: with `--strict-mcp-config` and
+`--permission-mode bypassPermissions`, the deny-list genuinely leaves the model with no
+file-reading tool. **Without** `--strict-mcp-config` the model reads the file through a
+connected MCP server — `--disallowedTools` denies native tools, not MCP ones, so it is not a
+no-file-access switch on its own. That fact is now OP-12 in `prompt-engineering`'s
+`docs/trackers/prompt-tdd-operating-guide.md`.
 ## W-4 — Scouting the runtime's capability surface before planning caught an unbuildable arm
 
 **Valid:** dated 2026-08-23
@@ -357,6 +386,232 @@ design review passed. At two datapoints, promote to the reconnaissance skill as 
 craft-shaped rule — "a design that names runtime behaviour is a seam; scout the
 runner before writing the plan" — since it is true of any harness in any language,
 not just this one.
+
+## W-5 — Measuring the predicate family before fixing converged where four rounds of fix-then-discover did not
+
+**Valid:** dated 2026-08-24
+
+**Observed:** 2026-08-23/24, the hidden-information eval's fixture (Task 2 of
+`docs/superpowers/plans/2026-08-23-hidden-information-eval.md`). Six fix rounds against one
+property: *no mechanical filter over the generated tree may isolate the 12 truth sites from
+the ~157 filler files.*
+
+**Pattern:** When a generated artifact must be indistinguishable from hand-authored content,
+do not patch the discriminating channel you were told about. **Add predicates covering the
+whole category to a measuring instrument first, re-run the sweep, and aim the fix at the
+measured result.**
+
+**Counterfactual, with the rounds as the evidence:**
+
+| round | brief said | outcome |
+|---|---|---|
+| 1 | close filename + length | closed those two; name-shape appeared |
+| 2 | drop the `_<k>` suffix | closed it; docstrings / annotations / uniqueness appeared |
+| 3 | make the style distributions overlap | closed five channels; token frequency + signature vocabulary appeared |
+| 4 | close token + signature | closed those; **body AST shape** appeared |
+| 5 | **add body-shape predicates, THEN widen** | category closed in one pass |
+| 6 | same method, literal-value rarity | closed; stratified null p 0.042 → 0.250 |
+
+Rounds 1-4 each closed exactly the list they were handed and surfaced the next channel.
+Rounds 5 and 6 named the *mechanism* rather than the symptom and closed the category. The
+controller's own briefs are the confound: round 2's brief ("drop the suffix") was a symptom
+instruction and produced a symptom fix.
+
+**Confirming data points:**
+1. Round 5 — body-shape predicates added before any generator change; reopening the fix
+   (`DECORATE_P = 0.0`) measures lift **8.45** at 0.93 hand-authored precision against
+   **1.51** at 0.18 after. One pass.
+2. Round 6 — same method on literal-value rarity; the leaking OR went 6 files / 4 of 12 /
+   lift **9.39** → 76 files / lift **1.67**, and stratified null p moved 0.042 → 0.250
+   **with no bar moved to achieve it**.
+
+**Impact:** high — four rounds of controller and implementer time, roughly 1.5M subagent
+tokens, spent closing channels one at a time before the method changed.
+
+**Promote-when:** promoted 2026-08-24 to codescout memory `eval-design` § *Generated
+fixtures leak by authorship*, together with the family/combination/null-control method.
+
+**Status:** promoted-to-permanent-docs
+
+## W-6 — A subagent's combination search found what the controller's 27-predicate sweep declared clean
+
+**Valid:** dated 2026-08-24
+
+**Observed:** 2026-08-24, verifying round 4 of the hidden-info fixture. I swept 27
+structural predicates individually — ten of them invented for the check, precisely to test
+whether the fixture had been tuned to its own guard list — and reported the fixture "at the
+null floor": worst concentration lift **1.6** against a base rate of 7.1%.
+
+**Pattern:** **A predicate sweep that evaluates predicates singly cannot see conjunctions,
+and conjunctions are where the leak lives.** Any guard over a family of filters must search
+combinations (pure ANDs and ORs to at least k=3), because a filter that is harmless alone is
+potent when intersected with anything that removes the other population.
+
+**Counterfactual:** the implementer's own combination search — which I had asked for in the
+same brief — immediately found twelve leaking combinations that my sweep was structurally
+blind to, including `length ≤30 AND leading-token-rarity` at 11 of 12 truth sites, and
+`leading-token AND no-float AND cross-file-called` at 5 files / 5 of 12 / **zero false
+positives** / lift 14.1. Had I acted on my own "null floor" verdict, the fixture would have
+shipped with a three-predicate filter handing over 42% of the answer set at perfect
+precision.
+
+**The statistic I was reading was the wrong one.** The token predicate sat at lift 1.6 — so
+it cleared every threshold — while capturing **11 of 12 truth sites**. High-recall,
+low-precision filters are exactly the dangerous conjunction ingredients: they already contain
+the answer, so ANDing them with anything that drops filler concentrates immediately.
+Precision was never the risk; recall was, and no single-predicate bar looks at it.
+
+**Confirming data points:**
+1. This instance — 27 singles clean, 12 combinations leaking.
+2. Round 6's null control, over 140,675 swept candidates, is a combination search by
+   construction; the guard's own `_is_leak` gate now applies at k=1, 2 and 3.
+
+**Impact:** high — the controller's verification would have certified a leaking fixture.
+
+**Promote-when:** promoted 2026-08-24 to codescout memory `eval-design` ("searched over
+**combinations** … three individually-clean predicates reached 10-of-12 sites").
+
+**Status:** promoted-to-permanent-docs
+
+## W-7 — Reading the file settled two agent disagreements that weighing the agents would have got wrong once
+
+**Valid:** invariant
+
+**Observed:** 2026-08-24, twice in one session, in both directions.
+
+**Pattern:** **When two agents disagree about what a file says, open the file.** Do not
+adjudicate by seniority, recency, or which one sounds more careful — both are usually acting
+in good faith on the same bytes, and the disagreement is about *where they looked*.
+
+**Case 1 — my subagent was right, a peer session was wrong.** My research subagent reported
+that quorum discredited a 352-run, $650 gate because the agent under test could read its own
+scenario's `story.md` answer key. A peer session in `changelog-reader`, reading the same two
+clones, searched for `leak`, `contaminat`, `$650`, `352` and "own scenario" and **could not
+find it**, and asked me to point at the source. Reading
+`superpowers-evals/docs/experiments/2026-08-08-fresh-release-gate.md:10-14` confirmed the
+claim verbatim. The peer's search had covered `src/` and `docs/superpowers/specs/`; the
+incident lives in `docs/experiments/`. Had I deferred to the peer's negative result I would
+have retracted a true finding I had already relayed to the user as fact.
+
+**Case 2 — my subagent was right, I was wrong.** I ran the fixture suite mid-round, read
+`file length ≤30 + leading token <5x` at 27 files / 11 of 12 truth sites, and built a whole
+fix brief on it. The implementer replied that `TEMP-MUTATION-6` was live in the tree at the
+time and that on the real generator the predicate is 64 files / **1** truth site / lift 0.22
+— then **re-applied the mutation to a copy to prove attribution rather than assert it**. My
+numbers reproduced under it and vanished without it. The reviewer independently reproduced
+both states.
+
+**Counterfactual:** case 1 costs a retracted-but-true finding and a lost lesson; case 2
+costs a round spent widening a vocabulary that was already fine. Each check took under a
+minute — a `sed -n` in case 1, a rebuild-and-measure in case 2.
+
+**Corollary worth keeping separately:** *never read a number off a working tree that has a
+live mutation in it.* A mid-round suite run reads whatever the implementer currently has
+staged. Ask for a clean-tree run, or apply the mutation yourself.
+
+**Impact:** med-high — one false retraction avoided, one wasted round caused and then
+diagnosed.
+
+**Promote-when:** promoted 2026-08-24 to codescout memory `test-design-discipline` §
+*`indeterminate` is a third verdict* → *Corollary: never read a number off a working tree
+that has a live mutation in it*.
+
+**Status:** promoted-to-permanent-docs
+
+## F-8 — Eight assertions in one task passed for the wrong reason, all the same shape
+
+**Valid:** invariant
+
+**Observed:** 2026-08-23/24, across six fix rounds on the hidden-info fixture guard. Every
+one was found by a reviewer or by mutation, never by the suite going red.
+
+**When:** writing or reviewing any assertion, especially a guard over an invariant that
+cannot be checked directly.
+
+**Expected:** an assertion that names an invariant tests that invariant.
+
+**Got:** eight that named the right invariant and measured something **adjacent** to it:
+
+1. `test_answer_key_is_not_inside_the_fixture` called `build()`, which writes no JSON — only
+   `main()` does. Both assertions trivially true while the key could have been written inside
+   the tree the agent reads. **This guarded the hardest integrity invariant in the spec.**
+2. `assert non_mod != planted_py` — two sets that always differ by ≥2 by construction.
+3. The name-shape predicate `any(not SUFFIX_DIGITS.search(d.name))` matched **133 of 133**
+   files, because `__init__` and CamelCase can never carry a digit suffix. Dead on the
+   unmutated tree, not merely under mutation.
+4. + 5. Two restored length-overlap counts — which the controller had ordered restored
+   *specifically* to catch a regression — both passed under the very mutation they were
+   restored to catch.
+6. `_score` counted false positives excluding decoys while the precision beside it included
+   them; the discrepancy reaches 8 on any filter catching a decoy, and that number was
+   headed for a pre-registration.
+7. The family guard itself passed green on an **emptied** predicate space: `real = 0.0`,
+   every null best `0.0`, `0.0 >= 0.0` → p = 1.0 → pass, printing `worst … none` with
+   nothing asserting on it.
+8. Decoy 8's ground-truth symbol (`pricing-overview`) appeared nowhere in its file, so the
+   decoy was unhittable and the precision-penalty set was really 7, not 8 — the existence
+   test covered `sites` but not `decoys`.
+
+**Probable cause:** an invariant that is awkward to observe directly gets tested through
+whatever *is* observable nearby, and the substitution is invisible once written.
+
+**Workaround that works:** the mutation question — *what one-character change to the
+production code flips this red?* — caught all eight. Two structural guards followed: a
+per-predicate **liveness floor** (`0 < matched < len(all)`), and a **space-size floor**, which
+between them make cases 3 and 7 unrepresentable rather than merely detectable.
+
+**Severity:** high — case 1 alone would have let the agent under test read the answer key,
+which is the failure that discredited a 352-run, $650 gate at prime-radiant.
+
+**Status:** promoted-to-permanent-docs — codescout memory `test-design-discipline` §
+*EXECUTED is not TESTED*, with all eight listed and the shared shape named as its corollary.
+
+**Fix idea / Pointer:** vocabulary from evener's coverage floor: code that *runs* is
+EXECUTED, code whose *output is checked* is TESTED, and the gap is invisible in a green bar.
+
+## F-9 — Five API drops stranded uncommitted subagent work; incremental commits and one-line tasks are the fix
+
+**Valid:** dated 2026-08-24
+
+**Observed:** 2026-08-24, five separate agent terminations during the hidden-info fixture
+rounds — four `API Error: Connection lost mid-response` / `The response stopped arriving`,
+and one process exit when Claude Code itself restarted.
+
+**When:** long-running implementer or reviewer subagents on large diffs, especially once a
+subagent's context passes ~200k tokens.
+
+**Got, per occurrence:**
+
+| # | died at | stranded |
+|---|---|---|
+| 1 | ~10 min in | 887 insertions in `gen_fixture.py`, uncommitted |
+| 2 | mid-sentence, "the restored assertion is nearly vacuous" | 1,413 insertions across two files |
+| 3 | immediately, before any tool call | nothing |
+| 4 | one line after "21 passed. Committing" | the commit itself |
+| 5 | CC process exit | `null_control.py` (17 KB) + test changes |
+
+**Probable cause:** long responses. Every drop landed mid-response; the immediate one (#3)
+was the only exception and cost nothing.
+
+**Workarounds, both validated in this session:**
+
+1. **Instruct implementers to commit whatever is green as soon as it is green.** Added after
+   drop #2; drop #4 then cost only a commit instead of an hour.
+2. **When only a commit remains, send a one-line instruction.** The reply is then too short
+   to drop. Used to recover #4 — the agent came back with a single SHA and subject line.
+3. **Recover by inspection, not by restart.** In every case `git status` plus a test run
+   established what survived; the work was intact each time and resuming beat re-dispatching.
+   For #5 the remaining task was self-contained, so a *fresh* agent was cheaper than resuming
+   one carrying 421k tokens of history.
+
+**Severity:** med — no work was ultimately lost, but roughly two hours of subagent time was
+re-spent before the workarounds were in place, and each recovery cost a controller
+verification round.
+
+**Status:** mitigated
+
+**Fix idea / Pointer:** carry "commit incrementally" in every implementer dispatch brief as
+standing text rather than adding it after the first drop.
 
 ## Template for new entries
 

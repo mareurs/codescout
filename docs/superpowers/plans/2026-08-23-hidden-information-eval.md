@@ -1,13 +1,17 @@
 ---
 id: '89c2984ca7c074a0'
 kind: plan
-status: draft
+status: active
 title: Hidden-information eval — implementation plan
 tags:
 - eval
 - prompt-tdd
 - measurement
 topic: hidden information eval implementation plan fixture checker arms
+code_repo: prompt-engineering@master
+ledger: .superpowers/sdd/2026-08-23-hidden-information-eval/progress.md
+next_task: 3
+tasks_complete: 1,2
 ---
 
 # Hidden-Information Eval Implementation Plan
