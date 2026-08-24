@@ -232,3 +232,69 @@ Related: `docs/trackers/bug-fix-session-log.md` W-48 — the same phase's findin
 strong enough to leave zero surviving mutants in the *code* still under-counted a
 documentation-defect class by 55%, because mutation testing has no mutant for "this comment's
 stated reason is now false."
+
+
+## EXECUTED is not TESTED
+
+Borrowed vocabulary that names a failure this repo hit **eight times in one task**
+(hidden-info fixture guard, 2026-08-23/24). Code that *runs* under a test earns coverage;
+code whose *output is checked* earns confidence. They are different states and the gap
+between them is invisible in a green bar.
+
+The origin is concrete rather than rhetorical: evener's coverage floor unions its
+imperative suite with a deterministic replay of committed fuzz corpora, where the replay
+matrices call production code and discard the result (`_ = f(x)`). Their only oracle is a
+crash, panic or `-race` failure. They earn floor credit **without proving correctness** —
+EXECUTED. Upgrading one call site to assert against an independently written literal
+converts *that call site alone* to TESTED.
+
+Ask of every assertion: **which state is this in?** The eight that were EXECUTED wearing
+an assertion's clothes:
+
+- called `build()` to check a file `main()` writes — trivially true either way
+- `assert a != b` between two sets that always differ by construction
+- a predicate matching **133 of 133** files, so it was satisfied by every input
+- two length-overlap counts that passed under the very mutation they were restored to catch
+- a false-positive count excluding decoys while the precision beside it included them
+- the family guard itself passing green on an **emptied** predicate space
+
+### Corollary: an assertion can guard an invariant by measuring something adjacent to it
+
+Every one of those named the right contract and measured a neighbour. That is the shape to
+hunt: not "is there an assertion", but "is the thing asserted on the same object as the
+thing promised". The answer-key test named file placement and measured a function that
+never writes files.
+
+### Corollary: a guard over a collection needs a liveness floor
+
+A predicate-family guard that iterates a list must assert `0 < matched < len(all)` **per
+predicate**, or a dead instrument passes silently — as does an empty list. Emptying the
+collection made `real = 0.0`, every null `0.0`, `0.0 >= 0.0` → pass. One line closes it,
+and nothing else in a suite will.
+
+### Corollary: prefer removing the branch to modelling it
+
+quorum's check DSL forbids conditionals in phase bodies — an `if` line fails tokenisation
+as an unknown verb — so "a check that only sometimes runs" **cannot be expressed**, and a
+committed manifest of expected assertions can be compared against what actually ran. When
+a guard is hard to write because the thing it guards is conditional, ask whether the
+conditionality is required.
+
+## `indeterminate` is a third verdict, and you need it
+
+Pass/fail forces a broken instrument to emit one of two answers, and both are lies. A
+result whose *instrument* failed must be structurally distinct from a result that measured
+something. quorum composes `indeterminate` whenever the assertions that ran do not match
+the committed manifest of assertions expected — and carries it first-class through
+aggregation rather than collapsing it into fail.
+
+Our own instance: a checker missing its exec bit reports a clean `0/N`, character-identical
+to a genuine floor (prompt-tdd OP-5). No amount of care at the reading end recovers that;
+only a third verdict does.
+
+### Corollary: never read a number off a working tree that has a live mutation in it
+
+Ran the suite mid-fix-round, read a predicate at 11-of-12 truth sites, and built a whole
+brief on it. The implementer's `TEMP-MUTATION-6` was applied at the time; on the real
+generator that predicate is 1-of-12 at lift 0.22. Ask for a clean-tree run, or apply the
+mutation yourself — a mid-round suite reads whatever the implementer currently has staged.
