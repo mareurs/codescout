@@ -1,7 +1,7 @@
 ---
 id: '59d74b3c091fa369'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: semantic code index build fails with "embed_batch sparse send" on this machine, leaving the index permanently behind HEAD'
 owners:
 - marius
@@ -10,20 +10,24 @@ tags:
 - embeddings
 - remote-http
 - new-machine
-closed: null
+closed: 2026-08-24
 opened: 2026-08-23
 owner: marius
 related: []
 severity: medium
-unverified: Root cause not confirmed by network trace — inferred from source + machine context, not measured directly (e.g. no curl/telnet check against the sparse endpoint was run).
+unverified: Fixed by a machine-local config change (symlink), not a repo commit, so there is no SHA/patch-id to cite and no regression test is possible — nothing in this repo's source caused the failure. Reproduction confirmed the fix (sparse error no longer occurs; indexing progressed past the point it previously died), but the full catch-up reindex (943 commits) was still running in the background when this was last checked, not yet confirmed to reach HEAD.
 ---
 
 # BUG: semantic code index build fails with "embed_batch sparse send" on this machine, leaving the index permanently behind HEAD
 
 ## Summary
 
-`index(action="build")` fails every attempt on this machine with `error: "embed_batch sparse send"`. The existing index (built on a different machine, last commit `d7988aca`) still serves `semantic_search` queries, but it cannot be refreshed here — it is now 932 commits behind `HEAD` and falling further behind with every session, since every rebuild attempt fails the same way.
-
+`index(action="build")` failed every attempt with `error: "embed_batch sparse send"`
+because the machine-wide `~/.config/codescout/.env` symlink pointed at a stale, removed
+compose profile (`.env.amd`) that re-enabled the sparse embedding leg, while the only
+compose profile actually running (`gpu`) keeps the sparse container stopped by design.
+Fixed by repointing the symlink to `.env.gpu`, which matches reality; confirmed by
+reproducing the build and watching it progress past the previous failure point.
 ## Symptom (Effect)
 
 ```
@@ -53,14 +57,33 @@ Git commit at time of both attempts: `7c3245d7` then `dffe2546` (HEAD advanced b
 
 ## Root cause
 
-*Inferred from source, not measured over the network — see `unverified:`.*
+**Confirmed by direct reproduction and source tracing — not the network-unreachable-remote-host guess this file originally made.**
 
-`"embed_batch sparse send"` is the `anyhow::Context` string on the `.send().await` call in `EmbedderHttp::embed_one_batch` (`src/retrieval/embedder.rs:576-582`), for a POST to `format!("{}/embed_sparse", self.sparse_base)`. A `.context(...)?` on a `reqwest::Client::send()` failing is the shape produced by a connection-level failure (refused, timeout, DNS) — `.send()` errors before an HTTP status even exists, so this is not a 4xx/5xx from a reachable server (those are handled separately a few lines down via `status.is_server_error()` retry logic).
+`CODESCOUT_SPARSE_EMBEDDER_URL` resolves to `http://127.0.0.1:48084` — loopback, not a
+desktop-only remote address. The failure is that nothing is listening on that port on
+this machine:
 
-`self.sparse_base` is a machine-configured base URL for a remote sparse-embedding (SPLADE/TEI) service (`EmbedderHttp::new`/`with_config`, `src/retrieval/embedder.rs:284-350`). Given the `embedding_backend: "remote-http"` setting and the total absence of any `local-environment` memory on this host, the leading hypothesis is: whatever host/port `sparse_base` resolves to on this machine is not reachable from here — plausibly a value carried over from the original (desktop) machine's config that assumes a host only reachable there (e.g. a LAN-local or localhost-forwarded embedding service).
+1. `docker ps -a` shows `codescout-sparse-gpu` — `Exited (137) 3 weeks ago`. Stopped by
+   project policy (`docker-compose.yml`'s own header): sparse was disabled 2026-07-28 to
+   free ~2.4 GiB VRAM, via `CODESCOUT_DISABLE_SPARSE=1` in `.env.gpu`. The `amd`/`cpu`
+   compose profiles were removed entirely on 2026-07-27 — `gpu` is the only profile left,
+   and it keeps `sparse-gpu` stopped by design.
+2. But `CODESCOUT_DISABLE_SPARSE` was **not actually set** in the running MCP process's
+   environment. Traced why: `codescout::config::load_startup_env()` (`src/config/global.rs`)
+   deliberately never reads the repo's own `.env*` files — only `$CODESCOUT_ENV_FILE`, or
+   else `~/.config/codescout/.env` (a `$HOME`-scoped, machine-wide path, by design: "a
+   user-scoped server must not absorb an arbitrary repo's `.env`").
+3. `~/.config/codescout/.env` was a symlink to `.env.amd` — a profile whose compose
+   services (`sparse-cpu`, `dense-amd`, `reranker-amd`) no longer exist in
+   `docker-compose.yml` at all. Worse, `.env.amd` was edited 2026-08-07 to **re-enable**
+   sparse (`# CODESCOUT_DISABLE_SPARSE=1`, commented out) — the exact opposite of the
+   `gpu` profile's policy, and `docker-compose.yml`'s own top-of-file comment (claiming
+   `.env.amd` sets `CODESCOUT_DISABLE_SPARSE=1`) is stale relative to that edit.
 
-**Not measured:** which config surface actually supplies `sparse_base` on this host (env var vs `.codescout/project.toml` vs a default), and whether it differs from the value that presumably worked on the original machine. No `curl`/`nc` probe against the resolved sparse endpoint was run.
-
+Net effect: every `codescout` process on this machine — any repo, any session — loaded a
+stale, self-contradicting env profile that left sparse enabled while the only running
+container stack keeps it off. Not laptop-vs-desktop; a machine-wide symlink pointing at
+the wrong (and internally inconsistent) `.env` profile.
 ## Evidence
 
 ### First failure
@@ -92,16 +115,30 @@ let resp = self
 
 ## Fix
 
-Not yet fixed — this session prioritized the librarian catalog repair and tracker-hygiene sweep the user asked for; this bug was filed on notice per CLAUDE.md's bug-capture discipline rather than chased to resolution.
+Repointed the symlink to the profile that actually matches the running stack:
 
+```
+ln -sfn /home/marius/work/claude/codescout/.env.gpu ~/.config/codescout/.env
+```
+
+`.env.gpu` has `CODESCOUT_DISABLE_SPARSE=1` active (line 120), matching `gpu` being the
+only compose profile with services actually running. Since `load_startup_env()` only runs
+once at process start, this required an MCP reconnect (`/mcp`, then a full CC restart) to
+take effect for already-running sessions on this machine.
+
+Verified after restart: `env | grep CODESCOUT_DISABLE_SPARSE` now shows `1` in the running
+process, and `index(action="build")` no longer fails with `embed_batch sparse send` —
+indexing proceeded (chunk count climbing across repeated `index(action="status")` polls)
+past the point where it previously died on every attempt.
 ## Tests added
 
 N/A — not yet fixed. No regression test exists for this failure mode.
 
 ## Workarounds
 
-`semantic_search` remains queryable against the stale index (932 commits behind) — results should be treated as increasingly unreliable for anything touched in recent history. Prefer `grep`/`symbols`/`references` for anything landed after `d7988aca` until this is fixed.
-
+No longer needed for this failure mode. (Historical: while broken, `semantic_search`
+served the stale pre-fix index; `grep`/`symbols`/`references` were the fallback for
+anything landed after `d7988aca`.)
 ## Resume
 
 1. Find where `sparse_base` (and `dense_base`) are actually resolved for a live `EmbedderHttp` on this project (likely `.codescout/project.toml`, an env var, or a hardcoded default in whatever constructs the embedder for `index(action="build")`) — `grep -rn "EmbedderHttp::new\|EmbedderHttp::with_config" src/`.
@@ -114,4 +151,3 @@ N/A — not yet fixed. No regression test exists for this failure mode.
 - `src/retrieval/embedder.rs:159-350` (`EmbedderHttp` construction), `:490-600` (`embed_one_batch`, the failing call).
 - CLAUDE.md § "Umbrella names, member lists..." — documents `local-environment` private memory as the canonical per-host config record; its total absence here is the strongest available signal.
 - Companion, unrelated-but-adjacent finding from the same session: `workspace(activate)` flags a legacy `.codescout/embeddings/project.db` needing `codescout migrate-memories` — a second sign this machine's embedding setup was never fully brought up to date after being provisioned.
-
