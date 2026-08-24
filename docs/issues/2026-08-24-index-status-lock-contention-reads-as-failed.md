@@ -1,7 +1,7 @@
 ---
 id: aa0cf06422d3d0aa
 kind: bug
-status: open
+status: fixed
 title: 'BUG: index(action="status")''s indexing.status stays "failed" from a stale lock-contention race while real progress (chunk_count, GPU) continues'
 owners:
 - marius
@@ -10,7 +10,7 @@ tags:
 - misleading-status
 - concurrency
 - codescout-tool
-closed: null
+closed: 2026-08-24
 opened: 2026-08-24
 owner: marius
 related:
@@ -21,16 +21,17 @@ severity: medium
 
 ## Summary
 
-After fixing the sparse-embedder bug, `index(action="status")` reported
-`indexing.status: "failed"` with a lock-contention error on every poll — while
-`chunk_count` climbed steadily and `nvidia-smi` showed the GPU at 95% utilization
-running the embedder. The `indexing` field is not a live check of whatever
-process actually holds the project's index lock; it is a one-shot echo of this
-agent's own last local `index(action="build")` call, which lost a benign lock
-race against an indexer that was genuinely working. The field renders
-identically to a real failure, so there is no way to tell "broken" from
-"someone else already has this, and it's fine" from the response alone.
-
+`index(action="status")`'s `indexing` field echoed a stale, per-agent-process
+lock-contention result as `"failed"`, indistinguishable from a genuine failure,
+while the real indexer (elsewhere) kept making progress. Fixed by having both
+`index(action="build")` (pre-spawn, and the rare post-spawn race) and
+`index(action="status")`'s `Idle` arm peek the cross-process lock and report
+`"already_running_elsewhere"` / `"running_elsewhere"` with the holder's PID
+instead. Live-verified: started a real rival `codescout index --force` CLI
+process, called `index(action="build")` against it and got
+`{"status": "already_running_elsewhere", "holder_pid": 49334}`; `index(action="status")`
+reported `{"status": "running_elsewhere", "holder_pid": 49334}`; `ps -p 49334`
+confirmed that PID was exactly the rival CLI process.
 ## Symptom (Effect)
 
 Four consecutive `index(action="status")` calls, each showing a growing
@@ -173,40 +174,62 @@ file.try_lock_exclusive().with_context(|| {
 
 ## Fix
 
-*Not yet implemented — filed on notice per the bug-capture discipline, pending
-a decision on direction.* Two candidates, not mutually exclusive:
+Implemented in `src/retrieval/index_lock.rs` and `src/tools/semantic/index.rs`:
 
-1. Distinguish "this agent's attempt failed because another (live) holder has
-   it" from a genuine failure in the `indexing` field's shape — e.g. a
-   `"benign": true` / `"reason": "lock_contention"` marker set specifically
-   when the error came from `index_lock::acquire` losing the race, vs. any
-   other `Err` from `sync_project`.
-2. On a lock-contention `Err` specifically, leave `ctx.agent.indexing` at its
-   prior state (or `Idle`) instead of overwriting it with `Failed(...)` —
-   since this agent made no real attempt that should displace whatever was
-   already known, and a genuinely redundant `build` call shouldn't clobber the
-   status of the build that's actually running.
+1. `acquire_in` now returns a downcastable `LockHeldError { project_id, path,
+   holder_pid }` on contention instead of an opaque `anyhow` context string.
+2. Added `peek_in`/`peek` — acquire-then-immediately-release, non-blocking,
+   returning `Option<Option<u32>>` (held-with-pid / free-or-unknown).
+3. `IndexProject::call`: peeks the cross-process lock synchronously, before
+   committing `ctx.agent.indexing` to `Running` — on contention, returns
+   `{"status": "already_running_elsewhere", "holder_pid"}` and never touches
+   agent state. The narrow post-spawn race (peek said free, the real acquire
+   loses moments later) is classified via the same `LockHeldError` downcast
+   inside the spawned task and steps back to `Idle` instead of `Failed`.
+4. `IndexStatus::call`'s `Idle` arm now also peeks, so an agent that never
+   called `build` gets `{"status": "running_elsewhere", "holder_pid"}` instead
+   of silence when someone else is indexing.
 
+**SHA:** `60a7e624` (branch `experiments`)
+**patch-id:** `40abcc0cf2f65a1895332ba7da63925d7e9700b2`
+
+Designed via `superpowers:brainstorming` (bounded path) before implementation;
+two design forks considered and rejected: tagging the failure without changing
+control flow (leaves callers needing to check a flag), and only fixing the
+pre-spawn case (leaves the Idle-agent blind spot open).
 ## Tests added
 
-N/A — no fix implemented yet.
+Hermetic unit tests, TDD (red confirmed — compile failure naming the missing
+symbol — before each green):
 
+- `src/retrieval/index_lock.rs::tests::second_acquire_fails_with_a_downcastable_lock_held_error_naming_the_holder_pid`
+- `src/retrieval/index_lock.rs::tests::peek_in_returns_none_when_free`
+- `src/retrieval/index_lock.rs::tests::peek_in_returns_holder_pid_when_locked`
+- `src/retrieval/index_lock.rs::tests::peek_in_does_not_leave_the_lock_held`
+- `src/tools/semantic/tests.rs::already_running_elsewhere_response_names_the_holder_pid`
+- `src/tools/semantic/tests.rs::already_running_elsewhere_response_allows_an_unknown_holder_pid`
+- `src/tools/semantic/tests.rs::running_elsewhere_indexing_block_names_the_holder_pid`
+
+**Not unit-tested:** the full tool-to-real-OS-lock wiring (`IndexProject::call`
+and `IndexStatus::call` actually calling `peek()` against a genuinely-held
+lock). `peek`/`acquire` go through the real per-user runtime dir
+(`per_user_runtime_dir()`, which reads `$XDG_RUNTIME_DIR`), and this project's
+own test convention (see `index_lock.rs::tests::scratch`'s doc comment, and
+`acquire_in_does_not_touch_the_real_runtime_dir`) is that tests must not write
+there — mutating it via an env var for a test would also risk the documented
+UB from concurrent `getenv`/`setenv` (`docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`). Covered instead by
+live reproduction (below) — the same standard the original bug report itself
+used.
+
+Full gate: `cargo fmt`, `cargo clippy --lib --tests -- -D warnings`, `cargo test --lib` — 4302 passed, 0 failed, 8 ignored (pre-existing, unrelated).
 ## Workarounds
 
-Don't trust `indexing.status: "failed"` alone. Cross-check `chunk_count` /
-`file_count` across two calls a few seconds apart (Qdrant-backed, live) — if
-they're climbing, indexing is progressing regardless of what `indexing` says.
-`docker ps` / `nvidia-smi` corroborate further if available.
-
+No longer needed — fixed. (Historical: cross-check `chunk_count`/`file_count`
+across two `status` calls; if climbing, indexing is progressing regardless of
+what `indexing.status` said.)
 ## Resume
 
-Pick one of the two `Fix` candidates (or both) and implement in
-`src/tools/semantic/index.rs` / `src/agent/mod.rs`. Add a unit test that
-simulates a lock-acquire failure specifically (distinct from the existing
-`IndexingState::Failed` tests in `src/tools/semantic/tests.rs`) and asserts the
-response is distinguishable from a genuine failure. Run `cargo test`, `cargo
-clippy -- -D warnings`, `cargo fmt` before closing.
-
+N/A — fixed and live-verified.
 ## References
 
 - `docs/issues/2026-08-23-index-build-fails-embed-batch-sparse-send.md` — the
@@ -216,4 +239,3 @@ clippy -- -D warnings`, `cargo fmt` before closing.
 - `src/retrieval/index_lock.rs` — the cross-process file lock.
 - `src/tools/semantic/index.rs`, `src/agent/mod.rs` — the tool implementation
   and per-agent state.
-
