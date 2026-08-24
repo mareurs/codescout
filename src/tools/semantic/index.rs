@@ -269,7 +269,7 @@ impl Tool for IndexProject {
             // synchronously, before committing to `Running`, so a doomed spawn
             // never corrupts `ctx.agent.indexing` with a stale `Failed(...)` that
             // has nothing to do with this agent's own request. See
-            // docs/issues/2026-08-24-index-status-lock-contention-reads-as-failed.md.
+            // docs/issues/archive/2026-08-24-index-status-lock-contention-reads-as-failed.md.
             if let Some(holder_pid) = crate::retrieval::index_lock::peek(&project_id) {
                 return Ok(already_running_elsewhere_response(holder_pid));
             }
@@ -539,7 +539,7 @@ impl Tool for IndexStatus {
                     // This agent isn't indexing, but a different process might
                     // be — surface that instead of silence, the same blind spot
                     // this bug fixed for the build side. See
-                    // docs/issues/2026-08-24-index-status-lock-contention-reads-as-failed.md.
+                    // docs/issues/archive/2026-08-24-index-status-lock-contention-reads-as-failed.md.
                     if let Some(holder_pid) = crate::retrieval::index_lock::peek(&project_id) {
                         result["indexing"] = running_elsewhere_indexing_block(holder_pid);
                     }

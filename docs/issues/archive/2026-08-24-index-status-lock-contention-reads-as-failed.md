@@ -1,5 +1,5 @@
 ---
-id: aa0cf06422d3d0aa
+id: 05a0548d57664984
 kind: bug
 status: fixed
 title: 'BUG: index(action="status")''s indexing.status stays "failed" from a stale lock-contention race while real progress (chunk_count, GPU) continues'
