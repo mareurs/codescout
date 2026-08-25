@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 60
-entry_high_water_W: 49
+entry_high_water_F: 62
+entry_high_water_W: 50
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -4363,6 +4363,89 @@ session hazard (commits landing under me) this session already hit twice.
 **Fix idea / Pointer:** Commit each tracker append immediately rather than batching; a stronger structural fix (session-scoped worktrees) is out of scope for this session — see `docs/RELEASE.md` § Concurrent-Work Rules.
 
 **Status:** mitigated
+
+## F-61 — "No live-pyright harness exists" was a negative search of ONE file, and it nearly shipped a fix with no regression test
+
+**Observed:** 2026-08-26, finishing the fix for `docs/issues/2026-08-25-references-dead-ends-at-renaming-re-export.md`. Fix written, unit tests green, about to commit.
+
+**When:** Choosing a test strategy for a fix whose entire behaviour is live-LSP integration.
+
+**Expected (my claim to the user):** "There is no live-pyright harness in this repo — the Python tests in `src/tools/symbol/tests.rs` are synthetic `SymbolInfo` fixtures, so the alias path has no CI-enforced regression test." I asked the user to run `/mcp` so I could verify by hand instead.
+
+**Got (scouted reality):** `tests/` holds a full declarative e2e harness — `tests/e2e/harness.rs`, `tests/e2e/test_python.rs`, and TOML expectation files at `tests/fixtures/core-expectations.toml` and `tests/fixtures/python-extensions.toml` — carrying **six existing live-LSP `find_referencing_symbols` expectations**, one of which (`refs_reexported_class`) already covers a *non-renaming* re-export. Enabling coverage took one TOML block plus three fixture files, and produced a clean RED (`FAIL refs_renaming_reexport_alias: symbol not found: apply_duty`, 24/25, 90s real LSP run) → GREEN (25/25) around the fix.
+
+**Probable cause:** I grepped `src/tools/symbol/tests.rs` — one file — for `pyright|\.py"`, saw synthetic fixtures, and generalised to the repo. The reconnaissance law names this exactly: *a search that finds nothing is evidence about the search, not about the world*, under its **scope** mechanism ("search the tree, not the file you are editing"). Worse, this project's own `cargo-test-lib-skips-integration` memory prescribes the precise check I skipped — `grep -rn "<symbol_you_changed>" tests/` — and that memory was listed at session start.
+
+**Workaround:** None needed. Added `[refs_renaming_reexport_alias]` to `tests/fixtures/python-extensions.toml` plus `library/pricing/__init__.py`, `library/pricing/duties.py` and `library/orders.py` — all NEW files, so no existing expectation's containment assertions could shift.
+
+**Severity:** high — the fix would have shipped with zero coverage of the behaviour it changes, under an `unverified:` marker asserting that coverage was *impossible*. The marker is the durable damage: it tells every future reader not to look, which is worse than silence.
+
+**Status:** fixed-verified — regression test lands with the fix; red and green both measured.
+
+**Valid:** dated 2026-08-26
+
+**Rests on:** the `cargo-test-lib-skips-integration` memory's rule, and the reconnaissance skill's negative-search law (scope mechanism).
+
+**Fix idea / Pointer:** When about to write `unverified:` because "no harness exists", treat that sentence as the trigger to search `tests/`. An assertion that testing is impossible is a claim about the repo, and by the skill's own deferral-rationale law it is the least-audited kind — nobody re-checks a reason for not doing work.
+
+## F-62 — All five feature-gated e2e language lanes had stopped compiling, invisibly, because `cargo test` never builds them
+
+**Observed:** 2026-08-26, while enabling the Python e2e lane to host a regression test (see F-61).
+
+**When:** First `cargo test --features e2e-python --test e2e_tests` of the session.
+
+**Expected:** The lane runs, or fails on my new expectation.
+
+**Got:** It did not compile at all.
+
+```
+error[E0063]: missing field `workspace_override` in initializer of `codescout::tools::ToolContext`
+  --> tests/e2e/harness.rs:43:14
+```
+
+`ToolContext` gained a `workspace_override` field at some point; `tests/e2e/harness.rs` was never updated. Because `tests/e2e/mod.rs` gates every language module behind `#[cfg(feature = "e2e-rust" | "e2e-python" | …)]`, a plain `cargo test` never compiles the harness — so the breakage produced no error anywhere, for however long it has been there. All five lanes (rust, python, typescript, kotlin, java) share that harness, so all five were dead simultaneously.
+
+One field fixed it. `cargo test --features e2e --no-run` now builds every lane, and `--features e2e-python` runs 24/24 green on the pre-existing expectations.
+
+**Probable cause:** A structural blind spot rather than an oversight — the gate that would have caught it is excluded from the command everyone runs. This is the reconnaissance skill's *"a green result certifies the path that actually EXECUTED"* law in its **configured-out** form: `cargo test` was green through every commit that broke this, and would read the same in a fully broken world.
+
+**Workaround:** N/A — fixed in place.
+
+**Severity:** high — not for the missing field, which is trivial, but for the duration and the silence. Every live-LSP behavioural assertion in the repo (24 for Python alone, plus four other languages) was not merely unrun but unbuildable, while `cargo test` reported green. Any regression those lanes exist to catch has been uncaught for the whole window.
+
+**Status:** fixed-verified — `--features e2e` compiles all five; python lane 25/25 including the new expectation.
+
+**Valid:** dated 2026-08-26
+
+**Rests on:** the cfg-gating in `tests/e2e/mod.rs` and the feature list in `Cargo.toml:209-211`.
+
+**Fix idea / Pointer:** A feature-gated test lane needs a compile-only CI step (`cargo test --features e2e --no-run`) — cheap, needs no language servers, and would have caught this the day it broke. `tests/feature_lanes.rs` exists and may already be the intended home for that guard; worth checking before adding a new one. Not done in this pass — filed rather than bundled into a `references` fix.
+
+## W-50 — Recon run at the commit boundary converted "unverifiable, ask the user to /mcp" into a measured red→green
+
+**Observed:** 2026-08-26, invoked at the point where the `references` alias fix was written, gate-green, and about to be committed.
+
+**Pattern:** Run reconnaissance at the **commit boundary of your own fix**, and aim it at the sentences you are about to write into the durable record — not at the code. The seam here was not a struct shape; it was three claims I had already drafted for the user and for an `unverified:` field: *no harness exists*, *the green covers this*, and *therefore verify by hand*. Each is a checkable assertion about the repo, and all three were false.
+
+**Counterfactual:** Without the scout I would have committed a fix whose behaviour had **no** automated coverage, stamped `unverified:` with a claim that coverage was impossible, and handed the user a manual `/mcp` verification step. Concretely lost:
+
+1. The `refs_renaming_reexport_alias` expectation — a real live-LSP regression test, measured RED (`symbol not found: apply_duty`, 24/25) before the fix and GREEN (25/25) after.
+2. F-62 — five e2e language lanes that had stopped compiling entirely and were reporting nothing. Found only because I went looking for a harness I had asserted did not exist.
+3. The `unverified:` marker itself, which would have instructed every future reader that this path *cannot* be tested here.
+
+**Confirming data points:**
+1. This session (F-61, F-62) — two false claims and one dead test suite, all surfaced by one scout at the commit boundary.
+2. Same session, earlier: `references` returned `0 references` for `store_file` with a warming-index warning; corroborating with `grep` found 24 call sites across 6 files. The tool's own warning prompted the check — the same reflex, prompted externally rather than by the skill.
+
+**Impact:** high — the difference between a fix with a regression test and a fix with a durable note saying it cannot have one.
+
+**Promote-when:** A third instance where a commit-boundary scout invalidates a *claim about the repo* (as opposed to a claim about code shape). At three, promote to the skill's Phase 1 as an explicit bullet: *"Before writing `unverified:`, or telling the user something cannot be tested/measured here, scout that claim — an assertion of impossibility is a claim about the repo, and nobody re-audits a reason for not doing work."* Note this is close to the existing deferral-rationale law; the promotion may be an **outgrown** re-promotion of that law rather than a new one, since that law is scoped to a `## Fix` section's rationale and this instance was a live claim to the user. Audit it against the four staleness classes before adding.
+
+**Status:** validated — two datapoints this session, both with measured counterfactuals.
+
+**Valid:** dated 2026-08-26
+
+**Rests on:** F-61 and F-62, same session — this win is their shared counterfactual, not independent evidence.
 
 ## Template for new entries
 

@@ -59,6 +59,96 @@ fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// Byte offset → LSP column. LSP positions are UTF-16 code units, so a byte
+/// offset is only the same number when everything before it on the line is
+/// ASCII. Converting unconditionally costs nothing and stops a non-ASCII line
+/// from silently shifting the probe onto the wrong token.
+fn utf16_col(line: &str, byte_idx: usize) -> u32 {
+    line[..byte_idx].encode_utf16().count() as u32
+}
+
+/// Word-boundary occurrences of `ident` in `text`, as 0-based `(line, col)` LSP
+/// positions, in source order.
+///
+/// The positional companion to [`contains_word`], which answers the same
+/// question without saying where. Used to recover a position for a name the
+/// language server never emits as a document symbol — see the fallback in
+/// `References::call`.
+pub(crate) fn ident_positions(text: &str, ident: &str) -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    if ident.is_empty() {
+        return out;
+    }
+    let nlen = ident.len();
+    for (lineno, line) in text.lines().enumerate() {
+        let bytes = line.as_bytes();
+        let mut from = 0;
+        while let Some(rel) = line[from..].find(ident) {
+            let i = from + rel;
+            let before_ok = i == 0 || !is_ident_byte(bytes[i - 1]);
+            let after = i + nlen;
+            let after_ok = after >= bytes.len() || !is_ident_byte(bytes[after]);
+            if before_ok && after_ok {
+                out.push((lineno as u32, utf16_col(line, i)));
+            }
+            from = i + nlen;
+        }
+    }
+    out
+}
+
+/// Recover a position for a name that resolves to no document symbol.
+///
+/// An import alias — `from m import f as g`, `pub use m::f as g` — binds a name
+/// the language server does not emit as a document symbol, so name lookup
+/// cannot reach it. The SAME position answers `textDocument/definition` and
+/// `textDocument/references` perfectly well, which is why `symbol_at` resolves
+/// an alias that `references` reported as "symbol not found". Measured
+/// 2026-08-25 on a Python fixture: `symbol_at(__init__.py, line=1, col=48)`
+/// returned both the definition and `(function) def apply_duty() -> float`,
+/// while `references(symbol="apply_duty", path="src/intl/__init__.py")` errored
+/// — and the error's recommended recovery, `symbols(path)`, listed only
+/// `__all__`, never the alias. See
+/// `docs/issues/2026-08-25-references-dead-ends-at-renaming-re-export.md`.
+///
+/// Two guards keep this from papering over a different problem:
+///
+/// - It runs only when the name matched **no** symbol. An *ambiguous* name must
+///   stay an error — picking a textual occurrence there would silently choose
+///   one of several real candidates.
+/// - Every candidate occurrence is validated with `goto_definition` before it is
+///   used. An occurrence inside a comment or a string literal resolves to
+///   nothing, and answering from one would turn a loud error into a quiet,
+///   well-formed, wrong reference list — which is the failure this tool exists
+///   to prevent, not to commit.
+async fn resolve_binding_by_position(
+    client: &dyn crate::lsp::LspClientOps,
+    path: &std::path::Path,
+    lang: &str,
+    name: &str,
+    text: &str,
+    symbols: &[crate::lsp::SymbolInfo],
+) -> Option<(u32, u32)> {
+    // A name_path with '/' addresses a nested symbol; there is no single
+    // identifier to probe for.
+    if name.contains('/') {
+        return None;
+    }
+    if !crate::symbol::query::collect_matching_symbols(symbols, name).is_empty() {
+        return None;
+    }
+    const MAX_PROBES: usize = 8;
+    for (line, col) in ident_positions(text, name).into_iter().take(MAX_PROBES) {
+        if matches!(
+            client.goto_definition(path, line, col, lang).await,
+            Ok(d) if !d.is_empty()
+        ) {
+            return Some((line, col));
+        }
+    }
+    None
+}
+
 /// LSP-independent corroboration for a zero-external-callers `references` result
 /// (BUG 2026-06-09 references-false-zero-stale-graph). After an incremental
 /// reindex the LSP reference graph can lag the on-disk text, so
@@ -170,7 +260,11 @@ impl Tool for References {
         // cross-check (below) still has them.
         let timer = LspTimer::start();
         let name_path_owned = name_path.to_string();
-        let (sym, refs) = retry_on_mux_disconnect(
+        // Read once for the alias fallback below — the closure may run twice.
+        let file_text = tokio::fs::read_to_string(&full_path)
+            .await
+            .unwrap_or_default();
+        let (sym_line, sym_col, refs) = retry_on_mux_disconnect(
             &ctx.agent,
             &*ctx.lsp,
             &full_path,
@@ -180,11 +274,19 @@ impl Tool for References {
             |c, l| {
                 let p = full_path.clone();
                 let np = name_path_owned.clone();
+                let text = file_text.clone();
                 async move {
                     let symbols = c.document_symbols(&p, &l).await?;
-                    let sym = find_unique_symbol_by_name_path(&symbols, &np)?.clone();
-                    let refs = c.references(&p, sym.start_line, sym.start_col, &l).await?;
-                    anyhow::Ok((sym, refs))
+                    let (line, col) = match find_unique_symbol_by_name_path(&symbols, &np) {
+                        Ok(s) => (s.start_line, s.start_col),
+                        Err(name_err) => {
+                            resolve_binding_by_position(&*c, &p, &l, &np, &text, &symbols)
+                                .await
+                                .ok_or(name_err)?
+                        }
+                    };
+                    let refs = c.references(&p, line, col, &l).await?;
+                    anyhow::Ok((line, col, refs))
                 }
             },
         )
@@ -290,7 +392,7 @@ impl Tool for References {
         // proof of an incomplete reference set. Cheap: one prepare_call_hierarchy
         // (None for non-callable symbols → skipped) plus one incoming_calls.
         if let Ok(Some(item)) = client
-            .prepare_call_hierarchy(&full_path, sym.start_line, sym.start_col, &lang)
+            .prepare_call_hierarchy(&full_path, sym_line, sym_col, &lang)
             .await
         {
             if let Ok(incoming) = client.incoming_calls(&item, &lang).await {

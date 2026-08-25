@@ -90,3 +90,17 @@ tool = "find_referencing_symbols"
 path = "library/services/catalog.py"
 symbol = "Catalog"
 expected_refs_contain = ["__init__"]
+
+# `apply_duty` is bound only by `from ... import duty_multiplier as apply_duty`.
+# pyright does not emit an import alias as a document symbol, so resolving the
+# `symbol` argument by name finds nothing — yet the same position answers
+# textDocument/definition and textDocument/references perfectly. Before the fix
+# this returned "symbol not found: apply_duty", which dead-ended impact analysis
+# one hop short and returned a well-formed, plausible caller list.
+# docs/issues/2026-08-25-references-dead-ends-at-renaming-re-export.md
+[refs_renaming_reexport_alias]
+description = "An import alias is addressable by name even though it is not a document symbol"
+tool = "find_referencing_symbols"
+path = "library/pricing/__init__.py"
+symbol = "apply_duty"
+expected_refs_contain = ["orders.py"]

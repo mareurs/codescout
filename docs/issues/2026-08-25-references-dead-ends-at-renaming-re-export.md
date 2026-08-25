@@ -1,13 +1,16 @@
 ---
-status: open
-opened: 2026-08-25
-closed:
-severity: medium
-owner: marius
-unverified: 'Not yet reproduced inside an indexed codescout project — the primary measurement ran against a pytest tmp-dir tree that may never have been indexed. The confound is named in Evidence and must be closed before any of this is treated as characterized.'
-related: []
-tags: [lsp, python, references, impact-analysis]
 kind: bug
+status: fixed
+tags:
+- lsp
+- python
+- references
+- impact-analysis
+closed: 2026-08-26
+opened: 2026-08-25
+owner: marius
+related: []
+severity: medium
 ---
 
 # BUG: `references` dead-ends at a renaming re-export, so impact analysis silently under-reports callers
@@ -112,6 +115,70 @@ Recorded verbatim in
 `codescout:.superpowers/sdd/2026-08-25-unanchored-blast-radius-eval/task-1-report.md`,
 "Fix Round 2" section.
 
+## Confound closed, and the diagnosis flips (2026-08-25)
+
+The `unverified:` blocker on this file was that the primary measurement ran
+against a pytest tmp-dir tree that may never have been indexed — and "not
+indexed" produces output byte-identical to "not indexable". **Closed.**
+
+The fixture was rebuilt at
+`…/scratchpad/refrepo` with the exact shape from *Symptom*, then **activated as
+a codescout project** (`workspace(action="activate")`, `index(action="build")`)
+so it is registered and indexed. It reproduces identically:
+
+```
+references(symbol="duty_multiplier", path="src/intl/duties.py")
+  → 2 references: src/intl/duties.py:1 (the def)
+                  src/intl/__init__.py:1 (the re-export)
+    — does NOT reach src/orders/crossborder.py, which calls apply_duty()
+
+symbols(name="apply_duty")                                    → 0 matches
+references(symbol="apply_duty", path="src/intl/__init__.py")  → symbol not found
+references(symbol="apply_duty", path="src/orders/crossborder.py") → symbol not found
+```
+
+### It is NOT an LSP capability gap
+
+This is the question *Resume* named as severity-deciding, and it resolves
+against the original reading:
+
+```
+symbol_at(path="src/intl/__init__.py", line=1, col=48)
+  def:   src/intl/duties.py:1  — def duty_multiplier() -> float
+  hover: (function) def apply_duty() -> float
+         Return the duty multiplier.
+```
+
+The language server resolves the alias **completely** — definition and hover —
+at that position. What fails is *name-based* addressing:
+`references` / `call_graph` resolve their `symbol` argument by name against
+extracted **document symbols**, and an import alias is not one.
+
+So it is a **name-addressability gap, not an LSP capability gap.** Severity
+drops — the data is reachable — but the defect is real: the documented entry
+point dead-ends, and there is no positional entry point to `references`.
+
+### The recommended recovery is itself a dead end
+
+The error hints "Use symbols(path) to list symbols." For this file that returns:
+
+```
+symbols(path="src/intl/__init__.py")
+  → Variable  3  __all__
+```
+
+One irrelevant symbol, and never the alias. A caller who follows the hint
+exactly is no closer.
+
+### Aside, found while setting this up
+
+Activating the fixture (read-only, `languages: []`, not yet indexed) **removed
+`references`, `call_graph`, `symbol_at` and `library` from the tool list**
+altogether; they returned on re-activating the home project. The tool set is
+project-dependent. Worked around here by staying on the home project and passing
+`workspace=<fixture>` to each call. Not filed separately yet — it needs its own
+reproduction to establish whether the trigger is read-only, unindexed, or
+no-language-detected.
 ## Hypotheses tried
 
 1. **Hypothesis:** `apply_duty` is absent because the alias is not indexed.
@@ -125,15 +192,80 @@ Recorded verbatim in
 
 ## Fix
 
-None. Not characterized enough to prescribe one, and doing so before separating the two
-mechanisms would be a prescription for a bug that may not exist in the form described.
+`references` resolved its `symbol` argument one way only: look the name up in
+the file's **document symbols**, take that symbol's `(start_line, start_col)`,
+and ask the LSP for references at that position. The positional call was always
+there; only the name→position step failed for a binding the server does not emit
+as a document symbol.
 
+`src/tools/symbol/references.rs` now falls back, when — and only when — the name
+matched **no** symbol:
+
+- `ident_positions(text, ident)` returns every word-boundary occurrence as a
+  0-based `(line, col)`, counted in **UTF-16 code units** (LSP positions are
+  UTF-16; a byte offset shifts the probe onto a neighbouring token on any
+  non-ASCII line, and that token resolves to something plausible).
+- `resolve_binding_by_position` walks those occurrences and validates each with
+  `goto_definition` before using it.
+
+Two guards carry the correctness argument, and both matter more than the
+fallback itself:
+
+- **Ambiguity stays an error.** The fallback runs only on a zero-match name
+  (checked via `collect_matching_symbols`), never on an ambiguous one. Choosing
+  a textual occurrence for an ambiguous name would silently pick one of several
+  *real* candidates.
+- **Unvalidated positions are never used.** An occurrence inside a comment or a
+  string literal resolves to nothing under `goto_definition`, so it is skipped.
+  Answering from one would turn a loud `symbol not found` into a quiet,
+  well-formed, wrong reference list — which is the failure this bug is about,
+  not one to commit while fixing it.
+
+A `name_path` containing `/` is excluded: it addresses a nested symbol, and
+there is no single identifier to probe for.
+
+**Fix commit:** recorded below once committed.
 ## Tests added
 
-None — deliberately. Adding a regression test before the mechanism is separated would
-pin whichever behaviour happens to be current, which is the defect this repo's own
-discipline calls out (`run the reproduction before reading the fix plan`).
+**End-to-end, live LSP** — `refs_renaming_reexport_alias` in
+`tests/fixtures/python-extensions.toml`, over new fixture files
+`library/pricing/__init__.py`, `library/pricing/duties.py` and
+`library/orders.py` (all new, so no existing expectation's containment
+assertions could shift).
 
+Measured both ways, with the fix stashed and restored:
+
+```
+without the fix:  FAIL  refs_renaming_reexport_alias:
+                        symbol not found: apply_duty
+                  24/25 passed for python   (90.65s, real pyright run)
+
+with the fix:     PASS  refs_renaming_reexport_alias
+                  25/25 passed for python
+```
+
+Run with `cargo test --features e2e-python --test e2e_tests python_e2e`.
+
+**Unit** — three in `src/tools/symbol/tests.rs` covering `ident_positions`: the
+exact alias line from this bug (column 47, the 0-based twin of the column 48
+`symbol_at` resolved), identifier-boundary rejection, and UTF-16-vs-byte columns.
+
+### An earlier claim in this file was wrong
+
+This file briefly carried an `unverified:` marker saying the alias path *could
+not* have a CI-enforced test because no live-pyright harness existed. That was a
+negative search of a single file (`src/tools/symbol/tests.rs`), and it was false
+— the harness is `tests/e2e/`, gated behind `--features e2e-python`, with six
+pre-existing live-LSP `find_referencing_symbols` expectations. Recorded as
+`bug-fix-session-log:F-61`; the scout that caught it is `W-50`.
+
+Enabling the lane also surfaced `bug-fix-session-log:F-62` — all five e2e
+language lanes had stopped compiling (`tests/e2e/harness.rs` missing
+`ToolContext::workspace_override`), invisibly, because `cargo test` never builds
+them. Fixed in its own commit; that fix is a prerequisite for this one's test.
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
+— 4459 passed, plus `cargo test --features e2e --no-run` building all five lanes.
 ## Workarounds
 
 Chase the rename lexically. `grep` the original name to find the re-export line, read the
@@ -143,21 +275,7 @@ bucket as unconstructible and repartition its fixture by hop-cost instead.
 
 ## Resume
 
-Build the minimal case **inside an indexed project** and re-run, which separates the two
-mechanisms in one pass: add `pkg/mod.py` defining `f()`, `pkg/__init__.py` with
-`from pkg.mod import f as g`, and `consumer.py` with `from pkg import g` calling `g()`,
-somewhere under `/home/marius/work/claude/prompt-engineering` (already registered,
-already Python). Then run, in order:
-
-1. `symbols(name="g", workspace="/home/marius/work/claude/prompt-engineering")` — if this
-   returns the binding, mechanism (2) was the whole story and the fixture measurement was
-   an artifact; close as `wontfix-false-alarm`.
-2. `references(symbol="f", path="pkg/mod.py")` — does it reach `consumer.py`?
-3. `symbol_at(path="pkg/__init__.py", line=1, col=<column of `g`>)` then `references`
-   from whatever it returns. **This is the check that decides severity:** if the alias is
-   reachable positionally but not by name, the gap is discoverability (medium) rather
-   than capability (high), and the fix is a `symbols` extraction change, not an LSP one.
-
+N/A — fixed.
 ## References
 
 - `codescout:docs/superpowers/plans/2026-08-25-unanchored-blast-radius-eval.md` — the

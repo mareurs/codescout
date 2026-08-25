@@ -5727,6 +5727,62 @@ fn contains_word_respects_identifier_boundaries() {
     assert!(!contains_word("", "getLabel"));
 }
 
+/// Bug 2026-08-25-references-dead-ends-at-renaming-re-export: `references`
+/// resolves its `symbol` by name against document symbols, and a language
+/// server does not emit an import alias as one — so the alias is unaddressable
+/// even though the LSP answers at that position perfectly well.
+/// `ident_positions` is how the fallback recovers the position.
+///
+/// The exact fixture line is the one measured in the bug file; `apply_duty`
+/// starts at 0-based column 47, which is the 1-based column 48 that
+/// `symbol_at` resolved.
+#[test]
+fn ident_positions_finds_an_import_alias_binding() {
+    use crate::tools::symbol::references::ident_positions;
+    let text = concat!(
+        "from src.intl.duties import duty_multiplier as apply_duty\n",
+        "\n",
+        "__all__ = [\"apply_duty\"]\n",
+    );
+    assert_eq!(
+        ident_positions(text, "apply_duty"),
+        vec![(0, 47), (2, 12)],
+        "both word-boundary occurrences, in source order — the binding first and \
+         the string literal second. That order is what the goto_definition probe \
+         relies on: it takes the first occurrence that actually resolves, so a \
+         name appearing only inside a string yields no position at all rather \
+         than a quiet, wrong answer."
+    );
+}
+
+#[test]
+fn ident_positions_respects_identifier_boundaries() {
+    use crate::tools::symbol::references::ident_positions;
+    assert!(ident_positions("apply_duty_extra()", "apply_duty").is_empty());
+    assert!(ident_positions("x_apply_duty()", "apply_duty").is_empty());
+    assert_eq!(
+        ident_positions("v = apply_duty()", "apply_duty"),
+        vec![(0, 4)]
+    );
+    assert!(
+        ident_positions("apply_duty", "").is_empty(),
+        "an empty needle must match nothing, not every position"
+    );
+}
+
+#[test]
+fn ident_positions_reports_utf16_columns_not_byte_offsets() {
+    use crate::tools::symbol::references::ident_positions;
+    // 'é' is one UTF-16 code unit but two UTF-8 bytes, so a byte offset would
+    // report 13 here. LSP positions are UTF-16, and probing the wrong column
+    // lands on a neighbouring token — which resolves to something plausible.
+    assert_eq!(
+        ident_positions("# café ---- apply_duty\n", "apply_duty"),
+        vec![(0, 12)],
+        "column must be counted in UTF-16 code units, not bytes"
+    );
+}
+
 #[test]
 fn corroborate_zero_references_finds_callers_via_text_scan() {
     // BUG 2026-06-09: the LSP-independent corroboration for a false 0-callers
