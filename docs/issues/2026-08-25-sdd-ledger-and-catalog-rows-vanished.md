@@ -255,6 +255,10 @@ check.
 
 1. Read the codescout memory `catalog-sql-hazards`; it may already document the
    concurrent-writer contract and make this a rediscovery rather than a finding.
+   **Checked 2026-08-25 (unrelated session, prompted by this file's own step 1):** it
+   does not — the memory covers table-copy migrations dropping later-added columns and
+   unescaped `LIKE` wildcards only, nothing about multi-process write contention or
+   journal mode. Step 2 (`PRAGMA journal_mode`/`busy_timeout`) is still the next real test.
 2. `sqlite3 /home/marius/.local/share/librarian/catalog.db 'PRAGMA journal_mode; PRAGMA
    busy_timeout;'` — WAL plus a non-zero busy timeout would largely acquit concurrency;
    `delete` journal mode with no timeout would largely convict it.
