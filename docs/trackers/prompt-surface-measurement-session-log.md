@@ -10,7 +10,7 @@ tags:
 - librarian
 topic: prompt surface budget measurement eval harness compaction
 entry_high_water_F: 9
-entry_high_water_W: 7
+entry_high_water_W: 8
 entry_prefix:
 - F
 - W
@@ -49,6 +49,7 @@ surfaces, not the definition.
 | W-5 | Measuring the predicate family before fixing beat four rounds of fix-then-discover | promoted-to-permanent-docs |
 | W-6 | A subagent's combination search found what a 27-predicate single sweep declared clean | promoted-to-permanent-docs |
 | W-7 | Reading the file settled two agent disagreements | promoted-to-permanent-docs |
+| W-8 | A deleted git-ignored ledger was rebuilt from the session transcript | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -612,6 +613,65 @@ verification round.
 
 **Fix idea / Pointer:** carry "commit incrementally" in every implementer dispatch brief as
 standing text rather than adding it after the first drop.
+
+## W-8 — A deleted git-ignored ledger was rebuilt from the session transcript, which records every write with its payload
+
+**Valid:** invariant
+
+**Observed:** 2026-08-25, resuming after compaction. The plan's `ledger:` frontmatter key
+named `.superpowers/sdd/2026-08-23-hidden-information-eval/progress.md`; the whole
+directory was gone from disk. `.superpowers/sdd/.gitignore` is `*`, so there was no git
+copy and no reflog entry — the normal recovery paths were all unavailable by construction.
+
+**Pattern:** A Claude Code transcript is a complete, ordered write log. Every
+`create_file` / `edit_markdown` / `edit_file` call is stored as a `tool_use` block with
+its **full input payload**, and every outcome as a matching `tool_result` carrying
+`is_error`. So for any file an agent authored, the transcript holds enough to replay it —
+including files git was never allowed to see.
+
+The method, in three steps:
+
+1. Scan `~/.claude*/projects/<project-slug>/*.jsonl` for `tool_use` blocks whose input
+   names the path. (Scan all profiles — this machine runs three.)
+2. Join each to its `tool_result` by `tool_use_id` and **drop the failures.** This ledger
+   had two `edit_markdown` calls refused with *"File writes are disabled for this
+   project"* (the F-3 read-only-activation friction). They wrote nothing on the day, and
+   replaying them would have inserted content the original never held.
+3. Apply the survivors in timestamp order.
+
+**Counterfactual:** 1,264 lines recovered, including all 24 `R-N` rulings and the
+`## CURRENT STATE` resume block. Without it, Tasks 3–6 would have started from the
+compaction summary alone, which names 7 of the 24 rulings. The other 17 would have been
+re-litigated or — worse — silently re-decided the other way, and R-24 in particular
+(`LIFT_BAR[3] = 9.5` overriding R-21's fitted 7.0) is exactly the kind of ruling whose
+reversal produces a confident wrong number rather than an error.
+
+**Two caveats, both found by doing it:**
+
+- **A simulated edit is not the tool's edit.** My replay of `insert_before` produced
+  different whitespace than codescout's, so the two later `edit_file` calls keyed to that
+  exact text missed, leaving a duplicated 30-line block and three stray `## Progress`
+  headings. Reconciling by diff was quick, but only because the mismatch was loud. Prefer
+  replaying through the real tool when the edit chain is short; simulate only when it is
+  long, and then verify structurally (heading map, id coverage) rather than by eye.
+- **Say so in the artifact.** The reconstruction is content-faithful, not byte-faithful.
+  It carries a provenance header naming the transcript, the op count, and what may differ,
+  so no later session cites it as the original.
+
+**Confirming data points:**
+
+1. This session — 22 of 24 recorded ops replayed cleanly; the 2 failures were correctly
+   skipped by reading `is_error` rather than assuming success.
+
+**Promote-when:** a second transcript replay recovers work no other surface held. At two
+datapoints, promote to codescout memory `gotchas` as a recovery procedure — it is
+craft-shaped, not project-shaped, and applies to any agent-authored file outside git.
+
+**Status:** validated — single datapoint, loss fully recovered and verified (all `R-1`..`R-24`
+present, heading map intact).
+
+**Rests on:** `docs/issues/2026-08-25-sdd-ledger-and-catalog-rows-vanished.md`, which
+records the loss itself and the catalog half of the repair.
 
 ## Template for new entries
 
