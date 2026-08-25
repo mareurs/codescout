@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 12
+entry_high_water_F: 13
 entry_high_water_W: 13
 entry_prefix:
 - F
@@ -40,6 +40,7 @@ surfaces, not the definition.
 | F-10 | Task 3's native-tool veto keys on a per-arm env var the runner cannot set | fixed-verified |
 | F-11 | Sharing one OAuth credential across Claude Code profiles broke three of them mid-pilot | mitigated |
 | F-12 | gates.py reported means only, hiding a three-valued instrument for seven rounds | fixed-verified |
+| F-13 | A bare `pytest` in prompt-engineering collects zero scenario tests | mitigated |
 
 ## Wins Index
 
@@ -1154,6 +1155,49 @@ logged-but-unreported field separates. At two datapoints, promote to `eval-desig
 as "enumerate the recorded fields before accepting a null".
 
 **Status:** validated
+
+## F-13 — A bare `pytest` in prompt-engineering collects zero scenario tests, so every "repo baseline green" was silent about the eval code
+
+**Valid:** conditional — pyproject's `testpaths` stops excluding `scenarios/`
+
+**Observed:** 2026-08-25, reconciling a test count that did not add up. Added 9 tests
+to `scenarios/hidden-info/test_gates.py`; the repo total moved by 7. The arithmetic
+was the tell.
+
+**Expected:** the repo suite covers the scenario code, so "401 passed / 7 deselected"
+is evidence the hidden-info checker and gate evaluator are green.
+
+**Got (measured):** `pyproject.toml:36` sets `testpaths = ["tests"]`. A bare
+`pytest` collected **408 of 408 node ids under `tests/`, and 0 under `scenarios/`** —
+`grep -c '^scenarios/'` on the collect-only output returns zero. The 9 added tests
+were not in that number at all, and the ±7 that made me look was unrelated drift in
+`tests/`. Every "repo baseline green" figure recorded in this work stream is true,
+and is a statement about a different body of code than the one being changed.
+
+**Probable cause:** `testpaths` was set for the harness package before the scenario
+suites existed; scenarios are run explicitly by their own tooling. Nothing warns.
+
+**Severity:** med — no wrong code shipped from it, because the scenario suites were
+also run directly every round. But it is a standing licence to believe a green number
+about the wrong subject, in a repo whose entire job is measurement, and the number is
+quoted in commit messages and reports.
+
+**Workaround / correct invocation:**
+`\.venv/bin/python -m pytest scenarios/hidden-info/` (300 passed at
+`prompt-engineering:cea3fc4`). The `.venv` matters too: a bare `python3 -m pytest`
+fails collection with `ModuleNotFoundError: No module named 'prompt_tdd'`, which at
+least fails loudly.
+
+**Fix idea:** add `scenarios` to `testpaths`, or state in `CLAUDE.md` that the repo
+run excludes them. Not done here — changing collection scope mid-stream would move
+every baseline figure at once, which is a change to make deliberately and alone.
+
+**This is the T-13 shape.** *"Every signal was true of 25 lines"* — a trimmed
+`cargo test` tail whose `test result: ok` was real and described a fraction of the
+run. Here the signal is true of `tests/`. Same defect class, different substrate:
+a count is only evidence once you know its denominator.
+
+**Status:** mitigated
 
 ## Template for new entries
 
