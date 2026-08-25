@@ -186,6 +186,14 @@ too, but already get `source_path = None` via the `@` prefix. They were left
 alone rather than bundled — they exhibit no defect today. The guardrail against
 them regressing is `store_file`'s doc comment, which now names
 `store_file_excerpt` as the required call for any derived subset.
+**Fix commit:** `bde47270498c17d7f1edac704dcae0e007708715`, on **`experiments`**.
+
+**patch-id:** `24ebd495d2f1e5e87ca8f9b4ddf211a4ae33b580`
+(`git show <sha> | git patch-id --stable`).
+
+The SHA is positional and dies when `experiments` is rebased; the patch-id is a
+content hash of the diff and survives rebase and cherry-pick alike. Both
+recorded once — nothing owed later, whichever way the fix reaches `master`.
 ## Tests added
 
 Three, each RED before the change:

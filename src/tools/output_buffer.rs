@@ -294,7 +294,7 @@ impl OutputBuffer {
     /// never asked for, while the response's `shown_lines` / `total_lines` still
     /// describe the excerpt. Measured 2026-08-25 — a handle minted as 12 lines
     /// served 41 after one append, and its line 1 was the file's line 1
-    /// (`docs/issues/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`).
+    /// (`docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`).
     ///
     /// Re-extracting the range on refresh was considered and rejected: two of
     /// the four excerpt call sites extract by HEADING, and a heading's line
@@ -1360,7 +1360,7 @@ mod tests {
     /// A handle minted by `store_file_excerpt` holds a DERIVED SUBSET, so the
     /// same mtime trigger that correctly refreshes a whole-file handle must not
     /// widen this one to the file. Bug
-    /// `docs/issues/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
+    /// `docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
     #[test]
     fn excerpt_handle_does_not_refresh_into_the_whole_file() {
         use std::fs;

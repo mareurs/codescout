@@ -158,6 +158,6 @@ fixture whose oversized section starts well past line 1.
 
 - `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md` — same
   defect class (mixed coordinate frames), different mechanism.
-- `docs/issues/2026-08-25-file-slice-handle-refreshes-to-whole-file.md` — the
+- `docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md` — the
   sibling that made these excerpt handles snapshots; found in the same sweep.
 - `src/tools/markdown/read_markdown.rs` — `read_markdown_single_heading`.

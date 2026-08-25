@@ -558,7 +558,7 @@ async fn heading_on_large_section_returns_ok_false_with_hint_and_section_map() {
 /// The heading-shaped twin of the ranged-read case: a `@file_*` handle minted
 /// for an oversized SECTION is a derived subset, so a later change to the file
 /// must not widen it into the whole document. Bug
-/// `docs/issues/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
+/// `docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
 ///
 /// This shape is why the fix snapshots rather than storing a line range to
 /// re-extract: a section's line range moves when text above it changes, so
