@@ -329,7 +329,7 @@ pub fn extract_lines_to_budget(
 /// `@tool_*` envelope wrapping the response instead of the response itself —
 /// and that envelope's hint routes into yet another buffer, which is the
 /// nesting reported in
-/// `docs/issues/2026-08-25-run-command-nested-buffer-recursion.md`.
+/// `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md`.
 ///
 /// Use this wherever the extracted chunk is returned inline as JSON; use
 /// [`extract_lines_to_budget`] where the budget really is raw bytes.

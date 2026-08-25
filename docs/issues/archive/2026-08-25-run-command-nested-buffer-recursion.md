@@ -1,5 +1,5 @@
 ---
-id: '014036728bbc5d5f'
+id: b26474f568eaf5e3
 kind: bug
 status: fixed
 title: run_command/read_file buffer output recurses into meta-wrappers instead of resolving to raw text
@@ -190,6 +190,15 @@ files the continuation carries `force=true`, because the head-read exemption
 file, verified with `references` — so it can name the file in its `next`
 instead of a handle.
 
+**Fix commit:** `7712d8e67565b90181bb215c31d48fb3b7c0e091`, on **`experiments`**.
+
+**patch-id:** `4a8809ba4b8fd26dacedd430ae11f16d5afad348`
+(`git show <sha> | git patch-id --stable`).
+
+The SHA is positional and dies when `experiments` is rebased, which happens
+after every ship; the patch-id is a content hash of the diff and survives both
+rebase and cherry-pick. Both are recorded here once — there is no promotion path
+to check and nothing owed later, whichever way the fix reaches `master`.
 ## Tests added
 
 All in-crate, all RED before the change:

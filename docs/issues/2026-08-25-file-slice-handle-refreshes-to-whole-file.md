@@ -1,17 +1,17 @@
 ---
+kind: bug
 status: open
+tags:
+- read_file
+- output_buffer
+- buffering
+- progressive-disclosure
+closed: null
 opened: 2026-08-25
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/2026-08-25-run-command-nested-buffer-recursion.md
-tags:
-  - read_file
-  - output_buffer
-  - buffering
-  - progressive-disclosure
-kind: bug
+- docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md
+severity: medium
 ---
 
 # BUG: a `@file_*` handle minted from an oversized *slice* silently refreshes into the whole file
@@ -136,7 +136,8 @@ None yet — this file is the capture, not the fix.
 
 Re-issue the ranged `read_file` against the original path rather than reusing a
 `file_id` across an edit. After
-`docs/issues/2026-08-25-run-command-nested-buffer-recursion.md` was fixed,
+`docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md` was
+fixed,
 `next` already points at the original path, so ordinary pagination no longer
 routes through the stale handle; the exposure is `grep`-ing a `file_id` that was
 minted before an edit.
@@ -151,7 +152,7 @@ the range (or errors) rather than the whole file.
 
 ## References
 
-- `docs/issues/2026-08-25-run-command-nested-buffer-recursion.md` — the sibling
+- `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md` — the sibling
   bug in the same code block; found while fixing it.
 - `src/tools/read_file.rs` — `read_with_line_range` oversized branch.
 - `src/tools/output_buffer.rs:188-296` — `get_with_refresh_flag`, `store_file`.
