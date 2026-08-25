@@ -107,36 +107,44 @@ never named is the dependency set, which is the thing under measurement.
 
 `duty_multiplier` currently has **two** direct consumers. Four are added, and the
 selection principle is that all six use **different reference forms**, so no single
-lexical pattern enumerates them.
+lexical pattern enumerates them — and that the set is **balanced** between forms each
+toolchain misses.
 
-| # | file | form | code |
-|---|---|---|---|
-| 1 | `src/intl/customs.py` *(exists)* | import-time module cache | `LEVY_MULTIPLIER = duty_multiplier()` |
-| 2 | `src/intl/checkout.py` *(exists)* | plain import + call | `f"duty multiplier: {duty_multiplier()}"` |
-| 3 | `src/intl/manifest.py` *(new)* | aliased import | `from src.intl.duties import duty_multiplier as _dm` … `amount * _dm()` |
-| 4 | `src/exports/customs_feed.py` *(new)* | module attribute | `import src.intl.duties as duties` … `duties.duty_multiplier()` |
-| 5 | `src/orders/crossborder.py` *(new)* | package re-export | `src/intl/__init__.py` re-exports it; caller does `from src.intl import duty_multiplier` |
-| 6 | `src/pricing/registry.py` *(new)* | string-keyed `getattr` | `RATE_FNS = {"duty": "duty_multiplier"}` … `getattr(_duties, RATE_FNS[kind])()` |
+| # | file | form | LSP `references` | grep `duty_multiplier` |
+|---|---|---|---|---|
+| 1 | `src/intl/customs.py` *(exists)* | import-time module cache — `LEVY_MULTIPLIER = duty_multiplier()` | ✓ | ✓ |
+| 2 | `src/intl/checkout.py` *(exists)* | plain import + call — `describe_duty()` | ✓ | ✓ |
+| 3 | `src/intl/manifest.py` *(new)* | aliased import — `… import duty_multiplier as _dm`, called `_dm()` | ✓ | **✗ at the call site** |
+| 4 | `src/orders/crossborder.py` *(new)* | package re-export — `from src.intl import duty_multiplier` | ✓ | **✗ — caller names the package** |
+| 5 | `src/pricing/registry.py` *(new)* | string in a dict — `getattr(_duties, RATE_FNS["duty"])()` | **✗ — no symbol reference exists** | ✓ |
+| 6 | `src/exports/customs_feed.py` *(new)* | name in `pricing.toml`, dispatched at runtime | **✗** | ✓ **only if non-`.py` files are searched** |
 
-**Neither toolchain reaches 6/6 alone.** That is deliberate:
+**Balance is 2 / 2 / 2**: two forms both toolchains find, two only LSP finds, two only
+a lexical search finds. **Neither toolchain reaches 6/6 alone**, and neither is
+favoured by the set's construction.
 
-| form | LSP `references` | lexical grep for `duty_multiplier` |
-|---|---|---|
-| 1, 2, 4 | finds | finds |
-| 3 aliased | finds | finds the import, **misses the call site** (`_dm()`) |
-| 5 re-export | finds | **misses** — the caller names the package, not the function's module |
-| 6 string registry | **misses** — no symbol reference exists | finds the string |
+Rows 5 and 6 are the most important rows in this spec. **They are the ones codescout
+loses**, and they use two *different* mechanisms rather than the same trick twice, so
+one implementation slip does not decide the codescout-loses case. An eval in which the
+tool under test can only win is an advertisement, not a measurement: a `getattr`
+lookup and a config-file dispatch are both invisible to LSP and both findable by a
+lexical sweep, so the native arm has real points available to it and a codescout win
+becomes worth believing.
 
-Row 6 is the most important row in this spec. **It is the one codescout loses.** An
-eval in which the tool under test can only win is an advertisement, not a measurement.
-A `getattr`-resolved registry entry is invisible to LSP and trivially findable by
-grep, so the native arm has a point available to it, and a codescout win becomes worth
-believing.
+Row 6 carries an extra property worth stating: it is findable **only by an agent that
+searches beyond `*.py`**. That is itself a recorded failure — a grep whose default
+scope silently excluded the file containing the answer returned **`0 matches` on four
+separate probes**, including one naming the file's exact path as its glob.
 
-Rows 3 and 5 are the mirror: forms where a grep-driven enumeration silently
+Rows 3 and 4 are the mirror: forms where a grep-driven enumeration silently
 undercounts. This reproduces a recorded failure exactly — a regex sweep counted **13
 construction sites where reality was ~30**, because it matched once per line rather
 than once per occurrence.
+
+**Dropped from the earlier draft:** the module-attribute form
+(`import src.intl.duties as duties` … `duties.duty_multiplier()`). Both toolchains
+find it, and rows 1–2 already cover that case; a third both-find row adds cost and no
+discrimination.
 
 ### 4a. Anti-oracle requirement (blocking)
 
@@ -149,6 +157,9 @@ oracle."*
 form against a different, unrelated function.** The form must not be the signal. This
 is a build-time assertion in the generator, not a review note.
 
+For row 6 this extends to the config file: `pricing.toml` must name several functions,
+only one of which is `duty_multiplier`, or "appears in `pricing.toml`" becomes the
+oracle.
 ## 5. Scoring — three links, measured separately
 
 The sub-goal is a chain and each link fails differently. Collapsing them into one
@@ -308,9 +319,22 @@ Stated here rather than discovered later.
 
 ## Review checklist for the reader
 
-- Is the defect the right one, or should it be subtler — a rounding error rather than
-  integer truncation?
-- Are six dependents the right margin, and are these the right six forms?
-- Is row 6 (the form codescout misses) acceptable, or does it need a second instance so
-  a single miss is not decisive?
-- Should the positive control exist for both families, or is one enough for v1?
+The four questions this draft opened were **decided on 2026-08-25** rather than left
+open. Each is reversible; the reasoning is recorded so a reversal is informed.
+
+1. **Defect — integer truncation, not a rounding error.** Truncation gives an 8.25%
+   swing and an unambiguous symptom. A rounding error (`1.08` vs `1.0825`) is more
+   realistic but its symptom is arguable, and `fix_correct` (L0) gates every other
+   metric — an arguable L0 makes the whole run uninterpretable. Subtlety belongs in the
+   blast radius, which is already subtle.
+2. **Six dependents — kept**, for the resolution argument in §5: a set of two makes
+   "did you find them" a coin flip, and the undercount failure mode this eval targets
+   is undetectable on two.
+3. **Rows 5 and 6 — the earlier draft had ONE LSP-invisible form against TWO
+   grep-invisible ones**, so the set leaned toward codescout before a single run. Now
+   balanced 2/2/2, with the two LSP-invisible rows using different mechanisms so one
+   implementation slip does not decide the case. The module-attribute form was dropped
+   to make room.
+4. **Positive control for BOTH families — a correctness requirement, not a budget
+   one.** The L1 detector is per-family and the two families' tool idioms differ, so a
+   cs-only control cannot validate the native detector.
