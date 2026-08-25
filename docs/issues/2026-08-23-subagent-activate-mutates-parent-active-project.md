@@ -1,13 +1,17 @@
 ---
-status: open
+kind: bug
+status: mitigated
+tags:
+- workspace
+- subagents
+- concurrency
+- write-guard
+closed: 2026-08-25
 opened: 2026-08-23
-closed:
-severity: high
 owner: marius
 related: []
-tags: [workspace, subagents, concurrency, write-guard]
-kind: bug
-unverified: 'Root cause only half established — the global-state mutation is measured, but the write-authorization rule that made the session scratchpad unwritable under the foreign project is NOT: both projects declare identical file_write_enabled=true / extra_write_roots=[], so the differentiator is unread code, not config.'
+severity: high
+unverified: Root cause (global mutable default_workspace_root, no per-caller identity) is NOT addressed — options 2/3 in Fix remain open. This closes the specific incident trigger (a Workflow script briefed to call activate) by strengthening the existing, already-correct-but-underweighted guidance; a subagent that ignores the briefing can still reproduce the original failure.
 ---
 
 # BUG: a background subagent's workspace(activate) mutates the PARENT session's active project, breaking the parent's writes mid-turn
@@ -248,12 +252,20 @@ decision already on record and never made**, not a fresh engineering question. S
 “`default_workspace_root` under concurrency” bullet. Three live options, not mutually
 exclusive:
 
-1. **Dispatch-discipline fix (cheapest, addresses the actual incident).** This bug's own
-   trigger was a workflow prompt briefing a subagent to call `workspace(activate=...)`
-   instead of the already-shipped `workspace=` per-call pin. Update the prompt surfaces
-   that brief subagents (`server_instructions`, onboarding, any workflow/subagent-dispatch
-   guidance) to steer subagents toward pinning and away from raw `activate`. Zero code
-   risk; does not protect against a subagent that ignores the briefing.
+1. **Dispatch-discipline fix (cheapest, addresses the actual incident). — TAKEN
+   2026-08-25.** This bug's own trigger was a workflow prompt briefing a subagent to call
+   `workspace(activate=...)` instead of the already-shipped `workspace=` per-call pin.
+   Investigated the three prompt surfaces first (`server_instructions`/`onboarding_prompt`
+   in `src/prompts/source.md`, `builders.rs`) — found the correct guidance ALREADY present
+   in `get_guide("workspace-state")` (pull-only, triggered on `workspace(activate)` calls)
+   and in `docs/architecture/companion-plugin.md` § *Concurrent multi-workspace*. The gap
+   wasn't missing policy, it was that nothing grounds the rule in a real cost or puts it in
+   front of a session at the moment it writes a `Workflow` script's subagent prompt.
+   Strengthened `docs/architecture/companion-plugin.md` § *Concurrent multi-workspace* with
+   an explicit imperative ("never brief a subagent to call `activate`") and a citation of
+   this incident as the concrete cost of getting it wrong — no change to the tight-budget
+   `server_instructions` 1900-char slice was needed or attempted. Zero code risk; does NOT
+   structurally prevent a subagent that ignores the briefing from reproducing this.
 2. **Resolve the plan's open question by declaring unpinned-concurrent unsupported,
    documented.** Keep `concurrent_activation_warning` on the unpinned
    `default_workspace_root` path only (per the plan's own recommendation in its Phase-5
@@ -275,10 +287,12 @@ rather than asserting a read-only mode that reads as user-configured when it is 
 a default inherited from someone else's activation.
 ## Tests added
 
-None — filed, not fixed. A regression test should assert that an `activate` issued on
-one logical caller does not change the project a second concurrent caller's writes
-resolve against.
-
+None — the fix is doc-only (a briefing-guidance edit to
+`docs/architecture/companion-plugin.md`), no behavior changed, nothing to regress
+against. Options 2/3 in Fix, if taken later, would each need the concurrent-pinning
+regression the sibling plan's Phase 3 already modeled
+(`docs/plans/2026-05-30-per-request-workspace-pinning.md` § Phase 3: “the 5-subagent
+scenario from the bug file”).
 ## Workarounds
 
 **Brief subagents to pass the per-call `workspace` parameter instead of calling

@@ -88,8 +88,20 @@ workspace(action="activate", path="<absolute path of THIS repo>", read_only=fals
 
 ## Concurrent multi-workspace: one server, one active project
 
-The codescout MCP server holds a single active project at a time. Parallel subagents
-operating on different workspaces must pin each tool call with `workspace=<abs path>`
-rather than calling `workspace(activate)` (which would race the global active-project
-state). After any `workspace(activate, path=foreign)`, restore the home project before
-finishing the turn. Full rules: `get_guide("workspace-state")`.
+The codescout MCP server holds a single active project at a time — **any**
+`workspace(activate)` call, whether from the top-level session or from a subagent,
+replaces it for every caller sharing that server, with no notice to a call already in
+flight. **When briefing a subagent — an `Agent` dispatch, or an `agent()` call inside a
+`Workflow` script — to work in a different repo, tell it to pass `workspace=<abs path>`
+on each call. Never brief it to call `workspace(action="activate")` itself**; that is
+the one form that mutates the shared state every other concurrent caller resolves
+against.
+
+This is not hypothetical. `docs/issues/2026-08-23-subagent-activate-mutates-parent-active-project.md`
+traces a live incident where exactly this mistake, in a `Workflow` script's subagent
+prompt, broke the parent session's own writes mid-turn with a misleading "read-only"
+error — three separate times in one session, all recovered after the fact, none
+prevented in advance.
+
+After any `workspace(activate, path=foreign)` issued by the top-level session itself,
+restore the home project before finishing the turn. Full rules: `get_guide("workspace-state")`.
