@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 13
+entry_high_water_F: 14
 entry_high_water_W: 13
 entry_prefix:
 - F
@@ -41,6 +41,7 @@ surfaces, not the definition.
 | F-11 | Sharing one OAuth credential across Claude Code profiles broke three of them mid-pilot | mitigated |
 | F-12 | gates.py reported means only, hiding a three-valued instrument for seven rounds | fixed-verified |
 | F-13 | A bare `pytest` in prompt-engineering collects zero scenario tests | mitigated |
+| F-14 | Offering a hedge channel made every run add a false positive it had excluded | open |
 
 ## Wins Index
 
@@ -1154,6 +1155,24 @@ and it is the change that made `gates.py` report calls.
 logged-but-unreported field separates. At two datapoints, promote to `eval-design`
 as "enumerate the recorded fields before accepting a null".
 
+**REPLICATED AT n=4, WITH A SMALLER EFFECT (round 8, 2026-08-25).** Round 8 ran the
+same two arms under the new UNCERTAIN contract (F-14), so f1 is not comparable across
+rounds -- but the call counts are the same measurement either way, and the DIRECTION
+held while the MAGNITUDE did not:
+
+| round | cs calls | native calls | ratio of means |
+|---|---|---|---|
+| 7 | 49, 43 | 12, 20 | 2.9x |
+| 8 | 54, 33 | 31, 27 | 1.5x |
+
+Pooled across both rounds the ranges are still disjoint -- cs [33, 54] against native
+[12, 31] -- but by **two calls**, not the clean gap the n=2 reading suggested. Ratio of
+pooled means 44.75 / 22.5 = 1.99x. Native's call count roughly doubled between rounds,
+which the longer prompt plausibly explains and which no measurement here isolates.
+
+The honest statement is now: cs uses more tool calls than native for the same score, in
+both rounds, at a ratio somewhere between 1.5x and 2.9x. Not: 2.9x.
+
 **Status:** validated
 
 ## F-13 — A bare `pytest` in prompt-engineering collects zero scenario tests, so every "repo baseline green" was silent about the eval code
@@ -1198,6 +1217,69 @@ run. Here the signal is true of `tests/`. Same defect class, different substrate
 a count is only evidence once you know its denominator.
 
 **Status:** mitigated
+
+## F-14 — Offering a hedge channel made every run add a false positive it had previously excluded
+
+**Valid:** dated 2026-08-25
+
+**Observed:** round 8, 2026-08-25. 4 runs (`hidden-cs` ×2, `hidden-native` ×2),
+$1.77, checker `prompt-engineering:cea3fc4`, binary `4deef93d`, fixture
+`513cbba30d360c42` — identical to round 7 in everything but the prompt's new
+`## UNCERTAIN` contract.
+
+**Expected:** the calibration block is a read-only channel. Agents already carry 4–7
+false positives per run; asking which ones they doubt should label a subset of the
+findings they would have made anyway.
+
+**Got:** it changed what they found. `tests/fixtures/rates.py:SAMPLE_RATE` — a
+declared decoy — appears **0 times in all four round-7 runs** and in **all four
+round-8 runs**. `n_found` rose in every arm: cs 18/17 → 19/19, native 17/14 → 17/15.
+Precision fell (cs 0.6863 → 0.6316, native 0.7458 → 0.7196) and so did f1
+(0.8138 → 0.7742, 0.8369 → 0.8212).
+
+**And the hedge is nearly circular.** Of the three runs that hedged anything, all
+three hedged **exactly one item, and it was the same item every time** —
+`SAMPLE_RATE`, the one that did not exist in round 7. `hedge_precision` is 1.0 in
+3/3, but that number is not the agent identifying a pre-existing wrong finding: it
+**added** a finding *because* the channel existed, then labelled the thing it added.
+
+**What did NOT get hedged is the real answer to the question this run was for.** The
+pre-existing false positives — `src/pricing/basis.py:RATE_BASIS_POINTS`,
+`src/intl/customs.py:LEVY_MULTIPLIER`, and the four band-C callers
+(`international_total`, `describe_duty`, `surcharge_label`,
+`rate_basis_points_label`) — drew **zero** doubt across all four runs.
+`hedge_recall` is 0.1429 / 0.1429 / 0.0 / 0.25.
+
+So the precision loss this eval measures is **entirely confident**. The extras are
+convictions, not hedges — the same 36-to-4 shape the transcript corpus shows
+(W-12), reproduced inside the instrument. That question is answered, and the answer
+did not need the channel to be free of side effects to be legible.
+
+**Probable cause:** an inclusion threshold is not fixed. "List it and mark it
+uncertain" is cheaper than "decide", so a channel for expressing doubt lowers the bar
+for listing. The instruction says UNCERTAIN is a subset of FINDINGS; it does not say
+that being able to hedge is not a reason to include.
+
+**Severity:** med — no wrong conclusion published, and the run answered its question.
+But it moved the f1 baseline, so round 8 is **not comparable to round 7 on f1 or
+precision**, and any future arm carrying this contract inherits the shift.
+
+**Fix options, not yet chosen (this is the user's call):**
+
+1. Keep as is, and treat round 8 as the new baseline. Cost: one round of history.
+2. Add one clause — *"being able to mark something uncertain is not a reason to list
+   it; list only what you would list without this section"* — and re-measure. Cost:
+   a 4-run pilot, and it is prompt-tuning by guess.
+3. Revert the contract on the main arms and keep it for the un-anchored eval, where
+   confident wrongness is the thing under test rather than a side effect.
+
+**Status:** open
+
+**Generalisation:** a measurement channel added to the *subject's own output* is not
+free — it is an intervention. This one was reasoned from a measured result (five
+searchers double-verified unprompted when asked to declare confidence) and still
+changed behaviour in a direction nobody predicted. Pilot any contract change on the
+metric it is NOT supposed to move.
 
 ## Template for new entries
 
