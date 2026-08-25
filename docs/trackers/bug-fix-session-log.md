@@ -4366,7 +4366,7 @@ session hazard (commits landing under me) this session already hit twice.
 
 ## F-61 — "No live-pyright harness exists" was a negative search of ONE file, and it nearly shipped a fix with no regression test
 
-**Observed:** 2026-08-26, finishing the fix for `docs/issues/2026-08-25-references-dead-ends-at-renaming-re-export.md`. Fix written, unit tests green, about to commit.
+**Observed:** 2026-08-26, finishing the fix for `docs/issues/archive/2026-08-25-references-dead-ends-at-renaming-re-export.md`. Fix written, unit tests green, about to commit.
 
 **When:** Choosing a test strategy for a fix whose entire behaviour is live-LSP integration.
 

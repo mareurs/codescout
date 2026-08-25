@@ -97,7 +97,7 @@ expected_refs_contain = ["__init__"]
 # textDocument/definition and textDocument/references perfectly. Before the fix
 # this returned "symbol not found: apply_duty", which dead-ended impact analysis
 # one hop short and returned a well-formed, plausible caller list.
-# docs/issues/2026-08-25-references-dead-ends-at-renaming-re-export.md
+# docs/issues/archive/2026-08-25-references-dead-ends-at-renaming-re-export.md
 [refs_renaming_reexport_alias]
 description = "An import alias is addressable by name even though it is not a document symbol"
 tool = "find_referencing_symbols"

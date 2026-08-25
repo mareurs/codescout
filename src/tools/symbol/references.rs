@@ -109,7 +109,7 @@ pub(crate) fn ident_positions(text: &str, ident: &str) -> Vec<(u32, u32)> {
 /// while `references(symbol="apply_duty", path="src/intl/__init__.py")` errored
 /// — and the error's recommended recovery, `symbols(path)`, listed only
 /// `__all__`, never the alias. See
-/// `docs/issues/2026-08-25-references-dead-ends-at-renaming-re-export.md`.
+/// `docs/issues/archive/2026-08-25-references-dead-ends-at-renaming-re-export.md`.
 ///
 /// Two guards keep this from papering over a different problem:
 ///

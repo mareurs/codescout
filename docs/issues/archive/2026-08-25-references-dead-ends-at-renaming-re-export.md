@@ -224,7 +224,17 @@ fallback itself:
 A `name_path` containing `/` is excluded: it addresses a nested symbol, and
 there is no single identifier to probe for.
 
-**Fix commit:** recorded below once committed.
+**Fix commit:** `2b0fcbf3f28ed07fd9a64e0a3c57fa036dafc17a`, on **`experiments`**.
+
+**patch-id:** `529bd116cb78e38b72956320246bb92c8a426db9`
+
+Its prerequisite — the e2e harness unrot that makes the regression test runnable
+at all — is `bd293162393578960a5f444e4f310f7aafc8ae46`, patch-id
+`b292280dd50daccc339bde7f7334e10147538813` (`bug-fix-session-log:F-62`).
+
+The SHAs are positional and die when `experiments` is rebased; the patch-ids are
+content hashes of the diffs and survive rebase and cherry-pick alike. Recorded
+once — nothing owed later.
 ## Tests added
 
 **End-to-end, live LSP** — `refs_renaming_reexport_alias` in
