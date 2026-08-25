@@ -254,16 +254,66 @@ impl OutputBuffer {
             .map(|e| (e, needs_refresh))
     }
 
-    /// Store file content under a `@file_*` handle.
+    /// Store a file's WHOLE content under a `@file_*` handle.
     ///
     /// Content goes in `stdout`; `stderr` is empty; `exit_code` is 0.
     /// The `command` field holds the source path for diagnostics.
+    ///
+    /// The entry auto-refreshes: `get_with_refresh_flag` re-reads `source_path`
+    /// in full whenever the file's mtime advances. That is correct only because
+    /// the stored content IS the file. For a line range, a heading section, or
+    /// any other derived subset use [`OutputBuffer::store_file_excerpt`], which
+    /// mints a snapshot — refreshing one of those widens the handle to content
+    /// the caller never asked for.
     ///
     /// `source_path` is set only when `path` is a real filesystem path (not a
     /// buffer ref like `@file_*` or `@tool_*`). Buffer refs are not on disk, so
     /// setting `source_path` to them would cause `get_with_refresh_flag` to call
     /// `fs::metadata("@file_...")`, get `Err`, and immediately evict the entry.
     pub fn store_file(&self, path: String, content: String) -> String {
+        // Only track source_path for real filesystem paths. Buffer ref paths
+        // (starting with '@') have no on-disk representation and must not be
+        // stat-checked — doing so evicts the entry on the first get().
+        let source_path = if path.starts_with('@') {
+            None
+        } else {
+            Some(PathBuf::from(&path))
+        };
+        self.store_file_inner(path, content, source_path)
+    }
+
+    /// Store a DERIVED SUBSET of a file — a line range, one heading section, a
+    /// set of sections — under a `@file_*` handle. The entry is a snapshot:
+    /// `path` is recorded in `command` for diagnostics, but `source_path` is
+    /// deliberately left unset.
+    ///
+    /// [`OutputBuffer::store_file`] must not be used for this.
+    /// `get_with_refresh_flag` re-reads `source_path` **whole**, which is the
+    /// intended freshness guarantee for a handle minted by a whole-file read and
+    /// silently wrong for an excerpt: the handle widens to content the caller
+    /// never asked for, while the response's `shown_lines` / `total_lines` still
+    /// describe the excerpt. Measured 2026-08-25 — a handle minted as 12 lines
+    /// served 41 after one append, and its line 1 was the file's line 1
+    /// (`docs/issues/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`).
+    ///
+    /// Re-extracting the range on refresh was considered and rejected: two of
+    /// the four excerpt call sites extract by HEADING, and a heading's line
+    /// range moves when text above it changes, so no stored range reproduces
+    /// "the `## Foo` section". A snapshot is also what every other buffer kind
+    /// already is — `@cmd_*` and `@tool_*` never re-run their source either.
+    pub fn store_file_excerpt(&self, path: String, content: String) -> String {
+        self.store_file_inner(path, content, None)
+    }
+
+    /// Shared mint/insert behind [`OutputBuffer::store_file`] and
+    /// [`OutputBuffer::store_file_excerpt`] — they differ only in the refresh
+    /// policy they select.
+    fn store_file_inner(
+        &self,
+        path: String,
+        content: String,
+        source_path: Option<PathBuf>,
+    ) -> String {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -273,16 +323,8 @@ impl OutputBuffer {
         let id = format!("@file_{:08x}", now.wrapping_add(inner.counter) as u32);
 
         Self::evict_oldest_locked(&mut inner);
-        // Only track source_path for real filesystem paths. Buffer ref paths
-        // (starting with '@') have no on-disk representation and must not be
-        // stat-checked — doing so evicts the entry on the first get().
-        let source_path = if path.starts_with('@') {
-            None
-        } else {
-            Some(PathBuf::from(&path))
-        };
         let entry = BufferEntry {
-            command: path.clone(),
+            command: path,
             stdout: content,
             stderr: String::new(),
             exit_code: 0,
@@ -1311,6 +1353,51 @@ mod tests {
         // Step 5 (fresh-assert): mtime is newer — must return updated content
         let entry = buf.get(&id).unwrap();
         assert_eq!(entry.stdout, "updated content");
+    }
+
+    /// The excerpt twin of `get_file_handle_refreshes_when_file_modified`.
+    ///
+    /// A handle minted by `store_file_excerpt` holds a DERIVED SUBSET, so the
+    /// same mtime trigger that correctly refreshes a whole-file handle must not
+    /// widen this one to the file. Bug
+    /// `docs/issues/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
+    #[test]
+    fn excerpt_handle_does_not_refresh_into_the_whole_file() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "one\ntwo\nthree\nfour\n").unwrap();
+
+        let buf = OutputBuffer::new(10);
+        // The excerpt: lines 2-3 of that file, and nothing else.
+        let id = buf.store_file_excerpt(
+            file_path.to_string_lossy().to_string(),
+            "two\nthree".to_string(),
+        );
+
+        // Advance mtime past the entry timestamp — the exact condition that
+        // makes a store_file handle re-read its source in full.
+        fs::write(&file_path, "ONE\nTWO\nTHREE\nFOUR\nFIVE\n").unwrap();
+        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+        filetime::set_file_mtime(&file_path, filetime::FileTime::from_system_time(future)).unwrap();
+
+        let (entry, refreshed) = buf
+            .get_with_refresh_flag(&id)
+            .expect("an excerpt handle must survive a change to its source file");
+        assert!(
+            !refreshed,
+            "an excerpt is a snapshot — it must never report a refresh"
+        );
+        assert_eq!(
+            entry.stdout, "two\nthree",
+            "the excerpt must keep the content it was minted with"
+        );
+        assert_eq!(
+            entry.command,
+            file_path.to_string_lossy().to_string(),
+            "the originating path is still recorded, for diagnostics"
+        );
     }
 
     #[test]

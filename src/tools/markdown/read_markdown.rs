@@ -109,7 +109,7 @@ fn read_markdown_multi_heading(
     if crate::tools::exceeds_inline_limit(&content) {
         let file_id = ctx
             .output_buffer
-            .store_file(resolved.to_string_lossy().to_string(), content.clone());
+            .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
         let lines = content.lines().count();
         let hint = format!(
             "use {:?} — request one heading at a time, or slice with start_line/end_line",
@@ -207,7 +207,7 @@ fn read_markdown_single_heading(
     // + next_actions. The agent must pick a sub-heading or a line range, not
     // retry against the original path.
     if crate::tools::exceeds_inline_limit(&section_result.content) {
-        let file_id = ctx.output_buffer.store_file(
+        let file_id = ctx.output_buffer.store_file_excerpt(
             resolved.to_string_lossy().to_string(),
             section_result.content.clone(),
         );
@@ -326,7 +326,7 @@ fn read_markdown_line_range(
     if crate::tools::exceeds_inline_limit(&content) {
         let file_id = ctx
             .output_buffer
-            .store_file(resolved.to_string_lossy().to_string(), content.clone());
+            .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
         // Budget on the ESCAPED size: this chunk is returned inline as JSON and
         // measured against TOOL_OUTPUT_BUFFER_THRESHOLD after serialization, so a
         // raw-byte budget lets a line-dense extract overshoot and get re-wrapped

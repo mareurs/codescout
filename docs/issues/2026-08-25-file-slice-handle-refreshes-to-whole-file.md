@@ -1,12 +1,12 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - read_file
 - output_buffer
 - buffering
 - progressive-disclosure
-closed: null
+closed: 2026-08-25
 opened: 2026-08-25
 owner: marius
 related:
@@ -115,23 +115,106 @@ read_file("@file_3a625da7", start_line=1, end_line=1)
 
 ## Fix
 
-Not yet fixed. Two candidate directions, unranked:
+### Scope was wider than this file claimed
 
-- Record the range on the entry (e.g. `source_range: Option<(usize, usize)>`) and
-  have `get_with_refresh_flag` re-extract that range after re-reading, so the
-  handle keeps meaning what it said it meant.
-- Or mint ranged slices with `source_path = None`, making them immutable
-  snapshots like the buffer-ref case, and accept that they go stale rather than
-  silently widen.
+The filed report named one call site. Enumerating every `store_file` caller
+(`grep`, after `references` returned 0 with a warming-index warning) found
+**four** production sites that mint a handle from a derived subset under a real
+path, all of which refresh into the whole file:
 
-The first preserves the freshness guarantee; the second is smaller. Deciding
-between them needs a call on whether a ranged handle is a *view* or a *snapshot*
-— which is the question the current code never answers.
+| Site | What it stores |
+|---|---|
+| `read_file.rs` — `read_with_line_range` | an oversized line range |
+| `read_markdown.rs` — `read_markdown_multi_heading` | several joined sections |
+| `read_markdown.rs` — `read_markdown_single_heading` | one oversized section |
+| `read_markdown.rs` — `read_markdown_line_range` | an oversized line range |
 
+Two further sites store a file's WHOLE content (`read_full_file`,
+`read_markdown_default_tiers`); for those the refresh is the intended freshness
+guarantee and is left alone.
+
+A fifth site, `memory/mod.rs` `apply_sections_filter`, had already hand-rolled a
+workaround — a `@`-prefixed *synthetic* path, with a comment saying it exists to
+stop `get_with_refresh_flag` stat-ing a non-existent file. Someone hit this trap
+before and routed around it locally.
+
+### The design flaw, stated
+
+`source_path` conflates two questions: **"where did this come from?"**
+(diagnostics) and **"may I re-read the whole file into this entry?"** (refresh
+policy). The `path.starts_with('@')` check answers neither — it just happens to
+disable both, which is why the memory workaround takes the shape it does.
+
+### Decision: excerpts are snapshots
+
+The two candidate directions this file originally listed were
+(a) record the range and re-extract on refresh, or (b) mint excerpts with
+`source_path = None`.
+
+**(a) was rejected on evidence, not preference.** Two of the four sites extract
+by HEADING, and a heading's line range moves when text above it changes — so no
+stored range reproduces "the `## Foo` section" after an edit. Storing the
+extraction *query* instead would mean re-running the tool, at which point the
+entry is not a buffer.
+
+**(b) generalizes across all four sites, and is consistent with the rest of the
+system:** every other buffer kind is already a snapshot. `@cmd_*` and `@tool_*`
+never re-run their source. The auto-refreshing whole-file handle is the special
+case, and it is justified precisely because there the path fully determines the
+content.
+
+### The change
+
+`src/tools/output_buffer.rs` — refresh policy is now chosen explicitly at the
+call site instead of inferred from the path's first character:
+
+- `store_file(path, content)` — unchanged contract, now documented as
+  **whole-file only**: the entry auto-refreshes because the stored content IS
+  the file.
+- `store_file_excerpt(path, content)` — new. A derived subset. `path` is still
+  recorded in `command` for diagnostics; `source_path` is deliberately unset, so
+  the entry is a snapshot.
+- `store_file_inner(path, content, source_path)` — shared mint/insert behind
+  both.
+
+The four excerpt sites now call `store_file_excerpt`. The two whole-file sites
+are untouched, so every existing refresh test still pins the behavior it always
+did.
+
+`read_from_buffer`'s two sites (`@tool_x:$.jp`, `@file_x[13-24]`) are excerpts
+too, but already get `source_path = None` via the `@` prefix. They were left
+alone rather than bundled — they exhibit no defect today. The guardrail against
+them regressing is `store_file`'s doc comment, which now names
+`store_file_excerpt` as the required call for any derived subset.
 ## Tests added
 
-None yet — this file is the capture, not the fix.
+Three, each RED before the change:
 
+- `excerpt_handle_does_not_refresh_into_the_whole_file`
+  (`src/tools/output_buffer.rs`) — the API-level contract, written as the
+  explicit twin of the existing `get_file_handle_refreshes_when_file_modified`
+  so the two policies sit side by side. Asserts the refresh flag stays false and
+  that `command` still carries the path.
+- `ranged_read_handle_stays_the_range_after_the_file_changes`
+  (`src/tools/read_file.rs`) — the measured defect path, end to end through
+  `ReadFile::call`. Before the fix the handle's content was `"REPLACED\n"`.
+- `heading_excerpt_handle_stays_the_section_after_the_file_changes`
+  (`src/tools/markdown/tests.rs`) — the heading-shaped extraction, which is the
+  shape that ruled out the store-a-range design.
+
+All three drive the mtime trigger deterministically with
+`filetime::set_file_mtime`, following the pattern of the existing refresh tests
+rather than sleeping.
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
+— 4455 passed, 0 failed.
+
+Not re-verified through a reconnected MCP server, and deliberately so: unlike
+the sibling nested-buffer bug — whose first mechanism only appeared through
+`call_content`'s serialization and was invisible to unit tests — this defect
+lives entirely inside `OutputBuffer`, and the tests above exercise the real
+`ReadFile::call` / `output_buffer.get` path directly. There is no MCP-layer
+component for a live run to add.
 ## Workarounds
 
 Re-issue the ranged `read_file` against the original path rather than reusing a
@@ -144,15 +227,20 @@ minted before an edit.
 
 ## Resume
 
-Decide view-vs-snapshot (above), then implement in
-`src/tools/output_buffer.rs`. A regression test belongs next to
-`store_file_with_buffer_ref_path_survives_get` in that file's `tests` module:
-mint a ranged handle, bump the source's mtime, assert the handle still yields
-the range (or errors) rather than the whole file.
-
+N/A — fixed.
 ## References
 
 - `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md` — the sibling
   bug in the same code block; found while fixing it.
 - `src/tools/read_file.rs` — `read_with_line_range` oversized branch.
 - `src/tools/output_buffer.rs:188-296` — `get_with_refresh_flag`, `store_file`.
+
+## Found while fixing, filed separately
+
+`docs/issues/2026-08-25-read-markdown-next-actions-uses-file-line-numbers.md` —
+`read_markdown`'s oversized-section error builds `next_actions` from the
+section's line numbers **in the file** while addressing the excerpt handle,
+which holds only the section. Following the tool's own suggestion returns
+`start_line 304 exceeds file length 202`. Same defect class as the sibling
+nested-buffer bug (mixed coordinate frames), different mechanism — so fixing
+that one did not touch it. Not bundled here: this file is about refresh policy.

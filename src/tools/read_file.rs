@@ -664,7 +664,7 @@ fn read_with_line_range(
     if crate::tools::exceeds_inline_limit(&content) {
         let file_id = ctx
             .output_buffer
-            .store_file(resolved.to_string_lossy().to_string(), content.clone());
+            .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
         let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
             &content,
             1,
@@ -1719,6 +1719,60 @@ mod tests {
             result["total_lines"].as_u64().unwrap(),
             40,
             "total_lines must be the file's total, so shown_lines reads against it: {result}"
+        );
+    }
+
+    /// Bug 2026-08-25-file-slice-handle-refreshes-to-whole-file: the
+    /// `@file_*` handle returned for an oversized RANGE is minted with
+    /// `source_path` pointing at the whole file, so the first `get()` after
+    /// an mtime bump replaces the excerpt with the file's entire contents —
+    /// under a handle whose `shown_lines`/`total_lines` still describe the
+    /// range, and which the caller was handed in order to grep the range.
+    ///
+    /// Measured 2026-08-25 against the live server: a handle minted as 12
+    /// lines reported 41 and served the file's line 1.
+    #[tokio::test]
+    async fn ranged_read_handle_stays_the_range_after_the_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.txt");
+        let lines: Vec<String> = (1..=40)
+            .map(|i| format!("line {i:04} {}", "x".repeat(900)))
+            .collect();
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        let ctx = test_ctx().await;
+
+        let result = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "start_line": 13, "end_line": 24 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let file_id = result["file_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("oversized range should be buffered: {result}"))
+            .to_string();
+
+        // Replace the file and push its mtime past the entry's timestamp —
+        // the exact trigger `get_with_refresh_flag` watches for.
+        std::fs::write(&path, "REPLACED\n").unwrap();
+        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future)).unwrap();
+
+        let entry = ctx
+            .output_buffer
+            .get(&file_id)
+            .expect("the excerpt handle should still resolve");
+        assert!(
+            !entry.stdout.contains("REPLACED"),
+            "an excerpt handle must not absorb content from outside the range \
+                 it was minted for; got: {:?}",
+            entry.stdout.chars().take(80).collect::<String>()
+        );
+        assert_eq!(
+            entry.stdout.lines().count(),
+            12,
+            "the handle was minted as lines 13-24 and must stay 12 lines"
         );
     }
 

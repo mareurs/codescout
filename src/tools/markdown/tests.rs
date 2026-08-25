@@ -555,6 +555,64 @@ async fn heading_on_large_section_returns_ok_false_with_hint_and_section_map() {
     );
 }
 
+/// The heading-shaped twin of the ranged-read case: a `@file_*` handle minted
+/// for an oversized SECTION is a derived subset, so a later change to the file
+/// must not widen it into the whole document. Bug
+/// `docs/issues/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
+///
+/// This shape is why the fix snapshots rather than storing a line range to
+/// re-extract: a section's line range moves when text above it changes, so
+/// re-reading `start_ln..end_ln` after an edit is not "the `# Root` section".
+#[tokio::test]
+async fn heading_excerpt_handle_stays_the_section_after_the_file_changes() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("big.md");
+    let mut body = String::from("# Root\n\n");
+    for i in 0..200 {
+        body.push_str(&format!("## Sub {i}\n\n"));
+        body.push_str(&"word ".repeat(500));
+        body.push_str("\n\n");
+    }
+    std::fs::write(&file, &body).unwrap();
+
+    let err = super::ReadMarkdown
+        .call(
+            json!({ "path": file.to_str().unwrap(), "heading": "# Root" }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("oversized heading must be RecoverableError");
+    let file_id = rec
+        .extra
+        .get("file_id")
+        .and_then(|v| v.as_str())
+        .expect("extra must include file_id")
+        .to_string();
+
+    // Rewrite the document entirely and advance its mtime past the entry's.
+    std::fs::write(&file, "# Different\n\nnothing to see here\n").unwrap();
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+    filetime::set_file_mtime(&file, filetime::FileTime::from_system_time(future)).unwrap();
+
+    let entry = ctx
+        .output_buffer
+        .get(&file_id)
+        .expect("the section handle must survive a change to its source file");
+    assert!(
+        !entry.stdout.contains("Different"),
+        "a section handle must not absorb the rewritten document; got: {:?}",
+        entry.stdout.chars().take(60).collect::<String>()
+    );
+    assert!(
+        entry.stdout.contains("## Sub 0"),
+        "the handle must still hold the section it was minted for"
+    );
+}
+
 // ── BUG-043: subsection-consumption detection ──────────────────────────
 
 /// `find_consumed_subsections` returns empty when the section has no nested
