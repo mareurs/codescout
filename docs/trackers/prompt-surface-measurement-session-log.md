@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 15
-entry_high_water_W: 14
+entry_high_water_F: 18
+entry_high_water_W: 15
 entry_prefix:
 - F
 - W
@@ -43,6 +43,9 @@ surfaces, not the definition.
 | F-13 | A bare `pytest` in prompt-engineering collects zero scenario tests | mitigated |
 | F-14 | Offering a hedge channel made every run add a false positive it had excluded | open |
 | F-15 | The new eval's dependent set favoured codescout 2-to-1 before a single run | fixed-verified |
+| F-16 | The plan put the leak sweep in the wrong file; following it would have dropped the anti-oracle guard and reported green | fixed-verified |
+| F-17 | New fixture files were invisible to the reserved-path set, so filler could silently overwrite a dependent | fixed-verified |
+| F-18 | The plan named two constants and a CLI flag the file it points at does not have | fixed-verified |
 
 ## Wins Index
 
@@ -62,6 +65,7 @@ surfaces, not the definition.
 | W-12 | An anchored retrieval eval ceilings by construction — naming the target supplies the doubt | promoted-to-permanent-docs |
 | W-13 | The arms separated on a metric we already logged and never reported | validated |
 | W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
+| W-15 | Reading the generator instead of the plan's description of it caught three defects, one with no downstream gate at all | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -1379,6 +1383,202 @@ test can only win is an advertisement, not a measurement. Enumerate the ways the
 subject **loses** with the same effort spent on the ways it wins, and count them. If
 the counts differ, the instrument is biased before the first run and no amount of
 sample size fixes it.
+
+## F-16 — The plan put the leak sweep in the wrong file, so following it literally would have deleted the anti-oracle guard and reported green
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-25, pre-dispatch reconnaissance for Task 1 of
+`docs/superpowers/plans/2026-08-25-unanchored-blast-radius-eval.md`
+(subagent-driven execution, before any subagent ran).
+
+**When:** Reading Task 2 Step 5 while composing the Task 1 dispatch.
+
+**Expected (plan):** Task 2 Step 5 — *"The copied `gen_fixture.py` already carries the
+75-predicate / 140,675-combination sweep. Add six predicates naming the new forms."*
+Task 2 Step 6 then runs `pytest scenarios/blast-radius/test_fixture.py -k leak -v -s`
+and expects the worst surviving combination to print.
+
+**Got (scouted reality):** none of the sweep is in `gen_fixture.py`. In
+`prompt-engineering`, `STRUCTURAL_PREDICATES` is `scenarios/hidden-info/test_fixture.py:1028`;
+`_score` is `:1311`, `_is_leak` `:1329`, `test_every_structural_predicate_is_a_live_instrument`
+`:1382`, `test_no_structural_predicate_isolates_the_planted_set` `:1409`, and
+`test_null_control_detects_an_injected_channel` `:1553`. Every one of them is in the
+**test** file. `gen_fixture.py` mentions lift only in prose comments.
+
+The compounding half: Task 1 Step 2 **creates** `scenarios/blast-radius/test_fixture.py`
+from scratch (it is not a copy of the 1619-line hidden-info original). So the sweep, the
+null control, the live-instrument guard and the site/filler disjointness check would all
+have been absent from the new scenario entirely — and `-k leak` would have selected zero
+tests and exited 0.
+
+**Probable cause:** the plan was written from the spec plus a memory of where the sweep
+"lives", never from the file. The two files sit next to each other and are named for the
+same fixture, which is exactly the pairing that makes a location slip invisible on re-read.
+
+**Workaround / ruling:** Task 2's scope grows explicitly — port the sweep machinery from
+`hidden-info/test_fixture.py` into `blast-radius/test_fixture.py` and **retarget its truth
+set** from the 12 tax sites to `gen_fixture.DEPENDENTS` (six). The retarget is real work,
+not a copy: `_score`'s `n_sites`, the base rate, and the `LIFT_BAR` / `RECALL_FLOOR`
+calibration are all keyed to the old truth-set size.
+
+**Severity:** high — the failure mode is the silent-zero shape this very plan warns about
+in three separate places (the missing exec bit reporting a clean `0/N`; `count: 0` against
+233 files; `codescout:prompt-surface-measurement-session-log:F-13`'s bare-`pytest`-collects-nothing).
+A green `-k leak` with zero tests selected is character-identical to a clean sweep, and the
+anti-oracle guard is the single thing standing between this eval and a fixture where one
+`grep getattr(` is the whole answer.
+
+**Status:** fixed-verified — ruled and carried into the ledger before Task 1 was dispatched;
+Task 2's dispatch will carry the retarget as a requirement.
+
+**Fix idea / Pointer:** SDD ledger
+`.superpowers/sdd/2026-08-25-unanchored-blast-radius-eval/progress.md`, pre-flight row 1,
+`Ruling: GAP-A`. Pairs with [[F-17]] and [[F-18]] — same scout, same root cause.
+
+## F-17 — New fixture files were invisible to the reserved-path set, so generated filler could silently overwrite a row of the instrument
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-25, same pre-dispatch scout as [[F-16]], while checking whether
+Task 1's four new dependent files could collide with anything.
+
+**When:** Reading `gen_fixture.py`'s emission order before composing the Task 1 dispatch.
+
+**Expected (plan):** Task 1 Step 8 writes four new files into the generated tree
+(`src/intl/manifest.py`, `src/orders/crossborder.py`, `src/pricing/registry.py`,
+`src/exports/customs_feed.py`, plus `src/intl/__init__.py` and `pricing.toml`) and says
+nothing further about them.
+
+**Got (scouted reality):** `gen_fixture.py:515` defines `_planted_paths()`, which returns
+`{SITES} | {DECOYS} | {"src/intl/checkout.py", "src/pricing/quotes.py"}`. That set is
+consumed as `protected` / `reserved` by filler-module planning at `:1212`, `:1217`, `:1221`
+and `:1231`, and `_module_filename(rng, used, reserved, rel_dir)` at `:586` skips a
+candidate only when `rel_path not in reserved` (`:599`). `build()` at `:1167` runs
+`_emit_planted` **before** `_emit_filler_modules`. So a filler module that draws a
+colliding path overwrites the planted file — after it was written, with no error, no
+warning, and a byte-stable tree either way.
+
+The new paths are exactly the collision-prone kind: `manifest`, `registry`, `dispatch`,
+`digest`, `window`, `labels`, `counters`, `cache` are all ordinary nouns, and the filler
+vocabulary is a noun pool.
+
+**Probable cause:** the plan reasoned about the fixture as a set of files to write, not as
+a two-pass generator with a reservation protocol between the passes. The protocol is only
+visible if you read `build()` — `_write` itself is an unguarded overwrite.
+
+**Workaround / ruling:** Task 1 registers all six new planted paths in `_planted_paths()`;
+Task 2 registers its eight anti-oracle filler files there too. Carried in the Task 1
+dispatch as ruling `GAP-C`, marked not-optional.
+
+**Severity:** high — a dropped dependent does not fail anything. `test_all_six_dependents_
+exist_with_their_declared_forms` would catch a total loss, but the plan's own scoring reads
+L2 out of the trace against `DEPENDENTS`, so a row that exists in the constant and not on
+disk scores as "the agent never reached it" for every run in both arms. That is a
+fabricated number, not a broken test, and it would have been indistinguishable from a real
+result.
+
+**Status:** fixed-verified — ruled before dispatch; Task 1 carries it.
+
+**Fix idea / Pointer:** SDD ledger pre-flight row 10, `Ruling: GAP-C`. The general form is
+worth keeping: **a generator with a reserve-then-emit protocol has two write surfaces, and
+adding a file to one without the other is silent.** Same family as [[F-16]] — both are
+"the plan described the artifact, not the machine that produces it".
+
+## F-18 — The plan told the implementer to edit two constants and pass a flag that the file it names has none of
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-25, same pre-dispatch scout as [[F-16]] and [[F-17]].
+
+**When:** Verifying Task 1 Steps 1 and 9 against `scenarios/hidden-info/gen_fixture.py`.
+
+**Expected (plan):** Step 1 — *"In the copy, change the two output names only:
+`TARBALL = "blast-fixture.tar.gz"`, `GROUND_TRUTH = "blast-ground-truth.json"`,
+`MARKER_SUFFIX = ".blast-radius-generated"`."* Step 9 — regenerate twice with
+`gen_fixture.py --out /tmp/blast-a`.
+
+**Got (scouted reality):** `gen_fixture.py` defines `MARKER_SUFFIX` at `:103` and neither
+of the other two, anywhere. `FIXTURE_TGZ` and `GROUND_TRUTH` live in the sibling
+`scenarios/hidden-info/gen.py:76-77`, which Task **6** copies. And the CLI is positional:
+`gen_fixture.py:1427` is `ap.add_argument("out_dir", type=Path)` — `--out` is an
+`unrecognized arguments` error.
+
+There is also a live consequence of the marker that Step 9 does not mention:
+`build()` writes its marker as a **sibling** of the tree (`marker_path()` at `:508`) and
+refuses to regenerate into a non-empty directory lacking one, so the two-tree diff needs
+both markers cleaned up.
+
+**Probable cause:** the same root cause as [[F-16]] — written from the design's vocabulary
+rather than from the file. "The generator emits a tarball and a ground-truth JSON" is true
+of the *scenario*; it is not true of `gen_fixture.py`.
+
+**Workaround / ruling:** Task 1 changes `MARKER_SUFFIX` only; the tarball/ground-truth
+rename moves to Task 6 where those constants actually exist. Step 9 uses the positional
+form. Carried in the dispatch as rulings `GAP-B`.
+
+**Severity:** med — an implementer hits both within a minute and the failure is loud
+(`AttributeError` on a constant that isn't there; argparse rejecting `--out`). The cost is
+one confused round-trip and the risk that an implementer *invents* the two constants to
+make the step do something, which would then quietly diverge from Task 6's copy of `gen.py`.
+
+**Status:** fixed-verified — ruled before dispatch.
+
+**Fix idea / Pointer:** SDD ledger pre-flight row 9, `Ruling: GAP-B`. Cheapest general
+guard: when a plan step says "change constant X in file Y", grep Y for X while writing the
+plan. All three of [[F-16]], [[F-17]] and this entry would have been caught by one pass of
+that habit at plan-writing time rather than at dispatch time.
+
+## W-15 — Reading the generator instead of the plan's description of it caught three defects, one of which had no downstream gate at all
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-25, pre-dispatch reconnaissance for Task 1 of the un-anchored
+blast-radius eval plan, subagent-driven mode. Scout cost: eight `run_command` greps and
+four ranged reads of `scenarios/hidden-info/gen_fixture.py` — no subagent, no dispatch.
+
+**Pattern:** Before dispatching the first implementer of a plan that *copies and edits an
+existing generator*, read the generator's own machinery — not the symbols it exports, but
+its **protocols**: what order it writes things in, what it reserves, what it refuses. Grep
+for every constant and CLI flag the plan tells the implementer to change, in the file the
+plan names.
+
+**Counterfactual, per finding:**
+
+- [[F-18]] (constants + `--out`): the implementer hits `AttributeError` and an argparse
+  rejection in its first two minutes. Cost without the scout ≈ one clarification
+  round-trip. **A downstream gate exists.**
+- [[F-16]] (leak sweep in the wrong file): the implementer of Task 2 runs
+  `pytest test_fixture.py -k leak`, sees `0 selected`, exit 0, and reports the step passed.
+  The task review reads a diff in which nothing about the sweep appears — because nothing
+  was written. Cost without the scout: the anti-oracle guard is absent from the eval, and
+  the first indication is a pilot in which one `grep getattr(` would have been the whole
+  answer. **The only gate is a human noticing a zero.**
+- [[F-17]] (`_planted_paths()`): **no gate at any layer.** A filler collision overwrites a
+  dependent silently; the tree stays byte-stable; `DEPENDENTS` still lists six; the checker
+  reads L2 from the trace and scores the missing row as "the agent never reached it" in
+  *both* arms, forever. It would have surfaced as a plausible number.
+
+**Confirming data points:**
+1. This session — three findings, one ungated, before any subagent ran.
+2. [[W-14]] (2026-08-25) — reading the real dependency chain before writing this same
+   spec turned an unbuildable trap into a buildable one.
+3. `codescout:bug-fix-session-log:W-2` / `F-3` (2026-05-18) — pre-dispatch scout caught a
+   plan citing a `RecoverableError.hint` field that does not exist.
+
+**Impact:** high — the F-17 class is the one that matters. A defect with a downstream gate
+costs a round-trip; a defect with no gate costs the validity of every number the instrument
+later produces, and is discovered (if ever) long after the runs are paid for.
+
+**Promote-when:** at a fourth datapoint, or at a second *ungated* one, promote to
+`CLAUDE.md` / the reconnaissance skill as: **"Before the first dispatch of a plan that
+copies an existing generator or harness, read that file's write-ordering and reservation
+protocol — a plan describes the artifact, and the bugs live in the machine that produces
+it."** Distinct from the existing type-shape rule (`bug-fix-session-log:W-2`), which is
+about signatures; this one is about *protocols between passes*.
+
+**Status:** validated — three findings, ruled and carried into the Task 1 dispatch before
+any subagent ran.
 
 ## Template for new entries
 
