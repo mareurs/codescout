@@ -10,7 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 58
+entry_high_water_F: 59
+entry_high_water_W: 49
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -4293,6 +4294,50 @@ are concurrently shipping in the same subsystem. See [[F-57]] for the sibling co
 session hazard (commits landing under me) this session already hit twice.
 
 **Valid:** dated 2026-08-21
+
+## F-59 — A filed bug's own root cause was wrong ("desktop-only remote host"); reproduction found a stale global symlink instead
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-24/25, session verifying the statement-validity/provenance implementation on a laptop distinct from the machine that built the existing index.
+
+**When:** Chasing an open bug (`docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md`) whose own Root cause section was explicitly flagged `unverified: inferred from source, not measured over the network`.
+
+**Expected:** The bug's stated hypothesis — `CODESCOUT_SPARSE_EMBEDDER_URL` pointed at a host/port only reachable from the original (desktop) machine — was the fix target.
+
+**Got:** The URL was loopback (`127.0.0.1:48084`), not remote. Reproducing end-to-end (curl the port, `docker ps -a`, then tracing `load_startup_env()` in source) found the real chain: the machine-wide `~/.config/codescout/.env` symlink pointed at a stale, partially-removed compose profile (`.env.amd`) that re-enabled sparse embedding, contradicting the actually-running `gpu` profile, which keeps the sparse container stopped by design. Fixing the symlink (not the URL) resolved it.
+
+**Probable cause:** An `unverified:` root cause written from source-reading alone, without a network trace, was nearly trusted as fact before reproduction corrected it.
+
+**Workaround:** N/A — this is the general lesson, not a live issue.
+
+**Severity:** med
+
+**Status:** fixed-verified
+
+**Fix idea / Pointer:** `docs/issues/2026-08-23-index-build-fails-embed-batch-sparse-send.md` (root cause section rewritten with the corrected chain and citations).
+
+---
+
+## W-49 — Checking ListAgents/SendMessage before committing shared uncommitted docs avoided a collision with two concurrent peer sessions
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-24, mid-session, asked to commit ~40 files of pending tracker-hygiene-sweep output sitting uncommitted in the working tree, ownership unknown.
+
+**Pattern:** Before committing someone else's uncommitted work, ran `ListAgents`, found two other active codescout sessions in the same repo (`codescout-ee`, `codescout-0e`), and pinged both via `SendMessage` asking whether the pending diff was theirs before touching it.
+
+**Counterfactual:** Both peers turned out to say "not mine, go ahead" — but the check caught something real in the process. `codescout-0e` had *already* committed one of the files (`src/librarian/catalog/augmentation.rs`) between an earlier `git status` read and the eventual commit attempt, confirmed live when a second file (`docs/issues/2026-08-23-subagent-activate-mutates-parent-active-project.md`) visibly vanished from `git status --short` mid-conversation as `codescout-ee` committed it. A blind commit at that point would have either failed confusingly on the first file or silently swept a stale version of the second, which a peer was actively appending to.
+
+**Confirming data points:** (1) `augmentation.rs` vanished from `git diff` between two checks, traced to `codescout-0e`'s commit `a03b54b0`; (2) the subagent-activate bug file vanished from `git status --short` mid-turn, traced to `codescout-ee`'s commit `8db6cf3d`; (3) `codescout-0e` separately flagged a real `.gitignore` gap (`.codescout/librarian.db*` uncovered, unlike its sibling catalogs) during the coordination reply, which this session would not have found unprompted.
+
+**Impact:** high
+
+**Promote-when:** A second independent work stream hits the same shape (about to commit uncommitted state of unknown ownership while other sessions are active in the same repo) and the check pays off again — target `docs/RELEASE.md` § Concurrent-Work Rules, which documents git-state safety but not this specific "ask before committing" step.
+
+**Status:** validated
+
+---
 
 ## Template for new entries
 

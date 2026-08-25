@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 9
+entry_high_water_F: 10
 entry_high_water_W: 8
 entry_prefix:
 - F
@@ -37,6 +37,7 @@ surfaces, not the definition.
 | F-7 | Spec asserted per-arm tool denial the harness cannot do | fixed |
 | F-8 | Eight assertions in one task passed for the wrong reason, all the same shape | promoted-to-permanent-docs |
 | F-9 | Five API drops stranded uncommitted subagent work | mitigated |
+| F-10 | Task 3's native-tool veto keys on a per-arm env var the runner cannot set | fixed-verified |
 
 ## Wins Index
 
@@ -672,6 +673,66 @@ present, heading map intact).
 
 **Rests on:** `docs/issues/2026-08-25-sdd-ledger-and-catalog-rows-vanished.md`, which
 records the loss itself and the catalog half of the repair.
+
+## F-10 — Task 3's native-tool veto keys on a per-arm env var the runner cannot set
+
+**Valid:** conditional — until `run_arms.py` gains per-arm `setup.env`
+
+**Observed:** 2026-08-25, pre-dispatch reconnaissance for Task 3 of the hidden-information
+eval. About to dispatch the implementer.
+
+**When:** Reading the plan's Task 3 Step 3 code, before any subagent ran.
+
+**Expected (plan):** the checker's native-tool veto is gated per arm —
+
+```python
+used = set(facts.get("tool_names", [])) & NATIVE_TOOLS
+if used and os.environ.get("HIDDEN_ARM") == "cs":
+    return "native-tool-used"
+```
+
+**Got (scouted reality):** `scripts/run_arms.py:101` builds **one** environment and reuses
+it for every arm in the loop:
+
+```python
+env = {**os.environ, "PROMPT_TDD_RUN_LOG": str(log)}
+```
+
+`PROMPT_TDD_RUN_LOG` is the only key that varies per arm. There is no `setup.env`, no
+argv, and no per-arm `PROMPT_TDD_SCENARIO_DIR`. So `HIDDEN_ARM` has exactly two reachable
+states, and **both are wrong**:
+
+- **unset** — the veto never fires. The `hidden-cs` arm silently scores runs that used
+  `Read`, which is the one thing the veto exists to catch. Fails open, reports a number.
+- **set once for the whole invocation** — the veto fires on `hidden-native` too, where
+  native tools are the arm's *definition*. Every native run vetoed by construction; the
+  comparison reads as a codescout landslide.
+
+Neither state errors. Both produce a clean table.
+
+**Probable cause:** the plan was written before ruling R-5/R-6 was made (both are in the
+SDD ledger's `### Rulings from the Task 3/4/5 pre-dispatch scout`, allocated while Task 1
+was still running). The plan text was never revised to match, and the ledger's
+`Carried into Task 3` block names R-5/R-6 but the plan's code block still shows the env
+form. Two surfaces, one of them stale — the classic shape.
+
+**Workaround:** implement per-arm identity the way R-5/R-6 specifies — a thin per-arm
+checker shim that hard-codes its own arm and delegates to a shared scorer, writing the arm
+into `facts` so `score_arm.py`'s re-scoring path cannot mispair it. This composes with R-8
+(one config dir per checker), which the same scout re-confirmed at
+`scripts/run_arms.py:87-94`: the runner picks the **first** arm's checker for the whole
+directory and warns only on stderr.
+
+**Severity:** high — it would not have failed. It would have produced the eval's headline
+number, wrong, with no error anywhere in the chain. This is the F-8 shape (a check that
+passes for the wrong reason) promoted from an assertion to the instrument itself.
+
+**Status:** fixed-verified — caught pre-dispatch; the implementer's brief carries the
+corrected design and the `path:line` evidence for it.
+
+**Rests on:** R-5 / R-6 / R-8 in the SDD ledger
+`.superpowers/sdd/2026-08-23-hidden-information-eval/progress.md`; verified this session
+against `scripts/run_arms.py:87-105` and `scripts/score_arm.py:69-83`.
 
 ## Template for new entries
 
