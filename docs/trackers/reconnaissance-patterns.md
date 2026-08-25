@@ -1186,7 +1186,7 @@ miss, any work stream); the ledger entry carries it at n=1.
 `RetrievalClient::from_env` sites across `src/tools/{semantic,memory,config}`,
 `src/tools/onboarding.rs`, `src/agent/mod.rs`, `src/main.rs`,
 `src/dashboard/api/index.rs`; work-stream narrative in
-`docs/trackers/dependency-review-session-log.md` F-3 + W-2; kin R-43 (read-side
+`docs/trackers/archive/dependency-review-session-log-2026-08-25.md` F-3 + W-2; kin R-43 (read-side
 twin), R-5 (compiler backstop that would NOT have caught the dead test), R-17
 (sibling-caller spot-check).
 ## R-45 — Hit: relocating a file needs a discovery-by-scan grep, which caller enumeration cannot substitute for

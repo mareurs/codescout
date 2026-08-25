@@ -1,6 +1,6 @@
 ---
 kind: tracker
-status: active
+status: archived
 title: Shine-In-All-Directions Tracker
 owners: []
 tags:

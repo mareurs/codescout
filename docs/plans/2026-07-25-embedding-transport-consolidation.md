@@ -289,7 +289,7 @@ Method note: measure by A/B-ing the real manifest and `comm -23` on sorted
 `cargo tree` output, restoring from a backup with `git status --porcelain` as
 the exit gate. Do **not** compose per-package closures — `cargo tree -p X
 --no-default-features` applies the flag to `X`, not the root, and returns
-degenerate results (`dependency-review-session-log` F-2).
+degenerate results (`docs/trackers/archive/dependency-review-session-log-2026-08-25.md` F-2).
 
 ---
 
@@ -318,8 +318,8 @@ degenerate results (`dependency-review-session-log` F-2).
 
 - [ADR: embedding transport boundary](../adrs/2026-07-25-embedding-transport-boundary.md)
   (`74c1aa5018287728`) — the decision
-- [Dependency review session log](../trackers/dependency-review-session-log.md)
-  (`4232733980fe92e9`) — F-1, F-2, W-1, and the pre-dispatch reconnaissance
+- [Dependency review session log](../trackers/archive/dependency-review-session-log-2026-08-25.md)
+  (`228a7a2f4dc2378d`) — F-1, F-2, W-1, and the pre-dispatch reconnaissance
   corrections applied to Stage 1 + Stage 3 on 2026-07-25: **F-3** (high — do not
   gate `pub mod client;`), **F-4** (wire-struct inventory), **F-5**
   (crypto-provider gate vs `dep:rustls` placement), **W-2** (the scout itself)

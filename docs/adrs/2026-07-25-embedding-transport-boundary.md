@@ -309,8 +309,8 @@ argument for Stage 0 existing at all.
 
 - [Embedding transport consolidation plan](../plans/2026-07-25-embedding-transport-consolidation.md)
   (`0da5bd672ef60dfc`) — task breakdown
-- [Dependency review session log](../trackers/dependency-review-session-log.md)
-  (`4232733980fe92e9`) — F-1, F-2, W-1 from the review that produced this ADR
+- [Dependency review session log](../trackers/archive/dependency-review-session-log-2026-08-25.md)
+  (`228a7a2f4dc2378d`) — F-1, F-2, W-1 from the review that produced this ADR
 - `docs/trackers/reconnaissance-patterns.md` — R-43 (the `#[cfg]`-from-grep miss
   that nearly shipped Stage 1 as a one-line manifest change)
 - `docs/plans/2026-06-16-two-stack-retrieval-lite.md` — the lite/server split
