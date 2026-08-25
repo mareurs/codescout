@@ -1,42 +1,40 @@
 ---
+kind: bug
 status: open
+title: Research Index tracker promises a [LIVE] index it has no augmentation to render
+tags:
+- librarian
+- trackers
+- docs-drift
+closed: null
 opened: 2026-08-23
-closed:
-severity: high
 owner: marius
 related: []
-tags: [librarian, trackers, docs-drift]
-kind: bug
-unverified: "Root cause established as catalog-side loss (augmentation has no on-disk form and is not regenerable by reindex). NOT established: WHICH event destroyed them, or when — no catalog backup or DB-level history exists to date it."
-title: Every augmentation in the catalog is gone, not just one tracker
+severity: medium
+unverified: 'Established 2026-08-26 from the catalog''s own columns: no augmentation was ever lost (f2ecdd76a6189efb created_at=2026-07-05, present throughout; 53 rows in the 2026-07-12 backup vs 70 today). NOT established: which catalog the 2026-08-23 session read — the DB path varies with env.db / $XDG_DATA_HOME, and no session-side record of it survives. Remaining open work is the original narrow bug only: docs/research/README.md has no augmentation.'
 ---
 
 # BUG: Research Index tracker documents a [LIVE] table and a params refresh, but has no augmentation
 
 ## Summary
 
-**Scope corrected 2026-08-23 — this is repo-wide, not one tracker.**
-`artifact(action="find", kind="tracker", augmented=true, scope="repo")` returns
-**zero rows**. Every augmentation in the codescout catalog is absent, including
-`docs/trackers/tool-usage-patterns.md` (`f2ecdd76a6189efb`), which CLAUDE.md
-documents as an augmented artifact with an `observations` entry collection and
-prescribes `append_entry` / `update_entry` against by id.
+**Refuted 2026-08-26 — nothing was lost.** This file escalated a single-tracker
+defect to "every augmentation in the codescout catalog is absent" on the strength
+of one query returning zero rows. The catalog's own columns disprove that. The
+original, narrow bug stands; the escalation does not. See § Root cause.
 
-Three workflows CLAUDE.md documents as the supported path are therefore
-impossible right now:
+**Still true:** `docs/research/README.md` (`5086e3c7c0b9d83c`) carries no
+augmentation, while its body tells the reader that "the [LIVE] table above is
+rendered automatically from each file's frontmatter by the librarian augmentation
+refresh — do not edit it by hand". That projection exists only in
+`librarian(action="context")` output — nothing ever writes it to disk — and
+without an augmentation it is not produced there either. The instruction refers
+to something no surface shows.
 
-- `artifact(action="append_entry", id="f2ecdd76a6189efb",
-  entry_collection="observations", id_prefix="T", …)` — the prescribed way to add
-  a T-N row.
-- `artifact(action="update_entry", …)` — the prescribed way to flip a verdict,
-  and the reason CLAUDE.md warns never to hand-build the array.
-- `docs/research/README.md` § *How to save a research* step 4, the `params`
-  refresh, which was the original discovery point for this bug.
-
-**The prose entries are NOT lost.** `tool-usage-patterns.md` still carries its
-`## T-001 …` headings on disk, and headings are what `link_scan` binds citations
-to. What is gone is the structured `params` index and the ability to allocate the
-next id atomically. That asymmetry is the whole mechanism — see § Root cause.
+**Not true:** the repo-wide claim. 21 codescout trackers are augmented, and
+`docs/trackers/tool-usage-patterns.md` (`f2ecdd76a6189efb`) — the id CLAUDE.md
+hard-codes for the T-N ledger — carries its `observations` collection intact,
+created 2026-07-05 and never interrupted.
 ## Symptom (Effect)
 
 `artifact(action="get", id="5086e3c7c0b9d83c", full=true)` returns:
@@ -76,29 +74,35 @@ local SQLite catalog (not in git — see CLAUDE.md § *Tool Usage Patterns*).
 
 ## Root cause
 
-**Established.** Augmentation (`prompt`, `params`, `params_schema`,
-`render_template`, `entry_collection`) lives **only in the catalog SQLite DB** and
-has *no on-disk representation*. `get_guide("librarian-runtime")` § *Where catalog
-state lives* states the durability split directly:
+Two causes were conflated. Separated:
 
-| State | Source of truth | Regenerable from disk? |
-|---|---|---|
-| Artifact rows (id, kind, status, title, body) | the `.md` file | **Yes** — reindex rebuilds from disk |
-| Augmentation | the **catalog DB only** | **No** — no disk form exists |
+**1. The repo-wide loss did not happen.** Established 2026-08-26 by querying the
+catalog directly:
 
-The catalog is machine-local and git-ignored. So any event that rebuilds or
-replaces the DB from scratch destroys every augmentation in the repo at once and
-leaves every artifact row intact — which is exactly the observed state: 41 tracker
-and bug files present and correctly classified, zero augmentations.
+| Evidence | Reading |
+|---|---|
+| `f2ecdd76a6189efb` augmentation `created_at` | `2026-07-05T06:51:44Z` — seven weeks before the measurement |
+| `augmentation::upsert` | stamps `updated_at` on conflict and never `created_at`, so the row cannot have been re-inserted later wearing an old date |
+| all 21 codescout rows | `created_at` spans 2026-06-13 … 2026-08-17; **none** on 08-22/23/24, which a restore would have stamped |
+| `~/.sync-backups/…/20260712/catalog.db` | 53 augmentations against 70 today — monotonic growth, no wipe |
+| `worktree_registration` | zero codescout rows, ever — the overlay-shadow explanation is out |
+| this file's own § Fix | "Not yet planned" — no restore was ever performed, so nothing re-created these rows |
 
-This also explains why the loss reads as invisible. `reindex` *preserves*
-augmentation rows keyed by artifact id rather than regenerating them, so a
-successful reindex after the loss reports healthy and repairs nothing. There is no
-gate that notices: `artifact(get)` returns `augmentation: null` without comment,
-and the documented `append_entry` call fails only at use.
+The 2026-08-23 readings were false negatives. **Which catalog that session opened
+is not established**, and likely never will be: the path is `env.db`, falling
+back to `dirs::data_local_dir()/librarian/catalog.db`, so it moves with
+`$XDG_DATA_HOME`/`$HOME`. A catalog holding *some* augmentations but no codescout
+rows reproduces E-4 exactly — count 0 with a populated scope block.
 
-**Not established:** which event destroyed them, or when. The DB has no history
-and no backup, so the date is not recoverable from the artefact itself.
+**2. The tool made that mistake easy to make.** This part is fixed.
+`find(augmented=true)` returned zero without saying which world the zero
+described: the empty-catalog path discarded the scope block outright
+(`scope: null`), and the populated path never reported how many augmentations the
+catalog actually held. Both now do — see § Fix.
+
+The durability fact the previous root cause cited remains correct and worth
+knowing: augmentation lives only in the catalog DB, has no on-disk form, and
+`reindex` cannot rebuild it. It simply is not what happened here.
 ## Evidence
 
 ### E-1 — catalog state
@@ -124,9 +128,10 @@ augmentation attached, a gather pass would find nothing to render for those entr
 This suggests the augmentation may never have been attached, rather than lost.
 
 
-### E-4 — the loss is repo-wide, not per-artifact
+### E-4 — REFUTED: a false negative, not a repo-wide loss
 
-2026-08-23, branch `experiments`, HEAD `6307a06a`:
+Kept as recorded, because the reasoning is the lesson. Measured 2026-08-23,
+branch `experiments`, HEAD `6307a06a`:
 
 ```
 artifact(action="find", kind="tracker", augmented=true, limit=20)
@@ -136,10 +141,15 @@ artifact(action="get", id="f2ecdd76a6189efb")
   → "augmentation": null      (docs/trackers/tool-usage-patterns.md)
 ```
 
-`f2ecdd76a6189efb` is the id CLAUDE.md hard-codes for the T-N ledger, so this is
-not an obscure artifact — it is the one the project documents most explicitly as
-augmented. Its body still lists `## T-001` … `## T-012`, `## T-14`, confirming the
-prose survived while the params index did not.
+Both readings were wrong about the world. `f2ecdd76a6189efb`'s augmentation row
+was created 2026-07-05 and is present today with its `observations` collection
+intact. A `get` by primary key is not scope-filtered, so a session that saw
+`null` for it was not reading this catalog.
+
+The inference — one query returning zero, generalised to "every augmentation in
+the repo is gone" — is the failure this entry now documents. A zero is evidence
+about the query first and the world second, and the check that would have settled
+it (`SELECT created_at FROM artifact_augmentation`) cost one command.
 ## Hypotheses tried
 
 1. **Hypothesis:** the augmentation was attached at index creation (2026-05-08) and
@@ -156,16 +166,30 @@ prose survived while the params index did not.
 
 ## Fix
 
-Not yet planned. If hypothesis 2 holds, the fix is a one-time
-`artifact_augment(id="5086e3c7c0b9d83c", prompt=…, params={entries: [...]},
-render_template=…, entry_collection="entries")` plus backfilling the five-key
-frontmatter onto the pre-C-7 entry files. If hypothesis 1 holds, the same call
-restores it, but the catalog-durability question is the real defect and belongs in a
-separate record.
+**Shipped** — `a77a39a0` on `experiments`, patch-id `087f3d1dd43afad04cf0df97a85c511c8129b4cd`.
+`artifact(action="find", augmented=true)` no longer returns an uninterpretable
+zero, in either of its two shapes:
 
-Decide which before writing either — per CLAUDE.md, run the reproduction before
-reading the fix plan.
+- *Zero because the catalog holds no augmentations at all.* The short-circuit no
+  longer skips the pipeline. It stays — `compile()` and `eval()` both reject an
+  empty `in` list, so "match nothing" is not expressible as a filter — but forces
+  the rows empty instead, so the scope block, `build_hints` and `catalog.total`
+  all survive, alongside a hint saying the zero is catalog-wide.
+- *Zero because they are elsewhere.* The response now carries
+  `augmented_in_catalog`, the count that separates "excluded by this query" from
+  "destroyed". This is the shape the 2026-08-23 session actually hit.
 
+Two regression tests in `src/librarian/tools/find.rs`, each verified red against
+the old shapes before the fix.
+
+**Still open — the original, narrow bug.** `docs/research/README.md` has no
+augmentation while its body promises a rendered index. Re-costed 2026-08-26 and
+it is smaller than this file implied: `docs/research/` holds 16 files, 10 of
+which already carry the `title:`/`date:`/`status:` frontmatter an index template
+would read, so the backfill is ~5 files plus one `artifact_augment` call. What it
+still needs is a decision on the index's shape (prompt, `render_template`,
+`entry_collection`) — not a large chore, but a design choice rather than a
+mechanical fix.
 ## Tests added
 
 None — bug is filed, not fixed.
