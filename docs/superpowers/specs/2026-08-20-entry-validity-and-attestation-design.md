@@ -358,9 +358,15 @@ server-side attribution cannot.
   proof.
 
 The distinction is load-bearing, and it is why this is not a pure rename of CAP-8's
-"gram". **Not every entry is a Statement.** A backlog item or a proposal asserts
-nothing and owes no proof; an observation, a measurement, or a law does. What makes an
-entry a Statement is that it declares a `**Valid:**` class — see Layer 1.
+"gram". **Not every entry is written to declare a class.** A backlog item or a proposal
+typically doesn't; an observation, a measurement, or a law typically does. What makes an
+entry a Statement in the strict sense is that it declares a `**Valid:**` class — see
+Layer 1. **But declaring none is not an exemption:** per decision 3 below, absence still
+means decay — an undeclared entry defaults to `dated <its last commit>` regardless of
+what its author meant to assert. That default is silent in practice only because nothing
+rests on it until the entry is cited from outside; see Layer 1 § *Default* and `doctor`'s
+`entry_cited_from_outside_but_undeclared` check, which is what actually decides whether
+an undeclared entry gets flagged.
 
 "Gram" named an *identity*, which is the smaller half. CAP-8's own open decision 1
 already argues the point: *"`bug-fix-session-log:F-33` is legible and `gram:a3f9c2` is

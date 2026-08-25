@@ -1,7 +1,7 @@
 ---
 id: '2a0d6d432c7ebc24'
 kind: bug
-status: open
+status: fixed
 title: 'entry-validity spec: Terminology and decision 3 disagree about undeclared entries'
 tags:
 - spec
@@ -9,6 +9,7 @@ tags:
 - statements
 - validity
 - doc-vs-doc
+closed: 2026-08-25
 ---
 
 # BUG: entry-validity spec — Terminology and decision 3 disagree about undeclared entries
@@ -81,14 +82,18 @@ malformed class, stamps `dated <today>` on `None`) and `scan_cited_but_undeclare
 
 ## Fix
 
-Not attempted this round — out of scope per the Fix Round 3 brief ("do not amend the spec in
-this round… do not unilaterally rewrite a binding design document"). Likely direction: amend
-§ *Terminology* to state decision 3's rule directly ("an entry that declares no `**Valid:**`
-class is not exempt — it defaults to `dated <its last commit>`"), or add a forward-reference
-from Terminology to decision 3 so a reader hits the correct rule first. Whichever route is
-chosen should also settle whether `resolve_validity` needs a production caller, since neither
-spec passage is actually enforced at read time today.
+Amended § *Terminology* to state decision 3's rule directly, reusing the language
+`tracker-conventions.md` already validated in Fix Round 3 rather than inventing new
+phrasing: kept "declaring a `**Valid:**` class is what makes an entry a Statement in the
+strict sense" (still true and still the useful distinction for an author deciding whether
+to write the line), but replaced "asserts nothing and owes no proof" — the sentence that
+contradicted decision 3 — with an explicit "declaring none is not an exemption" clause,
+cross-referencing decision 3, Layer 1 § *Default*, and `doctor`'s
+`entry_cited_from_outside_but_undeclared` check (the exposure gate that actually decides
+whether an undeclared entry's default gets flagged).
 
+No code changed — the shipped allocator and doctor check already implemented decision 3;
+only the spec's prose was self-contradictory.
 ## Tests added
 
 N/A — doc-only finding, not a code defect. The guide-level symptom (X-1) already has its fix
@@ -115,4 +120,3 @@ regardless of the underlying spec's internal disagreement.
 - `src/prompts/guides/tracker-conventions.md` — the guide bullet Fix Round 3 corrected
 - `.superpowers/sdd/2026-08-20-statement-validity-layers-1-2/final-review.md` § 3 (X-1)
 - `.superpowers/sdd/2026-08-20-statement-validity-layers-1-2/fix-round-3-brief.md`
-
