@@ -10,8 +10,8 @@ tags:
 topic: hidden information eval implementation plan fixture checker arms
 code_repo: prompt-engineering@master
 ledger: .superpowers/sdd/2026-08-23-hidden-information-eval/progress.md
-next_task: 3
-tasks_complete: 1,2
+next_task: 4
+tasks_complete: 1,2,3
 ---
 
 # Hidden-Information Eval Implementation Plan
