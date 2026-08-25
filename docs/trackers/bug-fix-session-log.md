@@ -109,6 +109,7 @@ entry_high_water_W: 49
 | F-56 | 2026-08-18 | med | process | wontfix-false-alarm | Ran the pre-promotion gate from a clone under `/tmp` and got a **false red** — three librarian temp-write-guard tests invert there, and cargo's fail-fast then skipped 21 other test binaries, so the run was simultaneously falsely negative and silently incomplete |
 | F-57 | 2026-08-21 | med | process | mitigated | A concurrent Claude Code session's own commit swept up this session's uncommitted `resolver.rs`/`severity.rs` edits under an unrelated spec-work message — content verified intact, but no single clean commit exists to cite as the fix; same class as F-54 |
 | F-58 | 2026-08-21 | low | plan-prose | mitigated | A same-day concurrent commit made a bug's own prescribed fix wrong before I got to it — `link_scan` gained a real `entry_cite` write path mid-day, inverting the bug's root cause |
+| F-59 | 2026-08-25 | med | codescout-tool | fixed-verified | A filed bug's own root cause was wrong ("desktop-only remote host"); reproduction found a stale global symlink instead |
 
 ## Wins Index
 
@@ -165,6 +166,7 @@ entry_high_water_W: 49
 | W-47 | 2026-08-18 | med-high | Walk the live process tree before designing against process topology | Rendezvous entries would likely have been published from a shared path, giving 2 `codescout mux` processes a `<pid>.json` no hook can ever match — permanent stale entries in a brand-new directory; also supplied the GC sizing (25 live servers, 22 `claude`) the spec omits | validated |
 
 | W-48 | 2026-08-18 | med-high | When a change invalidates a *rationale*, sweep the class corpus-wide and ask **by what method** the enumeration was done — a count is not a method | An Opus review that left zero surviving mutants in the code still listed only **5 of 11** doc sites naming `is_empty()` as the opener trigger; a targeted read found a 6th, a corpus sweep found 5 more. Six void-or-stale rationales would have survived in the exact files the next task's implementer reads | validated |
+| W-49 | 2026-08-24 | high | Checking ListAgents/SendMessage before committing shared uncommitted docs avoided a collision with two concurrent peer sessions | Two files vanished from `git status` mid-session as peer sessions (`codescout-0e`, `codescout-ee`) committed them concurrently; asking first also surfaced a real `.gitignore` gap this session had missed | validated |
 
 ## Category conventions
 
