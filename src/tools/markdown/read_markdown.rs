@@ -214,11 +214,18 @@ fn read_markdown_single_heading(
         let section_lines = section_result.content.lines().count();
 
         let (start_ln, end_ln) = section_result.line_range;
+        // Every number below addresses `file_id`, which holds ONLY this section,
+        // so they are stated in that buffer's frame — where the section's first
+        // line is 1, not `start_ln`. The server already reports it that way: ask
+        // the handle for a heading that does not exist and the listing comes
+        // back `### Sub A  L3`, not L306. `line_range` stays file-relative on
+        // purpose; it is the one field here that describes where the section
+        // lives rather than how to address the handle.
         let all_headings = crate::tools::file_summary::parse_all_headings(text);
         let nested: Vec<serde_json::Value> = all_headings
             .iter()
             .filter(|h| h.line > start_ln && h.line <= end_ln)
-            .map(|h| json!({"h": h.text, "l": h.line}))
+            .map(|h| json!({"h": h.text, "l": h.line - start_ln + 1}))
             .collect();
 
         let heading_label = section_result
@@ -236,14 +243,15 @@ fn read_markdown_single_heading(
             let mut actions = Vec::new();
             if let Some(first) = nested.first() {
                 if let Some(h) = first.get("h").and_then(|v| v.as_str()) {
-                    actions.push(format!("read_markdown({:?}, heading={})", file_id, h));
+                    // `{:?}` on the heading too — an unquoted `heading=### Sub A`
+                    // is not a call the caller can paste back.
+                    actions.push(format!("read_markdown({:?}, heading={:?})", file_id, h));
                 }
             }
             actions.push(format!(
-                "read_markdown({:?}, start_line={}, end_line={})",
+                "read_markdown({:?}, start_line=1, end_line={})",
                 file_id,
-                start_ln,
-                start_ln + 100.min(section_lines)
+                100.min(section_lines)
             ));
             actions
         };

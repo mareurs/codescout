@@ -613,6 +613,107 @@ async fn heading_excerpt_handle_stays_the_section_after_the_file_changes() {
     );
 }
 
+/// Bug 2026-08-25-read-markdown-next-actions-uses-file-line-numbers.
+///
+/// The oversized-section payload steers the caller at `file_id`, which holds
+/// ONLY the section — but built its numbers from the section's position in the
+/// FILE. Every number it hands back must address the handle it names.
+///
+/// A fixture whose section starts at line 1 passes under both the broken and
+/// the correct arithmetic, because the two frames coincide there. That is why
+/// `heading_on_large_section_returns_ok_false_with_hint_and_section_map` does
+/// not catch this — its `# Root` is at line 1. Here the section starts at file
+/// line 304.
+#[tokio::test]
+async fn oversized_section_steering_numbers_address_the_handle_not_the_file() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("deep.md");
+
+    let mut body = String::from("# Doc\n\n");
+    for i in 1..=300 {
+        body.push_str(&format!("filler line {i}\n"));
+    }
+    body.push_str("\n## Big\n\n");
+    for s in ["A", "B"] {
+        body.push_str(&format!("### Sub {s}\n\n"));
+        for i in 1..=100 {
+            body.push_str(&format!("sub {s} content line {i} {}\n", "a".repeat(52)));
+        }
+        body.push('\n');
+    }
+    std::fs::write(&file, &body).unwrap();
+
+    let err = super::ReadMarkdown
+        .call(
+            json!({ "path": file.to_str().unwrap(), "heading": "## Big" }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("oversized heading must be RecoverableError");
+    let file_id = rec.extra["file_id"]
+        .as_str()
+        .expect("extra must include file_id")
+        .to_string();
+
+    let actions: Vec<&str> = rec.extra["next_actions"]
+        .as_array()
+        .expect("next_actions array")
+        .iter()
+        .filter_map(|a| a.as_str())
+        .collect();
+
+    // 1. The line-range action addresses the handle, so it starts at its line 1.
+    //    Before the fix this said start_line=304 against a 207-line buffer, and
+    //    following it returned "start_line 304 exceeds file length 207".
+    let range_action = actions
+        .iter()
+        .find(|s| s.contains("start_line="))
+        .unwrap_or_else(|| panic!("expected a line-range next_action, got: {actions:?}"));
+    assert!(
+        range_action.contains("start_line=1,"),
+        "the line-range action addresses {file_id}, so it must start at that \
+         buffer's line 1; got: {range_action}"
+    );
+
+    // 2. The sub-heading action must be pasteable — the heading needs quoting.
+    let heading_action = actions
+        .iter()
+        .find(|s| s.contains("heading="))
+        .unwrap_or_else(|| panic!("expected a sub-heading next_action, got: {actions:?}"));
+    assert!(
+        heading_action.contains("heading=\"### Sub A\""),
+        "the heading argument must be quoted to be pasteable; got: {heading_action}"
+    );
+
+    // 3. section_map's line numbers address the handle too — the server's own
+    //    heading-miss listing reports `### Sub A` at L3 of this buffer, so a
+    //    section_map saying 306 contradicts it. Proven by following the number.
+    let sm = rec.extra["section_map"]
+        .as_array()
+        .expect("section_map array");
+    let first_line = sm[0]["l"].as_u64().expect("section_map entry has l");
+    let probe = super::ReadMarkdown
+        .call(
+            json!({ "path": &file_id, "start_line": first_line, "end_line": first_line }),
+            &ctx,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            panic!("section_map line {first_line} must be readable in {file_id}: {e}")
+        });
+    assert!(
+        probe["content"]
+            .as_str()
+            .unwrap_or("")
+            .contains("### Sub A"),
+        "section_map line {first_line} should land on '### Sub A' inside {file_id}; got: {probe}"
+    );
+}
+
 // ── BUG-043: subsection-consumption detection ──────────────────────────
 
 /// `find_consumed_subsections` returns empty when the section has no nested

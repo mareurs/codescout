@@ -1,16 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- read_markdown
+- progressive-disclosure
+- hints
+closed: 2026-08-25
 opened: 2026-08-25
-closed:
-severity: low
 owner: marius
 related:
-  - docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md
-tags:
-  - read_markdown
-  - progressive-disclosure
-  - hints
-kind: bug
+- docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md
+severity: low
 ---
 
 # BUG: `read_markdown`'s oversized-section `next_actions` addresses the excerpt handle with the FILE's line numbers
@@ -109,6 +109,47 @@ not touch this.
 measured 2026-08-25: the reproduction above, run against the live server; the
 suggested call returned `start_line 304 exceeds file length 202`.
 
+## Two more defects in the same block, found while fixing
+
+The filed report named the `next_actions` line-range entry. Re-running the
+reproduction with a fixture that *has* sub-headings (the original had
+`section_map: []`) surfaced two more, both in the same ~15 lines and both
+breaking the same thing — the caller cannot act on the steering payload.
+
+**`section_map[].l` is file-relative too.** Built as `json!({"h": h.text, "l":
+h.line})`, where `h.line` comes from `parse_all_headings(text)` over the whole
+file. The hint tells the caller to "pick a sub-heading from `section_map` or
+start_line/end_line", so these numbers read as addresses into `file_id` — and
+they are out of range for it.
+
+This one is not a judgment call about which frame reads better, because the
+server already contradicts itself. Asking the same handle for a heading that
+does not exist returns:
+
+```
+error: heading '### Nope' not found
+
+available headings:
+  ## Big  L1
+    ### Sub A  L3
+    ### Sub B  L106
+```
+
+`### Sub A` at **L3** of the handle, while `section_map` reports `l: 306` for the
+same heading — offset by exactly `start_ln - 1 = 303`. The error path already
+votes for the handle's frame.
+
+**The sub-heading `next_action` is not pasteable.** Built with `{}` rather than
+`{:?}` for the heading, it emits:
+
+```
+read_markdown("@file_3abc23a4", heading=### Sub A)
+```
+
+an unquoted argument containing spaces and `#`.
+
+measured 2026-08-25: all three observed in one response against the live server,
+fixture `deep2.md` (`## Big` at file line 304, 207 lines, two sub-headings).
 ## Evidence
 
 See Symptom — both calls quoted verbatim from the session.
@@ -126,20 +167,48 @@ one: there was no working alternative alongside it.
 
 ## Fix
 
-Not yet fixed. The line numbers should be the excerpt's own — `start_line=1`,
-`end_line=100.min(section_lines)` — since `file_id` is what they address.
+One rule, applied to the whole block in
+`read_markdown_single_heading` (`src/tools/markdown/read_markdown.rs`): **every
+number that addresses `file_id` is stated in that handle's frame.**
 
-Worth deciding at the same time whether the *other* `next_actions` entry (the
-sub-heading one, `read_markdown(file_id, heading=…)`) is correct: heading
-addressing is position-independent, so it likely is, but it was not exercised in
-this reproduction because `section_map` was empty.
+- The line-range `next_action` becomes `start_line=1, end_line=100.min(section_lines)`
+  — it addresses the handle, whose first line is 1.
+- `section_map[].l` becomes `h.line - start_ln + 1`. The filter above it already
+  guarantees `h.line > start_ln`, so this cannot underflow. It now agrees with
+  the heading-miss listing quoted above.
+- The sub-heading `next_action` uses `{:?}` for the heading, so it round-trips
+  as a pasteable call.
 
+`line_range` is deliberately left file-relative. It is the one field in this
+payload that describes *where the section lives* rather than *how to address the
+handle*, and it pairs with `breadcrumb`. A caller who needs a file line can
+recover it as `line_range[0] + l - 1`. The reasoning is recorded as a comment at
+the site, so the next reader does not "fix" it into the handle's frame.
+
+Heading addressing was verified to work against an excerpt handle before relying
+on it: the miss-listing above is produced by parsing the handle's own content,
+which is what makes `heading=` position-independent and therefore the right
+primary next action.
 ## Tests added
 
-None yet — this file is the capture, not the fix. When fixed, the regression
-test must place the target section away from line 1; a fixture with the heading
-at line 1 passes under both the broken and the correct arithmetic.
+`oversized_section_steering_numbers_address_the_handle_not_the_file`
+(`src/tools/markdown/tests.rs`) — RED before the change, failing on
+`start_line=304` exactly as measured live.
 
+Its fixture puts `## Big` at file line 304 with two sub-headings. That is
+load-bearing: a section starting at line 1 passes under **both** the broken and
+the correct arithmetic, because the two frames coincide there — which is exactly
+why the pre-existing
+`heading_on_large_section_returns_ok_false_with_hint_and_section_map` (whose
+`# Root` is at line 1) never caught this.
+
+The `section_map` assertion is end-to-end rather than arithmetic: it reads the
+handle at the line `section_map` reports and asserts `### Sub A` is there. A test
+that recomputed `h.line - start_ln + 1` and compared would pass against a fix
+that got the formula wrong in the same way twice.
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
+— 4456 passed, 0 failed.
 ## Workarounds
 
 Ignore the numbers in `next_actions` and read the handle from its own start:
@@ -148,12 +217,7 @@ accurate and names the valid range (`1..=202`), so the recovery is one call.
 
 ## Resume
 
-Fix `next_actions` construction in `read_markdown_single_heading`
-(`src/tools/markdown/read_markdown.rs`), then add a regression test in
-`src/tools/markdown/tests.rs` next to
-`heading_on_large_section_returns_ok_false_with_hint_and_section_map`, using a
-fixture whose oversized section starts well past line 1.
-
+N/A — fixed.
 ## References
 
 - `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md` — same
