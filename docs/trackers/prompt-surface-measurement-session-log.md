@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 14
-entry_high_water_W: 13
+entry_high_water_F: 15
+entry_high_water_W: 14
 entry_prefix:
 - F
 - W
@@ -42,6 +42,7 @@ surfaces, not the definition.
 | F-12 | gates.py reported means only, hiding a three-valued instrument for seven rounds | fixed-verified |
 | F-13 | A bare `pytest` in prompt-engineering collects zero scenario tests | mitigated |
 | F-14 | Offering a hedge channel made every run add a false positive it had excluded | open |
+| F-15 | The new eval's dependent set favoured codescout 2-to-1 before a single run | fixed-verified |
 
 ## Wins Index
 
@@ -60,6 +61,7 @@ surfaces, not the definition.
 | W-11 | The pilot earned its cost by invalidating the fixture, not by measuring anything | validated |
 | W-12 | An anchored retrieval eval ceilings by construction — naming the target supplies the doubt | promoted-to-permanent-docs |
 | W-13 | The arms separated on a metric we already logged and never reported | validated |
+| W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -1280,6 +1282,103 @@ free — it is an intervention. This one was reasoned from a measured result (fi
 searchers double-verified unprompted when asked to declare confidence) and still
 changed behaviour in a direction nobody predicted. Pilot any contract change on the
 metric it is NOT supposed to move.
+
+## W-14 — Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-25, immediately before writing
+`docs/superpowers/specs/2026-08-25-unanchored-blast-radius-eval-design.md`.
+
+**Pattern:** When a spec's central mechanism rests on a code structure, read the
+structure in the same session, before the spec — not the design conversation's memory
+of it. A design can be internally coherent and rest on a graph that does not exist.
+
+**Counterfactual — the spec would have specified an unbuildable trap.** I had asserted,
+in two consecutive messages, that `duty_multiplier` has **four** dependents, and had
+designed the trap as *"two fixes exist, one of them edits the shared function."* The
+bug was to sit **downstream**, in `apply_levy`. Reading `gen_fixture.py:1344-1358`
+before writing showed both halves were wrong:
+
+- `duty_multiplier` has **two** direct consumers (`LEVY_MULTIPLIER` and
+  `describe_duty`), not four. The four I had quoted were callers of *different* band-C
+  functions — a real number about the wrong subject, the W-10 shape again.
+- `apply_levy` is `return amount * LEVY_MULTIPLIER`. There is nothing upstream of it to
+  fix, so *"two fixes, one shared"* has no second fix. The trap could not fire.
+
+The repair was structural, not numeric: **put the defect INSIDE the shared function.**
+Checking the dependents then stops being optional cleverness and becomes what doing the
+job correctly requires — which is a strictly better design, and it was only reachable
+by reading the code.
+
+Without the scout, the spec would have shipped with a premise that has no
+implementation, and Task 1 would have discovered it — after the spec had been reviewed
+and a plan written on top of it.
+
+**Confirming data points:**
+
+1. This entry.
+2. `F-12` (same session): the round-7 support was readable from logs that already
+   existed; nobody looked, for seven rounds.
+3. `W-10` (same stream): five instances of a real number attached to the wrong subject
+   in one day.
+
+**Impact:** high — it changed the trap's mechanism, not its wording, and it happened
+before any review cost was spent on the wrong version.
+
+**Promote-when:** a second spec in this repo is corrected by a pre-write scout of the
+structure it rests on. At two datapoints, promote to the reconnaissance skill as
+"before writing a spec, read every structure the spec's mechanism depends on."
+
+**Status:** validated
+
+## F-15 — The new eval's dependent set favoured codescout 2-to-1 before a single run
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-25, first draft of the blast-radius spec, §4.
+
+**When:** After the design was agreed and before the plan was written.
+
+**Expected:** six reference forms chosen so that no single lexical pattern enumerates
+the dependent set — a difficulty property.
+
+**Got:** the six forms were *also* an asymmetry. Two of them (aliased call site,
+package re-export) are found by LSP `references` and missed by a lexical grep. Exactly
+**one** (a `getattr`-resolved dict string) was missed by LSP and found by grep. So the
+instrument offered codescout **two** available points against native's **one**, by
+construction, before any measurement was taken.
+
+**Probable cause:** I enumerated the forms by asking *"what would a grep miss?"* — a
+question that silently frames codescout as the subject and native as the baseline.
+The mirror question, *"what would `references` miss?"*, was asked once and answered
+once. One row is not a category; it is an afterthought.
+
+**How it was caught:** the user asked *"maybe we can add even more, 6?"* — a question
+about **count**. Re-deriving the count forced a re-derivation of the **composition**,
+which is where the asymmetry was. Nothing in my own review had looked at the balance,
+and the spec had already been written and committed.
+
+**Severity:** high — the eval would have produced a codescout-favouring result that
+looked measured. It would have passed every gate in the spec, because no gate checks
+the instrument's own bias, and there is no downstream check that would have caught it:
+the leak sweep looks for oracles, not for asymmetry.
+
+**Fix:** rebalanced to **2 / 2 / 2** — two forms both toolchains find, two only LSP
+finds, two only a lexical sweep finds. The second LSP-invisible form uses a different
+mechanism (config-file dispatch, not a second `getattr`), so one implementation slip
+does not decide the codescout-loses case. The module-attribute form was dropped to make
+room, since rows 1–2 already cover "both find it".
+
+**Status:** fixed-verified — spec §4 rewritten before the plan was written; the
+reasoning is recorded in the spec's own review-checklist section so a reversal is
+informed.
+
+**Generalisation (promoted to memory `eval-design`):** an eval in which the tool under
+test can only win is an advertisement, not a measurement. Enumerate the ways the
+subject **loses** with the same effort spent on the ways it wins, and count them. If
+the counts differ, the instrument is biased before the first run and no amount of
+sample size fixes it.
 
 ## Template for new entries
 

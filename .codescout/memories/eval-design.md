@@ -242,3 +242,36 @@ collapsed onto three distinct scores: the diversity check was measuring the mode
 output, not the instrument's resolution.
 
 Evidence: `prompt-surface-measurement-session-log:F-12`.
+
+
+## An eval the subject can only WIN is an advertisement
+
+Enumerate the ways the thing under test **loses** with the same effort spent on the
+ways it wins, then **count both**. If the counts differ, the instrument is biased
+before the first run, and no sample size fixes it.
+
+Measured 2026-08-25 on this repo's own blast-radius spec. Six reference forms were
+chosen to stop any single lexical pattern enumerating a dependent set. Two of them were
+found by LSP `references` and missed by grep; exactly **one** was missed by LSP and
+found by grep. The instrument offered codescout two available points against native's
+one, **by construction**, and every gate in the spec would have passed.
+
+**The tell is in how the list was generated.** The forms came from asking *"what would
+a grep miss?"* — a question that frames the tool under test as the subject and
+everything else as baseline. The mirror question was asked once and answered once. One
+row is not a category; it is an afterthought.
+
+Nothing downstream catches this. A leak sweep looks for oracles, not for asymmetry; a
+noise-floor gate compares two identical binaries; a positive control proves the scorer
+can register a hit. **Bias in the instrument's own construction has no gate**, so it has
+to be counted at design time.
+
+Two practices that make it checkable rather than a matter of taste:
+
+- **Write the coverage matrix into the spec** — one row per item, one column per
+  toolchain, ✓/✗ filled in. An imbalance is then visible as a column total rather than
+  as a feeling.
+- **Use different mechanisms for the losing cases, not the same trick twice.** One
+  implementation slip should not decide whether the subject can lose at all.
+
+Evidence: `prompt-surface-measurement-session-log:F-15`.
