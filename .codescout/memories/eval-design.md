@@ -86,3 +86,88 @@ final metrics, **never both** — a hybrid silently drops buckets. **Never fabri
 - **Contamination is the first thing to rule out.** quorum discredited a 352-run, $650 gate
   because the agent could read its own scenario's answer key. Keep the key outside anything
   the agent can reach, and assert it.
+
+
+## A truth site must be reachable by EVIDENCE, not by coincidence
+
+An answer key entry is only valid if something in the artifact links it to the question. If
+the only route in is a numeric or lexical coincidence, the eval measures **willingness to
+guess** and punishes correct reasoning.
+
+Measured 2026-08-25: four "vocabulary drift" truth sites each hardcoded 8.25% under names
+like `LEVY` (*"the customs levy"*) and `duty_multiplier` (*"import duty"*), with **no
+reference to the constant the task asked about**. A customs levy that happens to equal the
+sales tax rate is not the sales tax. Twelve runs across two toolsets scored that band 0.00 —
+several naming the sites in their reasoning and then correctly declining to list them. **The
+unanimity was the evidence**: twelve independent agents agreeing is a measurement of the
+fixture, not of the agents.
+
+- **The fixture had a hard ceiling** at recall 8/12 = 0.6667, and every run hit it exactly.
+- **Deleting the bad band is the wrong repair.** Truth = the easy bands only scored f1
+  1.000 — breaching the *upper* calibration bound and making the task trivial. There was no
+  discriminating middle: easy bands saturated, hard band impossible.
+- **The repair is a discoverable link**, not a hint: a derivation chain rooted in the real
+  constant, so the value genuinely propagates across renamed concepts. Then the information
+  is *hidden* (needs tracing) rather than *absent* (needs guessing).
+- **Cap the cheap route explicitly.** Only ONE site in the chain may name the constant, or
+  the trivial lexical search selects the whole chain and the hard band collapses into the
+  easy one. Assert the cap by measurement over the emitted tree.
+
+## Controls: you need a floor and a ceiling, and each must target the BINDING constraint
+
+Three controls, and most evals ship only the middle one:
+
+- **Positive (ceiling)** — a hint that must lift the score. Proves the instrument can
+  register a hit.
+- **Noise (tie)** — two identical configurations at different paths must tie. Proves path
+  and launch order do not leak.
+- **Negative (floor)** — a run with the capability removed must score ~0. Proves the
+  **capability** produces the score, not the task's guessability.
+
+The floor is the one usually missing and often the most informative: if agents can score
+well with *no tools at all*, the eval is measuring naming conventions and priors, and every
+comparison above it is contaminated.
+
+**A control that does not target the binding constraint proves nothing.** Measured
+2026-08-25: a positive control hinted at the definition site — a *recall* hint — while
+recall was already saturated at 1.0000 in every arm. It scored **identical** to the
+uncontrolled arm and the gate failed, not because the instrument was broken but because the
+hint had nothing left to lift. Re-check which dimension actually binds *after every fixture
+change*; the repair above moved the constraint from recall to precision in one round.
+
+**Until the ceiling control fires, a near-null reading is unvalidated.** An instrument never
+shown to respond to a known signal cannot be trusted when it reports no signal.
+
+## Uniform results are the loudest signal an eval can emit
+
+Twelve runs scoring identically to four decimal places is not weak evidence of no effect; it
+is strong evidence of **no measurement**. Treat any suspiciously uniform result as an
+instrument fault until disproven, and disprove it with two specific checks:
+
+1. **Are the underlying artefacts distinct?** Hash the raw answers. Twelve distinct hashes
+   converging on one score is a real finding; one hash twelve times is a stuck harness.
+2. **Did the arms actually differ?** Read the tool traces. Two arms that were supposed to
+   have different capabilities and show the same tool list were never separate arms.
+
+Both checks are seconds of work and they decide whether the number is reportable at all.
+
+## A number can be real and still describe the wrong subject
+
+The dangerous measurement error is never a wrong number — it is a correct number about
+something other than the claim. Five instances in one session (2026-08-25), none of which
+errored and four of which looked entirely plausible:
+
+- a `grep -n` line offset **in a JSON tool buffer**, read as a source line;
+- a measurement taken on a working tree with **a live mutation** applied;
+- a **CLI error envelope** parsed as a model answer, scoring a never-run as a content miss;
+- a **tail of an alphabetical concatenation**, reported as the file that just changed;
+- a streamed **`init` envelope**, read as proof a run succeeded — only the terminal
+  `result` object carries `is_error`.
+
+**Name the surface a number came from before you use it.** Tool responses routinely carry
+two coordinate systems at once — source ranges *and* buffer offsets, start events *and*
+terminal events — formatted alike and unlabelled.
+
+**What catches it:** a domain constraint making the value *impossible* rather than merely
+surprising (`runs: 2` means a third verdict cannot exist); and re-deriving through one
+audited instrument instead of reading numbers off whatever surface is nearest.

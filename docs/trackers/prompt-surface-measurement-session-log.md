@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 10
-entry_high_water_W: 9
+entry_high_water_F: 11
+entry_high_water_W: 11
 entry_prefix:
 - F
 - W
@@ -38,6 +38,7 @@ surfaces, not the definition.
 | F-8 | Eight assertions in one task passed for the wrong reason, all the same shape | promoted-to-permanent-docs |
 | F-9 | Five API drops stranded uncommitted subagent work | mitigated |
 | F-10 | Task 3's native-tool veto keys on a per-arm env var the runner cannot set | fixed-verified |
+| F-11 | Sharing one OAuth credential across Claude Code profiles broke three of them mid-pilot | mitigated |
 
 ## Wins Index
 
@@ -52,6 +53,8 @@ surfaces, not the definition.
 | W-7 | Reading the file settled two agent disagreements | promoted-to-permanent-docs |
 | W-8 | A deleted git-ignored ledger was rebuilt from the session transcript | validated |
 | W-9 | An Opus review with a mutation lens found four Criticals in code with 34 green tests | validated |
+| W-10 | A real number attached to the wrong subject — five instances in one session | validated |
+| W-11 | The pilot earned its cost by invalidating the fixture, not by measuring anything | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -799,6 +802,180 @@ the controller before any fix was made.
 **Rests on:** `docs/superpowers/specs/2026-08-23-hidden-information-eval-design.md` § arm
 symmetry; [[F-10]], which is the same failure mode caught one stage earlier, by
 reconnaissance rather than by review.
+
+## W-10 — A real number attached to the wrong subject — five instances in one session
+
+**Valid:** invariant
+
+**Observed:** 2026-08-25, across a single day of eval work. Five separate incidents, all the
+same shape, three of them mine and two in code I commissioned.
+
+| # | The number | What it actually described | How it was caught |
+|---|---|---|---|
+| 1 | `run()` at `surface_lib.py:427` | a line offset in a **JSON buffer**, not the source file (203 lines) | the implementer verified the citation against source |
+| 2 | file length ≤30 at 27 files / 11 of 12 sites *(earlier round)* | a working tree with a **live mutation** applied | the implementer re-applied the mutation to prove attribution |
+| 3 | `FAIL(no-findings-block)` ×2 | a **CLI error envelope**, not a model answer — the run never happened | reading the response body after the score looked wrong |
+| 4 | `main-cs/hidden-cs.log: VERDICT PASS` | the last line of an **alphabetical concatenation**, not the file that changed | `runs: 2` makes a third verdict *impossible*, not merely odd |
+| 5 | "your live profiles are fine" | a streamed **`init` envelope**, which proves the CLI started, not that it succeeded | probing again and reading the terminal `result` object |
+
+**Pattern:** the failure is never a wrong number. In all five the number was real, correctly
+computed, and correctly reported — *about something other than what the claim was about*.
+That is why none of them errored, and why four of the five looked entirely plausible.
+
+**What actually catches it**, in the order these were caught:
+
+1. **A domain constraint that makes the value impossible, not merely surprising.** `runs: 2`
+   means a third verdict cannot exist. Impossible beats implausible as a trigger, because
+   implausible values get rationalised and impossible ones do not.
+2. **Asking what surface the number came from**, separately from whether it looks right. A
+   `symbols` response carries source ranges *and* is stored in a buffer with its own line
+   numbers; a Claude Code run emits an `init` envelope *and* a `result` envelope. Both
+   coordinate systems are present, formatted alike, and unlabelled.
+3. **Re-deriving through a second, independent path.** Every substantive pilot claim was
+   computed by `gates.py` reading the logs directly, which is why incident 4 cost nothing.
+
+**Counterfactual, incident 3 specifically:** `hidden-cs` scored f1 0.8138 and
+`hidden-native` would have entered the aggregate as 0.0 twice. Gate 4 asks for a ≥ 0.10
+separation; it would have read **0.82** and passed triumphantly on an arm that never made an
+API call. Gate 1 would have failed, and gate 1's documented remedy is *tune the fixture* —
+i.e. make the task easier because the arm "found nothing". The eval would have published a
+codescout landslide manufactured entirely by an expired OAuth token.
+
+**The structural defence, and it is cheap:** route every number a decision rests on through
+**one audited instrument**, and never read one off whatever surface is nearest. That is what
+`gates.py` is for, and it is why incident 4 was an anecdote rather than a retraction.
+
+**Confirming data points:** five, above, in one session. Incidents 1 and 4 were mine;
+2 and 3 were in commissioned code; 5 was my own reporting of someone else's system.
+
+**Promote-when:** already met — five datapoints in a day. **Promote to codescout memory
+`eval-design`** as a named class, and to the reconnaissance skill's Phase 2, whose current
+wording ("compare plan to reality") does not cover *"the number is right and the subject is
+wrong"*. The check to add: **name the surface the number came from before you use it.**
+
+**Status:** validated — five independent instances, each verified at the bytes.
+
+**Rests on:** [[T-27]] (incident 1), [[W-5]] (incident 2),
+`docs/issues/archive/2026-08-25-checker-scores-cli-error-as-content-failure.md` (incident 3).
+
+## W-11 — The pilot earned its cost by invalidating the fixture, not by measuring anything
+
+**Valid:** invariant
+
+**Observed:** 2026-08-25. A $2.88 pilot at N=2 returned twelve runs that all scored
+**identically to four decimal places** — f1 `0.8000`, recall `0.6667`, precision `1.0000`,
+band A `1.00`, band B `1.00`, band C `0.00`.
+
+**What it found.** Not a result — a fixture that could not produce one. All four band-C
+truth sites hardcoded the same number with **no reference to `TAX_RATE`**: a `LEVY` constant
+described as *"the customs levy"*, a `duty_multiplier` described as *"import duty"*, a bare
+`8.25 / 100`, and `825  # basis points`. The task asks what must change when **the sales
+tax rate** changes. A customs levy that happens to equal 8.25% is not the sales tax, and
+nothing in the tree said otherwise — so including band C required guessing from a numeric
+coincidence, and excluding it was correct reasoning. The fixture had a hard ceiling at
+recall **8/12 = 0.6667**, which is exactly what every run scored.
+
+**The agents were right and the answer key was wrong, and the unanimity is the evidence.**
+Several runs named `apply_levy` / `surcharge_pct` / `duty_multiplier` in their reasoning and
+then declined to list them. That is an agent that looked and judged, not one that failed to
+look — and twelve of twelve agreeing across two different toolsets is not a coincidence, it
+is a measurement of the fixture.
+
+**Counterfactual.** Phase 2 was budgeted at 96 runs. Run on that fixture it would have spent
+~$34 to produce a table showing codescout and native tools performing identically, with a
+plausible-sounding explanation (*"the hard band is hard for both"*) and no error anywhere.
+The pilot's four gates cost $2.88 and returned **gate 4 FAIL / gate 2 FAIL**, which is what
+sent someone to look at the fixture code.
+
+**The trap in the obvious fix.** Deleting band C makes every run score recall 8/8,
+precision 8/8, **f1 1.000** — which breaches gate 1's *upper* bound and makes the task
+trivial. The eval would then fail gate 1 instead of gate 4, for the mirror reason. There was
+no discriminating middle: band A+B trivial, band C impossible. The repair had to make band C
+**findable by evidence** (a derivation chain rooted in the constant), not remove it.
+
+**And the repair surfaced a second, older defect.** Closing the chain's imports tripped a
+predicate that had been mis-calibrated **since round 4** — `has an import` sat at 0.351 on
+filler against 0.632 on planted, an asserted parity that had never been measured, and the
+generator's own docstring stated it as fact. It could not trip a verdict alone at lift 2.13,
+so it hid by appearing in *all fifteen* worst-surviving combinations. Fixing it took the
+worst asserted predicate from **8.05 → 5.63** and the null control from p = 0.292 → **0.683**.
+
+**Pattern:** a pilot's job is to falsify the instrument, not to preview the result. Budget
+it, gate it, and treat a *uniform* result as the loudest possible signal — twelve identical
+scores is not weak evidence of no effect, it is strong evidence of no measurement.
+
+**Confirming data points:**
+
+1. This session — a $2.88 pilot prevented a ~$34 run on an instrument with a hard ceiling,
+   and incidentally exposed a leak channel that had been live for three rounds.
+
+**Promote-when:** a second pilot catches an instrument defect that a full run would have
+published. At two datapoints, promote to codescout memory `eval-design` as: *before scaling
+any eval, run it small and check whether the results can vary at all.*
+
+**Status:** validated — single datapoint, fixture defect confirmed at the bytes, repaired,
+and re-piloted with band C at 1.00.
+
+**Rests on:** R-31 / R-32 in
+`.superpowers/sdd/2026-08-23-hidden-information-eval/progress.md`; [[W-10]], whose incident 3
+is the same pilot's other finding.
+
+## F-11 — Sharing one OAuth credential across Claude Code profiles broke three of them mid-pilot
+
+**Valid:** invariant
+
+**Observed:** 2026-08-25, six runs into the first Task 5 pilot. `hidden-native` returned
+`is_error: true`, `terminal_reason: api_error`, `duration_api_ms: 0`, zero tokens, zero
+tools, `$0`, carrying *"Failed to authenticate: OAuth session expired and could not be
+refreshed"*.
+
+**Expected:** two eval profiles cloned from an existing working profile, each symlinking
+`.credentials.json` to a shared source, would both authenticate.
+
+**Got:** the first profile to run authenticated; every other holder of that credential —
+including the shared source itself — could not.
+
+**Mechanism, established at the bytes.** An OAuth **refresh rotates the refresh token**, and
+Claude Code writes the new credential by **replacing the symlink with a regular file inside
+that profile**. So the rotation is captured by whichever profile refreshed first, and every
+other holder is left with a consumed token. Confirmed by `expiresAt`: the profile that ran
+first held a token valid for eight more hours; the shared source and the second profile both
+sat at epoch 0. Confirmed again in the other direction later — when the shared token was
+still valid, no refresh occurred, the symlinks **survived**, and both profiles worked.
+
+**Severity:** high — it broke `~/.claude-kat`, a profile in daily use, and it did so
+silently. Nothing announced the rotation; the next user of that profile simply could not
+authenticate.
+
+**Repair:** the freshly-refreshed credential was written back into the shared source, and
+both affected profiles verified authenticating afterwards. Expired state kept at
+`/tmp/claude-kat-creds-expired.bak`.
+
+**Workaround, now automated.** `scenarios/hidden-info/run_pilot.sh` gained a `sync_creds`
+guard that runs after every arm: if a profile's credential materialised into a regular file,
+it validates the new token, pushes it back to the shared source, and restores the symlink.
+That is the manual repair above, made idempotent, so a rotation can never be stranded.
+
+**The real lesson is not about credentials.** Two claims were made too early during the
+diagnosis, and both were corrected the same session:
+
+1. *"Your live profiles are fine"* — asserted after reading a streamed `init` envelope with
+   a full tool list, without checking the terminal `result` object. One of the three was
+   broken at that moment. **A streamed envelope proves the CLI started, never that it
+   succeeded.**
+2. The first probe loop reported all three live profiles *"unparseable"* because it assumed
+   one JSON object where `--output-format json` had emitted a stream. Two of the three were
+   healthy. **A parser failure is not a subject failure** — and reporting it as one nearly
+   raised a false alarm about working infrastructure.
+
+Both are the [[W-10]] class: a real signal, read as evidence about the wrong subject.
+
+**Status:** mitigated — the mechanism is understood, the damage is repaired and verified,
+and the guard prevents recurrence in this harness. Not `fixed`, because nothing prevents the
+next person from symlinking a credential into a new profile; the structural fix is a
+separate credential per profile, or an API key.
+
+**Rests on:** R-30 in `.superpowers/sdd/2026-08-23-hidden-information-eval/progress.md`.
 
 ## Template for new entries
 
