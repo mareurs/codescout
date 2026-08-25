@@ -171,3 +171,74 @@ terminal events — formatted alike and unlabelled.
 **What catches it:** a domain constraint making the value *impossible* rather than merely
 surprising (`runs: 2` means a third verdict cannot exist); and re-deriving through one
 audited instrument instead of reading numbers off whatever surface is nearest.
+
+
+## An ANCHORED eval ceilings — naming the target supplies the doubt
+
+If the prompt names what to find ("find every place that reads the tax rate"), the
+eval measures retrieval *given* that a search was triggered. That capability is not
+the bottleneck, so the arm saturates.
+
+Measured twice on this machine, independently:
+
+- A sealed needle-in-a-haystack harness (needle drawn by `/dev/urandom` from 60
+  candidates, five blind subagents, byte-identical prompts): **5/5 exact** on
+  name + value + `path:line`, **0** line drift under an off-by-one-is-a-miss rule,
+  **5/5 correctly CERTAIN**, mean **5.8 tool calls**. Conclusion recorded at the
+  time: *"Retrieval is healthy; triggering retrieval is what's broken. Suspicion is
+  the scarce resource, not capability."*
+- The hidden-info eval, 2026-08-25: recall **1.0000 in 11 of 12 runs**.
+
+**The failure population is the inverse of what an anchored eval scores.** Of 51
+failures reconstructed from real transcripts: **36 confident wrong answers vs 4 pure
+misses**. Recall measures misses. And **0 of the 51** were caught by unaided
+self-review — 22 by execution, 12 by the human, 10 by an external reviewer.
+
+**The corollary that closes the design space:** anchored + findable = ceiling;
+anchored + unfindable = floor (twelve agents once unanimously and *correctly*
+declined an impossible band). **There is no discriminating middle inside the
+anchored paradigm**, so no negative test can be built there. To get failure, the
+prompt must NOT name the target: give a task whose *completion* needs the fact, plant
+a plausible belief that already covers it, and score whether the query was issued at
+all.
+
+**Decoys must be wrong one hop PAST the value**, not wrong values. Every real decoy
+in the record fully satisfied the literal query and failed on a property one step
+further: a handler that is real but default-off, a function that exists and is tested
+but is wired into one of two call paths, a derived cache with the right name sitting
+closer to hand than the ground truth.
+
+**The one intervention with a measured positive effect is a scoring change, not a
+rule:** require each claim to carry `CERTAIN`/`UNCERTAIN` plus its justification.
+Five of five then double-verified through independent means, unprompted — because it
+attaches the check to the act of asserting, the one moment the failure is guaranteed
+to be present. Contrast: knowing a rule prevented nothing (three instances committed
+in a session that had read the rule in full and quoted it back).
+
+Evidence: `prompt-surface-measurement-session-log:W-12`.
+
+## Read the pilot for RANGE, not only validity
+
+A pilot answers two independent questions and it is easy to ask only one:
+
+- **Validity** — is this number real? (needs ground truth; expensive)
+- **Range** — can this number move? (needs only the spread of what came back; free)
+
+Ask range FIRST. It is cheaper and it gates everything built on top.
+
+Measured 2026-08-25: seven rounds and $8.28 into the hidden-info eval, all **12** runs
+had produced exactly **three** distinct F1 values, total range **0.046**, against a
+separation gate of `ΔF1 ≥ 0.10`. Because every per-run value sat in
+[0.8000, 0.8462], any two arm means sat there too — the gate was **unreachable by
+construction at any sample size**, and no re-pilot could have passed it.
+
+**Means hide a low-cardinality instrument.** Report the per-run value SET with counts
+(`{0.8000 ×7, 0.8276 ×4, 0.8462 ×1}`), not the mean. A mean implies a continuous
+measure and makes an unreachable threshold look merely unmet.
+
+**A diversity metric can point the opposite way.** The same round reported **12
+distinct answers** — which reads as healthy variance. Twelve distinct answers
+collapsed onto three distinct scores: the diversity check was measuring the model's
+output, not the instrument's resolution.
+
+Evidence: `prompt-surface-measurement-session-log:F-12`.

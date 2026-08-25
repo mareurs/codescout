@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 11
-entry_high_water_W: 11
+entry_high_water_F: 12
+entry_high_water_W: 13
 entry_prefix:
 - F
 - W
@@ -39,6 +39,7 @@ surfaces, not the definition.
 | F-9 | Five API drops stranded uncommitted subagent work | mitigated |
 | F-10 | Task 3's native-tool veto keys on a per-arm env var the runner cannot set | fixed-verified |
 | F-11 | Sharing one OAuth credential across Claude Code profiles broke three of them mid-pilot | mitigated |
+| F-12 | gates.py reported means only, hiding a three-valued instrument for seven rounds | fixed-verified |
 
 ## Wins Index
 
@@ -55,6 +56,8 @@ surfaces, not the definition.
 | W-9 | An Opus review with a mutation lens found four Criticals in code with 34 green tests | validated |
 | W-10 | A real number attached to the wrong subject — five instances in one session | validated |
 | W-11 | The pilot earned its cost by invalidating the fixture, not by measuring anything | validated |
+| W-12 | An anchored retrieval eval ceilings by construction — naming the target supplies the doubt | promoted-to-permanent-docs |
+| W-13 | The arms separated on a metric we already logged and never reported | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -976,6 +979,181 @@ next person from symlinking a credential into a new profile; the structural fix 
 separate credential per profile, or an API key.
 
 **Rests on:** R-30 in `.superpowers/sdd/2026-08-23-hidden-information-eval/progress.md`.
+
+## W-12 — An anchored retrieval eval ceilings by construction — naming the target supplies the doubt that real failures lack
+
+**Valid:** invariant
+
+**Observed:** 2026-08-25. Two independent evidence sweeps (curated trackers; raw
+session transcripts) run to answer "why can the hidden-info eval not produce a
+failing arm?"
+
+**Pattern:** Before building a retrieval eval, ask whether the prompt **names the
+target**. An *anchored* task — one whose prompt states what to find — hands the
+agent the one thing missing in every real failure: the doubt that sends it looking.
+Anchored evals therefore measure a capability that was never the bottleneck, and
+they saturate.
+
+**Counterfactual — this exact harness was already built on this machine and already
+saturated.** `docs/trackers/bistriceanu/raw/WhatsApp Chat with Bistriceanu.txt:713-899`:
+the operator asked for a needle-in-a-haystack harness; a needle was drawn by
+`/dev/urandom` from a 60-candidate pool, the key sealed, five blind subagents given
+byte-identical prompts. Result at `WA:891-899` — **5/5 exact** on name + value +
+`path:line`, **0** line-number drift under a rule where off-by-one counts as a miss,
+**5/5 said CERTAIN and 5/5 were right**, mean **5.8 tool calls**, ~30 s each. The
+conclusion recorded at the time (`WA:855-858`, `WA:900-906`): *"I never failed to
+find `path_security.rs`. I never looked… **Retrieval is healthy; triggering
+retrieval is what's broken.** … **Suspicion is the scarce resource, not
+capability.**"* We spent $8.28 rediscovering it.
+
+**Confirming data points:**
+
+1. **The failure population is the inverse of what we score.** 51 failures
+   reconstructed with file+line citations across four sessions on two machines:
+   **36 confident wrong answers** vs **4 pure misses** (~9:1); 8 of the 36 are
+   confident wrong *absence* claims. Our eval's primary signal is **recall**, which
+   measures misses — the 8% case.
+2. **Self-review detects nothing.** Of the 51: 22 caught by execution, 12 by the
+   human operator, 10 by an external reviewer, 6 by a subagent, 1 by CI, and
+   **0 by unaided self-review**. Corroborated by three independent in-transcript
+   tallies made at the time (`WA:958-968`: 10 corrections — 4 user pushback,
+   6 execution, 0 self-review; `WA:671`: 6 errors, 0 self-review).
+   Mechanism, `WA:970-978`: *"Re-reading my own text produces no new signal — it
+   reads exactly as convincing the second time, because it was generated from the
+   same wrong belief that would have to be the thing under suspicion."*
+3. **Anchoring explains W-11's "no discriminating middle" mechanically.**
+   Anchored + findable = ceiling (round 7: recall 1.0000 in 11 of 12 runs, band-C
+   recall 1.0000 in 11 of 12). Anchored + unfindable = floor (pre-repair band C:
+   twelve agents unanimously and *correctly* declined). There is no middle inside
+   the anchored paradigm, so no negative test can be designed there.
+4. **The unreachable needle is not a retrieval problem at all.** `FB:10257`
+   (`KT-13`): the missed fact was **fifteen lines below the constant the agent was
+   editing, in a file it had already read** — *"I was reading for the FK ordering
+   claim I'd come to fix, not for what the file already knew."* No retrieval eval
+   can produce this.
+5. **The repo diagnosed the same shape once before, in a different eval.** The
+   reconnaissance eval's P5 traps saturated at 100% for every arm *"because the
+   production artifact was named in the prompt and one small file away"*, with a
+   follow-up filed to *"redesign instrument traps with the artifact unnamed and the
+   check costly"*. The lesson did not transfer because it was filed against that
+   instrument rather than against eval design generally — which is why this entry
+   is promoted to `eval-design`, not to the hidden-info stream.
+
+**The one intervention with a measured positive effect** was a scoring change, not a
+rule or a hook: requiring each claim to carry `CERTAIN`/`UNCERTAIN` **plus its
+justification**. All five searchers then double-verified through independent means,
+unprompted (`WA:872-876`). Rationale, `WA:984`: *"it doesn't depend on suspecting
+anything — it attaches the check to the act of asserting, which is the one moment
+the failure is guaranteed to be present."* Contrast `R-104`, where knowing the rule
+prevented nothing: three instances were committed in a session that had read the
+entry in full and quoted it back.
+
+**Impact:** high — it invalidates the design of the current eval, and it is the
+reason the $40.14 phase-2 run was not spent.
+
+**Promote-when:** fired immediately. Promoted to memory `eval-design` on
+2026-08-25 as the anchoring rule; this entry keeps the evidence.
+
+**Status:** promoted-to-permanent-docs
+
+## F-12 — gates.py reported means only, hiding a three-valued instrument for seven rounds
+
+**Valid:** conditional — gates.py prints per-run value sets and a range check
+
+**Observed:** 2026-08-25, re-reading the round-7 pilot logs for *range* rather than
+*validity*.
+
+**When:** After seven rounds of fixture work and $8.28, while asking why gate 4
+would not separate.
+
+**Expected:** F1 is a continuous measure; a 0.10 threshold is a reasonable bar that
+more runs could clear.
+
+**Got (measured):** across **all 12 round-7 runs** there are exactly **three**
+distinct outcomes — `f1 0.8000 / P 0.6667 / R 1.0` (7 runs, 12 truths + 6 extras),
+`0.8276 / 0.7059 / 1.0` (4 runs, 12 + 5), `0.8462 / 0.7857 / 0.9167` (1 run,
+11 + 3). Total observed F1 range **0.046**. Since every per-run value lies in
+[0.8000, 0.8462], any two arm means lie there too, so `|Δmean| ≤ 0.046` — **gate 4's
+`ΔF1 ≥ 0.10` is unreachable by construction**, at any sample size, while runs land
+in this value set. The instrument's resolution is one borderline symbol; its full
+dynamic range is about three.
+
+**Probable cause:** `gates.py::summarise` computes plain means for f1 / recall /
+precision / bands and reports no dispersion — no min/max, no std, no distinct-value
+count. A three-valued output is invisible in a table of means. Worse, the diversity
+check we *did* have pointed the other way: round 7 reported **12 distinct answers**,
+which reads as healthy variance. Twelve distinct answers collapsed onto three
+distinct scores; the metric was measuring the wrong layer.
+
+**Severity:** high — it is the direct cause of seven rounds spent tuning a fixture
+whose gate could not be reached, and it would have licensed the $40.14 phase-2 run.
+
+**Fix:** `gates.py` now prints per-arm **tool calls** and the **per-run value set**
+alongside the mean, and gate 4 reports the observed range so an unreachable
+threshold is visible in the same table that evaluates it.
+
+**Generalisation (the reusable half):** a pilot has two jobs and we assigned it one.
+*Is the number real* (validity) and *can the number move* (range) are independent
+questions. Range is the cheaper one — it needs no ground truth, only the spread of
+what came back — and checking it first would have preceded the leak-guard sweep, the
+null control and the mutation harness, all of which were built on top.
+
+**Status:** fixed-verified
+
+## W-13 — The arms separated on a metric we already logged and never reported
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-25, after establishing in F-12 that gate 4's F1 threshold was
+unreachable. Rather than accept the tie, checked what else the round-7 facts blocks
+already carried.
+
+**Pattern:** When a headline metric ties, enumerate every field the harness already
+records before concluding "no effect". Reporting is a choice made once, at
+instrument-build time, and it is rarely revisited; the discriminating dimension may
+already be on disk, unpaid-for.
+
+**Counterfactual:** the round-7 facts blocks carry `calls`, `prompt`, `output`,
+`cost_usd` and the full `tool_args` sequence. `gates.py` surfaced only `cost`. On
+the metric it *did* report, the two main arms **interleave**:
+
+| arm | F1 (per run) | recall | tool calls (per run) | cost / 2 runs |
+|---|---|---|---|---|
+| `hidden-cs` | 0.8000, 0.8276 | **1.0000** | **49, 43** | $0.7722 |
+| `hidden-native` | 0.8276, 0.8462 | 0.9584 | **12, 20** | $0.6020 |
+
+F1 `{0.800, 0.828}` against `{0.828, 0.846}` overlap — which is exactly why gate 4
+reads ΔF1 0.0231. Tool calls `{49, 43}` against `{12, 20}` **do not overlap at
+all**: ~2.9×, with cost 28% higher.
+
+**It is not a setup tax.** Tool-name census across both `hidden-cs` runs (92 calls):
+41 `references`, 33 `symbols`, 13 `grep`, 3 `tree`, 2 `ToolSearch` — schema loading
+and orientation are 5 of 92. Both `hidden-native` runs (32 calls): 23 `Bash`,
+9 `Read`. The difference is behavioural: **codescout's tools induce per-symbol graph
+walking; the shell induces batch sweeps.**
+
+**Read it charitably — it is a characterisation, not a verdict.** `hidden-cs` spent
+2.9× the calls and 28% more money and got the one truth site `hidden-native` missed
+(recall 1.0000 vs 0.9584). Exhaustive versus fast-approximate is a real and useful
+description of the two toolchains, and it is the first substantive thing this eval
+has produced.
+
+**Limits, stated because n is small:** n=2 per arm. The call-count ranges are
+disjoint and the ratio is large relative to spread, but two runs cannot establish a
+distribution. The recall difference is a single site in a single run. And by the
+operator's own stated preference the call cost may not matter at all —
+`WA:213`: *"I do not care if you take longer to come back to me with answers. I
+would rather have correct answers and findings than inaccurate and fast answers."*
+
+**Impact:** med — it does not rescue the eval's design (see W-12), but it converts a
+"no effect" reading into a measured behavioural difference at zero additional spend,
+and it is the change that made `gates.py` report calls.
+
+**Promote-when:** a second eval in this repo ties on its headline metric while a
+logged-but-unreported field separates. At two datapoints, promote to `eval-design`
+as "enumerate the recorded fields before accepting a null".
+
+**Status:** validated
 
 ## Template for new entries
 
