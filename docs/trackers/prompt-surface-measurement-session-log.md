@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 18
+entry_high_water_F: 20
 entry_high_water_W: 15
 entry_prefix:
 - F
@@ -46,6 +46,8 @@ surfaces, not the definition.
 | F-16 | The plan put the leak sweep in the wrong file; following it would have dropped the anti-oracle guard and reported green | fixed-verified |
 | F-17 | New fixture files were invisible to the reserved-path set, so filler could silently overwrite a dependent | fixed-verified |
 | F-18 | The plan named two constants and a CLI flag the file it points at does not have | fixed-verified |
+| F-19 | The eval's guard apparatus is unenforced — no collection, no CI, and a permanent red makes "all green" inexpressible | open |
+| F-20 | Four times in one task, a commit asserted in prose what it measured otherwise in code — one of them from a controller ruling | open |
 
 ## Wins Index
 
@@ -1579,6 +1581,133 @@ about signatures; this one is about *protocols between passes*.
 
 **Status:** validated — three findings, ruled and carried into the Task 1 dispatch before
 any subagent ran.
+
+## F-19 — The eval's entire guard apparatus is unenforced — three independent facts compound so that no gate can ever be attached
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, out-of-scope observation from the opus re-review of Task 2's fix
+round 1 on the blast-radius eval. Surfaced while verifying that the round's new guards
+could actually fail.
+
+**When:** After a round whose entire deliverable was falsifiability — pinning every
+calibration bar and giving the leak sweep a positive control.
+
+**Expected:** That a suite of guards, once written and green, protects the fixture against
+regression the way any test suite does.
+
+**Got (three facts that compound, each measured):**
+
+1. `prompt-engineering:pyproject.toml:36` sets `testpaths = ["tests"]`, so a bare `pytest`
+   collects **zero** scenario tests — 408 of 408 node ids under `tests/`
+   ([[F-13]], measured 2026-08-25).
+2. The repo has **no `.github/` directory**, so nothing runs `scenarios/` in CI at all.
+3. `scenarios/blast-radius/` deliberately carries a **permanently-failing** test
+   (`test_every_dependent_changes_when_the_defect_is_fixed`, awaiting Task 3's `golden.py`;
+   a second, `test_no_bar_sits_above_the_lift_ceiling`, was also red for a round). So even
+   if someone attached a gate, **green is never the expected state** and the gate could not
+   be written as "exit 0".
+
+And separately, running the two scenario suites together fails: `pytest scenarios/` yields
+**21 failures** — the whole of `blast-radius/test_fixture.py` — because
+`gen_fixture` / `test_fixture` / `null_control` are ambiguous module names and each
+scenario's `conftest.py` puts its own directory on `sys.path`. Measured 2026-08-26:
+`21 failed, 301 passed in 16.74s`. Collection itself is clean (353 collected), so this is a
+runtime resolution failure, not a collection error.
+
+**Probable cause:** the scenario directories were built as *instruments run by hand during
+an eval*, not as a test suite. Every convention that makes a suite enforceable — a
+collectable path, a CI job, an all-green invariant, unambiguous module names — was
+therefore never established, and each subsequent scenario inherited the gap.
+
+**The shape worth naming:** the re-review put it precisely — *"every guard this round added
+is enforced only when a human explicitly targets the directory and reads which tests are
+red — the same 'a print no test reads' shape that I1 was filed against, one level up."*
+Finding I1 was that `null_control.py` printed a drift detector no test consumed. The repair
+was to make tests consume it. But the tests themselves are consumed by nobody.
+
+**Severity:** high — not because anything is broken today, but because the entire
+investment in this eval's trustworthiness is uncollected. The fixture's anti-oracle
+guarantees, the 4/4/4 partition, the re-derived calibration and the falsifiability layer
+are all real and all verified once, at the moment they were written. Nothing re-checks them
+when the tree changes — and the tree has already changed three times under them
+(188 → 206 → 250 `.py` files), each time silently invalidating any bar that was not
+re-derived.
+
+**Status:** open — deliberately not fixed inside the SDD run. It is repo-level work, and
+folding it into a task whose acceptance criterion is a red test would have been incoherent.
+
+**Fix idea / Pointer:** three separable pieces, in dependency order. (1) Disambiguate the
+module names or load scenario modules by path rather than by `sys.path` insertion — this
+one is a genuine bug and blocks the other two. (2) Replace the permanent-red convention
+with a marker (`@pytest.mark.awaiting_task3`) and a deselect, so "all green" becomes
+expressible. (3) Add a CI job over `scenarios/` once (1) and (2) hold. Pairs with [[F-13]],
+which found the collection half of the same gap; this entry is what makes it consequential
+rather than merely inconvenient.
+
+## F-20 — Three rounds running, a commit asserted in prose what it measured otherwise in code — measured facts and derived claims have no connecting gate
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, diagnosed by the Task 2b implementer at the end of its second fix
+round on the blast-radius eval, after the third consecutive review found the same shape.
+
+**When:** Building a measurement instrument whose credibility rests on documented numbers —
+calibration bars, worst-survivor tables, partition claims.
+
+**The pattern, in its own words:** *"measured facts live in test output, derived claims live
+in docstrings, nothing connects them."*
+
+**Got — four instances, all in one task, none caught by a gate:**
+
+1. `_is_leak`'s docstring said *"LIFT_BAR[3] sits ABOVE the lift ceiling of 34.33, so the
+   k=3 clause cannot fire at all"* — in the documentation of the one function the entire
+   guard turns on, after the task had moved the ceiling to 20.83 and the bar to 10.5. It
+   told the next re-deriver the exact belief the task was commissioned to refute.
+2. The generator's module docstring declared *"a MEASURED 2/2/2 partition"* while the test
+   it named as its keeper asserted 4/4/4 — in a sentence whose own point was that a stale
+   comment is what tests exist to prevent.
+3. The liveness docstring argued for a `MAX_NEAR_DEGENERATE` population clause the same
+   commit had deleted, contradicting an in-body comment forty lines below, so the function
+   carried two mutually exclusive accounts of its own band.
+4. The form-pair passage asserted *"every form-pair OR sits precisely ON the recall floor"*
+   while the same commit's `EXCLUSIVE_AMONG_DEPENDENTS` comment, 150 lines away, recorded
+   two forms at 9 of 12 and 6 of 12. Measured distribution over 15 pairs:
+   `{4: 6, 6: 1, 7: 1, 8: 2, 9: 2, 10: 2, 12: 1}`. **This one originated in a controller
+   ruling** — see the cost note below.
+
+Also: five stale `n=6` prose sites survived a round *dedicated* to fixing seventeen of them,
+two of which contradicted text that same commit had written; and `calls getattr` was
+documented as "65 files, 4 of 6, the worst single predicate" when it was 86 files, 6 of 12,
+and no longer the worst.
+
+**Probable cause:** the numbers in these docstrings were true when written and are derived
+from a tree that moves. This fixture's `.py` count went 188 → 206 → 250 across three tasks,
+and every derived figure silently expired at each step. Nothing re-reads a docstring; the
+tests that *could* falsify these claims compute their own values and never compare.
+
+**Severity:** high — for an instrument, the documentation is part of the deliverable. Every
+one of these told a future re-deriver something false about how the guard works, and the
+one in `_is_leak` would have propagated the retired conclusion into the next calibration.
+The reviews caught all four, but a review is a person reading, which is precisely the
+enforcement model [[F-19]] shows is absent here.
+
+**The controller-ruling instance is the sharpest.** Instance 4 entered the code because
+*I* asserted it in a fix dispatch, confusing declared carriers with tree matches. The
+implementer had no reason to re-measure a premise handed down as settled, so it wrote the
+false claim into the instrument faithfully. **A controller ruling is a claim and needs the
+same gate as code** — it should carry its measurement or be marked as unverified.
+
+**Status:** open — the repair is proposed and deliberately deferred, not dropped.
+
+**Fix idea / Pointer:** the implementer's own proposal, which it asked to have scoped
+rather than bolted on: regex the survivor tables out of `_is_leak`'s and the family guard's
+docstrings and compare them against a live sweep, the way `null-control-n12.txt` is now
+parsed and compared against `NULL_P90` (that one *was* fixed this way and works). Deferred
+in the SDD ledger to after the pilot, because the pilot may invalidate the design outright
+— as round 7 did for the sibling eval — in which case those docstrings are rewritten
+anyway. Pairs with [[F-19]]: this is the same enforcement gap one level down, where
+[[F-19]] is *tests* nothing runs and this is *numbers* nothing checks.
 
 ## Template for new entries
 
