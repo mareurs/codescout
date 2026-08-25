@@ -609,27 +609,44 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let base_filter = merge_kind_status(a.filter, a.kind.as_deref(), a.status.as_deref());
 
     // Build augmented pre-filter if requested, then merge with user filter.
+    //
+    // `augmented=true` with nothing augmented ANYWHERE cannot be expressed as a
+    // filter — `compile()` and `eval()` both reject an empty `in` list
+    // (filter.rs::eval_and_compile_both_reject_empty_in) — so the rows are forced
+    // empty further down instead. Deliberately NOT an early return: a bare
+    // `{count: 0, scope: null, hints: {}}` reads identically whether nothing is
+    // augmented, the scope resolved to another project, or this session opened a
+    // different catalog file. Augmentation lives only in the catalog DB — no on-disk
+    // form, not rebuildable by reindex — so that ambiguity is the difference between
+    // "nothing to see" and "data loss". Falling through preserves the scope block,
+    // the hints, and the catalog counts that tell those apart.
+    // docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+    let mut no_augmentations_anywhere = false;
+    let mut augmented_in_catalog: Option<usize> = None;
     let user_filter: Option<FilterNode> = if let Some(want_augmented) = a.augmented {
         let ids = {
             let cat = ctx.catalog.lock();
             augmentation::list_all_ids(&cat)?
         };
         if want_augmented {
+            augmented_in_catalog = Some(ids.len());
             if ids.is_empty() {
-                return Ok(json!({"count": 0, "items": [], "scope": Value::Null, "hints": {}}));
+                no_augmentations_anywhere = true;
+                base_filter
+            } else {
+                let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
+                let in_node = FilterNode::Leaf(
+                    [("id".to_string(), json!({"in": id_values}))]
+                        .into_iter()
+                        .collect(),
+                );
+                Some(match base_filter {
+                    Some(f) => FilterNode::And {
+                        and: vec![f, in_node],
+                    },
+                    None => in_node,
+                })
             }
-            let id_values: Vec<Value> = ids.into_iter().map(|id| json!(id)).collect();
-            let in_node = FilterNode::Leaf(
-                [("id".to_string(), json!({"in": id_values}))]
-                    .into_iter()
-                    .collect(),
-            );
-            Some(match base_filter {
-                Some(f) => FilterNode::And {
-                    and: vec![f, in_node],
-                },
-                None => in_node,
-            })
         } else if ids.is_empty() {
             // Nothing is augmented → "non-augmented" = everything; base filter unchanged.
             base_filter
@@ -726,7 +743,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let (items, hints, catalog_value) = {
         let cat = ctx.catalog.lock();
 
-        let catalog_value: Option<serde_json::Value> = if is_cold_call {
+        // Also on the empty-augmentation path: `total` is what distinguishes a
+        // populated catalog that genuinely holds no augmentations from an empty or
+        // unexpected one, and it is the reader's cheapest substrate check.
+        let catalog_value: Option<serde_json::Value> = if is_cold_call || no_augmentations_anywhere
+        {
             let summary = catalog_summary(&cat, scoped_filter.as_ref(), cutoff_ms)?;
             Some(serde_json::json!({
                 "total": summary.total,
@@ -737,17 +758,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             None
         };
 
-        let rows = match semantic_rows {
-            Some(r) => r,
-            None => find(
-                &cat,
-                &FindOpts {
-                    filter: scoped_filter,
-                    limit,
-                    offset,
-                },
-                cutoff_ms,
-            )?,
+        let rows = if no_augmentations_anywhere {
+            // The "match nothing" filter the engine refuses to compile, applied here
+            // instead. Everything downstream — scope, hints, catalog — still runs.
+            Vec::new()
+        } else {
+            match semantic_rows {
+                Some(r) => r,
+                None => find(
+                    &cat,
+                    &FindOpts {
+                        filter: scoped_filter,
+                        limit,
+                        offset,
+                    },
+                    cutoff_ms,
+                )?,
+            }
         };
 
         // Overlay dedup: a worktree session sees its shadow INSTEAD of the main
@@ -859,6 +886,38 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     });
     if let Some(cat_val) = catalog_value {
         response["catalog"] = cat_val;
+    }
+    // `augmented=true` matched nothing, but the catalog DOES hold augmentations —
+    // they are simply outside the filter or the scope. Say the count out loud: it is
+    // the single fact that separates "these were destroyed" from "you are not looking
+    // where they live", and without it a zero here is indistinguishable from loss.
+    // On 2026-08-23 this exact shape — count 0 with a populated scope block — was read
+    // as repo-wide augmentation loss and filed high-severity; the rows had been present
+    // since 2026-07-05 throughout.
+    // docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+    if let Some(total) = augmented_in_catalog {
+        if total > 0 && response["count"] == 0 {
+            response["hints"]["augmented_present_but_out_of_scope"] = serde_json::json!({
+                "augmented_in_catalog": total,
+                "note": format!(
+                    "This catalog holds {total} augmented artifact(s) — none matched this \
+                     query. That is a filter/scope result, NOT evidence that augmentations \
+                     were lost. Reconcile the `scope` block above against the project you \
+                     meant, and widen with scope=\"repo\"/\"umbrella\" before concluding loss."
+                ),
+            });
+        }
+    }
+    if no_augmentations_anywhere {
+        response["hints"]["augmented_zero_is_catalog_wide"] = serde_json::json!({
+            "note": "No artifact in this catalog carries an augmentation, at any scope — \
+                     so this zero is catalog-wide, not a limit of the scope you queried.",
+            "before_concluding_loss": "Augmentation lives only in the catalog DB and has no \
+                     on-disk form, so reindex cannot rebuild it — and a zero here looks the \
+                     same whether augmentations were destroyed or this session simply opened \
+                     a different catalog file. Read `catalog.total` and the `scope` block \
+                     above to tell those apart before reporting data loss.",
+        });
     }
     // Two independent repairs can fire, and each needs its own explanation — a lift
     // reported under the inverted-leaf hint would tell the caller to fix a shape they
@@ -1609,6 +1668,90 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], "aug");
     }
+
+    #[tokio::test]
+    async fn augmented_true_with_no_augmentations_still_reports_scope_and_catalog() {
+        // A zero from `augmented=true` used to short-circuit to
+        // `{count: 0, items: [], scope: null, hints: {}}` — stripping every diagnostic
+        // that separates "nothing is augmented" from "this session resolved another
+        // project's scope" or "this session opened a different catalog file", from
+        // exactly the one response that needed them. On 2026-08-23 that bare zero was
+        // read as repo-wide augmentation loss and filed high-severity with an
+        // "Established" root cause; the catalog's own created_at/updated_at columns
+        // later showed all 21 rows present throughout.
+        // docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("plain", "Plain")).unwrap();
+        artifact::upsert(&cat, &sample_row("other", "Other")).unwrap();
+        let ctx = mk_ctx(cat);
+
+        let result = call(&ctx, json!({"augmented": true})).await.unwrap();
+
+        assert_eq!(result["count"], 0, "nothing is augmented, so no rows");
+        assert!(
+            !result["scope"].is_null(),
+            "the scope block must survive the empty-augmentation path — it is what \
+             tells the caller WHICH world the zero describes: {result}"
+        );
+        assert_eq!(
+            result["catalog"]["total"], 2,
+            "catalog counts must ride along, so a populated catalog with no \
+             augmentations is distinguishable from an empty or wrong one: {result}"
+        );
+        assert!(
+            !result["hints"]["augmented_zero_is_catalog_wide"].is_null(),
+            "the zero must declare itself catalog-wide rather than scope-limited: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn augmented_zero_says_how_many_augmentations_the_catalog_holds() {
+        // The shape the 2026-08-23 incident actually hit: `augmented=true` matched
+        // nothing, the scope block WAS populated, and the zero was still read as
+        // repo-wide loss. A zero that does not say "N exist, none here" cannot be
+        // told apart from a zero that means "none exist anywhere" — and the rows in
+        // question had been present since 2026-07-05.
+        // docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+        use crate::librarian::catalog::augmentation::{self, AugmentationRow};
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut spec = sample_row("aug-spec", "Augmented spec");
+        spec.kind = "spec".to_string();
+        artifact::upsert(&cat, &spec).unwrap();
+        augmentation::upsert(
+            &cat,
+            &AugmentationRow {
+                artifact_id: "aug-spec".to_string(),
+                prompt: "p".to_string(),
+                params: "{}".to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: None,
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+        let ctx = mk_ctx(cat);
+
+        // Augmented, but excluded by the kind filter — the "not where you looked" case.
+        let result = call(&ctx, json!({"augmented": true, "kind": "tracker"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result["count"], 0, "no augmented *tracker* exists");
+        let hint = &result["hints"]["augmented_present_but_out_of_scope"];
+        assert_eq!(
+            hint["augmented_in_catalog"], 1,
+            "the zero must carry the catalog-wide augmentation count, which is what \
+             separates 'excluded by this query' from 'destroyed': {result}"
+        );
+    }
+
     #[tokio::test]
     async fn result_rows_surface_entry_collection_for_augmented_artifacts() {
         // The bug this pins: nothing in a `find` result says whether a tracker takes
