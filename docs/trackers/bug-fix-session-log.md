@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 59
+entry_high_water_F: 60
 entry_high_water_W: 49
 ---
 
@@ -110,6 +110,7 @@ entry_high_water_W: 49
 | F-57 | 2026-08-21 | med | process | mitigated | A concurrent Claude Code session's own commit swept up this session's uncommitted `resolver.rs`/`severity.rs` edits under an unrelated spec-work message — content verified intact, but no single clean commit exists to cite as the fix; same class as F-54 |
 | F-58 | 2026-08-21 | low | plan-prose | mitigated | A same-day concurrent commit made a bug's own prescribed fix wrong before I got to it — `link_scan` gained a real `entry_cite` write path mid-day, inverting the bug's root cause |
 | F-59 | 2026-08-25 | med | codescout-tool | fixed-verified | A filed bug's own root cause was wrong ("desktop-only remote host"); reproduction found a stale global symlink instead |
+| F-60 | 2026-08-25 | low | cross-session | mitigated | Even after ListAgents/SendMessage coordination, a peer's routine commit silently absorbed this session's uncommitted append_entry writes |
 
 ## Wins Index
 
@@ -4340,6 +4341,28 @@ session hazard (commits landing under me) this session already hit twice.
 **Status:** validated
 
 ---
+
+## F-60 — Even after ListAgents/SendMessage coordination, a peer's routine commit silently absorbed this session's uncommitted append_entry writes
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-25, immediately after resuming from context compaction, while verifying the F-59/W-49 commit (`1e5069d0`) this session made minutes earlier.
+
+**When:** `git show --stat 1e5069d0` reported only 2 insertions — far too few for two full prose entries — prompting a `git log -S "## F-59"` search across the file's history.
+
+**Expected:** The F-59/W-49 entry bodies (47 lines including the frontmatter high-water bump) to be committed under `1e5069d0`, the commit this session authored specifically for them.
+
+**Got:** They were already committed one commit earlier, under `a468e69d` — a peer session's commit titled "F-10 — Task 3's veto keys on a per-arm env var run_arms.py cannot set", touching this file *and* `prompt-surface-measurement-session-log.md` (the peer's actual, unrelated F-10 entry). The peer's own `git add`/`commit -a` swept up this session's already-on-disk-but-unstaged `append_entry` write before this session got to stage and commit it. `1e5069d0` then carried only the two Index/Wins-Index table rows added afterward.
+
+**Probable cause:** `append_entry` writes straight to the file on disk, bypassing git staging. The [[F-59]]/W-49 coordination check (ListAgents/SendMessage before committing) only guards against *this* session committing *someone else's* uncommitted work — it does nothing to stop a peer's own routine commit from staging a directory or running `commit -a` and incidentally absorbing *this* session's unstaged edits to a shared file. Both sessions operate on one working tree, not isolated worktrees.
+
+**Workaround:** `git add <specific file>` and commit immediately after any `append_entry`/`edit_markdown` write to a shared tracker, instead of batching several tracker edits before committing — the batching window is exactly what let the peer's commit land first.
+
+**Severity:** low — no content was lost or corrupted; both entries are intact and correctly formatted. The only casualty is provenance: `git log`/`git blame` on the F-59/W-49 section now points to a commit message about an unrelated topic, breaking the "commit message names the entry" convention this file's own entries otherwise rely on for traceability.
+
+**Fix idea / Pointer:** Commit each tracker append immediately rather than batching; a stronger structural fix (session-scoped worktrees) is out of scope for this session — see `docs/RELEASE.md` § Concurrent-Work Rules.
+
+**Status:** mitigated
 
 ## Template for new entries
 
