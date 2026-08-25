@@ -1773,6 +1773,20 @@ fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBacked
 /// inside a section heading, and defines nothing. Every real break found there was a
 /// self-citation, so excluding them would have reported the ledger as clean.
 ///
+/// **Known hazard, measured and accepted for now.** `extract()` cannot distinguish a real
+/// citation from a documentation example of citation syntax — the same root cause
+/// `link_scan`'s own report was fixed for in
+/// `docs/issues/archive/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md`.
+/// That fix added a per-source breakdown to `link_scan`'s report only; this function feeds
+/// `entry_without_definition` from the same extractor with no equivalent mitigation —
+/// `docs/issues/2026-08-21-doctor-cited-uncited-partition-inherits-doc-example-defect.md`.
+/// Measured 2026-08-25 across the full machine-wide catalog: zero live findings are actually
+/// affected — the one current `entry_without_definition` violation
+/// (`provenance-subsystem.md`, 33 cited / 9 uncited) was independently hand-verified as
+/// accurate, not example-inflated. Revisit if a future violation's cited count looks
+/// suspicious against its source's actual prose, rather than pre-emptively widening this
+/// function's return type for a problem with no measured victim yet.
+///
 /// Extraction is deliberately dumb — `UTF-8` and `SHA-256` arrive as entry tokens — which
 /// costs nothing here, because the result is only ever intersected against ids a ledger
 /// actually claims.
