@@ -716,6 +716,46 @@ the alias half is fixed and archived in `db76f69a`, the `command` half is target
 decision),
 `docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md`
 (30.9% of rows mis-attributed).
+### T-27 — `grep -n` on a `@tool_*` buffer numbers the buffer, not the source
+
+**Tool:** `grep -n` on a `@tool_*` buffer · **Verdict:** wrong-tool
+
+**Valid:** invariant
+
+**What happened.** Scouting `surface_lib.py` before dispatching Task 3 of the
+hidden-information eval, I ran `symbols(path=..., include_body=true)`. The result
+overflowed into buffer `@tool_37834a1f`, so I followed with `grep -n "def " @tool_37834a1f`
+to locate the functions — and read the returned line numbers as source lines. They are
+offsets into the buffered JSON document. I briefed a subagent that `run()` was at
+`surface_lib.py:427`, `collect_facts()` at `:221` and `log_run()` at `:371`. The file is
+**203 lines**; the real definitions are at 181, 97 and 151.
+
+**Why it is a trap rather than mere carelessness.** A `symbols` response carries *both*
+kinds of number, in the same payload, formatted alike. Its summary lists true source
+ranges as data — `Function 40-41 _response_raw`, `Function 44-53 split_facts` — while a
+`grep -n` over the buffer holding that same response yields document offsets. Nothing
+labels which is which. And one coincidence made the wrong set look independently
+confirmed: `split_facts` genuinely is at source 44–53, and the buffer grep also reported
+line 53 for it. A spot-check on the first hit would have passed.
+
+**Cost, and why it was not worse.** Zero code impact. Every *behavioural* claim in the
+brief — what `run()` does with the facts dict, that `log_run` formats five keys outside
+the try/except, that `run_arms.py` builds one env for all arms — was read from bodies and
+was correct. The implementer verified the citations against source, found the three bad
+line numbers, and reported them rather than quietly adapting. That is the behaviour the
+dispatch brief asked for, and it is the only reason this is an anecdote instead of a
+finding.
+
+**The rule.** Buffers are for retrieving content the summary elided — never for locating
+it. To place a symbol, read the range `symbols` already returned, or `grep -n` the source
+file. Positional metadata belongs to whatever artifact you numbered.
+
+**Generalises past `symbols`.** Any tool whose output embeds positions — a diff with
+`@@` hunks, a compiler log, a test report — has the same two coordinate systems inside one
+buffer. This is the same error class as reading a measurement off a working tree with a
+live mutation in it (`prompt-surface-measurement-session-log:W-5`): a number that is real,
+from a surface that is not the one the claim is about.
+
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
