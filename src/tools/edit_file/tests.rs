@@ -573,15 +573,33 @@ async fn read_file_buffer_ref_range_auto_chunks() {
     );
     // Must have a next command
     let next = result["next"].as_str().expect("should have next command");
-    // next should reference the file_id and use sub-buffer-relative line numbers
     assert!(
         next.contains("start_line="),
         "next should include start_line; got: {next}"
     );
-    let file_id = result["file_id"].as_str().expect("should have file_id");
+
+    // The slice is still parked under its own handle — that is what keeps this
+    // response small enough to escape a `@tool_*` re-wrap (BUG-026) and keeps the
+    // slice greppable.
     assert!(
-        next.contains(file_id),
-        "next should reference file_id; got: {next}"
+        result["file_id"].as_str().is_some(),
+        "the oversized slice should still be buffered; got: {result}"
+    );
+
+    // But `next` continues against the ORIGINAL ref, in the line numbers
+    // `shown_lines` reports. This test reads from line 1, where the ref's frame
+    // and the slice's own 1-based frame coincide — which is why it did not catch
+    // bug 2026-08-25-run-command-nested-buffer-recursion, where a mid-range read
+    // reported `shown_lines: [13, 20]` alongside `next: start_line=9`.
+    assert!(
+        next.contains(&buf_id),
+        "next should continue against the original ref {buf_id}; got: {next}"
+    );
+    let shown_end = result["shown_lines"][1].as_u64().expect("shown_lines[1]");
+    assert!(
+        next.contains(&format!("start_line={}", shown_end + 1)),
+        "next must resume at shown_lines[1] + 1 = {}; got: {next}",
+        shown_end + 1
     );
 }
 

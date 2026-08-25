@@ -279,6 +279,7 @@ fn read_markdown_single_heading(
 /// Line-range read: validate the 1-indexed range, extract the slice, and either
 /// return it (+ coverage) or buffer + paginate when oversized.
 fn read_markdown_line_range(
+    path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
     ctx: &ToolContext,
@@ -296,19 +297,19 @@ fn read_markdown_line_range(
         )
         .into());
     }
-    let content_total = text.lines().count();
-    if (start as usize) > content_total {
+    let file_total_lines = text.lines().count();
+    if (start as usize) > file_total_lines {
         return Err(RecoverableError::with_hint(
             format!(
                 "start_line {} exceeds file length {}",
-                start, content_total
+                start, file_total_lines
             ),
             format!(
                 "valid range is 1..={}; use read_markdown(path, start_line=N, end_line=M) within bounds",
-                content_total
+                file_total_lines
             ),
         )
-        .with_extra("lines", serde_json::json!(content_total))
+        .with_extra("lines", serde_json::json!(file_total_lines))
         .into());
     }
     let content = extract_lines(text, start as usize, end as usize);
@@ -323,11 +324,14 @@ fn read_markdown_line_range(
 
     // Buffer large extracts
     if crate::tools::exceeds_inline_limit(&content) {
-        let content_total = content.lines().count();
         let file_id = ctx
             .output_buffer
             .store_file(resolved.to_string_lossy().to_string(), content.clone());
-        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
+        // Budget on the ESCAPED size: this chunk is returned inline as JSON and
+        // measured against TOOL_OUTPUT_BUFFER_THRESHOLD after serialization, so a
+        // raw-byte budget lets a line-dense extract overshoot and get re-wrapped
+        // as a `@tool_*` envelope.
+        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
             &content,
             1,
             usize::MAX,
@@ -338,16 +342,17 @@ fn read_markdown_line_range(
         let mut result = json!({
             "content": chunk,
             "file_id": file_id,
-            "total_lines": content_total,
+            "total_lines": file_total_lines,
             "shown_lines": [orig_start, orig_end],
             "complete": complete,
         });
         if !complete {
-            let buf_next_start = lines_shown + 1;
-            let buf_next_end = (buf_next_start + lines_shown - 1).min(content_total);
+            // Continue against the file, in the line numbers `shown_lines` just
+            // reported. Phrasing `next` in the slice buffer's own 1-based frame
+            // is off by `start - 1` and re-serves lines the caller has seen.
             result["next"] = json!(format!(
-                "read_markdown(\"{file_id}\", start_line={buf_next_start}, \
-                 end_line={buf_next_end})"
+                "read_markdown(\"{path}\", start_line={}, end_line={end})",
+                orig_end + 1
             ));
         }
         if let Some(c) = md_cov {
@@ -548,7 +553,7 @@ impl Tool for ReadMarkdown {
             return read_markdown_single_heading(&text, &resolved, ctx, heading_query);
         }
         if let (Some(start), Some(end)) = (start_line, end_line) {
-            return read_markdown_line_range(&text, &resolved, ctx, start, end);
+            return read_markdown_line_range(path, &text, &resolved, ctx, start, end);
         }
         read_markdown_default_tiers(&text, &resolved, ctx)
     }

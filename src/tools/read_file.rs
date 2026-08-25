@@ -189,8 +189,10 @@ fn strip_buffer_ref_quotes(path: &str) -> &str {
 /// Read from an output buffer ref (`@file_*`, `@cmd_*`, `@tool_*`).
 ///
 /// Handles json_path navigation for `@tool_*` refs and line-range slicing.
-/// Never re-buffers — returns inline or, for oversized content, paginates
-/// via `shown_lines` / `next`.
+/// Never re-wraps its own result in a `@tool_*` envelope: oversized content is
+/// paginated via `shown_lines` / `next`, both stated in the ref's own line
+/// numbers, with the slice parked under a `@file_*` handle so it stays
+/// greppable.
 fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Value> {
     let raw = ctx
         .output_buffer
@@ -293,11 +295,20 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         }
         let content = extract_lines(&text, s as usize, e as usize);
         if crate::tools::exceeds_inline_limit(&content) {
-            let content_total = content.lines().count();
+            // The slice is still stored under its own handle: that keeps it
+            // greppable, and it keeps THIS response small enough that
+            // `call_content()` will not re-wrap it in a `@tool_*` envelope
+            // (BUG-026, archived 2026-03-15).
+            //
+            // Navigation, though, continues against the ORIGINAL ref. `shown_lines`
+            // and `total_lines` are that buffer's line numbers, so a `next` phrased
+            // in the slice's own 1-based frame is off by `s - 1` and sends the
+            // caller back over lines it has already seen — on a fresh handle each
+            // time, which is what made these chains look like they never converged.
             let file_id = ctx
                 .output_buffer
                 .store_file(format!("{}[{}-{}]", path, s, e), content.clone());
-            let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
+            let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
                 &content,
                 1,
                 usize::MAX,
@@ -308,15 +319,17 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             let mut result = json!({
                 "content": chunk,
                 "file_id": file_id,
-                "total_lines": content_total,
+                "total_lines": total_lines,
                 "shown_lines": [orig_start, orig_end],
                 "complete": complete,
             });
             if !complete {
-                let buf_next_start = lines_shown + 1;
-                let buf_next_end = (buf_next_start + lines_shown - 1).min(content_total);
+                // `complete == false` means the budget stopped us short of `e`, and
+                // the safety valve in `extract_lines_with_cost` always yields at
+                // least one line — so this strictly advances and terminates.
                 result["next"] = json!(format!(
-                    "read_file(\"{file_id}\", start_line={buf_next_start}, end_line={buf_next_end})"
+                    "read_file(\"{path}\", start_line={}, end_line={e})",
+                    orig_end + 1
                 ));
             }
             return Ok(result);
@@ -326,7 +339,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
 
     // Full buffer: paginate if over the inline limit. Never re-buffer.
     if crate::tools::exceeds_inline_limit(&text) {
-        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
+        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
             &text,
             1,
             usize::MAX,
@@ -649,11 +662,10 @@ fn read_with_line_range(
     // Proactive buffering: oversized extracted ranges are stored as @file_* refs
     // so callers can navigate by line number (BUG-025 class).
     if crate::tools::exceeds_inline_limit(&content) {
-        let content_total = content.lines().count();
         let file_id = ctx
             .output_buffer
             .store_file(resolved.to_string_lossy().to_string(), content.clone());
-        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_budget(
+        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
             &content,
             1,
             usize::MAX,
@@ -664,15 +676,30 @@ fn read_with_line_range(
         let mut result = json!({
             "content": chunk,
             "file_id": file_id,
-            "total_lines": content_total,
+            "total_lines": file_total_lines,
             "shown_lines": [orig_start, orig_end],
             "complete": complete,
         });
         if !complete {
-            let buf_next_start = lines_shown + 1;
-            let buf_next_end = (buf_next_start + lines_shown - 1).min(content_total);
+            // Continue against the file itself, in the same line numbers
+            // `shown_lines` just reported — a `next` phrased in the slice buffer's
+            // own 1-based frame is off by `start - 1` and re-serves seen lines.
+            //
+            // A continuation is a SUBrange of a range the overlap gate already
+            // allowed, so it cannot newly trip that gate — with one exception: the
+            // head-read exemption turns on `start == 1`, which a follow-up no
+            // longer satisfies. Carry `force=true` on source files so the call we
+            // hand back is one the caller can actually make.
+            let force_arg = if crate::tools::file_summary::detect_file_type(path)
+                == crate::tools::file_summary::FileSummaryType::Source
+            {
+                ", force=true"
+            } else {
+                ""
+            };
             result["next"] = json!(format!(
-                "read_file(\"{file_id}\", start_line={buf_next_start}, end_line={buf_next_end})"
+                "read_file(\"{path}\", start_line={}, end_line={end}{force_arg})",
+                orig_end + 1
             ));
         }
         if source_tag != "project" {
@@ -1597,6 +1624,171 @@ mod tests {
             "window should start at start_line (line 100), got: {body:?}"
         );
     }
+
+    /// Bug 2026-08-25-run-command-nested-buffer-recursion: an oversized
+    /// mid-range slice reported `shown_lines` in the ORIGINAL buffer's frame
+    /// but emitted `next` in the freshly-minted `@file_*` slice's own 1-based
+    /// frame. The two differ by `start - 1`, so following `next` re-read
+    /// already-seen lines and minted yet another handle every time — the
+    /// "chain that never converges" in the report.
+    ///
+    /// The contract is pinned by `format_read_file_auto_chunked_mid_file`:
+    /// `next.start_line == shown_lines[1] + 1`, both in one frame.
+    #[tokio::test]
+    async fn read_file_buffer_oversized_slice_next_continues_from_shown_lines() {
+        let lines: Vec<String> = (1..=40)
+            .map(|i| format!("line {i:04} {}", "x".repeat(900)))
+            .collect();
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", lines.join("\n"));
+
+        let result = ReadFile
+            .call(
+                json!({ "path": &buf_id, "start_line": 13, "end_line": 24 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let shown = result["shown_lines"]
+            .as_array()
+            .unwrap_or_else(|| panic!("oversized slice must paginate, got: {result}"));
+        assert_eq!(
+            shown[0].as_u64().unwrap(),
+            13,
+            "shown_lines must start at the requested line, got: {result}"
+        );
+        let shown_end = shown[1].as_u64().unwrap();
+        let next = result["next"]
+            .as_str()
+            .unwrap_or_else(|| panic!("an incomplete read must offer next, got: {result}"));
+        assert!(
+            next.contains(&format!("start_line={}", shown_end + 1)),
+            "next must resume at shown_lines[1] + 1 = {}, got: {next}",
+            shown_end + 1
+        );
+        assert!(
+            next.contains(&buf_id),
+            "next must address the original buffer {buf_id}, not a fresh handle: {next}"
+        );
+        assert_eq!(
+            result["total_lines"].as_u64().unwrap(),
+            40,
+            "total_lines must be the buffer's total, so shown_lines reads against it: {result}"
+        );
+    }
+
+    /// The same defect on the real-file path (`read_with_line_range`), which
+    /// carries a byte-identical copy of the oversized-slice block.
+    #[tokio::test]
+    async fn read_file_oversized_range_next_continues_from_shown_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.txt");
+        let lines: Vec<String> = (1..=40)
+            .map(|i| format!("line {i:04} {}", "x".repeat(900)))
+            .collect();
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        let ctx = test_ctx().await;
+
+        let result = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "start_line": 13, "end_line": 24 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let shown = result["shown_lines"]
+            .as_array()
+            .unwrap_or_else(|| panic!("oversized range must paginate, got: {result}"));
+        assert_eq!(
+            shown[0].as_u64().unwrap(),
+            13,
+            "shown_lines must start at the requested line, got: {result}"
+        );
+        let shown_end = shown[1].as_u64().unwrap();
+        let next = result["next"]
+            .as_str()
+            .unwrap_or_else(|| panic!("an incomplete read must offer next, got: {result}"));
+        assert!(
+            next.contains(&format!("start_line={}", shown_end + 1)),
+            "next must resume at shown_lines[1] + 1 = {}, got: {next}",
+            shown_end + 1
+        );
+        assert_eq!(
+            result["total_lines"].as_u64().unwrap(),
+            40,
+            "total_lines must be the file's total, so shown_lines reads against it: {result}"
+        );
+    }
+
+    /// Bug 2026-08-25-run-command-nested-buffer-recursion, second mechanism —
+    /// the one that produces the "recurses into meta-wrappers" headline.
+    ///
+    /// `INLINE_BYTE_BUDGET` caps the RAW chunk at 90% of
+    /// `TOOL_OUTPUT_BUFFER_THRESHOLD`, but the threshold that decides whether
+    /// `call_content` re-wraps a response applies to the SERIALIZED JSON.
+    /// Inside a JSON string every `\n` costs two bytes, so the per-line
+    /// escaping charge scales with line count and eats the whole 10% of
+    /// headroom the constant's doc comment budgets for key names.
+    ///
+    /// Measured 2026-08-25 against the live server: a 1200-line buffer read
+    /// as one range produced `buffered_bytes: 10169` — the caller got a
+    /// `@tool_*` envelope instead of their lines, and its hint sent them to
+    /// `json_path="$.content"`, which peels to another `@file_*`, which
+    /// slices to another `@tool_*`. That is the reported chain.
+    #[tokio::test]
+    async fn read_file_buffer_range_chunk_fits_the_threshold_it_is_measured_against() {
+        let lines: Vec<String> = (1..=1200).map(|i| format!("ln {i:05}")).collect();
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", lines.join("\n"));
+
+        let result = ReadFile
+            .call(
+                json!({ "path": &buf_id, "start_line": 1, "end_line": 1200 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let serialized = serde_json::to_string(&result).unwrap().len();
+        assert!(
+            serialized <= crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "a paginated response must fit the threshold it is measured \
+                 against, or call_content re-wraps it and the caller gets an \
+                 envelope instead of lines; got {serialized} bytes vs {}",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+        );
+        assert!(
+            result["content"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("ln 00001")),
+            "the chunk should still start at the requested line: {result}"
+        );
+    }
+
+    /// Same arithmetic, the whole-buffer branch — it inlines a chunk against
+    /// the same budget and is measured against the same threshold.
+    #[tokio::test]
+    async fn read_file_buffer_full_chunk_fits_the_threshold_it_is_measured_against() {
+        let lines: Vec<String> = (1..=1200).map(|i| format!("ln {i:05}")).collect();
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", lines.join("\n"));
+
+        let result = ReadFile
+            .call(json!({ "path": &buf_id }), &ctx)
+            .await
+            .unwrap();
+
+        let serialized = serde_json::to_string(&result).unwrap().len();
+        assert!(
+            serialized <= crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "a paginated response must fit the threshold it is measured \
+                 against; got {serialized} bytes vs {}",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+        );
+    }
+
     #[test]
     fn normalize_line_nav_aliases_maps_offset_and_limit() {
         let mut input = json!({ "path": "x", "offset": 100, "limit": 50 });

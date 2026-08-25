@@ -311,6 +311,65 @@ pub fn extract_lines_to_budget(
     end_line: usize,
     byte_budget: usize,
 ) -> (String, usize, bool) {
+    extract_lines_with_cost(text, start_line, end_line, byte_budget, |line| {
+        line.len() + 1 // +1 for the \n join separator
+    })
+}
+
+/// Like [`extract_lines_to_budget`], but charges each line what it will cost
+/// **after JSON string escaping** — which is the size the response is actually
+/// measured against.
+///
+/// A tool that inlines a chunk gets buffered by `call_content` when its
+/// *serialized* form exceeds `TOOL_OUTPUT_BUFFER_THRESHOLD`, yet the raw budget
+/// charges `line.len() + 1`. Inside a JSON string every `\n` is two bytes, so
+/// the escaping charge scales with line COUNT and short lines overshoot: a
+/// 9000-byte chunk of ~1000 short lines serialized to 10169 bytes against a
+/// 10000-byte threshold (measured 2026-08-25). The caller then received a
+/// `@tool_*` envelope wrapping the response instead of the response itself —
+/// and that envelope's hint routes into yet another buffer, which is the
+/// nesting reported in
+/// `docs/issues/2026-08-25-run-command-nested-buffer-recursion.md`.
+///
+/// Use this wherever the extracted chunk is returned inline as JSON; use
+/// [`extract_lines_to_budget`] where the budget really is raw bytes.
+pub fn extract_lines_to_json_budget(
+    text: &str,
+    start_line: usize,
+    end_line: usize,
+    byte_budget: usize,
+) -> (String, usize, bool) {
+    extract_lines_with_cost(text, start_line, end_line, byte_budget, |line| {
+        json_escaped_len(line) + 2 // the \n separator escapes to two bytes
+    })
+}
+
+/// Byte length of `s` inside a JSON string literal, matching `serde_json`'s
+/// default escaping. Computed rather than serialized, so budgeting a chunk
+/// costs no allocation per line.
+fn json_escaped_len(s: &str) -> usize {
+    s.chars()
+        .map(|c| match c {
+            '"' | '\\' | '\n' | '\r' | '\t' | '\u{08}' | '\u{0c}' => 2,
+            c if (c as u32) < 0x20 => 6, // \u00XX
+            c => c.len_utf8(),
+        })
+        .sum()
+}
+
+/// Shared walk behind the two budgeted extractors — they differ only in what a
+/// line is charged.
+///
+/// **Safety valve:** always includes at least 1 line (even if it exceeds the
+/// budget) to prevent infinite retry loops where the caller keeps requesting the
+/// same range. Exception: a zero budget returns nothing.
+fn extract_lines_with_cost(
+    text: &str,
+    start_line: usize,
+    end_line: usize,
+    byte_budget: usize,
+    cost: impl Fn(&str) -> usize,
+) -> (String, usize, bool) {
     // Edge case: zero budget returns nothing
     if byte_budget == 0 {
         return ("".to_string(), 0, false);
@@ -329,7 +388,7 @@ pub fn extract_lines_to_budget(
             break;
         }
 
-        let line_bytes = line.len() + 1; // +1 for the \n join separator
+        let line_bytes = cost(line);
         if bytes_used + line_bytes > byte_budget && !result_lines.is_empty() {
             hit_end = false;
             break;
