@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 62
-entry_high_water_W: 50
+entry_high_water_W: 51
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -168,6 +168,8 @@ entry_high_water_W: 50
 
 | W-48 | 2026-08-18 | med-high | When a change invalidates a *rationale*, sweep the class corpus-wide and ask **by what method** the enumeration was done — a count is not a method | An Opus review that left zero surviving mutants in the code still listed only **5 of 11** doc sites naming `is_empty()` as the opener trigger; a targeted read found a 6th, a corpus sweep found 5 more. Six void-or-stale rationales would have survived in the exact files the next task's implementer reads | validated |
 | W-49 | 2026-08-24 | high | Checking ListAgents/SendMessage before committing shared uncommitted docs avoided a collision with two concurrent peer sessions | Two files vanished from `git status` mid-session as peer sessions (`codescout-0e`, `codescout-ee`) committed them concurrently; asking first also surfaced a real `.gitignore` gap this session had missed | validated |
+| W-50 | 2026-08-26 | high | Run recon at the commit boundary of your own fix, aimed at the claims you are about to write into the durable record rather than at the code | Would have shipped the `references` alias fix with zero automated coverage plus an `unverified:` marker asserting coverage was impossible; the scout instead produced a measured red→green (24/25 → 25/25) and found five e2e lanes that had silently stopped compiling | validated |
+| W-51 | 2026-08-26 | high | When a filed root cause is about persisted state, reproduce it by querying the datastore — not by re-running the tool that reported it | The filed "restore every augmentation" fix, run against the 21 trackers that were already augmented, replaces their params wholesale — the same call that took the T-N queue from 19 entries to 1 on 2026-08-16 — causing the loss it claimed to repair | validated |
 
 ## Category conventions
 
@@ -4446,6 +4448,31 @@ One field fixed it. `cargo test --features e2e --no-run` now builds every lane, 
 **Valid:** dated 2026-08-26
 
 **Rests on:** F-61 and F-62, same session — this win is their shared counterfactual, not independent evidence.
+
+## W-51 — A filed root cause about STORED state is refuted by querying the store, not by re-running the tool that reported it
+
+**Valid:** dated 2026-08-25
+
+**Observed:** 2026-08-26, picking up `docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md`, whose § Root cause read "**Established.**" and whose title claimed every augmentation in the codescout catalog was gone.
+
+**Pattern:** CLAUDE.md's "run the reproduction before reading the fix plan" — with the sharpening that when the claim is about *persisted state*, the reproduction is a query against the datastore, not a re-run of the tool that reported it. Re-running `find(augmented=true)` would only have re-asked the instrument that produced the false negative. Six SQL queries against `~/.local/share/librarian/catalog.db` settled it in about two minutes: per-row `created_at`/`updated_at`, a date histogram, the `upsert` conflict clause, a backup's row count, and `worktree_registration`.
+
+**Counterfactual:** The filed fix was a one-time `artifact_augment(id=…, prompt=…, params={entries: […]}, render_template=…, entry_collection=…)` restore. Run against the 21 trackers that were *already* augmented, that call replaces params wholesale — `merge=false` resets all seven augmentation fields — and CLAUDE.md records this exact call taking the T-N queue from 19 entries to 1 on 2026-08-16. Restoring a loss that had not happened would have **caused** one, starting with `f2ecdd76a6189efb`'s live `observations` collection, and the catalog is not in git so nothing recovers it. The escalation also had reach beyond this file: it declared three CLAUDE.md-documented workflows "impossible right now", which is a standing instruction to future sessions not to attempt them.
+
+**Confirming data points:**
+
+1. `f2ecdd76a6189efb`'s augmentation row: `created_at = 2026-07-05T06:51:44Z` — seven weeks before the reported loss — with `observations` intact today.
+2. `augmentation::upsert` stamps `updated_at` on conflict and never `created_at`, so the row cannot have been re-inserted later wearing an old date.
+3. No codescout augmentation row carries a `created_at` **or** `updated_at` on 08-22/23/24; a restore would have stamped all 21 at once.
+4. `~/.sync-backups/…/20260712/catalog.db` holds 53 augmentations against today's 70 — monotonic growth, no wipe.
+5. Zero codescout rows in `worktree_registration`, ever, killing the overlay-shadow explanation the librarian guide would otherwise suggest.
+6. The bug's own § Fix still read "Not yet planned" — nothing had restored the rows it claimed were destroyed, so their presence is not evidence of a repair.
+
+**Impact:** high
+
+**Promote-when:** a second filed root cause about persisted state is refuted by querying the store directly. Then promote into CLAUDE.md's reproduction rule as an explicit clause — *when the claim is about stored state, the reproduction is a query against the datastore, not a re-run of the reporting tool* — since the generic rule did not by itself say which instrument to reach for.
+
+**Status:** validated
 
 ## Template for new entries
 
