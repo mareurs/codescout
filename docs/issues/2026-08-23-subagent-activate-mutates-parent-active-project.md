@@ -66,17 +66,57 @@ Linux, codescout MCP over stdio, Claude Code 2.1.241. Parent session home projec
 
 ## Root cause
 
-**Established:** active-project selection is server-global, not per-caller. Subagents
-share the parent's MCP server connection, so `activate` is a mutation visible to every
-concurrent caller. This is the defect.
+**Fully established, chain traced 2026-08-25.**
 
-**Not established:** the specific write-authorization rule that refused the scratchpad
-path under the foreign project. E-3 rules out per-project config as the differentiator,
-so the remaining candidate is home-vs-foreign project semantics in the write guard —
-inferred from `CLAUDE.md`'s existing warning ("After `workspace(activate, foreign)` →
-activate home before turn end") and the `get_guide("workspace-state")` topic covering
-"home/foreign", **not** measured. Do not treat the second paragraph as a finding.
+1. `Agent::activate` (`src/agent/mod.rs:542-567`) is unconditionally global and
+   caller-blind — there is no MCP-level concept of “which agent called this”
+   (confirmed already rejected as infeasible in the sibling plan below: “Per-actor
+   map: MCP `RequestContext` has no per-subagent key → impossible”). Every call, parent
+   or subagent, runs `inner.workspaces.clear(); inner.workspaces.insert(root, ws);
+   inner.default_workspace_root = Some(root);` under one write lock — wiping every
+   OTHER resident (pinned) workspace too, not just changing the default.
+2. `check_tool_access` → `security_config_for(None)` → `with_project_at(None, ...)`
+   (`src/agent/mod.rs:644-671`, `683-690`) resolves an **unpinned** call against
+   `inner.default_workspace()` — whichever project the *last* `activate()` call, by
+   anyone, installed. There is no separate “home” fallback consulted here.
+3. `AgentInner::build_workspace` (`:156-249`) computes `is_home = (root ==
+   self.home_root)` and defaults `read_only = true` for any non-home activation with no
+   explicit `read_only` — exactly what the subagent's bare `activate(prompt-engineering)`
+   triggered (E-2: it passed no `read_only`).
+4. `project_security_config` (`:399-411`) folds that runtime `read_only` bit into
+   `file_write_enabled`, **overriding** `project.toml`'s static setting — this is what
+   E-3 correctly ruled out as the differentiator; the differentiator is the runtime flag,
+   not the file.
 
+Hypothesis 3 is CONFIRMED, not just surviving: the write guard does check “the active
+project,” and that project's `read_only` bit is the foreign subagent's default — not
+anything the parent set or can see without an extra `workspace(status)` call.
+
+**This is not new territory — it is a known, tracked, partially-closed gap.**
+`docs/plans/2026-05-30-per-request-workspace-pinning.md` (status: draft, last touched
+2026-05-31) designed and shipped exactly the fix this bug needs, for the axis it covers:
+Phases 0–3 (read-tool pinning) and Phase 4a (write-tool pinning, incl. `create_file`,
+`edit_markdown`) are marked **COMPLETE**, confirmed live in current `experiments` by
+direct read of `with_project_at`/`ensure_resident`/`security_config_for`. A caller that
+passes the `workspace=` pin on every call is already immune to this bug today.
+
+What is NOT fixed, and is the plan's own explicitly-flagged, never-resolved question
+(“Risks / open questions”): **`default_workspace_root` under concurrency.** *“a subagent
+that does NOT pin still races the default slot. Decide before Phase 5: is
+unpinned-concurrent simply unsupported (documented), or does the warning guard survive
+only for the unpinned `default_workspace_root` path? … resolve it explicitly, don't let
+it default.”* Nobody returned to decide it. This bug's own reproduction is a live instance
+of exactly that gap: the triggering workflow briefed its subagent to call
+`workspace(activate=...)` — the one form that mutates shared state — instead of the
+already-existing, already-shipped `workspace=` pin.
+
+**Additional finding beyond E-1..E-5: `activate()`'s blast radius is wider than “the
+default changes.”** `inner.workspaces.clear()` drops every OTHER resident workspace too,
+including one a different concurrent caller had pinned and was relying on via
+`ensure_resident`. That caller's next `with_project_at(Some(root), ...)` re-runs
+`ensure_resident` and should self-heal, but can hit a transient “pinned workspace not
+resident” error first if the timing lands inside that window. Not reproduced directly;
+follows from reading `with_project_at`/`ensure_resident`/`activate` together.
 ## Evidence
 
 ### E-1 — exactly one subagent activated the sibling repo
@@ -192,30 +232,47 @@ session, all recovered, none prevented.
 3. **Hypothesis:** the write guard authorises paths against the **home** project and
    treats a foreign activated project as write-restricted, so the scratchpad falls
    outside the writable set once the active project is foreign.
-   **Test:** not yet run — requires reading the guard that emits the error string.
-   **Verdict:** deferred; currently the only surviving candidate.
+   **Test:** read `check_tool_access` → `security_config_for` → `with_project_at` →
+   `build_workspace` → `project_security_config` (`src/agent/mod.rs`,
+   `src/util/path_security.rs`), 2026-08-25.
+   **Verdict: CONFIRMED**, precisely — see Root cause. The guard checks “the active
+   project's `read_only` flag,” and an unpinned call's “active project” is whichever
+   project the last `activate()` call (by anyone, home or foreign) installed as the
+   global default.
 
 ## Fix
 
-Not yet planned — hypothesis 3 must be settled first, because it decides whether the fix
-is one change or two.
+Not yet chosen — hypothesis 3 is now settled, but settling it surfaced a **policy
+decision already on record and never made**, not a fresh engineering question. See
+`docs/plans/2026-05-30-per-request-workspace-pinning.md` § Risks / open questions, the
+“`default_workspace_root` under concurrency” bullet. Three live options, not mutually
+exclusive:
 
-The **global-state** defect has a clear direction regardless: activation should be
-per-caller, or subagents should be unable to mutate the parent's selection. The
-per-call `workspace` parameter already exists on every tool and is documented for
-exactly this case ("Absolute workspace path to resolve this call against; omit for the
-active project. For concurrent subagents in different workspaces."), so the machinery
-for caller-scoped resolution is present — `activate` is the surface that bypasses it.
+1. **Dispatch-discipline fix (cheapest, addresses the actual incident).** This bug's own
+   trigger was a workflow prompt briefing a subagent to call `workspace(activate=...)`
+   instead of the already-shipped `workspace=` per-call pin. Update the prompt surfaces
+   that brief subagents (`server_instructions`, onboarding, any workflow/subagent-dispatch
+   guidance) to steer subagents toward pinning and away from raw `activate`. Zero code
+   risk; does not protect against a subagent that ignores the briefing.
+2. **Resolve the plan's open question by declaring unpinned-concurrent unsupported,
+   documented.** Keep `concurrent_activation_warning` on the unpinned
+   `default_workspace_root` path only (per the plan's own recommendation in its Phase-5
+   progress note), retire it for pinned flows, and document plainly that a session doing
+   concurrent multi-repo subagent work MUST pin every call or accept the race. Matches
+   existing CLAUDE.md guidance (“After `workspace(activate, foreign)` → activate home
+   before turn end”) but makes the unpinned-default hazard explicit for the subagent case
+   specifically, which that guidance doesn't currently name.
+3. **A further code guard on top of pinning (most costly, not yet designed).** E.g. make
+   `activate()` itself refuse to run inside a subagent context, or scope it so a foreign
+   `activate` cannot silently displace an already-active home default without an explicit
+   flag. Blocked on the same constraint the plan already hit: MCP's `RequestContext` has
+   no per-caller identity, so “is this call from a subagent” cannot be answered directly
+   without inventing a new signal.
 
-Note this is the **inverse** of a family of already-fixed bugs (`edit_code`,
-`memory`, `references`/`symbol_at`/`call_graph`, `artifact(find)` all once ignored the
-`workspace=` pin). Those were "the pin is not honoured"; this is "the pin is honoured
-but a peer can move the default underneath you". Fixing it should not regress them.
-
-Secondary, same file: the error message should name the actual condition — that the
-active project is `<X>` and the path lies outside its writable roots — rather than
-asserting a read-only mode that may never have been set.
-
+Separately, regardless of which of the above is chosen: **the error message should name
+the actual condition** — the active project is `<X>` and its `read_only` bit is set —
+rather than asserting a read-only mode that reads as user-configured when it is actually
+a default inherited from someone else's activation.
 ## Tests added
 
 None — filed, not fixed. A regression test should assert that an `activate` issued on
@@ -258,6 +315,10 @@ scratchpad enters that set.
   Different trigger (worktree, not a peer agent), same underlying axis.
 - `docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md` and
   siblings — the inverse defect family, all fixed.
+- `docs/plans/2026-05-30-per-request-workspace-pinning.md` — the plan that built the
+  pin-based fix this bug needs. Phases 0–4a (COMPLETE) already solve this for any pinned
+  caller; § Risks / open questions names the exact unpinned-concurrency gap this bug hit,
+  flagged and never resolved since 2026-05-31.
 - `get_guide("workspace-state")` — home/foreign activation semantics; the authoritative
   account hypothesis 3 needs checking against.
 - `CLAUDE.md` § *Companion Plugin* — concurrent-multi-workspace rules.
