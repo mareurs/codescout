@@ -154,3 +154,20 @@ archetype's `rules` entry_collection.
 **Fix:** follow `artifact(create, augment={prompt, params})` with a separate
 `artifact_augment(id=..., entry_collection="...", merge=true)` call — `create`'s `augment`
 shortcut only ever gets you `prompt`+`params`; everything else needs the dedicated tool.
+
+## Machine-Wide Startup-Env Symlink Can Silently Contradict the Running docker-compose Profile
+
+`codescout::config::load_startup_env()` (`src/config/global.rs`) never reads a repo's own
+`.env*` files — only `$CODESCOUT_ENV_FILE`, or else `$XDG_CONFIG_HOME/codescout/.env`
+(a `$HOME`-scoped symlink, not a repo file, shared by every codescout process on the
+machine). If `index(action="build")` fails on an embed_batch call (e.g.
+`embed_batch sparse send`) but the configured URL responds fine to a direct `curl`, don't
+assume the URL is wrong — check what that symlink actually resolves to
+(`readlink -f ~/.config/codescout/.env`) and whether *its* `CODESCOUT_DISABLE_SPARSE` /
+`CODESCOUT_SPARSE_EMBEDDER_URL` values match the docker-compose profile that's actually
+running (`docker ps -a`), not the repo's own `.env`/`.env.gpu`/`.env.amd` files — this
+loader never reads those regardless of which one looks current. The symlink target can
+drift stale silently (e.g. left pointing at a profile whose compose services were later
+removed) with nothing warning on mismatch. See
+`docs/issues/2026-08-23-index-build-fails-embed-batch-sparse-send.md` and
+`bug-fix-session-log:F-59`.

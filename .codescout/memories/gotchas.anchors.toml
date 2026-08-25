@@ -7,15 +7,23 @@ hash = "b1814030247b69cb39bcea375dbccc4865f717af98fdd8c66809a6822b245550"
 
 [[anchors]]
 path = "src/librarian/tools/context.rs"
-hash = "3661e2415c8d69c674cd9b664c0fbf41203b9a2be05f1ae70fed0c6e7302e638"
+hash = "248e7787653e8b764fb8548d0d125d62fa4aa39427b43c596cd650c482a05463"
 
 [[anchors]]
 path = "docs/trackers/artifact-augmentation-followups.md"
-hash = "6bb07174599cbdb29ac7beaf7736326c71878fc231ccb448e4ba8535f31be70f"
+hash = "41af278e94ce303547f0963d711a985c2b5adf4c29651cf182c6bbd1d60e606c"
 
 [[anchors]]
 path = "src/ast/parser.rs"
 hash = "e1a5e2e88ddcc86db82927265a8fbeef80a7e8529c41c21e470307183abe1cdd"
+
+[[anchors]]
+path = "src/config/global.rs"
+hash = "6c959f05ef0d37a70d217a45644db3596d4edb9ea1d65ac2b1da115f33a37c86"
+
+[[anchors]]
+path = "docs/issues/2026-08-23-index-build-fails-embed-batch-sparse-send.md"
+hash = "a3a3fd451efdcbdafb5ffc107a92d44af82a1fd43e846802abe2e2b8225aedb8"
 
 [[anchors]]
 path = ".codescout/embeddings/project.db"
@@ -27,7 +35,7 @@ hash = "4ebd75a0368ed5caf79461702af7d69dc37976f6e34626e2129b7fc74b4c18d0"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "96156c8264655b30557db5cddc2bf54d1f479083741fe612f0aed3162cc55543"
+hash = "1690fbe4d2e717d40685357939cab6e510c75c24bf01fc6438a586bd274a1c16"
 
 [[anchors]]
 path = ".codescout/project.toml"
