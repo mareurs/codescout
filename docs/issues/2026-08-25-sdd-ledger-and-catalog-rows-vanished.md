@@ -173,6 +173,46 @@ distinguishes the incident from `docs/issues/2026-08-23-research-index-tracker-h
    exclusive lock or last-writer-wins. Check `catalog-sql-hazards` memory first — it may
    already name this.
 
+7. **Hypothesis:** nothing was lost — work continued on the laptop during a few days away,
+   and this desktop is simply behind.
+   **Test:** full host comparison, 2026-08-25. `git` state on both; then a pruned `find`
+   over both work repos on each host, diffed.
+   **Verdict: REJECTED, and it is the useful kind of rejection.**
+   - Both repos were **already in sync by git**: laptop `codescout` at `047dd433`, laptop
+     `prompt-engineering` at `cf97286` — exactly what this desktop held before today. No
+     laptop-only commits exist.
+   - 4,872 laptop files vs 5,209 desktop; **210 only on the laptop**. Of those, 208 are
+     ephemeral machine-local state (96 `.buddy/`, 90 `.codescout/` guide-hint session
+     JSONs, diagnostic logs, onboarding temp files, local DBs).
+   - The remaining **2** were `docs/trackers/2026-05-07-shine-improvements.md` and
+     `docs/trackers/dependency-review-session-log.md` — and they are not losses either.
+     Commit `45411044` (2026-08-25 09:12, a **peer session**) archived the first and
+     compacted the second into `dependency-review-session-log-2026-08-25.md`. The laptop
+     is pre-sweep.
+   - The uncommitted `conclude-last` work is byte-for-byte the same size on both hosts
+     (134 files, 456K + 156K).
+
+   So the desktop is not behind the laptop on anything. The loss is local to this host and
+   to git-ignored surfaces, which is what hypothesis 6 already predicted.
+
+8. **Hypothesis (strengthening 6):** the concurrent writer was a **non-codescout agent**.
+   **Evidence:** the process table taken 2026-08-25 11:50 shows `1082945`, started
+   **Mon Aug 24 21:55:31**, parented by **`codex`** — inside the loss window
+   (2026-08-24 17:39 → 2026-08-25 08:00) and the only non-`claude` client on the machine.
+   A codex session is not bound by codescout's own conventions about catalog writes or
+   about `.superpowers/` state.
+   **Verdict:** deferred. Note the ordering constraint this adds: the row loss was detected
+   at ~08:00, **before** any of 2026-08-25's commits, so the 09:12 hygiene sweep cannot be
+   the cause — only an earlier writer can be. That leaves `22767` (claude, Aug 24 17:37)
+   and `1082945` (codex, Aug 24 21:55) as the two candidates in-window.
+
+**Concurrency in this repo is now documented from the other side, too.** A peer session
+filed `bug-fix-session-log:F-60` today: this bug file's own author committed `a468e69d`
+with `git add -A`, which swept up that peer's on-disk-but-unstaged `append_entry` writes
+to a shared tracker. No content was lost — only provenance — but it is direct evidence that
+two sessions share one working tree with no isolation, which is the same substrate
+hypothesis 6 indicts.
+
 ## Fix
 
 None yet — the incident is recorded, not diagnosed. Recovery is documented below.
