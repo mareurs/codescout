@@ -50,6 +50,10 @@ async fn fixture_context(language: &str) -> Arc<ToolContext> {
             codescout::tools::section_coverage::SectionCoverage::new(),
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        // Added when ToolContext gained the field. This harness is behind
+        // `--features e2e-*`, so a plain `cargo test` never compiles it and the
+        // omission sat here undetected — see the session log's F-entry.
+        workspace_override: None,
     })
 }
 /// File extensions to prime per language.
