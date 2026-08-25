@@ -189,6 +189,14 @@ Heading addressing was verified to work against an excerpt handle before relying
 on it: the miss-listing above is produced by parsing the handle's own content,
 which is what makes `heading=` position-independent and therefore the right
 primary next action.
+**Fix commit:** `01ec8a0c24eaa21db05c4246b5ab0f4681225573`, on **`experiments`**.
+
+**patch-id:** `ac6c2824c284ea92dbce9e02fa3864427fd957d1`
+(`git show <sha> | git patch-id --stable`).
+
+The SHA is positional and dies when `experiments` is rebased; the patch-id is a
+content hash of the diff and survives rebase and cherry-pick alike. Both
+recorded once — nothing owed later, whichever way the fix reaches `master`.
 ## Tests added
 
 `oversized_section_steering_numbers_address_the_handle_not_the_file`
