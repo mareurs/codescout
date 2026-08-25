@@ -10,7 +10,7 @@ tags:
 - librarian
 topic: prompt surface budget measurement eval harness compaction
 entry_high_water_F: 10
-entry_high_water_W: 8
+entry_high_water_W: 9
 entry_prefix:
 - F
 - W
@@ -51,6 +51,7 @@ surfaces, not the definition.
 | W-6 | A subagent's combination search found what a 27-predicate single sweep declared clean | promoted-to-permanent-docs |
 | W-7 | Reading the file settled two agent disagreements | promoted-to-permanent-docs |
 | W-8 | A deleted git-ignored ledger was rebuilt from the session transcript | validated |
+| W-9 | An Opus review with a mutation lens found four Criticals in code with 34 green tests | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -733,6 +734,71 @@ corrected design and the `path:line` evidence for it.
 **Rests on:** R-5 / R-6 / R-8 in the SDD ledger
 `.superpowers/sdd/2026-08-23-hidden-information-eval/progress.md`; verified this session
 against `scripts/run_arms.py:87-105` and `scripts/score_arm.py:69-83`.
+
+## W-9 — An Opus review with a mutation lens found four Criticals in code that had 34 green tests
+
+**Valid:** invariant
+
+**Observed:** 2026-08-25, Task 3 of the hidden-information eval. A Sonnet implementer
+delivered the checker with 34 passing tests — 10 from the plan verbatim plus 24 it wrote
+itself, including genuine red/green verification via `git stash push -u`. Good work by
+every visible signal. An independent Opus review, dispatched blind with an explicit
+mutation-testing lens, returned **four Critical findings**, five Important and six Minor.
+I verified all four Criticals at the source myself before acting; every one was real.
+
+**Pattern:** for code that *publishes numbers*, budget an independent review at a stronger
+model than the implementer, and give it two specific instructions:
+
+1. **The mutation question, per test:** *if I deleted or inverted the logic this test
+   claims to cover, would it still pass?* The reviewer ran 43 mutants and found 5
+   survivors — including `facts.update(m)` (the single line that puts every published
+   metric into the log) replaceable with `pass` on a fully green suite.
+2. **A named-risk list to attack first,** written by whoever hands off. Two of the three
+   risks I named were cleared with reasoning; naming them cost nothing and bought a
+   verdict instead of a worry.
+
+**Counterfactual — the finding neither the implementer nor I would have reached.** C2:
+`LINE_RE`'s symbol class was `[\w.]+`. codescout's canonical symbol notation is
+`Quote/subtotal`; raw source reads as `Quote.subtotal`. So the **cs arm's natural idiom
+does not parse and the native arm's does** — measured on identical correct content, f1
+**0.4** vs **0.6667**. Four of the twelve real truth sites carry dotted symbols, so it
+would have fired. That is a differential measurement error *correlated with the
+treatment*: the worst defect an A/B eval can carry, because it produces a clean, confident
+table showing codescout worse than native for a purely notational reason.
+
+**It was my defect, not the implementer's.** That regex came from the plan — I wrote it.
+The implementer was told to keep the plan's scorer verbatim and correctly did. A review
+that only checks the implementer against the brief cannot find this class of bug; only one
+that checks the *artefact against the world* can.
+
+The same review also found the veto could not fire at all when a scenario omits
+`mode: trace` (`assertions.py:532-537` writes a well-formed doc with `tool_calls: []`, so
+`have_trace` is `True` while the tool list is empty) — a guarantee asserted from data that
+is silently absent.
+
+**Confirming data points:**
+
+1. 2026-07-07, EDU-Planner SI-29 — a Sonnet review approved a new module with zero
+   Important findings; a blind Opus re-review with a mutation lens found a
+   `(owner, date)` key-discrimination path with zero coverage. Recorded in CLAUDE.md.
+2. This session — 4 Critical / 5 Important / 6 Minor on 34 green tests, one of them
+   arm-correlated and therefore fatal to the eval's validity rather than merely to its
+   correctness.
+
+**Promote-when:** already promoted — CLAUDE.md's *Subagent Dispatch — Model Floor +
+Review Escalation* rule states it. This entry is the second datapoint and **sharpens** it:
+the existing rule says escalate for "test-rigor / edge-case coverage on load-bearing
+code." Add the sharper trigger — **escalate whenever the artefact under review is an
+instrument, i.e. its output is a number someone will publish** — and instruct the reviewer
+to check the artefact against the world, not merely against the brief, because a
+brief-conformance review structurally cannot find a defect inherited from the brief.
+
+**Status:** validated — two datapoints, second one verified independently at the source by
+the controller before any fix was made.
+
+**Rests on:** `docs/superpowers/specs/2026-08-23-hidden-information-eval-design.md` § arm
+symmetry; [[F-10]], which is the same failure mode caught one stage earlier, by
+reconnaissance rather than by review.
 
 ## Template for new entries
 
