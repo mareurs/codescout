@@ -144,6 +144,35 @@ distinguishes the incident from `docs/issues/2026-08-23-research-index-tracker-h
    **Test:** the previous session ran `artifact(action="update", id="89c2984ca7c074a0",
    patch={...})` successfully, which requires a row. **Verdict:** rejected.
 
+6. **Hypothesis:** concurrent writers to the shared machine-local catalog dropped the rows.
+   **Test:** enumerated live codescout server processes during an unrelated recon pass,
+   2026-08-25 11:50 — `ps -o pid=,ppid=,lstart= -C codescout`.
+   **Observed: SIX concurrent servers**, every one with a live parent, so none are orphans:
+
+   ```
+   PID       PPID     PARENT   RSS    STARTED
+   22767     22728    claude   337M   Mon Aug 24 17:37:22
+   1082945   1082692  codex    305M   Mon Aug 24 21:55:31
+   1930828   1930731  claude   351M   Tue Aug 25 08:08:40
+   2136184   2135916  claude   384M   Tue Aug 25 09:02:39
+   2719647   2719361  claude   363M   Tue Aug 25 10:48:28
+   3031648   1923118  claude   332M   Tue Aug 25 11:49:58
+   ```
+
+   All six share **one** catalog at `/home/marius/.local/share/librarian/catalog.db`
+   (machine-local, git-ignored). One is a **`codex`** client — a different agent entirely,
+   which would not be following codescout's own conventions. The loss window
+   (2026-08-24 17:13 → 2026-08-25 08:00) contains at least the `22767` and `1082945`
+   sessions, and `1082945` is the codex one.
+   **Verdict: deferred — this displaces `prune_missing` as the strongest lead.** It also
+   fits a detail hypothesis 4 does not: the 12 lost rows were the *most recently written*
+   ones, which is what a lost-update or a rolled-back transaction on a shared DB looks
+   like, and not what a dead-root prune looks like (that would take a contiguous subtree
+   regardless of age).
+   **Next test:** `PRAGMA journal_mode` on the catalog, and whether writes take an
+   exclusive lock or last-writer-wins. Check `catalog-sql-hazards` memory first — it may
+   already name this.
+
 ## Fix
 
 None yet — the incident is recorded, not diagnosed. Recovery is documented below.
@@ -181,13 +210,23 @@ header. The scripts are in this session's scratchpad (`recover_ledger.py`,
 
 ## Resume
 
-Test hypothesis 4. Run `librarian(action="doctor")` read-only and read the
-`abs_path_outside_managed_roots` and missing-file counts; then check whether batch
-`prune_missing`'s dead-root derivation can select a root whose subtree is present, by
-reading `derive_dead_roots` and `count_dead_root` (added by the catalog-hygiene plan,
-`docs/superpowers/plans/2026-07-18-catalog-hygiene-prevention-cleanup.md` Task 5). If it
-cannot, close this as `zombie` with a re-open trigger rather than leaving it open.
+Test hypothesis 6 before hypothesis 4 — it is now the stronger lead and it is cheaper to
+check.
 
+1. Read the codescout memory `catalog-sql-hazards`; it may already document the
+   concurrent-writer contract and make this a rediscovery rather than a finding.
+2. `sqlite3 /home/marius/.local/share/librarian/catalog.db 'PRAGMA journal_mode; PRAGMA
+   busy_timeout;'` — WAL plus a non-zero busy timeout would largely acquit concurrency;
+   `delete` journal mode with no timeout would largely convict it.
+3. Establish whether the writer path wraps artifact upserts in a transaction, and whether
+   a `reindex` from one process can delete rows another process just wrote.
+
+Only if hypothesis 6 is acquitted, fall back to hypothesis 4: read `derive_dead_roots` and
+`count_dead_root` (`docs/superpowers/plans/2026-07-18-catalog-hygiene-prevention-cleanup.md`
+Task 5) and decide whether batch `prune_missing`'s dead-root derivation can select a root
+whose subtree is present.
+
+If both are acquitted, close as `zombie` with a re-open trigger rather than leaving it open.
 ## References
 
 - `docs/superpowers/plans/2026-08-23-hidden-information-eval.md` — the plan whose
@@ -198,4 +237,3 @@ cannot, close this as `zombie` with a re-open trigger rather than leaving it ope
   augmentation loss; related but distinct (augmentations survived here).
 - `docs/issues/archive/2026-05-17-reindex-cascade-delete-data-loss.md` — the earlier
   reindex-driven data loss, fixed.
-
