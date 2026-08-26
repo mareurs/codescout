@@ -45,10 +45,26 @@
 #
 # The value must be a WINDOWS path — wine maps `/` to `Z:`. With it set, that module
 # went 9 failures -> 1, and the 1 was a genuine Windows defect
-# (`docs/issues/2026-08-26-windows-lanes-still-red-on-four-remaining-causes.md` group A).
+# (`docs/issues/archive/2026-08-26-windows-lanes-still-red-on-four-remaining-causes.md`
+# group A).
 #
-# Note this is still the gnu ABI. Two `retrieval::index_lock` tests PASS here and
-# FAIL on MSVC, so a green wine run is not a green `windows-latest`.
+# A few tests shell out to `git` DIRECTLY rather than through Git Bash, so CODESCOUT_BASH
+# never reaches them and they die on "program not found". Put PortableGit's `cmd/` on the
+# WINDOWS path too — a Unix PATH entry does nothing for a wine process:
+#
+#   WINEPATH='Z:\path\to\PortableGit\cmd' CODESCOUT_BASH='...' scripts/build-windows.sh test --lib
+#
+# With both set the suite needs 7 skips instead of 32 — 4283 passed, 0 failed, measured
+# 2026-08-26.
+#
+# Note this is still the gnu ABI, and a green wine run is NOT a green `windows-latest`.
+# The sharpest demonstration to date: two `retrieval::index_lock` tests passed here while
+# failing on MSVC, because wine implements Windows byte-range locks permissively where real
+# Windows makes them MANDATORY — so wine could neither reproduce that defect nor verify its
+# fix (`ee9d9844`). Nor is a green run here a green wine LANE: CI installs ubuntu's wine
+# 9.0, typically two majors behind a dev box, and the two have already diverged twice —
+# `docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md`.
+# Check `wine --version` before trusting a local result against a CI failure.
 set -euo pipefail
 
 TARGET="x86_64-pc-windows-gnu"
