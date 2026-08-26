@@ -51,6 +51,11 @@ pub struct SyncReport {
     /// content must say so, because nothing marks a skipped chunk dirty and a
     /// later no-op sync will never reconcile it.
     pub skipped: Vec<String>,
+    /// `Some((from, to))` when a `force=true` sync discarded this project's index to
+    /// rebuild it at a new embedding dimension. Reported because a silent successful
+    /// rebuild at a different width is nearly as confusing as the failure it
+    /// replaced.
+    pub dim_migration: Option<(u64, u64)>,
 }
 
 impl std::fmt::Display for SyncReport {
@@ -64,6 +69,9 @@ impl std::fmt::Display for SyncReport {
         // incomplete, and that must not be a field a reader learns to skim past.
         if !self.skipped.is_empty() {
             write!(f, " SKIPPED={} (index incomplete)", self.skipped.len())?;
+        }
+        if let Some((from, to)) = self.dim_migration {
+            write!(f, " dim_migrated={from}->{to}")?;
         }
         Ok(())
     }
@@ -773,6 +781,9 @@ pub async fn sync_worktree(
         updated: 0,
         elapsed_ms: started.elapsed().as_millis(),
         skipped,
+        // A worktree delta is never the surface a model migration happens on —
+        // `sync_worktree` deliberately does not call `ensure_collection` either.
+        dim_migration: None,
     })
 }
 
@@ -838,7 +849,13 @@ impl crate::retrieval::client::RetrievalClient {
 
         let started = std::time::Instant::now();
         let collection = self.config.collection("code_chunks");
-        self.guard_index_dim(&collection, project_id).await?;
+        // force=false delegates to `guard_index_dim` unchanged; force=true treats a
+        // dimension mismatch as the reason for the rebuild and migrates instead of
+        // erroring. Previously this was a bare guard call, which is why force=true
+        // could not perform the one reindex that genuinely needs one.
+        let dim_migration = self
+            .migrate_or_guard_index_dim(&collection, project_id, opts.force_reindex)
+            .await?;
         self.code_store
             .ensure_collection(
                 &collection,
@@ -909,6 +926,7 @@ impl crate::retrieval::client::RetrievalClient {
             updated: 0,
             elapsed_ms,
             skipped,
+            dim_migration,
         })
     }
 }
@@ -1253,6 +1271,26 @@ mod tests {
 
         async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
             Ok(*self.dim.lock().unwrap())
+        }
+
+        /// Mirrors the real store's observable effects, which is what makes a broken
+        /// migration fail here: dropping `code_vec` means `collection_dim` now reports
+        /// `None`, and clearing `code_chunk` means `chunk_refs` reports nothing for
+        /// this project. A double that kept answering `Some(dim)` would let a
+        /// migration that never actually reset anything pass.
+        async fn reset_project_index(&self, _c: &str, p: &str) -> Result<()> {
+            *self.dim.lock().unwrap() = None;
+            self.seeded.lock().unwrap().retain(|(proj, _)| proj != p);
+            let mut u = self.upserted.lock().unwrap();
+            let mut up = self.upserted_projects.lock().unwrap();
+            let (refs, projs): (Vec<ChunkRef>, Vec<String>) = u
+                .drain(..)
+                .zip(up.drain(..))
+                .filter(|(_, proj)| proj.as_str() != p)
+                .unzip();
+            *u = refs;
+            *up = projs;
+            Ok(())
         }
     }
 
@@ -2307,6 +2345,14 @@ mod tests {
         async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
             Ok(None)
         }
+
+        /// Never exercised: this double exists only to make `chunk_refs` slow so a
+        /// lock-duration test can observe the window. `unreachable!` rather than
+        /// `Ok(())` so that if a future change routes a reset through this store, the
+        /// test fails loudly instead of silently asserting on a no-op.
+        async fn reset_project_index(&self, _c: &str, _p: &str) -> Result<()> {
+            unreachable!("SlowChunkRefsStore is only used for lock-duration timing")
+        }
     }
 
     #[tokio::test]
@@ -2419,6 +2465,11 @@ mod tests {
 
         async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
             Ok(None)
+        }
+
+        /// Never exercised — see `SlowChunkRefsStore::reset_project_index`.
+        async fn reset_project_index(&self, _c: &str, _p: &str) -> Result<()> {
+            unreachable!("SlowEnsureStore is only used for lock-duration timing")
         }
     }
 
@@ -2622,6 +2673,85 @@ mod tests {
         assert!(
             msg.contains("999") && msg.contains('3'),
             "error should name both the stored and configured dims, got: {msg}"
+        );
+    }
+
+    /// `force=true` must MIGRATE across a dimension change rather than refuse it.
+    ///
+    /// The defect: `sync_project` called `guard_index_dim` unconditionally *ahead* of
+    /// the force-capable indexing work, so `force=true` — which advertises a full
+    /// reindex — could not perform the one rebuild that genuinely requires one.
+    /// `docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
+    ///
+    /// Identical setup to the sibling above (stored dim 999, `test_retrieval_client`
+    /// pins `model_dim: Some(3)`) with only `force_reindex` flipped on. Keeping that
+    /// sibling — which asserts the NON-forced path still errors — is what stops this
+    /// bug being "fixed" by deleting the guard: the two tests fail in opposite
+    /// directions, so no single change satisfies both unless `force` is what
+    /// discriminates.
+    #[tokio::test]
+    async fn sync_project_force_migrates_a_dimension_mismatch_instead_of_refusing() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        let store = RecordingStore {
+            dim: Mutex::new(Some(999)),
+            ..Default::default()
+        };
+        let client = test_retrieval_client(store);
+        let opts = SyncOpts {
+            force_reindex: true,
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
+
+        let report = client
+            .sync_project("dim-migration-project", dir.path(), opts)
+            .await
+            .expect(
+                "force=true must migrate a 999-dim index to the configured 3, not \
+                 refuse it — the guard is the thing force is supposed to override here",
+            );
+
+        assert_eq!(
+            report.dim_migration,
+            Some((999, 3)),
+            "the report must name both widths: a silent successful rebuild at a \
+             different dimension is nearly as confusing as the failure it replaced"
+        );
+    }
+
+    /// A forced sync whose dimensions already AGREE must not report a migration.
+    ///
+    /// Without this, `migrate_or_guard_index_dim` could return `Some(..)`
+    /// unconditionally under `force` — every forced reindex would claim to have
+    /// discarded and rebuilt the index across a model change, and the field would
+    /// become noise a reader learns to ignore. It also pins that `force=true` does
+    /// not reset an index that needs no reset.
+    #[tokio::test]
+    async fn a_forced_sync_at_a_matching_dimension_reports_no_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        // 3 == test_retrieval_client's pinned model_dim, so there is nothing to migrate.
+        let store = RecordingStore {
+            dim: Mutex::new(Some(3)),
+            ..Default::default()
+        };
+        let client = test_retrieval_client(store);
+        let opts = SyncOpts {
+            force_reindex: true,
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
+
+        let report = client
+            .sync_project("matching-dim-project", dir.path(), opts)
+            .await
+            .expect("a forced sync at a matching dim is an ordinary reindex");
+
+        assert_eq!(
+            report.dim_migration, None,
+            "no dimension changed, so nothing was migrated — reporting one here would \
+             make the field meaningless"
         );
     }
 

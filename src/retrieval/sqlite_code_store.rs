@@ -373,6 +373,34 @@ impl CodeVectorStore for SqliteVecCodeStore {
             .context("read existing code_vec dim")?;
         Ok(blob_len.map(|n| (n / 4) as u64))
     }
+
+    /// Drop this project's vector table and chunk metadata so the next sync can
+    /// recreate `code_vec` at a different dimension.
+    ///
+    /// Scoping is structural, not query-enforced: `conn_for(project_id)` opens one
+    /// `.db` file per project (see its doc comment), so `DROP TABLE code_vec` here
+    /// cannot reach a sibling project's vectors — there is no shared table to be
+    /// careful about. The `DELETE` still carries its `project_id` predicate because
+    /// `code_chunk` has the column and honouring it costs nothing.
+    ///
+    /// `DROP TABLE` on a `vec0` virtual table takes its shadow tables
+    /// (`code_vec_chunks`, `code_vec_rowids`, `code_vec_info`,
+    /// `code_vec_vector_chunks00`) with it — sqlite-vec implements `xDestroy`. If
+    /// that ever regresses, the symptom is the subsequent `CREATE VIRTUAL TABLE`
+    /// colliding with a leftover shadow, which
+    /// `reset_then_reindex_migrates_the_vector_table_to_a_new_dimension` catches.
+    async fn reset_project_index(&self, _collection: &str, project_id: &str) -> Result<()> {
+        let conn = self.conn_for(project_id)?;
+        let conn = conn.lock();
+        conn.execute_batch("DROP TABLE IF EXISTS code_vec;")
+            .context("drop code_vec for dimension migration")?;
+        conn.execute(
+            "DELETE FROM code_chunk WHERE project_id = ?1",
+            rusqlite::params![project_id],
+        )
+        .context("clear code_chunk for dimension migration")?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -471,6 +499,103 @@ mod tests {
             Some(3),
             "vec0 bakes the dim at creation — report what it baked"
         );
+    }
+
+    /// The migration this bug is about, against a REAL `vec0` table: build at one
+    /// dimension, reset, rebuild at another.
+    ///
+    /// This is the test that answers the residual risk the reconnaissance pass
+    /// identified (`bug-fix-session-log:F-64`). `DROP TABLE` on a `vec0` virtual
+    /// table must take its shadow tables with it — `code_vec_chunks`,
+    /// `code_vec_rowids`, `code_vec_info`, `code_vec_vector_chunks00`, all four
+    /// observed in a live index. If any survives, the rebuild's
+    /// `CREATE VIRTUAL TABLE` collides with it and this test fails at the second
+    /// `upsert_chunks`. That is the whole point: fail here, in a tempdir, rather
+    /// than in a production migration that has already dropped the old index.
+    ///
+    /// A `RecordingStore` double cannot cover this — the question is entirely about
+    /// what sqlite-vec's `xDestroy` actually does.
+    #[tokio::test]
+    async fn reset_then_reindex_migrates_the_vector_table_to_a_new_dimension() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SqliteVecCodeStore::at(tmp.path().to_path_buf());
+
+        // Build at 3 dimensions.
+        store
+            .upsert_chunks(
+                "code_chunks",
+                &[(
+                    payload("c1", "proj", "a.rs", "rust", "h1"),
+                    embed(vec![0.1, 0.2, 0.3]),
+                )],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.collection_dim("code_chunks", "proj").await.unwrap(),
+            Some(3)
+        );
+
+        // The reset `force=true` could not previously perform.
+        store
+            .reset_project_index("code_chunks", "proj")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.collection_dim("code_chunks", "proj").await.unwrap(),
+            None,
+            "the vector table must be GONE, not merely emptied — its dim is baked at \
+             creation, so an emptied table would still refuse the new width"
+        );
+        assert!(
+            store
+                .chunk_refs("code_chunks", "proj")
+                .await
+                .unwrap()
+                .is_empty(),
+            "chunk metadata must go too, or the rebuild's prune step would delete the \
+             very ids it is about to re-create"
+        );
+
+        // Rebuild at 5 dimensions — the migration itself.
+        store
+            .upsert_chunks(
+                "code_chunks",
+                &[(
+                    payload("c2", "proj", "b.rs", "rust", "h2"),
+                    embed(vec![0.1, 0.2, 0.3, 0.4, 0.5]),
+                )],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.collection_dim("code_chunks", "proj").await.unwrap(),
+            Some(5),
+            "the rebuilt table must carry the NEW width — a surviving vec0 shadow \
+             table surfaces right here"
+        );
+
+        // And the migrated index is actually searchable at the new width.
+        let hits = store
+            .query(
+                "code_chunks",
+                "proj",
+                &[0.1, 0.2, 0.3, 0.4, 0.5],
+                &empty_sparse(),
+                10,
+                0.0,
+                true,
+                &[],
+                &[],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "a migrated index that is not queryable is not a migration"
+        );
+        assert_eq!(hits[0].file_path, "b.rs");
     }
 
     #[tokio::test]

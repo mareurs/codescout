@@ -387,10 +387,16 @@ mod dim_guard_tests {
     /// Reports a fixed stored dim and records whether `query` was ever reached,
     /// so a test can prove `guard_index_dim` short-circuits `search_in` BEFORE
     /// the store runs — not just that some error eventually surfaces.
+    ///
+    /// `reset` records `reset_project_index`, which is what distinguishes the
+    /// forced migration path (guard yields, index discarded) from the guarded one
+    /// (error, index untouched). Without it a test could only observe that no
+    /// error surfaced, which is also true of a guard that silently did nothing.
     #[derive(Default)]
     struct DimReportingStore {
         dim: Option<u64>,
         queried: AtomicBool,
+        reset: AtomicBool,
     }
 
     #[async_trait]
@@ -435,6 +441,11 @@ mod dim_guard_tests {
         }
         async fn collection_dim(&self, _c: &str, _p: &str) -> Result<Option<u64>> {
             Ok(self.dim)
+        }
+
+        async fn reset_project_index(&self, _c: &str, _p: &str) -> Result<()> {
+            self.reset.store(true, Ordering::SeqCst);
+            Ok(())
         }
     }
 

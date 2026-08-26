@@ -187,6 +187,29 @@ pub trait CodeVectorStore: Send + Sync {
     /// Every implementor answers explicitly, so a new backend fails to compile
     /// rather than failing quietly.
     async fn collection_dim(&self, collection: &str, project_id: &str) -> Result<Option<u64>>;
+
+    /// Discard this project's index entirely — vectors *and* chunk metadata — so it
+    /// can be rebuilt at a different embedding dimension.
+    ///
+    /// Exists because a vector table bakes its dimension in at creation and cannot
+    /// widen in place, so switching embedding models is the one case a "full
+    /// reindex" genuinely requires and `force=true` could not perform:
+    /// `docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
+    ///
+    /// **Both** halves must go. Dropping the vectors while leaving `code_chunk`
+    /// rows behind leaves `chunk_refs` reporting an index that no longer exists,
+    /// so the rebuild's prune step would then delete "stale" ids that are simply
+    /// the rows it is about to re-create.
+    ///
+    /// Deliberately has **no default implementation**, for the same reason as
+    /// `project_has_chunks` and `collection_dim` above, and one more specific to
+    /// this method: backends differ in whether a per-project reset is even
+    /// *expressible*. The sqlite-vec store is one file per project, so a reset
+    /// cannot reach a sibling. A Qdrant collection is shared across projects and
+    /// its dimension is a collection-level property, so the same operation would
+    /// be destructive beyond its stated scope — that backend must say so rather
+    /// than inherit a silent no-op that reports success.
+    async fn reset_project_index(&self, collection: &str, project_id: &str) -> Result<()>;
 }
 /// Which code-vector backend the retrieval client uses.
 ///
@@ -373,6 +396,32 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
             Err(_) => Ok(None),
         }
     }
+
+    /// Refused, deliberately, rather than silently doing the wrong thing.
+    ///
+    /// A Qdrant collection is shared across every project, and its vector size is a
+    /// property of the collection, not of a project's points. So there is no
+    /// per-project dimension migration to perform here: deleting this project's
+    /// points would leave the collection's width unchanged (achieving nothing),
+    /// and recreating the collection at a new width would silently destroy every
+    /// *other* project's index.
+    ///
+    /// `RecoverableError`, not `bail!` — an operator-fixable configuration
+    /// situation with a concrete remedy, not a codescout bug.
+    async fn reset_project_index(&self, collection: &str, project_id: &str) -> Result<()> {
+        Err(crate::tools::RecoverableError::with_hint(
+            format!(
+                "cannot reset project '{project_id}' alone: Qdrant collection \
+                 '{collection}' is shared across all projects and its vector size is \
+                 a collection-level property, so a per-project dimension migration \
+                 does not exist on this backend"
+            ),
+            "Recreate the Qdrant collection at the new dimension and reindex every \
+             project that uses it, or switch CODESCOUT_VECTOR_BACKEND=sqlite-vec, \
+             where each project has its own store and can migrate independently.",
+        )
+        .into())
+    }
 }
 
 /// Walk a Qdrant collection-info response down to the size of its dense
@@ -546,6 +595,13 @@ mod tests {
             _project_id: &str,
         ) -> Result<Option<u64>> {
             Ok(None)
+        }
+
+        async fn reset_project_index(&self, _collection: &str, project_id: &str) -> Result<()> {
+            self.chunks
+                .lock()
+                .retain(|(p, _)| p.project_id != project_id);
+            Ok(())
         }
     }
 

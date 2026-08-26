@@ -427,6 +427,64 @@ impl RetrievalClient {
         .into())
     }
 
+    /// Force-aware front end to [`RetrievalClient::guard_index_dim`]. Returns
+    /// `Some((from, to))` when it migrated, `None` when there was nothing to do.
+    ///
+    /// - `force == false` — the guard, unchanged. A dimension mismatch is an error.
+    /// - `force == true` — the mismatch is the *reason* for the rebuild, so discard
+    ///   this project's index and let the caller recreate it at the configured
+    ///   width.
+    ///
+    /// A separate method rather than a `force: bool` parameter on the guard,
+    /// because the guard's other caller is `search_in`
+    /// (`src/retrieval/search.rs`), where "force" is meaningless and the flag would
+    /// be threaded through as a permanent `false`.
+    ///
+    /// Before this existed, `sync_project` called the guard unconditionally *ahead*
+    /// of the force-capable indexing work, so `force=true` — which advertises a
+    /// full reindex — could not perform the one rebuild that actually requires
+    /// one:
+    /// `docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
+    pub(crate) async fn migrate_or_guard_index_dim(
+        &self,
+        collection: &str,
+        project_id: &str,
+        force: bool,
+    ) -> Result<Option<(u64, u64)>> {
+        if !force {
+            self.guard_index_dim(collection, project_id).await?;
+            return Ok(None);
+        }
+        // Nothing indexed yet — no dimension to disagree with, so a forced build is
+        // an ordinary first build.
+        let Some(index_dim) = self
+            .code_store
+            .collection_dim(collection, project_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let model_dim = self.effective_model_dim(index_dim as usize);
+        if model_dim == index_dim {
+            return Ok(None);
+        }
+        // Loud on purpose: this discards a real index. `force=true` authorises the
+        // rebuild, but the operator asked for a reindex, not necessarily for a model
+        // migration, and the two are only distinguishable from here.
+        tracing::warn!(
+            project_id,
+            collection,
+            from = index_dim,
+            to = model_dim,
+            "force reindex is migrating the vector table to a new embedding \
+             dimension — the existing index is discarded and rebuilt"
+        );
+        self.code_store
+            .reset_project_index(collection, project_id)
+            .await?;
+        Ok(Some((index_dim, model_dim)))
+    }
+
     /// The dimension to validate or size an index against, for the embedder
     /// this client actually holds (`self.embedder`) — not a config value that
     /// can default to whatever it's being compared against.
