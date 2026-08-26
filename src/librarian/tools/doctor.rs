@@ -3116,8 +3116,24 @@ fn structured_fix_pointers(content: &str) -> Vec<(String, Option<String>)> {
         Some(rest[..end].to_string())
     }
     let mut out: Vec<(String, Option<String>)> = Vec::new();
+    // Fenced lines are quotations, not declarations. A bug file that shows a provenance
+    // block — to teach the shape, or to reproduce a defect in this very parser — had its
+    // example read as its own claim, and the SHA inside it verified as though declared.
+    // Same treatment `tracker-conventions` gives `**Valid:**` / `**Rests on:**`, and the
+    // same hazard already documented on `corpus_cited_tokens`. Measured before shipping:
+    // of 75 declared pointer lines in docs/issues/, 74 sit outside fences and the only
+    // fenced one is a worked example, so this loses no real declaration.
+    // docs/issues/2026-08-26-structured-fix-pointers-reads-a-fenced-example-as-a-declaration.md
+    let mut fenced = false;
     for line in content.lines() {
         let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
         if let Some(rest) = t.strip_prefix("- **SHA:**") {
             if let Some(sha) = backticked(rest) {
                 out.push((sha, None));
@@ -3210,7 +3226,7 @@ fn scan_archived_fix_sha_unresolvable(
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
 
-    let (mut scanned, mut skipped, mut out) = (0usize, 0usize, Vec::new());
+    let (mut scanned, mut skipped, mut cross_repo, mut out) = (0usize, 0usize, 0usize, Vec::new());
     for (id, abs_path) in &rows {
         let path = Path::new(abs_path);
         if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
@@ -3229,6 +3245,19 @@ fn scan_archived_fix_sha_unresolvable(
         // first anchor would leave the second rotting exactly as if it were never recorded.
         scanned += 1;
         for (sha, patch_id) in &pointers {
+            // `<repo>:<sha>` cites a commit in a SIBLING repo (CLAUDE.md § Git Workflow).
+            // This check is deliberately scoped to one repo, holds no map from prefix to
+            // checkout path, and the sibling may not be on this machine at all. Handing the
+            // whole token to revparse asks git for "the object at path <sha> inside a
+            // tree-ish named <repo>" — which fails, so a perfectly good pointer was reported
+            // dead and offered a patch-id remedy that cannot address another repo's commit.
+            // Counted as not-checked rather than resolved elsewhere: guessing a checkout path
+            // would trade one false positive for an unbounded one.
+            // docs/issues/2026-08-26-doctor-reports-a-cross-repo-fix-sha-as-dead.md
+            if sha.contains(':') {
+                cross_repo += 1;
+                continue;
+            }
             if repo.revparse_single(sha).is_ok() {
                 continue;
             }
@@ -3260,10 +3289,14 @@ fn scan_archived_fix_sha_unresolvable(
     let health = json!({
         "scanned": scanned,
         "skipped_no_structured_pointer": skipped,
+        "skipped_cross_repo_pointer": cross_repo,
         "unresolvable": out.len(),
         "note": "Only files carrying the `## Fix provenance` triple are checked. Files that \
                  mention commits in freeform prose are SKIPPED, not passed: sweeping prose for \
-                 hex would flag reproduction and exonerated-suspect commits as dead fixes.",
+                 hex would flag reproduction and exonerated-suspect commits as dead fixes. \
+                 `skipped_cross_repo_pointer` counts `<repo>:<sha>` citations, which name a \
+                 commit in a sibling repo and cannot be resolved from here — they were NOT \
+                 verified, so a zero `unresolvable` does not mean every declared fix resolves.",
     });
     Ok((out, health))
 }
@@ -4599,6 +4632,59 @@ mod tests {
         );
         assert_eq!(health["scanned"], 0);
     }
+
+    /// A `<repo>:<sha>` pointer names a commit in a SIBLING repo, and this check is
+    /// deliberately scoped to one. Resolving it locally asks git for *the object at path
+    /// `<sha>` inside a tree-ish named `<repo>`*, which fails — so a perfectly good pointer
+    /// was reported dead, together with a patch-id remedy that cannot work across repos.
+    ///
+    /// The genuinely dead LOCAL pointer is the control: without it, "skip everything"
+    /// passes and the check is silently disabled.
+    /// docs/issues/2026-08-26-doctor-reports-a-cross-repo-fix-sha-as-dead.md
+    #[tokio::test]
+    async fn a_cross_repo_prefixed_pointer_is_skipped_rather_than_reported_dead() {
+        let (_tmp, root, live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_archived_bug(
+            &cat,
+            &root,
+            "cross-repo",
+            "## Fix provenance\n\n- **SHA:** `codescout-companion:b8ffa8b`\n\
+             - **patch-id:** not computable from this repo (fix lives in codescout-companion)\n",
+        );
+        seed_archived_bug(
+            &cat,
+            &root,
+            "local-alive",
+            &format!("## Fix provenance\n\n- **SHA:** `{}`\n", &live[..8]),
+        );
+        seed_archived_bug(
+            &cat,
+            &root,
+            "local-dead",
+            "## Fix provenance\n\n- **SHA:** `deadbee`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let (v, health) = {
+            let cat = ctx.catalog.lock();
+            scan_archived_fix_sha_unresolvable(&ctx, &cat.conn).unwrap()
+        };
+
+        let fired: Vec<&str> = v.iter().filter_map(|x| x.artifact_id.as_deref()).collect();
+        assert_eq!(
+            fired,
+            vec!["local-dead"],
+            "only the dead LOCAL pointer may fire — a cross-repo one is unresolvable here by \
+             construction, not rotted: {v:#?}"
+        );
+        assert_eq!(
+            health["skipped_cross_repo_pointer"], 1,
+            "the skip must be counted, or a clean result reads as 'every declared fix \
+             resolves' when one of them was never checked: {health}"
+        );
+    }
+
     // ---- terminal_status_without_fix_anchor -----------------------------------------
 
     /// A live (non-archived) bug file plus its catalog row. Distinct from
@@ -4839,6 +4925,30 @@ mod tests {
                 ("4ffd2803".to_string(), Some("c6beb5f60c30".to_string())),
             ],
             "each patch-id must bind to the SHA above it, not to the first SHA in the file"
+        );
+    }
+
+    /// A fenced block is a quotation, not a claim.
+    ///
+    /// The real declaration outside the fence is the control: without it, "return nothing"
+    /// passes and the parser is silently disabled. Found by this parser reading a bug file's
+    /// own worked example as a second declaration.
+    /// docs/issues/2026-08-26-structured-fix-pointers-reads-a-fenced-example-as-a-declaration.md
+    #[test]
+    fn structured_fix_pointers_ignores_a_fenced_worked_example() {
+        let text = "## Fix provenance\n\n\
+                    - **SHA:** `5a72304c` (`experiments`)\n\
+                    - **patch-id:** `e9f8df63b911`\n\n\
+                    Do not write it like the file this bug is about:\n\n\
+                    ```\n\
+                    - **SHA:** `deadbee0`\n\
+                    - **patch-id:** `ffffffffffff`\n\
+                    ```\n";
+        assert_eq!(
+            structured_fix_pointers(text),
+            vec![("5a72304c".to_string(), Some("e9f8df63b911".to_string()))],
+            "only the unfenced declaration counts — a quoted example must not be verified \
+             as though the file claimed it"
         );
     }
 
