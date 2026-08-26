@@ -289,11 +289,24 @@ async fn flush_pending(
     let mut failed: Vec<String> = Vec::new();
     for p in pending.drain(..) {
         let text = embed_text(&p);
+        let label = format!("{}:{}", p.file_path, p.start_line);
         match embedder.embed_batch_dyn(std::slice::from_ref(&text)).await {
             Ok(mut embeds) if !embeds.is_empty() => good.push((p, embeds.remove(0))),
-            // An `Ok` carrying no vector is as unusable as an `Err`; treating them
-            // alike stops a zip from silently dropping the payload.
-            Ok(_) | Err(_) => failed.push(format!("{}:{}", p.file_path, p.start_line)),
+            // Both are unusable — an `Ok` carrying no vector would let a zip silently
+            // drop the payload — but they are recorded DISTINCTLY and with their cause.
+            // The first version of this collapsed them into a bare `file:line`, so the
+            // report said which chunks were skipped and never why; "too large, re-chunk
+            // it" and "embedder down, retry" call for opposite responses, and an empty
+            // `Ok` is a backend contract violation rather than either.
+            Ok(_) => failed.push(format!("{label} — embedder returned no vector")),
+            Err(e) => {
+                let mut why = format!("{e:#}");
+                // Bounded: one entry per skipped chunk lands in `SyncReport.skipped`.
+                if why.chars().count() > 200 {
+                    why = why.chars().take(200).collect::<String>() + "…";
+                }
+                failed.push(format!("{label} — {why}"));
+            }
         }
     }
 
@@ -1487,6 +1500,16 @@ mod tests {
         assert!(
             skipped.iter().all(|s| s.contains("huge.rs")),
             "only the offending file's chunks may be skipped, got {skipped:?}"
+        );
+        // The REASON must survive, not just the location. A report naming which chunks
+        // were skipped without saying why cannot distinguish "too large, re-chunk it"
+        // from "embedder down, retry" — opposite responses. The first version of this
+        // fix dropped the per-chunk error and this assertion is what pins it back.
+        assert!(
+            skipped
+                .iter()
+                .all(|s| s.contains("larger than the max context size")),
+            "each skip must carry the embedder's stated cause, got {skipped:?}"
         );
 
         let stored: Vec<String> = store

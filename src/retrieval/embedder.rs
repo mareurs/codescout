@@ -417,30 +417,46 @@ impl EmbedderHttp {
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }
-        let resp: OpenAiEmbedResp = req
-            .send()
-            .await
-            .map_err(|e| {
-                // A connect/timeout failure is client-side: the embedder URL is
-                // wrong or the service is down. Lift the URL + a "connect" marker
-                // to the top-level message so `e.to_string()` (what the search
-                // layer's classifier sees) routes this to the embedder hint
-                // instead of the misleading "check qdrant logs" fallback.
-                if e.is_connect() || e.is_timeout() {
-                    anyhow!(
-                        "dense embed connect failed: {url} — the dense embedder is \
+        let http = req.send().await.map_err(|e| {
+            // A connect/timeout failure is client-side: the embedder URL is
+            // wrong or the service is down. Lift the URL + a "connect" marker
+            // to the top-level message so `e.to_string()` (what the search
+            // layer's classifier sees) routes this to the embedder hint
+            // instead of the misleading "check qdrant logs" fallback.
+            if e.is_connect() || e.is_timeout() {
+                anyhow!(
+                    "dense embed connect failed: {url} — the dense embedder is \
                          unreachable (connect/timeout). Check CODESCOUT_EMBEDDER_URL and \
                          that the embedder is running (`./scripts/retrieval-stack.sh ps`). ({e})"
-                    )
-                } else {
-                    anyhow::Error::new(e).context("dense openai send")
-                }
-            })?
-            .error_for_status()
-            .context("dense openai status")?
-            .json()
-            .await
-            .context("dense openai json")?;
+                )
+            } else {
+                anyhow::Error::new(e).context("dense openai send")
+            }
+        })?;
+
+        // `error_for_status()` keeps the status code and DISCARDS the response body —
+        // and for this backend the body is the only place the actionable cause appears.
+        // llama.cpp refuses an oversized payload with a 400 whose body reads
+        // `input (1682 tokens) is larger than the max context size (1024 tokens)`, but
+        // through that helper the caller saw only "400 Bad Request", which reads as a
+        // generic outage. Unattributed skips were the result:
+        // docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
+        let status = http.status();
+        if !status.is_success() {
+            let body_raw = http.text().await.unwrap_or_default();
+            let trimmed = body_raw.trim();
+            // Bounded: an HTML error page would otherwise flood every surface that
+            // renders this — including `SyncReport.skipped`, which holds one entry per
+            // skipped chunk.
+            let mut body: String = trimmed.chars().take(400).collect();
+            if body.is_empty() {
+                body = "<empty response body>".to_string();
+            }
+            // The "dense openai status" marker is load-bearing: `classify_search_error`
+            // routes on it and docs/greps name it. Keep it as the message prefix.
+            anyhow::bail!("dense openai status {}: {body}", status.as_u16());
+        }
+        let resp: OpenAiEmbedResp = http.json().await.context("dense openai json")?;
         let mut items = resp.data;
         items.sort_by_key(|i| i.index);
         Ok(items.into_iter().map(|i| i.embedding).collect())

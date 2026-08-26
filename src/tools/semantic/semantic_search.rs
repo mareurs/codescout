@@ -57,7 +57,35 @@ pub(crate) fn map_from_env_error(
 /// "embed sparse" wording, and would otherwise fall all the way to the
 /// generic qdrant-oriented fallback — the identical misrouting class.
 pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
-    if err_str.contains("doesn't exist")
+    // These two arms come FIRST, ahead of the collection bucket, for two reasons.
+    //
+    // (1) `dense openai status` matched NO bucket before this. The embedder arm below
+    //     carries "openai send" but not "openai status", so every dense-embedder HTTP
+    //     failure fell through to the generic fallback and sent operators to qdrant
+    //     logs — the exact misrouting class this function's doc comment exists to
+    //     prevent. (The sparse path was fine: "embed sparse status" contains
+    //     "embed sparse", which the embedder arm already matches.)
+    //
+    // (2) That message now carries the embedder's RESPONSE BODY, which is arbitrary
+    //     remote text. A body containing "not found" or "Collection" would hijack the
+    //     collection bucket. Specificity first, per this function's own contract.
+    if err_str.contains("larger than the max context size")
+        || err_str.contains("exceed_context_size")
+    {
+        "The text could not be embedded because it exceeds the embedding model's \
+         context ceiling. This is a PAYLOAD SIZE problem, not an outage — retrying \
+         will not help, and neither will raising llama.cpp's --ctx-size past the \
+         model's own n_ctx_train. Shorten the query. If you are seeing this during \
+         indexing, the affected chunks are reported as `skipped` in the index status \
+         and the index is INCOMPLETE until they embed."
+            .to_string()
+    } else if err_str.contains("dense openai status") || err_str.contains("sparse openai status") {
+        "The dense embedder returned an error status. This is an embedder problem, \
+         NOT a Qdrant issue (don't check qdrant logs). The embedder's own response \
+         body is included in the error above — read it first; it usually names the \
+         cause exactly. Then `./scripts/retrieval-stack.sh ps`."
+            .to_string()
+    } else if err_str.contains("doesn't exist")
         || err_str.contains("not found")
         || err_str.contains("Collection")
     {
@@ -1017,6 +1045,70 @@ mod classify_search_error_tests {
         assert!(
             !hint.contains("Stack reachable but query failed"),
             "a dense send failure must route to the embedder bucket, not the generic fallback: {hint}"
+        );
+    }
+
+    /// The sibling gap the test above did not cover, and it was live.
+    ///
+    /// The embedder bucket matched "openai send" but not "openai **status**", so every
+    /// dense-embedder HTTP failure — the 400 a payload-size refusal produces, among
+    /// others — fell all the way to the generic fallback and told the operator to read
+    /// qdrant logs for an embedder fault. Exactly the misrouting class the 2026-07-13
+    /// bug and this module's other tests exist to prevent, one word away from the
+    /// case that was covered.
+    #[test]
+    fn openai_status_does_not_hit_generic_qdrant_fallback() {
+        let err = "stack search failed: dense openai status 500: upstream unavailable";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            !hint.contains("Stack reachable but query failed")
+                && !hint.contains("docker logs codescout-qdrant"),
+            "a dense STATUS failure must route to the embedder bucket, not the generic \
+             qdrant fallback: {hint}"
+        );
+    }
+
+    /// A payload-size refusal is not an outage, and must not be reported as one.
+    ///
+    /// Retrying will not help and neither will raising llama.cpp's `--ctx-size`, since
+    /// the model's own `n_ctx_train` is the binding ceiling — so a hint that says
+    /// "restart the stack" actively misleads. Checked ahead of every other arm.
+    #[test]
+    fn an_oversized_payload_routes_to_a_size_hint_not_an_outage_hint() {
+        let err = "dense openai status 400: {\"error\":{\"code\":400,\"message\":\"input \
+                   (1682 tokens) is larger than the max context size (1024 tokens). \
+                   skipping\",\"type\":\"exceed_context_size_error\"}}";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            hint.contains("PAYLOAD SIZE"),
+            "must name the cause as size, not reachability: {hint}"
+        );
+        assert!(
+            !hint.contains("retrieval-stack.sh up"),
+            "must NOT suggest restarting the stack — the payload is too big, the stack \
+             is fine: {hint}"
+        );
+    }
+
+    /// The response body is arbitrary remote text, and the collection bucket matches
+    /// "not found" / "Collection" very broadly. Lifting the body into the message (so
+    /// the real cause is readable) therefore created a hijack path: an embedder 404
+    /// whose body happens to say "not found" would be reported as a missing Qdrant
+    /// collection, sending the operator to re-run sync_project for an embedder fault.
+    ///
+    /// This is the regression guard for the ordering that prevents it.
+    #[test]
+    fn an_embedder_body_mentioning_not_found_does_not_hijack_the_collection_bucket() {
+        let err = "dense openai status 404: {\"error\":\"model not found\"}";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            !hint.contains("Qdrant collection is missing"),
+            "an embedder error carrying 'not found' in its BODY must stay in the \
+             embedder bucket: {hint}"
+        );
+        assert!(
+            hint.contains("embedder problem"),
+            "and it must reach the embedder hint: {hint}"
         );
     }
 
