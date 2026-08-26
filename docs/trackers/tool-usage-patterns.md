@@ -832,6 +832,32 @@ so nothing warns that overlapping ranges duplicate their shared lines. This is t
 family as `bug-fix-session-log:W-63` — a reconstruction of what a tool returned, mistaken
 for what the artifact contains.
 
+### T-30 — `symbols(include_body=true)`'s rendered indentation copied straight into `edit_code`
+
+**Tool:** `symbols(name_path=..., include_body=true)` → `edit_code(action="replace"/"insert", body=...)` — **verdict: legitimate, shape-mismatched**
+
+Twice in one session, copied a symbol's body as shown by `symbols(include_body=true)` into
+an `edit_code` call reproducing it (once a doc-comment block, once a whole function body via
+`action="replace"`). Both times the write succeeded — syntactically valid Rust — but carried
+one extra indent level relative to the file's actual bytes, caught only by `cargo fmt --check`
+immediately after, never by inspection.
+
+**Why it is worth an entry:** the failure is silent at write time, same shape as T-29 — a
+reconstruction of what a tool *displayed*, mistaken for the file's bytes. `symbols` is a
+pretty-printer (consistent, readable indentation for humans scanning many symbols at once);
+it was never a promise that the returned whitespace matches the source file's own. Recurring
+twice in one session, on two different symbols, argues the pattern rather than a fluke.
+
+**Ideal:** for a whole-symbol `edit_code` `replace`/`insert` that reproduces multi-line
+content, verify indentation against a raw byte read (`read_file(..., force=true)`) before
+writing, or treat `cargo fmt` as a mandatory mechanical follow-up to any such call rather than
+an optional gate check run later.
+
+**Prompt gap:** `symbols`' `include_body=true` documentation ("pass include_body=true for the
+full source") carries no caveat that the returned indentation is a display rendering, not
+verified byte-identical to disk — the same class the reconnaissance skill already names
+generically ("a rendered read is evidence about content, not about bytes"), but `symbols`'
+own surface doesn't point a reader there for this specific case.
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)

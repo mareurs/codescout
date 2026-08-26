@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 68
-entry_high_water_W: 65
+entry_high_water_W: 67
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -190,7 +190,8 @@ entry_high_water_W: 65
 | W-63 | 2026-08-26 | high | A regex over source and a structured tool are DIFFERENT INSTRUMENTS — the regex over-counts by exactly the fixtures, every time | Counting rotted `docs/issues/` citations for a severity-policy decision, grep said 77 (truth 55) and then 22 (truth 7); `audit_doc_refs` reads tree-sitter documentation nodes and has a test pinning that a path in a string literal is NOT a citation. The second wrong number was committed into a bug file as fact and had to be corrected — a figure a later session inherits without re-deriving. Survivable only because the filter was conservative BY CONSTRUCTION (a placeholder has no archived twin), which let a 30-file automated rewrite run with zero hand decisions | validated |
 | W-64 | 2026-08-26 | high | Bulk-removing a suppression list is the cheapest audit of it — once a GREEN baseline makes the red unambiguous | The windows-gnu `--skip` list had grown to 32 write-only entries. Dropping 22 in one commit passed 21 of 22 on CI, and the 1 failure shared a cause with an entry already listed; +WINEPATH retired 3 more. 32 → 8, every survivor classified, and CI's only gnu-ABI lane went 4251 → 4293 tests. My by-hand arithmetic on the same list was wrong (19 vs 22, tripped by one entry matching four test names by substring). The blocking deferral was correct when written and expired when the lane went green — R-95 | validated |
 | W-65 | 2026-08-26 | high | When a result is IMPOSSIBLE rather than merely wrong, suspect the RUN, not the code | A failing payload carried 2 of 4 keys that output.rs sets in ONE `if let` block; grep confirmed a single producer, so no branch could emit it. Re-running unchanged: 4293/0, twice. I was two steps from filing a platform defect against a peer's hour-old feature and "fixing" correct production code — with a wine Cygwin warning in the payload ready to anchor the wrong diagnosis. Wrong values mean wrong logic; impossible combinations mean a wrong observation, and that second hunt is invisible if you start from "which line computed this?" | validated |
-
+| W-66 | 2026-08-26 | med | RED-before-GREEN on a bug's own prescribed fix, not just "bare vs. my fix" | Would have shipped a fix that changed nothing and closed a live defect | validated |
+| W-67 | 2026-08-26 | low-med | Measured the 3 live zombie records before picking doc-fix vs. doctor-check | Would have built a staleness detector for a population with no measured neglect | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -5618,6 +5619,66 @@ subject. Discarding a bad observation is not evidence of health; it returns you 
 no observation.
 
 **Status:** validated (with the scope correction above)
+
+## W-66 — RED-before-GREEN on a bug's OWN prescribed fix caught it doing nothing
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, implementing the fix for
+`docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md`. The
+bug's own `## Fix` table prescribed a three-part `<repo>:<file-stem>:<ID>` qualification
+for the template's `F-N`/`W-N` citations.
+
+**Pattern:** Applied the prescribed fix, then ran the regression test against BOTH the
+pre-fix bare form and the prescribed fix — RED in both cases, byte-identical output. The
+`<repo>:` segment was being silently dropped by the extraction regex's leftmost-match
+slide (the same failure class as an already-fixed sibling bug,
+`reconnaissance-patterns:R-89`'s truncation case), so the "fix" degraded to the same
+single-qualifier form as no fix at all.
+
+**Counterfactual:** Watching only "bare form fails, my fix passes" — the more common
+shape of a regression test — would have shown green, because the prescribed fix and the
+correct single-qualifier fix produce IDENTICAL extraction output; the test cannot tell
+them apart without a THIRD data point. Watching RED-before-GREEN on the literal
+*prescribed* text (not a stand-in "any fix") is what surfaced that the three-part form
+does nothing at all. Without it: a "fix" ships that changes no observable behavior, the
+bug closes as fixed, and the real defect — silent wrong-binding for template citations
+copied into another repo — stays live. Filed separately as
+`docs/issues/archive/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md`.
+
+**Pattern, generalized:** a bug file's own `## Fix` section is a claim about what will
+work, written at the same moment of confidence the root cause itself was — re-entering
+it to implement is a seam like any other (`reconnaissance-patterns:R-49`). Test the
+literal prescribed text, not a paraphrase of it.
+
+**Status:** validated
+
+## W-67 — Measuring the 3 live zombie records before picking a fix shape avoided an unneeded doctor check
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, picking up
+`docs/issues/archive/2026-08-26-zombie-bug-files-are-reachable-by-no-query.md`, which
+named two fix options (a new `doctor` staleness check, or widening the triage guide's
+canonical query) and explicitly recommended checking whether any live zombie record was
+actually neglected before choosing between them.
+
+**Pattern:** Read all 3 live `status: zombie` records before picking. None showed active
+neglect: one (`e817931e`) had been explicitly re-verified that same day
+(`last_verified: 2026-08-26`) and was deliberately zombie by maintainer decision; one's
+own title said its underlying bugs were already fixed/mitigated; the oldest had already
+been through one reopen-and-fail-to-reproduce cycle. That is exactly the outcome the
+bug's own Fix section said would point at the doc-only fix over the doctor check.
+
+**Counterfactual:** Defaulting to "add a doctor check, that's the more thorough-looking
+option" without the 3-record read would have built a staleness-window detector for a
+population that measurement showed had no active neglect to detect — solving a problem
+that, on the evidence, wasn't actually occurring, while the doctor check's own design
+choice (the staleness window) was explicitly flagged in the bug as "a judgement" with no
+data yet to make it. The doc-only fix took minutes; the alternative would have spent a
+session-worth of design + test effort on a check whose trigger population was empty.
+
+**Status:** validated
 
 ## Template for new entries
 
