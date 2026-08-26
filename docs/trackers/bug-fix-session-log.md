@@ -5891,8 +5891,13 @@ entry originally asserted, wrongly.
    stages *every* change under that path, a peer's included. For a ledger two sessions
    append to all evening, a peer holding uncommitted work inside the path you are staging
    is the **normal case, not the edge case**. See Correction 2.
-3. **Take both halves of a comparison from ONE command invocation.** Two commands
-   are two different worlds.
+3. **Take both halves of a comparison from ONE INVOCATION — not one command line.**
+   Two commands are two different worlds, and *a single shell command containing two
+   `git` calls is two commands*. Measured 2026-08-26 23:47, in a command literally
+   labelled `=== one snapshot ===`: `git rev-list --count` returned 22, and the
+   `git log` three statements later listed 23 — a peer's `cd374594` landed between
+   them, inside one `run_command`. The semicolons bought nothing. Derive every figure
+   from the output of **one** process, or state the two as separate observations.
 5. **Run `git diff -- <path>` immediately before `git add <path>`, and confirm every
    hunk is yours.** This is the check that actually covers rule 2's blind spot, and it
    is one command. **Rule 1 does not substitute**: `git status` reports the file as
