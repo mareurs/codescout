@@ -2908,6 +2908,60 @@ async fn non_filter_pipe_no_unfiltered_ref() {
     );
 }
 
+/// Regression for docs/issues/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md:
+/// when the filter matched nothing, the response used to omit `stdout` entirely (absent,
+/// not `""`) and attach a bare `unfiltered_output` ref with no size signal — an agent
+/// could not tell a 2-line buffer from a 20,000-line one without a blind round-trip.
+#[tokio::test]
+async fn unfiltered_output_carries_a_line_count_and_explicit_empty_stdout() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "printf 'a\\nb\\nc\\n' | grep zzz" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result["stdout"], "",
+        "stdout must be explicitly \"\", not absent, when the filter matched nothing: {result}"
+    );
+    assert!(
+        result.get("unfiltered_output").is_some(),
+        "expected an unfiltered_output ref: {result}"
+    );
+    assert_eq!(
+        result["unfiltered_output_lines"], 3,
+        "expected the unfiltered capture's line count (3), not silence: {result}"
+    );
+}
+
+/// The line count must reflect the FULL unfiltered capture, not the (possibly
+/// truncated-for-inline-storage) stored copy.
+#[tokio::test]
+async fn unfiltered_output_line_count_survives_inline_truncation() {
+    let (_dir, ctx) = project_ctx().await;
+    // Enough lines to exceed the inline-storage cap (MAX_INLINE_TOKENS * 4 bytes),
+    // so the stored copy is truncated but the reported count must still be the full
+    // pre-truncation line count.
+    let line_count = 20_000;
+    let result = RunCommand
+        .call(
+            json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        result.get("unfiltered_truncated").is_some(),
+        "fixture must actually exceed the inline cap to exercise truncation: {result}"
+    );
+    assert_eq!(
+        result["unfiltered_output_lines"], line_count,
+        "line count must be the full pre-truncation total, not the truncated-for-storage count: {result}"
+    );
+}
+
 #[tokio::test]
 async fn il3_blocks_chained_unbounded_pipe() {
     // Chained pipes off an unbounded LHS still block (was originally

@@ -126,43 +126,48 @@ pub(crate) async fn handle_successful_output(
     };
 
     // --- Step 6.5: Read tee capture and store as unfiltered_output ref ---
-    let unfiltered_ref: Option<(String, bool)> = if let Some(ref tmpfile) = unfiltered_tmpfile {
-        let capture = std::fs::read_to_string(&tmpfile.0).ok();
-        // tmpfile drops at function exit — TmpfileGuard::drop() removes the file.
-        // Skip empty captures: when the terminal filter matched nothing, both
-        // raw_stdout and the tee file are empty — surfacing a handle is misleading.
-        capture.and_then(|content| {
-            if content.is_empty() {
-                return None;
-            }
-            let (stored, truncated) = if crate::tools::exceeds_inline_limit(&content) {
-                let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
-                let capped: String = content
-                    .lines()
-                    .take_while(|line| {
-                        if byte_budget == 0 {
-                            return false;
-                        }
-                        byte_budget = byte_budget.saturating_sub(line.len() + 1);
-                        true
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                (capped, true)
-            } else {
-                (content, false)
-            };
-            let ref_id = ctx.output_buffer.store(
-                original_command.to_string(),
-                stored,
-                String::new(), // unfiltered capture is stdout-only
-                exit_code,
-            );
-            Some((ref_id, truncated))
-        })
-    } else {
-        None
-    };
+    let unfiltered_ref: Option<(String, bool, usize)> =
+        if let Some(ref tmpfile) = unfiltered_tmpfile {
+            let capture = std::fs::read_to_string(&tmpfile.0).ok();
+            // tmpfile drops at function exit — TmpfileGuard::drop() removes the file.
+            // Skip empty captures: when the terminal filter matched nothing, both
+            // raw_stdout and the tee file are empty — surfacing a handle is misleading.
+            capture.and_then(|content| {
+                if content.is_empty() {
+                    return None;
+                }
+                // Counted on the FULL capture, before any inline-storage truncation below —
+                // the whole point is telling the caller how much is behind the ref, not how
+                // much of it happened to fit inline.
+                let line_count = count_lines(&content);
+                let (stored, truncated) = if crate::tools::exceeds_inline_limit(&content) {
+                    let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
+                    let capped: String = content
+                        .lines()
+                        .take_while(|line| {
+                            if byte_budget == 0 {
+                                return false;
+                            }
+                            byte_budget = byte_budget.saturating_sub(line.len() + 1);
+                            true
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    (capped, true)
+                } else {
+                    (content, false)
+                };
+                let ref_id = ctx.output_buffer.store(
+                    original_command.to_string(),
+                    stored,
+                    String::new(), // unfiltered capture is stdout-only
+                    exit_code,
+                );
+                Some((ref_id, truncated, line_count))
+            })
+        } else {
+            None
+        };
 
     // Computed BEFORE the branch below: one arm moves `raw_stderr` into the response, and
     // the diagnostic has to cover every output shape — buffered summary included.
@@ -301,9 +306,16 @@ pub(crate) async fn handle_successful_output(
         }
     };
 
-    // Attach unfiltered_output ref if we captured via tee.
-    if let Some((ref ref_id, truncated)) = unfiltered_ref {
+    // Attach unfiltered_output ref if we captured via tee. A non-empty capture behind an
+    // empty filtered `stdout` is exactly the case docs/issues/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md
+    // covers: without an explicit `"stdout": ""` and a line count, the response looks
+    // identical whether the ref holds 2 lines or 20,000.
+    if let Some((ref ref_id, truncated, line_count)) = unfiltered_ref {
+        if result.get("stdout").is_none() {
+            result["stdout"] = json!("");
+        }
         result["unfiltered_output"] = json!(ref_id);
+        result["unfiltered_output_lines"] = json!(line_count);
         if truncated {
             result["unfiltered_truncated"] = json!(true);
         }
