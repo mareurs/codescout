@@ -68,6 +68,44 @@ A reader following one of those gets the whole sibling and has to find the secti
 by hand. That is the defect in its cheapest observable form: **the documentation's
 own cross-references are more precise than its retrieval API.**
 
+## Counterexample — the same delivery rule, the opposite outcome
+
+Added 2026-08-27 from a concurrent session (`77c6f4ae`) in this checkout, which
+volunteered the case that cuts against the framing above. **It is the arm the
+measurement was missing, and it changes the claim.**
+
+That session took **six** auto-injected guides on the same rule —
+`project-activation-bootstrap`, `progressive-disclosure`, `tracker-conventions`,
+`symbol-navigation`, `librarian`, `workspace-state`, each on the first call
+touching its topic, none requested. Delivery reproduced exactly.
+
+But `tracker-conventions` **earned its 34,333 bytes there.** Archiving two bug
+files, the session used the status vocabulary, the archive trigger, the
+SHA-plus-patch-id rule, the citation-sweep grep, the `## PREFIX-N — title`
+definition rule, and the write-the-index-row-after rule — six or seven sections,
+and at least two *changed what it did* rather than confirming it. The
+`--include`-list-is-a-hypothesis warning is why it re-ran a citation sweep with
+`include_hidden=true` after a clean zero; the definition rule is why it checked a
+heading was `## W-71 — ` rather than merely present.
+
+**Why this matters more than either number.** A single high-delivery /
+low-utilisation measurement has no resolving power between two hypotheses:
+*the guide is too big*, and *the guide is delivered without regard to whether this
+session needs it*. Both predict 63% delivered and five sections used. Only a
+second arm separates them — and the second arm shows near-full utilisation under
+the identical delivery rule. So the size is not the defect. **The absence of
+targeting is.**
+
+One corpus, one delivery rule, two sessions, opposite outcomes. That is an
+argument for **addressing**, and specifically an argument against shrinking as a
+standalone remedy — see the risk now recorded under (b).
+
+(Method note: this is `claude-plugins:W-4`'s shape — a measurement that returns
+the same value under every hypothesis reads exactly like a measurement that
+settled something. The original text stated the delivered-vs-used limit honestly
+but still led with the byte count, which is the interpretation that limit does not
+support.)
+
 ## Root cause
 
 Bodies are `include_str!`'d and dispatched by a hardcoded match on topic name:
@@ -120,11 +158,28 @@ trigger to say what it is *about*, not merely that it fired.
 
 `tracker-conventions` (34 KB) and `librarian` (20 KB) are 52% of the corpus
 between them. Splitting them into the topics they already contain shrinks the
-atom without changing the mechanism. Costs: more match arms, and **every existing
-citation of the old topic name breaks** — including the ones in shipped prompt
-surface and in downstream repos' skills. Sequence it after (a) so section
-addressing can serve as the compatibility shim.
+atom without changing the mechanism.
 
+**Do not do this before (a), and possibly not at all.** The counterexample above
+is a session that used six or seven sections of `tracker-conventions` in one
+sitting. Auto-inject fires on *the first call that touches a topic* — so after a
+split, that session receives whichever fragment its first `artifact()` call maps
+to, and must then know that five more exist and request them by name. **Splitting
+without addressing does not reduce cost; it moves the cost onto the caller and
+converts a silent over-delivery into a silent under-delivery**, which is the worse
+failure because nothing in the transcript shows what was missing.
+
+The precedent is already in the corpus and it is not encouraging.
+`librarian.md:407` ends by routing to `get_guide("librarian-runtime")` — an
+operational reference split out by hand, explicitly to keep the parent lean. That
+split already happened, and what it produced was **an edge nothing reads**: a
+reader who needs both now needs two calls and has to know to make the second. That
+is the outcome (b) generalises, absent (c).
+
+Remaining costs if it is done anyway: more match arms, and **every existing
+citation of the old topic name breaks** — including shipped prompt surface and
+downstream repos' skills. Sequence it after (a) so section addressing serves as
+the compatibility shim.
 ### (c) Declare the edges
 
 Give each guide frontmatter naming its `requires` / `see-also` / `supersedes`
@@ -145,13 +200,20 @@ corpus composable rather than merely sliceable.
 
 ## Not yet done
 
-No measurement of how often a session needs only part of a guide versus all of it.
-The 66 KB / 63% figure above measures what was *delivered*, not what was *used* —
-those are different claims and only the first is established. A probe worth running
-before (b): instrument which sections of `tracker-conventions` are actually cited
-back or acted on across a sample of sessions. Splitting on the assumption that the
-file is six topics is an authoring judgement, not a measurement, and it is the sort
-of premise that deserves re-costing before anyone builds on it.
+The 63% figure measures what was **delivered**, not what was **used** — stated as
+a limit when this was filed, and now partly answered from the other direction by
+the counterexample above, which supplies a high-utilisation arm under the same
+delivery rule. Together they establish that utilisation *varies by session*, which
+is precisely the case for targeting.
 
-**Valid:** dated 2026-08-27
+What is still unmeasured is the **distribution**: two sessions is two points, and
+they were selected by being the two that happened to be talking to each other, not
+by any sampling rule. Neither is evidence about the typical session. The probe
+worth running before (b) or (c) is which sections of `tracker-conventions` are
+cited back or acted on across a real sample — and note that the two arms here
+would both survive a bad sampling design, so the sample is the thing to get right.
 
+"`tracker-conventions` is really six topics" remains an authoring judgement, not a
+measurement. It is the kind of premise that reads as settled because it is stated
+by someone who knows the file, and it deserves re-costing before anyone builds on
+it.
