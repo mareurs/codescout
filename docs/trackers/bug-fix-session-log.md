@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 71
+entry_high_water_F: 72
 entry_high_water_W: 71
 ---
 
@@ -119,6 +119,7 @@ entry_high_water_W: 71
 | F-67 | 2026-08-26 | med | self-friction | validated | Two tree-wide writes swallowed a peer's in-flight work — `cargo fmt` and `git add <dir>` |
 | F-66 | 2026-08-26 | high | process | open | Quoted the substrate law at the user, then measured a retired sqlite store all session — backend is Qdrant, `codescout.db` untouched since Aug 25; five published figures described a dead world, and a passing positive control validated the instrument against the wrong database |
 | F-69 | 2026-08-26 | med | process | fixed-verified | Bug-file citations written at a future `archive/` path schedule no sweep — the archive flow repairs citations that *were* correct, never one wrong the day it was written |
+| F-72 | 2026-08-27 | high | self-friction | validated | Writing an honest caveat discharges the obligation to close it — two sessions, forty minutes apart, each named the exact missing check in prose and then stopped. The tell: a caveat that names a specific next action is a work item, not a deliverable. Mechanism behind [[R-95]], seen from inside |
 | F-71 | 2026-08-26 | med | self-friction | fixed-verified | Three claims published from instruments that could not discriminate the hypothesis from its alternative — and the retraction of one lost a race to a peer's committed ledger entry |
 | F-70 | 2026-08-26 | med | process | fixed-verified | A dead citation that was wrong when written is indistinguishable from one that decayed — 0 of 6 in a 321-citation sweep were decay, and three independent artifacts misread it from the prose; the `--diff-filter=AD` probe is the only discriminator |
 
@@ -6234,6 +6235,70 @@ processes nor commits — i.e. the shape generalises past "concurrent sessions i
 checkout." Candidate home is `reconnaissance-patterns` as a sibling to R-79 (a search that
 finds nothing is evidence about the search), which is the same law for a *query*; this is
 that law for a *population*.
+
+## F-72 — Writing the caveat discharges the obligation to close it — the honest limit is the failure mode, not the remedy
+
+**Valid:** invariant
+
+**Observed:** 2026-08-27, ~00:30–01:10, two sessions independently, within forty minutes,
+in a shared investigation of `get_guide` delivery. Neither of us was being careless, and
+that is the whole point of the entry.
+
+**The two instances.**
+
+1. **`claude-plugins-15`** measured guide delivery from one session, noticed the sampling
+   defect themselves, and wrote it into the issue's `Not yet done`: *"two points selected
+   by being the two sessions that happened to be talking to each other is not a sample."*
+   Correctly scoped, honestly stated — and they then stopped, without looking for the
+   population.
+2. **Me.** I went looking for the census, failed to find it in three plausible paths, and
+   told my user: *"I did not read the persistence code, so I cannot tell you whether the
+   writer is inert or writes somewhere I did not look… one function read settles it — say
+   the word and I'll do it."* Accurate, properly hedged, correctly naming the exact next
+   action. Then I wrapped up the turn instead of reading the function.
+
+The peer read it. It resolved in one look: the ledger is at
+`~/.local/state/codescout/guide_hints/` (XDG **state**, not cache or data —
+`src/server.rs:438-439`), holding **91 session ledgers**. Everything the investigation
+needed was there.
+
+**Mechanism.** A caveat is written at the moment you become aware a check is missing.
+Writing it converts an open question into a *recorded* one, and recorded reads as handled.
+The obligation is not dropped — it is discharged, by the act of describing it. That is why
+it does not feel like cutting a corner, and why "be more diligent" cannot fix it: the
+diligence already fired. It fired into prose instead of into a probe.
+
+**This is the mechanism BEHIND [[R-95]], not a sibling of it.** R-95 records that a
+deferral rationale is the least-audited kind of claim, and that the bias runs one way —
+nobody drafts an estimate that makes the work sound easier, because that estimate would
+not justify stopping. This entry says *why the author himself stops re-checking*: he
+already paid the honesty cost. Having written the limit feels like having taken it
+seriously. R-95 is measured from outside (nine rationales, all inflated); this is the view
+from inside the moment.
+
+**The discriminator, and it is cheap.** When you write a caveat, check whether it names a
+*specific next action* — a file to read, a command to run, a path to check. If it does,
+the caveat is not the deliverable; it is a work item you have just written down and are
+about to not do. Both instances passed this test loudly: mine literally named "one function
+read settles it", theirs named the missing population. **A caveat that names its own remedy
+should be executed, not filed.** One that genuinely cannot be closed in the current turn is
+the legitimate case, and it reads differently — it names a blocker, not a next step.
+
+**Counterfactual.** Had either of us closed it when we wrote it, the investigation would
+have reached the census forty minutes earlier — and it *inverted* two conclusions when it
+arrived. `librarian-runtime`, split out of `librarian` by hand specifically to keep the
+parent lean, has auto-injected in **0 of 91 sessions**; I had cited that split as the
+*precedent* for a splitting proposal, when it was the already-run *experiment*, and a
+failed one. And the median session takes **2** topics against my 6, so my own
+counterexample arm — which had already reframed the peer's central claim — turned out to
+be drawn from the top 11%.
+
+**Status:** validated
+
+**Promote-when:** a third instance appears where the caveat names a next action that is
+then not taken. Candidate home is `reconnaissance-patterns` beside R-95, as its
+inside-view; the pairing is what makes both actionable, since R-95 tells you to re-cost a
+deferral and this tells you why the author will not.
 
 ## Template for new entries
 
