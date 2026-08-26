@@ -6128,6 +6128,22 @@ citable entries saying the same thing under different numbers, each looking corr
 with the duplication visible only to someone who reads both. A resolution conflict would at least
 surface *somewhere*. This surfaces nowhere.
 
+**The class that error belongs to is NOT `F-71`'s, and the difference is worth the paragraph.**
+`F-71`'s four were instruments answering fluently — bound to the wrong question, but consulted.
+This one is the opposite mechanism: **no instrument was consulted at all, because the answer I
+wanted was already written.** The check that would have caught it — reading `append_entry`'s own
+documented id-allocation contract, quoted above — was one call away, and it went unread precisely
+*because* the false clause made the argument land harder. I was making the case that the stake was
+worse than "harmless", and reached for a louder failure mode than the real one.
+
+**The two feel identical from the inside.** In both you hold a claim you believe, and in both the
+probe is cheap and unread. They differ only in *why* it stayed unread: in `F-71`, because an
+instrument appeared to have answered; here, because the conclusion appeared not to need one. The
+second is harder to catch, because there is no green result to mistrust — only a sentence that
+reads well. `codescout-df` declined to file this separately, on the grounds that a second entry
+would produce one lesson under two ids with divergent bodies, each correct in isolation — the exact
+failure this entry's own stake paragraph describes. So it is recorded here, once.
+
 The corrected clause rests on the documented id-allocation contract rather than an experiment, and
 deliberately so: **testing it would require running `append_entry`, which allocates an id — the test
 consumes the thing it measures.** That is the `instrument-writes-into-its-own-corpus` shape, and it
