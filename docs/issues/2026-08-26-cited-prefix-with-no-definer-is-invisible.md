@@ -13,7 +13,7 @@ opened: 2026-08-26
 owner: marius
 related: []
 severity: medium
-unverified: The three-state behaviour is established from report output across four namespaces in one downstream repo, not from reading the resolver source. The proposed check's false-positive rate against a prose doc that merely quotes `## R-4` in prose (which the guide warns about for ledger inference) has not been assessed.
+unverified: Primary + documentation shipped and tested; the citation-count threshold (>=3 across >=2 files) is the bug's own suggested starting point, not yet swept against the full catalog to tune. Secondary (a per-array `truncated` flag on link_scan's report) is still unimplemented -- noted in Resume.
 ---
 
 # BUG: a cited prefix with no definer is reported nowhere
@@ -106,32 +106,47 @@ as a level rule.
 
 ## Fix
 
-**Primary — a `doctor` check, `cited_prefix_with_no_definer`.** For every prefix appearing
-in ≥1 citation with 0 definers in scope, emit a row: the prefix, the citation count, and the
-citing files. Read-only worklist, consistent with `doctor`'s existing posture. This converts
-the invisible state into the one thing that makes it fixable — a row someone can see.
+**Primary and Documentation shipped 2026-08-26 -- Secondary still open.**
 
-Guard against the false positive the guide already warns about for ledger inference: a
-design doc quoting `## R-4` in prose is not a namespace. A citation-count threshold (say ≥3
-across ≥2 files) keeps incidental prose out.
+**SHA:** `c0ec5ace` (`experiments`)
+**patch-id:** `b07570e84e40c7dfd8a5664d9793175c0b40ca25`
 
-**Secondary — a `truncated` flag per finding array** on `link_scan`, so
-`len(dangling) == 50 < counts.dangling == 70` is stated rather than inferred. The
-`*_by_source` maps are the census today but answer "which file", never "which token", so
-there is no complete token-level view at any size.
+`feat(doctor): add cited_prefix_with_no_definer check`.
 
-**Documentation —** state in `get_guide("tracker-conventions")` § *Entry headings* that a
-prefix with no definer anywhere produces citations that are neither resolved nor reported,
-and that heading level is irrelevant to the definition rule.
-
-Fix commit SHA + `git patch-id --stable`: not yet applied.
-
+1. **[done] Primary — the `doctor` check.** `scan_cited_prefix_with_no_definer`
+   (`src/librarian/tools/doctor.rs`) starts from the citation graph rather than a known
+   ledger's claimed entries — one combined corpus pass over `link_scan::extract`, reusing
+   the same extraction `corpus_cited_tokens` and `body_defined_indices` already use for the
+   citation and definition halves, so this check can't disagree with either about what
+   counts as one. Emits `cited_prefix_with_no_definer` naming the prefix, citation count,
+   and citing files. Guarded by a citation-volume threshold (≥3 citations across ≥2 files)
+   to stay quiet on incidental prose (`## R-4` quoted in a design doc) — the threshold is the
+   bug's own suggested starting point, not yet swept against the full catalog to tune.
+   Silent when the prefix is defined elsewhere (link_scan's dangling territory) or declared
+   via `entry_prefix` (`ledger_defines_nothing`'s territory), to avoid double-reporting the
+   same underlying namespace under two check names.
+2. **[done] Documentation.** `get_guide("tracker-conventions")` § *Entry headings* now
+   states the third citation state (resolved / dangling / inert) and the heading-level
+   non-rule two readers had already misread.
+3. **[still open] Secondary — a `truncated` flag per finding array on `link_scan`.** Not
+   implemented. `len(dangling) == 50 < counts.dangling == 70` is still inferred, not stated.
+   Left for a follow-up: it touches `link_scan`'s report shape rather than `doctor`, is a
+   separable change, and this session's scope was the two bugs picked as genuinely
+   self-contained — this one is not.
 ## Tests added
 
-None yet. The natural regression is a fixture repo with one prefix cited N times and never
-defined, asserting the check fires; plus an assertion that
-`len(findings) < counts.<finding>` implies `truncated: true`.
+Four tests in `src/librarian/tools/doctor.rs`, all confirmed RED (function didn't exist)
+before GREEN:
 
+- `cited_prefix_with_no_definer_fires_above_threshold` — 2 files, 4 citations, fires with
+  the right check name, count, and both citing files named.
+- `cited_prefix_with_no_definer_is_silent_below_threshold` — 1 incidental citation, silent.
+- `cited_prefix_with_no_definer_is_silent_when_prefix_is_defined_elsewhere` — a defined
+  sibling entry makes the prefix known; other ids in it dangle (link_scan's job), silent here.
+- `cited_prefix_with_no_definer_is_silent_when_prefix_is_declared` — `entry_prefix:` declared
+  but nothing defined; silent here, `ledger_defines_nothing`'s finding instead.
+
+No regression test yet for the still-open secondary (`truncated` flag).
 ## Workarounds
 
 Run a **positive control** before believing any categorical claim from the report: resolve
@@ -142,12 +157,12 @@ Use `*_by_source` for census; never infer from absence in the finding arrays.
 
 ## Resume
 
-Decide whether the check belongs in `doctor` (read-only worklist, matches
-`entry_without_definition`'s posture) or in `link_scan`'s report (closer to the data, but
-that report is breakage-shaped). Then pick the citation-count threshold against the catalog:
-count prefixes with 0 definers by citation volume across all managed roots, and see where
-incidental prose quotation falls off.
+Primary + documentation done (`c0ec5ace`). What remains:
 
+1. Implement the `truncated` flag per finding array on `link_scan`'s report (§ Fix item 3).
+2. Sweep the `cited_prefix_with_no_definer` citation-count threshold (currently ≥3 across
+   ≥2 files) against the full catalog to see where incidental prose quotation actually falls
+   off, per the original Resume note — not done, the shipped threshold is a starting point.
 ## References
 
 - `docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md` —
@@ -158,4 +173,3 @@ incidental prose quotation falls off.
 - `claude-plugins:roster-audit-session-log:F-4` — the wrong finding it produced, corrected same day
 - `claude-plugins:reconnaissance-patterns:R-4` — the reasoning-side counterpart: the positive-control law was loaded and still missed
 - `claude-plugins` `docs/issues/2026-08-26-active-plan-t-n-row-only-uncitable.md` — the downstream instance
-
