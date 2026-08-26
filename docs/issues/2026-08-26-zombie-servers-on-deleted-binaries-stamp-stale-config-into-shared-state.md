@@ -177,6 +177,45 @@ the writes would have been genuinely incompatible. `CODESCOUT_MODEL_DIM=768`
 would have caught the dimension change on the current process, but a zombie
 without that env has no such pin.
 
+### Measured 2026-08-26 23:38–23:40 — the first live `SIGTERM` test of `ca2b0226`
+
+Three pre-rebuild servers were killed at the user's request. The result sorts them against
+`ca2b0226` (22:32, *"bound LSP shutdown to a deadline so SIGTERM always reaps the
+process"*):
+
+| pid | started | vs `ca2b0226` | `SIGTERM` result |
+|---|---|---|---|
+| `3537046` | 23:25:45 | after | **exited cleanly** |
+| `2139369` | 21:01:42 | before | hung — needed `-9` |
+| `3007036` | 22:38:57 | after the commit, build unknown | hung — needed `-9` |
+
+**One clean post-fix exit is the first positive datapoint for `ca2b0226`.** `3007036` is
+deliberately counted neither way: a commit timestamp says nothing about when the binary was
+rebuilt, and the binary that process loaded was overwritten by the 23:33:54 build, so which
+code it ran is not recoverable.
+
+**The handler was installed on both hangers and observed not to complete** — this file's
+root cause seen directly rather than inferred. `/proc/<pid>/status` on both:
+
+```
+SigCgt: 0000000100014443    bit 14 set → SIGTERM is caught
+SigIgn: 0000000000001000    SIGPIPE only
+STAT:   Sl+                 still sleeping >60s after SIGTERM
+```
+
+**The observable is a hang, never a delayed exit — and that distinction picks the fix.**
+If the handler sets a shutdown flag read only after the current stdin read returns, a
+still-connected client means it never returns, so the handler is not *slow* but
+structurally unable to run to completion while any client holds the pipe. A deadline
+wrapped around the shutdown steps cannot help a handler that never reaches them; the remedy
+would be a wakeup on the read. **Mechanism proposed by `codescout-77` and NOT verified
+against the code path** — the process measurements above are observed, this paragraph is a
+hypothesis about why, and the two should not be read at the same confidence.
+
+**Consequence for this file's `unverified:` line.** Both long-lived servers running deleted
+binaries — the exact population that caveat concerns — were killed at 23:39 and are gone.
+Anything that needed reading out of a live one is no longer available; the window closed.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** a config file somewhere sets `all-minilm`.
