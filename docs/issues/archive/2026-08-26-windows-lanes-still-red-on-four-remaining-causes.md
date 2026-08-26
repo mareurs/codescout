@@ -1,7 +1,7 @@
 ---
-id: '3dff5caea3feebce'
+id: 010297e601f03f00
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the Windows lanes stay red on four further causes after the doctor cluster — POSIX-absolute fixtures, verbatim-prefix worktree detection, config-dir resolution, and parent pid'
 tags:
 - windows
@@ -9,11 +9,10 @@ tags:
 - path-form
 - worktree
 - cross-platform
-closed: ''
+closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 severity: high
-unverified: 'Groups A, C, D, E and F are closed, each verified red→green under wine. Group B is now root-caused and fixed (ee9d9844) from CI run 32961510592''s assertion values, but the fix is UNVERIFIED: wine implements Windows byte-range locks permissively, so those two tests pass there both before and after the change — the local run proves the wiring, not the fix. It needs a real windows-latest run. If it comes back red, the fallback is NOT to skip: read whether holder_pid is still None (sidecar unreadable too, so a different mechanism) or now wrong (a stale record, so the Drop ordering).'
 ---
 
 ## Summary
@@ -237,14 +236,47 @@ E is a policy question first; B and F cannot be settled with the local loop.
 
 ## Fix
 
-Not started. Suggested order — cheapest and most certain first:
+All six groups closed. **Verified on real Windows**: CI run `32970579826` (commit
+`c91eb754`) had all three `windows-latest` lanes green — `default`, `no-features` and
+`local-embed` — down from 46 failures on run `32740102144`.
 
-1. **C**, mirroring `af5d0dab`: fixtures must spell paths the way the platform does. Keep
-   the predicate under test intact; these are security-boundary tests.
-2. **E**, once the XDG-on-Windows question is answered.
-3. **D**, the only group with a plausible user-visible defect behind it.
-4. **B/F** last, and only with MSVC evidence — the local loop cannot see them.
+| Group | Fix | SHA (`experiments`) | patch-id |
+|---|---|---|---|
+| (prior) doctor cluster, 31 tests | forward-slash paths in entry-validity fixtures + `outside_roots_group` | `af5d0dab` | `de915596b0fbdaac4c9e06fc471ca0ef662227d1` |
+| A — no POSIX shell (8) | give the wine lane a real Git Bash rather than re-skipping | `ba046b9c` | `6da1b8b22512932e135c2a82a4023afc92ad8876` |
+| B — index_lock (2) | holder PID moves to a never-locked sidecar | `ee9d9844` | `e2461046f300d59b0faae829ec831ecf8b26c652` |
+| C — POSIX-absolute fixtures (3) | drive-prefix the fixtures; split the one Windows semantic | `cd0bfcaa` | `65de6c9d9f660dc657915fe7d7f9c5a19546e0a6` |
+| D — verbatim `\\?\` vs plain (4) | build gitdir pointers with `join`; read the notice out of parsed JSON | `9b048e17` | `f42a4e9faa0aac83d8f92f1f94ee66852e1e952c` |
+| E — config-dir resolution (3) | make the XDG fixtures absolute on both platforms | `b1681d76` | `f35b49bee1eb754961ae06610b90fbc073839acb` |
+| F — parent pid is 0 (1) | split the rendezvous ppid assertion, pinning the Windows contract | `4824dfe3` | `25136f153b69ac064c40b7b88131fa141a3c4091` |
+| (production) tracker-path match | `names_tracker_path` normalises separators | `3a7599c2` | `ef59e5fd0215dad4603ce0dd2d4f378eb7025f74` |
 
+### What the sweep actually found
+
+Of 44 failing tests across six causes, **exactly one was a production defect** —
+`names_tracker_path` matching `docs/issues/` and `docs/trackers/` with a hard-coded
+forward slash, so Windows sessions got the wrong guide (`3a7599c2`). Group B was the
+second, found later and only because CI printed the assertion values. Everything else
+was a fixture that spelled paths the way the author's platform does.
+
+That ratio is the finding worth carrying: a red cross-platform lane is overwhelmingly
+fixture noise, and the one real defect is cheapest to lose inside it. Group A is the
+same lesson in the other direction — 8 environmental failures were *hiding* the ninth,
+which was the production defect (W-59).
+
+### Three filed guesses were wrong, and are left standing
+
+The original triage guessed D "looks like production" (fixtures), E "a decision, not a
+bug" (no decision was needed), and F "either the lookup returns 0 or wine doesn't" (the
+zero is deliberate design). Each wrong sentence is still in its section above with the
+correction under it, because the pattern — a plausible cause written at triage time,
+before any reproduction — is more useful visible than tidied away.
+
+### Not covered here
+
+The `Windows-gnu cross` lane is a different surface and is NOT claimed green by this
+file. Its remaining issue is a wine-version divergence, tracked separately in
+`docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md`.
 ## Tests added
 
 None yet.

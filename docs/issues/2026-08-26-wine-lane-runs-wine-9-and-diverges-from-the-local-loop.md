@@ -151,6 +151,7 @@ N/A — mitigated. Reopen by implementing the WineHQ pin above.
 
 - CI run `32961510592` — the shell fix; 8 → 1 on this lane
 - CI run `32970579826` — the timeout, made visible by `7d8bfae7`
-- `docs/issues/2026-08-26-windows-lanes-still-red-on-four-remaining-causes.md` — the
-  Windows sweep this lane was built to serve
+- `docs/issues/archive/2026-08-26-windows-lanes-still-red-on-four-remaining-causes.md` —
+  the Windows sweep this lane was built to serve (archived 2026-08-26: all six groups
+  fixed, verified on all three `windows-latest` lanes in run `32970579826`)
 - `scripts/build-windows.sh` — the local loop whose fidelity this bug bounds
