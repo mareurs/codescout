@@ -224,14 +224,23 @@ running.
 ---
 ## `index_project`
 
-Backward-compatible alias for `index(action="build")`. The dedicated tool is
-still registered; new code should prefer the action-dispatched form for
-consistency with the other meta-tools (`workspace`, `library`, `memory`).
+The action-dispatch target behind `index(action="build")`. **Not a separately
+registered MCP tool** — `src/server.rs` registers `Index` (and `SemanticSearch`)
+from this module and nothing else, so there is no `index_project` to call by name.
+The name survives as the `IndexProject` `Tool` impl that `index` dispatches to, and
+is documented here because the `Tool Docs Sync` CI gate diffs every `Tool::name()`
+in `src/tools/` against the headings on this page.
 
+Use `index(action="build")`, consistent with the other meta-tools (`workspace`,
+`library`, `memory`).
+
+> Corrected 2026-08-26. This section previously said "the dedicated tool is still
+> registered", which was false against `src/server.rs`.
 ## `index_status`
 
-Backward-compatible alias for `index(action="status")`. The dedicated tool is
-still registered.
+The action-dispatch target behind `index(action="status")`. **Not a separately
+registered MCP tool** — see the note under `index_project` above. Call
+`index(action="status")`.
 
 **Purpose:** Report whether the project is indexed and queryable, with chunk and
 file counts read live from Qdrant, plus optional in-flight progress and git-sync
@@ -329,3 +338,98 @@ the worktree state fields above.
 
 > **See also:** [Dashboard](../concepts/dashboard.md) — the Overview page surfaces
 > index staleness without a tool call.
+
+## `index_verify`
+
+The action-dispatch target behind `index(action="verify")`, and — like the two
+above — **not separately registered**. Call `index(action="verify")`.
+
+**Purpose:** check the semantic index against the filesystem and report coverage,
+orphaned rows, and chunks stored without a vector. It also checks the *memory*
+collection, which leaks differently and is the reason the check exists in this shape
+(below).
+
+**Read-only by construction, and that is the design rather than a limitation.** A
+negative result must never authorise a deletion: a bad filesystem walk reporting
+every file as an orphan would, if this pruned, destroy a live index. Repair stays
+with `index(action="build")`, whose prune runs against a walk it performed itself.
+
+**Parameters:** none.
+
+**Example:**
+
+```json
+{ "action": "verify" }
+```
+
+**Output:**
+
+```json
+{
+  "verdict": "incomplete",
+  "project_id": "codescout",
+  "collection": "code_chunks",
+  "expected_files": 1383,
+  "stored_files": 1379,
+  "missing_count": 4,
+  "missing_sample": ["src/foo.rs"],
+  "orphan_count": 0,
+  "orphan_sample": [],
+  "empty_eligible_dirs": [],
+  "chunks_without_vectors": 0,
+  "git_sync": { "status": "behind", "behind_commits": 0 },
+  "memories": { "on_disk": 23, "in_store": 18, "missing_count": 5, "...": "..." },
+  "hint": "Index is level with HEAD but missing 4 eligible file(s). Run index(action='build')."
+}
+```
+
+### The verdict, and why the ordering matters
+
+`verdict` is one of three values, derived from the axes above so that readers do not
+have to reconcile six independent fields inconsistently:
+
+| verdict | meaning |
+|---|---|
+| `complete` | Level with HEAD and covering every eligible file. |
+| `stale` | Behind HEAD; the missing files are explained by the pending commits. |
+| `incomplete` | Genuinely broken — see below. |
+
+The `stale` arm sits **before** the missing-file check on purpose. An index behind
+HEAD is *expected* to be missing the files those commits added, so calling that
+"incomplete" would cry wolf on almost every project almost all the time — and a check
+that always complains gets switched off. Only an index level with HEAD and still
+short is actually broken.
+
+Two conditions outrank staleness entirely, because no number of pending commits
+explains either: a chunk stored **without a vector** (it answers `chunk_refs` and
+counts toward `index(action="status")`, but can never match a query) and an eligible
+top-level directory with files on disk and none in the index. Both report
+`incomplete` at any freshness.
+
+`hint` names the one next action for the verdict rather than listing problems — a
+report that says what is wrong without saying which command fixes it gets read as
+noise.
+
+### The `memories` block
+
+The memory store is the other collection, and it fails in a way no store-side
+instrument can see: `cross_embed_memory` is best-effort and non-fatal, so a failed
+embed leaves the markdown on disk with **no point ever written**. There is no row to
+enumerate, which is why this is checked against disk here rather than left to
+`reembed_memories_in_place` — that walks `store.list()` and is blind to exactly the
+memories that are lost.
+
+Two details worth knowing before reading the numbers:
+
+- **Shared topics only.** `cross_embed_memory` runs under `if !private`, so private
+  memories have no point *by design* and would otherwise report as missing, every one
+  of them, forever.
+- **It degrades rather than propagates.** A memory-store outage yields
+  `{"status": "unchecked", "reason": "…"}` instead of failing the call: the code index
+  is this tool's primary subject, and an outage in the secondary one must not turn its
+  report into an error.
+
+The `hint` inside this block names `memory(action='write')` for missing entries and
+`memory(action='forget')` for orphaned points, and explicitly rules out
+`codescout migrate-memories --in-place` — the repair anyone would reach for first, and
+the one guaranteed to report success while changing nothing.
