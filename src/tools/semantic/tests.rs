@@ -705,6 +705,52 @@ fn format_index_status_leads_with_degraded_when_chunks_have_no_vector() {
     );
 }
 
+/// A sync that skipped chunks is a bigger gap than a vector hole -- the chunks
+/// never made it into the store at all, not merely un-embedded -- so it leads
+/// the line ahead of the hole arm, and stays queryable for the same reason holes
+/// do: the index still answers, it just cannot return what it never received.
+/// docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+#[test]
+fn format_index_status_leads_with_degraded_when_the_last_sync_skipped_chunks() {
+    let result = serde_json::json!({
+        "indexed": true,
+        "file_count": 100,
+        "chunk_count": 5000,
+        "last_sync_skipped": {"count": 3, "sample": ["src/a.rs:1 -- boom"]},
+        "integrity": "degraded",
+    });
+    let out = format_index_status(&result);
+    assert!(
+        out.starts_with("DEGRADED"),
+        "a skipped-chunk sync must lead, not trail: {out}"
+    );
+    assert!(out.contains('3'), "must name the count: {out}");
+    assert!(
+        out.contains("queryable"),
+        "and must not imply the index is unusable: {out}"
+    );
+}
+
+/// A skipped-chunk sync outranks a vector hole when both are present -- the
+/// skipped chunks are wholly absent from the store, which is the more severe of
+/// the two knowable-cheaply facts.
+#[test]
+fn format_index_status_skipped_outranks_a_vector_hole() {
+    let result = serde_json::json!({
+        "indexed": true,
+        "file_count": 100,
+        "chunk_count": 5000,
+        "chunks_without_vectors": 7,
+        "last_sync_skipped": {"count": 3, "sample": []},
+        "integrity": "degraded",
+    });
+    let out = format_index_status(&result);
+    assert!(
+        out.contains("skipped"),
+        "the skipped-chunk fact must be named when both hold: {out}"
+    );
+}
+
 #[test]
 fn search_result_item_content_is_last_field() {
     // Regression: content must be last — it is the bulk payload.

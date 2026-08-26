@@ -1388,6 +1388,8 @@ mod worktree_search_tests {
             schema_version: crate::retrieval::index_state::INDEX_STATE_SCHEMA_VERSION,
             indexed_with_model: None,
             dirty_paths: Vec::new(),
+            last_sync_skipped_count: 0,
+            last_sync_skipped_sample: Vec::new(),
         };
         std::fs::write(
             root.join(".codescout").join("index-state.json"),

@@ -828,10 +828,19 @@ pub async fn sync_worktree(
     // None` note at the end of this function, and the fact that it deliberately does not
     // call `ensure_collection`. Stamping a model here would let a worktree delta
     // overwrite main's record of what built the index.
+    // `&[]` for `skipped`, not "nothing was skipped": this write happens BEFORE the
+    // embed pass below runs (see the I3 ordering comment above), by design, so this
+    // run's own skip count is not yet knowable at this point in the flow. A worktree
+    // delta sync's `last_sync_skipped` therefore never reflects the run that follows
+    // this write -- a known gap, not a claim of cleanliness. Closing it would mean a
+    // second sidecar write after the embed pass, which needs its own reasoning about
+    // ordering against the same early-return hazard this comment block documents, and
+    // is left for a follow-up rather than folded in here.
     crate::retrieval::index_state::write_index_state_with_dirty(
         worktree_root,
         &dirty_vec,
         crate::retrieval::index_state::ModelStamp::Preserve,
+        &[],
     )
     .with_context(|| {
         format!(
@@ -1057,6 +1066,7 @@ impl crate::retrieval::client::RetrievalClient {
                 root,
                 &existing_dirty,
                 crate::retrieval::index_state::ModelStamp::Record(&self.config.model),
+                &skipped,
             ) {
                 tracing::warn!(error = %e, "failed to write index-state sidecar");
             }
@@ -1718,6 +1728,25 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
+    impl CodeEmbedder for CeilingEmbedder {
+        // Every method but `known_dim` is unreachable: `sync_project` drives this
+        // fixture through `BatchEmbedder` only (`&*self.embedder` cast in
+        // `stream_index`), mirroring `FixedDimEmbedder` above.
+        async fn embed_one(&self, _text: &str) -> Result<EmbedOutput> {
+            unreachable!("CeilingEmbedder is driven through sync_project's BatchEmbedder path")
+        }
+        async fn embed_dense_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("CeilingEmbedder is driven through sync_project's BatchEmbedder path")
+        }
+        async fn embed_document_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("CeilingEmbedder is driven through sync_project's BatchEmbedder path")
+        }
+        fn known_dim(&self) -> Option<usize> {
+            Some(self.dim)
+        }
+    }
+
     /// An embedder that refuses everything — a down or unhealthy backend, as
     /// opposed to a healthy one handed a single oversized payload.
     struct DeadEmbedder;
@@ -1849,6 +1878,101 @@ mod tests {
              vanished silently, which is the exact defect this test guards",
             skipped.len()
         );
+    }
+
+    /// The skip count `flush_pending`'s isolation retry discovers must reach the
+    /// DURABLE sidecar, not just the in-memory `SyncReport` -- otherwise a caller
+    /// who checks `index(action="status")` on a LATER call still cannot tell the
+    /// last sync was partial. This is the wiring gap
+    /// docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+    /// closes: `sync_project` must thread its own `skipped` list into
+    /// `write_index_state_with_dirty`, not pass `&[]`.
+    #[tokio::test]
+    async fn sync_project_records_its_own_skip_count_in_the_durable_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        write_sources(dir.path(), 3);
+        std::fs::write(
+            dir.path().join("huge.rs"),
+            format!("fn huge() {{ let s = \"{}\"; }}\n", "x".repeat(4000)),
+        )
+        .unwrap();
+
+        let store: Arc<dyn CodeVectorStore> = Arc::new(RecordingStore::default());
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(CeilingEmbedder { dim: 4, limit: 500 });
+        let client = test_retrieval_client_with_embedder(store, embedder);
+        let opts = SyncOpts {
+            record_index_state: true,
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
+        let report = client
+            .sync_project("p", dir.path(), opts)
+            .await
+            .expect("an oversized chunk must not abort the sync");
+        assert!(
+            !report.skipped.is_empty(),
+            "fixture must actually skip something, or this test proves nothing"
+        );
+
+        let st = crate::retrieval::index_state::read_index_state(dir.path())
+            .expect("sidecar must exist after a record_index_state sync");
+        assert_eq!(
+            st.last_sync_skipped_count,
+            report.skipped.len(),
+            "the sidecar's count must match what THIS sync actually skipped"
+        );
+        assert!(
+            st.last_sync_skipped_sample
+                .iter()
+                .all(|s| s.contains("huge.rs")),
+            "the sample must name the offending file, got {:?}",
+            st.last_sync_skipped_sample
+        );
+    }
+
+    /// The converse: a clean sync must record 0, never carrying forward a
+    /// previous partial sync's count -- see `a_clean_sync_records_zero_skipped_not_a_stale_carry_over`
+    /// in `index_state.rs` for the same invariant at the writer layer; this pins
+    /// it through the real `sync_project` path.
+    #[tokio::test]
+    async fn sync_project_clears_a_previously_recorded_skip_count_on_a_clean_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        write_sources(dir.path(), 2);
+
+        crate::retrieval::index_state::write_index_state_with_dirty(
+            dir.path(),
+            &[],
+            crate::retrieval::index_state::ModelStamp::Preserve,
+            &["stale.rs:1 -- a previous sync's failure".to_string()],
+        )
+        .unwrap();
+
+        let store: Arc<dyn CodeVectorStore> = Arc::new(RecordingStore::default());
+        // A ceiling no real test content will ever hit -- standing in for a
+        // healthy embedder without adding a second `CodeEmbedder` fake.
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(CeilingEmbedder {
+            dim: 4,
+            limit: 100_000,
+        });
+        let client = test_retrieval_client_with_embedder(store, embedder);
+        let opts = SyncOpts {
+            record_index_state: true,
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            ..SyncOpts::default()
+        };
+        client
+            .sync_project("p", dir.path(), opts)
+            .await
+            .expect("a healthy embedder must sync cleanly");
+
+        let st = crate::retrieval::index_state::read_index_state(dir.path()).unwrap();
+        assert_eq!(
+            st.last_sync_skipped_count, 0,
+            "a clean sync must clear a stale skip count, not carry it forward"
+        );
+        assert!(st.last_sync_skipped_sample.is_empty());
     }
 
     /// The companion guard to the test above, and the reason the fix probes rather
@@ -3129,6 +3253,7 @@ mod tests {
             dir.path(),
             &["src/changed.rs".to_string()],
             crate::retrieval::index_state::ModelStamp::Preserve,
+            &[],
         )
         .unwrap();
 
@@ -3149,8 +3274,8 @@ mod tests {
             state.dirty_paths,
             vec!["src/changed.rs".to_string()],
             "an ordinary sync_project call must never clear a previously recorded \
-             dirty set -- it must route through write_index_state_with_dirty, \
-             never plain write_index_state"
+                 dirty set -- it must route through write_index_state_with_dirty, \
+                 never plain write_index_state"
         );
     }
 }

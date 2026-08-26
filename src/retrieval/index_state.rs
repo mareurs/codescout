@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 /// version-gated. See the `index-state.json` schema section of
 /// `docs/state-protocol.md`. If version-gated degradation is ever built, update
 /// this comment to describe the real mechanism rather than the aspiration.
-pub const INDEX_STATE_SCHEMA_VERSION: u32 = 3;
+pub const INDEX_STATE_SCHEMA_VERSION: u32 = 4;
 
 /// The on-disk shape of `.codescout/index-state.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +68,27 @@ pub struct IndexState {
     /// `#[serde(default)]` for the same reason as `dirty_paths` above.
     #[serde(default)]
     pub indexed_with_model: Option<String>,
+    /// How many chunks the sync that wrote this state could not embed (0 = clean).
+    /// Sourced from `SyncReport.skipped.len()` -- see `flush_pending`'s doc comment
+    /// in `src/retrieval/sync.rs` for why a batch failure is recorded rather than
+    /// aborting the walk.
+    ///
+    /// Unlike `indexed_with_model`, this has no `Preserve` case and takes a plain
+    /// `&[String]` rather than an enum: every write KNOWS whether THIS sync skipped
+    /// anything (there is no "not the surface that would know" writer the way
+    /// `sync_worktree` is for the model), so a clean run must record 0 rather than
+    /// silently carrying forward a previous run's count.
+    ///
+    /// `#[serde(default)]` for the same reason as `dirty_paths` above: a sidecar
+    /// written before this field existed must parse as "0 skipped", not fail.
+    #[serde(default)]
+    pub last_sync_skipped_count: usize,
+    /// A bounded sample of what was skipped and why, capped at
+    /// `SKIPPED_SAMPLE_CAP` -- matching `sync.rs`'s own `INTEGRITY_SAMPLE`
+    /// convention (count exact, sample capped) without importing across the
+    /// module boundary. Empty when `last_sync_skipped_count == 0`.
+    #[serde(default)]
+    pub last_sync_skipped_sample: Vec<String>,
 }
 
 /// What a sidecar write should do about [`IndexState::indexed_with_model`].
@@ -118,7 +139,7 @@ fn head_commit_full(root: &Path) -> Option<String> {
 /// than cleared, since nothing about this wrapper's contract says a caller with no
 /// dirty set also intends to forget which model built the index.
 pub fn write_index_state(root: &Path) -> std::io::Result<()> {
-    write_index_state_with_dirty(root, &[], ModelStamp::Preserve)
+    write_index_state_with_dirty(root, &[], ModelStamp::Preserve, &[])
 }
 
 /// As [`write_index_state`], additionally recording the paths a worktree's delta
@@ -129,10 +150,16 @@ pub fn write_index_state(root: &Path) -> std::io::Result<()> {
 /// what produced the `dirty_paths` wipe this file already carries a HUMAN RULING
 /// about, so a new field gets no default and the compiler names every caller that
 /// has to decide.
+///
+/// `skipped` is likewise required, plainly `&[String]` rather than an enum: pass
+/// the chunks THIS sync could not embed (`SyncReport.skipped`), or `&[]` when
+/// nothing was skipped or the calling path cannot yet know (see
+/// `sync_worktree`'s call site, which writes before its embed pass runs).
 pub fn write_index_state_with_dirty(
     root: &Path,
     dirty: &[String],
     model: ModelStamp<'_>,
+    skipped: &[String],
 ) -> std::io::Result<()> {
     // Read-back-and-preserve for the model, mirroring what `sync_project` already
     // does by hand for `dirty_paths`. Done INSIDE the writer rather than at each
@@ -142,12 +169,19 @@ pub fn write_index_state_with_dirty(
         ModelStamp::Record(m) => Some(m.to_string()),
         ModelStamp::Preserve => read_index_state(root).and_then(|s| s.indexed_with_model),
     };
+    // Cap matches `sync.rs`'s own `INTEGRITY_SAMPLE` (20): count exact, sample
+    // capped. Defined locally rather than imported -- this module has no other
+    // dependency on `sync.rs`, and the value only needs to agree in spirit, not
+    // by shared constant.
+    const SKIPPED_SAMPLE_CAP: usize = 20;
     let state = IndexState {
         last_indexed_commit: head_commit_full(root).unwrap_or_default(),
         last_indexed_at: chrono::Utc::now().to_rfc3339(),
         schema_version: INDEX_STATE_SCHEMA_VERSION,
         dirty_paths: dirty.to_vec(),
         indexed_with_model,
+        last_sync_skipped_count: skipped.len(),
+        last_sync_skipped_sample: skipped.iter().take(SKIPPED_SAMPLE_CAP).cloned().collect(),
     };
     std::fs::create_dir_all(root.join(".codescout"))?;
     let body = serde_json::to_string_pretty(&state).map_err(std::io::Error::other)?;
@@ -287,10 +321,66 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
-        write_index_state_with_dirty(root, &["src/a.rs".to_string()], ModelStamp::Preserve)
+        write_index_state_with_dirty(root, &["src/a.rs".to_string()], ModelStamp::Preserve, &[])
             .unwrap();
         let st = read_index_state(root).expect("sidecar should exist");
         assert_eq!(st.dirty_paths, vec!["src/a.rs".to_string()]);
+    }
+
+    #[test]
+    fn last_sync_skipped_round_trips() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let skipped = vec![
+            "src/a.rs:10 -- embedder timeout".to_string(),
+            "src/b.rs:5 -- too large".to_string(),
+        ];
+        write_index_state_with_dirty(root, &[], ModelStamp::Preserve, &skipped).unwrap();
+        let st = read_index_state(root).expect("sidecar should exist");
+        assert_eq!(st.last_sync_skipped_count, 2);
+        assert_eq!(st.last_sync_skipped_sample, skipped);
+    }
+
+    #[test]
+    fn a_clean_sync_records_zero_skipped_not_a_stale_carry_over() {
+        // Unlike `indexed_with_model` (which has a genuine "leave it" case via
+        // `ModelStamp::Preserve`), a skip count has none: every write KNOWS whether
+        // THIS sync skipped anything, so a clean run must record 0 -- never silently
+        // carry forward a previous run's count.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        write_index_state_with_dirty(
+            root,
+            &[],
+            ModelStamp::Preserve,
+            &["src/a.rs:1 -- boom".to_string()],
+        )
+        .unwrap();
+        write_index_state_with_dirty(root, &[], ModelStamp::Preserve, &[]).unwrap();
+        let st = read_index_state(root).expect("sidecar should exist");
+        assert_eq!(st.last_sync_skipped_count, 0);
+        assert!(st.last_sync_skipped_sample.is_empty());
+    }
+
+    #[test]
+    fn last_sync_skipped_sample_is_capped_but_count_stays_exact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let skipped: Vec<String> = (0..30).map(|i| format!("file{i}.rs -- reason")).collect();
+        write_index_state_with_dirty(root, &[], ModelStamp::Preserve, &skipped).unwrap();
+        let st = read_index_state(root).expect("sidecar should exist");
+        assert_eq!(
+            st.last_sync_skipped_count, 30,
+            "count must stay exact even when the sample is capped"
+        );
+        assert_eq!(
+            st.last_sync_skipped_sample.len(),
+            20,
+            "sample capped -- counts stay exact, matching sync.rs's own INTEGRITY_SAMPLE convention"
+        );
     }
 
     #[test]
@@ -311,6 +401,21 @@ mod tests {
         assert_eq!(st.last_indexed_commit, "abc");
     }
 
+    #[test]
+    fn sidecar_written_before_last_sync_skipped_existed_still_parses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(
+            root.join(".codescout").join("index-state.json"),
+            r#"{"last_indexed_commit":"abc","last_indexed_at":"2026-08-01T00:00:00Z","schema_version":1}"#,
+        )
+        .unwrap();
+        let st = read_index_state(root).expect("old sidecar must still parse");
+        assert_eq!(st.last_sync_skipped_count, 0);
+        assert!(st.last_sync_skipped_sample.is_empty());
+    }
+
     /// `Record` stores the model; a later `Preserve` write must not erase it.
     ///
     /// This is the whole hazard [`ModelStamp`] exists for. `sync_worktree` writes with
@@ -324,7 +429,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
 
-        write_index_state_with_dirty(root, &[], ModelStamp::Record("local:BGESmallENV15")).unwrap();
+        write_index_state_with_dirty(root, &[], ModelStamp::Record("local:BGESmallENV15"), &[])
+            .unwrap();
         assert_eq!(
             read_index_state(root)
                 .unwrap()
@@ -333,7 +439,7 @@ mod tests {
             Some("local:BGESmallENV15")
         );
 
-        write_index_state_with_dirty(root, &["src/a.rs".to_string()], ModelStamp::Preserve)
+        write_index_state_with_dirty(root, &["src/a.rs".to_string()], ModelStamp::Preserve, &[])
             .unwrap();
         let st = read_index_state(root).unwrap();
         assert_eq!(
@@ -356,9 +462,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
 
-        write_index_state_with_dirty(root, &[], ModelStamp::Record("local:AllMiniLML6V2Q"))
+        write_index_state_with_dirty(root, &[], ModelStamp::Record("local:AllMiniLML6V2Q"), &[])
             .unwrap();
-        write_index_state_with_dirty(root, &[], ModelStamp::Record("CodeRankEmbed")).unwrap();
+        write_index_state_with_dirty(root, &[], ModelStamp::Record("CodeRankEmbed"), &[]).unwrap();
 
         assert_eq!(
             read_index_state(root)

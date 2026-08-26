@@ -716,6 +716,21 @@ impl Tool for IndexStatus {
                 // model at sync time rather than this path deriving it.
                 if let Some(st) = crate::retrieval::index_state::read_index_state(&root) {
                     result["indexed_at"] = json!(st.last_indexed_at);
+                    // The durable half of
+                    // docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md:
+                    // a caller who never runs index(action="verify") still sees whether the
+                    // sync that produced THIS store's vectors skipped anything, because the
+                    // fact outlives the call that discovered it. Absent (not `count: 0`) when
+                    // clean, matching `model_mismatch`'s presence-means-a-problem convention.
+                    if st.last_sync_skipped_count > 0 {
+                        result["last_sync_skipped"] = json!({
+                            "count": st.last_sync_skipped_count,
+                            "sample": st.last_sync_skipped_sample,
+                        });
+                        if result["integrity"] == json!("ok") {
+                            result["integrity"] = json!("degraded");
+                        }
+                    }
                     if let Some(m) = st.indexed_with_model.as_deref() {
                         result["indexed_with_model"] = json!(m);
                         // A dimension check already catches a dimension change; the common
@@ -1138,12 +1153,13 @@ pub(crate) fn format_index_status(result: &Value) -> String {
     // rendered as "good · queryable". `indexed` states what is actually known here;
     // coverage is not checked on this path, and `coverage_hint` in the JSON says so.
     //
-    // Two conditions ARE knowable cheaply, so when either holds it leads the line.
-    // A model mismatch outranks a vector hole: a hole means some chunks cannot be
-    // returned, while a mismatch means every score is being compared across two
-    // embedding spaces — the results still arrive, and they are quietly wrong, which
-    // is the worse failure to leave unsaid.
+    // Three conditions ARE knowable cheaply, so when any holds it leads the line.
+    // A model mismatch outranks everything: every score is being compared across two
+    // embedding spaces, not merely some. A skipped-chunk sync outranks a vector hole:
+    // skipped chunks never reached the store at all, where a hole means the chunk
+    // exists but lacks a vector -- the more severe absence leads.
     let holes = result["chunks_without_vectors"].as_u64().unwrap_or(0);
+    let skipped = result["last_sync_skipped"]["count"].as_u64().unwrap_or(0);
     let mismatch = result["model_mismatch"].is_object();
     let mut out = if mismatch {
         let indexed_with = result["model_mismatch"]["indexed_with"]
@@ -1164,16 +1180,21 @@ pub(crate) fn format_index_status(result: &Value) -> String {
         {
             format!(
                 "MODEL MISMATCH · indexed with {indexed_with}, configured {configured} — \
-                 different models, so every score crosses two embedding spaces · \
-                 {files} files · {chunks} chunks"
+                     different models, so every score crosses two embedding spaces · \
+                     {files} files · {chunks} chunks"
             )
         } else {
             format!(
                 "model label differs · indexed as {indexed_with}, configured {configured} \
-                 — the endpoint may ignore the name; check before rebuilding · {files} \
-                 files · {chunks} chunks"
+                     — the endpoint may ignore the name; check before rebuilding · {files} \
+                     files · {chunks} chunks"
             )
         }
+    } else if skipped > 0 {
+        format!(
+            "DEGRADED · last sync skipped {skipped} chunk(s) that could not be embedded · \
+                 queryable · {files} files · {chunks} chunks"
+        )
     } else if holes > 0 {
         format!(
             "DEGRADED · {holes} chunk(s) have no vector · queryable · {files} files · {chunks} chunks"
