@@ -195,7 +195,7 @@ entry_high_water_W: 69
 | W-65 | 2026-08-26 | high | When a result is IMPOSSIBLE rather than merely wrong, suspect the RUN, not the code | A failing payload carried 2 of 4 keys that output.rs sets in ONE `if let` block; grep confirmed a single producer, so no branch could emit it. Re-running unchanged: 4293/0, twice. I was two steps from filing a platform defect against a peer's hour-old feature and "fixing" correct production code — with a wine Cygwin warning in the payload ready to anchor the wrong diagnosis. Wrong values mean wrong logic; impossible combinations mean a wrong observation, and that second hunt is invisible if you start from "which line computed this?" | validated |
 | W-66 | 2026-08-26 | med | RED-before-GREEN on a bug's own prescribed fix, not just "bare vs. my fix" | Would have shipped a fix that changed nothing and closed a live defect | validated |
 | W-67 | 2026-08-26 | low-med | Measured the 3 live zombie records before picking doc-fix vs. doctor-check | Would have built a staleness detector for a population with no measured neglect | validated |
-| W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions in one checkout | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
+| W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 ## Category conventions
 
@@ -5875,7 +5875,10 @@ Compare the two. Nothing cheaper works, and every unaided attempt in this sessio
 `experiments` checkout simultaneously — this one, `codescout-77`, and **a third session
 neither of us has been able to identify** (mid-fix on the memory-pollution bug
 `1275a6ada95c7182`, "91.5% of the live memories collection is test-fixture data").
-See the correction below: this entry originally named that third session, wrongly.
+**Read both corrections before this entry's title.** The title overclaims: the practice
+held against a peer's *other* files and failed against a *shared* one, three minutes later
+and in this very ledger (Correction 2). Correction 1 strikes a third-session name this
+entry originally asserted, wrongly.
 
 **Pattern:** Under concurrent writers, three rules, all cheap:
 
@@ -5894,6 +5897,14 @@ See the correction below: this entry originally named that third session, wrongl
    modified, which is true and useless — it cannot distinguish *your* modification from
    a peer's. An instrument answering exactly what it was asked, bound to the wrong
    question, which is `bug-fix-session-log:F-71`'s law — and F-71 is what it ate.
+   **But the check is NOT atomic with the `add`, and that is measured in both
+   directions inside four minutes.** `02d80963` (mine, no check run) swept
+   `codescout-77`'s F-71. `66671bf5` (theirs, check run and honestly passed) swept three
+   of *this very correction's* edits — my write landed in the window between their `diff`
+   and their `add`. Rule 5 narrows the race from minutes to seconds; it does not close
+   it. **Closing it takes coordination, not a command: two sessions should not hold
+   uncommitted work in one file at the same time.** Say so on the wire, and the file is
+   yours until you say otherwise.
 4. **State uncertainty in the original claim, at the strength the evidence supports.**
    In a shared checkout your retraction *races a peer's ledger, and the ledger can win* —
    see the correction below, where a prompt, unprompted retraction still arrived after
