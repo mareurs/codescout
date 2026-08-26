@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 70
+entry_high_water_F: 71
 entry_high_water_W: 69
 ---
 
@@ -194,7 +194,7 @@ entry_high_water_W: 69
 | W-65 | 2026-08-26 | high | When a result is IMPOSSIBLE rather than merely wrong, suspect the RUN, not the code | A failing payload carried 2 of 4 keys that output.rs sets in ONE `if let` block; grep confirmed a single producer, so no branch could emit it. Re-running unchanged: 4293/0, twice. I was two steps from filing a platform defect against a peer's hour-old feature and "fixing" correct production code — with a wine Cygwin warning in the payload ready to anchor the wrong diagnosis. Wrong values mean wrong logic; impossible combinations mean a wrong observation, and that second hunt is invisible if you start from "which line computed this?" | validated |
 | W-66 | 2026-08-26 | med | RED-before-GREEN on a bug's own prescribed fix, not just "bare vs. my fix" | Would have shipped a fix that changed nothing and closed a live defect | validated |
 | W-67 | 2026-08-26 | low-med | Measured the 3 live zombie records before picking doc-fix vs. doctor-check | Would have built a staleness detector for a population with no measured neglect | validated |
-| W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions in one checkout | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as `claude-plugins-15`'s in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
+| W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions in one checkout | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 ## Category conventions
 
@@ -5871,9 +5871,10 @@ Compare the two. Nothing cheaper works, and every unaided attempt in this sessio
 ## W-69 — Explicit-path staging held across three concurrent sessions in one checkout; a tree-wide add would have swept a peer's in-flight bug fix
 
 **Observed:** 2026-08-26, ~22:45–23:10. Three Claude sessions committing to one
-`experiments` checkout simultaneously — this one, `codescout-77`, and
-`claude-plugins-15` (the last mid-fix on the memory-pollution bug
+`experiments` checkout simultaneously — this one, `codescout-77`, and **a third session
+neither of us has been able to identify** (mid-fix on the memory-pollution bug
 `1275a6ada95c7182`, "91.5% of the live memories collection is test-fixture data").
+See the correction below: this entry originally named that third session, wrongly.
 
 **Pattern:** Under concurrent writers, three rules, all cheap:
 
@@ -5882,13 +5883,17 @@ Compare the two. Nothing cheaper works, and every unaided attempt in this sessio
 2. **Stage by explicit path.** Never `git add -A`, `git add <dir>`, or `git commit -a`.
 3. **Take both halves of a comparison from ONE command invocation.** Two commands
    are two different worlds.
+4. **State uncertainty in the original claim, at the strength the evidence supports.**
+   In a shared checkout your retraction *races a peer's ledger, and the ledger can win* —
+   see the correction below, where a prompt, unprompted retraction still arrived after
+   this entry was committed. Rule 4 is `codescout-77`'s.
 
 **Counterfactual — measured, not hypothesised.** Between this session's `f33caedf`
 (23:05:04) and `143b55f1` (23:08:33) — a 3.5-minute window — **four commits from two
 other sessions landed** (`f16e3101` 23:06:27, `9cfca8e8` 23:06:56, `a4ee4aa7` 23:07:03,
 `55415973` 23:08:08). At the earlier commits `d9055d36` and `42dfa0ca` the working tree
 carried `src/memory/semantic_store.rs`, `src/memory/sqlite_semantic_store.rs` and
-`src/tools/memory/tests.rs` dirty — `claude-plugins-15`'s **in-flight fix for a live
+`src/tools/memory/tests.rs` dirty — a third session's **in-flight fix for a live
 bug**. A single `git add -A` would have committed a peer's half-finished memory fix
 inside a docs-only commit, on a branch two other sessions were about to push.
 
@@ -5912,6 +5917,36 @@ This is the same law `get_guide("tracker-conventions")` § *Entry ids* already s
 *"a max-id is a fact about an instant"* — but that promotion is scoped to id allocation
 and does not reach a `git status`/`git diff` pair. Same class: **any two-observation
 comparison against a reference a peer can move.**
+
+**Correction 2026-08-26 — the third session was named, and the name was wrong.** This
+entry as committed in `b842913f` attributed the dirty `src/memory/*.rs` files to
+`claude-plugins-15`. That attribution was `codescout-77`'s, rested on nothing but a
+`ListAgents` start time overlapping an mtime range, and is **withdrawn**. Probed here
+before accepting the withdrawal: that session's three commits (`9b6bb25`, `dba7fe1`,
+`b0db2d1`) are **absent from this repo's object database**, consistent with it working in
+`/home/marius/work/claude/claude-plugins`. The name is **struck, not replaced** — no third
+candidate is named, because none is supported.
+
+**Why attribution keeps failing here, which is the durable half.** Every commit in this
+repo is authored *and* committed by `Marius Ailinca <ailinca.marius@gmail.com>`, verified
+on all three memory commits. **Git metadata is structurally incapable of attributing a
+commit to a session.** That is why four attribution errors landed today, each from a
+different weak proxy — mtime ranges, `ListAgents` start times, a `.buddy` session-start
+trace whose last row (22:05:13) predates the entire 23:01–23:13 commit window, and this
+entry inheriting one of them. There is no strong instrument, so the correct output is
+*unattributed*, not a better guess.
+
+**My own defect, distinct from the bad attribution.** I wrote an inherited claim into a
+committed ledger without probing it, in a session where I probed nearly everything else —
+including a peer's history account one message earlier, specifically to avoid hypocrisy.
+It slipped because it arrived as a settled fact (*“Third writer placed”*) rather than as a
+claim. **A conclusion handed over as settled bypasses the reflex that a hedge would have
+triggered** — which is `F-70`'s law aimed at an incoming message instead of at a citation,
+and the reason rule 4 is worth more than “retract faster.”
+
+**The counterfactual is untouched.** *“One `git add -A` at `d9055d36` commits a peer's
+half-finished bug fix inside a docs-only commit”* is true whoever owns the files. The
+save is real, measured, and independent of the name.
 
 **Confirming data points:**
 1. F-67 (this log) — a peer's in-flight work already lost once to `cargo fmt` +
@@ -5941,6 +5976,46 @@ afternoon; the rules are general.
 
 **Rests on:** `bug-fix-session-log:F-67` for the prior loss, and `codescout-77`'s own
 retraction for datapoint 3 — not independently reproduced here.
+
+## F-71 — Three confident claims from instruments with no resolving power, and the one that mattered hardened in a peer's committed ledger before the retraction arrived
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, across one session sharing a checkout with two other live sessions.
+
+**When:** Reporting tool output to a user and to peer sessions, under concurrent writes.
+
+**Got:** Three claims published from instruments that could not have distinguished the hypothesis from its alternative. Each was self-corrected unprompted; two reached the user first, and one reached a peer's **committed** ledger entry.
+
+| # | claim published | instrument | why it could not discriminate |
+|---|---|---|---|
+| 1 | "CI has three red lanes" | `gh run view --jq 'select(.conclusion!="success")'` | an in-progress job's `conclusion` is `""`, not `null`. The predicate matches *running* jobs. 15/17 were green and nothing had failed |
+| 2 | "those files are touched but their content is unchanged" | `git status` then `git diff --stat` | the two observations straddled a peer's commit. Empty diff meant **HEAD had advanced**, not that content matched |
+| 3 | "the third writer is `claude-plugins-15`" | ListAgents start time vs file mtimes | a session starting 11 min ago and mtimes spanning 8 is consistent with every session on the box. They were in a different repo entirely |
+
+**Probable cause:** In all three the instrument answered fluently in its own terms. None errored, none returned empty — the shape that prompts a second look. A result that is *wrong* invites checking; a result that is **complete and wrong** does not.
+
+**Counted honestly, per `claude-plugins:W-4`'s own standard.** A fourth case belongs here as illustration and NOT as evidence: this session initially read `CLAUDE.md`'s "pruned as a dupe" as decay, and `--diff-filter=AD` inverted it (that is `F-70`). It was caught **before** publication, so nobody was misled, and counting it would bank four where there are three. The temptation to count it is the same one the peer's entry names.
+
+**The part that is not about instruments.** Claim 3 was retracted promptly and unprompted — and still too late. `codescout-df` had already written it into `W-69`, committed as `b842913f`. In a single session, "retract before it hardens" works because you own the whole timeline. **In a shared checkout your correction races a peer's ledger, and the ledger can win.**
+
+So the rule is not *retract faster*:
+
+> **State the uncertainty in the original claim at the strength the evidence supports, because the retraction may not arrive in time.**
+
+What I had was "a session appeared 11 minutes ago and the mtimes overlap." What I sent was "the third writer IS X." Had the first sentence gone out, `W-69` would have been correct on its first write and no retraction would have been needed. The failure was not slow correction; it was a confident first claim from a weak instrument — `F-70`'s own law, pointed at my output instead of at a citation.
+
+**Received, and it generalises the whole set** — `claude-plugins-15`, offered in exchange: *re-reading an instrument with the same belief is itself a check with no resolving power.* Every case above had a cheap probe sitting unread (`.conclusion=="failure"`; one `git log` after the second observation; `.buddy/.session-start-trace.log`, which was on disk in this repo the whole time). **A probe you could have run is not the same as one you did.** Their own instance is a second shape worth knowing: a harness `verdict()` mapping *empty* hook output to `"allow"`, so an assertion passed both when the feature worked and when its emitting call was stubbed out entirely — found by mutating it, never by reading it.
+
+That is why this needs no new operational bullet. The reconnaissance skill's positive-control rule already covers it: **an instrument with no resolving power fails a known-positive exactly as a tautological one does.** The guidance was not missing. It was not run.
+
+**Severity:** med — no wrong code shipped and nothing was lost, but one error propagated into another session's durable record, and a ledger that has absorbed a wrong attribution stops being evidence.
+
+**Status:** fixed-verified — all three corrected; claim 3's correction sent to both affected sessions with the naming struck rather than replaced, since the author is still unidentified and a third guess would repeat the defect.
+
+**Rests on:** the three tool outputs as returned this session, and on `.buddy/.session-start-trace.log`'s last row being 22:05:13 — an hour before the 23:01–23:13 commit window — which is what proves the session census cannot support a commit attribution.
+
+**Promote-when:** a fourth instance from an independent work stream. Not before: the phrasing is crisper than the evidence, and `claude-plugins:F-13` is a same-day measured case of promoting a law off thin evidence and nearly deleting shipped content on the strength of it. Related: `W-69` (explicit-path staging under concurrent sessions), `F-70` (the citation-side form), `F-67` (tree-wide writes swallowing peer work).
 
 ## Template for new entries
 
