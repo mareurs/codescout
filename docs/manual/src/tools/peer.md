@@ -93,4 +93,5 @@ timeout (`PEER_IDLE_TIMEOUT_SECS`). No manual start or stop.
 `src/tools/peer.rs` (the tool), `src/peer/registry.rs` (`peers.toml` parsing),
 `src/peer/server.rs` (`PEER_EXPOSED_TOOLS` — the allowlist above),
 `src/peer/launch.rs` (process reuse and idle shutdown), `src/peer/protocol.rs`
-(envelope and error codes).
+(envelope and error codes), `src/server.rs` (`peer_enabled_at_runtime` — the
+opt-in gate above).
