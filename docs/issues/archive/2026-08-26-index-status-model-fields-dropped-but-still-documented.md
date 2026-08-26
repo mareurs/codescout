@@ -14,6 +14,7 @@ related:
 - docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
 - docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md
 severity: medium
+unverified: `embedding_count`, `db_path` and `by_source` were dropped by the same 79e0e4f2 sweep and are still absent; only the two fields the manual's recipe named were restored. The superseded design plan listing all five is deliberately left unedited as a historical snapshot.
 ---
 
 # BUG: `index(action="status")` dropped the two model fields its own manual tells users to compare
@@ -214,6 +215,62 @@ parts landed, not just the two originally scoped as mechanical:
 
 Verified 2026-08-26: `cargo test --features librarian model` — 39 passed, 0 failed,
 including all of the above.
+
+### Addendum — the first cut shipped a fresh overclaim of the exact kind this file is about
+
+*Added by the authoring session after the archive above was written, which was accurate
+as of `394931d8` but predates the correction.*
+
+- **SHA:** `899c5212` (`experiments`)
+- **patch-id:** `4e5c9b77070f126688f750d01833131715a632c5`
+
+`394931d8`'s `model_mismatch` hint asserted *"scores are being compared across two
+embedding spaces"*. Its **first live invocation** reported `all-minilm` against a
+configured `CodeRankEmbed` — which looked like a textbook hit. Measuring the endpoint
+instead of trusting the label:
+
+```
+CodeRankEmbed          dim=768  first=0.078631
+all-minilm             dim=768  first=0.078631
+total-nonsense-model   dim=768  first=0.078631
+```
+
+llama-server ignores the requested model entirely and serves whichever gguf is loaded. The
+stored vectors *were* CodeRankEmbed vectors; the label was wrong and the embedding space
+was one. So the report was right that two writers disagreed, and wrong about every
+consequence it drew from that.
+
+The discriminator was already in the config, unread when the hint was written:
+`embedder_url: None` means the backend is resolved **from** the model spec, so two names
+are two models and the strong claim holds; a url set means the name is a field in an
+OpenAI-compatible request the server may ignore. `model_mismatch` now carries
+`name_is_authoritative`, the hint splits into two strengths, and the compact line says
+`MODEL MISMATCH` only when the name actually determines the vectors — otherwise
+`model label differs … the endpoint may ignore the name; check before rebuilding`.
+
+**Worth stating plainly, because it is the lesson rather than the patch:** this file exists
+because `status` implied something it had not established. The fix for it shipped a hint
+doing the same thing one layer down. The overclaim did not disappear — it relocated into
+the prose explaining the fix, and only reading the live bytes caught it. Third such catch
+by `docs/RELEASE.md`'s live-output step in one day, second authored by the session doing
+the fixing.
+
+### The mislabel was a real defect, and a worse one than expected
+
+Chasing where `all-minilm` came from — it is in no config file, no current source default,
+and no live code path — found two `codescout start` processes from **Aug 24** and **Aug
+25** still running, both executing **deleted** binaries (`ls -l /proc/<pid>/exe`), neither
+carrying a model env var, therefore each using its own binary's compiled-in default and
+stamping it into this project's shared sidecar.
+
+Filed as
+`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`.
+The vectors survived only because the backend ignores the model name; a zombie holding a
+`local:` spec would have written 384-d vectors into a 768-d collection.
+
+So `indexed_with_model` earned its place on day one — by surfacing a live cross-process
+defect that had been invisible — even though its first verdict was an overclaim. Both
+facts belong in the record.
 ## Tests added
 
 By the fix commit (`394931d8`):
