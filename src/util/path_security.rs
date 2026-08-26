@@ -572,7 +572,7 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
             if !config.file_write_enabled =>
         {
             bail!(
-                    "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes."
+                    "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes. If you didn't expect this, a subagent may have changed the active project — call workspace(action='status') to check."
                 );
         }
         "semantic_search" | "index" if !config.indexing_enabled => {
@@ -2160,6 +2160,20 @@ mod tests {
         assert!(
             err.to_string().contains("disabled"),
             "should block approve_write when writes disabled: {err}"
+        );
+    }
+
+    #[test]
+    fn file_write_disabled_message_points_to_workspace_status() {
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            ..PathSecurityConfig::default()
+        };
+        let err = check_tool_access("create_file", &config).unwrap_err();
+        assert!(
+            err.to_string().contains("workspace(action='status')"),
+            "read-only refusal should point at workspace(action='status') so a caller can \
+             discover the active project may have been changed by a subagent: {err}"
         );
     }
 
