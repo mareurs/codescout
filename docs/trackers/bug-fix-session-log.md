@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 68
-entry_high_water_W: 62
+entry_high_water_W: 65
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -187,6 +187,9 @@ entry_high_water_W: 62
 | W-59 | 2026-08-26 | high | "Cannot be separated" / "only CI can see this" is a claim about the SUBSTRATE, not the defect — price changing the substrate before accepting the limit | wine failed 9 guide_hint tests, MSVC 1, and the bug file recorded "whether the ninth is real cannot be separated from this run". Extracting PortableGit with `7z x` (a self-extracting archive — no installer runs) and pointing CODESCOUT_BASH at its Windows path took the module 9 → exactly the 1 MSVC had → 0. Cost ~5 min and 56 MB. The ninth was the ONLY production defect among all six Windows causes and 44 tests — noise is where a real signal is cheapest to lose | validated |
 | W-60 | 2026-08-26 | high | Fix the failure MESSAGE before the failure, when the message would read the same in more than one broken world — on a slow or unreproducible surface it is the cheapest next measurement, not a detour | The wine lane's last red printed a bare empty string, and the test's name, doc comment and linked bug file all said *heredoc pipe-rewrite corruption* — which produces exactly that. One edit asserting the write's exit code, one CI run, and the payload said `{"timed_out":true,...}`: a hang, not corruption. The alternative was re-opening a closed masking bug on a platform with no local repro at ~7 min per round trip. Mirror of R-79 for reds; the same test carried both defects | validated |
 | W-61 | 2026-08-26 | med-high | A tool response read through a harness is evidence about the HARNESS's encoding, not the callee's signature — make a new assertion fail on purpose before trusting the belief it encodes | Writing that guard I also wrote "`call` returns Ok for a gate refusal", inferred from the `{"ok": false, "error": ...}` every refused `run_command` had returned all session. The positive control did not fire: that JSON is MCP serializing a real `Err`, which `.expect` catches. A false claim about `Tool::call`'s error contract would have shipped in the comment most likely to be consulted next — and it is not checkable by reading the test, only by running the broken world. R-89's rendered-read law at the RPC boundary | validated |
+| W-63 | 2026-08-26 | high | A regex over source and a structured tool are DIFFERENT INSTRUMENTS — the regex over-counts by exactly the fixtures, every time | Counting rotted `docs/issues/` citations for a severity-policy decision, grep said 77 (truth 55) and then 22 (truth 7); `audit_doc_refs` reads tree-sitter documentation nodes and has a test pinning that a path in a string literal is NOT a citation. The second wrong number was committed into a bug file as fact and had to be corrected — a figure a later session inherits without re-deriving. Survivable only because the filter was conservative BY CONSTRUCTION (a placeholder has no archived twin), which let a 30-file automated rewrite run with zero hand decisions | validated |
+| W-64 | 2026-08-26 | high | Bulk-removing a suppression list is the cheapest audit of it — once a GREEN baseline makes the red unambiguous | The windows-gnu `--skip` list had grown to 32 write-only entries. Dropping 22 in one commit passed 21 of 22 on CI, and the 1 failure shared a cause with an entry already listed; +WINEPATH retired 3 more. 32 → 8, every survivor classified, and CI's only gnu-ABI lane went 4251 → 4293 tests. My by-hand arithmetic on the same list was wrong (19 vs 22, tripped by one entry matching four test names by substring). The blocking deferral was correct when written and expired when the lane went green — R-95 | validated |
+| W-65 | 2026-08-26 | high | When a result is IMPOSSIBLE rather than merely wrong, suspect the RUN, not the code | A failing payload carried 2 of 4 keys that output.rs sets in ONE `if let` block; grep confirmed a single producer, so no branch could emit it. Re-running unchanged: 4293/0, twice. I was two steps from filing a platform defect against a peer's hour-old feature and "fixing" correct production code — with a wine Cygwin warning in the payload ready to anchor the wrong diagnosis. Wrong values mean wrong logic; impossible combinations mean a wrong observation, and that second hunt is invisible if you start from "which line computed this?" | validated |
 
 ## Category conventions
 
@@ -5442,6 +5445,152 @@ True of the specific numbers measured this session; the general lesson (prefer m
 **Valid:** dated 2026-08-26
 
 **Rests on:** the source read of buddy 0.9.1's `scripts/reload.py` `render_reload_block`, and `codescout-8f`'s independent confirmation of the live file's last-writer-wins content.
+
+## W-63 — A regex over source and a structured tool are different instruments — the regex over-counts by exactly the fixtures
+
+**Valid:** dated 2026-08-26
+
+**Observed:** measuring how many `docs/issues/` citations in source code had rotted, to
+decide whether `audit_doc_refs` should promote code-comment findings from `Med` to
+gating severity. I counted with `grep`. Twice.
+
+**Got:** both counts were wrong, in the same direction, by the same mechanism.
+
+| pass | regex said | truth | the difference |
+|---|---|---|---|
+| archive-move rot | **77** | **55** | 15 string literals + 7 teaching placeholders |
+| step-2 residue | **22** | **7** | 15 string literals |
+
+`audit_doc_refs` extracts refs from **documentation nodes** via tree-sitter — it has a
+test pinning that `let p = "docs/issues/2026-01-01-x.md";` is *not* a citation while the
+comment above it is. A regex has no such notion. So the two instruments answer
+similar-sounding questions about different populations, and the regex's answer is always
+the larger one.
+
+**Counterfactual:** the first error was caught before it mattered. The second was
+**committed into a bug file as a fact** and shipped, and had to be corrected in a
+follow-up. A number in a bug file is exactly the kind of thing a later session inherits
+without re-deriving.
+
+**What makes it survivable:** a filter that is conservative *by construction* rather than
+by judgement. Splitting the 77 on *"does a file of this basename exist in
+`docs/issues/archive/`?"* isolated the 55 genuine cases without a single hand decision,
+because a placeholder has no archived twin. The independent comment-line test then agreed
+on all 55 with zero disagreements — two orthogonal filters converging is what made a
+30-file automated rewrite safe to run unattended.
+
+**The rule:** when the question is *"what does this structured tool see?"*, the only
+instrument that answers it is that tool. A grep answers a different question — about the
+bytes — and the gap between them is the fixtures, every time.
+
+Related: [[W-61]] (a tool's rendered response shape is evidence about the transport, not
+its return type) — same family, one layer down: there, the harness's encoding was mistaken
+for the callee's signature; here, the bytes are mistaken for the parse.
+
+**Status:** validated
+
+**Promote-when:** a third instance in any work stream, or one instance where the
+over-count changes a decision rather than just a recorded number. At that point it belongs
+in the reconnaissance ledger next to the "a search that finds nothing is evidence about
+the search" law, as its false-positive twin: a search that finds *too much* is also
+evidence about the search.
+
+## W-64 — Bulk-removing a suppression list is the cheapest audit of it — once a green baseline makes the red unambiguous
+
+**Valid:** dated 2026-08-26
+
+**Observed:** the `windows-gnu` lane's `--skip` list had grown to **32 entries**. A skip
+list is write-only in practice: entries are added under pressure and nothing ever prompts
+a re-check, so it reads as coverage while silently withholding it.
+
+**Got:** removing them in bulk and letting the lane name the survivors, in two passes:
+
+| pass | action | result |
+|---|---|---|
+| local (wine 11.16) | run with ZERO skips | 12 fail — so 22 of 32 entries named passing tests |
+| CI (wine 9.0) | drop those 22 | **21 of 22 passed**; the 1 that did not shared a cause with an entry already on the list |
+| — | add `WINEPATH` for `git.exe` | 3 more retired |
+
+**32 → 8 entries**, every survivor classified with its own un-skip protocol, and the
+gnu-ABI lane — CI's *only* non-MSVC Windows coverage — went from 4251 to 4293 tests.
+
+**The precondition is the whole trick.** This is only cheap because the lane was **green
+first**. Against a red baseline a red result is uninformative; against a green one, the
+failing test names *are* the answer, delivered in one run. Deriving the same list by
+reasoning per-entry would have cost far more and produced a worse answer — I know, because
+my by-hand arithmetic on this same list was wrong (19 vs the measured 22, tripped by one
+entry matching four test names by substring).
+
+**What had to be re-costed first:** I had recorded, correctly, that these could not be
+removed because a wine-11 measurement does not transfer to a wine-9 lane. That was true
+when written and **expired the moment the lane went green** — the green baseline converted
+a red run from noise into an instrument. A deferral rationale is a claim about current
+state ([[R-95]]), and its premise had changed under it.
+
+**Generalises to:** `--skip` lists, `#[ignore]`, lint allowlists, `continue-on-error`,
+exclusion globs, `expected_failures`. Anywhere a suppression accumulates faster than it is
+audited.
+
+**Do it safely:** drop them on a branch with a known-green tip, in a commit that says it is
+a measurement, and re-add the genuine ones with the failure text as their justification.
+Every survivor then carries evidence instead of inheritance.
+
+**Status:** validated
+
+**Promote-when:** a second work stream audits a suppression list this way. At that point it
+belongs in the reconnaissance skill as a named technique, next to the positive-control
+guidance — it is the same idea applied to a *set*: make the instrument fail on purpose to
+learn what it was actually holding.
+
+## W-65 — When a result is IMPOSSIBLE rather than merely wrong, suspect the run — not the code
+
+**Valid:** dated 2026-08-26
+
+**Observed:** three unrelated tests failed together on one `windows-gnu` run. Two were a
+peer's brand-new feature, which made "the new code is broken on Windows" the obvious
+reading. One of the payloads was this:
+
+```
+{"exit_code":1,"stderr":"Cygwin WARNING:…","unfiltered_output":"@cmd_3ee4bbf5",
+ "unfiltered_truncated":true}
+```
+
+**Got:** that response cannot exist. `src/tools/run_command/output.rs` sets
+`stdout`, `unfiltered_output`, `unfiltered_output_lines` and `unfiltered_truncated` inside
+**one** `if let` block. Two of the four are present and two are absent. No branch produces
+that.
+
+I checked the obvious alternative first — a second producer that had not been updated —
+and `grep` over `src/**/*.rs` found exactly one site. At that point the shape itself was
+the evidence: **a response that no code path can emit is a fact about the run, not the
+code.** Re-running the identical command with no source change: 4293 passed, 0 failed.
+Twice. The two tests also pass in isolation under wine in 0.52s.
+
+**Counterfactual:** I was two steps from filing a platform defect against a colleague's
+feature that shipped an hour earlier, and from "fixing" production code that was correct.
+The stderr in the payload is the wine Cygwin FAST_CWD warning — a genuine red herring that
+appears on *every* `bash.exe` here and would have anchored the wrong diagnosis nicely.
+
+**The tell, stated so it is checkable:** before diagnosing a failure, ask whether the
+observed output is *reachable* from the code as written. Wrong values mean the logic is
+wrong. **Impossible combinations mean the observation is wrong** — a partial write, a
+truncated read, contention, a stale binary, a clobbered fixture. Different failure, different
+hunt, and the second one is invisible if you start from "which line computed this?".
+
+Filed as `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` with the
+mechanism explicitly unproven — contention fits all three symptoms but nothing was
+instrumented, so `unverified:` says lead-not-finding, and the two tempting fixes (retries,
+raising the SQLite busy timeout) are named as harmful rather than deferred.
+
+Related: [[W-60]] — there the message could not discriminate between broken worlds; here
+the message was fully detailed and described a world that does not exist. Both are
+"interrogate the instrument before the subject".
+
+**Status:** validated
+
+**Promote-when:** a second instance where impossibility — rather than incorrectness —
+redirected a diagnosis. At two datapoints this belongs in `systematic-debugging` Phase 1,
+as the question to ask before Phase 2: *is this output reachable at all?*
 
 ## Template for new entries
 
