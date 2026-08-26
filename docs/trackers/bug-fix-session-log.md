@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 70
-entry_high_water_W: 68
+entry_high_water_W: 69
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -194,6 +194,7 @@ entry_high_water_W: 68
 | W-65 | 2026-08-26 | high | When a result is IMPOSSIBLE rather than merely wrong, suspect the RUN, not the code | A failing payload carried 2 of 4 keys that output.rs sets in ONE `if let` block; grep confirmed a single producer, so no branch could emit it. Re-running unchanged: 4293/0, twice. I was two steps from filing a platform defect against a peer's hour-old feature and "fixing" correct production code — with a wine Cygwin warning in the payload ready to anchor the wrong diagnosis. Wrong values mean wrong logic; impossible combinations mean a wrong observation, and that second hunt is invisible if you start from "which line computed this?" | validated |
 | W-66 | 2026-08-26 | med | RED-before-GREEN on a bug's own prescribed fix, not just "bare vs. my fix" | Would have shipped a fix that changed nothing and closed a live defect | validated |
 | W-67 | 2026-08-26 | low-med | Measured the 3 live zombie records before picking doc-fix vs. doctor-check | Would have built a staleness detector for a population with no measured neglect | validated |
+| W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions in one checkout | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as `claude-plugins-15`'s in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 ## Category conventions
 
@@ -5866,6 +5867,80 @@ Compare the two. Nothing cheaper works, and every unaided attempt in this sessio
 **Rests on:** the four-commit lifecycle above, read via `--diff-filter=AD --name-status` this session; and on the citing-commit dates from `git log -S` scoped to each citing file.
 
 **Fix idea / Pointer:** the discriminator is recorded in `codescout-df`'s `claim-decay` ledger as the required probe, credited. The complement worth knowing here: **a bare "0 of 6 were decay" is survivorship, not prevalence** — a citation that decayed and was then repaired never appears as dead at all, so this measures the composition of the *dead* population only. Quoting the number without that scope would decay into "the DC class is empty" within a session or two.
+
+## W-69 — Explicit-path staging held across three concurrent sessions in one checkout; a tree-wide add would have swept a peer's in-flight bug fix
+
+**Observed:** 2026-08-26, ~22:45–23:10. Three Claude sessions committing to one
+`experiments` checkout simultaneously — this one, `codescout-77`, and
+`claude-plugins-15` (the last mid-fix on the memory-pollution bug
+`1275a6ada95c7182`, "91.5% of the live memories collection is test-fixture data").
+
+**Pattern:** Under concurrent writers, three rules, all cheap:
+
+1. **Re-read `git status` immediately before every commit** — never reuse a status
+   taken earlier in the same turn. HEAD moves.
+2. **Stage by explicit path.** Never `git add -A`, `git add <dir>`, or `git commit -a`.
+3. **Take both halves of a comparison from ONE command invocation.** Two commands
+   are two different worlds.
+
+**Counterfactual — measured, not hypothesised.** Between this session's `f33caedf`
+(23:05:04) and `143b55f1` (23:08:33) — a 3.5-minute window — **four commits from two
+other sessions landed** (`f16e3101` 23:06:27, `9cfca8e8` 23:06:56, `a4ee4aa7` 23:07:03,
+`55415973` 23:08:08). At the earlier commits `d9055d36` and `42dfa0ca` the working tree
+carried `src/memory/semantic_store.rs`, `src/memory/sqlite_semantic_store.rs` and
+`src/tools/memory/tests.rs` dirty — `claude-plugins-15`'s **in-flight fix for a live
+bug**. A single `git add -A` would have committed a peer's half-finished memory fix
+inside a docs-only commit, on a branch two other sessions were about to push.
+
+This is not a hypothetical failure mode in this repo: `bug-fix-session-log:F-67` records
+it *already happening once*, via `cargo fmt` and `git add <dir>`. Rule 2 is F-67's
+promotion, and this is its first measured save under real concurrency. Rule 1 also fired
+twice for real — the tree changed under this session between consecutive commits, and a
+file (`docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md`)
+appeared dirty *between* two of them.
+
+**Rule 3 is the sharp one, and it is `codescout-77`'s** (credited): *`git status` and
+`git diff` are not two readings of one world when a peer commits between them.* They ran
+`status`, saw four dirty Rust files, then ran `git diff --stat`, got empty, and concluded
+"touched but content unchanged — a stat-cache artifact." The diff was empty because HEAD
+had advanced between the two observations; the files were genuinely modified and genuinely
+committed, at 23:06:56 and 23:07:03, in the gap. A race read as a no-op, one step from
+being published to two users as a fabricated anomaly. They caught and retracted it
+themselves.
+
+This is the same law `get_guide("tracker-conventions")` § *Entry ids* already states —
+*"a max-id is a fact about an instant"* — but that promotion is scoped to id allocation
+and does not reach a `git status`/`git diff` pair. Same class: **any two-observation
+comparison against a reference a peer can move.**
+
+**Confirming data points:**
+1. F-67 (this log) — a peer's in-flight work already lost once to `cargo fmt` +
+   `git add <dir>`.
+2. This session — three concurrent writers, four peer commits inside one 3.5-minute
+   window, zero cross-contamination; every commit staged by explicit path and verified
+   by `git show --stat` afterwards.
+3. `codescout-77`'s status/diff race, same afternoon, same checkout — the same law in
+   its read-only form.
+
+**Impact:** high — the failure is silent, lands in someone else's commit, and is
+discovered by whoever the half-finished code breaks.
+
+**Promote-when:** one further datapoint of a two-observation race in a shared checkout.
+At that point promote to `CLAUDE.md` § *Git Workflow*, as one line: **under concurrent
+sessions, stage by explicit path and take both halves of a comparison from one command.**
+Rules 1–2 are already implied by F-67; rule 3 is not stated anywhere outside the entry-id
+context.
+
+**Status:** validated — three datapoints, one of them a measured save under live
+concurrency.
+
+**Valid:** dated 2026-08-26
+
+The commit timeline and the dirty-file observations are facts about this checkout on this
+afternoon; the rules are general.
+
+**Rests on:** `bug-fix-session-log:F-67` for the prior loss, and `codescout-77`'s own
+retraction for datapoint 3 — not independently reproduced here.
 
 ## Template for new entries
 
