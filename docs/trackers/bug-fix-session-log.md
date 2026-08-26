@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 66
+entry_high_water_F: 67
 entry_high_water_W: 61
 ---
 
@@ -116,6 +116,7 @@ entry_high_water_W: 61
 | F-62 | 2026-08-26 | high | process | fixed-verified | All five feature-gated e2e language lanes had stopped compiling — `ToolContext` grew a field, the shared harness never got it — while `cargo test` stayed green, since it never builds a feature-gated target no lane names; recurrence guard shipped in `3784cb65` |
 | F-64 | 2026-08-26 | med | plan-prose | fixed-verified | My own #18 bug file inflated its own fix — `code_vec` is per-project by FILE, so the "most likely to be got wrong" step is vacuous and its regression test would have passed for every implementation |
 | F-65 | 2026-08-26 | low | skill-doc | open | The reconnaissance skill's worked exemplars show a `**Valid:**` form the server refuses (13-vs-0 in this tracker), and instruct you to copy them |
+| F-67 | 2026-08-26 | med | self-friction | validated | Two tree-wide writes swallowed a peer's in-flight work — `cargo fmt` and `git add <dir>` |
 | F-66 | 2026-08-26 | high | process | open | Quoted the substrate law at the user, then measured a retired sqlite store all session — backend is Qdrant, `codescout.db` untouched since Aug 25; five published figures described a dead world, and a passing positive control validated the instrument against the wrong database |
 
 ## Wins Index
@@ -5315,6 +5316,69 @@ trusting either the assertion or the belief.
 a callee's contract (not merely about a value). At two datapoints, this belongs alongside
 the existing rendered-read law in the reconnaissance patterns ledger as its RPC-boundary
 form.
+
+## F-67 — Two tree-wide writes swallowed a peer's in-flight work in one session — `cargo fmt` and `git add <dir>`
+
+**Valid:** invariant
+
+**Status:** validated
+
+**Observed:** 2026-08-26. Two separate incidents, same root shape, same session, on a
+shared checkout with a peer session actively editing three files.
+
+**What happened.**
+
+1. **`cargo fmt`** — run bare as part of the pre-commit gate. It is a *tree-wide write*:
+   it reformatted 2 lines in `tests/retrieval_unit.rs`, a file the peer was editing.
+   Detected by comparing `git diff --stat` (142/53) against
+   `git diff --ignore-all-space --stat` (140/51) — the 2-line delta is the whitespace,
+   and nothing else would have shown it. Harmless in content, but it surfaces as an
+   unexplained diff in someone else's editor.
+2. **`git add docs/issues`** — staged a whole directory, and swept
+   `docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md` into commit
+   `38f15fa1`. That is **~168 lines of the peer's active investigation** (an Update
+   section, and a root cause naming the `default_workspace_root` clobber from
+   `3be6b587a9c92a7a`), now committed under a message about memory migration that does
+   not mention it.
+
+**Why the second one is the costly one.** Nothing was lost — the content is in the repo,
+correct, and the peer's working tree still matches. What was lost is **findability**: a
+commit message is the index into history, and theirs now points at the wrong subject.
+Anyone later asking *"when did the read_only investigation land?"* will not find it by
+message, only by path.
+
+**Why I did not fix it.** `git reset --soft HEAD~1` would restore the exact pre-commit
+state and is tempting. It is also history surgery on a shared branch while a peer holds
+uncommitted work in it — which is how `F-57` and `F-60` happened in the first place. The
+disclosure plus this entry costs a bookkeeping wrinkle; the rewrite risks the thing it is
+trying to protect. **When the damage is bookkeeping and the remedy is history rewriting,
+take the bookkeeping.**
+
+**The rule.** On a checkout that may be shared, treat every tree-wide operation as a
+write to someone else's files:
+
+- `git add <explicit paths>`, never `git add -A` or `git add <dir>`. Read
+  `git status --short` **in the same call as the commit** and check every staged path is
+  yours — the output is right there, which is exactly why it gets skimmed.
+- Formatters, linters with `--fix`, codemods, `cargo fmt` — all tree-wide. There is no
+  per-file discipline that makes them safe; the discipline has to be *checking the tree
+  first*, or scoping the tool to your own paths.
+- The tell for both: a `git status` or `git diff --stat` listing a path you never opened.
+  `F-57`/`F-60` are the same tell from the receiving end, which is why this is a
+  recurrence and not a new class.
+
+**Impact:** medium. No data loss in either incident, and both were caught in-session. But
+`F-57` and `F-60` are the same failure with the roles reversed, so this is the third and
+fourth datapoint for one hazard, and the first two were expensive enough to log.
+
+**Promote-when:** already actionable — the `git add <explicit paths>` half belongs in
+`docs/RELEASE.md`'s ship sequence next to the existing state-check step, since that is
+where the commit actually gets made. Promote on one more incident, or immediately if a
+future one loses content rather than only mislabelling it.
+
+**Rests on:** `bug-fix-session-log:F-57`, `bug-fix-session-log:F-60`, and
+`bug-fix-session-log:W-49` (checking `ListAgents`/`SendMessage` before committing shared
+uncommitted docs — the coordination half of the same problem).
 
 ## Template for new entries
 
