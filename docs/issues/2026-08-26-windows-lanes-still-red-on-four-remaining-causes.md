@@ -13,7 +13,7 @@ closed: ''
 opened: 2026-08-26
 owner: marius
 severity: high
-unverified: 'Groups A, C, D, E and F are closed, each verified red→green under wine. What remains UNVERIFIED is only the tail: the two `retrieval::index_lock` failures PASS under wine and FAIL on MSVC, so neither has been reproduced even once outside a CI log and the local loop cannot see them. They need a real `windows-latest` run.'
+unverified: 'Groups A, C, D, E and F are closed, each verified red→green under wine. Group B is now root-caused and fixed (ee9d9844) from CI run 32961510592''s assertion values, but the fix is UNVERIFIED: wine implements Windows byte-range locks permissively, so those two tests pass there both before and after the change — the local run proves the wiring, not the fix. It needs a real windows-latest run. If it comes back red, the fallback is NOT to skip: read whether holder_pid is still None (sidecar unreadable too, so a different mechanism) or now wrong (a stale record, so the Drop ordering).'
 ---
 
 ## Summary
@@ -72,6 +72,34 @@ have to rediscover it — including that a green wine run is still not a green
 MSVC-specific — file-locking or pid semantics that wine emulates differently. They cannot
 be worked with the local loop, which is worth knowing before someone tries.
 
+**Root-caused and fixed 2026-08-26** — SHA `ee9d9844` (branch `experiments`), patch-id
+`e2461046f300d59b0faae829ec831ecf8b26c652`. CI run `32961510592` supplied the one thing
+the local loop could not: the actual assertion values.
+
+```
+peek_in_returns_holder_pid_when_locked     left: Some(None)  right: Some(Some(2932))
+second_acquire_..._naming_the_holder_pid   left: None        right: Some(2932)
+```
+
+The lock itself works — `Some(..)` means the second acquire correctly failed. What fails is
+**reading the holder's PID out of the locked file**. `fs4` locks the whole byte range
+(`LockFileEx(handle, EXCLUSIVE|FAIL_IMMEDIATELY, 0, !0, !0)` in `fs4-0.12.0/src/windows.rs`),
+and Windows byte-range locks are **mandatory** rather than advisory: a read through any
+other handle fails with `ERROR_LOCK_VIOLATION` — the very error `fs4` names in its own
+`lock_error()` — for exactly as long as the lock is held, which is when a waiter wants it.
+Unix never showed this because `flock` is advisory and the read simply succeeds.
+
+This was **not** a test-only defect, which is why it was worth fixing rather than skipping.
+`holder_pid` is surfaced to callers by `index(action="status")`'s `indexing` block and by
+`index(action="build")`'s already-running reply (`src/tools/semantic/index.rs`), so both
+reported `holder_pid: null` on Windows — and `LockHeldError`'s message directed the reader
+to the lock file's first line, which Windows would refuse to serve.
+
+The PID now lives in a never-locked sidecar, `codescout-index-<hash>.pid`. **Wine cannot
+verify the fix any more than it could reproduce the bug**: it implements those locks
+permissively, so both tests pass there before and after. The local run proves the wiring —
+the value now comes from a file no lock covers — not the fix. Verification is a
+`windows-latest` run.
 ### C. POSIX-absolute paths in fixtures (3) — same class as the doctor cluster
 
 - `tools::grep::tests::unsatisfiable_absolute_glob_flags_only_absolute_paths_outside_the_root`
