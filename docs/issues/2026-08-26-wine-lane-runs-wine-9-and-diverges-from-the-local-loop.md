@@ -6,7 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: [ci, windows, wine, cross-compile, test-environment]
-unverified: "Mitigated, not fixed: one test (the heredoc hang) is skipped on the wine lane rather than the version gap being closed. The durable fix — pin the lane to a WineHQ build matching the local loop — is designed and argued below but NOT implemented or measured. The 22 stale skip entries this file originally recorded as un-removable HAVE now been removed, once a green CI baseline made a red run a usable measurement; if the lane goes red, the failing names are the entries wine 9.0 still needs and should be re-added with that reason. Corrected count: this file first said 19, which was hand arithmetic; 22 is measured."
+unverified: "Mitigated, not fixed: TWO tests (the heredoc write and the yes|head overflow) are skipped on the wine lane rather than the version gap being closed. Both hang identically under wine 9.0 and pass under 11.16, so they share a cause and a remedy. The durable fix — pin the lane to a WineHQ build matching the local loop — is designed and argued below but NOT implemented or measured; the honest expectation is that changing wine versions moves the failure set in BOTH directions. Skip list is now 8 entries, each classified, down from 32."
 kind: bug
 ---
 
@@ -77,9 +77,27 @@ Measured 2026-08-26, two independent instances:
 
 1. **The shell.** 8 tests died on `no POSIX shell available` because wine ships no bash.
    Fixed by supplying PortableGit (`ba046b9c`) — 7 of the 8 then passed.
-2. **The heredoc hang.** The 8th still fails: the write times out after 30s on wine 9.0 and
-   completes in under a second on wine 11.16. Same commit, same Git Bash, same
-   `CODESCOUT_BASH` shape.
+2. **The hangs — two of them, one cause.** Measured separately, from two CI logs, and they
+   produce the *identical* envelope:
+
+   ```
+   {"timed_out":true,"stderr":"Command timed out after 30 seconds","exit_code":null}
+   ```
+
+   | test | command | run |
+   |---|---|---|
+   | `heredoc_..._written_file` | `cat > note.txt <<'EOF' … EOF` | `32970579826` |
+   | `run_command_with_overflow_..._once` | `yes filler \| head -2000` | `32976889055` |
+
+   What they share is a **forked pipeline or redirection under MSYS**, where a child has to
+   be reaped and a handle closed before `run_command`'s `output()` can observe EOF — which
+   is precisely what `run_command`'s own timeout hint describes ("leaves background
+   processes holding the stdout pipe open, so `output()` never gets EOF"). Both finish in
+   well under a second on wine 11.16, same commit, same Git Bash, same `CODESCOUT_BASH`.
+
+   The second one is the load-bearing datapoint: it arrived as the **1 of 22** that did not
+   transfer when the stale skips were dropped, so it was found by a measurement rather than
+   by looking for it, and it independently reproduced the first one's mechanism.
 
 A third, smaller instance is visible in the same measurement: under wine, every `bash.exe`
 invocation emits a 6-line `Cygwin WARNING: Couldn't compute FAST_CWD pointer` block on
@@ -128,10 +146,21 @@ stale entries were silently withholding.
 
 ## Fix
 
-**Mitigation taken:** the test is skipped on the wine lane only, with the measured reason
-and an un-skip protocol in `.github/workflows/ci.yml`. Its coverage is not lost — it runs
-and passes on all three `windows-latest` lanes, which is where a Windows regression guard
-belongs; the wine lane is a fast proxy, not the source of truth.
+**Mitigation taken:** both hanging tests are skipped on the wine lane only, with the
+measured reason and a shared un-skip protocol in `.github/workflows/ci.yml`. Their coverage
+is not lost — both run and pass on all three `windows-latest` lanes, which is where a
+Windows regression guard belongs; the wine lane is a fast proxy, not the source of truth.
+
+Two things were *not* done, and both would have been wrong. Neither test was edited to
+accommodate the emulator — that would disarm it on the platform it exists for. And neither
+got a raised `timeout_secs`, which is the obvious-looking knob and the wrong one: a hang is
+not slowness, so a larger timeout buys nothing but wall-clock before the same failure.
+
+**Coverage recovered in the same pass**, so the skip list shrank while this bug was being
+written: 32 entries → 8. Twenty-two were stale, and three more (`activate_populates_head_sha`,
+`check_index_scope_respects_gitignore`, `reindex_backfills_commits_table`) fell to one env
+var — they invoke `git` directly rather than through Git Bash, so `CODESCOUT_BASH` never
+reached them and `WINEPATH` pointing at PortableGit's `cmd/` does.
 
 **The durable fix, designed and not taken:** pin this lane's wine to a WineHQ build
 matching the local loop (add the WineHQ apt repository and install a pinned

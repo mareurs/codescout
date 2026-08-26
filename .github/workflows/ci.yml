@@ -334,14 +334,14 @@ jobs:
           test -f "$DIR/cmd/git.exe" || { echo "git.exe missing at $DIR/cmd" >&2; exit 1; }
           echo "CODESCOUT_BASH=Z:${UNIX_PATH//\//\\}" >> "$GITHUB_ENV"
           echo "WINEPATH=Z:${DIR//\//\\}\\cmd" >> "$GITHUB_ENV"
-      # SKIP LIST — 7 entries covering 10 tests, every one classified below.
+      # SKIP LIST — 8 entries covering 11 tests, every one classified below.
       #
       # MEASURED, in two passes, and the second pass is the one that counts.
       #   Locally (wine 11.16, zero skips): exactly these fail.
       #   On THIS lane (wine 9.0, run 32975930504): dropping 22 stale entries passed 21 of
       #   22 — so the local measurement transferred almost perfectly, and the ONE that did
-      #   not is now carried as its own classified entry rather than as a blanket.
-      # Then WINEPATH retired 3 more (group 2 below), leaving 7.
+      #   not turned out to share a cause with a skip already here (group 6).
+      # Then WINEPATH retired 3 more (group 2 below), leaving 8.
       #
       # The 22 had accumulated since the lane gained a Git Bash and named tests that pass —
       # including two in the block historically blamed on a wine-broken glob walk. A stale
@@ -387,38 +387,43 @@ jobs:
       #    offset lands at 95 instead of the asserted 101. Do NOT relax the assertion to
       #    accommodate this — the exact arithmetic is what the test is for on real Windows.
       #
-      # 6. heredoc_body_pipes_... — wine 9.0 ONLY; see the block below.
-      #
-      # NOT skipped, deliberately, and expected to fail once more:
-      # run_command_with_overflow_emits_progressive_hint_once was the 1-of-22 that did not
-      # transfer from wine 11.16 to this lane. Its assertion was a bare
-      # "overflowing output should emit progressive-disclosure hint" — a message that reads
-      # the same whether the command timed out, produced no output, produced too little to
-      # overflow, or was refused, so skipping on it now would file an unclassified entry. The
-      # assertion has been taught to print the envelope instead; the next red run classifies
-      # it, and THEN it gets a skip with a reason or a fix. Same move that turned the heredoc
-      # "corruption" into a measured timeout (W-60).
+      # 6. WINE 9.0 HANGS (2) — heredoc_body_pipes_are_not_rewritten_into_the_written_file and
+      #    run_command_with_overflow_emits_progressive_hint_once. ONE cause, ONE remedy; see
+      #    the block below for the evidence and the un-skip protocol.
       #
       # Do NOT make any of these self-skip at runtime on a probe (missing bash, missing `py`,
       # missing git). Every one is load-bearing on windows-latest, where the thing being probed
       # for IS present, and a probe-gated early return disarms it there too. (WIN-32, WIN-36)
       #
-      # heredoc_body_pipes_are_not_rewritten_into_the_written_file — skipped for a reason
-      # that is neither the shell nor a codescout defect: the write HANGS on THIS runner's
-      # wine and is killed by run_command's 30s timeout. Measured on run 32970579826:
+      # GROUP 6 IN DETAIL — two tests, one cause, one remedy. Neither is a codescout defect
+      # and neither is about the shell: on THIS runner's wine the command HANGS and is killed
+      # by run_command's own 30s timeout. Both were measured, each from a CI log, and both
+      # produced the identical envelope:
+      #
       #   {"timed_out":true,"stderr":"Command timed out after 30 seconds","exit_code":null}
-      # The same command finishes in under a second under wine 11.16, and the test PASSES
-      # on all three windows-latest lanes — which is where its coverage actually lives, so
-      # this skip costs none. ubuntu-latest packages wine 9.0; a dev box is typically two
-      # majors ahead, and that gap has now produced two divergences in one day (this, and
-      # the guide_hint cluster's shell). Do NOT diagnose this as heredoc corruption: the
-      # symptom looked like an empty file until the test was taught to check the write's
-      # exit code, and only then did the timeout become visible.
-      # Un-skip protocol: pin this lane's wine to a version matching the local loop
-      # (WineHQ apt repo), then drop this skip and re-measure — not by editing the test.
+      #
+      #   heredoc_..._written_file            `cat > note.txt <<'EOF' ... EOF`  (run 32970579826)
+      #   run_command_with_overflow_...once   `yes filler | head -2000`         (run 32976889055)
+      #
+      # What they share is a FORKED pipeline or redirection under MSYS, where a child must be
+      # reaped and a handle closed before run_command's `output()` can see EOF. Both finish in
+      # well under a second under wine 11.16, and both PASS on all three windows-latest lanes —
+      # which is where their coverage actually lives, so these skips cost none.
+      #
+      # Do NOT diagnose either as a codescout bug. The first LOOKED like heredoc content
+      # corruption (empty file) until the test was taught to check its write's exit code; the
+      # second LOOKED like a missing progressive-disclosure hint until its assertion was taught
+      # to print the envelope. In both cases the real answer was the same timeout, and in both
+      # cases the bare assertion had been hiding it. (W-60,
+      # docs/trackers/bug-fix-session-log.md)
+      #
+      # Un-skip protocol — ONE change clears both: pin this lane's wine to a version matching
+      # the local loop (WineHQ apt repo), then drop both skips and re-measure. NOT by editing
+      # either test, and NOT by raising timeout_secs, which would only make a hang cost more
+      # wall-clock before failing the same way.
       # docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file --skip run_command_with_overflow_emits_progressive_hint_once
 
   tool-docs-sync:
     name: Tool Docs Sync
