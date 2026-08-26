@@ -1,3 +1,11 @@
+---
+title: Retrieval Stack Benchmark — 2026-05-06
+date: 2026-05-06
+topic: retrieval-quality
+summary: 20-TC suite comparing the legacy sqlite-vec backend against the Qdrant hybrid stack (BGE-M3 dense + SPLADE sparse + BGE-Reranker-v2-m3).
+status: complete
+---
+
 # Retrieval Stack Benchmark — 2026-05-06
 
 20-TC suite comparing the legacy sqlite-vec backend against the new Qdrant hybrid

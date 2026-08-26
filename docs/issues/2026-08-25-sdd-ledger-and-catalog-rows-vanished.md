@@ -12,7 +12,7 @@ closed: null
 opened: 2026-08-25
 owner: marius
 related:
-- docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+- docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
 - docs/issues/archive/2026-05-17-reindex-cascade-delete-data-loss.md
 severity: high
 unverified: Root cause undetermined — the loss was detected after the fact, with no session running to observe it.
@@ -115,8 +115,18 @@ Six sibling directories under `.superpowers/sdd/` survived with their original m
 
 `docs/trackers/tool-usage-patterns.md` (`f2ecdd76a6189efb`) still carries its
 augmentation, `entry_collection: "observations"`, and all 26 `T-N` rows. This
-distinguishes the incident from `docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md`
+distinguishes the incident from `docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md`
 (F-4) and from the archived `2026-05-17-reindex-cascade-delete-data-loss.md`.
+
+**Update 2026-08-26 — this observation was evidence *against* the 2026-08-23
+file's conclusion, not merely a contrast with it.** That bug claimed every
+augmentation in the catalog had been destroyed on 08-23. This section records
+`f2ecdd76a6189efb` alive with its full `observations` collection two days later,
+with no restore performed in between — which is only possible if it was never
+destroyed. It has since been refuted outright: the row's `created_at` is
+2026-07-05 and its history is unbroken. The contrast that still stands is with
+the archived `2026-05-17-reindex-cascade-delete-data-loss.md`, which was a real
+loss.
 
 ## Hypotheses tried
 
@@ -277,7 +287,7 @@ If both are acquitted, close as `zombie` with a re-open trigger rather than leav
   `ledger:` key names the deleted file.
 - `docs/trackers/prompt-surface-measurement-session-log.md` — the work stream's session
   log; its row was re-created by the repair reindex.
-- `docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md` — F-4,
+- `docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md` — F-4,
   augmentation loss; related but distinct (augmentations survived here).
 - `docs/issues/archive/2026-05-17-reindex-cascade-delete-data-loss.md` — the earlier
   reindex-driven data loss, fixed.

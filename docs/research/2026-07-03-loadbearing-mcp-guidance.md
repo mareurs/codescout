@@ -1,3 +1,11 @@
+---
+title: Making Developer-Authored MCP Guidance Load-Bearing Without Weakening Injection Resistance
+date: 2026-07-03
+topic: prompt-engineering
+summary: Which codescout guidance surfaces are structurally non-forgeable, why the trusted ones are weakly load-bearing in practice, and four A/B tests for per-tool guide injection.
+status: complete
+---
+
 # Making Developer-Authored MCP Guidance Load-Bearing Without Weakening Injection Resistance
 
 ## TL;DR

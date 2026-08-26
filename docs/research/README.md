@@ -8,9 +8,27 @@ title: Research Index
 
 # Research Index
 
-This folder catalogs every research artifact in the codescout repo. The
-[LIVE] table above is rendered automatically from each file's frontmatter
-by the librarian augmentation refresh — do not edit it by hand.
+This folder catalogs every research artifact in the codescout repo.
+
+**Where the index actually lives — read this before concluding it is missing.**
+It is *not* a table in this file. The index is the librarian **augmentation** on
+this file (`5086e3c7c0b9d83c`): an `entries` array projected through a
+`render_template` into the `[LIVE]` block that appears above this body in
+`librarian(action="context")` output. **Nothing writes that table to disk.**
+Opening this file in an editor and seeing no table is the expected, healthy state
+— it is not evidence that the index was lost. (A 2026-08-23 session read exactly
+that absence as repo-wide augmentation loss and filed it high-severity; see
+`docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md`.)
+
+To read the index:
+
+```
+librarian(action="context", anchor_id="5086e3c7c0b9d83c")
+artifact(action="get", id="5086e3c7c0b9d83c",
+         entry_filter={"topic": {"eq": "retrieval-quality"}})
+```
+
+Do not hand-write a table into this file.
 
 ## How to save a research
 
@@ -43,17 +61,23 @@ the error.
 
    Then a blank line, then the H1, then the body.
 
-4. **Refresh the index.** If the librarian MCP is available:
+4. **Refresh the index.** Rebuild the whole `entries` array from every file's
+   frontmatter and write it to the augmentation on this file:
 
    ```
-   artifact_refresh(action="gather", id="<this-tracker-id>")
-   # synthesize new params from gather output
-   artifact(action="update", id="<this-tracker-id>",
-            patch={params: {...}}, commit_refresh=true)
+   artifact_augment(id="5086e3c7c0b9d83c", merge=true,
+                    params_path="<abs path to the rebuilt entries JSON>")
    ```
 
-   If librarian is unavailable, the file is still saved correctly; the next
-   librarian-equipped session refreshes the index. No manual table edit.
+   **Send every entry, every time.** A params write REPLACES the collection
+   rather than merging into it, so a patch carrying only the new row deletes all
+   the others — and the catalog is not in git, so nothing recovers them. Rebuild
+   from the files; their frontmatter is the source of truth and this array is
+   only a projection of it.
+
+   If librarian is unavailable, the file is still saved correctly with its
+   frontmatter, and the next librarian-equipped session picks it up. Never
+   hand-write a table into this file.
 
 5. **Bootstrap migration** (only on explicit user request, not autonomous):
    scan `docs/**/research-*.md` and `docs/observations.md` for stragglers.
@@ -182,4 +206,3 @@ Tracker artifact created from spec
 research files indexed; 2 stragglers migrated from `docs/` root with frontmatter
 (`research-progressive-disclosure.md`, `research-validation.md`) — both with
 `date: unknown`. Quality criteria authored via Hamsa session.
-

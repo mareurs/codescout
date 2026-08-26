@@ -31,7 +31,7 @@ surfaces, not the definition.
 | F-1 | Fixed output path destroyed the evidence for the headline figure | fixed |
 | F-2 | `json.dumps` defaults inflated every schema measurement by 3.8% | fixed |
 | F-3 | A subagent's `workspace(activate)` mutated the parent's active project | open |
-| F-4 | Every augmentation in the catalog is gone | open |
+| F-4 | REFUTED — "every augmentation in the catalog is gone" was a false negative; one tracker was genuinely unaugmented | refuted |
 | F-5 | A stale recon finding was relayed as current | fixed |
 | F-6 | 400k of context with no tracker or librarian use | fixed |
 | F-7 | Spec asserted per-arm tool denial the harness cannot do | fixed |
@@ -134,25 +134,45 @@ touching shared state. Brief subagents with the parameter, never the activate.
 
 ## F-4 — Every augmentation in the catalog is gone
 
-**Valid:** dated 2026-08-23
-**Status:** open
+**REFUTED 2026-08-26 — nothing was lost.** This entry's heading is wrong; it is
+kept unchanged so the reasoning stays findable and the correction visible.
 
-**Observed:** `artifact(find, kind="tracker", augmented=true, scope="repo")`
-returns zero rows. `f2ecdd76a6189efb` — the T-N ledger CLAUDE.md hard-codes and
-prescribes `append_entry` / `update_entry` against — has `augmentation: null`.
+**Valid:** dated 2026-08-26
+**Status:** refuted
 
-**Mechanism:** augmentation lives only in the catalog SQLite DB and has no on-disk
-form, so it is the one class of state `reindex` cannot rebuild. Any event that
-recreates the DB destroys every augmentation at once while leaving all artifact
-rows intact — the observed state exactly.
+**Observed (2026-08-23):** `artifact(find, kind="tracker", augmented=true,
+scope="repo")` returned zero rows, and `f2ecdd76a6189efb` — the T-N ledger
+CLAUDE.md hard-codes — read `augmentation: null`.
 
-**Why it stayed invisible:** reindex *preserves* augmentation rather than
-regenerating it, so a post-loss reindex reports healthy and repairs nothing. No
-gate notices; `artifact(get)` returns `augmentation: null` without comment.
+**Refutation (2026-08-26), from the catalog's own columns.**
+`f2ecdd76a6189efb`'s augmentation row carries `created_at =
+2026-07-05T06:51:44Z` with an unbroken history, and `augmentation::upsert`
+stamps `updated_at` on conflict but never `created_at` — so it cannot have been
+re-inserted later wearing an old date. No codescout row is stamped 08-22/23/24,
+which a restore would have stamped all at once; a 2026-07-12 backup holds 53
+augmentations against today's 70; no codescout `worktree_registration` has ever
+existed; and no restore was ever performed. Independently,
+`docs/issues/2026-08-25-sdd-ledger-and-catalog-rows-vanished.md` records
+`f2ecdd76a6189efb` alive with all 26 `T-N` rows on 2026-08-25 — two days after
+the supposed loss.
 
-**Full record:** `docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md`
-(escalated low → high, scope corrected from one tracker to repo-wide).
+**The mechanism note was true, and is worth keeping — it just was not what
+happened.** Augmentation does live only in the catalog DB, has no on-disk form,
+and is the one class of state `reindex` cannot rebuild, so a post-loss reindex
+would report healthy and repair nothing. All correct; none of it evidence that a
+loss occurred. A true mechanism is not a substitute for a measurement, and
+supplying one is what made the conclusion feel established.
 
+**What was actually wrong:** `docs/research/README.md` had no augmentation — one
+tracker, not the catalog. Fixed 2026-08-26; the index renders.
+
+**What produced the zero:** `find(augmented=true)` returned a bare count without
+reporting how many augmentations the catalog held or which scope applied, so
+"excluded by this query" and "destroyed" were indistinguishable. Fixed in
+`a77a39a0` (patch-id `087f3d1d`) with two regression tests.
+
+**Full record:**
+`docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md`
 ## F-5 — A stale recon finding was relayed as current
 
 **Valid:** invariant

@@ -1,3 +1,11 @@
+---
+title: Deep-Research Brief — Tool-Result Authority
+date: 2026-07-03
+topic: research-brief
+summary: "Brief for the positive angle on tool-result trust: how to get agents to believe and use the facts tools return, calibrated rather than blind. A request for research, not a finding."
+status: complete
+---
+
 # Deep-Research Brief — Tool-Result Authority: how to make LLM agents *believe and use* tool results (calibrated, not blind)
 
 **Date:** 2026-07-03 · **Requester:** Marius (codescout) · **Mode:** deep research, literature + production practice

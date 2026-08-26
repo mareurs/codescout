@@ -4453,7 +4453,7 @@ One field fixed it. `cargo test --features e2e --no-run` now builds every lane, 
 
 **Valid:** dated 2026-08-25
 
-**Observed:** 2026-08-26, picking up `docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md`, whose § Root cause read "**Established.**" and whose title claimed every augmentation in the codescout catalog was gone.
+**Observed:** 2026-08-26, picking up `docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md`, whose § Root cause read "**Established.**" and whose title claimed every augmentation in the codescout catalog was gone.
 
 **Pattern:** CLAUDE.md's "run the reproduction before reading the fix plan" — with the sharpening that when the claim is about *persisted state*, the reproduction is a query against the datastore, not a re-run of the tool that reported it. Re-running `find(augmented=true)` would only have re-asked the instrument that produced the false negative. Six SQL queries against `~/.local/share/librarian/catalog.db` settled it in about two minutes: per-row `created_at`/`updated_at`, a date histogram, the `upsert` conflict clause, a backup's row count, and `worktree_registration`.
 

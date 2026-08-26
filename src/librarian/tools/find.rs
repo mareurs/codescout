@@ -620,7 +620,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // form, not rebuildable by reindex — so that ambiguity is the difference between
     // "nothing to see" and "data loss". Falling through preserves the scope block,
     // the hints, and the catalog counts that tell those apart.
-    // docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+    // docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
     let mut no_augmentations_anywhere = false;
     let mut augmented_in_catalog: Option<usize> = None;
     let user_filter: Option<FilterNode> = if let Some(want_augmented) = a.augmented {
@@ -894,7 +894,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // On 2026-08-23 this exact shape — count 0 with a populated scope block — was read
     // as repo-wide augmentation loss and filed high-severity; the rows had been present
     // since 2026-07-05 throughout.
-    // docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+    // docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
     if let Some(total) = augmented_in_catalog {
         if total > 0 && response["count"] == 0 {
             response["hints"]["augmented_present_but_out_of_scope"] = serde_json::json!({
@@ -1679,7 +1679,7 @@ mod tests {
         // read as repo-wide augmentation loss and filed high-severity with an
         // "Established" root cause; the catalog's own created_at/updated_at columns
         // later showed all 21 rows present throughout.
-        // docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+        // docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
         let cat = Catalog::open_in_memory().unwrap();
         artifact::upsert(&cat, &sample_row("plain", "Plain")).unwrap();
         artifact::upsert(&cat, &sample_row("other", "Other")).unwrap();
@@ -1711,7 +1711,7 @@ mod tests {
         // repo-wide loss. A zero that does not say "N exist, none here" cannot be
         // told apart from a zero that means "none exist anywhere" — and the rows in
         // question had been present since 2026-07-05.
-        // docs/issues/2026-08-23-research-index-tracker-has-no-augmentation.md
+        // docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
         use crate::librarian::catalog::augmentation::{self, AugmentationRow};
         let cat = Catalog::open_in_memory().unwrap();
         let mut spec = sample_row("aug-spec", "Augmented spec");

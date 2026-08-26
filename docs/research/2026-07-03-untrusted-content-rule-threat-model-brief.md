@@ -1,3 +1,11 @@
+---
+title: Threat-Model Brief — untrusted-content guide rule
+date: 2026-07-03
+topic: research-brief
+summary: Threat-model request for the untrusted-content guide rule before it reaches master, on the grounds that passing an abuse eval is not a threat model. A request for research, not a finding.
+status: complete
+---
+
 # Threat-Model Brief — `untrusted-content` guide rule (for security-ibex)
 
 **Date:** 2026-07-03 · **Requester:** Marius / prompt-hamsa work stream

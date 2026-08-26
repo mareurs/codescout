@@ -1,3 +1,11 @@
+---
+title: Making MCP Guidance Load-Bearing — Findings
+date: 2026-07-03
+topic: prompt-engineering
+summary: Distilled synthesis of prompt-tdd experiments A-4 to A-7 on how coding agents trust, follow and resist guidance surfaced by a code-intelligence MCP server.
+status: complete
+---
+
 # Making MCP Guidance Load-Bearing — Findings (2026-07-03)
 
 *A distilled synthesis of one session's experiments on how coding agents trust,

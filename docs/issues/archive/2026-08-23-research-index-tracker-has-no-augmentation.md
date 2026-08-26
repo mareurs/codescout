@@ -1,17 +1,17 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: Research Index tracker promises a [LIVE] index it has no augmentation to render
 tags:
 - librarian
 - trackers
 - docs-drift
-closed: null
+closed: 2026-08-26
 opened: 2026-08-23
 owner: marius
 related: []
 severity: medium
-unverified: 'Established 2026-08-26 from the catalog''s own columns: no augmentation was ever lost (f2ecdd76a6189efb created_at=2026-07-05, present throughout; 53 rows in the 2026-07-12 backup vs 70 today). NOT established: which catalog the 2026-08-23 session read — the DB path varies with env.db / $XDG_DATA_HOME, and no session-side record of it survives. Remaining open work is the original narrow bug only: docs/research/README.md has no augmentation.'
+unverified: 'The index is catalog-only state — augmentation has no on-disk form, so a fresh clone or a rebuilt catalog starts without it, and no automated gate asserts its existence. Mitigated by construction rather than by test: every entry is a projection of its file''s own frontmatter, so the whole array is regenerable from disk by the procedure in the augmentation prompt. Separately NOT established, and now moot: which catalog the 2026-08-23 session read.'
 ---
 
 # BUG: Research Index tracker documents a [LIVE] table and a params refresh, but has no augmentation
@@ -182,14 +182,34 @@ zero, in either of its two shapes:
 Two regression tests in `src/librarian/tools/find.rs`, each verified red against
 the old shapes before the fix.
 
-**Still open — the original, narrow bug.** `docs/research/README.md` has no
-augmentation while its body promises a rendered index. Re-costed 2026-08-26 and
-it is smaller than this file implied: `docs/research/` holds 16 files, 10 of
-which already carry the `title:`/`date:`/`status:` frontmatter an index template
-would read, so the backfill is ~5 files plus one `artifact_augment` call. What it
-still needs is a decision on the index's shape (prompt, `render_template`,
-`entry_collection`) — not a large chore, but a design choice rather than a
-mechanical fix.
+**The original, narrow bug — also fixed, 2026-08-26.** `docs/research/README.md`
+(`5086e3c7c0b9d83c`) now carries an augmentation, so the `[LIVE]` index its body
+promised actually renders.
+
+The backfill was re-costed first, and the earlier estimate in this file was
+wrong in a way worth recording: it said "10 of 16 files already carry the
+frontmatter", taken from `grep -l '^title:'`, which matches anywhere in a file
+— one non-compliant file quotes a YAML block in its body. The true split was
+**9 compliant, 6 not**. Measuring the predicate, not just running it, is the
+same lesson as § Root cause.
+
+What shipped:
+
+- Five-key C-7 frontmatter backfilled onto the 6 files that lacked it. All 15
+  entry files now verify as `title, date, topic, summary, status`, in order.
+  The two `*-brief.md` files are indexed as `topic: research-brief`, because
+  C-1 counts a *finding* as research and a brief is a request for one — the
+  index says so rather than relocating files, which § How to save a research
+  step 5 reserves for an explicit user request.
+- An augmentation with `entry_collection: "entries"`, a `params_schema`
+  (six required keys, `status` enum, `summary` maxLength 200), and a
+  `render_template` that renders `superseded` entries last per C-6.
+- The body now states where the index lives, because the absence of a table in
+  this file is what was misread as loss in the first place.
+
+Verified on the live server: `librarian(action="context", anchor_id=…)` renders
+the 15-row `[LIVE]` table, and `artifact(get, entry_filter={"topic": {"eq":
+"retrieval-quality"}})` returns `entry_total: 3`.
 ## Tests added
 
 None — bug is filed, not fixed.

@@ -1,3 +1,11 @@
+---
+title: Lite vs. Hybrid Retrieval Benchmark — 2026-07-02
+date: 2026-07-02
+topic: retrieval-quality
+summary: 25-TC pinned-suite comparison of hybrid, SPLADE-disabled and lite sqlite-vec retrieval. The headline lite-beats-hybrid result is confounded by a confirmed harness bug, documented inline.
+status: complete
+---
+
 # Lite vs. Hybrid Retrieval Benchmark — 2026-07-02
 
 Task 10 (WIN-26 quality gate): a 25-TC pinned-suite comparison of three retrieval
