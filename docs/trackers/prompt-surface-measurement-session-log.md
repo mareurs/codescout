@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 20
-entry_high_water_W: 15
+entry_high_water_F: 21
+entry_high_water_W: 16
 entry_prefix:
 - F
 - W
@@ -48,6 +48,7 @@ surfaces, not the definition.
 | F-18 | The plan named two constants and a CLI flag the file it points at does not have | fixed-verified |
 | F-19 | The eval's guard apparatus is unenforced — no collection, no CI, and a permanent red makes "all green" inexpressible | open |
 | F-20 | Four times in one task, a commit asserted in prose what it measured otherwise in code — one of them from a controller ruling | open |
+| F-21 | I made a probe the acceptance gate for a question it was not precise enough to answer | fixed-verified |
 
 ## Wins Index
 
@@ -68,6 +69,7 @@ surfaces, not the definition.
 | W-13 | The arms separated on a metric we already logged and never reported | validated |
 | W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
 | W-15 | Reading the generator instead of the plan's description of it caught three defects, one with no downstream gate at all | validated |
+| W-16 | Three dilution rounds converged without closing; one measurement of the shared cause moved it further than all three | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -1728,6 +1730,126 @@ in the SDD ledger to after the pilot, because the pilot may invalidate the desig
 — as round 7 did for the sibling eval — in which case those docstrings are rewritten
 anyway. Pairs with [[F-19]]: this is the same enforcement gap one level down, where
 [[F-19]] is *tests* nothing runs and this is *numbers* nothing checks.
+
+## W-16 — Three dilution rounds converged without closing; one measurement of the shared cause moved it further than all three
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, blast-radius eval, Tasks 4c and 4d. A structural-leak guard kept
+reporting the same high-recall channel at roughly the same magnitude after each repair.
+
+**Pattern:** When targeted fixes converge without closing — the same magnitude, a *different*
+instance each time — stop fixing instances and measure what the instances share. The
+give-away is the shape of the series, not the size of the residual.
+
+**The series.** Three dilution rounds against the high-recall tier: **3.49 → 3.36 → 3.30 →
+3.30**. Each round diluted the predicate that had won, and each time a different triple won
+next, at nearly the same lift. The implementer's own closing sentence was the diagnosis it
+had not yet been authorised to act on: *"the underlying cause is structural, not any single
+predicate."*
+
+**The measurement, one command.** Functions per file, dependents vs everything else:
+
+| | files | mean | median |
+|---|---|---|---|
+| the twelve dependents | 12 | **18.50** | **19.5** |
+| everything else | 255 | 12.29 | **8.0** |
+
+The planted files were **1.5× the mean and 2.4× the median** of the tree they hide in. Every
+existence predicate in the sweep — *contains a raise*, *calls getattr*, *has an f-string*,
+*has a return annotation*, *nests control flow* — is monotone in file size, so a
+systematically larger truth set is **jointly enriched on all of them at once**. Diluting one
+predicate simply moved the winner to a neighbour that the same size gap was still enriching.
+
+**Counterfactual.** A fourth improvised dilution round was the obvious next step and would
+have produced another ~0.05 with a fourth winning triple — the pattern the first three had
+already established. Instead, matching the planted padding volume to the filler distribution
+closed the size ratio to **1.16× mean / 1.5× median** and moved the tier **0.29 in one
+change**, against 0.13 for the whole of the round before it. The leak sweep went green for
+the first time in three tasks.
+
+**A negative result from the same pass, worth as much as the positive one.**
+`single-word filename` appeared in every recent winning triple and looked exactly like the
+next authorship tell. Measured: **0.833 on the truth set against 0.768 tree-wide — lift
+1.08.** It survives because it preserves recall (10 of 12), not because it discriminates.
+One command ruled out what would otherwise have been a whole task.
+
+**Confirming data points:**
+1. This session — the padding-volume measurement, after three symptom rounds.
+2. [[W-5]] — measuring the predicate family before fixing converged where four rounds of
+   fix-then-discover did not. Same shape, one level up.
+3. The same session's independent confirmation that general growth dilutes where targeted
+   batches do not: across seven seeds the two **largest** trees (302, 278 files) produced the
+   two **lowest** reals (2.549, 2.989), and of 16 bespoke dilution files **zero** appeared in
+   the winning combination's matched set.
+
+**Impact:** high — three tasks of real work bought 0.19 on this tier; one measurement bought
+0.29 and closed it.
+
+**Promote-when:** this is the second datapoint with [[W-5]] and they generalise the same
+rule at different scales. At a third, promote to `eval-design` memory as: *"When repairs
+converge on a constant with a different instance each round, the instances share a cause —
+measure the shared property before repairing again."* Already recorded there in narrower
+form.
+
+**Status:** validated — the counterfactual is measured, not argued: 0.13 for a full round of
+symptom repair against 0.29 for one cause repair.
+
+## F-21 — I made a probe the acceptance gate for a question it was not precise enough to answer
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, blast-radius eval, Task 4d. Caught by the implementer, not by me.
+
+**When:** I set a task's acceptance criterion to "`real <= p90` in ≥5 of 7 seeds, measured by
+`scratchpad/seed_sweep_probe.py`".
+
+**Expected:** that the probe and the fixture's own leak gate would agree, since both compare
+a real lift against a null percentile.
+
+**Got:** they disagreed by 0.10 on the shipped seed, in opposite directions. The tree
+**passed** the fixture's internal gate (real 3.0689 strictly below its raw gate of 3.07) and
+**failed** my probe (real 3.07 against p90 2.97). The implementer diagnosed why rather than
+reporting a contradiction: the internal gate draws **240 samples across two schemes and
+takes the conservative `min`**, while my probe drew **150 samples, one scheme, a different
+draw seed**.
+
+**Probable cause:** I built the probe to answer a different question — *"does each seed's own
+p90 track its real value?"* — where it works well, because that question turns on comparing
+two **spreads** (real 1.36 against p90 0.26) and a coarse instrument resolves that fine.
+Then I reused it, without re-examining it, as a pass/fail gate on a **0.10 difference**. A
+p90 of 150 samples is the 135th order statistic of a right-skewed distribution; it does not
+resolve 0.10. Same tool, different job, and I never asked whether it was strong enough for
+the second one.
+
+An earlier instance in the same session should have warned me: my first run of that probe
+used 30 draws and read the shipped seed's p90 as **3.71** against the **3.07** that 240
+draws gives. I noticed *that* one because it was obviously wrong, and drew no general lesson
+from it.
+
+**Severity:** med — no wrong artefact shipped, and the error was conservative (it made the
+gate stricter than the real one, so it could only cause extra work, never a false pass). But
+it cost a task's acceptance verdict, and had it run the other way — a weak probe reporting a
+pass the shipping guard would have failed — it would have waved a defective fixture into a
+paid pilot.
+
+**Status:** fixed-verified — replaced by `scratchpad/seed_sweep_v2.py`, which reproduces the
+gate exactly: both schemes, 240 draws, `min(p90)`, truth set excluded from the pool. Its
+verdict now agrees with the shipping guard by construction. It also prints an explicit
+`edge` verdict for any margin under 0.10 rather than calling it — so the instrument states
+its own resolution instead of leaving the reader to assume it has none.
+
+**Fix idea / Pointer:** the general rule, and it is cheap: **before reusing a measurement
+instrument as a gate, check it is at least as strong as the thing it is standing in for.**
+Where a project already ships its own guard, the probe should reproduce that guard's exact
+sampling rule rather than approximate it — then disagreement is a finding rather than an
+artefact. And an instrument that cannot resolve a difference should say so in its output;
+`seed_sweep_v2.py`'s `edge` label is what makes that automatic rather than remembered.
+
+Same family as [[F-20]] — a controller claim that reached the work unchallenged because it
+arrived as settled. There it was a false premise about form-pair carriers; here it was an
+unexamined assumption that a probe was gate-grade. Both were caught by someone downstream
+re-measuring rather than by me.
 
 ## Template for new entries
 

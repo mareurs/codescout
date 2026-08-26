@@ -275,3 +275,74 @@ Two practices that make it checkable rather than a matter of taste:
   implementation slip should not decide whether the subject can lose at all.
 
 Evidence: `prompt-surface-measurement-session-log:F-15`.
+
+## A bar whose margin comes from a rounding rule is not a measurement
+
+Measured 2026-08-26 (blast-radius, four tasks). Bars were
+`round_up_half(min(uniform_p90, stratified_p90))` and `_is_leak` tripped on the **rounded**
+bar. The high-recall tier read as passing at 3.49 against 3.5 — a 0.3% margin. The
+underlying p90 was **3.07**, so the real value *exceeded* the percentile and cleared only
+because the rounding pushed the bar up: **the rounding supplied 0.43 of the 0.43 margin.**
+
+Trip the gate on the raw percentile. Keep the rounded value for publication if it reads
+better, and say in the docstring which number is the gate and which is presentation —
+that confusion is what let it stand for a round.
+
+**The tell that it is happening:** headroom expressed as a *ratio* (`1.003x`, `1.25x`) rather
+than as the null's *p-value*. A ratio is a distance; only the p-value answers "is this a
+channel?". In this project a "1.25× headroom" scare turned out to sit at **p = 0.287** —
+three in ten random draws reach it — while a comfortable-looking bar hid **p = 0.042**.
+Pre-register **per-tier** p, not just the headline: the high-recall tier sat at 0.042 for a
+whole round while only the headline (0.537) was recorded, which is why nobody noticed.
+
+## When repairs converge on a constant, measure what the instances share
+
+Three targeted dilution rounds against one leak channel gave **3.49 → 3.36 → 3.30 → 3.30** —
+same magnitude, a *different* winning combination each time. That series shape is the
+diagnosis: the instances share a cause, and each repair moves the winner to a neighbour the
+cause is still feeding.
+
+One measurement found it. Functions per file: the twelve planted dependents averaged
+**18.50 (median 19.5)** against the tree's **12.29 (median 8.0)** — 1.5× the mean, 2.4× the
+median. Every *existence* predicate (contains a raise, calls getattr, has an f-string, has a
+return annotation) is monotone in file size, so a systematically larger truth set is jointly
+enriched on all of them at once.
+
+Matching the planted padding volume to the filler distribution moved the tier **0.29 in one
+change**, against 0.13 for the whole round before it, and turned the guard green for the
+first time in three tasks. See [[W-16]].
+
+**Corollary — match the distribution, not the median.** Collapsing the truth set onto the
+tree's median would replace one tell with a narrower one: a truth set of suspiciously low
+variance. Keep the spread (here: range 2–31 preserved).
+
+**Corollary — general growth dilutes where targeted batches do not.** Across seven seeds the
+two *largest* trees produced the two *lowest* channel values, and of 16 purpose-built
+dilution files **zero** appeared in the winning combination's matched set. A bespoke
+micro-batch is the narrowest population in the tree and misses the neighbour it creates.
+
+## Ask a reviewer what would change its mind, then measure exactly that
+
+The strongest review in this project ended with an explicit falsification condition: *"run
+the null per seed; if each seed's own p90 tracks its real value up, the tier is simply
+wide-variance and I would drop the concern entirely."* Running it settled in one pass a
+question that three rounds of argument had not: **real spread 1.68 against p90 spread 0.31**
+— the reference is flat while the statistic ranges five times as far.
+
+Two habits worth keeping. **Asking for the condition** turns a judgement into an experiment.
+**Volunteering it** makes a review falsifiable rather than merely authoritative — a reviewer
+who names what would refute them has done most of the work of being checkable.
+
+## Before reusing a probe as a gate, check it is as strong as the guard it stands in for
+
+A probe built to compare two *spreads* was reused as a pass/fail gate on a **0.10**
+difference. It drew 150 samples from one scheme; the shipping guard drew **240 across two
+schemes and took the conservative `min`**. They disagreed on the shipped tree in opposite
+directions, which was an artefact of the instrument, not a fact about the fixture. A p90 of
+150 samples is the 135th order statistic of a right-skewed distribution and does not resolve
+0.10. See [[F-21]].
+
+Where a project ships its own guard, a probe should **reproduce that guard's sampling rule
+exactly** rather than approximate it — then a disagreement is a finding. And an instrument
+that cannot resolve a difference should say so in its own output: printing an explicit
+`edge` verdict below the resolution limit makes that automatic rather than remembered.
