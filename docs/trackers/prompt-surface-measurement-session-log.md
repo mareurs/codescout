@@ -10,7 +10,7 @@ tags:
 - librarian
 topic: prompt surface budget measurement eval harness compaction
 entry_high_water_F: 22
-entry_high_water_W: 16
+entry_high_water_W: 17
 entry_prefix:
 - F
 - W
@@ -70,6 +70,7 @@ surfaces, not the definition.
 | W-13 | The arms separated on a metric we already logged and never reported | validated |
 | W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
 | W-15 | Reading the generator instead of the plan's description of it caught three defects, one with no downstream gate at all | validated |
+| W-17 | A pre-dispatch scout caught a forward dependency I had stated in a form the harness cannot express | validated |
 | W-16 | Three dilution rounds converged without closing; one measurement of the shared cause moved it further than all three | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
@@ -1902,6 +1903,56 @@ silently fixing or silently ignoring it — the right call under a byte-identity
 Correct the docstring's "safe because" sentence to say what is actually true — the check is
 a substring test and the pools are not word-boundary clean — even if the behaviour stays.
 A false safety claim is the part that propagates.
+
+## W-17 — A pre-dispatch scout caught a forward dependency I had stated in a form the harness cannot express
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, blast-radius eval, between Task 5 closing and Task 6 dispatching.
+
+**Pattern:** When one task invents an interface that a *later* task must satisfy, scout the
+later task's substrate for whether it CAN satisfy it — before dispatching, and before writing
+the forward dependency into a ledger as though it were settled.
+
+Task 5's `check_blast.py` reads two tree roots from `BLAST_GOLDEN_BEFORE_ROOT` /
+`BLAST_GOLDEN_AFTER_ROOT`. I ruled that contract accepted and recorded "Task 6 owes these env
+vars" in the ledger. The scout found `ScenarioSetup` (`src/prompt_tdd/types.py:160-174`) has
+exactly five fields — `files`, `hooks`, `skills`, `commands`, `mcp_config` — and **no `env`**.
+`hidden-info/gen.py` even carries an `assert_no_env_key()` that hard-fails anyone who emits
+one. Env reaches a checker only via `assertions.py:551` building the child environment as
+`{**os.environ, ...}`, so the variables are an **operator responsibility documented in a
+README** — the precedent being hidden-info's own section, *"`HIDDEN_GROUND_TRUTH` is an
+operator responsibility, not a config key."*
+
+**Counterfactual:** the dispatch would have told an implementer to wire two env vars into arm
+config. The most likely path is that it ports `assert_no_env_key()` from hidden-info (the
+dispatch says to copy that file) and its own ported assertion hard-fails on its own output —
+a confusing self-inflicted BLOCKED report costing a round-trip. The worse path is that it
+emits `setup.env` *without* porting the guard, the harness silently ignores the key, and every
+run returns `indeterminate:no-golden-output` — which is the gate behaving **correctly**, so
+nothing looks broken. That failure would surface at Task 9, the first paid step, as an eval
+that produces no data.
+
+**Confirming data points:**
+1. This entry — a controller-invented interface checked against the consuming task's substrate
+   before dispatch.
+2. Same session, Task 5: scouting `golden.py` confirmed `main(install=import_stub.install)`
+   and that a second in-process call RAISES, against plan text saying the checker "runs it
+   twice and diffs".
+3. Same session, Task 5: scouting `DEPENDENTS` / `ENTRY_POINTS` found the brief *less* stale
+   than assumed (four details verified correct, one docstring wrong) — the scout that returns
+   "mostly fine" still converts assumptions into facts the next session inherits.
+
+**Impact:** high — the silent-failure branch reaches the first paid step before anyone
+notices, and its symptom is a correctly-firing gate.
+
+**Promote-when:** a fourth datapoint where a scout of the *consuming* substrate invalidates an
+interface the controller had already ruled settled. At that point promote to CLAUDE.md as:
+*"An interface one task invents is a hypothesis about the next task's substrate — scout the
+consumer before recording the dependency as settled."*
+
+**Status:** validated — three datapoints in one session, all pre-dispatch, all caught before
+any subagent ran.
 
 ## Template for new entries
 
