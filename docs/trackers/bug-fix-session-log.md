@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 65
-entry_high_water_W: 54
+entry_high_water_W: 55
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -178,6 +178,7 @@ entry_high_water_W: 54
 | W-53 | 2026-08-26 | med | Verify a scan's FIRST finding against reality before acting on the worklist, and treat a false one as a bug in the instrument | The single archived_fix_sha finding was a false positive; checking it found two defects in the same parser, against an alternative of hunting a dead commit the check itself sizes at 2-153 candidates | validated |
 | W-51 | 2026-08-26 | high | When a filed root cause is about persisted state, reproduce it by querying the datastore — not by re-running the tool that reported it | The filed "restore every augmentation" fix, run against the 21 trackers that were already augmented, replaces their params wholesale — the same call that took the T-N queue from 19 entries to 1 on 2026-08-16 — causing the loss it claimed to repair | validated |
 | W-54 | 2026-08-26 | med | Before implementing from a bug file or plan YOU wrote, scout the seam its Fix section SIZES — not only the seam its Root cause cites | Would have implemented a project-scoped `DELETE` plus a "sibling project survives" test for an invariant the per-project-file schema already guarantees; that test passes for every possible implementation, including a wrong one, so it enters the suite as a permanent green-but-uninformative assertion | validated |
+| W-55 | 2026-08-26 | high | Before trusting a diagnostic, confirm the serving process is not running a DELETED binary — `ls -l /proc/<pid>/exe`, with the pid found by walking `ps -o ppid=` up from a `run_command` shell | A peer session's `cargo rb` unlinked this session's server binary 70 minutes after it started; `doctor` then reported a check as broken that had been fixed 80 minutes earlier, and the next step was reopening a closed bug to repair a guard that works. Unlike R-89 the rebuild was someone else's, so commit, tree and binary mtime all read green and nothing in the transcript hinted at it | validated |
 
 ## Category conventions
 
@@ -4802,6 +4803,52 @@ the two need different fixes, and only the first is a skill defect.
 **Fix idea / Pointer:** In `SKILL.md`, move the em-dash rationale off the
 `**Valid:**` line in both worked exemplars. Optionally note that
 `conditional — <event>` is the one form whose em-dash is part of the syntax.
+
+## W-55 — A peer session's rebuild left this one answering from a deleted inode — `/proc/<pid>/exe` is the one-command tell
+
+**Valid:** invariant
+
+**Observed:** First real action after compaction, `librarian(action="doctor")` reported
+`archived_fix_sha_unresolvable` against `codescout-companion:b8ffa8b` — a **cross-repo**
+pointer, which is exactly the case `7b5325a9` had taught the check to skip earlier the
+same morning. Both obvious readings were wrong: the guard is not incomplete, and the
+pointer is not dead (`b8ffa8b` resolves in `claude-plugins`).
+
+**Got:** the binary answering me was a ghost. Timeline, all measured:
+
+| 09:32 | my MCP server (pid 84841) starts |
+| 09:45 | `7b5325a9` commits the cross-repo skip |
+| 10:42 | a **peer session** runs `cargo rb`, replacing the inode |
+| 11:05 | I run `doctor` and get pre-fix behaviour |
+
+`ls -l /proc/84841/exe` → `…/target/release/codescout (deleted)`. The on-disk binary has
+the fix (`grep -c skipped_cross_repo_pointer target/release/codescout` → 1); the running
+process kept its own unlinked copy of the 09:32 build. Every doctor number this session
+reported was from code that predates two of its own commits.
+
+**Why this is not just R-89 restated.** R-89's mechanism is a session outrunning *its own*
+rebuild — recoverable by remembering what you did. Here the rebuild belonged to **someone
+else** and left no trace in my transcript, so there is nothing to remember and no upstream
+proxy to consult: commit, working tree and binary mtime all read green. The peer-rebuild
+form is invisible by construction to the session it breaks.
+
+The tell is also cheaper than R-89's prescribed probe. `/proc/<pid>/exe` naming a
+`(deleted)` target is one `ls`, needs no knowledge of which string the fix added, and can
+be run *before* trusting a diagnostic rather than after one surprises you. Find the serving
+pid by walking `ps -o ppid=` up from a `run_command` shell — the shell's parent **is** the
+MCP server.
+
+**Counterfactual:** the next step was to reopen a bug closed 80 minutes earlier and
+"repair" a guard that works. What it actually cost was one `ls`, and the honest word for
+`7b5325a9` shifted from *live* to **committed and present in the on-disk binary, not
+loaded here** — which is also the correct word for every fix a peer's rebuild has
+overtaken.
+
+**Status:** validated
+
+**Promote-when:** a second session hits a peer-rebuild ghost, or the deleted-inode probe
+lands in the reconnaissance skill's freshness bullet (which today prescribes the
+string-grep probe only).
 
 ## Template for new entries
 

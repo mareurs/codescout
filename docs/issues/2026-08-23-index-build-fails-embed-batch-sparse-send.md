@@ -11,6 +11,7 @@ tags:
 - remote-http
 - new-machine
 closed: 2026-08-24
+no_fix_commit: Machine-local config change (an ONNX model symlink), not a repo commit — nothing in this repo's source caused the failure, so no SHA or patch-id exists to cite. See `unverified:` for what that leaves unestablished.
 opened: 2026-08-23
 owner: marius
 related: []

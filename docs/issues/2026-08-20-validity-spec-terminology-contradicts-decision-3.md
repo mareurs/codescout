@@ -120,3 +120,19 @@ regardless of the underlying spec's internal disagreement.
 - `src/prompts/guides/tracker-conventions.md` — the guide bullet Fix Round 3 corrected
 - `.superpowers/sdd/2026-08-20-statement-validity-layers-1-2/final-review.md` § 3 (X-1)
 - `.superpowers/sdd/2026-08-20-statement-validity-layers-1-2/fix-round-3-brief.md`
+
+## Fix provenance
+
+- **SHA:** `8ff30672` (`experiments`)
+- **patch-id:** `7d2869eecf3f669dd206c03e6b5bb66b630b292a`
+
+`docs(specs): fix entry-validity spec's Terminology/decision-3 contradiction` — the
+amendment to `docs/superpowers/specs/2026-08-20-entry-validity-and-attestation-design.md`
+§ *Terminology*. Doc-only: the shipped allocator and `doctor`'s
+`entry_cited_from_outside_but_undeclared` already implemented decision 3, so nothing under
+`src/` changed and no regression test is owed.
+
+`4e08aeb8`, cited in § *Tests added*, is a **different** commit — the Fix Round 3 edit to
+`src/prompts/guides/tracker-conventions.md` that closed the guide-level symptom (X-1). It
+is not this bug's fix, and it is the reason this file read as anchored to
+`terminal_status_without_fix_anchor` while declaring nothing.

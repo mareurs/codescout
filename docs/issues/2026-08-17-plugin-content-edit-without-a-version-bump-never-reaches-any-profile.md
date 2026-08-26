@@ -240,3 +240,24 @@ report green while it does.
   (`50038111`, still open) — the sibling "committed but not live" defect, one surface over.
   Worth reading as a pair: both are cases where the artifact on disk is correct and the
   copy actually being served is not, and in both the author is the least able to notice.
+
+## Fix provenance
+
+- **SHA:** `claude-plugins:49b64c33` (`main`)
+- **patch-id:** `c1b1c84033ae99d3169f2817849c35561ccd213b`
+
+`chore: bump codescout-companion to 1.16.8` — the version bump that carried the
+already-committed skill content into all three profile caches. **The fix is not in this
+repo**, so the pointer is qualified `<repo>:<sha>` and both it and the patch-id resolve
+only against `claude-plugins`. `doctor`'s `archived_fix_sha_unresolvable` skips qualified
+pointers for exactly this reason (`7b5325a9`) rather than reporting them as dead.
+
+The four commit-like hashes in this file's prose — `9d9ecc2`, `f6140205`, `9877b9d`,
+`5f6b336` — are **none of them** the fix: they are commits the bug was observed at, or
+cited as precedent for where a hook already lives. That is precisely the failure mode
+`terminal_status_without_fix_anchor` names — a file that reads as anchored to a scanning
+reader while declaring nothing — and it is why the declaration above is a section of its
+own rather than one more hash in a paragraph.
+
+Status stays `mitigated`: only this instance was repaired. Durable options a/b/c in § *Fix*
+are unshipped, so nothing yet gates the next content-edit-without-a-bump.

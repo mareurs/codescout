@@ -94,3 +94,17 @@ the partition.
 - `docs/issues/archive/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md` — parent bug, § *A second consumer, and a measurement that bounds it*
 - `src/librarian/tools/doctor.rs` — `entry_without_definition`, `corpus_cited_tokens`
 - `src/librarian/tools/link_scan/extract.rs` — the shared extractor
+
+## Fix provenance
+
+- **SHA:** `7c2f47bd` (`experiments`)
+- **patch-id:** `a9da0453c5e460f7704a23a631b8a881e06a7725`
+
+`docs(doctor): document the doc-example-citation hazard in corpus_cited_tokens` — the
+doc comment on `corpus_cited_tokens` in `src/librarian/tools/doctor.rs`, plus this file.
+Option 1 of the three sketched, chosen because the re-measurement found zero live
+victims; no behaviour changed, so there is nothing to regress against.
+
+The later `7b5325a9` also names `corpus_cited_tokens` in this same file — in a
+cross-reference from `structured_fix_pointers`' fenced-line comment, since both parsers
+share the hazard. It fixes two different checks and is not this bug's fix.

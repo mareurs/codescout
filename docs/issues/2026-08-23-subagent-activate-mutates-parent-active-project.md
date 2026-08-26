@@ -337,3 +337,19 @@ scratchpad enters that set.
   account hypothesis 3 needs checking against.
 - `CLAUDE.md` § *Companion Plugin* — concurrent-multi-workspace rules.
 - Workflow `wf_f348d3a6-a64`, agent `a2ae67537bf864aec` — the incident's trigger.
+
+## Fix provenance
+
+- **SHA:** `001c0a91` (`experiments`)
+- **patch-id:** `5dd3d86fd214d28b7c852cc692827dbe8867be1a`
+
+`docs(architecture): ground the subagent-activate warning in the actual incident` — option 1
+(dispatch discipline) applied to `docs/architecture/companion-plugin.md`
+§ *Concurrent multi-workspace*, plus this file.
+
+The pointer records a **mitigation, not a fix**, and the two must not be read as the same
+thing. The root cause in § *Root cause* — a process-global `default_workspace_root` with no
+per-caller identity in MCP's `RequestContext` — is untouched by this commit; `unverified:`
+in the frontmatter says so where a query can read it. Options 2 and 3 remain open, and
+either would carry the concurrent-pinning regression this commit does not
+(`docs/plans/2026-05-30-per-request-workspace-pinning.md` § Phase 3).
