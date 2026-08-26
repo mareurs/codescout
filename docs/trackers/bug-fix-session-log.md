@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 66
-entry_high_water_W: 59
+entry_high_water_W: 61
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -184,6 +184,8 @@ entry_high_water_W: 59
 | W-56 | 2026-08-26 | high | EXECUTE a bug file's archive precondition rather than asserting it is met — it is a check someone deliberately deferred, so the cheapest disposal is also the only silent failure | "Confirm CI, then archive" read as boilerplate from a stricter era. CI had been red on every Test lane since 2026-08-19 — 3 OSes × 3 feature sets — on one test that resolves an embedder from ambient config; the mandated local gate runs in the developer's environment by construction and can never show it. Cost two gh calls; the alternative was archiving six files under a green that was true only on this machine | validated |
 | W-58 | 2026-08-26 | med-high | Read the live envelope AND its formatter in ONE pass — the live response is a census of the keys that path emits, so any `Option`-guarded reader of a key absent from it is dead code | `format_index_status`'s model and timestamp arms have had no producer anywhere in the repo since `79e0e4f2` (2026-05-13, whose own message lists them as dropped). The test covering them hand-builds the response it asserts on, so it stayed green for 3.5 months across 4494 tests — and `docs/manual/src/troubleshooting.md:231` still tells users to compare `configured_model` against `indexed_with_model` to diagnose the exact model mismatch #18 was about, when `configured_model` has never been emitted by any commit in this repo's history | validated |
 | W-59 | 2026-08-26 | high | "Cannot be separated" / "only CI can see this" is a claim about the SUBSTRATE, not the defect — price changing the substrate before accepting the limit | wine failed 9 guide_hint tests, MSVC 1, and the bug file recorded "whether the ninth is real cannot be separated from this run". Extracting PortableGit with `7z x` (a self-extracting archive — no installer runs) and pointing CODESCOUT_BASH at its Windows path took the module 9 → exactly the 1 MSVC had → 0. Cost ~5 min and 56 MB. The ninth was the ONLY production defect among all six Windows causes and 44 tests — noise is where a real signal is cheapest to lose | validated |
+| W-60 | 2026-08-26 | high | Fix the failure MESSAGE before the failure, when the message would read the same in more than one broken world — on a slow or unreproducible surface it is the cheapest next measurement, not a detour | The wine lane's last red printed a bare empty string, and the test's name, doc comment and linked bug file all said *heredoc pipe-rewrite corruption* — which produces exactly that. One edit asserting the write's exit code, one CI run, and the payload said `{"timed_out":true,...}`: a hang, not corruption. The alternative was re-opening a closed masking bug on a platform with no local repro at ~7 min per round trip. Mirror of R-79 for reds; the same test carried both defects | validated |
+| W-61 | 2026-08-26 | med-high | A tool response read through a harness is evidence about the HARNESS's encoding, not the callee's signature — make a new assertion fail on purpose before trusting the belief it encodes | Writing that guard I also wrote "`call` returns Ok for a gate refusal", inferred from the `{"ok": false, "error": ...}` every refused `run_command` had returned all session. The positive control did not fire: that JSON is MCP serializing a real `Err`, which `.expect` catches. A false claim about `Tool::call`'s error contract would have shipped in the comment most likely to be consulted next — and it is not checkable by reading the test, only by running the broken world. R-89's rendered-read law at the RPC boundary | validated |
 
 ## Category conventions
 
@@ -5210,6 +5212,109 @@ person would have re-derived the same split from the same two logs.
 **Promote-when:** a second "cannot reproduce locally" is dissolved by changing the
 substrate rather than the reasoning — or `scripts/build-windows.sh`'s new `CODESCOUT_BASH`
 note is used by someone who did not write it.
+
+## W-60 — Fix the failure MESSAGE before the failure, when the message is uninformative
+
+**Valid:** dated 2026-08-26
+
+**Observed:** the `windows-gnu` lane's last remaining failure printed only
+
+```
+the heredoc body must land byte-for-byte:
+```
+
+— an empty `content`. That string reads identically in at least four different broken
+worlds: the write was refused, the write failed, the write timed out, or it wrote
+somewhere else. It also meant the test's *first* assertion
+(`!content.contains("codescout-unfiltered")`) had been passing vacuously on the empty
+string.
+
+**Got:** rather than diagnose the bug, I spent one edit making the message able to
+discriminate — assert the write's `exit_code` before reading, and print both results on
+failure (`7d8bfae7`). The very next CI run answered the question outright:
+
+```
+{"timed_out":true,"stderr":"Command timed out after 30 seconds","exit_code":null,…}
+```
+
+Not corruption at all. A hang.
+
+**Counterfactual:** the test's name, its doc comment, and its linked bug file all say
+*heredoc pipe-rewrite corruption*, and the empty file is exactly what that bug produced.
+Every signal pointed at re-opening a closed corruption bug — in masking code, on a
+platform with no local reproduction, at roughly 7 minutes per CI round trip. The message
+fix cost one edit and one run and pointed somewhere else entirely
+(`docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md`).
+
+**Why it generalises:** an uninformative failure message is not a documentation problem,
+it is a *measurement* problem — the instrument cannot distinguish the hypotheses you are
+about to spend hours on. Improving it is not a detour from the debugging; on a slow or
+unreproducible surface it is usually the cheapest next measurement available. The tell is
+specific and checkable: **if the message would read the same in more than one broken
+world, fix the message first.**
+
+Related: [[R-79]]'s "a green that reads the same in a broken world proves nothing" — this
+is its mirror for reds, and the same test carried both defects at once.
+
+**Status:** validated
+
+**Promote-when:** a second work stream reports the same sequence — an ambiguous failure
+message improved before diagnosis, and the improved message changing the diagnosis. At
+two datapoints this belongs in the systematic-debugging skill's Phase 1, next to "Read
+Error Messages Carefully", as its active counterpart: when the message cannot answer the
+question, make it able to.
+
+## W-61 — A tool's rendered response shape is evidence about the transport, not its return type
+
+**Valid:** dated 2026-08-26
+
+**Observed:** adding an `assert_eq!(wrote["exit_code"], 0)` guard to a test (see [[W-60]]),
+I wrote a comment explaining why it was needed: *"`call` returns Ok for a gate refusal and
+for a non-zero exit alike, so the `expect` above proves only that the tool was reachable."*
+
+That felt obviously true. Every time this session refused one of my own `run_command`
+calls, the refusal came back as a **value**:
+
+```json
+{"ok": false, "error": "shell access to source files is blocked", "hint": "..."}
+```
+
+**Got:** I ran the positive control anyway — substituted a gate-blocked command to confirm
+the new assertion fires. It did not fire. The `.expect` above it caught an `Err`:
+
+```
+panicked at ...:1544:10: writing the heredoc should succeed:
+  shell access to source files is blocked — hint: use read_file(...)
+```
+
+The refusal is a genuine `Err` in Rust. The `{"ok": false, …}` I had been reading all
+session is the **MCP layer serializing that Err for the wire**. I had inferred a function's
+return type from its transport encoding, and written the inference into a comment that
+would have been read as authoritative by whoever touched that test next.
+
+The assertion is still correct and still needed — a non-zero exit *does* come back as `Ok`,
+confirmed by substituting `exit 3` — but for one reason, not two. Comment corrected in the
+same commit (`7d8bfae7`).
+
+**Counterfactual:** without the control, a false claim about `Tool::call`'s error contract
+ships inside a test comment, in the file most likely to be consulted when someone next
+wonders whether `.expect` on a tool call is sufficient. The claim is not checkable by
+reading the test; you have to run the broken world to see it.
+
+**Why it generalises:** this is the reconnaissance law *"a rendered read is evidence about
+content, not about bytes"* applied one layer up. **A tool response you read through a
+harness is evidence about the harness's encoding, not about the callee's signature** —
+and the two disagree exactly where errors are marshalled into values, which is most RPC,
+MCP, and HTTP boundaries. The reflex that would catch it is cheap: when a new assertion
+encodes a belief about an API's contract, make the assertion fail once on purpose before
+trusting either the assertion or the belief.
+
+**Status:** validated
+
+**Promote-when:** a second instance where a positive control refutes a stated belief about
+a callee's contract (not merely about a value). At two datapoints, this belongs alongside
+the existing rendered-read law in the reconnaissance patterns ledger as its RPC-boundary
+form.
 
 ## Template for new entries
 
