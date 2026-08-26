@@ -79,6 +79,13 @@ pub struct ServerEnv {
     /// `guide_hints_dir`: no test may read, write, or garbage-collect the
     /// developer's real state directory.
     pub servers_dir: Option<PathBuf>,
+    /// `CODESCOUT_PEER_ENABLED` — raw value, layered against `[peer] enabled` in
+    /// project.toml by `peer_enabled_at_runtime`. `None` ⇒ not set in the
+    /// environment; captured raw (not pre-parsed to bool) so the layering function
+    /// stays a pure, independently-testable unit — see `parse_rerank_opt_in` for
+    /// why an inline env read is avoided here too.
+    #[cfg(unix)]
+    pub peer_enabled: Option<String>,
     /// Inputs for the librarian runtime (workspace/db/embed/cwd).
     #[cfg(feature = "librarian")]
     pub librarian: crate::librarian::LibrarianEnv,
@@ -132,6 +139,8 @@ impl ServerEnv {
                 .ok()
                 .and_then(|v| parse_guide_idle_ttl(&v)),
             servers_dir: None,
+            #[cfg(unix)]
+            peer_enabled: std::env::var("CODESCOUT_PEER_ENABLED").ok(),
             #[cfg(feature = "librarian")]
             librarian: crate::librarian::LibrarianEnv::from_env(),
         }
@@ -340,10 +349,16 @@ impl CodeScoutServer {
             Arc::new(Library),
             // Deep-guidance tool — see docs/architecture/mcp-channel-caps.md
             Arc::new(crate::tools::guide::GetGuide::new()),
-            // Peer delegation tool (Unix-only — uses Unix domain sockets)
-            #[cfg(unix)]
-            Arc::new(crate::tools::peer::PeerTool),
         ];
+        // Peer delegation tool (Unix-only — uses Unix domain sockets) — opt-in,
+        // not opt-out: see peer_enabled_at_runtime for why.
+        #[cfg(unix)]
+        if peer_enabled_at_runtime(
+            env.peer_enabled.as_deref(),
+            status.as_ref().map(|s| s.path.as_str()),
+        ) {
+            tools.push(Arc::new(crate::tools::peer::PeerTool));
+        }
         if env.probe {
             tools.push(Arc::new(crate::tools::probe::ProbeTool));
             tracing::warn!(
@@ -1230,6 +1245,57 @@ fn librarian_enabled_at_runtime(project_path: Option<&str>) -> bool {
     true
 }
 
+/// Whether to register the peer-delegation tool for this session.
+///
+/// Layered defaults — same shape as [`librarian_enabled_at_runtime`], opposite
+/// resting state:
+/// 1. `env_override` `0|false|off|no` disables (overrides everything).
+/// 2. `env_override` `1|true|on|yes` enables (overrides config).
+/// 3. `[peer] enabled = true|false` in `<project>/.codescout/project.toml`.
+/// 4. Default: **disabled** (opt in with `CODESCOUT_PEER_ENABLED=1` or
+///    `[peer] enabled = true`).
+///
+/// Measured 2026-08-26 across every `.codescout/usage.db` on this machine (29
+/// projects, every session that has ever run here): `peer` was called twice,
+/// ever — once a success with no recorded detail, once an error from a guessed
+/// `action="list"` (the tool only accepts `status` for that). Opt-out was
+/// exposing a schema and description nobody was using by default.
+///
+/// `env_override` is taken as a parameter rather than read from
+/// `std::env::var` directly (contrast `librarian_enabled_at_runtime`) so this
+/// function stays a pure, independently-testable unit — see
+/// `retrieval::config::parse_rerank_opt_in`'s doc comment for why an inline env
+/// read is UB-risky against the test suite's concurrent `getenv` readers.
+#[cfg(unix)]
+fn peer_enabled_at_runtime(env_override: Option<&str>, project_path: Option<&str>) -> bool {
+    if let Some(v) = env_override {
+        let v = v.trim().to_ascii_lowercase();
+        if matches!(v.as_str(), "0" | "false" | "off" | "no") {
+            return false;
+        }
+        if matches!(v.as_str(), "1" | "true" | "on" | "yes") {
+            return true;
+        }
+    }
+    if let Some(root) = project_path {
+        let cfg = std::path::Path::new(root)
+            .join(".codescout")
+            .join("project.toml");
+        if let Ok(text) = std::fs::read_to_string(&cfg) {
+            if let Ok(parsed) = toml::from_str::<toml::Value>(&text) {
+                if let Some(v) = parsed
+                    .get("peer")
+                    .and_then(|t| t.get("enabled"))
+                    .and_then(|v| v.as_bool())
+                {
+                    return v;
+                }
+            }
+        }
+    }
+    false
+}
+
 impl ServerHandler for CodeScoutServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
@@ -2083,10 +2149,9 @@ mod tests {
     #[tokio::test]
     async fn server_registers_all_tools() {
         let (_dir, server) = make_server().await;
-        // `peer` is Unix-only (cfg(unix); Unix-domain-socket); it is not
-        // registered on Windows, so only assert it on Unix.
-        #[allow(unused_mut)]
-        let mut expected_tools = vec![
+        // `peer` is opt-in (see peer_enabled_at_runtime) and not registered by
+        // `make_server()`'s default env, on any platform.
+        let expected_tools = vec![
             "read_file",
             "tree",
             "grep",
@@ -2109,8 +2174,6 @@ mod tests {
             "library",
             "get_guide",
         ];
-        #[cfg(unix)]
-        expected_tools.push("peer");
         let core_count = server
             .tools
             .iter()
@@ -2141,11 +2204,9 @@ mod tests {
             .iter()
             .filter(|t| !is_librarian_tool(t.name()))
             .count();
-        // `peer` is Unix-only (cfg(unix); Unix-domain-socket), so the L3 target
-        // is 22 core tools on Unix and 21 on Windows where peer is not registered.
-        #[cfg(unix)]
-        let expected = 22;
-        #[cfg(not(unix))]
+        // `peer` is opt-in (see peer_enabled_at_runtime) and not registered by
+        // `make_server()`'s default env, so the L3 target is 21 core tools
+        // regardless of platform.
         let expected = 21;
         assert_eq!(
             core_count,
@@ -2154,6 +2215,139 @@ mod tests {
             core_count,
             server.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
         );
+    }
+
+    /// Regression for the near-zero-adoption finding (2 calls across every
+    /// `.codescout/usage.db` on the machine, one an error from a wrong action
+    /// guess): `peer` must be opt-in, not opt-out, so its schema and description
+    /// stop reaching every session by default.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn peer_tool_absent_by_default() {
+        let (_dir, server) = make_server().await;
+        assert!(
+            server.find_tool("peer").is_none(),
+            "peer must not be registered without an explicit opt-in"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn peer_tool_present_when_env_enabled() {
+        let dir = tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(codescout_dir.join("librarian-workspace.toml"), "").unwrap();
+        let env = ServerEnv {
+            peer_enabled: Some("1".to_string()),
+            ..test_env(dir.path())
+        };
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+        assert!(
+            server.find_tool("peer").is_some(),
+            "CODESCOUT_PEER_ENABLED=1 must register peer"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn peer_tool_present_when_project_toml_enables_it() {
+        let dir = tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(codescout_dir.join("librarian-workspace.toml"), "").unwrap();
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"proj\"\n\n[peer]\nenabled = true\n",
+        )
+        .unwrap();
+        let env = test_env(dir.path());
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+        assert!(
+            server.find_tool("peer").is_some(),
+            "[peer] enabled = true in project.toml must register peer"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn peer_tool_env_var_off_overrides_project_toml_on() {
+        let dir = tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(codescout_dir.join("librarian-workspace.toml"), "").unwrap();
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"proj\"\n\n[peer]\nenabled = true\n",
+        )
+        .unwrap();
+        let env = ServerEnv {
+            peer_enabled: Some("0".to_string()),
+            ..test_env(dir.path())
+        };
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+        assert!(
+            server.find_tool("peer").is_none(),
+            "CODESCOUT_PEER_ENABLED=0 must override [peer] enabled = true in project.toml"
+        );
+    }
+
+    mod peer_enabled_at_runtime_tests {
+        use super::peer_enabled_at_runtime;
+
+        #[test]
+        fn defaults_to_disabled_with_no_env_no_config() {
+            assert!(!peer_enabled_at_runtime(None, None));
+        }
+
+        #[test]
+        fn env_var_1_enables_regardless_of_project() {
+            assert!(peer_enabled_at_runtime(Some("1"), None));
+            assert!(peer_enabled_at_runtime(Some("true"), None));
+            assert!(peer_enabled_at_runtime(Some("ON"), None));
+        }
+
+        #[test]
+        fn env_var_0_disables_regardless_of_project() {
+            assert!(!peer_enabled_at_runtime(Some("0"), None));
+            assert!(!peer_enabled_at_runtime(Some("false"), None));
+            assert!(!peer_enabled_at_runtime(Some("OFF"), None));
+        }
+
+        #[test]
+        fn unrecognised_env_value_falls_through_to_default() {
+            assert!(!peer_enabled_at_runtime(Some("banana"), None));
+        }
+
+        #[test]
+        fn project_toml_enabled_true_wins_over_default() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            std::fs::write(
+                dir.path().join(".codescout").join("project.toml"),
+                "[peer]\nenabled = true\n",
+            )
+            .unwrap();
+            assert!(peer_enabled_at_runtime(
+                None,
+                Some(dir.path().to_str().unwrap())
+            ));
+        }
+
+        #[test]
+        fn missing_project_toml_is_disabled() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(!peer_enabled_at_runtime(
+                None,
+                Some(dir.path().to_str().unwrap())
+            ));
+        }
     }
 
     fn is_librarian_tool(name: &str) -> bool {

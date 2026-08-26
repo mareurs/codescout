@@ -3,6 +3,16 @@
 Delegate read-only exploration to another codescout instance that owns a
 different project.
 
+> **Opt-in, not registered by default.** Set `CODESCOUT_PEER_ENABLED=1`, or
+> `[peer]\nenabled = true` in `<project>/.codescout/project.toml`, to register
+> the tool. Same layered-default shape as `LIBRARIAN_ENABLED` (env var
+> overrides config, either direction), opposite resting state: `peer` defaults
+> to **off**. Measured 2026-08-26 across every `.codescout/usage.db` on this
+> machine — 29 projects, every session that has ever run here — the tool was
+> called twice, ever, one of those an error. An opt-out default was exposing
+> its schema and description to every session for a feature almost nobody
+> reaches for.
+
 ## Why
 
 Cross-project questions ("how does the backend call this endpoint?") need a
