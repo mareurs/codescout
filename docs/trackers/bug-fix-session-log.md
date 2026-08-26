@@ -4523,7 +4523,9 @@ Verified against the real defect rather than against its own green: with `worksp
 
 Compounded twice more, both times the same shape:
 
-1. Told the user "10 terminal-but-unarchived", derived from two doctor checks — whose SQL is `('fixed','mitigated','wontfix')` and `('fixed','mitigated')`. That count inherited *their* filters and missed the 4 zombies, which no query in the project reaches (now `docs/issues/2026-08-26-zombie-bug-files-are-reachable-by-no-query.md`).
+1. Told the user "10 terminal-but-unarchived", derived from two doctor checks — whose SQL is `('fixed','mitigated','wontfix')` and `('fixed','mitigated')`. That count inherited *their* filters and missed the 4 zombies, which no query in the project reaches (fixed and archived same-session:
+   `docs/issues/archive/2026-08-26-zombie-bug-files-are-reachable-by-no-query.md` — the
+   canonical triage query now includes `zombie`).
 2. The doctor's single `archived_fix_sha_unresolvable` finding, which I took at face value long enough to start working it, was a false positive — a cross-repo `<repo>:<sha>` pointer resolved against the wrong repo.
 
 **Severity:** med — no wrong edit resulted, but the user was given a wrong number repeatedly and a triage decision ("2 open, both blocked, here's what else to do") rested on it.

@@ -1,20 +1,20 @@
 ---
-id: '3efdeb057c0deea9'
+id: 213cf067be79209e
 kind: bug
-status: open
+status: fixed
 title: '`status: zombie` bug files are reachable by no standard query — not triage, not either doctor check'
 tags:
 - librarian
 - doctor
 - tracker-conventions
 - triage
-closed: null
+closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 related:
 - docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
 severity: medium
-unverified: 'The blind spot is measured at the SQL level and by count. NOT established: whether any of the 4 live zombie records is actually stale — verifying them is the work this bug makes possible, not work it did.'
+unverified: Measured which fix option was right (checked the 3 live zombie records for staleness before choosing), but did not implement a regression test -- there is no code path to test for a doc-only guidance change; verification is that the query text now includes zombie in the three prescriptive surfaces, checked by hand.
 ---
 
 # BUG: `status: zombie` bug files are reachable by no standard query
@@ -78,20 +78,31 @@ one is `2026-07-07`, 50 days at time of filing.
 
 ## Fix
 
-Options, not yet chosen:
+**Measured before choosing, per this file's own recommendation.** Checked the 3 live
+`status: zombie` records (not 4 — one had been reclassified since filing):
 
-1. **A `zombie_unreviewed` doctor check** — report zombie records whose `last_observed:`
-   is older than some window. Closest in shape to the checks that already exist, and it
-   gives `last_observed:` its first reader. Needs a window, and the window is a judgement.
-2. **Widen the triage guidance** — teach `get_guide("tracker-conventions")` that the
-   canonical query is `[open, investigating, zombie]`. Cheapest; catches it at read time
-   rather than by a scan, and does nothing for anyone who runs the old query.
-3. **Both.** 1 makes it enumerable, 2 makes it habitual.
+- `e817931ef9d51dd0` — `last_verified: 2026-08-26` (today). Explicitly `zombie` by
+  maintainer decision, actively tracked — working as designed, not neglected.
+- `523233935cc53bc4` — title states its underlying bugs ("Bug A", "Bug B") are already
+  fixed/mitigated. Residual instrumented-watch state, not neglect.
+- `6d6a6efca4d2bdd9` — the stalest (`last_observed: 2026-07-18`), but already went
+  through one reopen-and-fail-to-reproduce cycle before settling into `zombie`.
 
-Prefer measuring first whether any of the four is actually stale — if all four are
-still genuinely unobserved-but-unconfirmed, the exposure is smaller than the count
-suggests, and option 2 alone may be right.
+None represents active neglect — exactly the outcome this file predicted would point at
+**option 2 alone** (widen the triage guidance) rather than option 1 (a new `doctor`
+staleness check).
 
+**Implemented option 2.** Widened the canonical bug-triage query from
+`{"status": {"in": ["open", "investigating"]}}` to include `"zombie"`, with an explicit
+note that a `zombie` hit is a "has this recurred?" check, not a task to pick up (most
+zombie records have no available work by design). Updated the three prescriptive
+surfaces that state this query: both auto-injected `get_guide` topics
+(`project-activation-bootstrap`, `tracker-conventions`) and `docs/issues/_TEMPLATE.md`.
+Left `docs/trackers/open-issue-work-queue.md` alone — its `17 rows` line is a historical
+snapshot tied to its own past query run, not general guidance.
+
+**SHA:** `8c12a55a` (`experiments`)
+**patch-id:** `962d4704612f674b49915566c0ac6e97d4463c2a`
 ## Tests added
 
 Pending.
@@ -100,4 +111,3 @@ Pending.
 
 - `get_guide("tracker-conventions")` § Bug files — the status vocabulary, including `zombie` and its `last_observed:` pairing
 - `src/librarian/tools/doctor.rs:2935,3397` — the two terminal-population queries
-
