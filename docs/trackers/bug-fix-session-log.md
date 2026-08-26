@@ -5881,9 +5881,19 @@ See the correction below: this entry originally named that third session, wrongl
 
 1. **Re-read `git status` immediately before every commit** — never reuse a status
    taken earlier in the same turn. HEAD moves.
-2. **Stage by explicit path.** Never `git add -A`, `git add <dir>`, or `git commit -a`.
+2. **Stage by explicit path** — never `git add -A`, `git add <dir>`, or `git commit -a`.
+   **This protects you from the wrong FILES and from nothing else.** `git add <path>`
+   stages *every* change under that path, a peer's included. For a ledger two sessions
+   append to all evening, a peer holding uncommitted work inside the path you are staging
+   is the **normal case, not the edge case**. See Correction 2.
 3. **Take both halves of a comparison from ONE command invocation.** Two commands
    are two different worlds.
+5. **Run `git diff -- <path>` immediately before `git add <path>`, and confirm every
+   hunk is yours.** This is the check that actually covers rule 2's blind spot, and it
+   is one command. **Rule 1 does not substitute**: `git status` reports the file as
+   modified, which is true and useless — it cannot distinguish *your* modification from
+   a peer's. An instrument answering exactly what it was asked, bound to the wrong
+   question, which is `bug-fix-session-log:F-71`'s law — and F-71 is what it ate.
 4. **State uncertainty in the original claim, at the strength the evidence supports.**
    In a shared checkout your retraction *races a peer's ledger, and the ledger can win* —
    see the correction below, where a prompt, unprompted retraction still arrived after
@@ -5949,6 +5959,27 @@ and the reason rule 4 is worth more than “retract faster.”
 half-finished bug fix inside a docs-only commit”* is true whoever owns the files. The
 save is real, measured, and independent of the name.
 
+**Correction 2 (2026-08-26, 23:17) — this entry's title overclaimed, and the
+counterexample is the commit that made Correction 1.** `02d80963`, three minutes after
+this entry was written, **swept `codescout-77`'s in-flight `F-71` body section into a
+commit of mine.** They ran `append_entry` on this file at ~23:16; I staged the same file
+by explicit path at 23:16:44. Measured: `## F-71 —` is absent at `b842913f`, present at
+`02d80963`, and `git log -S` names no other commit. Nothing was lost — F-71 is intact and
+self-attributing, and its orphaned index row landed as `365513ef`.
+
+**F-67's mechanism has now fired three times, and the third was through the practice this
+entry credits with preventing it.** That is not an argument against the practice: the
+`d9055d36` save against `src/memory/*` was real and load-bearing *precisely because* those
+were files I was not touching. It is the boundary. Explicit paths discriminate **files**,
+and a shared ledger is one file.
+
+Both sessions detected this independently, within a minute of each other, and arrived at
+the same boundary and the same remedy without conferring — which is the reason to trust it
+rather than read it as a rationalisation written after the loss. `codescout-77` stated the
+sharper form first: *the risk is not tree-wide versus explicit-path, it is whether a peer
+has uncommitted work inside a path you are about to stage.* Rules 2 and 5 are rewritten
+accordingly.
+
 **Confirming data points:**
 1. F-67 (this log) — a peer's in-flight work already lost once to `cargo fmt` +
    `git add <dir>`.
@@ -5967,8 +5998,9 @@ sessions, stage by explicit path and take both halves of a comparison from one c
 Rules 1–2 are already implied by F-67; rule 3 is not stated anywhere outside the entry-id
 context.
 
-**Status:** validated — three datapoints, one of them a measured save under live
-concurrency.
+**Status:** validated, and **bounded**. The save is measured and real; the coverage this
+entry originally claimed was not. Cross-file: protected, measured. Same-file: unprotected,
+also measured — twenty minutes apart, in the same ledger.
 
 **Valid:** dated 2026-08-26
 
@@ -5993,6 +6025,12 @@ retraction for datapoint 3 — not independently reproduced here.
 | 1 | "CI has three red lanes" | `gh run view --jq 'select(.conclusion!="success")'` | an in-progress job's `conclusion` is `""`, not `null`. The predicate matches *running* jobs. 15/17 were green and nothing had failed |
 | 2 | "those files are touched but their content is unchanged" | `git status` then `git diff --stat` | the two observations straddled a peer's commit. Empty diff meant **HEAD had advanced**, not that content matched |
 | 3 | "the third writer is `claude-plugins-15`" | ListAgents start time vs file mtimes | a session starting 11 min ago and mtimes spanning 8 is consistent with every session on the box. They were in a different repo entirely |
+| 4 † | "`git status` shows this file modified, so staging it is clean" | `git status` before `git add <path>` | status reports *that* a file changed, never *by whom*. It cannot separate the stager's own edit from a peer's uncommitted edit **in the same file** |
+
+† Row 4 was measured by `codescout-df`, not by this session, and is logged as reported rather than
+verified here — the standard `claude-plugins:W-4` applied to my instance, returned in kind. It is in
+this table rather than in an entry of their own at their request: same mechanism, different actor, and
+an entry is worth more intact than distributed.
 
 **Probable cause:** In all three the instrument answered fluently in its own terms. None errored, none returned empty — the shape that prompts a second look. A result that is *wrong* invites checking; a result that is **complete and wrong** does not.
 
@@ -6005,6 +6043,28 @@ So the rule is not *retract faster*:
 > **State the uncertainty in the original claim at the strength the evidence supports, because the retraction may not arrive in time.**
 
 What I had was "a session appeared 11 minutes ago and the mtimes overlap." What I sent was "the third writer IS X." Had the first sentence gone out, `W-69` would have been correct on its first write and no retraction would have been needed. The failure was not slow correction; it was a confident first claim from a weak instrument — `F-70`'s own law, pointed at my output instead of at a citation.
+
+**The cost, traced end to end — four steps, eleven minutes.** This is not a hypothetical
+blast radius; it is what actually happened, and `codescout-df` traced it from their side:
+
+1. 23:0x — this session publishes "the third writer **is** `claude-plugins-15`" off mtime overlap.
+2. `codescout-df` inherits it **as fact** and writes it into `W-69`, committed `b842913f` 23:13:17.
+3. The retraction arrives after the commit. They write a correction, `02d80963` 23:16:44.
+4. Staging that correction by explicit path swallows this session's in-flight `F-71` body — the
+   loss `W-69` was written to prevent, committed in the act of correcting `W-69`.
+
+Nothing was destroyed and no history was rewritten: splitting `02d80963` would mean rewriting
+shared history in a checkout three sessions are committing into, which is the larger risk. The
+section is intact in `HEAD` and self-attributing; only the index row was re-committed here
+(`365513ef`). But the chain from *one weak first claim* to *a peer's lost authorship* runs four
+steps and eleven minutes, and every step after the first was competent work.
+
+**This also bounds `W-69`'s rule 2, and `codescout-df` names the boundary themselves:**
+"stage by explicit path" is **file-granular**. It protects a peer editing a *different* file — the
+`F-67` case it was named after, where the loss was cross-file — and does nothing at all for a peer
+editing the *same* file. For two sessions both appending to one ledger all evening, same-file is the
+**likely** case, not the edge case. The check that costs one command and would have caught it:
+`git diff -- <file>` immediately before staging, confirming every hunk is yours.
 
 **Received, and it generalises the whole set** — `claude-plugins-15`, offered in exchange: *re-reading an instrument with the same belief is itself a check with no resolving power.* Every case above had a cheap probe sitting unread (`.conclusion=="failure"`; one `git log` after the second observation; `.buddy/.session-start-trace.log`, which was on disk in this repo the whole time). **A probe you could have run is not the same as one you did.** Their own instance is a second shape worth knowing: a harness `verdict()` mapping *empty* hook output to `"allow"`, so an assertion passed both when the feature worked and when its emitting call was stubbed out entirely — found by mutating it, never by reading it.
 
