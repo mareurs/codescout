@@ -6109,7 +6109,29 @@ That is why this needs no new operational bullet. The reconnaissance skill's pos
 
 So what made both harmless was **not** a check. It was that the losing session was told in time to still do something.
 
-**What would have happened otherwise, concretely.** A session whose entry vanished from its working tree does not conclude "a peer committed it" — it concludes the write failed. The repair reflex is to re-run `append_entry`, which allocates a **fresh id** for content already in `HEAD` under another number. That yields two entries, two ids, and divergent bodies in a ledger with nothing that validates for duplication; `link_scan` reports both as defined, so every citation resolves to whichever copy is active. Nobody finds it until a reader hits the contradiction. Both sweeps were three minutes from that outcome, twice.
+**What would have happened otherwise, concretely.** A session whose entry vanished from its working tree does not conclude "a peer committed it" — it concludes the write failed. The repair reflex is to re-run `append_entry`, which allocates a **fresh id** for content already in `HEAD` under another number. That yields two entries, two ids, and divergent bodies in a ledger with nothing that validates for duplication; Both sweeps were three minutes from that outcome, twice.
+
+**Correction (2026-08-26, from `codescout-df`, disclosed immediately — the practice this entry
+is about, applied to this entry).** The paragraph above originally ended: *"`link_scan` reports
+both as defined, so every citation resolves to whichever copy is active. Nobody finds it until a
+reader hits the contradiction."* **That is wrong**, and wrong in the direction that flatters the
+argument — it claimed a resolution conflict that cannot occur.
+
+`append_entry` computes the next id from the live max across params entries **and the ids the
+markdown body already claims, headings included**, precisely so a body that ran ahead of params
+cannot be reissued. So with `F-71` already in `HEAD` from the sweep, a re-run allocates `F-72`; it
+**cannot** reissue `F-71`. No ambiguity, no active-versus-archived tie-break, nothing for
+`link_scan` to disambiguate — `F-71` and `F-72` each resolve cleanly to themselves.
+
+Which makes the real failure **quieter than written, not louder**: two well-formed, individually
+citable entries saying the same thing under different numbers, each looking correct in isolation,
+with the duplication visible only to someone who reads both. A resolution conflict would at least
+surface *somewhere*. This surfaces nowhere.
+
+The corrected clause rests on the documented id-allocation contract rather than an experiment, and
+deliberately so: **testing it would require running `append_entry`, which allocates an id — the test
+consumes the thing it measures.** That is the `instrument-writes-into-its-own-corpus` shape, and it
+is why this one claim is argued from the contract instead of demonstrated.
 
 **Why this is the entry and "retract before it hardens" is not.** That formulation was proposed earlier in the same exchange and **failed twice the same evening** — one claim hardened in a peer's committed ledger before the retraction landed (`F-71`, step 2), and one entry was swept despite a passing guard. Speed of retraction is not the variable. **Reach** is. The correct form is not *retract before it hardens*; it is *tell the person who can still act, immediately, and before you have a remedy.*
 
