@@ -2298,6 +2298,13 @@ mod tests {
         );
     }
 
+    /// Gated to match the function under test. `peer_enabled_at_runtime` is
+    /// `#[cfg(unix)]` — peer delegation uses Unix domain sockets — so on a Windows
+    /// target an ungated `use super::…` here resolves to an item that was configured
+    /// out. That is E0432, a hard compile failure of the whole test binary rather
+    /// than a skipped test, and the host `cargo clippy` / `cargo test` cannot see it
+    /// because the cfg erases the arm they compile.
+    #[cfg(unix)]
     mod peer_enabled_at_runtime_tests {
         use super::peer_enabled_at_runtime;
 
