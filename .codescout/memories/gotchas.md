@@ -1,5 +1,44 @@
 # Workspace Gotchas
 
+## `.codescout/embeddings/*.db` May Belong To A Backend That Is Not In Use
+
+**Read the resolved backend before quoting any number about "the index."**
+
+`VectorBackend::resolve` (`src/retrieval/code_store.rs`) reads
+`CODESCOUT_VECTOR_BACKEND`; when it is **unset** and the binary is built with
+`server-stack`, it defaults to **Qdrant**. The sqlite-vec store files
+(`.codescout/embeddings/<project>.db`) are then leftovers from an earlier lite-stack
+run — and they keep answering queries perfectly.
+
+Measured 2026-08-26 on this host, minutes apart:
+
+| | live tool (Qdrant) | `codescout.db` |
+|---|---|---|
+| distinct files | 1611 | 1593 |
+| chunks | 47 647 | 46 979 |
+| paths absent from disk | 6 | 18 |
+
+**Use `index(action="status")` or `index(action="verify")`, not `sqlite3`.** The
+tool owns the backend resolution and cannot be wrong about its own substrate.
+
+Three reasons nothing catches this on its own, so the check has to be deliberate:
+
+- A bounded `sqlite3` read is correctly not IL-3-blocked.
+- Every query succeeds and returns internally consistent numbers — no zero, no
+  empty result, no error for `docs/PROBES.md` rules 3/4 to catch on.
+- **A passing positive control does not help.** Validating that a predicate
+  discriminates (a deliberately-broken join key returning all rows) says nothing
+  about *which database* it discriminated in. Instrument and substrate are
+  orthogonal; passing one while failing the other is the most confident wrong state
+  available.
+
+Also: `chunks_without_vectors` from `verify` is a real measurement only under
+sqlite-vec. Qdrant returns 0 structurally, because a point carries its payload and
+vector together.
+
+Full account: `bug-fix-session-log:F-66`, `reconnaissance-patterns:R-116`,
+`tool-usage-patterns:T-28`.
+
 ## Semantic Index — Fixture Projects Not Indexed
 
 The semantic index is populated for `codescout` only. All fixture projects

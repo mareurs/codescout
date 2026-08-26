@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 66
-entry_high_water_W: 56
+entry_high_water_W: 57
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -179,6 +179,7 @@ entry_high_water_W: 56
 | W-53 | 2026-08-26 | med | Verify a scan's FIRST finding against reality before acting on the worklist, and treat a false one as a bug in the instrument | The single archived_fix_sha finding was a false positive; checking it found two defects in the same parser, against an alternative of hunting a dead commit the check itself sizes at 2-153 candidates | validated |
 | W-51 | 2026-08-26 | high | When a filed root cause is about persisted state, reproduce it by querying the datastore — not by re-running the tool that reported it | The filed "restore every augmentation" fix, run against the 21 trackers that were already augmented, replaces their params wholesale — the same call that took the T-N queue from 19 entries to 1 on 2026-08-16 — causing the loss it claimed to repair | validated |
 | W-54 | 2026-08-26 | med | Before implementing from a bug file or plan YOU wrote, scout the seam its Fix section SIZES — not only the seam its Root cause cites | Would have implemented a project-scoped `DELETE` plus a "sibling project survives" test for an invariant the per-project-file schema already guarantees; that test passes for every possible implementation, including a wrong one, so it enters the suite as a permanent green-but-uninformative assertion | validated |
+| W-57 | 2026-08-26 | high | Call the tool live on the real backend before shipping tool-facing OUTPUT — a fixture built from a bug report's quoted error string is NOT a live check | `67c548b9`'s payload-size hint matched the wording quoted in the issue (`exceed_context_size`, HTTP 400); the running server emits HTTP 500 `input is too large to process` from llama.cpp's n_batch path, so the arm was dead on the very stack it was written for — 3 tests, clippy clean, 4477 green, and an operator would have got the generic hint instead of "retrying will not help" | validated |
 | W-55 | 2026-08-26 | high | Before trusting a diagnostic, confirm the serving process is not running a DELETED binary — `ls -l /proc/<pid>/exe`, with the pid found by walking `ps -o ppid=` up from a `run_command` shell | A peer session's `cargo rb` unlinked this session's server binary 70 minutes after it started; `doctor` then reported a check as broken that had been fixed 80 minutes earlier, and the next step was reopening a closed bug to repair a guard that works. Unlike R-89 the rebuild was someone else's, so commit, tree and binary mtime all read green and nothing in the transcript hinted at it | validated |
 | W-56 | 2026-08-26 | high | EXECUTE a bug file's archive precondition rather than asserting it is met — it is a check someone deliberately deferred, so the cheapest disposal is also the only silent failure | "Confirm CI, then archive" read as boilerplate from a stricter era. CI had been red on every Test lane since 2026-08-19 — 3 OSes × 3 feature sets — on one test that resolves an embedder from ambient config; the mandated local gate runs in the developer's environment by construction and can never show it. Cost two gh calls; the alternative was archiving six files under a green that was true only on this machine | validated |
 
@@ -4983,6 +4984,67 @@ BACKEND first — `env | grep CODESCOUT_VECTOR_BACKEND` plus
 `index(action="verify")` now exists precisely so this question has a
 substrate-correct answer; use it instead of `sqlite3`. Pairs with W-54: I scouted
 my own sizing claim and not my own instrument.
+
+## W-57 — RELEASE.md's required live-output step caught a branch that was dead on the very stack it was written for
+
+**Observed:** 2026-08-26, working `docs/RELEASE.md`'s Standard Ship Sequence step 1
+sub-clause: *"Changed tool-facing OUTPUT? Call the tool live on this repo and read
+the bytes first — a green suite does not establish that what the tool SAYS is
+useful."*
+
+**Pattern:** For any change to tool-facing output — a warning, hint, completeness
+note, summary — call the real backend once and read the real bytes before shipping,
+**even when the fixtures were written from a bug report that quotes the error
+verbatim.** A quoted error string is evidence about the reporter's stack, not
+yours.
+
+**Counterfactual, concrete.** `67c548b9` added a payload-size arm to
+`classify_search_error` matching `"larger than the max context size"` /
+`"exceed_context_size"` — the wording quoted in GitHub #15. Three tests passed,
+clippy clean, 4477 green. Then I posted an oversized payload to the running
+CodeRankEmbed server and it returned **HTTP 500 `input is too large to process.
+increase the physical batch size`, type `server_error`** — llama.cpp's `n_batch`
+path, not its `n_ctx`-per-slot path. Different status, different type, different
+wording, different remedy. **The arm would never have fired on this stack.** An
+operator hitting it would have got the generic embedder hint instead of "this is a
+size problem, retrying will not help" — the exact misrouting that function's doc
+comment and its six sibling tests exist to prevent. Fixed in `5f8c42ec`, with both
+variants now pinned and the binary-search provenance in the doc comment.
+
+The same step then paid twice more in the same session: it produced the first
+substrate-correct measurement of this project's index (`F-66`), and it confirmed
+the segmentation fix end-to-end against the real embedder — the memory that cannot
+be embedded today splitting into four pieces that all embed, byte-exact.
+
+**Confirming data points:**
+1. This session — dead classifier arm, invisible to a green suite because every
+   fixture used the reported wording.
+2. `docs/RELEASE.md` already records two: the `grep` hidden-skip warning (7 tests,
+   3522 green, CI 15/15 on attempt 1, bug archived, output useless — every fixture
+   had exactly one hidden entry so the truncation branch never ran) and round 6's
+   `create.rs` fix proved inert in a live session despite a green suite.
+
+**Impact:** high — this is a *shipped-and-green* escape class, not a caught-in-dev
+one. All three datapoints passed every gate the project has.
+
+**Promote-when:** already promoted — the step is `required`, not advisory, in
+`docs/RELEASE.md`. This entry exists to add the third datapoint and to sharpen the
+trigger, which the current wording does not cover: **a fixture built from a bug
+report's quoted error string is not a live check.** It reads like evidence from the
+real world because it came from one — someone else's. Worth folding that sentence
+into the step when it is next edited.
+
+**Status:** validated — third datapoint, and the first where the fixture *looked*
+empirical.
+
+**Valid:** invariant
+
+The class is invariant: assertions written from quoted error text can only ever
+pin the quoted text.
+
+**Rests on:** `docs/RELEASE.md` § *Before cherry-pick: read the live output of any
+tool-facing change (required)* and its two prior datapoints, which this extends
+rather than establishes.
 
 ## Template for new entries
 

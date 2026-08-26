@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 115
+entry_high_water_R: 116
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -343,6 +343,7 @@ be treated as findings, not as a summary to re-derive.
 | R-41 | 2026-07-17 | miss → promoted | A later table-rebuild migration (`CREATE _new`/`INSERT … SELECT`/`DROP`/`RENAME`) has a column list that is a silent ALLOW-LIST — a column an earlier migration added but the SELECT doesn't name is dropped on swap, no error. Adding a column is a seam whose far side is every later rebuild's SELECT. | Stage-2 review; `migrate_v6.rs::drop_legacy_and_stamp` dropped `slug`; fix 9aa8063f + test `migration_v6_single_open_preserves_v9_entry_graph_shape`; kin R-3/R-28 |
 | R-42 | 2026-07-17 | miss → promoted | When a writer produces a new value shape (id-keyed ref, optional field), each reader's absent-key/None branch must RESOLVE the other shape, not dead-end (return empty / fall through) — a dead-end silently drops every value stored in that variant. Shared incidental test preconditions ("target always has a slug") mask it. | Stage-2 review; `get(include_links)` hid incoming-by-id backlinks for slug-less targets; fix 70d16686; kin R-27/R-21 |
 | R-115 | 2026-08-15 | miss ×2 → rule | **Aggregate behaviour data is a screen, not a verdict — and it is wrong in BOTH directions.** An audit of 53,916 recorded tool calls ranked failures by frequency and by "what tool came next". Reading the actual arguments of ~12 instances overturned two conclusions. (a) **Overstated:** every rejection of a `json_path` wildcard was scored a successful recovery because the next call returned `success`. The arguments showed what those recoveries were — `$.items[*].abs_path` → read 393 raw lines; `$.entries[*].id` → `$.entries[4].id` one element per call; another → abandon the buffer and re-query upstream; another → grep the buffer. A green outcome column concealed a degraded workaround every time: it records that the call returned, never that the agent got what it asked for. (b) **Understated:** a guard scored at 35% "same-tool recovery" was in fact working — its correct recovery is a DIFFERENT tool (`symbols(include_body)` on the exact symbol wanted), which the same-tool metric counts as failure. Same-tool and adjacent-call metrics systematically penalise every guard whose right answer is another tool or needs a lookup first (widening one route's window from 1 call to 3 moved compliance 45% → 74%). And the sharpest defect was invisible to all aggregation: bucketing the refused ranges showed 69 of 244 were canonical imports reads (`1-20`, `1-30`), refused by a guard whose recommended alternative structurally cannot return imports. **Rule:** before filing or closing anything from aggregate counts, read the arguments of ten instances — and check whether the payload that would show intent is even being recorded. | 2026-08-15 tool-usage investigation TU-11; `docs/trackers/2026-08-15-tool-usage-investigation.md`. Kin R-50 (the view is not the set — this is its behavioural-telemetry form), R-75 (verify the artifact produced, not the exit code) |
+| R-116 | 2026-08-26 | miss | **A positive control validates the INSTRUMENT, never the SUBSTRATE.** Phase 1's substrate law was read, quoted aloud to the user, then violated for a whole session: `.codescout/embeddings/codescout.db` was queried as the live index when `CODESCOUT_VECTOR_BACKEND` is unset and `VectorBackend::resolve` defaults to Qdrant under `server-stack`. Live 1611 files / 47 647 chunks vs the file's 1593 / 46 979. Three things defeated the existing text: the backend was taken from the *reporter's* env block rather than this host's; a 247 MB file with the right name and schema is a powerful false confirmation, so no zero and no error gave PROBES rules 3/4 anything to catch on; and a positive control on the join **passed** — proving the predicate discriminated, in the wrong database. Caught only by `index(action="verify")`'s first live run disagreeing. | `bug-fix-session-log:F-66`; `tool-usage-patterns:T-28`; promoted to codescout memory `gotchas` |
 | R-75 | 2026-08-13 | miss → rule | **A process-level env scrub is not configuration isolation — a program that reads config from disk reconstitutes what you removed, and the result looks like success.** An end-to-end probe launched under `env -i` with three explicit `CODESCOUT_*` vars was treated as hermetic on that basis. `main.rs` calls `load_startup_env`, which reads `~/.config/codescout/.env` (here a symlink to the repo's own `.env.amd`) and fills every key the caller left **unset** — so a url that had just been scrubbed came back, and the retrieval path silently discarded the `local-dir:` model in its favour. Exit **0**, `added=5`, no warning; the only tell was the artifact's shape, `FLOAT[768]` where the local model is 384-dimensional. This is the substrate rule (read what world the tool read, not just its verdict) failing where it was most needed: the negative control — does this run still succeed when I make the config source *provably* absent? — was never run. The repo already knew the escape (`tests/cli_artifact.rs:18-24` sets `CODESCOUT_ENV_FILE` to a nonexistent path for exactly this reason) and it was not consulted. **Rule:** before believing an isolated run, name every layer that can supply config — process env, dotenv, user config, project config, compiled default — and neutralise or observe each; then verify the *artifact produced*, not the exit code. Note the compensation: chasing the impossible dimension is what exposed the real defect, so the sloppy probe still paid — but it would have paid as a false "verified" had the dimension gone unread. | local-onnx-embedding session log F-7 + W-5; `docs/issues/2026-08-13-url-silently-overrides-local-dir-model.md` (fixed `38e0980b`). Kin R-50 (the view is not the set), R-6 (scout the substrate before mechanism design) |
 | R-54 | 2026-08-05 | miss → rule | **Before counting rows, ask what one row IS and whether two rows can contain the same underlying event — and never let "zero observed" become "empty" without stating n.** A corpus of 63,574 rows was 444 sessions: each row was one request re-sending the whole conversation (143 per session, 165× double-count). A 64-row sample was 34 effective sessions; a top band of 13 rows was 6. Nesting is invisible downstream because the duplicated content is genuinely present in both rows. Sibling of R-53: that one guards what the corpus is MADE OF, this one guards what a ROW MEANS | provenance-probe F-14 + W-10; PV-65; PV-66 |
 | R-53 | 2026-08-04 | miss → rule | **A corpus's composition is a seam — census it by producing tool before you measure it, and when you stratify by a magnitude, ask what makes things big.** One tool contributed 59.8% of all tool-result bytes as base64 image data that `json.dumps` had stringified into the text denominator; it also defined the top band of a size-stratified sample (11/13 sessions), so the magnitude axis was a producer axis in disguise. Invisible to thirteen rounds of internal checks — contamination moved numerator and denominator together. Caught only when the corpus owner said the traffic was not representative | provenance-probe F-13 + W-9; PV-61; PV-62 |
@@ -3526,6 +3527,79 @@ SKILL.md next to R-95's bullet, phrased as the inversion check.
 
 **Status:** open — 1/1 datapoint. Recorded now because the mechanism is precise and the
 cheap check ("invert the statistic") is one sentence.
+
+## R-116 — MISS — the substrate law was quoted aloud and then violated for a whole session; a positive control made it feel checked
+
+**Verdict:** miss.
+
+**What recon should have caught.** Phase 1 already carries the law verbatim: *"A
+tool that resolves its target from the environment has a SUBSTRATE as well as a
+verdict… A retired-but-still-present datastore keeps answering, so the failure is a
+confident wrong number, never an exception."* I read it, quoted it to the user in
+this session, and then spent the session querying
+`.codescout/embeddings/codescout.db` as if it were this project's live index. It is
+not: `CODESCOUT_VECTOR_BACKEND` is unset, `VectorBackend::resolve`
+(`src/retrieval/code_store.rs:247-262`) defaults to Qdrant under `server-stack`,
+and `CODESCOUT_QDRANT_URL` is set and answering. The file's mtime predated the
+session.
+
+**What caught it instead.** A downstream gate, and only because I had just built
+it: `index(action="verify")`'s first live run returned 1611 files / 47 647 chunks
+against the sqlite file's 1593 / 46 979. Two instruments, two numbers, and the
+skill's own instruction — *"the question is not whose logic is wrong but which
+world each one read"* — is what turned the discrepancy into the diagnosis in one
+step. Without that tool existing, nothing in the session would have disagreed with
+me. See `bug-fix-session-log:F-66`.
+
+**Why the existing text did not fire — the useful part.** Three compounding
+reasons, and only the third is new:
+
+1. I took the backend from the **reporter's** environment block (their bug text
+   said `CODESCOUT_VECTOR_BACKEND=sqlite-vec`) rather than from this host. The law
+   says read the substrate; it does not say *whose* substrate, and a bug report
+   supplies a plausible one for free.
+2. A 247 MB file with exactly the right name, schema and internal consistency is a
+   powerful false confirmation. Every query succeeded. Nothing was empty, nothing
+   errored, no zero appeared — so rules 3 and 4 of `docs/PROBES.md` (a zero lies /
+   run a positive control) had no hook to catch on.
+3. **I ran a positive control and it passed.** A deliberately-broken join key
+   returned all 46 979 rows, proving the predicate discriminated. It did — against
+   the wrong database. This is the gap: rule 4 tells you to validate the
+   *instrument*, and a passing control feels like it has validated the *answer*.
+   It has not. The two are orthogonal, and passing one while failing the other is
+   the most confident possible wrong state.
+
+**Proposal.** Phase 1's substrate bullet ends by naming failure shapes ("an ORM
+pointed at a stale replica, a linter reading a cached AST, a test suite importing
+an installed wheel"). Add the interaction with rule 4, because they currently read
+as independent safeguards and this session shows one masking the other:
+
+> A positive control validates the INSTRUMENT, never the SUBSTRATE. Passing one
+> against the wrong datastore is the most confident wrong state available — the
+> predicate provably discriminates, so the number looks earned. Establish which
+> world you are reading *before* proving your query works in it, and prefer the
+> tool that resolves the backend over a file you can name.
+
+**Confirming data points:** 1 (this session). The substrate law itself is at many;
+what is new is the positive-control interaction.
+
+**Promote-when:** a second instance of a validated instrument reporting confidently
+on the wrong substrate. At 2, fold the paragraph above into the skill's Phase 1
+substrate bullet via the Sync flow. Below that threshold it stays here, because one
+datapoint is exactly the evidence the skill's own *Every promotion audits the
+promoted set* section says is not enough to widen a promoted law.
+
+**Status:** open — proposal drafted, threshold not met.
+
+**Valid:** invariant
+
+The positive-control/substrate orthogonality is a law. The specific backend
+resolution on this host is `dated 2026-08-26` and changes the moment
+`CODESCOUT_VECTOR_BACKEND` is set.
+
+**Rests on:** `VectorBackend::resolve`'s `server-stack` default plus an unset env
+var — together they make a present, plausible, schema-correct sqlite file the
+*wrong* substrate rather than merely a stale one.
 
 ## Template for new entries
 

@@ -757,6 +757,55 @@ buffer. This is the same error class as reading a measurement off a working tree
 live mutation in it (`prompt-surface-measurement-session-log:W-5`): a number that is real,
 from a surface that is not the one the claim is about.
 
+### T-28 — `sqlite3` on a store file answered five questions about a store that was not live
+
+**Tool:** `run_command` (`sqlite3 .codescout/embeddings/codescout.db`) where
+`index(action="status")` / `index(action="verify")` was the right instrument.
+**Verdict:** wrong-tool. **Severity:** high.
+
+**Observed.** Across one session I answered roughly five questions about "the
+index" by querying `.codescout/embeddings/codescout.db` directly: per-directory
+coverage, per-language max chunk size, chunk↔vector holes, orphan count. On this
+host that file is a **retired** store. `CODESCOUT_VECTOR_BACKEND` is unset,
+`VectorBackend::resolve` (`src/retrieval/code_store.rs:247-262`) defaults to Qdrant
+when `server-stack` is compiled in, and `CODESCOUT_QDRANT_URL` is set and
+answering. The file's mtime predated the session entirely.
+
+| | live tool (Qdrant) | `codescout.db` |
+|---|---|---|
+| distinct files | 1611 | 1593 |
+| chunks | 47 647 | 46 979 |
+| paths absent from disk | 6 | 18 |
+
+**Ideal.** Ask the tool that *owns the backend resolution*.
+`index(action="status")` was already available and reports the live store;
+`index(action="verify")` now exists for the coverage questions specifically
+(`e5821fec`). Reach for a store file only after establishing which store is live —
+and then prefer the tool anyway, because it cannot be wrong about its own
+substrate.
+
+**Why no gate fired — the prompt gap.** Three independent reasons, and each one is
+why this is a *prompt* observation rather than merely a mistake:
+
+1. A bounded `sqlite3` read is not IL-3-blocked, correctly — it is a cat-like
+   producer, not an unbounded one piped to a trimmer.
+2. Every query succeeded and returned internally consistent numbers. No zero, no
+   empty result, no error. `docs/PROBES.md` rules 3 and 4 both need something to
+   catch on, and nothing was anomalous.
+3. I ran a **positive control** on the join — a deliberately-broken key returned
+   all 46 979 rows — and it passed, which felt like verification. It verified the
+   predicate, not the database.
+
+**Candidate fix.** Have `index(action="status")` name the resolved backend in its
+envelope (`"backend": "qdrant" | "sqlite-vec"`). That makes the substrate visible
+at the exact moment someone is forming a belief about the index, costs a handful of
+bytes, and is the one signal that would have short-circuited all three reasons
+above. Nothing in any prompt surface currently warns that
+`.codescout/embeddings/*.db` may belong to a backend that is not in use.
+
+**Status:** open.
+**Refs:** `bug-fix-session-log:F-66`, `reconnaissance-patterns:R-116`.
+
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
