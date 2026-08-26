@@ -1110,7 +1110,7 @@ mod tests {
     async fn counts_flags_truncation_per_finding_array_when_the_cap_is_exceeded() {
         // `FINDINGS_CAP` (50) caps every finding array; without a `truncated` flag,
         // `len(dangling) == 50` reads identically whether the true count is 50 or 5000 —
-        // docs/issues/2026-08-26-cited-prefix-with-no-definer-is-invisible.md.
+        // docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md.
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
 

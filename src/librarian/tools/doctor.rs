@@ -2787,7 +2787,7 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
 /// namespace), and this prefix owns none of those — it is not a *broken* citation in the
 /// resolver's terms, it is not a citation candidate at all, so `link_scan`'s own resolver
 /// treats it as prose noise (`resolve.rs`'s `prefix_is_known` gate) and reports nothing.
-/// docs/issues/2026-08-26-cited-prefix-with-no-definer-is-invisible.md
+/// docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md
 ///
 /// **Threshold, not a bare "any unknown prefix."** Extraction is deliberately dumb — `UTF-8`
 /// and `SHA-256` arrive as entry tokens exactly like `T-1` does, and a design doc that quotes
@@ -5763,7 +5763,7 @@ mod tests {
 
     // ---- scan_cited_prefix_with_no_definer -----------------------------------------------
 
-    /// Regression for docs/issues/2026-08-26-cited-prefix-with-no-definer-is-invisible.md:
+    /// Regression for docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md:
     /// a prefix with zero definers repo-wide is not a *broken* citation in the resolver's
     /// terms (it is not a citation candidate at all), so it landed in neither `link_scan`'s
     /// dangling/ambiguous buckets nor either existing `doctor` check. Both of those key off

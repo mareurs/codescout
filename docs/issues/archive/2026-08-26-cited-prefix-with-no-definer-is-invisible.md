@@ -1,7 +1,7 @@
 ---
-id: b3d5eec46e6dfe86
+id: c2a65e6e1814524b
 kind: bug
-status: open
+status: fixed
 title: link_scan and doctor have no check for a cited prefix with zero definers — the citations are inert, and the report's capped arrays invite the opposite wrong conclusion
 tags:
 - librarian
@@ -9,11 +9,11 @@ tags:
 - doctor
 - reporting
 - link-graph
+closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 related: []
 severity: medium
-unverified: Primary + documentation shipped and tested; the citation-count threshold (>=3 across >=2 files) is the bug's own suggested starting point, not yet swept against the full catalog to tune. Secondary (a per-array `truncated` flag on link_scan's report) is still unimplemented -- noted in Resume.
 ---
 
 # BUG: a cited prefix with no definer is reported nowhere
@@ -106,7 +106,7 @@ as a level rule.
 
 ## Fix
 
-**Primary and Documentation shipped 2026-08-26 -- Secondary still open.**
+**All three shipped 2026-08-26.**
 
 **SHA:** `c0ec5ace` (`experiments`)
 **patch-id:** `b07570e84e40c7dfd8a5664d9793175c0b40ca25`
@@ -128,11 +128,15 @@ as a level rule.
 2. **[done] Documentation.** `get_guide("tracker-conventions")` § *Entry headings* now
    states the third citation state (resolved / dangling / inert) and the heading-level
    non-rule two readers had already misread.
-3. **[still open] Secondary — a `truncated` flag per finding array on `link_scan`.** Not
-   implemented. `len(dangling) == 50 < counts.dangling == 70` is still inferred, not stated.
-   Left for a follow-up: it touches `link_scan`'s report shape rather than `doctor`, is a
-   separable change, and this session's scope was the two bugs picked as genuinely
-   self-contained — this one is not.
+3. **[done] Secondary — a `truncated` flag per finding array on `link_scan`.**
+   `counts.truncated.{ambiguous,dangling,cross_repo}`, gated on `total > len(array)`, in
+   `src/librarian/tools/link_scan/mod.rs`. `len(dangling) == 50` no longer has to be compared
+   against `counts.dangling` by hand — the report states directly which arrays were cut.
+
+   **SHA:** `a14215ce` (`experiments`)
+   **patch-id:** `079e5eea8768c62e0b82b9727fa0b408cc5c9570`
+
+   `fix(link-scan): flag which finding arrays were truncated by the cap`.
 ## Tests added
 
 Four tests in `src/librarian/tools/doctor.rs`, all confirmed RED (function didn't exist)
@@ -146,7 +150,12 @@ before GREEN:
 - `cited_prefix_with_no_definer_is_silent_when_prefix_is_declared` — `entry_prefix:` declared
   but nothing defined; silent here, `ledger_defines_nothing`'s finding instead.
 
-No regression test yet for the still-open secondary (`truncated` flag).
+One test for the secondary — `counts_flags_truncation_per_finding_array_when_the_cap_is_exceeded`
+(`src/librarian/tools/link_scan/mod.rs`): seeds 51 dangling citations against a target with
+one defined entry (so the prefix is known, not inert), confirms the array stays capped at 50
+while `counts.dangling == 51`, and asserts `counts.truncated.dangling == true` while an empty
+arm (`ambiguous`) reports `false`. RED confirmed as an assertion failure against the live
+fixture (51 real dangling citations, correctly capped) before the field existed.
 ## Workarounds
 
 Run a **positive control** before believing any categorical claim from the report: resolve
@@ -157,12 +166,14 @@ Use `*_by_source` for census; never infer from absence in the finding arrays.
 
 ## Resume
 
-Primary + documentation done (`c0ec5ace`). What remains:
+All three Fix items shipped (`c0ec5ace`, `a14215ce`). One optional item remains, not a
+blocker for archiving this bug:
 
-1. Implement the `truncated` flag per finding array on `link_scan`'s report (§ Fix item 3).
-2. Sweep the `cited_prefix_with_no_definer` citation-count threshold (currently ≥3 across
+1. Sweep the `cited_prefix_with_no_definer` citation-count threshold (currently ≥3 across
    ≥2 files) against the full catalog to see where incidental prose quotation actually falls
-   off, per the original Resume note — not done, the shipped threshold is a starting point.
+   off. Calibration, not correctness — the shipped threshold is a deliberate starting point,
+   not a guess that needs fixing. Worth its own lightweight tracker note if anyone picks it
+   up rather than reopening this file.
 ## References
 
 - `docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md` —
