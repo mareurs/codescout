@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 67
-entry_high_water_W: 61
+entry_high_water_F: 68
+entry_high_water_W: 62
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -5379,6 +5379,53 @@ future one loses content rather than only mislabelling it.
 **Rests on:** `bug-fix-session-log:F-57`, `bug-fix-session-log:F-60`, and
 `bug-fix-session-log:W-49` (checking `ListAgents`/`SendMessage` before committing shared
 uncommitted docs — the coordination half of the same problem).
+
+## F-68 — Shared-tree authorship attribution: two indirect heuristics both proved unreliable
+
+**Observed:** 2026-08-26, mid-session, resolving whose uncommitted WIP sat in three files (`src/main.rs`, `src/migrate/memories.rs`, `src/tools/semantic/index.rs`) in codescout's shared working tree — this machine runs three concurrent Claude Code profiles against the same repo.
+
+**When:** After a peer proposed `git log -1 --format='%h %s' -- <path>` as "the discriminator" for who authored an uncommitted diff, and separately after a peer quoted a live process count ("6 codescout server processes with `cwd=codescout`") as corroborating evidence.
+
+**Expected (peer's claim):** a commit's subject line names the active work stream, so it discriminates current authorship; process count of a shared `cwd` roughly tracks concurrent session count.
+
+**Got (scouted reality):** `src/main.rs`'s last commit was 11 days old, `src/migrate/memories.rs`'s was 12 days old — both predate the session entirely, so the heuristic answers "who committed here historically," never "who holds today's uncommitted diff." Re-running the identical process-count probe minutes apart gave 6, then 11 (my own independent count via `/proc/*/cwd`), then 13 — a ~2x swing from LSP-worker/indexer churn under the same `cwd`, not from session count.
+
+**Probable cause:** both are indirect, environment-derived proxies for a question ("who is editing this file right now") that has a direct, primary-source answer — reached for first because they're cheap to check, not because they discriminate the actual question.
+
+**Workaround:** `stat --format='%y %n'` mtime clustering is the correct first-order check — cheap, and answers "when," which the commit-history heuristic never could. Where mtime clustering still leaves multiple candidates, grep the candidate sessions' own transcript content for the disputed path/topic — direct and decisive (67 vs. 4 mentions settled the actual case in one call).
+
+**Severity:** med — no data was lost, but two wrong provisional attributions were stated to peer sessions as findings before being retracted, and concurrent multi-profile sessions on one machine is this machine's documented normal operating mode, not a one-off.
+
+**Status:** fixed-verified — mtime clustering + transcript-content grep resolved the actual case; both retracted heuristics were withdrawn by their proposer before being written anywhere durable.
+
+**Valid:** dated 2026-08-26
+
+True of the specific numbers measured this session; the general lesson (prefer mtime/content over commit-history/process-count for live-authorship questions) should outlive them.
+
+**Rests on:** `docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md` — the bug that prompted the cross-session coordination this friction surfaced in.
+
+## W-62 — Source-level verification of buddy's `from=` field overturned a peer's self-doubt — and forward-projected the same failure mode
+
+**Observed:** 2026-08-26, during the same cross-session coordination thread as F-68. A peer session (`codescout-8f`) surfaced its own `SessionStart` hook output — `<!-- buddy:reloaded sid=... from=92412525-... source=compact -->` — where `92412525` matched the session independently identified as the author of the disputed uncommitted WIP, and explicitly could not rule out that this meant genuine conversational lineage (i.e. that the peer's own "not mine" claim might be unknowingly false).
+
+**Pattern:** When a peer raises a self-implicating possibility grounded in an ambiguous hook artifact (a `from=<sid>` field that could mean "you inherited this content" or could mean something narrower), read the mechanism's actual source and test fixtures before accepting either the exculpatory or the incriminating reading — don't resolve on plausibility, and don't defer to the peer's own hedged uncertainty as if it settles anything.
+
+**Counterfactual:** without checking, "codescout-8f's session might have unknowingly absorbed the memory-migration work" would have remained an open, unresolved cloud over a good-faith "not mine" claim already stated three times to two other sessions — exactly the kind of ambiguity that erodes trust in future good-faith denials from any session. The actual mechanism (`.buddy/.current_session_id`, project-scoped, last-writer-wins, `render_reload_block` in buddy 0.9.1's `scripts/reload.py:236`) fully clears it: the field records whichever session last touched buddy specialist state in this project directory, with zero relation to conversational content.
+
+**Confirming data points:**
+1. Source read (`render_reload_block`, `scripts/reload.py`) plus test fixtures (`tests/test_hooks_session_start.sh`) established the mechanism before any claim was made either way.
+2. `codescout-8f` independently confirmed by reading the live file content post-hoc: `.buddy/.current_session_id` now holds their own sid, having been overwritten since their own `SessionStart` — directly demonstrating last-writer-wins in real time, on their own initiative, after being told they didn't need to check.
+3. `codescout-8f`'s follow-up named the sharper implication unprompted: the *next* session to start in this project will read `from=b02898c3` and can draw the identical false inference forward — the failure mode rotates rather than resolving, a conclusion the source read alone would not have surfaced without their confirmation closing the loop.
+
+**Impact:** high — resolved a live, concrete, peer-facing credibility question (not a hypothetical), using cheap evidence (one source read + one grep, no full-transcript read of another session's private content), and surfaced that the underlying plugin mechanism will keep producing this exact false signal for every future session in this project unless fixed upstream.
+
+**Promote-when:** a second instance of a hook-emitted `from=`/`prev_sid`-shaped field (in this or any plugin) is taken at face value as lineage before being checked at the source. At 2 datapoints, promote to codescout project memory (topic: `reconnaissance`) as: "A session-identity or lineage-looking field from a Claude Code plugin hook is a claim about implementation, not fact — read the hook's source before treating `from=`/`prev_sid`/similar as evidence of content inheritance."
+
+**Status:** validated — single datapoint with a strong counterfactual (a live, stated, three-times-repeated peer claim was genuinely at risk); awaiting a second occurrence for promotion.
+
+**Valid:** dated 2026-08-26
+
+**Rests on:** the source read of buddy 0.9.1's `scripts/reload.py` `render_reload_block`, and `codescout-8f`'s independent confirmation of the live file's last-writer-wins content.
 
 ## Template for new entries
 
