@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 62
-entry_high_water_W: 51
+entry_high_water_F: 63
+entry_high_water_W: 53
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -112,6 +112,7 @@ entry_high_water_W: 51
 | F-59 | 2026-08-25 | med | codescout-tool | fixed-verified | A filed bug's own root cause was wrong ("desktop-only remote host"); reproduction found a stale global symlink instead |
 | F-60 | 2026-08-25 | low | cross-session | mitigated | Even after ListAgents/SendMessage coordination, a peer's routine commit silently absorbed this session's uncommitted append_entry writes |
 | F-61 | 2026-08-26 | med | process | fixed-verified | Asserted "no live-pyright harness exists" from grepping ONE file, and nearly shipped an `unverified:` marker declaring the test impossible; `tests/e2e/` already held six live-LSP `find_referencing_symbols` expectations |
+| F-63 | 2026-08-26 | med | process | fixed-verified | Reported "2 open bugs" four times from a query whose filter was the thing hiding the pile — 23 files in `docs/issues/`, 2 open, 17 terminal-unarchived, 4 zombie that no query in the project reaches |
 | F-62 | 2026-08-26 | high | process | fixed-verified | All five feature-gated e2e language lanes had stopped compiling — `ToolContext` grew a field, the shared harness never got it — while `cargo test` stayed green, since it never builds a feature-gated target no lane names; recurrence guard shipped in `3784cb65` |
 
 ## Wins Index
@@ -171,6 +172,8 @@ entry_high_water_W: 51
 | W-48 | 2026-08-18 | med-high | When a change invalidates a *rationale*, sweep the class corpus-wide and ask **by what method** the enumeration was done — a count is not a method | An Opus review that left zero surviving mutants in the code still listed only **5 of 11** doc sites naming `is_empty()` as the opener trigger; a targeted read found a 6th, a corpus sweep found 5 more. Six void-or-stale rationales would have survived in the exact files the next task's implementer reads | validated |
 | W-49 | 2026-08-24 | high | Checking ListAgents/SendMessage before committing shared uncommitted docs avoided a collision with two concurrent peer sessions | Two files vanished from `git status` mid-session as peer sessions (`codescout-0e`, `codescout-ee`) committed them concurrently; asking first also surfaced a real `.gitignore` gap this session had missed | validated |
 | W-50 | 2026-08-26 | high | Run recon at the commit boundary of your own fix, aimed at the claims you are about to write into the durable record rather than at the code | Would have shipped the `references` alias fix with zero automated coverage plus an `unverified:` marker asserting coverage was impossible; the scout instead produced a measured red→green (24/25 → 25/25) and found five e2e lanes that had silently stopped compiling | validated |
+| W-52 | 2026-08-26 | high | Measure the corpus before building a detector — run its predicate over the whole population and name the true/false split | The obvious `[LIVE]`-body heuristic would have fired on 23 unaugmented artifacts of which 1 was defective; a 23:1 rot-detector gets switched off or learned-around, and the count cost ~40 seconds | validated |
+| W-53 | 2026-08-26 | med | Verify a scan's FIRST finding against reality before acting on the worklist, and treat a false one as a bug in the instrument | The single archived_fix_sha finding was a false positive; checking it found two defects in the same parser, against an alternative of hunting a dead commit the check itself sizes at 2-153 candidates | validated |
 | W-51 | 2026-08-26 | high | When a filed root cause is about persisted state, reproduce it by querying the datastore — not by re-running the tool that reported it | The filed "restore every augmentation" fix, run against the 21 trackers that were already augmented, replaces their params wholesale — the same call that took the T-N queue from 19 entries to 1 on 2026-08-16 — causing the loss it claimed to repair | validated |
 
 ## Category conventions
@@ -4483,6 +4486,110 @@ Verified against the real defect rather than against its own green: with `worksp
 **Promote-when:** a second filed root cause about persisted state is refuted by querying the store directly. Then promote into CLAUDE.md's reproduction rule as an explicit clause — *when the claim is about stored state, the reproduction is a query against the datastore, not a re-run of the reporting tool* — since the generic rule did not by itself say which instrument to reach for.
 
 **Status:** validated
+
+## F-63 — Reported "2 open bugs" four times from a query whose filter was the thing hiding the pile
+
+**Observed:** 2026-08-26, across the whole session — every "what's open?" report I gave the user.
+
+**When:** `artifact(find, kind="bug", filter={"status": {"in": ["open","investigating"]}})`, the query `get_guide("tracker-conventions")` and the activation bootstrap both prescribe as canonical.
+
+**Expected:** a count of the live bug population.
+
+**Got:** a count of the *non-terminal* population, which is a different thing. Counting `docs/issues/` by hand at the end of the session:
+
+| | |
+|---|---|
+| files in `docs/issues/` | **23** |
+| reported as open, four times | **2** |
+| terminal-but-unarchived | **17** |
+| `status: zombie` | **4** |
+
+**Probable cause:** the query is correct and I read it as answering a question it does not ask. The filter names `open|investigating`; I heard "what is live". Those coincide only when the archive discipline is perfectly kept, which is exactly what the pile proves it was not.
+
+Compounded twice more, both times the same shape:
+
+1. Told the user "10 terminal-but-unarchived", derived from two doctor checks — whose SQL is `('fixed','mitigated','wontfix')` and `('fixed','mitigated')`. That count inherited *their* filters and missed the 4 zombies, which no query in the project reaches (now `docs/issues/2026-08-26-zombie-bug-files-are-reachable-by-no-query.md`).
+2. The doctor's single `archived_fix_sha_unresolvable` finding, which I took at face value long enough to start working it, was a false positive — a cross-repo `<repo>:<sha>` pointer resolved against the wrong repo.
+
+**Severity:** med — no wrong edit resulted, but the user was given a wrong number repeatedly and a triage decision ("2 open, both blocked, here's what else to do") rested on it.
+
+**Status:** fixed-verified — the count is corrected, the zombie gap is filed, and 6 of the 17 are archived (`d5ed4d6f`).
+
+**Valid:** invariant
+
+**Rests on:** the status vocabulary having six values and every query naming a subset; true regardless of the current counts.
+
+**Fix idea / Pointer:** The habit that would have caught it costs one command: when reporting a population, count the substrate once and reconcile it against the query. `ls docs/issues/*.md | wc -l` against `find(...)` disagreeing by 21 is not subtle — nobody had to know *why* to know something was wrong. Generalises past bug files: any report of the form "there are N X" derived from a filtered query owes one unfiltered count.
+
+## W-52 — Measure the corpus before building a detector — the obvious heuristic was 23 false positives to 1
+
+**Observed:** 2026-08-26, building the `augmentation_declared_but_absent` doctor check — the recurrence guard the research-index bug's own `unverified:` field said was missing.
+
+**Pattern:** Before implementing a detector, run its predicate over the real corpus and count what it would fire on. Not a review of the idea, not a sample — the whole population, with the true/false split named.
+
+The obvious implementation was to read each artifact's body for a `[LIVE]` claim: the research index's body promised a `[LIVE]` table it had no augmentation to render, so a body that mentions `[LIVE]` while unaugmented is exactly the defect. One script over all catalogued artifacts:
+
+| | |
+|---|---|
+| artifacts scanned | 4,195 |
+| mention `[LIVE]` outside fenced code | 29 |
+| of those, carrying **no** augmentation | **23** |
+| of those 23, actually defective | **1** |
+
+The 23 are guides, specs, plans and bug files *describing the mechanism* — including the bug file for this very check. Intent is not recoverable from prose.
+
+That killed the heuristic and pointed at the remedy the project already uses for the identical problem: `entry_prefix` is declared in committed frontmatter precisely because *"a declaration stored in the augmentation is absent in a fresh clone."* A ledger is declared, never inferred; so is an augmentation. Shipped as `expects_augmentation: true` (`dab5c530`), backfilled to all 22 (`d6d66e4c`).
+
+**Counterfactual:** a check firing 23 false positives against 1 true one, in a rot-detector whose entire value is that nothing else re-reads `archive/`. It would have been switched off, or — worse — left on and learned-around, which is how a gate becomes decoration. And the measurement was ~40 seconds of scripting against a corpus already on disk.
+
+**Confirming data points:**
+
+1. This entry — 23:1, measured before a line of the check was written.
+2. Same session, `structured_fix_pointers`: before skipping fenced lines I counted 75 declared pointer lines, 74 outside fences and 1 inside. That confirmed the fix loses no real declaration *and* sized the defect honestly as latent-not-live.
+3. Same session, the rendezvous latch (`f1a1a59f`): the bug file's own sketched fix — a staleness bound on `hook_at` — was refuted by measuring `hook_at` across 5 healthy sessions (0.6h–25.0h, two of them predating their own process). No window separates "hook died" from "long conversation". The fix was closed off by data, not argument.
+
+**Impact:** high — in all three, the measurement changed the design rather than confirming it, and in two of the three the "obvious" implementation was wrong.
+
+**Promote-when:** a fourth instance where a pre-implementation corpus count changes a detector's design. At four, promote to CLAUDE.md beside the reproduction rule, as: *a detector's predicate is a hypothesis about the corpus — count what it fires on before building it, and report the true/false split, not just the hits.*
+
+**Status:** validated — three datapoints this session, each with a measured counterfactual.
+
+**Valid:** dated 2026-08-26
+
+**Rests on:** [[F-63]] — the same session's failure mode inverted. F-63 is trusting a filter's output; this is measuring a predicate before trusting it.
+
+## W-53 — Working an instrument's own worklist found two defects in the instrument before any of the work it listed
+
+**Observed:** 2026-08-26, starting on the doctor's 69-violation report after extending doctor with a new check.
+
+**Pattern:** When a scan hands you a worklist, verify the *first* finding against reality before acting on any of them — and treat a finding that turns out false as a bug in the instrument, filed and fixed, not as a row to skip.
+
+The single `archived_fix_sha_unresolvable` finding said `codescout-companion:b8ffa8b` "no longer names an object in this repo". One command settled it:
+
+```
+git -C ../claude-plugins/codescout-companion cat-file -t b8ffa8b   → commit
+```
+
+It resolves, in the repo its own prefix names. The check had handed the whole `<repo>:<sha>` token to git, which reads `a:b` as *the object at path b inside tree-ish a*. It then offered recovery **by patch-id** — impossible across repos, and the file says so on the line directly below the SHA.
+
+Verifying *that* turned up a second defect in the same parser: `structured_fix_pointers` scanned fenced lines too, so a file **quoting** a provenance block had the quotation counted as its own declaration. Self-demonstrating — the bug file I had just written for defect 1 reproduces the pointer it is about, and the scan counted it as a second declaration. Both fixed in `7b5325a9`.
+
+**Counterfactual:** the alternative was to read the finding as true and go looking for a dead commit — a search the check's own text sizes at "2–153 ambiguous candidates". Worse is the path where I noticed it was wrong and simply moved on: a false positive left standing in a rot-detector teaches the reader to discount it, and this check exists precisely because *nothing else re-reads `archive/`*. A detector nobody believes is worse than no detector, because it also occupies the slot.
+
+**Confirming data points:**
+
+1. This entry — 1 finding checked, 2 defects found, 0 of the listed work done first.
+2. Same session, [[W-51]]: the filed root cause of a data-loss bug was refuted by querying the datastore instead of re-running the tool that reported it. Same shape one layer up — the instrument's *output* was the thing to distrust.
+
+**Impact:** med — neither defect was load-bearing today (the cross-repo case is one file; the fence case was latent), but both produce confident wrong answers in the one place the project relies on for rot detection, and both were cheap to close.
+
+**Promote-when:** a third instance where checking a scan's first finding surfaces a defect in the scanner. Likely already at three counting [[W-51]] and the `find(augmented=true)` zero from the same session — but those are about *reading* an instrument's output, and this is about *acting* on a worklist; audit whether they are one law before promoting, rather than promoting a near-duplicate.
+
+**Status:** validated
+
+**Valid:** dated 2026-08-26
+
+**Rests on:** [[F-63]] and [[W-51]] — same session, same family: an instrument's output is a claim about the world, not the world.
 
 ## Template for new entries
 

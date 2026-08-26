@@ -385,9 +385,32 @@ build/test/clippy. Those are genuine long work, not hand-rolled waiting — but 
 *consumer* of an await primitive, since they are what a caller would background first.
 ## CAP-5 — Server-assigned entry ids for prose trackers
 
-**Status:** partially shipped · **Opened:** 2026-08-17 · **Updated:** 2026-08-18
+**Status:** shipped · **Opened:** 2026-08-17 · **Updated:** 2026-08-26
 
-**Valid:** conditional — until append_section's heading-shape validation (defect class 2) ships
+**Valid:** dated 2026-08-26
+
+> **Closed 2026-08-26 — the conditional fired.** Defect class 2, the last one open, is
+> closed, and in the exact shape this entry argued for: *"extend `append_entry` rather
+> than add `append_section`, so a storage distinction is not encoded as an API one."*
+>
+> `append_entry(anchor_heading, title, body)` now writes the section itself — `## <ID> —
+> <title>` at the ledger's own level, inserted at an anchor, in the same file write that
+> assigns the id — which is the *"server-side body writer on top of the one that exists"*
+> named above as the remaining scope. The format is pinned by
+> `a_written_section_gets_a_def_re_conformant_heading_at_the_ledgers_own_level`, so
+> conformance is by construction rather than by validation-after-the-fact, which is
+> stronger than this entry asked for. `append_entry` and `update_entry` additionally
+> report `undefined_in_body` for an entry nothing can cite
+> (`src/librarian/catalog/augmentation.rs`).
+>
+> Confirmed by use, not only by reading: F-63, W-52 and W-53 in
+> `docs/trackers/bug-fix-session-log.md` were each written by one `append_entry` call
+> that allocated the id and wrote a conformant heading in the same write.
+>
+> Found by `librarian(action="doctor")`'s `entry_conditional_past_due`, which is CAP-7's
+> own check reporting on CAP-5 — the mechanism this file proposed catching the staleness
+> this file had. The note below is left intact: it is the analysis that produced the
+> shipped design, and deleting it would erase the reasoning while keeping the conclusion.
 
 **The problem.** Entry ids in prose ledgers are allocated by the agent: scan the file for
 the max `PREFIX-N`, add one, write the entry. That read-then-write is not atomic, and it is
