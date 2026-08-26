@@ -1,5 +1,5 @@
 ---
-id: '1440b07375a1e30f'
+id: 52f65564a09fd8f6
 kind: bug
 status: fixed
 title: 'BUG: every CI Test lane is red because one test builds an embedder from ambient config, and the local gate is green only because a dev env var is set'
@@ -173,3 +173,15 @@ gate is now environment-independent where it was not before.
 - `docs/conventions/test-env-isolation.md`
 - `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`
   — why env mutation in default-feature tests was removed in the first place
+
+## Fix provenance
+
+- **SHA:** `d81064f7` (`experiments`)
+- **patch-id:** `eebb9eb7286e37470c619200687a9db8ddb34b9e`
+
+`fix(tests): stop memory_embedder's test reading the developer's environment` — the
+project-config injection in `src/agent/mod.rs`, plus the two doc-comment corrections in
+`src/retrieval/client.rs` that the surviving mutant exposed.
+
+One commit, `experiments` only. `master` is a strict ancestor, so promotion is a
+fast-forward and this is already the master-side SHA; there is no second one to record.
