@@ -59,7 +59,7 @@ this gap is documented to skip precisely this class.
 
 ## Relationship to the quoting bug
 
-`docs/issues/archive/2026-08-08-librarian-guard-misses-quoted-frontmatter-ids.md`
+`docs/issues/archive/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`
 (status `fixed`) reported "15 of 27 trackers are unprotected" because the predicate
 mishandled YAML quoting. That fix works — `id: '7e49…'` is now correctly guarded, as
 demonstrated above. This is a **distinct and larger class**: not a mis-parsed id, but no

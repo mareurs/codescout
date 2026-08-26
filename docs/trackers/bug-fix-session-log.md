@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 69
+entry_high_water_F: 70
 entry_high_water_W: 68
 ---
 
@@ -119,6 +119,7 @@ entry_high_water_W: 68
 | F-67 | 2026-08-26 | med | self-friction | validated | Two tree-wide writes swallowed a peer's in-flight work — `cargo fmt` and `git add <dir>` |
 | F-66 | 2026-08-26 | high | process | open | Quoted the substrate law at the user, then measured a retired sqlite store all session — backend is Qdrant, `codescout.db` untouched since Aug 25; five published figures described a dead world, and a passing positive control validated the instrument against the wrong database |
 | F-69 | 2026-08-26 | med | process | fixed-verified | Bug-file citations written at a future `archive/` path schedule no sweep — the archive flow repairs citations that *were* correct, never one wrong the day it was written |
+| F-70 | 2026-08-26 | med | process | fixed-verified | A dead citation that was wrong when written is indistinguishable from one that decayed — 0 of 6 in a 321-citation sweep were decay, and three independent artifacts misread it from the prose; the `--diff-filter=AD` probe is the only discriminator |
 
 ## Wins Index
 
@@ -5820,6 +5821,51 @@ and ran but changed nothing observable; here it would have compiled, run, and ch
 because the premise itself no longer held.
 
 **Status:** validated
+
+## F-70 — A dead citation that was wrong when written is indistinguishable from one that decayed, and three attempts in one session each got it wrong from the prose
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, sweeping every `docs/issues/archive/*.md` citation in the repo — 321 distinct, 6 dead.
+
+**When:** Answering `codescout-df`'s question of whether any of the dead citations belonged in the new `claim-decay` ledger (`DC-N`), which tracks claims that were correct when written and later invalidated with nothing scheduled to re-check them.
+
+**Expected:** That at least one would be decay. `CLAUDE.md` says of the kotlin-lsp bug file that it "was pruned as a dupe in `c6184884`" — which reads exactly like *correct citation, target later removed*.
+
+**Got:** **Zero.** All three real dead citations were wrong on the day they were written, and the prose pointed the other way in every case:
+
+| citation | history | verdict |
+|---|---|---|
+| `docs/issues/archive/2026-03-24-kotlin-lsp-concurrent-instances.md`, cited from `docs/archive/2026-03-01-TODO-lsp-cancelled-kotlin.md:14` | target added `docs/issues/` `dc44ac3d` 2026-03-24 → added at `archive/` `cbf7456d` 2026-04-21 → open copy deleted `c6184884` → archived copy deleted `771d9516` **2026-05-02**. Citing line written `f7801347` **2026-05-18** | wrong when written, by 16 days |
+| `docs/issues/archive/2026-08-08-librarian-guard-misses-quoted-frontmatter-ids.md`, cited from `docs/issues/archive/2026-08-17-librarian-guard-blind-to-artifacts-with-no-frontmatter-id.md:50` | `git log --all --diff-filter=AD` over `*librarian-guard-misses-quoted-frontmatter-ids*` returns **one** row: created `09633f16` **2026-08-16**. Never at an `08-08` path, at any commit | wrong when written — a date typo |
+| `docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md` | cited at a path the archive flow had not yet created — `F-69`'s class | wrong when written; resolved by completing the archive |
+
+**Probable cause:** "Was this true when it was written?" **reads as a fact about the prose and is only ever a fact about history.** Nothing in a citation's text records when its target existed, so every unaided reading substitutes the reader's model of what probably happened — and that model is built from the surrounding narrative, which is exactly what the author's own wrong model produced.
+
+The kotlin-lsp case is the worked trap: the file *did* live at the cited archive path, for eleven days. Both halves of "it was archived, then pruned" are true. Only the **ordering against the citing commit** decides it, and no amount of re-reading either document surfaces that.
+
+**The probe, which is mandatory rather than advisory:**
+
+```
+git log --all --diff-filter=AD --name-status -- '*<target-slug>*'   # every path the target held, and when
+git log --all -S'<cited path>' -- <citing file>                     # when the citation was written
+```
+
+Compare the two. Nothing cheaper works, and every unaided attempt in this session was wrong.
+
+**Evidence that this is a class and not one slip — three passes, three errors, all inside one small classification:**
+
+1. `codescout-df` shipped `DC` with two mutually incompatible criteria (the body keyed on the missing repair trigger; its own `F-69` correction one commit later keyed on "exact when written") and did not notice — they select different sets, and `DC-2` sits in the symmetric difference.
+2. This session classified the kotlin-lsp citation as decay from `CLAUDE.md`'s "pruned as a dupe" phrasing, and only the `--diff-filter` run inverted it.
+3. `codescout-df`'s correction (`42dfa0ca`) adopted the right criterion — *is the claim's truth coupled to a substrate that can still change, with nothing scheduled to re-check it* — and then mapped the three states onto it inverted, placing `DC-2` in F/W and the plain error in `DC`. Flagged before it hardened.
+
+**Severity:** med — a dead link in a retired document is low cost on its own, but the *misclassification* routes entries into the wrong ledger, and a ledger that has swallowed the wrong class stops being evidence for anything.
+
+**Status:** fixed-verified — the `08-08`→`08-16` typo is repaired (provable target: the citing sentence quotes that document's "15 of 27 trackers are unprotected" verbatim). The kotlin-lsp citation is **deliberately left**: its target exists at no path, so there is no correct value to write, and inventing an editorial note inside a retired 2026-03-01 TODO is a larger liberty than the dead link costs. `get_guide("tracker-conventions")` says to leave `docs/issues/archive/**` alone; that rule scopes to *"a retired document citing a **moved** path"*, so a provable transcription error is outside it while this one is not.
+
+**Rests on:** the four-commit lifecycle above, read via `--diff-filter=AD --name-status` this session; and on the citing-commit dates from `git log -S` scoped to each citing file.
+
+**Fix idea / Pointer:** the discriminator is recorded in `codescout-df`'s `claim-decay` ledger as the required probe, credited. The complement worth knowing here: **a bare "0 of 6 were decay" is survivorship, not prevalence** — a citation that decayed and was then repaired never appears as dead at all, so this measures the composition of the *dead* population only. Quoting the number without that scope would decay into "the DC class is empty" within a session or two.
 
 ## Template for new entries
 
