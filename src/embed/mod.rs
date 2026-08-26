@@ -10,6 +10,7 @@
 //! and the `retrieval::*` modules.
 
 pub mod ast_chunker;
+pub mod document;
 pub mod preflight;
 pub mod schema;
 

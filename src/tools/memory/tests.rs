@@ -434,7 +434,7 @@ fn segmenting_never_drops_or_duplicates_content() {
     ];
     for content in &cases {
         for budget in [1usize, 7, 64, 1000, 100_000] {
-            let segs = super::segment_for_budget(content, budget);
+            let segs = crate::embed::document::segment_for_budget(content, budget);
             assert_eq!(
                 segs.concat(),
                 *content,
@@ -459,7 +459,7 @@ fn segmenting_never_drops_or_duplicates_content() {
 #[test]
 fn content_within_budget_is_never_segmented() {
     for content in ["", "one line", "two\nlines\n"] {
-        let segs = super::segment_for_budget(content, 1000);
+        let segs = crate::embed::document::segment_for_budget(content, 1000);
         assert!(
             segs.len() <= 1,
             "{content:?} fits the budget and must not be split: {segs:?}"
@@ -477,7 +477,8 @@ fn content_within_budget_is_never_segmented() {
 /// back" would pass against that.
 #[test]
 fn pooling_returns_a_unit_vector_and_rejects_ragged_input() {
-    let pooled = super::mean_pool_normalized(&[vec![1.0, 0.0], vec![0.0, 1.0]]).unwrap();
+    let pooled =
+        crate::embed::document::mean_pool_normalized(&[vec![1.0, 0.0], vec![0.0, 1.0]]).unwrap();
     let norm: f32 = pooled.iter().map(|x| x * x).sum::<f32>().sqrt();
     assert!(
         (norm - 1.0).abs() < 1e-5,
@@ -489,17 +490,17 @@ fn pooling_returns_a_unit_vector_and_rejects_ragged_input() {
     );
 
     assert!(
-        super::mean_pool_normalized(&[]).is_err(),
+        crate::embed::document::mean_pool_normalized(&[]).is_err(),
         "nothing to pool must error, not return a bogus vector"
     );
     assert!(
-        super::mean_pool_normalized(&[vec![1.0, 0.0], vec![1.0]]).is_err(),
+        crate::embed::document::mean_pool_normalized(&[vec![1.0, 0.0], vec![1.0]]).is_err(),
         "ragged dimensions must error rather than silently produce a truncated vector"
     );
 
     // Degenerate all-zero input must not divide by zero into NaNs — a NaN vector
     // poisons the index silently, where a zero vector reads as "no signal".
-    let zero = super::mean_pool_normalized(&[vec![0.0, 0.0]]).unwrap();
+    let zero = crate::embed::document::mean_pool_normalized(&[vec![0.0, 0.0]]).unwrap();
     assert!(
         zero.iter().all(|x| x.is_finite()),
         "all-zero input must not produce NaNs: {zero:?}"
@@ -557,7 +558,7 @@ async fn under_budget_makes_one_call_and_over_budget_pools_to_unit_norm() {
     let short = CountingEmbedder {
         calls: AtomicUsize::new(0),
     };
-    let v = super::embed_document_pooled(&short, "well under budget", 1000)
+    let v = crate::embed::document::embed_document_pooled(&short, "well under budget", 1000)
         .await
         .unwrap();
     assert_eq!(
@@ -572,7 +573,7 @@ async fn under_budget_makes_one_call_and_over_budget_pools_to_unit_norm() {
         calls: AtomicUsize::new(0),
     };
     let long = "some line of text\n".repeat(300); // ~5400 chars
-    let v2 = super::embed_document_pooled(&long_embedder, &long, 500)
+    let v2 = crate::embed::document::embed_document_pooled(&long_embedder, &long, 500)
         .await
         .unwrap();
     let calls = long_embedder.calls.load(Ordering::SeqCst);

@@ -39,25 +39,52 @@ pub trait MigrationEmbedder: Send + Sync {
 
 /// Production embedder backed by the project's `EmbedderHttp`. Returns the
 /// dense vector only — sparse is not stored on memory points.
+///
+/// Carries `budget_chars` so an oversized document is segmented and mean-pooled rather
+/// than rejected. Without it this type embedded raw, which meant `migrate-memories` — the
+/// command whose job is repairing what the unsegmented path lost — could not repair the
+/// largest memory in the corpus. Measured 2026-08-26: `eval-design` (31 596 B) failed with
+/// llama.cpp's `input is too large to process. increase the physical batch size` while
+/// every smaller memory succeeded.
+/// `docs/issues/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`
 pub struct HttpMigrationEmbedder {
     inner: std::sync::Arc<dyn crate::retrieval::embedder::CodeEmbedder>,
+    budget_chars: usize,
 }
 
 impl HttpMigrationEmbedder {
-    pub fn new(inner: std::sync::Arc<dyn crate::retrieval::embedder::CodeEmbedder>) -> Self {
-        Self { inner }
+    /// `budget_chars` should come from `chunk_size_for_model(&model_spec)` for the model
+    /// this embedder is configured with — the same source the tool-layer write path uses,
+    /// so a migration and a live write segment identically. A caller with no model spec to
+    /// hand can pass `usize::MAX` to opt out, which restores the raw pre-`26feb1aa`
+    /// behaviour and its failure mode.
+    pub fn new(
+        inner: std::sync::Arc<dyn crate::retrieval::embedder::CodeEmbedder>,
+        budget_chars: usize,
+    ) -> Self {
+        Self {
+            inner,
+            budget_chars,
+        }
     }
 }
 
 #[async_trait]
 impl MigrationEmbedder for HttpMigrationEmbedder {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        // `embed_document_one`, not `embed_one`: a migration re-embeds *stored*
-        // content, so it must use the document side. `embed_one` is the query
-        // seam and applies an asymmetric model's query prefix — routing a
-        // migration through it re-creates the very defect a re-embed exists to
-        // repair. docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
-        Ok(self.inner.embed_document_one(text).await?)
+        // Routed through `embed_document_pooled`, which segments and mean-pools above the
+        // budget. It calls `DenseEmbedder::embed_document` — the DOCUMENT side, same
+        // reason the raw call used `embed_document_one` and not `embed_one`: a migration
+        // re-embeds *stored* content, and the query seam applies an asymmetric model's
+        // query prefix, re-creating the very defect a re-embed exists to repair.
+        // docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
+        //
+        // `CodeDenseAdapter` is the sanctioned bridge: `CodeEmbedder` deliberately does
+        // NOT have `DenseEmbedder` as a supertrait, because that trait's `embed` collides
+        // by name with `EmbedderHttp`'s inherent `embed` and inherent resolution would
+        // silently win (src/retrieval/embedder.rs:37-39).
+        let adapter = crate::retrieval::embedder::CodeDenseAdapter(self.inner.clone());
+        crate::embed::document::embed_document_pooled(&adapter, text, self.budget_chars).await
     }
 }
 
@@ -967,6 +994,123 @@ mod tests {
         assert_eq!(
             second.upserted, 0,
             "a nested topic must match its stored title, or it re-embeds forever: {second:?}"
+        );
+    }
+
+    // --- HttpMigrationEmbedder segments, like the tool path does ---
+
+    /// A `CodeEmbedder` double that counts document embeds and rejects anything longer
+    /// than `max_chars`, standing in for the backend's per-request ceiling.
+    struct CeilingEmbedder {
+        max_chars: usize,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl crate::retrieval::embedder::BatchEmbedder for CeilingEmbedder {
+        async fn embed_batch_dyn(
+            &self,
+            _texts: &[String],
+        ) -> Result<Vec<crate::retrieval::embedder::EmbedOutput>> {
+            unreachable!("the migration path embeds one document at a time")
+        }
+    }
+
+    #[async_trait]
+    impl crate::retrieval::embedder::CodeEmbedder for CeilingEmbedder {
+        async fn embed_one(&self, _t: &str) -> Result<crate::retrieval::embedder::EmbedOutput> {
+            unreachable!("a migration must never touch the QUERY seam")
+        }
+        async fn embed_dense_one(&self, _t: &str) -> Result<Vec<f32>> {
+            unreachable!("a migration must never touch the QUERY seam")
+        }
+        async fn embed_document_one(&self, text: &str) -> Result<Vec<f32>> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if text.chars().count() > self.max_chars {
+                // The shape llama.cpp actually returns, measured 2026-08-26.
+                anyhow::bail!("input is too large to process. increase the physical batch size");
+            }
+            Ok(vec![1.0, 0.0])
+        }
+        fn known_dim(&self) -> Option<usize> {
+            Some(2)
+        }
+    }
+
+    /// The regression test for
+    /// `docs/issues/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`.
+    ///
+    /// The double refuses any input over 20 chars, exactly as the real backend refused
+    /// `eval-design` at 31 596 B. With a 10-char budget the content is segmented so every
+    /// request clears the ceiling and a pooled unit vector comes back. Embedding raw —
+    /// the pre-fix behaviour — sends 35 chars in one request and gets the error, so this
+    /// fails on the exact defect rather than on a proxy for it.
+    #[tokio::test]
+    async fn http_migration_embedder_segments_past_the_backend_ceiling() {
+        let inner = std::sync::Arc::new(CeilingEmbedder {
+            max_chars: 20,
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let emb = HttpMigrationEmbedder::new(inner.clone(), 10);
+
+        let content = "0123456789\n0123456789\n0123456789\n"; // 33 chars, 3 lines
+        let v = emb
+            .embed(content)
+            .await
+            .expect("segmenting must keep every request under the backend ceiling");
+
+        assert!(
+            inner.calls.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+            "must have segmented: one raw call would have exceeded the ceiling"
+        );
+        let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 1e-5,
+            "pooled vector must be unit-norm — the sqlite-vec store's metric is L2, so a \
+             short norm would rank every segmented memory systematically further away: \
+             {norm}"
+        );
+    }
+
+    /// Below the budget nothing changes: one call, no pooling. The common case must not
+    /// pay for the fix.
+    #[tokio::test]
+    async fn http_migration_embedder_leaves_small_documents_as_one_call() {
+        let inner = std::sync::Arc::new(CeilingEmbedder {
+            max_chars: 1000,
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let emb = HttpMigrationEmbedder::new(inner.clone(), 1000);
+
+        emb.embed("short").await.unwrap();
+
+        assert_eq!(
+            inner.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "under budget must be a single un-pooled call"
+        );
+    }
+
+    /// `usize::MAX` is the documented opt-out, and it must genuinely restore raw
+    /// behaviour — otherwise the escape hatch in the constructor doc is a lie.
+    #[tokio::test]
+    async fn http_migration_embedder_budget_opt_out_embeds_raw() {
+        let inner = std::sync::Arc::new(CeilingEmbedder {
+            max_chars: 20,
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let emb = HttpMigrationEmbedder::new(inner.clone(), usize::MAX);
+
+        let err = emb
+            .embed("0123456789\n0123456789\n0123456789\n")
+            .await
+            .expect_err("opting out must send it raw, and raw hits the ceiling");
+
+        assert!(format!("{err:#}").contains("too large"), "{err:#}");
+        assert_eq!(
+            inner.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "raw means exactly one request"
         );
     }
 }

@@ -316,8 +316,16 @@ async fn main() -> Result<()> {
             // migrate_memories. Uses the same env-driven config as the server.
             let client =
                 codescout::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
-            let embedder =
-                codescout::migrate::memories::HttpMigrationEmbedder::new(client.embedder);
+            // The budget must describe the embedder actually being wrapped, so it comes
+            // from `client.config` — the same config `client.embedder` was built from —
+            // and NOT from `p.config.embeddings.model`, which is a second copy of the
+            // same setting that can diverge from it. Feeding the wrong one would segment
+            // on a budget the live backend does not have.
+            let budget_chars = codescout::embed::chunk_size_for_model(&client.config.model);
+            let embedder = codescout::migrate::memories::HttpMigrationEmbedder::new(
+                client.embedder,
+                budget_chars,
+            );
 
             let report = if in_place {
                 tracing::info!(
