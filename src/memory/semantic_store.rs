@@ -72,6 +72,16 @@ pub trait SemanticMemoryStore: Send + Sync {
     /// unordered, unlimited" — equivalent to the old `list(project_id)`.
     /// Set `anchor_path` to filter to memories anchored to a file.
     async fn list(&self, project_id: &str, filter: MemoryFilter) -> Result<Vec<MemoryHit>>;
+
+    /// Test-only downcast seam, mirroring [`DenseEmbedder::as_any`]. Lets a
+    /// test prove that a resolved `Arc<dyn SemanticMemoryStore>` is the
+    /// specific test double it installed, rather than a store resolved from
+    /// ambient config that merely happens to behave the same way in a given
+    /// environment. No default implementation, for the same reason
+    /// `DenseEmbedder::as_any` has none: a default body would coerce an
+    /// unsized `Self`, which a trait default can't do.
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 #[cfg(feature = "server-stack")]
@@ -151,6 +161,11 @@ impl SemanticMemoryStore for QdrantSemanticMemoryStore {
             hits.truncate(n);
         }
         Ok(hits)
+    }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -267,6 +282,11 @@ pub(crate) mod test_support {
                 hits.truncate(n);
             }
             Ok(hits)
+        }
+
+        #[cfg(test)]
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 }

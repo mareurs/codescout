@@ -19,7 +19,32 @@ fn assert_memory_write_ok(result: &Value) {
     assert_eq!(result["status"], json!("ok"), "unexpected result: {result}");
 }
 
-async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
+/// Constant-vector test double for `DenseEmbedder`, shared by every test that
+/// needs a network-free embedder. Both sides return the same vector, which is
+/// enough to exercise store/recall plumbing without asserting on similarity.
+struct FixedEmbedder;
+#[async_trait::async_trait]
+impl crate::retrieval::embedder::DenseEmbedder for FixedEmbedder {
+    async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
+        Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    }
+
+    async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        self.embed(text).await
+    }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Builds a real `Agent` with no store/embedder override — `semantic_memory_store()`
+/// and `memory_embedder()` resolve however the environment resolves them. Only
+/// for tests that install their OWN isolation immediately afterward (before any
+/// tool call can trigger resolution); everything else must use
+/// `test_ctx_with_project()` below.
+async fn test_ctx_with_project_raw() -> (tempfile::TempDir, ToolContext) {
     let dir = tempdir().unwrap();
     // Create .codescout dir so MemoryStore::open works
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -39,6 +64,74 @@ async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
             workspace_override: None,
         },
     )
+}
+
+/// Regression for docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md:
+/// `test_ctx_with_project_raw()` resolves its store/embedder from ambient
+/// config, and on a machine with a real local Qdrant + embedder configured in
+/// the shell environment, that silently cross-embeds fixture memories into the
+/// real `memories` collection. Every test that doesn't need to install its own
+/// stub (i.e. almost all of them) should use THIS function instead, which
+/// pre-installs a network-free store and embedder before any tool call can
+/// trigger the ambient resolution path.
+async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::Arc;
+
+    let (dir, ctx) = test_ctx_with_project_raw().await;
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    ctx.agent
+        .set_semantic_memory_store_for_test(
+            Arc::new(InMemorySemanticMemoryStore::new()) as Arc<dyn SemanticMemoryStore>
+        )
+        .map_err(|_| ())
+        .expect("set store");
+    (dir, ctx)
+}
+
+/// Regression for docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md:
+/// the default `test_ctx_with_project()` must resolve a store/embedder that is
+/// pre-installed and deterministic, never one resolved from ambient config —
+/// on a machine with a real local Qdrant + embedder configured in the shell
+/// environment, the ambient path silently cross-embeds fixture memories into
+/// the real `memories` collection.
+#[tokio::test]
+async fn test_ctx_with_project_writes_land_in_an_isolated_store() {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+
+    // The default context's store resolves via `Agent::semantic_memory_store()`,
+    // which lazily caches whatever it resolves. On a machine with no ambient
+    // Qdrant/embedder config, that path can ALREADY succeed today via the
+    // always-compiled SqliteVec fallback — round-tripping a write through it
+    // would pass whether or not the isolation seam is installed, and so
+    // wouldn't distinguish "resolved from ambient config" from "the test
+    // double". Assert on the concrete TYPE instead: it must be the specific
+    // `InMemorySemanticMemoryStore` this test never constructed itself, proving
+    // `test_ctx_with_project()` pre-installed it rather than deferring to
+    // whatever the environment happens to resolve.
+    let (_dir, ctx) = test_ctx_with_project().await;
+
+    let store = ctx.agent.semantic_memory_store().await.unwrap();
+    assert!(
+        store
+            .as_any()
+            .downcast_ref::<InMemorySemanticMemoryStore>()
+            .is_some(),
+        "the default test context must resolve the in-memory test double, not a store \
+         resolved from ambient config"
+    );
+
+    let embedder = ctx.agent.memory_embedder().await.unwrap();
+    assert!(
+        embedder.as_any().downcast_ref::<FixedEmbedder>().is_some(),
+        "the default test context must resolve the fixed test embedder, not one resolved \
+         from ambient config"
+    );
 }
 
 async fn test_ctx_no_project() -> ToolContext {
@@ -181,7 +274,7 @@ async fn memory_forget_delegates_to_store() {
     use crate::retrieval::memory_payload::{point_id_for, SemanticMemory};
     use std::sync::Arc;
 
-    let (_dir, ctx) = test_ctx_with_project().await;
+    let (_dir, ctx) = test_ctx_with_project_raw().await;
 
     // Swap in the in-memory stub before any tool call — once Agent caches a
     // store via semantic_memory_store(), set_semantic_memory_store_for_test
@@ -250,30 +343,12 @@ async fn memory_remember_then_recall_e2e_via_test_seams() {
     use crate::retrieval::embedder::DenseEmbedder;
     use std::sync::Arc;
 
-    let (_dir, ctx) = test_ctx_with_project().await;
+    let (_dir, ctx) = test_ctx_with_project_raw().await;
 
     // Stub the dense embedder so memory ops don't need a live retrieval
     // stack. A constant vector makes every recall match every memory at
     // cosine 1.0, which is enough to exercise the round-trip without
     // requiring real semantic similarity.
-    struct FixedEmbedder;
-    #[async_trait::async_trait]
-    impl DenseEmbedder for FixedEmbedder {
-        async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
-            Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        }
-
-        /// Constant embedder: both sides return the same vector, which is what
-        /// this test wants — it asserts store/recall plumbing, not similarity.
-        async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-            self.embed(text).await
-        }
-
-        #[cfg(test)]
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
     ctx.agent
         .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
         .map_err(|_| ())
@@ -338,7 +413,7 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
     use std::sync::Arc;
 
     // Session-default project (from Agent::new in the helper).
-    let (_default_dir, mut ctx) = test_ctx_with_project().await;
+    let (_default_dir, mut ctx) = test_ctx_with_project_raw().await;
 
     // A second, DISTINCT project we will pin via workspace_override.
     let pinned_dir = tempdir().unwrap();
@@ -355,22 +430,6 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
         .unwrap();
 
     // Network-free stubs: constant embedder + in-memory store.
-    struct FixedEmbedder;
-    #[async_trait::async_trait]
-    impl DenseEmbedder for FixedEmbedder {
-        async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
-            Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        }
-
-        async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-            self.embed(text).await
-        }
-
-        #[cfg(test)]
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
     ctx.agent
         .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
         .map_err(|_| ())
@@ -597,23 +656,7 @@ async fn memory_recall_signals_has_more_when_capped() {
     use crate::retrieval::embedder::DenseEmbedder;
     use std::sync::Arc;
 
-    let (_dir, ctx) = test_ctx_with_project().await;
-    struct FixedEmbedder;
-    #[async_trait::async_trait]
-    impl DenseEmbedder for FixedEmbedder {
-        async fn embed(&self, _text: &str) -> anyhow::Result<Vec<f32>> {
-            Ok(vec![1.0_f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        }
-
-        async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-            self.embed(text).await
-        }
-
-        #[cfg(test)]
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
+    let (_dir, ctx) = test_ctx_with_project_raw().await;
     ctx.agent
         .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
         .map_err(|_| ())
