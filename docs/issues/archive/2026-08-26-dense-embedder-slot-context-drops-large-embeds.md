@@ -1,12 +1,13 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-26
-closed:
+closed: 2026-08-26
 severity: high
 owner: marius
 related: [docs/issues/2026-08-26-onnx-local-path-lacks-coderankembed.md]
 tags: [embeddings, memory, silent-failure, retrieval]
 kind: bug
+unverified: "Two residues, both deliberate: Fix step 3 (a startup probe of the effective per-request embed ceiling) is still ABSENT, so a misconfigured backend is still discovered at first oversized write rather than at connect. And the 8 already-lost memories are now DETECTED but not yet re-written — the repair is named in the verify hint, not performed."
 ---
 
 # BUG: oversized dense-embed payloads are dropped silently — memory writes report `ok` with no vector
@@ -225,6 +226,63 @@ perfectly healthy. Nothing in this commit re-embeds them. That needs a migration
 that keys off "has no vector / was written before this SHA" rather than off the
 old naming convention, and it is the only reason this bug is not archived.
 
+### Step 4 answered 2026-08-26 — and the paragraph above is wrong about it
+
+- **SHA:** `899ced3b` (detector) + `6f6d2023` (bucket scoping + hint), both `experiments`
+- **patch-id:** `4969b35b3c7aa9890dffbebeb6690a35392ded44`, `f9c5fa11c54019b888463aefd1fd70f8f30f0c4f`
+
+The prescription above — *"a migration that keys off `has no vector / was written before
+this SHA`"* — cannot work, and the reason is the bug itself. `cross_embed_memory` is
+best-effort and non-fatal (`src/tools/memory/mod.rs:871-877`): a failed embed logs a
+warning, the markdown write proceeds, and **no point is ever created**. There is no vector
+to key off, because there is no row. The damage leaves no trace in the store, so every
+store-side instrument is blind to it by construction.
+
+That includes the one anyone would reach for. `reembed_memories_in_place`
+(`src/migrate/memories.rs:203`) already exists and already does the blanket re-derive this
+file asks for — it *"takes no argument describing what changed: it just re-derives every
+vector from current config"* — but it enumerates via `store.list()`. Run against this repo
+it would have re-embedded 17 memories that were already fine, recovered none of the 8 that
+were lost, and reported success throughout.
+
+**So the check runs against disk**, via `MemoryStore::list` — the writer's own walk — and
+is folded into `index(action="verify")` as a `memories` block. Live output, 2026-08-26 at
+`6f6d2023`:
+
+```json
+"memories": {
+  "on_disk": 23, "in_store": 17,
+  "missing_count": 8,
+  "missing_sample": ["cargo-test-lib-skips-integration", "domain-glossary",
+                     "eval-design", "language-patterns", "onboarding",
+                     "project-overview", "research/agent-memory-frameworks",
+                     "system-prompt"],
+  "orphan_count": 2,
+  "orphan_sample": ["prompt-tdd-skill-eval-confounds", "zz-probe-delete-me"]
+}
+```
+
+**8 of 23 memories were undiscoverable via `recall`** — `eval-design` at 31 KB among them
+— and nothing on any surface said so. That is the measurement this bug never took.
+
+The repair is `memory(action='write')` with each one's current content, named in the hint.
+Deliberately not a bespoke "embed the missing ones" path: re-writing through the normal
+path inherits segmentation and mean-pooling (`26feb1aa`) and anchor seeding, where a
+dedicated repair would have to re-derive `bucket` and the UUIDv5 `point_id` from
+`(project_id, bucket, title)` and would write **duplicate** points on any divergence.
+
+**Two defects in the first cut, both found by RELEASE.md's live-output read and neither by
+the 8 tests that shipped with it** — recorded because the pattern is the reusable part:
+
+1. Orphan detection flagged a real `preferences`-bucket memory, which has no disk file *by
+   design* — `memory(action="remember")` upserts straight to the store
+   (`src/tools/memory/mod.rs:1044`). A warning no action could ever clear, on a report
+   meant to be read routinely. Fixed by scoping the store side to the `structured` bucket,
+   the twin of the shared-only rule already documented on the disk side.
+2. `parts.join(" ")` ran the two clauses together — `… system-prompt 3 point(s) have no
+   file` — so a memory name read as carrying a number. All three hint assertions were
+   `contains(...)`, which passes at any separator.
+
 Also unchanged: step 3 (a startup probe reporting the effective per-request
 ceiling) is still absent, so a misconfigured backend is still discovered at first
 oversized write rather than at connect.
@@ -333,6 +391,32 @@ None yet. Required before this can be called fixed:
 - a test pinning that a failed cross-embed does **not** report `status: "ok"`
   without a machine-readable `embedded: false` marker.
 
+
+### 2026-08-26 — the coverage check (`899ced3b`, `6f6d2023`)
+
+8 tests. `src/memory/mod.rs`:
+
+- `coverage_separates_missing_orphan_and_present` — the load-bearing one.
+  **Mutation-checked:** making the orphan diff a copy-paste of the missing diff
+  (`stored.difference(&stored)`) fails only this test. The other four — including
+  `coverage_clean_when_both_sides_agree` — passed with orphan detection entirely dead.
+- `coverage_ignores_points_outside_the_topic_bucket` — regression for defect 1 above; a
+  `preferences`/`unstructured` point is not an orphan.
+- `coverage_ignores_other_projects_points` — a cross-project leak would report a broken
+  index as complete, and the collection holds 1959 fixture points under `.tmp*` project
+  ids (`docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md`).
+- `coverage_matches_nested_topics`, `coverage_clean_when_both_sides_agree`,
+  `coverage_caps_sample_but_not_count` (the count is the true total; only the sample caps).
+
+`src/tools/semantic/index.rs`:
+
+- `missing_hint_names_the_repair_and_rules_out_the_wrong_one` — pins that the hint says
+  `migrate-memories --in-place` will NOT fix this, since that is what a reader would
+  otherwise try and it reports success while changing nothing.
+- `hint_clauses_are_separated_sentences` — regression for defect 2, pinning the seam
+  (`!contains("lost 1 point")`) rather than adding a fourth substring that would have
+  passed on the broken output.
+- `clean_memory_hint_is_not_a_warning`.
 ## Workarounds
 
 Keep individual structured memories under ~2000 tokens (~6-8KB) so the
@@ -410,6 +494,21 @@ calling the real server, fixed, and both variants are now pinned by tests.
 3. Then the repair path (Fix step 4): confirm the in-place re-embed migration
    picks up memories that lack a vector, not just those on the old convention.
    Without it, memories already lost stay lost after the fix.
+
+### Closed 2026-08-26 — nothing left that blocks archival
+
+The subsections above are the record of the investigation; they are not open work. The
+reported defect (silent loss of oversized embeds) is fixed and verified, and the
+already-lost corpus is now detectable via `index(action="verify")`.
+
+Two residues are declared in `unverified:` rather than left in prose, so a query reads
+them:
+
+- **Step 3, the startup probe** of the effective per-request ceiling. Never implemented.
+  Worth its own file if it is to be worked — it is an earlier-detection improvement, not
+  the reported defect.
+- **Re-writing the 8 detected memories.** One `memory(action='write')` each, with current
+  disk content. Detection was the hard half and it is done; the repair is mechanical.
 ## References
 
 - GitHub issue #15 — <https://github.com/mareurs/codescout/issues/15>

@@ -4,7 +4,7 @@ opened: 2026-08-26
 closed:
 severity: high
 owner: marius
-related: [docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md, docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md]
+related: [docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md, docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md]
 tags: [retrieval, indexing, status, silent-failure]
 unverified: 'the originally reported symptom (docs/ = 0 indexed files) is NOT reproducible at d5ed4d6f — docs/ is now fully indexed. The live, verified defect is the status-completeness gap; the original drop mechanism remains unidentified.'
 last_observed: 2026-08-26
@@ -101,7 +101,7 @@ still say `indexed: true, queryable: true`. Two live bugs can abort a build
 mid-flight, both filed this session:
 
 - an oversized chunk failing the dense embedder with HTTP 400
-  (`docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`);
+  (`docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`);
 - a bare `?` on an embed call aborting a whole target loop
   (`docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`).
 
@@ -173,7 +173,7 @@ Two consequences, both honest:
 
 The reachable surface for an oversized payload is `cross_embed_memory`, which
 sends a whole memory in one request with no cap at all — see
-`docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`.
+`docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`.
 
 **The codebase already knows this hazard class and reasoned about it once, in
 the wrong place.** `src/retrieval/sync.rs:581` in `sync_worktree` says:
@@ -493,6 +493,6 @@ smallest useful guard, in `src/tools/semantic/index.rs:507-514`.
   `:533+` (background indexing state), `:738-745` (`format_index_status`)
 - `.codescout/project.toml` `[ignored_paths]` — gitignored; why `scripts/` is
   correct at 15 of 19
-- `docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`,
+- `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`,
   `docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md` —
   candidate mid-build abort mechanisms

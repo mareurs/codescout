@@ -437,7 +437,7 @@ fn mean_pool_normalized(vectors: &[Vec<f32>]) -> anyhow::Result<Vec<f32>> {
 /// default and stored a vector representing only the opening fraction. The second is
 /// worse, because nothing anywhere reports it.
 ///
-/// `docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`
+/// `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`
 async fn embed_document_pooled(
     embedder: &dyn crate::retrieval::embedder::DenseEmbedder,
     content: &str,

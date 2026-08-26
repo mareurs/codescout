@@ -4,7 +4,7 @@ opened: 2026-08-26
 closed:
 severity: low
 owner: marius
-related: [docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md]
+related: [docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md]
 tags: [embeddings, docs, onnx, retrieval]
 unverified: 'both reported blockers are working-as-designed with documented remedies — the only defect here is the undocumented migration cost. The CodeRankEmbed-on-ONNX request is a feature, not a bug, and is recorded here only because it has no tracker home yet.'
 kind: bug
@@ -16,7 +16,7 @@ kind: bug
 
 A host running CodeRankEmbed over llama-server was advised to move to the
 in-process ONNX path to escape the slot-context drops of
-`docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`. The
+`docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`. The
 reporter audited the code and found that move is not vector-compatible: the ONNX
 path cannot load CodeRankEmbed at all, and it cannot run the hybrid sparse leg.
 Both behaviors are deliberate and well-guarded — **the defect is that neither
@@ -193,5 +193,5 @@ blocked on a roadmap answer rather than on code.
 - `crates/codescout-embed/src/local.rs:68-69` (fixed pooling/quantization),
   `:192-231` (`from_dir_blocking`), `:234-255` (`parse_model` allowlist)
 - `src/retrieval/client.rs:170-182` (`guard_sparse` and its rationale)
-- `docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md` —
+- `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md` —
   the bug this was proposed as an escape from

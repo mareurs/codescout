@@ -4,7 +4,7 @@ opened: 2026-08-26
 severity: high
 owner: marius
 related:
-  - docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
+  - docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
 tags: [test-isolation, memory, qdrant, pollution]
 kind: bug
 unverified: 'which test lane writes the points is NOT established — only that they exist, are fixture content, and are keyed by tempdir project_id'

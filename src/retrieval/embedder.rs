@@ -440,7 +440,7 @@ impl EmbedderHttp {
         // `input (1682 tokens) is larger than the max context size (1024 tokens)`, but
         // through that helper the caller saw only "400 Bad Request", which reads as a
         // generic outage. Unattributed skips were the result:
-        // docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
+        // docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
         let status = http.status();
         if !status.is_success() {
             let body_raw = http.text().await.unwrap_or_default();

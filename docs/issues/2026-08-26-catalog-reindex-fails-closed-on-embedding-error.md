@@ -4,7 +4,7 @@ opened: 2026-08-26
 closed:
 severity: high
 owner: marius
-related: [docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md]
+related: [docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md]
 tags: [librarian, catalog, embeddings, silent-failure]
 kind: bug
 ---
@@ -270,5 +270,5 @@ existing precedent — read it before inventing a new store.
   `:243-254` (`backfill_errors`, the pattern to copy)
 - `docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md` — why
   `embedded` / `embed_note` exist at all
-- `docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md` —
+- `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md` —
   a live way to *cause* the embed failure that triggers this abort

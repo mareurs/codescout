@@ -250,7 +250,7 @@ pub fn worktree_ids(main_repo: &Path, worktree_root: &Path) -> (String, String) 
 /// count. That is the confirmed mechanism behind an index missing an entire
 /// top-level directory:
 /// `docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
-/// and `docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`.
+/// and `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`.
 ///
 /// So on a batch error we retry chunk-by-chunk to isolate the offenders, store
 /// everything that does embed, and report the rest through `skipped` rather than
