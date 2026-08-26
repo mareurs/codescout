@@ -3123,7 +3123,7 @@ fn structured_fix_pointers(content: &str) -> Vec<(String, Option<String>)> {
     // same hazard already documented on `corpus_cited_tokens`. Measured before shipping:
     // of 75 declared pointer lines in docs/issues/, 74 sit outside fences and the only
     // fenced one is a worked example, so this loses no real declaration.
-    // docs/issues/2026-08-26-structured-fix-pointers-reads-a-fenced-example-as-a-declaration.md
+    // docs/issues/archive/2026-08-26-structured-fix-pointers-reads-a-fenced-example-as-a-declaration.md
     let mut fenced = false;
     for line in content.lines() {
         let t = line.trim_start();
@@ -3253,7 +3253,7 @@ fn scan_archived_fix_sha_unresolvable(
             // dead and offered a patch-id remedy that cannot address another repo's commit.
             // Counted as not-checked rather than resolved elsewhere: guessing a checkout path
             // would trade one false positive for an unbounded one.
-            // docs/issues/2026-08-26-doctor-reports-a-cross-repo-fix-sha-as-dead.md
+            // docs/issues/archive/2026-08-26-doctor-reports-a-cross-repo-fix-sha-as-dead.md
             if sha.contains(':') {
                 cross_repo += 1;
                 continue;
@@ -4640,7 +4640,7 @@ mod tests {
     ///
     /// The genuinely dead LOCAL pointer is the control: without it, "skip everything"
     /// passes and the check is silently disabled.
-    /// docs/issues/2026-08-26-doctor-reports-a-cross-repo-fix-sha-as-dead.md
+    /// docs/issues/archive/2026-08-26-doctor-reports-a-cross-repo-fix-sha-as-dead.md
     #[tokio::test]
     async fn a_cross_repo_prefixed_pointer_is_skipped_rather_than_reported_dead() {
         let (_tmp, root, live) = git_fixture_with_commit();
@@ -4933,7 +4933,7 @@ mod tests {
     /// The real declaration outside the fence is the control: without it, "return nothing"
     /// passes and the parser is silently disabled. Found by this parser reading a bug file's
     /// own worked example as a second declaration.
-    /// docs/issues/2026-08-26-structured-fix-pointers-reads-a-fenced-example-as-a-declaration.md
+    /// docs/issues/archive/2026-08-26-structured-fix-pointers-reads-a-fenced-example-as-a-declaration.md
     #[test]
     fn structured_fix_pointers_ignores_a_fenced_worked_example() {
         let text = "## Fix provenance\n\n\
