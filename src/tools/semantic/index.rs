@@ -694,7 +694,7 @@ impl Tool for IndexStatus {
                 // They were dropped in 79e0e4f2 and their readers in `format_index_status`
                 // outlived them by three and a half months, so the manual's recipe for
                 // diagnosing a model mismatch named two keys nothing emitted.
-                // docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
+                // docs/issues/archive/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
                 //
                 // `indexed_with_model` is the STORED model — what actually produced the
                 // vectors — and `configured_model` is what is set now. Reporting the
@@ -1138,7 +1138,7 @@ pub(crate) fn format_index_status(result: &Value) -> String {
     // sat unreachable for three and a half months while a test that hand-built the
     // envelope kept them green — so the model is appended only when it is NOT already
     // in the mismatch banner above, or the line names it twice.
-    // docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
+    // docs/issues/archive/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
     if !mismatch {
         if let Some(model) = result["indexed_with_model"].as_str() {
             out.push_str(&format!(" · {model}"));

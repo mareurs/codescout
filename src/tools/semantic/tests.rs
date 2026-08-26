@@ -507,7 +507,7 @@ fn semantic_search_score_alignment() {
 /// for the formatter, but the keys are now genuinely produced: `IndexStatus::call` reads
 /// them from the sidecar, and `preserve_does_not_erase_a_recorded_model` pins the write
 /// side.
-/// docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
+/// docs/issues/archive/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
 #[test]
 fn format_index_status_shows_model_and_timestamp() {
     let result = serde_json::json!({

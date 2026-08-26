@@ -5086,7 +5086,8 @@ five-commit history for `indexed_with_model` and none at all for it. So the manu
 documented detection procedure for a model mismatch names two fields, neither of which
 exists, for exactly the failure class GitHub #18 was about (a dimension mismatch *is* a
 model mismatch). Filed as
-`docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md`.
+`docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md`
+(fixed and archived same-session: `docs/issues/archive/2026-08-26-index-status-model-fields-dropped-but-still-documented.md`).
 
 **What this sharpens, beyond `W-57`.** `W-57`'s three datapoints are all fixtures whose
 *content* was wrong — the reported error wording, the single-hidden-entry case, the inert

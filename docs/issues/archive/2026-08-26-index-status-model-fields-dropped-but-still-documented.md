@@ -1,14 +1,19 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- index
+- reporting
+- doc-drift
+- dead-code
+- test-fabrication
+closed: 2026-08-26
 opened: 2026-08-26
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
-  - docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md
-tags: [index, reporting, doc-drift, dead-code, test-fabrication]
-kind: bug
+- docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+- docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md
+severity: medium
 ---
 
 # BUG: `index(action="status")` dropped the two model fields its own manual tells users to compare
@@ -183,44 +188,43 @@ part needs a decision rather than a line of code — see Fix.
 
 ## Fix
 
-*Not yet implemented — filed on notice per CLAUDE.md. Three parts, and only the first
-two are mechanical.*
+**Shipped by a concurrent session on this branch, verified here rather than
+re-implemented.** This bug file was still `status: open` (a zombie-open — the fix
+landed without a commit message naming the tracker entry) when checked 2026-08-26.
 
-1. **`indexed_at`** — surface `IndexState.last_indexed_at` in the `status` envelope.
-   `git_sync_status` (`src/retrieval/index_state.rs:102-129`) already reads the struct;
-   either add it to that returned object or read the sidecar once in `IndexStatus::call`
-   (`src/tools/semantic/index.rs:686`).
+**SHA:** `394931d8` (`experiments`)
+**patch-id:** `e90b8c9dde07a52ab55248c347baf580e4d2bbfb`
 
-2. **The fabricating test** — `format_index_status_shows_model_and_timestamp` must
-   assert against an envelope the product actually builds, or be split so the
-   formatter-rendering half is honest about being a pure unit test of `push_str` while a
-   second test pins *the keys the live path emits*. As written it is a coverage claim for
-   a field that does not exist.
+`feat(index): record which model built the index, and report a mismatch`. All three
+parts landed, not just the two originally scoped as mechanical:
 
-3. **`indexed_with_model` — decide before implementing.** The obvious move is to fill it
-   from the configured embedding model, and that would be a **fresh instance of the
-   overclaim this session just removed from the same function**. The configured model is
-   not the model the stored vectors were built with, and those differ precisely in the
-   failure the manual is trying to diagnose (see
-   `docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`
-   — a dimension mismatch *is* a model mismatch). Reporting the configured model under a
-   name that says `indexed_with_model` would make the mismatch invisible by
-   construction: the two fields the manual says to compare would be the same value read
-   twice.
+1. **`indexed_at`** — `IndexStatus::call` (`src/tools/semantic/index.rs`) now reads
+   `IndexState.last_indexed_at` from the sidecar and sets `result["indexed_at"]`.
+2. **The fabricating test** — `format_index_status_shows_model_and_timestamp`
+   (`src/tools/semantic/tests.rs:512-538`) is kept as a pure formatter unit test
+   (by design, per its own updated doc comment), but the keys it exercises are now
+   genuinely produced on the live path — backed by a real-path assertion via the new
+   `preserve_does_not_erase_a_recorded_model` / `record_replaces_a_previously_recorded_model`
+   tests in `src/retrieval/index_state.rs`.
+3. **`indexed_with_model`** — option (a) from this bug's original analysis was chosen:
+   the model spec is persisted into `IndexState` at sync time and the STORED value is
+   reported, never the configured one. `configured_model` is reported separately
+   (always present when knowable), and a `model_mismatch` block fires when they
+   disagree — exactly the manual's original comparison, now backed by real data.
 
-   Honest options: **(a)** persist the model spec into `IndexState` at sync time and
-   report the stored value, which makes the manual's comparison work as written;
-   **(b)** delete the two dead readers and rewrite the troubleshooting section around
-   the dimension check that already exists. (a) is more useful, (b) is smaller. Do not
-   ship the shortcut.
-
+Verified 2026-08-26: `cargo test --features librarian model` — 39 passed, 0 failed,
+including all of the above.
 ## Tests added
 
-None yet — bug is `open`. The regression test for part 1 asserts `indexed_at` is present
-in a real `IndexStatus` envelope (not a hand-built literal); for part 3 it asserts the
-reported model is the *stored* one after a model change, which is only meaningful once
-(a) is chosen.
+By the fix commit (`394931d8`):
 
+- `retrieval::index_state::tests::record_replaces_a_previously_recorded_model`
+- `retrieval::index_state::tests::preserve_does_not_erase_a_recorded_model`
+- `tools::semantic::tests::format_index_status_shows_model_and_timestamp` (updated,
+  not new — its doc comment now explains why the fixture is intentionally still
+  hand-built)
+- `tools::semantic::tests::format_index_status_has_no_mismatch_banner_when_models_agree`
+- `tools::semantic::tests::format_index_status_leads_with_model_mismatch_over_a_vector_hole`
 ## Workarounds
 
 To check for a model/index mismatch today, ignore the manual's recipe and use the
