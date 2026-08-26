@@ -180,6 +180,77 @@ opener re-fires), `gc()` prunes ledgers idle past `GC_MAX_IDLE_DAYS = 35`,
 TTL. So 91 is *sessions whose ledger survived*, biased toward the recent and the
 non-empty. Real counts are higher and the true denominator is unrecoverable.
 
+## No topic has ever arrived by citation — which decides the proposal
+
+Added 2026-08-27, from the same peer, verified independently against the ledgers.
+
+### The bundle (confirmed, exact)
+
+`tracker-conventions` and `librarian` are not two costs. Measured over 91:
+**38 sessions have both**, 3 have `tracker-conventions` alone, 3 have `librarian`
+alone, 47 have neither. By comparison `progressive-disclosure` differs from
+`librarian` in 24 sessions, so it is genuinely independent. They arrive by
+*different* calls — one session had `artifact(find)` pull `tracker-conventions`
+and `artifact_event` pull `librarian` — which is why targeting either alone leaves
+the other arriving whole. **54,878 bytes is the real atom for a session that
+touches the artifact family.**
+
+### The delivery observation
+
+`error-handling` is 1 of 91. It is the most heavily *pointed-at* topic in the
+corpus:
+
+- `server_instructions` — in every main agent's system prompt: *"error-handling —
+  RecoverableError vs anyhow::bail"*
+- `CLAUDE.md:241` — *"Full error decision tree: `get_guide("error-handling")`"*
+- **three guides cite it, two of which auto-inject**: `progressive-disclosure:116`
+  (delivered to 41 sessions), `workspace-state:158` (13), `iron-laws-detail:228` (0)
+- eight plans/specs and a tracker cite it
+
+So in at least 41 sessions the pointer was *already in context*, inside a body the
+substrate had just delivered. One session in 91 fetched it.
+
+`iron-laws-detail` is the same shape at 0 — advertised in `server_instructions`,
+applies to every session using these tools, never fetched.
+
+### What this does and does not establish
+
+**Name the confound, because it is real and it is the same shape this issue keeps
+catching.** A low count is equally consistent with *citations are not followed*
+and with *most sessions did not need that topic*. `error-handling` is about this
+repo's Rust conventions, and an unknown share of the 91 are sessions in other
+repos with no reason to want it. Need is unmeasured, varies by topic, and the
+ledger cannot see it. **So "agents ignore citations" is NOT established here**, and
+anyone quoting the 1/91 as proof of that is doing what the 63% headline did.
+
+What *is* established needs no assumption about need, because it is a statement
+about observed paths rather than about intent:
+
+> **Every topic that reaches sessions reaches them by auto-injection. No topic has
+> ever reached sessions by citation.** Six topics auto-inject and land in 13-89
+> sessions each. Four do not auto-inject and land in 0, 0, 0 and 1. The split is
+> bimodal with a 13× gap and nothing in between.
+
+Whether the citation path fails because unneeded or because unfollowed, **it has
+not demonstrated delivery in 91 sessions**, and no proposal should assume it will.
+
+### Consequence — direction (a) is reframed, (c) is promoted
+
+This is the row that answers any proposal ending *"and agents will call the
+sections they need."* Rewriting the directions accordingly:
+
+- **(a) section addressing is still worth doing, but NOT as a delivery fix.** Its
+  value is precision *for the auto-inject path* — letting the substrate deliver
+  the right section — not enabling callers to fetch what they need. Framed the
+  latter way it inherits the 0/0/0/1 track record. The three `§` citations
+  resolving is a legibility win, not a delivery win.
+- **(c) declaring the edges is the load-bearing one**, and it must be traversed
+  **by the substrate, not by the model**. An edge only a reader can follow is
+  exactly what `librarian.md:407` already is, and that edge has been followed 0
+  times in 91 sessions. Edges have to be something the auto-inject path walks.
+- **(b) remains contraindicated**, now for a second independent reason: splitting
+  produces edges, and edges are not a delivery mechanism here.
+
 ## Root cause
 
 Bodies are `include_str!`'d and dispatched by a hardcoded match on topic name:
