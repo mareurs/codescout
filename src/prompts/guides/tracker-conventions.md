@@ -191,6 +191,39 @@ If you must also move the file on disk, use `artifact(action="move",
 id="<id>", new_rel_path="docs/trackers/archive/foo.md")` — never a bare
 `git mv`, which orphans the catalog record.
 
+## Declaring an augmentation
+
+If an artifact is meant to carry an augmentation, say so in **frontmatter**:
+
+```yaml
+expects_augmentation: true
+```
+
+Augmentation is the one artifact state with **no on-disk form**. Rows, frontmatter and
+body all rebuild from disk on `reindex`; `prompt`, `params`, `params_schema`,
+`render_template` and `entry_collection` live only in the catalog, which is
+machine-local and git-ignored. Nothing else in the repo records that an artifact is
+*supposed* to have one — so a fresh clone, or any catalog rebuild, is
+indistinguishable from an artifact that never had one.
+
+Its absence is silent in every direction that matters. `reindex` preserves
+augmentation keyed by id rather than regenerating it, so it reports healthy after a
+loss and repairs nothing. `artifact(get)` returns `augmentation: null` without
+comment. The documented `append_entry` / `update_entry` / `entry_filter` calls fail
+only at use, one caller at a time.
+
+The declaration is what `librarian(action="doctor")`'s
+`augmentation_declared_but_absent` reads. It is the same remedy `entry_prefix` uses,
+in the same place and for the same reason, and like a ledger it is **declared, never
+inferred**: measured across 4,195 catalogued artifacts, 29 mention `[LIVE]` outside
+fenced code and 23 of those carry no augmentation — they are guides, specs, plans and
+bug files *describing* the mechanism. Intent is not recoverable from prose, so it has
+to be stated.
+
+Firing in a fresh clone is correct, not a false positive: that clone genuinely has no
+augmentation, and the check is how its owner finds out before an `append_entry` does.
+Re-attach with `artifact_augment(id=…, prompt=…, …)`.
+
 ## Entry-level standard — the shape INSIDE a tracker
 
 The rules above govern the tracker *file*. These govern its **entries** (`F-3`,
