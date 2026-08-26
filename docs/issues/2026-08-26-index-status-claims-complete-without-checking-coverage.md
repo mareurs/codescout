@@ -280,6 +280,62 @@ genuinely anomalous.
    **Verdict:** rejected — both returned HTTP 200. The limit is per input.
 
 ## Fix
+### Reporting gap closed 2026-08-26 — status no longer implies completeness
+
+- **SHA:** `48825529` (`experiments`)
+- **patch-id:** `f855a10a1afca25211fb9504fba17964d6ab29a9`
+
+`fix(index): stop status implying completeness, and fold in the cheap integrity
+check`. This is the half `e5821fec` left open: `verify` closed *detection*, but it
+is opt-in, so a caller who never ran it saw exactly the envelope this file
+complains about.
+
+**What `status` now says.** `chunks_without_vectors` + `integrity: ok|degraded`
+from one indexed COUNT, and — the part that matters most —
+`coverage: "unchecked"` with a `coverage_hint` naming `verify`. Coverage cannot be
+answered cheaply, because it needs the indexer's own walk. So `status` states that
+rather than letting silence imply the opposite: `file_count`/`chunk_count` are what
+the store **holds**, never proof it holds everything eligible.
+
+**`queryable` is deliberately still `true`.** An index with a hole is queryable —
+it simply cannot return the holed chunks. Downgrading it would break every caller
+that branches on it, so the honest signal had to be an additional field rather than
+a lie in an existing one.
+
+**Why the fold is safe here and would not be on the activation path.** `status`
+already calls `project_index_stats`, which enumerates the project, so one more
+indexed COUNT is proportionally nothing. Activation asks `project_has_chunks`
+instead, and `check_has_index`'s doc comment records why: `project_index_stats`
+could not finish inside `FIRST_PROBE_TIMEOUT` on a real corpus, so every large
+project reported as unindexed and — a timeout being deliberately uncached —
+re-scanned on every activation
+(`docs/issues/archive/2026-08-08-index-probe-scrolls-the-whole-corpus-to-answer-a-yes-no.md`).
+**Orphan detection therefore stays in `verify`**: it needs `chunk_refs` over every
+chunk plus a stat per stored file, which is that same enumeration class.
+
+**Item 1 is inert on a Qdrant host, and that is expected.**
+`count_chunks_without_vectors` returns 0 structurally under Qdrant, since a point
+carries payload and vector together — it is a real measurement only under
+sqlite-vec. The `coverage: "unchecked"` change is the backend-independent one, and
+is why the fold was worth doing anyway.
+
+**Also: the word "good" is gone.** `format_index_status` opened every compact line
+with `good · queryable · N files · M chunks`, and "good" was derived from nothing
+but non-emptiness — this file's own § *Root cause* names it. Now `indexed ·
+queryable · …`, or `DEGRADED · N chunk(s) have no vector · …` when there is a real
+signal. A permanent "coverage unchecked" nag on every line was considered and
+rejected: noise gets learned around, and the JSON carries the hint for anyone
+reading it.
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` →
+4494 passed, 0 failed, 46 ignored.
+
+**What is left before this can be archived.** Only the durable half: nothing
+persists "the last refresh was partial" across calls, so a caller who does not look
+at the envelope that reported it still cannot find out later. That is
+`docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md` step 2,
+and the two should be designed together — they are one missing state model, which
+is the third acceptance criterion that bug already asks for.
 ### `index(action="verify")` shipped 2026-08-26 — headline defect closed
 
 - **SHA:** `e5821fec` (`experiments`)
