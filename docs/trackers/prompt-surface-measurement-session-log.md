@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 21
+entry_high_water_F: 22
 entry_high_water_W: 16
 entry_prefix:
 - F
@@ -49,6 +49,7 @@ surfaces, not the definition.
 | F-19 | The eval's guard apparatus is unenforced — no collection, no CI, and a permanent red makes "all green" inexpressible | open |
 | F-20 | Four times in one task, a commit asserted in prose what it measured otherwise in code — one of them from a controller ruling | open |
 | F-21 | I made a probe the acceptance gate for a question it was not precise enough to answer | fixed-verified |
+| F-22 | A docstring word ending in "raise" fired a substring guard the docstring called safe | open |
 
 ## Wins Index
 
@@ -1850,6 +1851,57 @@ Same family as [[F-20]] — a controller claim that reached the work unchallenge
 arrived as settled. There it was a false premise about form-pair carriers; here it was an
 unexamined assumption that a probe was gate-grade. Both were caught by someone downstream
 re-measuring rather than by me.
+
+## F-22 — A docstring word ending in "raise" fired a substring guard the docstring called safe
+
+**Valid:** invariant
+
+**Observed:** 2026-08-26, blast-radius fixture, re-review round 1 fix (Minor 8 nit). An
+implementer widening an import-time pool guard to `SHAPE_VERBS` / `RARE_SHAPE_VERBS` hit an
+immediate collection failure on an entry that has been shipping since Task 4c.
+
+**Expected:** `_dilute_raise_pair_no_params` (`gen_fixture.py:1025`) selects filler files by
+`"raise " in text` rather than re-parsing, and its own docstring (`:1056-1059`) justifies
+that as *"safe because this generator's own `raise` statements are always plain
+`raise ValueError("...")` text, never inside a string literal or comment."*
+
+**Got:** `SHAPE_VERBS["ratio"]` (`gen_fixture.py:134`) contains **`"appraise"`**, which ends
+in the four characters `raise`. Rendered into prose with a following space — *"...will
+appraise the..."* — it contains the exact substring `"raise "` the check scans for, with no
+`ast.Raise` node anywhere in the file. Three shipped files already carry an appended
+`_<stem>_default()` purely from this collision: `src/provisioning/ledger.py`,
+`src/identity/pool.py`, `src/identity/envelope.py`.
+
+**Probable cause:** the safety argument reasons about the shape of *emitted statements*
+(`raise ValueError(...)`) and never about the *vocabulary pools* rendered into prose in the
+same files. A substring test has no word boundary, so any pool word ending in `raise` —
+`appraise`, `braise` — satisfies it. The docstring asserted the property instead of testing
+it, which is F-20's family: prose asserting what code measures otherwise.
+
+**Impact:** not a validity leak, and the direction is worth stating rather than assuming.
+The dilution's purpose is to raise the FILLER side's conditional rate of "has a zero-arg
+function, GIVEN it matches (single-word stem + raises)". Firing on three files the sweep's
+own AST-based predicate does not count as raising means those three helpers do not
+contribute to the intended dilution — so the dilution is marginally **weaker** than its
+docstring claims, never stronger, and no dependent-side signal is created. The leak sweep is
+green either way (worst surviving channel 9.9x against the depth-3 bar of 10.5).
+
+**Severity:** low — the shipped effect is three spurious helpers in filler and one false
+sentence in a docstring. It is filed because the false sentence is load-bearing: a future
+author widening that check, or trusting the "safe" claim while adding a pool word, inherits a
+guard that silently mis-selects.
+
+**Status:** open — deliberately not fixed. Either remedy (change the pool word, or give the
+check a `\braise\s` word boundary) **moves the generated tree**, which reopens the leak
+sweep, the null-control bars and the edge-margin seed sensitivity for a defect that costs
+three filler helpers. The implementer left the verb pools out of the enforced guard and
+documented the collision inline at the assert site (`gen_fixture.py:603-608`) rather than
+silently fixing or silently ignoring it — the right call under a byte-identity constraint.
+
+**Fix idea / Pointer:** fold into the next change that is already allowed to move the tree.
+Correct the docstring's "safe because" sentence to say what is actually true — the check is
+a substring test and the pools are not word-boundary clean — even if the behaviour stays.
+A false safety claim is the part that propagates.
 
 ## Template for new entries
 
