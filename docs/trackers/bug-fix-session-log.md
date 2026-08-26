@@ -5643,8 +5643,8 @@ them apart without a THIRD data point. Watching RED-before-GREEN on the literal
 *prescribed* text (not a stand-in "any fix") is what surfaced that the three-part form
 does nothing at all. Without it: a "fix" ships that changes no observable behavior, the
 bug closes as fixed, and the real defect — silent wrong-binding for template citations
-copied into another repo — stays live. Filed separately as
-`docs/issues/archive/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md`.
+copied into another repo — stays live. Filed separately (still open) as
+`docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md`.
 
 **Pattern, generalized:** a bug file's own `## Fix` section is a claim about what will
 work, written at the same moment of confidence the root cause itself was — re-entering

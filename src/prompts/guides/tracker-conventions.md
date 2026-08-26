@@ -381,7 +381,8 @@ dangling/ambiguous buckets nor a ledger-scoped `doctor` check. `doctor`'s
 `cited_prefix_with_no_definer` check exists specifically for this state: it
 starts from the citation graph rather than a known ledger's claimed entries,
 and fires only above a citation-volume threshold to stay quiet on incidental
-prose. See `docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md`.
+prose. See `docs/issues/2026-08-26-cited-prefix-with-no-definer-is-invisible.md` (open at time of
+writing — the primary check landed; a secondary report-shape change is still pending).
 
 
 ### Citing an entry — bare, or qualified
