@@ -5265,6 +5265,21 @@ two datapoints this belongs in the systematic-debugging skill's Phase 1, next to
 Error Messages Carefully", as its active counterpart: when the message cannot answer the
 question, make it able to.
 
+**Second instance, same day — and it does NOT fire the criterion above.** Dropping 22 stale
+wine-lane skips left one failure,
+`run_command_with_overflow_emits_progressive_hint_once`, whose assertion was the bare
+"overflowing output should emit progressive-disclosure hint" — identical in four broken
+worlds (timed out / no output / too little to overflow / refused by a gate). It was taught
+to print the envelope BEFORE being diagnosed or skipped (`d0aabbe3`), which is the pattern
+applied deliberately rather than in hindsight.
+
+Recorded as evidence, not as a promotion trigger: the criterion asks for a second **work
+stream**, and this is the same one. A lesson confirming itself inside the sitting that
+produced it is the weakest possible evidence for it — that is precisely why the criterion
+names a different stream. The commit message for `d0aabbe3` claimed this satisfied the
+criterion; it does not, and this note is the correction. Status stays `validated`; the
+Promote-when stays unfired.
+
 ## W-61 — A tool's rendered response shape is evidence about the transport, not its return type
 
 **Valid:** dated 2026-08-26
