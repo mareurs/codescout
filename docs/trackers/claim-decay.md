@@ -45,17 +45,32 @@ one is a mistake this ledger made on its own first day. `DC-1` was true and deca
 `DC-2` was false and would have *become* true had the archive completed. Both are hostage
 to an unwatched substrate, which is the thing being tracked.
 
-Three states — only the third is out of scope. (Distinction contributed by peer session
+Three states, two of them in scope. (Distinction contributed by peer session
 `codescout-77` on 2026-08-26, after it cost a real misclassification.)
 
-| State | Example | Goes to |
-|---|---|---|
-| True when written; substrate moved; nothing re-checks | `DC-1` (10.4 KB → 33.4 KB), `DC-3` (prefix count) | **DC** |
-| False when written, but truth is hostage to an event that could still fire, and nothing re-checks either way | `DC-2` / `bug-fix-session-log:F-69` (prospective `archive/` path) | **DC** |
-| False when written, and **no** substrate change could ever have made it true | a citation added 16 days *after* its target was deleted; a path that never existed at any commit; a conclusion its own predicate could not support | **`F-N` / `W-N`** — authoring error, not decay |
+| State | What it is | Example | Goes to |
+|---|---|---|---|
+| **`decayed`** | True when written; substrate moved; nothing re-checks | `DC-1` (10.4 KB → 33.4 KB), `DC-3` (prefix count) | **DC** |
+| **`anticipated`** | False when written, but truth is hostage to an event that could still fire, and nothing re-checks either way | `DC-2` / `bug-fix-session-log:F-69` (prospective `archive/` path) | **DC** |
+| **`never-true`** | False when written, and **no** substrate change could ever have made it true | a citation added 16 days *after* its target was deleted; a path that never existed at any commit; a conclusion its own predicate could not support | **`F-N` / `W-N`** — authoring error, not decay |
 
-**The third state impersonates the first**, which is the trap: it reads as
+**Name these states, never number them.** This table was referred to once as *“states one
+and two”* in a cross-session message, against a peer's prose that ordered the same three
+differently — which inverted `anticipated` and `never-true`, the exact pair the test exists
+to separate. The ledger's row order is not a shared referent between two readers; the names
+are. The inversion was caught in the message and never reached this file.
+
+**`never-true` impersonates `decayed`**, which is the trap: it reads as
 correct-then-invalidated from the prose and separates only on history.
+
+**The probe below is mandatory, not advisory.** *“Was this true when written”* presents as
+a fact about prose and is only ever a fact about history. On this ledger's first day every
+unaided attempt at it went wrong somewhere: `codescout-77` expected the kotlin-lsp citation
+to be `decayed` and found `never-true` only by running `--diff-filter`; `CLAUDE.md`
+describes that same file as *“pruned as a dupe”*, which reads as `decayed` and is not; and
+this ledger shipped with two incompatible criteria and did not notice for a commit. Run the
+probe before classifying — including on your own claims, and especially when the prose
+sounds settled.
 
 ```
 git log --all --diff-filter=AD --name-status -- <target-path>   # the target's lifecycle
