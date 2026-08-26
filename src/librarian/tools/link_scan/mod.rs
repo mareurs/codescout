@@ -1190,7 +1190,7 @@ mod tests {
     /// resolve on its own. This is the sharpest version of the bug: the qualifier
     /// segment being dropped is not merely lost, it lets a malformed citation succeed
     /// where a correctly-shaped one would be expected, with zero signal to the author.
-    /// docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
+    /// docs/issues/archive/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
     #[tokio::test]
     async fn a_double_qualified_citation_is_reported_not_resolved_even_when_the_inner_form_would_resolve(
     ) {

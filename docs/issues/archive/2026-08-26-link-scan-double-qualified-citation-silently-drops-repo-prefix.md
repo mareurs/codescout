@@ -1,19 +1,19 @@
 ---
-id: '4975d27ed2aa9550'
+id: e7eebd21a5c0cd99
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a `repo:file-stem:ID` citation silently degrades to `file-stem:ID` — the repo qualifier is dropped by regex slide, not parsed'
 tags:
 - librarian
 - link-scan
 - citations
 - extraction
+closed: 2026-08-27
 opened: 2026-08-26
 owner: marius
 related:
 - '08072e4a358640f0'
 severity: low
-unverified: Only the extraction-regex slide hypothesis was confirmed by test; the exact regex source (extract.rs scan_tokens) was not read line-by-line to cite its pattern text — the mechanism was inferred from black-box test behavior plus resolve.rs's split_once(':') semantics, not from reading the regex literal itself.
 ---
 
 ## Summary
@@ -135,38 +135,61 @@ This guide is not itself wrong; the sibling bug's prescribed remedy was.
 
 ## Fix
 
-*Not yet implemented — filed on notice per CLAUDE.md; this is resolver/extraction-layer
-work, not a doc fix, and is left open rather than rushed. Two honest options, and they are
-not mutually exclusive:*
+**Shipped 2026-08-27 — Option 2, extended:** rather than a bare warn tacked onto an
+existing arm, a double-qualified citation now gets its own first-class report class.
 
-1. **Extend the grammar to genuinely support `<repo>:<file-stem>:<ID>`.** Capture up to
-   two qualifier segments and check the outer one against known repo names (the
-   `by_stem`-adjacent structure would need a parallel `by_repo_name` or equivalent) before
-   falling through to the stem-only interpretation. This is the fix that makes the sibling
-   bug's originally-prescribed double-qualification form actually work as documented.
-2. **Retract the three-part form from anywhere it's prescribed, and document that
-   file-stem qualification alone is the ceiling** — safe against a bare token's ambiguity
-   and against a same-numbered entry under an unrelated stem, but *not* safe against an
-   exact stem collision across repos (a rarer, harder-to-hit case, since it requires two
-   different repos to name a tracker file identically). The sibling bug's fix already took
-   this path pragmatically (dropped the repo prefix, kept file-stem-only), so option 2 is
-   already partially in effect in practice even though this file documents that no code
-   change enforces or explains it.
+A new `CitationKind::MalformedQualifier` is matched by a dedicated regex
+(`double_qualified_re()`, `extract.rs`) built to match the FULL
+`<qualifier>(:<qualifier>)+:<TOKEN>` span directly — so it wins the leftmost-match
+race against `cross_repo_re` before that regex's own slide has a chance to claim the
+tail. `scan_tokens` runs it first and masks its spans, so neither `cross_repo_re` nor
+`entry_re` can re-discover the embedded fragments. `resolve::resolve` always returns
+`Outcome::MalformedQualifier` for this kind, unconditionally — it never inspects
+`corpus`/`index`, because the citation is malformed at the SHAPE level and no lookup
+could make it valid. `link_scan`'s `call()` reports it as a new peer finding class
+(`counts.malformed_qualifier`, a capped `malformed_qualifier` array, a `_by_source`
+breakdown, and its own `truncated` flag) — the exact same shape `ambiguous` /
+`dangling` / `cross_repo` already use.
 
-Either way, `librarian(action="doctor")` or `link_scan` itself could usefully warn on a
-citation containing 2+ colons that isn't a rel-path or URL — right now it is silently
-reinterpreted rather than flagged, which is the sharper edge here: a well-intentioned
-author following the sibling bug's (wrong) advice gets no signal that their fix did
-nothing.
+Option 1 (extend the grammar to make `<repo>:<file-stem>:<ID>` actually resolve) was
+declined: nothing in the repo depends on the three-part form resolving, since the one
+bug that invented it already worked around it by dropping to the two-part form.
 
+The archived sibling bug
+(`docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md`)
+was re-checked at fix time and had already self-corrected its own wrongly-prescribed
+3-part example, citing this very bug — no further doc correction was needed.
+
+**Known live occurrences, deliberately left untouched:**
+`docs/trackers/prompt-surface-measurement-session-log.md` (an active concurrent
+session's WIP tracker at fix time) and
+`docs/superpowers/plans/2026-08-25-unanchored-blast-radius-eval.md` each still use the
+three-part form. Neither's *resolution* changes — they were already silently
+collapsing to the two-part form before this fix — but both will now surface in
+`link_scan`'s `malformed_qualifier` report the next time it runs, which is the
+intended remediation path: visibility, not an unrequested edit to another session's
+files.
+
+**SHA:** `9a517e54` (`experiments`)
+**patch-id:** `52abb0f1294e41587c276cafe33d61055d757b44`
 ## Tests added
 
-None in this file. The mechanism is exercised indirectly by
-`tests/link_scan.rs::session_log_template_citations_never_bind_to_a_foreign_repos_namesakes`
-(added for the sibling bug), which uses only the corrected single-qualifier form and does
-not itself assert on the 3-part form's behavior. A direct regression for *this* bug — two
-tests, one per candidate fix in § Fix — should land with whichever option is chosen.
+Three, all in `src/librarian/tools/link_scan/`:
 
+- `extract::tests::a_double_qualified_citation_is_flagged_not_silently_collapsed_to_the_inner_form`
+  — the whole three-part span is captured as `MalformedQualifier`; it does NOT also
+  extract as a working `CrossRepoToken`, and the embedded entry token stays masked.
+- `extract::tests::citation_kind_wire_values_match_what_debug_emitted` — extended to
+  cover the new variant (pre-existing test, one more case added).
+- `tests::a_double_qualified_citation_is_reported_not_resolved_even_when_the_inner_form_would_resolve`
+  — end-to-end through `call()`. The sharpest case: seeds a real target file so the
+  inner `target:F-2` form WOULD legitimately resolve to an edge on its own, then
+  asserts the double-qualified citation still reports only
+  (`counts.malformed_qualifier == 1`, `counts.cross_repo == 0`, `counts.dangling == 0`)
+  and `edges_missing` stays 0 even in `write=true` mode.
+
+All 73 `link_scan` tests green, plus the full suite (4403 passed, 0 failed, 8 ignored),
+`cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings`.
 ## Workarounds
 
 Use single-qualifier citations (`<file-stem>:<ID>` for a per-work-stream namespace,
@@ -176,15 +199,10 @@ lower-probability risk of an exact file-stem collision across repos. This is wha
 
 ## Resume
 
-Pick option 1 or 2 in § Fix. If 1: extend `extract.rs`'s qualifier-capturing regex (near
-`scan_tokens`, `extract.rs:432` and the pattern discussed at `extract.rs:692-727`) to
-accept a second colon-delimited segment, and give `resolve.rs`'s `CrossRepoToken` arm
-(`resolve.rs:233-270`) a repo-name lookup path alongside `corpus.by_stem`. If 2: grep the
-repo for any other place prescribing `<repo>:<file-stem>:<ID>` (only
-`docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md` at time of
-filing — already corrected) and close this as `wontfix` with the rationale above, keeping
-the doctor/warn suggestion as a separate, smaller follow-up.
-
+Closed — no further action. Both options in § Fix were resolved: option 2 shipped, as
+a first-class report class rather than a bare warn; option 1 was deliberately
+declined. The two live three-part citations named in § Fix are for their owning
+sessions to fix once `link_scan` next reports them — not this bug's scope.
 ## References
 
 - `docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md` — the bug

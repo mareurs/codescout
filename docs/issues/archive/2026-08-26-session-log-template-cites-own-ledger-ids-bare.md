@@ -1,5 +1,5 @@
 ---
-id: 08072e4a358640f0
+id: '08072e4a358640f0'
 kind: bug
 status: fixed
 title: docs/templates/session-log.md cites codescout's own ledger ids bare, so every copy into another repo imports dangling citations — and one that resolves to the wrong entry
@@ -14,7 +14,7 @@ closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 related:
-- '4975d27ed2aa9550'
+- e7eebd21a5c0cd99
 severity: medium
 unverified: Only one downstream repo was measured (claude-plugins). The wrong-resolution of `R-1` was confirmed there by elimination from link_scan's edge list, not by a direct per-token resolver dump. Other consuming repos were not surveyed.
 ---
@@ -174,8 +174,8 @@ produces zero edges, zero dangling, zero ambiguous from the template artifact.
 from § Reproduction): 3 wrong edges materialized, matching this bug's own symptom
 exactly. Then, after applying the (initially wrong) three-part qualification, RED
 again — byte-identical failure, which is what surfaced
-`docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md`.
-Only the corrected single-qualifier form goes green.
+`docs/issues/archive/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md`
+(now fixed and archived). Only the corrected single-qualifier form goes green.
 ## Workarounds
 
 Downstream: after copying the template, qualify or delete the imported citations before the

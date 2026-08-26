@@ -167,7 +167,7 @@ pub enum CitationKind {
     /// past an unmatchable prefix rather than failing to match — so without this
     /// variant, a malformed double-qualified citation silently collapses to a
     /// working single-qualifier one with no signal to the author.
-    /// docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
+    /// docs/issues/archive/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
     MalformedQualifier,
 }
 
@@ -778,7 +778,7 @@ mod tests {
     /// mechanism the sibling regression above pins for a single truncated qualifier —
     /// one qualifier segment earlier. The resolver never supported this three-part
     /// form; it must now be FLAGGED rather than silently reinterpreted.
-    /// docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
+    /// docs/issues/archive/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
     #[test]
     fn a_double_qualified_citation_is_flagged_not_silently_collapsed_to_the_inner_form() {
         let text = "See `codescout:statement-validity-session-log:F-2` for the rule.\n";
