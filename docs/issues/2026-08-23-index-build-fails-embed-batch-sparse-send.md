@@ -16,7 +16,7 @@ opened: 2026-08-23
 owner: marius
 related: []
 severity: medium
-unverified: Fixed by a machine-local config change (symlink), not a repo commit, so there is no SHA/patch-id to cite and no regression test is possible — nothing in this repo's source caused the failure. Reproduction confirmed the fix (sparse error no longer occurs; indexing progressed past the point it previously died), but the full catch-up reindex (943 commits) was still running in the background when this was last checked, not yet confirmed to reach HEAD.
+unverified: 'Fixed by a machine-local config change (a symlink), not a repo commit, so there is no SHA/patch-id to cite and no regression test is possible — nothing in this repo''s source caused the failure. The reindex half of this caveat is now DISCHARGED: measured 2026-08-26, index(action="status") reports git_sync.behind_commits: 0 with last_indexed_commit == head_commit (fcb86c16) and chunks_without_vectors: 0, so the 943-commit catch-up did reach HEAD. (index(action="verify") separately returns verdict: incomplete over one eligible file — a newly-created, still-untracked tracker that postdates this bug and is unrelated to the sparse failure.)'
 ---
 
 # BUG: semantic code index build fails with "embed_batch sparse send" on this machine, leaving the index permanently behind HEAD
@@ -133,8 +133,15 @@ indexing proceeded (chunk count climbing across repeated `index(action="status")
 past the point where it previously died on every attempt.
 ## Tests added
 
-N/A — not yet fixed. No regression test exists for this failure mode.
+None, and none is possible at the repo level: the failure came from a machine-local
+`~/.config/codescout/.env` symlink pointing at a removed compose profile, so no code path
+in this repo produced it and no test in this repo can regress it. The instrument that
+would surface the *effect* — an index stuck behind HEAD — is `index(action="verify")`,
+which now reports `git_sync.status: up_to_date`.
 
+*(Corrected 2026-08-26. This section previously read "N/A — not yet fixed", which
+contradicted the file's own `status: fixed` and `closed: 2026-08-24`. It was stale text
+left over from when the bug was opened.)*
 ## Workarounds
 
 No longer needed for this failure mode. (Historical: while broken, `semantic_search`
