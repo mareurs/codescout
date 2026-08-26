@@ -806,6 +806,32 @@ above. Nothing in any prompt surface currently warns that
 **Status:** open.
 **Refs:** `bug-fix-session-log:F-66`, `reconnaissance-patterns:R-116`.
 
+### T-29 — Two OVERLAPPING `read_file` ranges, stitched as if continuous
+
+**Tool:** `read_file(path, start_line, end_line)` × 2 — **verdict: wrong-tool**
+
+Read `scripts/build-windows.sh` as `(1-45)` and then `(45-62)`, and treated the two
+results as one continuous read. Line 45 came back in **both**, so the stitched text held a
+duplicated `#` line that exists nowhere in the file. The `edit_file` anchor built from it
+failed with `old_string not found`.
+
+**Why it is worth an entry:** the failure surfaces one layer away from its cause, wearing
+the costume of a different bug. `old_string not found` is exactly what a *stale* or
+*concurrently modified* file looks like — and a peer session was in fact writing to this
+repo at the time, so the wrong diagnosis was not merely available, it was plausible. What
+prevented it was `edit_file` printing the real bytes in its error, which made the
+non-existent duplicate line obvious in one round-trip.
+
+**Ideal:** one call spanning the range, or `grep` for the anchor to get its exact bytes. If
+two calls are genuinely needed, make the ranges **disjoint** (`1-44`, `45-62`) — an
+off-by-one in the join between two reads is invisible, whereas an off-by-one inside a
+single range is not.
+
+**Prompt gap:** `read_file`'s contract is per-call and says nothing about composing calls,
+so nothing warns that overlapping ranges duplicate their shared lines. This is the same
+family as `bug-fix-session-log:W-63` — a reconstruction of what a tool returned, mistaken
+for what the artifact contains.
+
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
