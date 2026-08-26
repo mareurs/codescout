@@ -346,3 +346,107 @@ Where a project ships its own guard, a probe should **reproduce that guard's sam
 exactly** rather than approximate it — then a disagreement is a finding. And an instrument
 that cannot resolve a difference should say so in its own output: printing an explicit
 `edge` verdict below the resolution limit makes that automatic rather than remembered.
+
+
+## A fixture's bucket mix is an empirical claim — measure it against real corpora, don't ask
+
+A synthetic fixture that partitions its truth set by *mechanism* (direct reference /
+reachable-only-under-a-rename / name-held-as-a-string) is asserting that real code
+distributes that way. The ratio **is** the effect size: shift it and the tool under test
+looks better or worse without anything about the tool changing. That claim is measurable
+on any machine with real code on it, and measuring it costs one script.
+
+Measured 2026-08-26 for the blast-radius eval, whose CHASE_REQUIRED bucket claims
+**4 of 12 dependents (33.3%)** reach the defect under a rename they never spell.
+
+**Python, AST-based** (`ast.ImportFrom`, `asname != name`) over 10 corpora — stdlib,
+`site-packages`, serena, gpt-researcher, Skill_Seekers, researcher, mempalace, headroom,
+prompt-engineering, topictracker: **8,517 files, 72,968 `from X import Y` binding sites.**
+
+| statistic | value |
+|---|---|
+| all import sites that rename | **3.31%** (2,415 / 72,968) |
+| distinct `(module, symbol)` pairs ever renamed | **5.53%** (1,312 / 23,735) |
+| **sites renamed, restricted to symbols renamed at least once** | **38.1%** (2,415 / 6,331) |
+| same, best-powered corpus (`site-packages`, 4,888 sites) | **39.2%** |
+| range across well-powered corpora | 16.1% (mempalace) – 56.4% (stdlib) |
+| `__init__.py` files carrying relative re-exports | **42.6%** (370 / 869) |
+
+The third row is the one that answers the fixture's question, and a corpus-wide average
+hides it: renaming is rare *across all imports* (3.31%) but common *for the symbols that
+get renamed at all* (38.1%). A fixture about indirection necessarily draws its symbol from
+that ~5.5% tail, so the conditional rate is the right comparator. **33.3% is inside the
+range and slightly conservative against the pooled 38.1%** — the bucket is well calibrated,
+not an authoring artifact.
+
+**Kotlin — the same mechanism barely exists.** `import a.b.C as D` over two real repos
+(EDU-Planner `backend-kotlin`, JetBrains `kotlin-lsp`): **16 aliased of 16,703 imports =
+0.10%** (15/14,199 and 1/2,504). A 33% chase bucket would be wildly unrepresentative of
+JVM code. **Conclusions from a Python-shaped fixture do not transfer to Kotlin without
+re-deriving the mix.**
+
+**What this measurement cannot see** — state it before attaching a conclusion:
+it counts *binding sites*, not dependent *files* (the bucket requires a file to never spell
+the symbol; a file may do both); it sees only import-time renaming, so runtime aliasing,
+`getattr`, and dict-of-callables — the LEXICAL_ONLY route — are unmeasured; 691 star-imports
+hide symbol identity entirely; and "renamed at least once" is corpus-size-dependent, so a
+larger corpus qualifies more symbols by construction.
+
+The generalisable rule: **when a fixture parameter encodes a claim about how real code is
+shaped, that parameter has an empirical answer — go get it.** Asking a human to eyeball it
+buys a slower, worse-calibrated version of a number a script produces in one run. See
+memory `reconnaissance`, rule *"Importance × cost decides explore-vs-ask"*. The probe is
+`scratchpad/rename_density.py` (session b02898c3); it is 150 lines and takes both rates
+because only the conditional one answers the question.
+
+
+### The other bucket: LEXICAL_ONLY is ~4× over-represented, and it tilts the eval
+
+Same 10 corpora, 8,517 files. LEXICAL_ONLY means the callable is reached by a **string**
+— `getattr(x, "name")`, `D["name"]()`, `globals()["name"]`, or a config key — so
+`references()` cannot reach it by any number of hops and only a text sweep finds it. The
+fixture puts **4 of 12 (33.3%)** there.
+
+| statistic | value |
+|---|---|
+| files containing ANY string dispatch | **18.5%** (1,579 / 8,517) |
+| distinctive callables ever reached by a string | **0.48%** (300 / 62,135) |
+| **dependent files reaching a callable ONLY by string** | **8.5%** (136 / 1,608) |
+| best-powered corpora | site-packages **4.4%** (756 files), headroom **14.7%** (584) |
+| distinctive callables named in config files | **66** across 4,099 config files |
+
+The first and third rows say opposite-sounding things and both are true: **string dispatch
+is everywhere, but a callable reachable *only* by string is rare.** Nearly one file in five
+does string-based dispatch somewhere; fewer than one distinctive callable in two hundred
+has no symbolic route at all. A fixture bucket is about the second, never the first.
+
+**So LEXICAL_ONLY at 33.3% runs ~4× the pooled 8.5%** and ~2.3× the highest well-powered
+corpus. The config half is scarcer still: the fixture spends 2 of 12 dependents (16.7%) on
+config-key dispatch, against 66 distinctive callables named across 4,099 real config files.
+
+**Which way the two errors push, and why it matters more than either alone.** LEXICAL_ONLY
+files are reachable by grep and *not* by `references()`, so over-weighting them favours the
+lexical arm. CHASE_REQUIRED is the mirror — reachable under LSP, needing a second grep
+lexically — and it is slightly *under*-weighted (33.3% against a real 38.1%). Both
+non-neutral buckets therefore tilt the same way: **against the symbol-navigation arm.** A
+codescout win on this fixture is conservative; a codescout loss is partly composition, not
+capability. Pre-register that, exactly as with the seed sensitivity — a limitation stated up
+front is a known property, and the same limitation found by a reader is a defect.
+
+**The denominator trap, recorded because the first run fell into it.** v1 matched symbol
+references on the bare name, so `get` collected every `.get(` in the corpus — 495,054
+references across 1,209 names, ~409 each — and reported a 0.62% string share that was an
+artifact of the denominator. The fix is to restrict to names where a bare-name match means
+what it says, and the restriction is not arbitrary: it is the shape of the fixture's own
+symbol. **DISTINCTIVE = len ≥ 8, snake_case, defined exactly once in the corpus.** Same
+move as conditioning on "ever renamed" in the section above — matching the estimand to the
+claim, not cherry-picking. Count **files**, not sites, because the bucket is a claim about
+dependent files.
+
+**What it cannot see:** the distinctive-and-unique filter excludes short and common names,
+where string dispatch may well be commoner; only in-corpus definitions count, so a config
+naming a callable from a dependency is invisible; and the config scan is word-boundary
+regex, which the first pass got wrong in a way worth remembering — requiring quotes around
+the token silently dropped YAML and TOML **bare keys** and undercounted by 5× (13 names →
+66). Probe: `scratchpad/string_dispatch2.py` (session b02898c3); `string_dispatch.py` is v1
+and is kept only as the worked example of the trap.

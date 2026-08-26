@@ -75,3 +75,24 @@ entry holds the full narrative; this file carries only the rule.
   no-op bug until the source showed `paths` takes globs. Reading it first
   prevented a false bug filing; not reading it produced one the day before.
   (R-91)
+
+
+- **Importance × cost decides explore-vs-ask, and cheap+important is never a
+  question.** Score what rests on the claim: **high** — it feeds a decision being
+  executed *now* (a plan step, a dispatch brief, a gate, an edit about to land);
+  **medium** — a later session in this work stream will read it; **low** —
+  incidental to this turn. If importance is high and the exploration is cheap
+  (one or two tool calls, seconds, no spend, no irreversible side effect),
+  **run the exploration.** Do not assert it, do not hedge it, and above all do
+  not put it to the user: asking spends a round-trip of their day to buy what
+  one call buys, and a question is not a safer form of a guess. Reserve
+  questions for what exploration genuinely cannot settle — spend, taste,
+  priorities, external facts, or a judgement that is theirs by right. The
+  asymmetry that makes this load-bearing: a controller's unverified claim
+  becomes a subagent's committed code, and the code outlives the sentence that
+  caused it. Promoted 2026-08-26 on user instruction, after one session both
+  (a) filed `prompt-surface-measurement-session-log:F-20` for four
+  inferred-but-measured-sounding claims in a single task — one of which reached
+  a subagent's committed test — and (b) then asked the user whether the
+  blast-radius fixture's 4/4/4 bucket mix resembles real codebases, a question
+  answerable by two tool calls per symbol against any repo on this machine.
