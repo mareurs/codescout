@@ -13,7 +13,7 @@ closed: ''
 opened: 2026-08-26
 owner: marius
 severity: high
-unverified: 'Groups C, D, E and F are closed and each was verified red→green under wine. What remains UNVERIFIED is the tail: the two `retrieval::index_lock` failures pass under wine and fail on MSVC, and the single real `server::guide_hint_tests` failure cannot be separated from wine''s missing Git Bash. Neither is reachable from the local loop, so neither has been reproduced even once outside a CI log.'
+unverified: 'Groups A, C, D, E and F are closed, each verified red→green under wine. What remains UNVERIFIED is only the tail: the two `retrieval::index_lock` failures PASS under wine and FAIL on MSVC, so neither has been reproduced even once outside a CI log and the local loop cannot see them. They need a real `windows-latest` run.'
 ---
 
 ## Summary
@@ -45,6 +45,26 @@ MSVC has Git Bash; wine here does not. **MSVC failed only ONE test in that modul
 (`an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide`), so eight of these
 nine are wine-environment noise — the same reason `.github/workflows/ci.yml` carries a
 skip list on the wine job. Whether the ninth is real cannot be separated from this run.
+
+**RESOLVED 2026-08-26 by removing the environment gap rather than reasoning around it —
+`3a7599c2`, patch-id `ef59e5fd0215dad4603ce0dd2d4f378eb7025f74`.** PortableGit is a 7z
+SFX, so `7z x` unpacks it on Linux with no installer; `CODESCOUT_BASH` set to its
+**Windows** path (wine maps `/` to `Z:`) satisfies the resolver, and Git Bash runs under
+wine — `uname -s` returns `MINGW64_NT`. That took the module from **9 failures to exactly
+the 1 MSVC also had**, confirming the eight-vs-one split this entry could only infer.
+
+The ninth was real, and it is **the only production defect among all six groups**.
+`names_tracker_path` picks between two guides on a hardcoded forward-slash substring
+(`docs/issues/` / `docs/trackers/`); its doc comment asserted that was safe because
+`rel_path` is stored forward-slash and `abs_path` is relativized first. Neither holds on
+Windows: a backslash-spelled path matches nothing and the caller silently gets the
+**general** `librarian` guide instead of the one about the file they are editing. It fails
+as a wrong guide, never as an error. Fixed by normalizing separators, and by replacing the
+paragraph that made the false claim.
+
+The setup is documented in `scripts/build-windows.sh`'s header so the next person does not
+have to rediscover it — including that a green wine run is still not a green
+`windows-latest`.
 
 ### B. Wine passes what MSVC fails (2)
 
