@@ -251,8 +251,20 @@ See codescout memory `gotchas` (LSP section) for Kotlin multi-instance conflicts
 cold start behavior, circuit breaker, and LSP mux details.
 
 **Tracking:** the concurrent-instance failures were fixed in `dc44ac3d` (per-instance
-system-path, circuit breaker, diagnostics); that bug file was pruned as a dupe in
-`c6184884`, so the memory above is the canonical account. The heap/OOM bug is now
+system-path, circuit breaker, diagnostics). **That bug file existed in two places and both
+were deleted:** the open copy pruned as a dupe in `c6184884` (2026-04-30), and a second
+copy under `docs/issues/archive/` in `771d9516` (2026-05-02). The memory above is the
+canonical account.
+
+**Cite both SHAs when tracing a dead reference to either path.** Naming only `c6184884`
+makes a citation to the *archived* copy read as decayed — valid once, stale later — when
+any written after 2026-05-02 was wrong when authored; and the two need opposite fixes
+(re-point it, versus work out what the author actually meant). Measured at 16 days in
+`bug-fix-session-log:F-70`. Two later sweeps independently re-derived the same incomplete
+answer, both because they started from the one path this file used to name — which is why
+the omission is worth a paragraph rather than a clause. The deleted filename is left
+unwritten here on purpose, so the doc-ref audit does not read a statement of deletion as a
+citation (same reason as the ARCHITECTURE.md note under Docs). The heap/OOM bug is now
 closed too — `-Xmx2g` (`3adb66e7`), watchdog actuation, and a mem-kill that counts
 toward the LSP circuit breaker (`89f5d591`) — archived at
 `docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`.
