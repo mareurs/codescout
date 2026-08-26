@@ -276,13 +276,27 @@ impl LibrarianAdapter {
 /// `docs/issues/archive/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
 /// for the case where `doctor` was the missing shape.
 ///
-/// Forward-slash comparison is safe here: `rel_path` is always stored forward-slash (see
-/// `librarian(action="doctor")`'s forward-slash check), and `abs_path` is relativized by
-/// the path-strip pass before `call_content` computes the hint.
+/// Separators are normalized before matching. This paragraph used to claim a forward-slash
+/// comparison was safe — `rel_path` stored forward-slash, `abs_path` relativized before the
+/// hint is computed. Neither guarantee holds on Windows, where a backslash-spelled response
+/// path matched nothing and the caller silently got the general `librarian` guide. Measured
+/// under wine 2026-08-26, once Git Bash was available there to separate this from the eight
+/// no-POSIX-shell failures it had been hiding behind.
 fn names_tracker_path(result: &Value) -> bool {
     fn is_tracker_path(v: Option<&Value>) -> bool {
-        v.and_then(Value::as_str)
-            .is_some_and(|p| p.contains("docs/issues/") || p.contains("docs/trackers/"))
+        v.and_then(Value::as_str).is_some_and(|p| {
+            // Normalize separators before matching. This comment used to assert the
+            // opposite — that a forward-slash comparison was safe because `rel_path` is
+            // stored forward-slash and `abs_path` is relativized before the hint is
+            // computed. Neither guarantee survives Windows: a response path can arrive
+            // backslash-spelled, the hardcoded `docs/trackers/` never matches, and the
+            // caller silently receives the GENERAL `librarian` guide instead of the one
+            // about the file they are editing. It fails as a wrong guide, not an error —
+            // the same failure mode this function's own doc warns about for a missing
+            // response shape.
+            let p = p.replace('\\', "/");
+            p.contains("docs/issues/") || p.contains("docs/trackers/")
+        })
     }
     fn any_path_field(obj: &Value) -> bool {
         is_tracker_path(obj.get("abs_path")) || is_tracker_path(obj.get("rel_path"))

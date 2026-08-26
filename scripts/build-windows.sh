@@ -34,6 +34,21 @@
 # Caveat: wine executes the Win32 API surface (OpenProcess/TerminateProcess/...)
 # and the platform logic, but it is NOT EDR. EDR-only behaviors (GPU-probe skip,
 # run_command child hangs, AV-mediated kills) reproduce only on the VDI.
+#
+# Shell-dependent tests need a Windows bash: codescout runs commands through Git
+# Bash, and without one every `run_command`-touching test dies on "no POSIX shell
+# available" — 8 such failures in `server::guide_hint_tests` alone, which is enough
+# noise to hide a real one behind. Extract PortableGit (a 7z SFX; `7z x` unpacks it
+# on Linux, no installer) and point the resolver at it:
+#
+#   CODESCOUT_BASH='Z:\path\to\PortableGit\bin\bash.exe' scripts/build-windows.sh test --lib
+#
+# The value must be a WINDOWS path — wine maps `/` to `Z:`. With it set, that module
+# went 9 failures -> 1, and the 1 was a genuine Windows defect
+# (`docs/issues/2026-08-26-windows-lanes-still-red-on-four-remaining-causes.md` group A).
+#
+# Note this is still the gnu ABI. Two `retrieval::index_lock` tests PASS here and
+# FAIL on MSVC, so a green wine run is not a green `windows-latest`.
 set -euo pipefail
 
 TARGET="x86_64-pc-windows-gnu"
