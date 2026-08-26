@@ -208,6 +208,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // gap neither scan_undefined_entries nor link_scan's own report reaches. See
     // `scan_cited_prefix_with_no_definer`.
     all_violations.extend(scan_cited_prefix_with_no_definer(&cat.conn)?);
+    // The one check here that needs no threshold: a citation naming an archive path that
+    // holds nothing, for a bug still sitting un-archived, is wrong in every world. See
+    // `scan_premature_archive_citation`.
+    all_violations.extend(scan_premature_archive_citation(&cat.conn)?);
     // And beside both, the inverse of snapshot_drift: `params` behind a body that ran
     // ahead. Same two sets, subtracted the other way; opposite remedy.
     all_violations.extend(scan_params_behind_body(&cat.conn)?);
@@ -2882,6 +2886,121 @@ fn scan_cited_prefix_with_no_definer(conn: &rusqlite::Connection) -> Result<Vec<
                     .join(", ")
             ),
         ));
+    }
+    Ok(out)
+}
+
+/// Every `docs/issues/archive/<name>.md` a document names, ignoring shapes that cannot be a
+/// real citation: a placeholder (`<slug>.md`), a glob (`archive/**`), or a run that swallowed
+/// a slash or whitespace because the nearest `.md` was somewhere else entirely.
+///
+/// Deliberately NOT `link_scan::extract` — that reports a `RelPathLink` only for a markdown
+/// link (`Event::Start(Tag::Link)`); inline code goes to `scan_tokens`, which reads entry
+/// tokens and artifact ids and no paths at all. In this repo the citation form that actually
+/// occurs is a backticked path in prose, so extracting via `extract` would have seen none of
+/// the four sites that motivated this check.
+fn cited_archive_basenames(text: &str) -> std::collections::BTreeSet<String> {
+    const NEEDLE: &str = "docs/issues/archive/";
+    let mut out = std::collections::BTreeSet::new();
+    let mut rest = text;
+    while let Some(pos) = rest.find(NEEDLE) {
+        let after = &rest[pos + NEEDLE.len()..];
+        if let Some(end) = after.find(".md") {
+            let name = &after[..end + ".md".len()];
+            if !name.contains('/')
+                && !name.contains('<')
+                && !name.contains('*')
+                && !name.contains(char::is_whitespace)
+            {
+                out.insert(name.to_string());
+            }
+        }
+        rest = after;
+    }
+    out
+}
+
+/// `premature_archive_citation`: a document cites `docs/issues/archive/<slug>.md`, that path
+/// holds no artifact, and `docs/issues/<slug>.md` does — the bug is still open and the
+/// citation was written at the path the archive flow *would* create.
+///
+/// **Always wrong by construction, which is the point.** Every other check here needs a
+/// threshold or a judgement call to stay quiet; this one needs neither, because there is no
+/// world in which the state is correct. The cited path does not exist, and the file it
+/// unambiguously means is sitting un-archived one directory up. Both remedies are legitimate
+/// — repoint the citation, or complete the archive — and the check prefers neither.
+///
+/// **Why nothing else reports it.** `audit_doc_refs` does find these as missing paths, but
+/// `cap_code_comment` forces High→Med for a source comment, on purpose, so `--fail-on high`
+/// stays silent (`severity.rs`). `ArchiveDrop` does not apply either: it keys on whether the
+/// *citing* document is archived, not the target. And the archive sweep in
+/// `get_guide("tracker-conventions")` is triggered BY an archive move, so a citation written
+/// before one schedules no repair at all — no event fires, no sweep runs, no procedure owns
+/// the fix. See `bug-fix-session-log:F-69` and `claim-decay:DC-2`.
+///
+/// **Scope is catalogued artifacts only**, so this covers markdown and not `.rs` doc
+/// comments. That is the honest half of the boundary: of the four citations that motivated
+/// it, this reaches the two in markdown — exactly the two that carried full severity anyway
+/// — and the two in this file's own doc comments stay `audit_doc_refs` territory, capped.
+///
+/// A citer under any `archive/` directory is exempt, matching `apply_drops`' `archive_drop`:
+/// a retired document citing a path that was correct when written is a record, not drift,
+/// and rewriting it would falsify the record to satisfy a linter.
+fn scan_premature_archive_citation(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    // Partition catalogued bug files by basename. Archive is tested FIRST because
+    // `/docs/issues/archive/x.md` also contains `/docs/issues/`.
+    let mut archived: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut live: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for p in &paths {
+        if let Some((_, tail)) = p.split_once("/docs/issues/archive/") {
+            if !tail.contains('/') {
+                archived.insert(tail);
+            }
+        } else if let Some((_, tail)) = p.split_once("/docs/issues/") {
+            if !tail.contains('/') {
+                live.insert(tail);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for path in &paths {
+        if path.contains("/archive/") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        for name in cited_archive_basenames(&text) {
+            // The archive path is real — an ordinary, correct citation.
+            if archived.contains(name.as_str()) {
+                continue;
+            }
+            // Neither path exists: a plain dead link, and `audit_doc_refs`' to report. Firing
+            // here would duplicate it and assert a cause this check cannot know.
+            if !live.contains(name.as_str()) {
+                continue;
+            }
+            out.push(Violation::new(
+                "premature_archive_citation",
+                None,
+                path.clone(),
+                format!(
+                    "cites `docs/issues/archive/{name}`, which holds no artifact, while \
+                     `docs/issues/{name}` does — the bug is still open and the citation names \
+                     the path the archive flow *would* create. The archive sweep is triggered \
+                     BY an archive move, so a citation written before one schedules no repair: \
+                     no event fires and no procedure owns the fix. Either repoint the citation \
+                     to `docs/issues/{name}`, or complete the archive via \
+                     `artifact(action=\"move\")` and re-point every citation in the same commit."
+                ),
+            ));
+        }
     }
     Ok(out)
 }
@@ -5877,6 +5996,116 @@ mod tests {
             "T is declared, so it's a known-but-empty namespace -- ledger_defines_nothing's \
              territory"
         );
+    }
+
+    // ---- scan_premature_archive_citation ---------------------------------------------------
+
+    /// Regression for `bug-fix-session-log:F-69` / `claim-decay:DC-2`: a citation written at
+    /// fix time naming the path the archive flow *would* create, for a bug that then stayed
+    /// open. Nothing else reports it — `audit_doc_refs` caps a source comment to Med by
+    /// design, and the guide's archive sweep is triggered BY a move that never happened.
+    #[test]
+    fn premature_archive_citation_fires_when_the_bug_is_still_live() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "bug", "/repo/docs/issues/2026-08-26-still-open.md");
+        seed_ledger(
+            &cat,
+            "citer",
+            &tmp.path().join("guide.md"),
+            "Root cause in `docs/issues/archive/2026-08-26-still-open.md`.\n",
+        );
+
+        let v = scan_premature_archive_citation(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].check, "premature_archive_citation");
+        assert!(
+            v[0].detail.contains("2026-08-26-still-open.md"),
+            "must name the slug so the fix is actionable: {}",
+            v[0].detail
+        );
+    }
+
+    /// The ordinary, correct case: the bug really is archived. Firing here would flag every
+    /// well-formed citation in the repo, which is the failure mode that would get the check
+    /// switched off rather than fixed.
+    #[test]
+    fn premature_archive_citation_is_silent_when_the_archive_path_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "bug", "/repo/docs/issues/archive/2026-08-26-done.md");
+        seed_ledger(
+            &cat,
+            "citer",
+            &tmp.path().join("guide.md"),
+            "Fixed — see `docs/issues/archive/2026-08-26-done.md`.\n",
+        );
+
+        assert!(
+            scan_premature_archive_citation(&cat.conn)
+                .unwrap()
+                .is_empty(),
+            "a citation to a path that exists is not this check's business"
+        );
+    }
+
+    /// Neither path exists: a plain dead link, which `audit_doc_refs` already reports. This
+    /// check claims a specific CAUSE — written-before-the-move — and it cannot know that
+    /// about a slug the corpus has never held, so it must not guess.
+    #[test]
+    fn premature_archive_citation_is_silent_when_neither_path_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "citer",
+            &tmp.path().join("guide.md"),
+            "See `docs/issues/archive/2026-01-01-never-existed.md`.\n",
+        );
+
+        assert!(
+            scan_premature_archive_citation(&cat.conn)
+                .unwrap()
+                .is_empty(),
+            "a dead link with no live twin is audit_doc_refs' finding, not a premature citation"
+        );
+    }
+
+    /// A retired document citing a path that was correct when written is a record, not drift.
+    /// Same exemption `apply_drops`' `archive_drop` makes, for the same reason: rewriting it
+    /// would falsify the record to satisfy a linter.
+    #[test]
+    fn premature_archive_citation_is_silent_for_a_citer_under_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "bug", "/repo/docs/issues/2026-08-26-still-open.md");
+        seed_ledger(
+            &cat,
+            "retired",
+            &tmp.path().join("archive").join("old-log.md"),
+            "Back then: `docs/issues/archive/2026-08-26-still-open.md`.\n",
+        );
+
+        assert!(
+            scan_premature_archive_citation(&cat.conn)
+                .unwrap()
+                .is_empty(),
+            "an archived citer is a historical snapshot and is exempt"
+        );
+    }
+
+    /// The extractor must not read documentation ABOUT the convention as a citation. Both
+    /// shapes occur in `tracker-conventions.md` itself, which is also a catalogued artifact —
+    /// so a naive scan would make the guide that teaches the rule the check's loudest
+    /// violator.
+    #[test]
+    fn cited_archive_basenames_ignores_placeholders_and_globs() {
+        let names = cited_archive_basenames(
+            "write docs/issues/archive/<slug>.md, leave docs/issues/archive/** alone, \
+             and cite docs/issues/archive/real-one.md\n",
+        );
+        assert_eq!(names.len(), 1, "{names:?}");
+        assert!(names.contains("real-one.md"), "{names:?}");
     }
 
     /// The core positive. The body's index table carries ids that `params` has no
