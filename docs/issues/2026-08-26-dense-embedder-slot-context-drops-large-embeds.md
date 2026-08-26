@@ -208,51 +208,59 @@ for rows lacking a vector.
 
 ## Resume
 
-**Resume item 1 is now answered — the code-indexing surface is worse than the
-memory surface, and the answer raises this bug's severity.**
+### Measured 2026-08-26 — which surface is actually reachable
 
-Confirmed 2026-08-26 by reading `flush_pending` (`src/retrieval/sync.rs:223-243`)
-and its call sites: an oversized chunk does **not** get skipped and does **not**
-get silently dropped. It **aborts the entire index build**:
+Resume item 1 asked whether the code-indexing surface has the same hole. **It has
+the same code shape but is NOT reachable on this stack**, and an earlier revision
+of this section said the opposite ("the code-index surface is worse than the
+memory surface"). That was read from the code and never measured. Corrected:
 
-```
-sync.rs:238  embedder.embed_batch_dyn(&texts).await?   ← whole BATCH fails, not one chunk
-sync.rs:403  added += flush_pending(...).await?        ← early return, mid-walk
-sync.rs:409  added += flush_pending(...).await?
-sync.rs:422  prune step                                ← skipped
-```
+| Probe (live `POST /v1/embeddings`, CodeRankEmbed) | Result |
+|---|---|
+| per-input ceiling, binary search | **8000-8250 chars** (~2000-2062 tokens), matching `n_ctx_train` = 2048 |
+| `256 × 1200` chars in one request (production `DEFAULT_FLUSH_BATCH`) | HTTP 200 — the limit is per **input**, not per batch total |
+| `MAX(LENGTH(content))` over 47k live chunks, by language | **1200 in every language**, markdown included; zero over 8000 |
 
-Batches already flushed are committed at `:241`, so the result is a durable,
-truncated index — and `index(action="status")` reports it as
-`indexed: true, queryable: true`, because its only check is a non-zero chunk
-count. That is the confirmed root cause of
+`chunk_target` defaults to 1200 chars and the chunker enforces it as a hard cap,
+so a chunk sits ~6.7× under the ceiling. The same holds on the reporter's
+`--ctx-size 8192 --parallel 8` (1024 tokens/slot ≈ 4000 chars): still 3× clear.
+
+So the two surfaces rank the other way round:
+
+| Surface | Reachable? | Handling |
+|---|---|---|
+| **memory** (`memory/mod.rs:735`) | **Yes** — `cross_embed_memory` sends the whole memory in one request, no cap at any layer | error swallowed to a warning; write reports `ok`, vector missing |
+| code index (`sync.rs:238` → `:403`) | **No, at `chunk_target` 1200** — needs a >8000-char single chunk | fixed in `a5f8e5ad`: isolate, skip, report |
+
+The `a5f8e5ad` fix is therefore **defensive hardening of a real code defect, not a
+repair of an observed failure on this configuration** — any batch failure from any
+cause truncates the walk, and that is worth fixing regardless. But it does **not**
+explain the reporter's truncated index, and this file no longer claims it does.
+See the CORRECTION block in
 `docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md`.
 
-So this bug has two distinct surfaces with **opposite** error handling, both wrong:
+### The error strings, measured rather than quoted
 
-| Surface | Handling | Result |
-|---|---|---|
-| memory (`memory/mod.rs:735`) | error swallowed to a warning | write reports `ok`, vector missing |
-| code index (`sync.rs:238→403`) | error propagated with `?` | whole build aborts, partial index reported healthy |
+This stack emits **HTTP 500** `input is too large to process. increase the
+physical batch size` (`type: server_error`) — *not* the HTTP 400
+`exceed_context_size_error` this issue documents. Two different llama.cpp paths
+(n_batch vs n_ctx-per-slot) with different remedies. `67c548b9`'s first version of
+`classify_search_error`'s size arm matched only the wording quoted in this issue,
+so it would not have fired on the very stack it was written for — caught by
+calling the real server, fixed, and both variants are now pinned by tests.
 
-Next concrete actions, in order:
+### Next concrete actions
 
-1. **Fix `flush_pending`'s granularity.** A batch failure must not condemn the
-   batch. On `embed_batch_dyn` error, retry the batch per-chunk to isolate the
-   offending payload(s), embed the rest, and report the skipped chunks rather
-   than aborting the walk. Segmenting oversized chunks (see Fix step 2) is the
-   better end-state, but per-chunk isolation is what stops a truncated index
-   being reported as complete.
-2. **Attach the HTTP body** to the dense-openai transport error, so both
-   surfaces say "payload too large" instead of `dense openai status`. Cheapest
-   fix, and it is what makes every future instance self-diagnosing.
-3. Then the segmentation work in Fix step 2, which closes the hole properly and
-   is model-ceiling-aware rather than `ctx_size`-aware.
-
-Note the shared shape across three bugs filed this session: **a `?` on an embed
-call inside a loop that has already committed partial state.** `sync.rs:238`
-here, `librarian/tools/reindex.rs:236` in the catalog reindex bug, and the
-inverse error (swallowing) at `memory/mod.rs:735`. Worth fixing as one pattern.
+1. **The memory surface is the live hole. Reproduce it**: `memory(action="write")`
+   with >8250 chars of content, then `recall` a phrase unique to it. Expect
+   `status: "ok"` with a `cross-embed failed` warning and no hit. Needs `cargo rb`
+   + `/mcp` first, or the probe runs against the pre-fix binary.
+2. **Segment and mean-pool in `cross_embed_memory`.** Budget from the *model's*
+   ceiling — measured at ~2048 tokens here — not from `ctx_size / parallel`. Do
+   not hardcode 2048: discover it, or make it configurable with that default.
+3. Then the repair path (Fix step 4): confirm the in-place re-embed migration
+   picks up memories that lack a vector, not just those on the old convention.
+   Without it, memories already lost stay lost after the fix.
 ## References
 
 - GitHub issue #15 — <https://github.com/mareurs/codescout/issues/15>

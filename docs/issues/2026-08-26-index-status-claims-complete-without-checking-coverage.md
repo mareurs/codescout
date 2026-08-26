@@ -125,13 +125,41 @@ Four consequences compound:
    ran for every prior flush, so a partial index is durably persisted.
 4. **The prune at `:422` is skipped**, so stale rows also survive.
 
-Then this bug's status gap reports the result as `indexed: true, queryable:
-true`. That is the complete causal chain for the reporter's 486-of-1606 index:
-an oversized chunk truncates the build, and status calls the truncation healthy.
+Then this bug's status gap reports the result as `indexed: true, queryable: true`.
 
-`docs/` being markdown-heavy (25232 chunks over 1089 files) makes it a plausible
-source of the oversized chunk, though the walk ordering that left `docs/` at
-exactly 0 while `src/` kept 298 is not established — do not claim it.
+### CORRECTION 2026-08-26 — the mechanism is real, the trigger is NOT reachable
+
+An earlier revision of this section called the above "the complete causal chain
+for the reporter's 486-of-1606 index: an oversized chunk truncates the build, and
+status calls the truncation healthy." **The second half stands; the first half was
+wrong, and was measured wrong rather than reasoned wrong.**
+
+Measured on the live stack, 2026-08-26:
+
+| Probe | Result |
+|---|---|
+| Per-input ceiling, by binary search on `POST /v1/embeddings` | between **8000 and 8250 chars** (~2000-2062 tokens) — matches CodeRankEmbed's `n_ctx_train` = 2048 exactly |
+| `256 × 1200`-char inputs in one request (production's `DEFAULT_FLUSH_BATCH`) | **HTTP 200** — the limit is per input, not per batch total |
+| `MAX(LENGTH(content))` over all 47k live chunks, grouped by language | **1200 for every language**, markdown included; **zero** chunks over 8000 |
+
+`chunk_target` defaults to 1200 chars (`src/retrieval/sync.rs`,
+`STACK_CHUNK_TARGET`) and the chunker enforces it as a hard cap — so a code or
+markdown chunk sits ~6.7× below the ceiling and **cannot** trigger the refusal.
+That holds on the reporter's configuration too: `--ctx-size 8192 --parallel 8`
+gives 1024 tokens/slot ≈ 4000 chars, still over 3× a 1200-char chunk.
+
+Two consequences, both honest:
+
+- **The abort mechanism is confirmed** (read at the code, `sync.rs:238` → `:403`)
+  and worth fixing on its own — any batch failure, from any cause, truncates the
+  walk and the result reports healthy. That is what `a5f8e5ad` fixed.
+- **What truncated the reporter's index is still unknown.** An oversized chunk is
+  now ruled out. Do not re-file it as the cause. The `docs/`-is-markdown-heavy
+  hypothesis is also refuted by the table above — markdown obeys the same cap.
+
+The reachable surface for an oversized payload is `cross_embed_memory`, which
+sends a whole memory in one request with no cap at all — see
+`docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`.
 
 **The codebase already knows this hazard class and reasoned about it once, in
 the wrong place.** `src/retrieval/sync.rs:581` in `sync_worktree` says:
@@ -215,12 +243,27 @@ genuinely anomalous.
    abort (bugs #15 / #19 above).
    **Test:** read `flush_pending` (`src/retrieval/sync.rs:223-243`) and its two
    call sites in `stream_index` (`:403`, `:409`).
-   **Verdict:** **confirmed.** `embed_batch_dyn(&texts).await?` at `:238`
-   propagates out of `flush_pending`, and `?` at `:403`/`:409` is an early
-   return out of the walk. Prior batches are already committed at `:241`, and
-   the prune at `:422` is skipped. An oversized chunk therefore truncates the
-   build and leaves a durable partial index — which check 4 above then reports
-   as healthy. See Root cause.
+   **Verdict:** **split — mechanism confirmed, trigger REFUTED.**
+   `embed_batch_dyn(&texts).await?` at `:238` propagates out of `flush_pending`,
+   and `?` at `:403`/`:409` is an early return out of the walk; prior batches are
+   already committed at `:241` and the prune at `:422` is skipped. So *a* batch
+   failure does truncate the build and leave a durable partial index that check 4
+   reports as healthy — confirmed, and fixed in `a5f8e5ad`.
+   But **an oversized chunk cannot be that failure.** Measured 2026-08-26: the
+   per-input ceiling is 8000-8250 chars, every live chunk is ≤1200 in every
+   language, and a 256×1200 batch returns HTTP 200. See the CORRECTION block in
+   § *Root cause* for the full table. This entry previously read "confirmed" and
+   overstated what had been established — the code was read, the substrate was
+   not measured until later.
+6. **Hypothesis:** `docs/` being markdown-heavy makes markdown the likely source
+   of an oversized chunk (the reporter's missing corpus was `docs/`).
+   **Test:** `MAX(LENGTH(content))` grouped by language over all 47k live chunks.
+   **Verdict:** rejected — markdown's max is 1200, identical to Rust's. The
+   chunker's cap is language-independent.
+7. **Hypothesis:** production's `DEFAULT_FLUSH_BATCH = 256` makes the *batch
+   total* (~307k chars) exceed a server limit, even though each input is small.
+   **Test:** posted 128 and 256 inputs of 1200 chars to the live embedder.
+   **Verdict:** rejected — both returned HTTP 200. The limit is per input.
 
 ## Fix
 ### Progress 2026-08-26 — root cause fixed, headline defect still open

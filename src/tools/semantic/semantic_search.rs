@@ -71,13 +71,36 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     //     collection bucket. Specificity first, per this function's own contract.
     if err_str.contains("larger than the max context size")
         || err_str.contains("exceed_context_size")
+        || err_str.contains("input is too large")
+        || err_str.contains("physical batch size")
     {
-        "The text could not be embedded because it exceeds the embedding model's \
-         context ceiling. This is a PAYLOAD SIZE problem, not an outage — retrying \
-         will not help, and neither will raising llama.cpp's --ctx-size past the \
-         model's own n_ctx_train. Shorten the query. If you are seeing this during \
-         indexing, the affected chunks are reported as `skipped` in the index status \
-         and the index is INCOMPLETE until they embed."
+        // FOUR patterns, because llama.cpp has (at least) TWO distinct payload-size
+        // refusals and they differ in status, type AND remedy. Measured against the
+        // running CodeRankEmbed server on 2026-08-26 by binary search on input size:
+        //
+        //   8000 chars  -> HTTP 200
+        //   8250 chars  -> HTTP 500 {"message":"input is too large to process.
+        //                  increase the physical batch size","type":"server_error"}
+        //
+        // The n_batch refusal above is what this stack actually emits. The n_ctx
+        // refusal — HTTP 400, `exceed_context_size_error`, "input (N tokens) is larger
+        // than the max context size (M tokens)" — is what a slot-constrained
+        // configuration emits (`--ctx-size N --parallel P` gives N/P per slot) and is
+        // the one the originating bug report documented.
+        //
+        // Matching only the reported wording is the mistake this comment exists to
+        // prevent: the first version of this arm did exactly that, so it would not
+        // have fired on the very stack it was written for. Green tests, dead branch.
+        "The text could not be embedded because it exceeds a size limit on the \
+         embedding server. This is a PAYLOAD SIZE problem, not an outage — the server \
+         is up and retrying the same input will fail again. Shortening the input \
+         always works. Raising a server limit sometimes does: `--ubatch-size` / \
+         `--batch-size` lifts the physical-batch ceiling, but `--ctx-size` CANNOT lift \
+         the per-request ceiling past the model's own n_ctx_train (2048 for \
+         CodeRankEmbed), so no server configuration makes an over-long single input \
+         embeddable. If you are seeing this while indexing, the affected chunks are \
+         listed as `skipped` in the index status and the index is INCOMPLETE until \
+         they embed."
             .to_string()
     } else if err_str.contains("dense openai status") || err_str.contains("sparse openai status") {
         "The dense embedder returned an error status. This is an embedder problem, \
@@ -1087,6 +1110,39 @@ mod classify_search_error_tests {
             !hint.contains("retrieval-stack.sh up"),
             "must NOT suggest restarting the stack — the payload is too big, the stack \
              is fine: {hint}"
+        );
+    }
+
+    /// The variant this stack actually emits, which the first version of the arm above
+    /// did NOT match — so the hint was dead on the very configuration it was written
+    /// for. Green tests, dead branch, caught only by calling the real server.
+    ///
+    /// Measured 2026-08-26 against the running CodeRankEmbed llama-server by binary
+    /// search on input length: 8000 chars → HTTP 200; 8250 chars → HTTP 500 with
+    /// `{"message":"input is too large to process. increase the physical batch size",
+    /// "type":"server_error"}`. Note it is a 500 and a `server_error`, not the 400
+    /// `exceed_context_size_error` the originating issue documented — same class of
+    /// problem, different llama.cpp code path (n_batch vs n_ctx-per-slot), different
+    /// remedy.
+    #[test]
+    fn the_n_batch_payload_refusal_this_stack_emits_also_routes_to_the_size_hint() {
+        let err = "dense openai status 500: {\"error\":{\"code\":500,\"message\":\"input is \
+                   too large to process. increase the physical batch size\",\"type\":\
+                   \"server_error\"}}";
+        let hint = classify_search_error(err, "codescout");
+        assert!(
+            hint.contains("PAYLOAD SIZE"),
+            "the n_batch refusal is a size problem too, not an outage: {hint}"
+        );
+        assert!(
+            !hint.contains("retrieval-stack.sh up"),
+            "must not tell the operator to restart a server that is up: {hint}"
+        );
+        // A 500 must not be read as "the stack went away" — that is the misrouting the
+        // generic and transport buckets would produce.
+        assert!(
+            !hint.contains("Stack went offline") && !hint.contains("Stack reachable but"),
+            "a 500 carrying a size message is not an outage: {hint}"
         );
     }
 
