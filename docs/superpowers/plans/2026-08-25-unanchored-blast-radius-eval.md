@@ -30,7 +30,7 @@ Every task's requirements implicitly include this section.
 - **Run tests with the venv:** `.venv/bin/python -m pytest scenarios/blast-radius/`.
   A bare `pytest` collects **zero** scenario tests — `pyproject.toml:36` sets
   `testpaths = ["tests"]`, measured 408 of 408 node ids under `tests/`
-  (`codescout:prompt-surface-measurement-session-log:F-13`). A green repo run is not
+  (`prompt-surface-measurement-session-log:F-13`). A green repo run is not
   evidence about this directory.
 - **No paid run before Task 8.** Every task up to and including the mutation harness
   is free. The first `claude -p` invocation is Task 9.

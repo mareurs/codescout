@@ -1458,7 +1458,7 @@ calibration are all keyed to the old truth-set size.
 
 **Severity:** high — the failure mode is the silent-zero shape this very plan warns about
 in three separate places (the missing exec bit reporting a clean `0/N`; `count: 0` against
-233 files; `codescout:prompt-surface-measurement-session-log:F-13`'s bare-`pytest`-collects-nothing).
+233 files; `prompt-surface-measurement-session-log:F-13`'s bare-`pytest`-collects-nothing).
 A green `-k leak` with zero tests selected is character-identical to a clean sweep, and the
 anti-oracle guard is the single thing standing between this eval and a fixture where one
 `grep getattr(` is the whole answer.
@@ -1597,7 +1597,7 @@ plan names.
 1. This session — three findings, one ungated, before any subagent ran.
 2. [[W-14]] (2026-08-25) — reading the real dependency chain before writing this same
    spec turned an unbuildable trap into a buildable one.
-3. `codescout:bug-fix-session-log:W-2` / `F-3` (2026-05-18) — pre-dispatch scout caught a
+3. `bug-fix-session-log:W-2` / `F-3` (2026-05-18) — pre-dispatch scout caught a
    plan citing a `RecoverableError.hint` field that does not exist.
 
 **Impact:** high — the F-17 class is the one that matters. A defect with a downstream gate
