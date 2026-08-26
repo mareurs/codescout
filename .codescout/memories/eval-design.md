@@ -450,3 +450,64 @@ regex, which the first pass got wrong in a way worth remembering — requiring q
 the token silently dropped YAML and TOML **bare keys** and undercounted by 5× (13 names →
 66). Probe: `scratchpad/string_dispatch2.py` (session b02898c3); `string_dispatch.py` is v1
 and is kept only as the worked example of the trap.
+
+
+### The empty fourth cell — what could fill it, and why we chose not to yet
+
+The blast-radius fixture's three buckets are not three mechanisms. They are three points in
+a 2×2 of **which tool reaches the dependent**, and the fourth cell is empty:
+
+|  | `references()` reaches | `references()` misses |
+|---|---|---|
+| **grep-by-name finds** | BOTH_FIND | LEXICAL_ONLY |
+| **grep-by-name misses** | CHASE_REQUIRED | *— empty —* |
+
+Six candidate mechanisms, measured 2026-08-26 over 8 corpora / 8,379 files
+(`scripts/probe_dependency_vectors.py`), as % of files containing at least one:
+
+| vector | % files | sites | grep-by-name? | `references()`? | verdict |
+|---|---|---|---|---|---|
+| `inherit` | **48.0%** | 18,441 | usually | usually | drop — lands in BOTH_FIND |
+| `callback` | **21.6%** | 14,606 | no | **wrong direction** | **a new axis, not a cell** |
+| `assembled` | **9.4%** | 2,598 | **no** | **no** | **true fourth cell** |
+| `registry` | **5.2%** | 4,453 | **no** | reaches the table, stops | fourth cell, other flavour |
+| `monkeypatch` | 2.6% | 672 | yes | partly | drop — spells the name, and rare |
+| `entrypoint` | 0.2% | 24 | `.toml` only | no | drop — config rows cover it |
+
+**The design test is not "is this mechanism real" — all six are. It is "does it occupy a
+distinct point in the tool-advantage space", because that is what the partition partitions.**
+By that test the most *common* vector (`inherit`, 48%) is worthless — LSP resolves overrides
+and grep finds the method name, so it is BOTH_FIND under another name. Prevalence and
+discriminating power are close to uncorrelated here.
+
+- **`assembled`** — `getattr(mod, "duty_" + kind)`. The token `duty_multiplier` exists
+  *nowhere* in the dependent, so neither tool can reach it; only reading and reasoning can.
+- **`registry`** — `@register("duty")` plus `REGISTRY["duty"]()`. The name exists as a
+  string, but a *different* string. Strictly harder than LEXICAL_ONLY, which at least leaves
+  the real name greppable.
+- **`callback`** — the arrow points the other way: the defect calls the dependent. An agent
+  asking *"who depends on this?"* runs callers and structurally cannot arrive, whatever tool
+  it holds. Orthogonal to the 2×2 rather than a hole in it.
+
+`Decision (2026-08-26): do NOT add any of them to this eval yet.` Two reasons, and the
+second is the one that generalises. **(1) Cost:** every addition moves the generated tree,
+re-deriving the leak sweep, the null-control bars — the lift ceiling is `N/n`, so changing
+the truth-set size changes what is even *detectable* — and the edge-margin seed calibration.
+Task 2b was exactly this change and cost a full task plus two fix rounds. **(2) A fourth cell
+where neither tool can win REDUCES the eval's power.** Every dependent placed there is a
+dependent that cannot express a difference between the arms. A bucket measuring *reasoning*
+does not belong in an eval whose hypothesis is about *retrieval*; it is a second eval, and a
+tool-independent one.
+
+**Revisit trigger — read the pilot's traces first.** If BOTH_FIND / CHASE_REQUIRED /
+LEXICAL_ONLY all saturate or all floor, the instrument is not resolving the three buckets it
+already has and a fourth is premature. That read is free: it comes from data Task 9 collects
+anyway. If they *do* separate, the highest-value addition is the **inverted axis**, and it
+likely deserves its own fixture — it changes the question (*"who depends on this?"* →
+*"what does this touch?"*), and a question change is a new eval, not a new row.
+
+**Two more vectors named but NOT measured**, because AST shape does not find them: **value
+coupling** (the dependent hardcodes the constant, so grep-by-*value* works and
+grep-by-*name* does not) and **test golden files** (an expected value baked into an
+assertion, naming nothing). Both are real, both are classic agent blind spots, and both need
+a different detector.
