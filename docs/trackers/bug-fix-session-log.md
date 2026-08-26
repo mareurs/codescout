@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 66
-entry_high_water_W: 57
+entry_high_water_W: 58
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -182,6 +182,7 @@ entry_high_water_W: 57
 | W-57 | 2026-08-26 | high | Call the tool live on the real backend before shipping tool-facing OUTPUT — a fixture built from a bug report's quoted error string is NOT a live check | `67c548b9`'s payload-size hint matched the wording quoted in the issue (`exceed_context_size`, HTTP 400); the running server emits HTTP 500 `input is too large to process` from llama.cpp's n_batch path, so the arm was dead on the very stack it was written for — 3 tests, clippy clean, 4477 green, and an operator would have got the generic hint instead of "retrying will not help" | validated |
 | W-55 | 2026-08-26 | high | Before trusting a diagnostic, confirm the serving process is not running a DELETED binary — `ls -l /proc/<pid>/exe`, with the pid found by walking `ps -o ppid=` up from a `run_command` shell | A peer session's `cargo rb` unlinked this session's server binary 70 minutes after it started; `doctor` then reported a check as broken that had been fixed 80 minutes earlier, and the next step was reopening a closed bug to repair a guard that works. Unlike R-89 the rebuild was someone else's, so commit, tree and binary mtime all read green and nothing in the transcript hinted at it | validated |
 | W-56 | 2026-08-26 | high | EXECUTE a bug file's archive precondition rather than asserting it is met — it is a check someone deliberately deferred, so the cheapest disposal is also the only silent failure | "Confirm CI, then archive" read as boilerplate from a stricter era. CI had been red on every Test lane since 2026-08-19 — 3 OSes × 3 feature sets — on one test that resolves an embedder from ambient config; the mandated local gate runs in the developer's environment by construction and can never show it. Cost two gh calls; the alternative was archiving six files under a green that was true only on this machine | validated |
+| W-58 | 2026-08-26 | med-high | Read the live envelope AND its formatter in ONE pass — the live response is a census of the keys that path emits, so any `Option`-guarded reader of a key absent from it is dead code | `format_index_status`'s model and timestamp arms have had no producer anywhere in the repo since `79e0e4f2` (2026-05-13, whose own message lists them as dropped). The test covering them hand-builds the response it asserts on, so it stayed green for 3.5 months across 4494 tests — and `docs/manual/src/troubleshooting.md:231` still tells users to compare `configured_model` against `indexed_with_model` to diagnose the exact model mismatch #18 was about, when `configured_model` has never been emitted by any commit in this repo's history | validated |
 
 ## Category conventions
 
@@ -5045,6 +5046,80 @@ pin the quoted text.
 **Rests on:** `docs/RELEASE.md` § *Before cherry-pick: read the live output of any
 tool-facing change (required)* and its two prior datapoints, which this extends
 rather than establishes.
+
+## W-58 — The live-output read is a census of the keys a path emits — which is what exposes a reader of a key nothing writes
+
+**Valid:** invariant
+
+**Status:** validated
+
+**Observed:** 2026-08-26, running `docs/RELEASE.md`'s required live-output step for
+`48825529` — the `index(action="status")` envelope change. The step's stated purpose is
+to check *your own* change. It found a defect that predates it by three and a half
+months.
+
+**Pattern:** Read the live envelope **and** its formatter in the same pass. The live
+response is not only evidence about the change under review — it is a **census of the
+keys that path actually emits**, and any `if let Some(...)` in the formatter over a key
+absent from that census is dead code. Producer/consumer mismatch becomes free to spot,
+because both halves are in front of you at once. Nothing else in the project surfaces
+it: the readers are `Option`-guarded, so a missing key is silently inert rather than a
+panic, a wrong value, or a failing test.
+
+**Counterfactual, concrete.** `format_index_status`
+(`src/tools/semantic/index.rs:968-1012`) ends with four appended segments; two of them —
+`indexed_with_model` (`:995`) and `indexed_at` (`:998`) — have had **no producer
+anywhere in the repo** since `79e0e4f2` (2026-05-13, "re-route IndexStatus to Qdrant"),
+whose own commit message lists both under *"Dropped fields (sqlite-only metadata)"*.
+Measured: `grep("indexed_with_model", mode="files")` → four files repo-wide, all of them
+the two readers, one test, and two docs. Zero producers.
+
+The durable harm is not the dead code. `docs/manual/src/troubleshooting.md:231` tells a
+user diagnosing an embedding-model mismatch to read `configured_model` and
+`indexed_with_model` off a `status` response and check they match. **`configured_model`
+has never been emitted by any commit in this repo's history** — `git log -S` finds a
+five-commit history for `indexed_with_model` and none at all for it. So the manual's
+documented detection procedure for a model mismatch names two fields, neither of which
+exists, for exactly the failure class GitHub #18 was about (a dimension mismatch *is* a
+model mismatch). Filed as
+`docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md`.
+
+**What this sharpens, beyond `W-57`.** `W-57`'s three datapoints are all fixtures whose
+*content* was wrong — the reported error wording, the single-hidden-entry case, the inert
+`create.rs` path. This one is a fixture whose **provenance** is wrong.
+`format_index_status_shows_model_and_timestamp` (`src/tools/semantic/tests.rs:502-528`)
+hand-builds a `json!` literal containing `"indexed_with_model"` and `"indexed_at"`, then
+asserts the formatter renders them. It has been green continuously since the fields were
+deleted, and **no amount of case variety would ever have helped**: the test author wrote
+the response as well as the assertion, so the test can only ever prove `push_str` works.
+The tell is structural and greppable — **a formatter test that constructs its own input
+by hand asserts on a shape the product may not produce.** It is the "fixture could never
+reach the gate" mechanism, one layer up: not an input that fails a validator, but a
+*response* the code under test never builds.
+
+**Second-order finding: a partially-reversed removal is a worse record than a total
+one.** `git_sync` and `last_indexed_commit` are on `79e0e4f2`'s identical dropped list,
+and both are in the live envelope today (`src/tools/semantic/index.rs:686` restores them
+via `index_state::git_sync_status`). So anyone comparing that commit message against
+current behaviour finds it *partly false*, which reads as a stale commit message rather
+than as a live inventory of what is still missing. The reversal that got done is what
+concealed the reversals that did not.
+
+**Impact:** medium-high. Nothing is corrupt and nothing crashes; a documented
+user-facing diagnostic procedure is simply inoperable, and has been for three and a half
+months across every gate the project has — 4494 green tests included, one of which is
+*about* the missing fields.
+
+**Promote-when:** the RELEASE.md step is already `required`, so no promotion is owed for
+the step itself. Promote the **structural tell** — *a formatter/renderer test that
+hand-builds the value it formats proves nothing about the keys the product emits* — to
+`docs/conventions/` or the reconnaissance skill's green-result bullet at a second
+datapoint. Search shape for the second: a `json!` / dict literal inside a test whose
+subject is a pure formatting function.
+
+**Rests on:** `docs/RELEASE.md` Standard Ship Sequence step 1 (live-output sub-clause);
+the reconnaissance skill's *"a green result certifies the path that actually EXECUTED"*
+rule, of which this is a new mechanism rather than a new instance.
 
 ## Template for new entries
 
