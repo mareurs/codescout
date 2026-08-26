@@ -161,6 +161,14 @@ pub enum CitationKind {
     ArtifactId,
     RelPathLink,
     CrossRepoToken,
+    /// A citation with 2+ qualifier segments before the entry token
+    /// (`<repo>:<file-stem>:<ID>`). The resolver has no notion of a second
+    /// qualifier segment, and the extraction regex for a single qualifier SLIDES
+    /// past an unmatchable prefix rather than failing to match — so without this
+    /// variant, a malformed double-qualified citation silently collapses to a
+    /// working single-qualifier one with no signal to the author.
+    /// docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
+    MalformedQualifier,
 }
 
 impl CitationKind {
@@ -181,6 +189,7 @@ impl CitationKind {
             CitationKind::ArtifactId => "ArtifactId",
             CitationKind::RelPathLink => "RelPathLink",
             CitationKind::CrossRepoToken => "CrossRepoToken",
+            CitationKind::MalformedQualifier => "MalformedQualifier",
         }
     }
 }
@@ -278,6 +287,30 @@ fn id_re() -> &'static Regex {
 fn cross_repo_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\b[a-z][a-z0-9_-]{1,119}:[A-Z]{1,3}-\d+\b").unwrap())
+}
+
+/// Double-qualified citation: `codescout:statement-validity-session-log:F-2`. Matches
+/// the FULL `<qualifier>(:<qualifier>)+:<TOKEN>` span directly — two or more
+/// colon-separated qualifier segments before the entry token — so it wins the
+/// leftmost-match race against `cross_repo_re` and the outer qualifier is never
+/// silently dropped by that regex's own slide.
+///
+/// `cross_repo_re` only ever anchors on the LAST qualifier segment because its
+/// pattern has no notion of an earlier one: for `codescout:statement-validity-
+/// session-log:F-2` it fails to match starting at `codescout` (the character after
+/// `codescout:` is `s`, not `[A-Z]`) and slides to the next `\b`, which is right
+/// after the dropped segment's colon. This regex is checked FIRST in `scan_tokens`
+/// specifically so the whole span is claimed before that slide has a chance to fire.
+///
+/// No resolver support is planned for this form — see the bug this fixes. The point
+/// is visibility, not resolution: a citation shaped like this is malformed, not
+/// merely unresolved.
+fn double_qualified_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\b[a-z][a-z0-9_-]{1,119}(?::[a-z][a-z0-9_-]{1,119})+:[A-Z]{1,3}-\d+\b")
+            .unwrap()
+    })
 }
 
 /// Definition shape: heading's first text starts with an entry token followed
@@ -413,9 +446,11 @@ pub fn extract(text: &str) -> DocExtract {
     out
 }
 
-/// Scan one text chunk for cross-repo tokens, entry tokens, and artifact ids.
-/// Cross-repo matches are found first and their spans masked so the embedded
-/// entry token is not double-reported.
+/// Scan one text chunk for double-qualified (malformed), cross-repo, and entry
+/// tokens, and artifact ids. Double-qualified matches are found first and masked so
+/// `cross_repo_re`'s own slide never re-claims their tail as a working two-part
+/// citation; cross-repo matches are then found and masked so the embedded entry
+/// token is not double-reported.
 fn scan_tokens(
     out: &mut DocExtract,
     seen: &mut std::collections::BTreeMap<(CitationKind, String), usize>,
@@ -423,7 +458,20 @@ fn scan_tokens(
     line: u32,
 ) {
     let mut masked: Vec<(usize, usize)> = Vec::new();
+    for m in double_qualified_re().find_iter(chunk) {
+        masked.push((m.start(), m.end()));
+        push_citation(
+            out,
+            seen,
+            m.as_str().to_string(),
+            CitationKind::MalformedQualifier,
+            line,
+        );
+    }
     for m in cross_repo_re().find_iter(chunk) {
+        if masked.iter().any(|&(s, e)| m.start() >= s && m.end() <= e) {
+            continue;
+        }
         masked.push((m.start(), m.end()));
         push_citation(
             out,
@@ -725,6 +773,33 @@ mod tests {
             "embedded token must still be masked"
         );
     }
+    /// Regression: a THREE-part `<repo>:<file-stem>:<ID>` citation must not silently
+    /// collapse to a working two-part `<file-stem>:<ID>` citation via the same SLIDE
+    /// mechanism the sibling regression above pins for a single truncated qualifier —
+    /// one qualifier segment earlier. The resolver never supported this three-part
+    /// form; it must now be FLAGGED rather than silently reinterpreted.
+    /// docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
+    #[test]
+    fn a_double_qualified_citation_is_flagged_not_silently_collapsed_to_the_inner_form() {
+        let text = "See `codescout:statement-validity-session-log:F-2` for the rule.\n";
+        let ex = extract(text);
+
+        assert_eq!(
+            tokens(&ex, CitationKind::MalformedQualifier),
+            vec!["codescout:statement-validity-session-log:F-2"],
+            "the whole three-part citation must be captured as malformed, not silently \
+             reinterpreted"
+        );
+        assert!(
+            tokens(&ex, CitationKind::CrossRepoToken).is_empty(),
+            "must not ALSO resolve as a working two-part cross-repo citation -- that is \
+             the silent collapse this bug fixes"
+        );
+        assert!(
+            tokens(&ex, CitationKind::EntryToken).is_empty(),
+            "the embedded entry token must still be masked"
+        );
+    }
 
     #[test]
     fn tables_and_blockquotes_are_scanned() {
@@ -789,6 +864,7 @@ mod tests {
             CitationKind::ArtifactId,
             CitationKind::RelPathLink,
             CitationKind::CrossRepoToken,
+            CitationKind::MalformedQualifier,
         ] {
             assert_eq!(
                 kind.as_str(),

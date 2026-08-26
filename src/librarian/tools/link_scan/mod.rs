@@ -128,6 +128,13 @@ fn entry_dst_ref(
         extract::CitationKind::ArtifactId | extract::CitationKind::RelPathLink => {
             Some(dst_id.to_string())
         }
+        extract::CitationKind::MalformedQualifier => {
+            // Never reached: `resolve::resolve` never yields `Edge` or `SelfCite` for
+            // this kind (it is always report-only — see its `MalformedQualifier` arm),
+            // so `attribute_entry_edge` never calls this function with one.
+            // Exhaustiveness only.
+            None
+        }
     }
 }
 
@@ -345,7 +352,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut ambiguous: Vec<Value> = Vec::new();
     let mut dangling: Vec<Value> = Vec::new();
     let mut cross_repo: Vec<Value> = Vec::new();
+    let mut malformed_qualifier: Vec<Value> = Vec::new();
     let (mut ambiguous_total, mut dangling_total, mut cross_repo_total) = (0usize, 0usize, 0usize);
+    let mut malformed_qualifier_total = 0usize;
     // Per-source counts for the same three arms, uncapped (unlike the `ambiguous` /
     // `dangling` / `cross_repo` finding arrays above, which cap at FINDINGS_CAP) —
     // the whole point is to make the TOTAL interpretable, so a source contributing
@@ -354,6 +363,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut ambiguous_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut dangling_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut cross_repo_by_source: BTreeMap<String, usize> = BTreeMap::new();
+    let mut malformed_qualifier_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut citations_total = 0usize;
 
     // Entry-grain edges: (src_slug, src_local, dst_ref). A set because one entry citing
@@ -457,6 +467,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     cross_repo_total += 1;
                     *cross_repo_by_source.entry(src_rel.clone()).or_insert(0) += 1;
                     push_capped(&mut cross_repo, finding(&row.id, c, json!({})));
+                }
+                Some(resolve::Outcome::MalformedQualifier) => {
+                    malformed_qualifier_total += 1;
+                    *malformed_qualifier_by_source
+                        .entry(src_rel.clone())
+                        .or_insert(0) += 1;
+                    push_capped(&mut malformed_qualifier, finding(&row.id, c, json!({})));
                 }
                 None => {} // suppressed noise / foreign-jurisdiction links
             }
@@ -562,6 +579,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "ambiguous": ambiguous_total,
             "dangling": dangling_total,
             "cross_repo": cross_repo_total,
+            // Shape-level, not a lookup failure: a citation with 2+ qualifier segments
+            // before its entry token (`<repo>:<file-stem>:<ID>`) is malformed regardless
+            // of corpus contents — see `resolve::Outcome::MalformedQualifier`.
+            "malformed_qualifier": malformed_qualifier_total,
             "prefix_conflicts": prefix_conflicts.len(),
             // `len(dangling) == FINDINGS_CAP` reads identically whether the true count is
             // exactly the cap or 100x it — this states which arrays actually got cut, so a
@@ -570,6 +591,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 "ambiguous": ambiguous_total > ambiguous.len(),
                 "dangling": dangling_total > dangling.len(),
                 "cross_repo": cross_repo_total > cross_repo.len(),
+                "malformed_qualifier": malformed_qualifier_total > malformed_qualifier.len(),
             },
         },
         "edges_missing": edge_view(&d.to_add),
@@ -577,6 +599,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "ambiguous": ambiguous,
         "dangling": dangling,
         "cross_repo": cross_repo,
+        "malformed_qualifier": malformed_qualifier,
         // Per-source breakdown of the three arms above, uncapped — the "attribute and
         // subtract" reading: a triager checks which keys are guides/conventions docs
         // explaining citation syntax (rather than genuinely broken references) and
@@ -584,6 +607,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "ambiguous_by_source": ambiguous_by_source,
         "dangling_by_source": dangling_by_source,
         "cross_repo_by_source": cross_repo_by_source,
+        "malformed_qualifier_by_source": malformed_qualifier_by_source,
         // Latent rather than broken, so it sits beside the citation arms rather than in
         // one: a declared namespace with a second active definer has no failing citation
         // *yet*, and the arms above only ever report a citation that already resolves
@@ -1158,6 +1182,69 @@ mod tests {
             out["counts"]["truncated"]["ambiguous"],
             json!(false),
             "an array at or under its cap (here: empty) must not read as truncated: {out:#?}"
+        );
+    }
+
+    /// End-to-end: a double-qualified citation must be flagged, not silently resolved
+    /// as an edge -- even when the inner `<file-stem>:<ID>` form WOULD legitimately
+    /// resolve on its own. This is the sharpest version of the bug: the qualifier
+    /// segment being dropped is not merely lost, it lets a malformed citation succeed
+    /// where a correctly-shaped one would be expected, with zero signal to the author.
+    /// docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md
+    #[tokio::test]
+    async fn a_double_qualified_citation_is_reported_not_resolved_even_when_the_inner_form_would_resolve(
+    ) {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let dst = tmp.path().join("target.md");
+        std::fs::write(&dst, "## F-2 — anchor entry\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "dst", &dst, "target");
+
+        let src = tmp.path().join("source.md");
+        std::fs::write(&src, "See `codescout:target:F-2` for the rule.\n").unwrap();
+        seed_scan_artifact(&cat, "src", &src, "source");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": true })).await.unwrap();
+
+        assert_eq!(out["counts"]["malformed_qualifier"], json!(1), "{out:#?}");
+        assert_eq!(
+            out["malformed_qualifier"].as_array().unwrap().len(),
+            1,
+            "{out:#?}"
+        );
+        assert_eq!(
+            out["malformed_qualifier"][0]["raw"], "codescout:target:F-2",
+            "the whole three-part citation, not the collapsed inner form: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["cross_repo"],
+            json!(0),
+            "must not ALSO land in cross_repo: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["dangling"],
+            json!(0),
+            "must not land in dangling either -- it is malformed, not merely unresolved: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["edges_missing"],
+            json!(0),
+            "must never silently produce an edge, even though the inner `target:F-2` \
+             form would legitimately resolve on its own: {out:#?}"
         );
     }
 }

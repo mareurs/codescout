@@ -213,6 +213,11 @@ pub enum Outcome {
     },
     Dangling,
     CrossRepo,
+    /// A `CitationKind::MalformedQualifier` citation — 2+ qualifier segments before
+    /// the entry token. Always report-only, unconditionally: unlike every other arm,
+    /// this one never inspects `corpus` or `index`, because the citation is malformed
+    /// at the SHAPE level and no lookup could make it a valid edge target.
+    MalformedQualifier,
 }
 
 /// Cap on candidate ids carried in an Ambiguous finding.
@@ -230,6 +235,12 @@ pub fn resolve(
     corpus: &Corpus,
 ) -> Option<Outcome> {
     match citation.kind {
+        CitationKind::MalformedQualifier => {
+            // Shape-level defect, not a lookup failure: no corpus contents could make
+            // a double-qualified citation a valid edge target, so this never resolves
+            // — see `Outcome::MalformedQualifier` and the bug it fixes.
+            Some(Outcome::MalformedQualifier)
+        }
         CitationKind::CrossRepoToken => {
             // `<qualifier>:<TOKEN>` carries two different intents, told apart by
             // whether the qualifier names a file in THIS repo:
