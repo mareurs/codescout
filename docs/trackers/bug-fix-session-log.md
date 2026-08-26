@@ -6268,15 +6268,44 @@ needed was there.
    PostToolUse path that sees MCP transport errors — **not confirmed to exist**."* They did
    not confirm it. When their user later said "go", `codescout-companion/hooks/hooks.json`
    turned out to have carried PostToolUse matchers on MCP tools all along —
-   `mcp__.*__workspace` on line 141, plus a line-151 matcher covering nearly every
-   codescout tool. Verified here before recording: `git log -S` dates that matcher to
-   `2926543`, **2026-05-01**, roughly four months before the bug was filed.
+   `mcp__.*__workspace` on line 141. Verified before recording: `git log -S` dates that
+   matcher to `2926543`, **2026-05-01**, roughly four months before the bug was filed —
+   so the premise was not awaiting confirmation, it had been false for a third of a year.
 
    So the caveat did not merely fail to prompt the work. **It authorised skipping the
    work, it was false, and (c) shipped the moment anyone looked.** It also survived the
    author's own review and a commit message that quoted it approvingly — two further
    passes over a false premise, each of which read it as a finding because it was
    labelled as a limit.
+
+4. **Me, inside the write-up of instance 3 — and this is the entry's own best evidence.**
+   The paragraph above originally read "`mcp__.*__workspace` on line 141, **plus a
+   line-151 matcher covering nearly every codescout tool**", offered as a second proof the
+   premise was false. Line 151 is `cs-liveness.mjs`, and `git log -S 'cs-liveness'` dates
+   it to `b0db2d1`, **2026-08-26 — tonight**. It is the **remedy for that very bug**, not
+   evidence against its premise. I read the current file and attributed its contents to
+   the past, so the entry claimed the premise was *doubly* false when it was *singly*
+   false. Caught by `claude-plugins-15`; corrected above.
+
+   Two things make this the sharpest instance in the set. First, **I ran `git log -S` on
+   the first matcher and not on the second** — so the write-up carried one dated claim and
+   one undated one, and only the dated one was about the past. I verified exactly the
+   claim I thought to verify, in an entry whose subject is claims nobody thinks to verify.
+   Second, and worse: **I already knew.** I had investigated `cs-liveness.mjs` earlier the
+   same session, established it was a `PostToolUse` hook clearing pre-tool-guard's circuit
+   breaker, and told my user that `/reload-plugins` was needed precisely to register it.
+   The fact was in context. Knowing the law did not install the check, and neither did
+   knowing the fact.
+
+   This is the substrate question from `reconnaissance-patterns` one level up: not whose
+   logic is wrong, but **which world each tool read**. A file read reports the present. It
+   answers a question about the past only if you date it, and nothing in the reading says
+   you failed to.
+
+5. **Me again, in this entry's own `Promote-when`.** The first version read "a third
+   instance appears" — a bar the entry had *already cleared* at the moment I wrote it,
+   inside an entry about premises nobody checks. Replaced below with
+   `claude-plugins-15`'s criterion.
 
 **Mechanism.** A caveat is written at the moment you become aware a check is missing.
 Writing it converts an open question into a *recorded* one, and recorded reads as handled.
