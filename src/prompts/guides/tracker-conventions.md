@@ -155,6 +155,18 @@ is already ignoring them.
 Note the gate only catches the subset that lands in a full-severity surface, so the grep
 is the check — not a green CI run.
 
+**Cite where the file IS, never where the archive flow will put it.** The sweep above
+repairs citations that *were* correct when written; it can never reach one that was wrong
+on the day it was written. A citation is authored at **fix** time; the archive move is a
+separate, **later** event — `fixed` is terminal, archiving is a manual
+`artifact(action="move")`, and a *partial* fix cancels it outright. So writing
+`docs/issues/archive/<slug>.md` for a bug still sitting in `docs/issues/` schedules no
+repair at all: no archive event ever fires, therefore no sweep is ever triggered and no
+procedure owns the fix — it survives until a reader follows the link. Measured 2026-08-26:
+four such citations across three files, two of them in `.rs` doc comments where
+`--fail-on high` cannot gate by design, needing a dedicated repair commit (`fcb86c16`).
+See `bug-fix-session-log:F-69`.
+
 *(Corrected 2026-08-26. This sentence used to add "and it does not scan `CHANGELOG.md` at
 all", citing a bug that has since been fixed and archived —
 `docs/issues/archive/2026-08-08-audit-doc-refs-never-scans-changelog-or-contributing.md`.

@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 68
+entry_high_water_F: 69
 entry_high_water_W: 67
 ---
 
@@ -118,6 +118,7 @@ entry_high_water_W: 67
 | F-65 | 2026-08-26 | low | skill-doc | open | The reconnaissance skill's worked exemplars show a `**Valid:**` form the server refuses (13-vs-0 in this tracker), and instruct you to copy them |
 | F-67 | 2026-08-26 | med | self-friction | validated | Two tree-wide writes swallowed a peer's in-flight work — `cargo fmt` and `git add <dir>` |
 | F-66 | 2026-08-26 | high | process | open | Quoted the substrate law at the user, then measured a retired sqlite store all session — backend is Qdrant, `codescout.db` untouched since Aug 25; five published figures described a dead world, and a passing positive control validated the instrument against the wrong database |
+| F-69 | 2026-08-26 | med | process | fixed-verified | Bug-file citations written at a future `archive/` path schedule no sweep — the archive flow repairs citations that *were* correct, never one wrong the day it was written |
 
 ## Wins Index
 
@@ -5679,6 +5680,83 @@ data yet to make it. The doc-only fix took minutes; the alternative would have s
 session-worth of design + test effort on a check whose trigger population was empty.
 
 **Status:** validated
+
+## F-69 — Bug-file citations written at a future `archive/` path schedule no sweep, so nothing ever repairs them
+
+**Observed:** 2026-08-26, reconnaissance scout of the then-uncommitted diff on
+`experiments`. (Mid-scout a concurrent session committed the work as `fcb86c16` +
+`0e88c979`; the scout's conclusions survived because they were content-addressed —
+grep results and code facts — rather than position-addressed. The same distinction
+`docs/RELEASE.md` draws between a SHA and a patch-id.)
+
+**When:** Scouting the seam before the diff was committed — three files, all
+re-pointing `docs/issues/archive/<slug>.md` citations to `docs/issues/<slug>.md`.
+
+**Expected (plan):** `get_guide("tracker-conventions")` § *Bug files* documents
+citation drift in exactly one direction — archive the file, then re-point every
+citation **in the same commit as the move**, using the prescribed `grep -rn` sweep
+(whose `--include` list was itself widened on 2026-08-26 by
+`docs/issues/2026-08-26-archive-citation-sweep-grep-cannot-see-shell-or-yaml.md`).
+
+**Got (scouted reality):** **4 citations across 3 files** named
+`docs/issues/archive/<slug>.md` for two bugs that had **never been archived** and
+were both still `status: open` at scout time:
+
+- `src/librarian/tools/doctor.rs:2790` and `:5766` → `cited-prefix-with-no-definer-is-invisible`
+- `src/prompts/guides/tracker-conventions.md:384` → same bug
+- `docs/trackers/bug-fix-session-log.md:5647` → `link-scan-double-qualified-citation-silently-drops-repo-prefix`
+
+`git log -S` puts the `doctor.rs` and guide sites in `c0ec5ace`
+(*feat(doctor): add cited_prefix_with_no_definer check*) — written at the moment the
+fix was authored, naming the path the file *would* occupy once archived. `9bd9632e`
+then recorded that fix as **partial**, so the archive move never happened and the
+predicted path never came to exist.
+
+**Probable cause:** The guide's sweep is **triggered by the archive event**. A
+citation written prospectively is created *without* one, so no sweep is ever
+scheduled and no procedure owns the repair — it depends entirely on someone
+noticing. The underlying slip is that **"fixed" and "archived" are two separate
+events**, and the bug file's own status vocabulary allows an indefinite gap between
+them (`fixed` is terminal; archiving is a later, manual `artifact(action="move")`).
+A partial fix widens that gap to permanent.
+
+Half the population was also structurally ungateable, though for an already-documented
+reason rather than a new one: the two `.rs` doc-comment sites are forced High→Med by
+`cap_code_comment` (`src/librarian/tools/audit_doc_refs/severity.rs:199-205`, pinned by
+`code_comments.rs::a_high_severity_citation_in_a_comment_is_capped_to_med`), so
+`--fail-on high` cannot fire on them — which is why the guide already says *"the grep is
+the check — not a green CI run."* The other two sat in live markdown at full severity.
+Note `ArchiveDrop` does **not** apply here: it keys on whether the **citing** document is
+archived (`severity.rs:251`, `matches_archive(md_file)`), not the target.
+
+**Workaround:** Corrected in `fcb86c16` (*fix(docs): correct premature archive/
+citations for two still-open bugs*), patch-id
+`51a4af509be224cc87839ebbada5d35f68ee3b4a`. Scout re-swept the class repo-wide:
+exactly 4 sites, all now `docs/issues/`, no stragglers.
+
+**Severity:** med — 4 dead citations needing a dedicated repair commit; two of them
+in a surface CI is designed never to gate on, so absent the scout they would have
+persisted until a reader followed the link.
+
+**Status:** fixed-verified — repaired in `fcb86c16`; class swept repo-wide this
+session with zero remaining `docs/issues/archive/` citations for either slug.
+
+**Valid:** dated 2026-08-26
+
+True of the two bug files' status and the four citation sites at `fcb86c16`. The
+procedural hole (no sweep is scheduled for a prospective citation) outlives them and
+is what the fix idea addresses.
+
+**Rests on:** `cap_code_comment`'s High→Med forcing and `matches_archive`'s
+citer-side keying, both read in `severity.rs` this session; and on `git log -S`
+attributing the two `doctor.rs` sites to `c0ec5ace`.
+
+**Fix idea / Pointer:** Add one line to `get_guide("tracker-conventions")` §
+*Bug files*, next to the archive sweep: **cite where the file IS, never where the
+archive flow will put it.** A citation is written when the fix is authored; the
+archive move is a separate, later event that a partial fix may cancel outright. The
+archive sweep repairs citations that *were* correct — it can never reach one that
+was wrong on the day it was written.
 
 ## Template for new entries
 
