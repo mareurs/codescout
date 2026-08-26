@@ -326,32 +326,60 @@ jobs:
           UNIX_PATH="${{ runner.temp }}/portable-git/bin/bash.exe"
           test -f "$UNIX_PATH" || { echo "PortableGit missing at $UNIX_PATH" >&2; exit 1; }
           echo "CODESCOUT_BASH=Z:${UNIX_PATH//\//\\}" >> "$GITHUB_ENV"
-      # 12 pre-existing wine failures skipped (bisect-proven pre-existing; NOT regressions),
-      # plus one NEW test (59df5c9e) that exercises the same wine-broken glob-walk path.
-      # The 8-test guide_hint cluster is no longer skipped: fixed 2026-07-05 by seeding
-      # LIBRARIAN_WORKSPACE in make_server (build_tool_context no longer depends on the
-      # ambient ~/.config/librarian/workspace.toml, which is absent under wine).
-      # Inventory + un-skip protocol: docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md (WIN-27)
-      # background_command_with_quotes_captures_output — root cause now KNOWN (2026-08-07), so this
-      # skip is permanent rather than pending investigation: wine has no Python launcher, and the
-      # test's command is `py -c "..."`. Run under wine it captures cmd's
-      # "Can't recognize 'py -c ...' as an internal or external command" into the bg buffer, which
-      # proves spawn + capture + `type @bg_*` all work there — only the interpreter is absent. Do
-      # NOT re-investigate it as a wine path-handling failure, and do not make the test self-skip
-      # on a missing `py`: it stays load-bearing on windows-latest, where `py` IS present, and a
-      # probe-gated early return would silently disarm the MSVC-CRT quote-mangling guard, which is
-      # the only place the test has value. (WIN-30)
-      # The 21 run_command / Git Bash skips below are ENVIRONMENTAL, not defects, and the
-      # reason is one line: this wine image has no Git for Windows. Since WIN-32 every
-      # Windows spawn goes through Git Bash, so with none installed `run_command` cannot
-      # run at all here. codescout now says so up front — `shell_unavailable_hint()` turns
-      # the OS's bare `program not found` into a RecoverableError naming CODESCOUT_BASH —
-      # but a tool that correctly refuses to run is still a failing spawn test.
-      # Un-skip protocol: install Git for Windows in the wine image (or set CODESCOUT_BASH
-      # to a bash.exe wine can execute) and drop this block wholesale — there is no
-      # per-test triage to do, they share one cause. Do NOT make these tests self-skip on a
-      # missing bash: they are load-bearing on windows-latest, where Git Bash IS present,
-      # and a probe-gated early return would disarm them there too. (WIN-32, WIN-36)
+      # SKIP LIST — 10 entries covering 13 tests, every one classified below.
+      #
+      # MEASURED 2026-08-26 by running the suite with ZERO skips under wine 11.16: exactly
+      # these fail and everything else passes (4280 passed, 0 failed with this list). That
+      # pass dropped **22** stale entries which had accumulated since the lane gained a Git
+      # Bash and named tests that now pass — including two in the block historically blamed
+      # on a wine-broken glob walk. A stale skip is not free: it reads as coverage while
+      # silently withholding it, which is why this list is now justified per entry rather
+      # than per block.
+      #
+      # Add nothing here without a measured reason and an un-skip protocol.
+      #
+      # 1. GLOB-WALK CLUSTER (6 tests, 3 entries) — bisect-proven pre-existing wine failures,
+      #    NOT regressions: symbols_path_type (x4), symbols_name_path_pattern_in_directory,
+      #    include_docs_attaches_docs_in_search_mode.
+      #    Inventory: docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md (WIN-27)
+      #
+      # 2. NO `git.exe` ON WINE'S PATH (3) — activate_populates_head_sha,
+      #    check_index_scope_respects_gitignore, reindex_backfills_commits_table. All three die
+      #    on `Error { kind: NotFound, message: "program not found" }`. These shell out to `git`
+      #    DIRECTLY rather than through Git Bash, so supplying PortableGit as CODESCOUT_BASH —
+      #    which fixed the shell for this lane — never reaches them.
+      #    Un-skip protocol: put PortableGit's `cmd/` on PATH for the test step, then re-measure.
+      #    This is the cheapest remaining win on this lane, and is NOT yet attempted.
+      #
+      # 3. format_compact_live_renders_claude_md_as_map_shape — permanent for any CROSS-COMPILED
+      #    lane, by construction. The test deliberately reads the repo's real CLAUDE.md via
+      #    `env!("CARGO_MANIFEST_DIR")`, which bakes in the BUILD machine's path at compile time.
+      #    Cross-compiling from Linux that is a Unix root, and `Path::join` under Windows
+      #    semantics then yields a hybrid with no drive letter:
+      #      relative path '/home/runner/work/codescout/codescout\CLAUDE.md' requires an active project
+      #    It passes on windows-latest, where CARGO_MANIFEST_DIR is a real Windows path. Do NOT
+      #    "fix" the fixture by making the path absolute — the path IS the build machine's, and
+      #    using the real CLAUDE.md is the whole point of the test.
+      #
+      # 4. background_command_with_quotes_captures_output — permanent, root cause KNOWN
+      #    (2026-08-07): wine has no Python launcher and the test's command is `py -c "..."`. Run
+      #    under wine it captures cmd's "Can't recognize 'py -c ...' as an internal or external
+      #    command" into the bg buffer, which proves spawn + capture + `type @bg_*` all work here
+      #    — only the interpreter is absent. Do NOT re-investigate it as a wine path-handling
+      #    failure. (WIN-30)
+      #
+      # 5. buffer_query_truncation_hint_shows_next_page — permanent, an emulator artifact at ANY
+      #    wine version rather than a codescout defect. Every bash.exe under wine emits a 6-line
+      #    `Cygwin WARNING: Couldn't compute FAST_CWD pointer` block on stderr; run_command counts
+      #    it toward the 100-line display budget, so stdout gets 94 of 300 and the next-page
+      #    offset lands at 95 instead of the asserted 101. Do NOT relax the assertion to
+      #    accommodate this — the exact arithmetic is what the test is for on real Windows.
+      #
+      # 6. heredoc_body_pipes_... — wine 9.0 ONLY; see the block below.
+      #
+      # Do NOT make any of these self-skip at runtime on a probe (missing bash, missing `py`,
+      # missing git). Every one is load-bearing on windows-latest, where the thing being probed
+      # for IS present, and a probe-gated early return disarms it there too. (WIN-32, WIN-36)
       #
       # heredoc_body_pipes_are_not_rewritten_into_the_written_file — skipped for a reason
       # that is neither the shell nor a codescout defect: the write HANGS on THIS runner's
@@ -368,7 +396,7 @@ jobs:
       # (WineHQ apt repo), then drop this skip and re-measure — not by editing the test.
       # docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip activate_populates_head_sha --skip check_index_scope_respects_gitignore --skip reindex_backfills_commits_table --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip symbols_overview_glob_marks_grammarless --skip msys_form_path_resolves_for_native_binaries --skip run_command_with_overflow_emits_progressive_hint_once --skip run_command_without_overflow_no_progressive_hint --skip run_command_output_keeps_absolute_project_paths --skip ack_handle_executes_stored_command --skip buffer_query_returns_up_to_200_lines_inline --skip buffer_query_truncation_hint_shows_next_page --skip cat_file_no_hint_field --skip execute_shell_command_echo_cross_platform --skip execute_shell_command_exit_code_preserved --skip execute_shell_command_fast_command_succeeds --skip execute_shell_command_small_output_not_truncated --skip non_filter_pipe_no_unfiltered_ref --skip run_command_buffer_only_skips_speed_bump --skip run_command_dangerous_allowed_with_acknowledge --skip run_command_does_not_include_warning --skip run_command_short_output_returned_directly --skip run_command_safe_command_not_blocked --skip run_command_source_block_bypassed_with_acknowledge_risk --skip run_command_source_block_not_triggered_for_non_source --skip run_command_source_block_not_triggered_for_markdown --skip run_in_background_returns_bg_handle --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip activate_populates_head_sha --skip check_index_scope_respects_gitignore --skip reindex_backfills_commits_table --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file
 
   tool-docs-sync:
     name: Tool Docs Sync

@@ -6,7 +6,7 @@ severity: medium
 owner: marius
 related: []
 tags: [ci, windows, wine, cross-compile, test-environment]
-unverified: 'Mitigated, not fixed: one test is skipped on the wine lane rather than the version gap being closed. The durable fix (pin the lane to a WineHQ build matching the local loop) is designed and argued below but NOT implemented or measured. Also unverified: 19 of the 31 skip-list entries were measured stale under wine 11.16 and are deliberately LEFT IN PLACE, because that measurement does not transfer to wine 9.0 — the whole point of this bug. Nobody should remove them citing this file.'
+unverified: "Mitigated, not fixed: one test (the heredoc hang) is skipped on the wine lane rather than the version gap being closed. The durable fix — pin the lane to a WineHQ build matching the local loop — is designed and argued below but NOT implemented or measured. The 22 stale skip entries this file originally recorded as un-removable HAVE now been removed, once a green CI baseline made a red run a usable measurement; if the lane goes red, the failing names are the entries wine 9.0 still needs and should be re-added with that reason. Corrected count: this file first said 19, which was hand arithmetic; 22 is measured."
 kind: bug
 ---
 
@@ -89,16 +89,33 @@ That one is an emulator artifact at any wine version and is a separate, permanen
 
 ## Evidence
 
-With **zero** skips, the local wine 11.16 lane fails 12 tests, not 31. The current skip
-list has 31 entries, so **19 name tests that now pass** — `symbols_overview_glob_marks_grammarless`
-and `msys_form_path_resolves_for_native_binaries` among them, both in the block the
-workflow attributes to a wine-broken glob walk rather than to the shell.
+With **zero** skips, the local wine 11.16 lane fails 12 tests, not 31.
 
-That number is recorded here and **deliberately not acted on.** It was measured under
-wine 11.16, and this bug is precisely that wine 11.16 measurements do not transfer to the
-CI lane. Removing 19 skips on local evidence would be the same mistake this file exists to
-document, one lane wider.
+**Corrected 2026-08-26.** This section first said "19 name tests that now pass". That was
+arithmetic done by hand and it was wrong; the measured figure is **22**. Determined by
+running the lane with a candidate 10-entry list rather than by subtraction — 4280 passed,
+0 failed — so 22 of the 32 entries then present named tests that pass. The discrepancy came
+from `symbols_path_type`, a single entry that matches four test names by substring, which
+makes entry-count and test-count arithmetic diverge exactly where it is easiest not to
+notice.
 
+The 10 that remain are classified per entry in `.github/workflows/ci.yml`; two of them were
+never triaged before this pass. `format_compact_live_renders_claude_md_as_map_shape` turns
+out to be permanent for any cross-compiled lane — the test reads the repo's real `CLAUDE.md`
+via `env!("CARGO_MANIFEST_DIR")`, which bakes in the *build* machine's path, so on a
+Linux-hosted cross-build `Path::join` under Windows semantics yields
+`/home/…/codescout\CLAUDE.md`, a hybrid with no drive letter. And three others
+(`activate_populates_head_sha`, `check_index_scope_respects_gitignore`,
+`reindex_backfills_commits_table`) fail on `program not found` because they invoke `git`
+directly rather than through Git Bash, so `CODESCOUT_BASH` never reaches them — a concrete,
+cheap un-skip protocol that is now written down and not yet attempted.
+
+**The stale entries were removed in this pass.** The reasoning that previously withheld
+them — a wine-11 measurement does not transfer to a wine-9 lane — was re-costed once the
+lane had a **green** baseline on CI (run `32972195661`): with a known-good tip, a red run
+names exactly which entries wine 9.0 still needs, which is the CI-side measurement this
+file said was missing. That is the whole cost, and it buys back the gnu-ABI coverage the
+stale entries were silently withholding.
 ## Hypotheses tried
 
 1. **Heredoc pipe-rewrite corruption regressed** — the shape the original failure message
@@ -118,8 +135,9 @@ belongs; the wine lane is a fast proxy, not the source of truth.
 
 **The durable fix, designed and not taken:** pin this lane's wine to a WineHQ build
 matching the local loop (add the WineHQ apt repository and install a pinned
-`winehq-stable`), then drop the skip and re-measure the other 19. Not done here for two
-reasons worth stating rather than leaving implicit. It swaps a distro-packaged wine for a
+`winehq-stable`), then drop the heredoc skip and re-measure. (The other 22 stale entries no
+longer wait on that — they were dropped separately once a green baseline existed; see
+Evidence.) Not done here for two reasons worth stating rather than leaving implicit. It swaps a distro-packaged wine for a
 third-party repo on every run of this lane, which is a stability trade the lane's owner
 should make deliberately rather than as a rider on a flake fix. And it wants its own CI
 cycle to measure, because the honest expectation is that changing wine versions moves the
