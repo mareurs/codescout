@@ -152,6 +152,32 @@ impl TestToolContextBuilder {
         self
     }
 
+    /// The fields existed from the start; only these setters were missing, which is
+    /// why `reindex`'s embedding paths had no coverage at this layer — its own test
+    /// says so: *"`TestToolContextBuilder` has no `with_embedding` setter today"*.
+    /// That gap is what let a bare `?` on the embed call sit in a target loop
+    /// unnoticed
+    /// (`docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`).
+    ///
+    /// Both are needed together: the embed block is gated on
+    /// `if let (Some(svc), Some(store))`, so setting one alone silently skips it —
+    /// a test that set only the embedder would pass while exercising nothing.
+    pub(crate) fn with_embedding(
+        mut self,
+        embedding: Arc<crate::librarian::embedding::EmbeddingService>,
+    ) -> Self {
+        self.embedding = Some(embedding);
+        self
+    }
+
+    pub(crate) fn with_artifact_store(
+        mut self,
+        store: Arc<dyn crate::librarian::artifact_store::ArtifactVectorStore>,
+    ) -> Self {
+        self.artifact_store = Some(store);
+        self
+    }
+
     pub(crate) fn build(self) -> ToolContext {
         ToolContext {
             lsp: crate::lsp::MockLspProvider::with_client(crate::lsp::MockLspClient::default()),

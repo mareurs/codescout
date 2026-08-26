@@ -201,6 +201,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // skipped by mistake — which is exactly how the `reembed` no-op stayed
     // invisible (docs/issues/archive/2026-07-25-reindex-reembed-noop-without-force.md).
     let mut total_embedded = 0usize;
+    // Embed failures are COLLECTED, not propagated. A bare `?` on the embed call
+    // below escaped the `for abs_root in &targets` loop, so one transport error
+    // meant every later target was never walked at all, the succeeded catalog
+    // counters were discarded, and `backfill_commits` was skipped — while the
+    // catalog writes for earlier targets had already committed. The caller then saw
+    // an error and could not tell which half had happened.
+    // docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+    //
+    // Same shape as `backfill_errors` above, deliberately: that field exists
+    // because F-5 swallowed a failure silently, and the remedy — keep going, report
+    // what broke — is identical here.
+    let mut embed_errors: Vec<String> = Vec::new();
 
     let want_embeddings = ctx.embedding.is_some();
 
@@ -233,9 +245,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
             for (id, title, chunk_text) in &embed_queue {
-                let vec = svc.embed_artifact(title.as_deref(), chunk_text).await?;
-                store.upsert(&project_id, id, &vec).await?;
-                total_embedded += 1;
+                match svc.embed_artifact(title.as_deref(), chunk_text).await {
+                    Ok(vec) => match store.upsert(&project_id, id, &vec).await {
+                        Ok(()) => total_embedded += 1,
+                        Err(e) => embed_errors.push(format!("{id}: upsert failed: {e}")),
+                    },
+                    Err(e) => embed_errors.push(format!("{id}: embed failed: {e}")),
+                }
             }
         }
 
@@ -269,9 +285,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "unknown_sample": sample,
         "backfill_error_count": backfill_errors.len(),
         "backfill_errors": backfill_errors,
+        "embed_error_count": embed_errors.len(),
+        // Capped at the same 20 as `unknown_sample`, and for the same reason: one
+        // entry per queued artifact could be thousands. The COUNT is exact.
+        "embed_errors": embed_errors.iter().take(20).collect::<Vec<_>>(),
         // Name the ambiguous case out loud rather than leaving the caller to
         // infer it from a bare `unchanged: N`.
-        "embed_note": if want_embeddings && total_embedded == 0 && total_unchanged > 0 {
+        // A partial embed is the case worth naming first: the catalog IS refreshed
+        // (classification runs before embedding and commits independently), so
+        // artifact discovery works — but the un-vectored artifacts are invisible to
+        // semantic search, and nothing marks them for retry.
+        "embed_note": if !embed_errors.is_empty() {
+            format!(
+                "DEGRADED: {total_embedded} embedded, {} failed. The catalog is \
+                 refreshed and `artifact(action=\"find\")` is accurate, but the failed \
+                 artifacts have no vector, so semantic search will not surface them. \
+                 Re-run reindex once the embedder is healthy.",
+                embed_errors.len()
+            )
+        } else if want_embeddings && total_embedded == 0 && total_unchanged > 0 {
             format!(
                 "0 embedded, {total_unchanged} unchanged — nothing needed a new vector. \
                  If you meant to backfill (embeddings newly enabled, or model/backend \
@@ -361,6 +393,100 @@ mod tests {
         assert_eq!(v2["unchanged"].as_u64().unwrap(), 1);
         assert_eq!(v2["embedded"].as_u64().unwrap(), 0);
         assert_eq!(v2["embed_note"].as_str().unwrap(), "0 embedded");
+    }
+
+    /// A failing embedder must not stop the walk — the loop-abort fix.
+    ///
+    /// TWO roots, so the default `scope="all"` yields two targets. Before the fix the
+    /// bare `?` on the embed call escaped `for abs_root in &targets`, so the second
+    /// target was never walked at all: its artifacts simply absent from the catalog,
+    /// while the caller held a transport error with no way to tell which half had
+    /// run. The reported issue diagnosed this as "fails before refreshing the
+    /// catalog", which is the opposite of true — `index_repo_sync` commits first —
+    /// so the assertions below pin the real contract: catalog work completes for
+    /// EVERY target, and the embedding failure is reported rather than fatal.
+    ///
+    /// `docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`
+    #[tokio::test]
+    async fn an_embed_failure_still_walks_every_target_and_reports_it() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+
+        struct FailingEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for FailingEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, _texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                anyhow::bail!("connection refused")
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("one/docs/specs")).unwrap();
+        std::fs::create_dir_all(root.join("two/docs/specs")).unwrap();
+        std::fs::write(root.join("one/docs/specs/a.md"), "# A\nbody\n").unwrap();
+        std::fs::write(root.join("two/docs/specs/b.md"), "# B\nbody\n").unwrap();
+
+        let rules =
+            load_rules("[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n").unwrap();
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "one".into(),
+                path: root.join("one"),
+            })
+            .with_root(Root {
+                name: "two".into(),
+                path: root.join("two"),
+            })
+            .with_rules(rules)
+            .with_embedding(std::sync::Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
+                    FailingEmbedder,
+                )),
+            ))
+            .with_artifact_store(std::sync::Arc::new(InMemoryArtifactStore::default()))
+            .build();
+
+        let v = call(&ctx, json!({})).await.expect(
+            "an embedder outage must not fail the whole reindex — the catalog half \
+             succeeds and must be reported",
+        );
+
+        assert_eq!(
+            v["targets"].as_array().unwrap().len(),
+            2,
+            "test setup: both roots must resolve as targets, or this proves nothing \
+             about the loop the `?` used to escape"
+        );
+        assert_eq!(
+            v["added"].as_u64().unwrap(),
+            2,
+            "BOTH targets' artifacts must be classified into the catalog — the second \
+             is the one the abort used to skip entirely"
+        );
+        assert_eq!(
+            v["embedded"].as_u64().unwrap(),
+            0,
+            "nothing embeds against a dead embedder"
+        );
+        assert_eq!(
+            v["embed_error_count"].as_u64().unwrap(),
+            2,
+            "every failure is counted, not just the first"
+        );
+        let note = v["embed_note"].as_str().unwrap();
+        assert!(
+            note.contains("DEGRADED"),
+            "a partial embed must announce itself, not read as an ordinary success: {note}"
+        );
+        assert_eq!(
+            v["backfill_error_count"].as_u64().unwrap(),
+            0,
+            "backfill_commits sits AFTER the embed block and the `?` used to skip it, \
+             so it must now run for every target"
+        );
     }
 
     #[tokio::test]
