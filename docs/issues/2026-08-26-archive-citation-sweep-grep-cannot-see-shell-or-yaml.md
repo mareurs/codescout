@@ -6,7 +6,7 @@ severity: low
 owner: marius
 related: []
 tags: [tracker-conventions, guide, doc-refs, archive-flow]
-unverified: "The guide fix is done and verified. The severity-promotion policy question is now MEASURED (484 broken code-comment refs; ~55 of them the archive-move class) and answered `not yet`, with a three-step order recorded. What is NOT done: step 1 of that order, repairing the ~55 archive-move citations in source comments — deliberately deferred because it is a tree-wide write across ~30 files with a peer session active in this checkout. What is NOT measured: the composition of the other ~429 broken code-comment refs, which the audit''s 50-finding display cap hides."
+unverified: "The guide fix and step 1 (repairing the 55 archive-move citations, 7884fc7b) are both done and verified by two independent instruments. The severity-promotion policy question is MEASURED and answered `not yet`: 430 broken code-comment refs remain after step 1, still far too many to gate on. What is NOT done: step 2, excluding the audit''s own teaching placeholders — the worklist is now an exact 22 refs rather than an estimate. What is NOT characterised: the ~408 broken code-comment refs that are neither the archive-move class nor docs/issues placeholders; nobody has looked at what they are."
 kind: bug
 ---
 
@@ -146,8 +146,8 @@ day."* This section is that evidence, gathered 2026-08-26.
 |---|---|
 | broken refs, whole repo | **11,952** |
 | findings originating in code comments | **1,781** of 51,941 (**3.4%**), across 219 files |
-| **broken** refs originating in code comments | **484** (4.1% of all broken) |
-| of those, the `docs/issues/` archive-move class | **~55**, in ~30 files |
+| **broken** refs originating in code comments | **484** (4.1% of all broken) → **430** after step 1 |
+| of those, the `docs/issues/` archive-move class | **55**, in 30 files → **0** (fixed, `7884fc7b`) |
 
 Method, and its two independent instruments — they agree, which is the only reason either
 is quoted:
@@ -183,13 +183,29 @@ tool doing the gating.
 
 Sequence, cheapest and most certain first:
 
-1. Repair the ~55 archive-move citations (mechanical: insert `archive/`). **Not done here** —
-   it is a tree-wide write across ~30 source files, and a peer session is active in this
-   checkout; `bug-fix-session-log:F-67` is that exact hazard.
-2. Exclude the audit's own fixtures and teaching placeholders, or teach the parser to skip a
-   ref whose basename is a known placeholder.
+1. ~~Repair the 55 archive-move citations.~~ **DONE** — `7884fc7b`, patch-id
+   `8ec3a2cf81a80b2283145f3527ed6df6e426dc5f`. Waited for a quiet tree (it is a
+   30-file write; `bug-fix-session-log:F-67`), re-derived against HEAD immediately before
+   applying because two peer archive moves had landed since the measurement — delta 0.
+   Confirmed by both instruments: the archive-move class went 55 → **0**, and the audit's
+   broken code-comment refs went 484 → **430** (−54, resolved +56). The −54/55 gap is not
+   rounding: `n_refs_found` rose by 2 between runs from a peer commit, and the audit's
+   tree-sitter extraction groups refs slightly differently from a line-based count.
+2. Exclude the audit's own fixtures and teaching placeholders. **The worklist is now exact
+   rather than estimated — 22 refs**, every one a placeholder: `foo.md`, `x.md`, `a.md`,
+   `b.md`, `some-bug.md`, `2026-01-01-x.md`, `2026-01-01-a.md`, `2026-01-01-y.md`,
+   `2026-08-16-append-entry.md`, `2026-08-16-run-command.md`, `2026-08-07-example.md`, and
+   one written with a literal `…` ellipsis. They sit in `librarian/adapter.rs`,
+   `classify.rs`, `create.rs`, `doctor.rs`, `mod.rs`, `library/auto_register.rs`,
+   `server.rs`, `util/librarian_guard.rs` and — five of them — inside `audit_doc_refs`'
+   own `code_comments.rs`, `parser.rs` and `resolver.rs`.
 3. Re-measure. If the residue is small, promotion becomes a cheap change rather than a
    flag day.
+
+**The recommendation is unchanged by step 1: still do not promote.** 430 remains far too
+many to switch on, and clearing the archive-move class is what proves the point rather than
+weakening it — the entire `docs/issues/` rot that motivated the question was 55 of 484, so
+the other 89% is a different population that nobody has characterised.
 
 The rationale for `Med` has not weakened and is not challenged by any of this: a contributor
 archiving a bug file still should not break everyone's build via a comment they never
