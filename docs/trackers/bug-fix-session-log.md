@@ -5740,8 +5740,16 @@ mode.** That sentence originally read *“re-swept the class repo-wide … no st
 was not a class sweep. The grep was
 `2026-08-26-(link-scan-double-qualified|cited-prefix-with-no-definer)` — two slugs — and a
 two-slug predicate cannot license a statement about the class. The claim was therefore
-**wrong when written**, not overtaken by events, which is the distinction that keeps it out
-of `claim-decay` (`DC` is for claims that were exact at write time) and squarely here.
+**wrong when written**, not overtaken by events, which is what keeps it out of
+`claim-decay` and squarely here.
+
+*(Amended — that parenthetical originally read “`DC` is for claims that were exact at
+write time”, which is **not** the ledger's test and contradicts `DC-2`, an entry that was
+never true. `codescout-77` caught the inconsistency. The actual test is whether the
+claim's truth is hostage to a substrate that can change with nothing re-checking it. This
+entry's “no stragglers” fails that test for a different reason: its falsity was fixed at
+write time by its own predicate's scope, and no later event could have made it true. See
+`claim-decay` § The inclusion test.)*
 
 Peer session `codescout-77` swept the real population — **321 distinct
 `docs/issues/archive/` citations** — and found one straggler this entry missed: **F-59**

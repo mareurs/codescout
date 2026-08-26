@@ -35,10 +35,47 @@ the recurring ones into automated checks — `librarian(action="doctor")`,
 | `T-N` tool-usage-patterns | Tool-*selection* quality | Unrelated axis |
 | Statements spec + `**Valid:**` | Declared validity on **tracker entries** | DC covers claims *anywhere* — code comments, guides, CI config, memories — and records **why nothing repaired it**. It is the evidence base that would justify extending Statements coverage past tracker entries |
 
-**Do not** open a DC row for a plain typo, or for a claim someone simply got wrong at
-write time with a trigger that *would* have caught it. The defining question is:
-*what event was supposed to fire, and why didn't it?* If the answer is "one did fire and
-someone ignored it", that is a process friction (`F-N`), not claim decay.
+### The inclusion test
+
+**Is the claim's truth coupled to a substrate that can change after the claim is written,
+with no event scheduled to re-check it?** That is the whole test.
+
+Whether the claim was *true at write time* is **not** the discriminator, and using it as
+one is a mistake this ledger made on its own first day. `DC-1` was true and decayed;
+`DC-2` was false and would have *become* true had the archive completed. Both are hostage
+to an unwatched substrate, which is the thing being tracked.
+
+Three states — only the third is out of scope. (Distinction contributed by peer session
+`codescout-77` on 2026-08-26, after it cost a real misclassification.)
+
+| State | Example | Goes to |
+|---|---|---|
+| True when written; substrate moved; nothing re-checks | `DC-1` (10.4 KB → 33.4 KB), `DC-3` (prefix count) | **DC** |
+| False when written, but truth is hostage to an event that could still fire, and nothing re-checks either way | `DC-2` / `bug-fix-session-log:F-69` (prospective `archive/` path) | **DC** |
+| False when written, and **no** substrate change could ever have made it true | a citation added 16 days *after* its target was deleted; a path that never existed at any commit; a conclusion its own predicate could not support | **`F-N` / `W-N`** — authoring error, not decay |
+
+**The third state impersonates the first**, which is the trap: it reads as
+correct-then-invalidated from the prose and separates only on history.
+
+```
+git log --all --diff-filter=AD --name-status -- <target-path>   # the target's lifecycle
+git log -S '<text of the citing line>' -- <citing-file>          # when the citation landed
+```
+
+If the citing line **postdates** the target's deletion, it was wrong when written — `F-N`.
+Measured 2026-08-26: across 6 dead `docs/issues/archive/` citations, `codescout-77` found
+three real ones and **none was DC** — two authoring errors (one citing a file deleted 16
+days earlier, one citing a file that has never existed at any path) and one `DC-2`-shaped.
+
+> ⚠️ **That zero is not evidence the DC class is small.** It describes the *dead*
+> population only, and a citation that decayed and was then repaired never shows up as
+> dead at all. The honest reading is *“among dead archive-citations in this sample, none
+> was correct-when-written”* — survivorship, not prevalence. (`codescout-77` stated the
+> scope alongside the finding; it is recorded here so a later reader cannot mistake the
+> one for the other.)
+
+Also out of scope: a plain typo, and any claim where a trigger **did** fire and someone
+ignored it — that is a process friction (`F-N`), not an absent trigger.
 
 ## The questions this ledger is built to answer
 
