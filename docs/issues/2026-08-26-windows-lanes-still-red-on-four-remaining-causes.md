@@ -96,6 +96,31 @@ while `current_project` holds `\\?\C:\...`"*), but in the worktree-detection pat
 than the catalog comparison, and it appears to be **production** behaviour rather than a
 fixture: a real Windows user with a linked worktree would get no worktree block.
 
+**FIXED 2026-08-26 — `9b048e17`, patch-id `f42a4e9faa0aac83d8f92f1f94ee66852e1e952c`. The
+heading's guess above was WRONG, and is left standing because the correction is the
+lesson.** Worktree detection is not broken on Windows: `is_linked_worktree` and
+`worktree_main_root` both pass there. Measuring the primitives before believing the
+symptom is what redirected this.
+
+Two fixture mechanisms, neither the one the panics suggested:
+
+1. **Verbatim prefix + forward slashes.** Three fixtures build the pointer as
+   `format!("gitdir: {}/main/.git/worktrees/feat", base.display())` where `base` is
+   **canonicalized** — on Windows the verbatim `\\?\C:\…` form. Inside a verbatim path
+   Rust does **not** treat `/` as a separator, so the whole tail parses as ONE component,
+   no `worktrees` component is seen, and the detector answers `false` — silently, since
+   every failure arm returns `false`. Git never writes that spelling; only string
+   concatenation does. **17 of the 20 sites in this crate are fine**, because their base
+   is not canonicalized — which is precisely why it stayed invisible.
+2. **JSON escaping.** `tools::core` substring-matched `wt.display()` against a JSON
+   *document*, where Windows separators are escaped to `\\`. It could never match. Now
+   reads the notice out of the parsed JSON.
+
+A permanent guard came out of it: `is_linked_worktree_survives_canonicalization`. It began
+as the discriminator for a hypothesis it then **refuted** — canonicalization alone is fine
+— and was kept anyway, because every real caller passes the canonicalized form and nothing
+else covered that shape.
+
 ### E. Config-dir resolution on Windows (3)
 
 - `config_dir_xdg_wins_over_home` — `left: "/tmp/fake-home\\.config\\codescout"`,
