@@ -6,7 +6,7 @@ severity: low
 owner: marius
 related: []
 tags: [windows, wine, ci, flake, concurrency]
-unverified: 'Observed exactly ONCE, and the mechanism is inferred rather than measured. Contention is the hypothesis that fits all three symptoms and the recovery, but nothing was instrumented to prove it — no load was measured, no retry was scripted, and the run that failed is not reproducible on demand. Treat the mechanism as a lead, not a finding. Do NOT add retries or raise timeouts on this evidence.'
+unverified: "NARROWED 2026-08-26 by CI run 32997878934: two of the three tests failed there with the wine-9.0 `timed_out` signature, NOT this file''s partial-key payload, so they belong to the lane''s already-classified wine-9 hang group and are skipped there. Only run_migrations_is_safe_under_concurrent_connections remains in scope for this file — observed ONCE, locally, never on CI, mechanism inferred (contention) and never instrumented. Treat it as a lead, not a finding, and do NOT add retries or raise the SQLite busy timeout on this evidence."
 kind: bug
 ---
 
@@ -19,6 +19,21 @@ identical command, with no source change, passed 4293/0. They are load-sensitive
 not defects — recorded so the next person to see one does not spend the afternoon
 diagnosing a platform bug that is not there.
 
+> **UPDATE 2026-08-26, and it narrows this file to ONE test.** CI run `32997878934`
+> (`ae7db407`, wine 9.0) failed two of the three — but with a **different payload**:
+> `{"timed_out":true,…}`, the wine-9.0 hang signature, not the partial-key payload
+> described below. Those two (`unfiltered_output_carries_…` and
+> `unfiltered_output_line_count_…`) are therefore **group 6 of the lane's skip list**, the
+> already-classified wine-9 hang class, and are now skipped there.
+>
+> **Same two test names, two unrelated causes.** Only the payload separates them: a
+> `timed_out` envelope is the wine-9 hang; a partial key set is the flake this file is
+> about. That is a genuinely nasty trap — a local reproduction of one looks like a
+> reproduction of the other, and the test name is the same in both logs.
+>
+> What remains in scope here is **one** test:
+> `librarian::catalog::tests::run_migrations_is_safe_under_concurrent_connections`
+> (`database is locked`), seen once, locally, never on CI.
 ## Symptom (Effect)
 
 One run, three failures:

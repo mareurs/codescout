@@ -334,7 +334,7 @@ jobs:
           test -f "$DIR/cmd/git.exe" || { echo "git.exe missing at $DIR/cmd" >&2; exit 1; }
           echo "CODESCOUT_BASH=Z:${UNIX_PATH//\//\\}" >> "$GITHUB_ENV"
           echo "WINEPATH=Z:${DIR//\//\\}\\cmd" >> "$GITHUB_ENV"
-      # SKIP LIST — 8 entries covering 11 tests, every one classified below.
+      # SKIP LIST — 10 entries covering 13 tests, every one classified below.
       #
       # MEASURED, in two passes, and the second pass is the one that counts.
       #   Locally (wine 11.16, zero skips): exactly these fail.
@@ -387,8 +387,10 @@ jobs:
       #    offset lands at 95 instead of the asserted 101. Do NOT relax the assertion to
       #    accommodate this — the exact arithmetic is what the test is for on real Windows.
       #
-      # 6. WINE 9.0 HANGS (2) — heredoc_body_pipes_are_not_rewritten_into_the_written_file and
-      #    run_command_with_overflow_emits_progressive_hint_once. ONE cause, ONE remedy; see
+      # 6. WINE 9.0 HANGS (4) — heredoc_body_pipes_are_not_rewritten_into_the_written_file,
+      #    run_command_with_overflow_emits_progressive_hint_once,
+      #    unfiltered_output_carries_a_line_count_and_explicit_empty_stdout and
+      #    unfiltered_output_line_count_survives_inline_truncation. ONE cause, ONE remedy; see
       #    the block below for the evidence and the un-skip protocol.
       #
       # Do NOT make any of these self-skip at runtime on a probe (missing bash, missing `py`,
@@ -404,6 +406,17 @@ jobs:
       #
       #   heredoc_..._written_file            `cat > note.txt <<'EOF' ... EOF`  (run 32970579826)
       #   run_command_with_overflow_...once   `yes filler | head -2000`         (run 32976889055)
+      #   unfiltered_output_carries_a_...     `printf 'a\nb\nc\n' | grep zzz`   (run 32997878934)
+      #   unfiltered_output_line_count_...    `seq 1 20000 | grep zzz`          (run 32997878934)
+      #
+      # The last two are worth a warning to whoever reads this next, because they ALSO fail
+      # locally under wine 11.16 for a COMPLETELY DIFFERENT and unrelated reason — a
+      # load-sensitive flake that yields an impossible payload (2 of 4 keys that
+      # `output.rs` sets in one block), documented in
+      # docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md. Same two test
+      # names, two distinct causes, and only the payload tells them apart: a `timed_out`
+      # envelope is THIS group; a partial key set is that flake. Do not let a local
+      # reproduction of one convince you that you have reproduced the other.
       #
       # What they share is a FORKED pipeline or redirection under MSYS, where a child must be
       # reaped and a handle closed before run_command's `output()` can see EOF. Both finish in
@@ -423,7 +436,7 @@ jobs:
       # wall-clock before failing the same way.
       # docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file --skip run_command_with_overflow_emits_progressive_hint_once
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file --skip run_command_with_overflow_emits_progressive_hint_once --skip unfiltered_output_carries_a_line_count_and_explicit_empty_stdout --skip unfiltered_output_line_count_survives_inline_truncation
 
   tool-docs-sync:
     name: Tool Docs Sync
