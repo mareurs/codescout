@@ -12,7 +12,7 @@ owner: marius
 related: []
 reopened: 2026-08-26
 severity: medium
-unverified: 'REPRODUCED but the mechanism is only half-established. Confirmed by reading the handlers: `list` and `read` never look at `project_id` at all. NOT established: why a bare-id focus-switch also returns 0, since `with_project_at` does resolve `ws.focused_active()` and `activate_within_workspace` does call `MemoryStore::open` on promotion. Two hypotheses were formed and both refuted by reading the code; do not inherit either.'
+unverified: 'Mechanism now ESTABLISHED and measured (see Root cause) — two surfaces read two different directories, coinciding only for the root project. What remains open is a DECISION, not a diagnosis: which location owns the memories of a sub-project. Both layouts are load-bearing somewhere, so either choice needs a migration for the other layout existing data (this repo has 9 directories under .codescout/projects/). No fix, no regression test yet.'
 ---
 
 # BUG: `memory(list/read)` only sees 2 topics for a project that `workspace(activate)` reports has 16
@@ -178,14 +178,64 @@ reads is a different one.
   which instructed reading each of the 14 missing memory topics
 
 ## Root cause
-Unknown — under investigation. Hypothesis: the `memory` tool's project resolution
-defaults to the outer "root" (home-directory) project's on-disk memory store rather
-than the nested `codescout` sub-project's store, even when `workspace(activate)` has
-switched the active project to `codescout` and `project_id="codescout"` is passed
-explicitly. `workspace(status)`/`workspace(activate)` and `memory(list)`/`memory(read)`
-appear to resolve the "current project" through two different code paths that
-disagree in this nested-workspace topology.
 
+**Established 2026-08-26.** The two surfaces read two different directories, and for any
+non-root sub-project those directories are never the same one.
+
+| Surface | Path it reads | Code |
+|---|---|---|
+| `workspace(activate)`'s `memories` array | `<project_root>/.codescout/memories` | `src/tools/config/mod.rs:759` → `p.memory.list()`; `p.memory` is `MemoryStore::open(p.root)`, `src/memory/mod.rs:25-29` |
+| `memory(action="list"/"read")` | `<workspace_root>/.codescout/projects/<id>/memories` | `src/tools/memory/mod.rs:975` → `resolve_memory_dir` → `Workspace::memory_dir_for_project`, `src/workspace.rs:527-543` |
+
+`memory(list)` never touches `p.memory` at all. It resolves a *directory* and builds a
+fresh `MemoryStore::from_dir` over it. So both earlier hypotheses were correctly refuted
+and both were also beside the point: the store IS opened on promotion, and
+`with_project_at` DOES resolve the focused project — the memory tool simply does not use
+either.
+
+`memory_dir_for_project` branches on whether the id names the **root** project
+(`relative_root == "."`):
+
+```rust
+if is_root { self.root.join(".codescout").join("memories") }
+else       { self.root.join(".codescout").join("projects").join(project_id).join("memories") }
+```
+
+For the root project the two paths **coincide**, which is exactly why this never
+reproduces on a single-project repo — and why the 2026-08-06 verify-open pass, run on
+home (`codescout`), found the two surfaces agreeing and could not clear the bug either.
+The divergence needs a sub-project to appear at all.
+
+Which surface looks wrong depends only on where the memories were last written, so the
+symptom is reversible. The original report had them in the sub-project's own tree
+(activate 16, memory 2). This repo has the opposite: `codescout-embed`'s memories sit at
+the workspace level and its own `.codescout/memories` does not exist.
+
+**Measured 2026-08-26**, live, on this repo:
+
+```
+memory(action="list", project_id="codescout-embed")  → 5 topics
+ls .codescout/projects/codescout-embed/memories/     → 5 .md files (exact match)
+ls crates/codescout-embed/.codescout/memories/       → No such file or directory
+```
+
+The second and third lines are the bug in one pair: the populated directory is the one
+`activate` does **not** read, and the absent one is the store it would open — and
+`MemoryStore::open` calls `create_dir_all`, so activating that sub-project would
+materialise an empty directory and report `0 memories` for a project holding five.
+
+### Why this is a design fork, not a typo
+
+Both layouts are deliberate somewhere. `memory_dir_for_project`'s per-project tree is
+what `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md` hardened
+(and this repo has nine such directories under `.codescout/projects/`). `MemoryStore::open`'s
+project-local tree is what makes memories git-tracked with the project they describe — the
+property the worktree notice in `src/tools/config/mod.rs:902` depends on.
+
+So the fix is a decision about which location owns a sub-project's memories, not a
+one-line path correction, and whichever way it goes needs a migration for the other
+layout's existing data. That is why this is left `open` with the mechanism recorded rather
+than patched here.
 ## Evidence
 Tool call transcript from this session (see above symptom block) — three consecutive
 calls, same session, same active project, all agreeing the project is "codescout"
