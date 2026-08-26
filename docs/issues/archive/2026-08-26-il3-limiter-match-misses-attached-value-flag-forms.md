@@ -1,14 +1,14 @@
 ---
-id: '217e83c9dab18c41'
+id: 7f18aaf9d68c0b24
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the IL-3 limiter table matches whole tokens, so git''s attached-value flag forms (--porcelain=v1, --stat=200, -n5) are refused as unbounded'
 tags:
 - il3
 - path-security
 - gate
 - false-positive
-closed: ''
+closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 related: []
@@ -155,31 +155,71 @@ after it.
 
 ## Fix
 
-Not implemented. The change is confined to `git_output_is_bounded`
-(`src/util/path_security.rs:1208-1227`): normalise each token by truncating at
-the first `=` before the equality test, and extend the short-flag rule to accept
-`-n<digits>` alongside the bare `-<digits>`. That subsumes the special-cased
-`--max-count=` rather than adding a fourth special case.
+Fixed in `git_output_is_bounded` (`src/util/path_security.rs`). Two changes, and
+the first subsumes rather than extends the special case:
 
-**Deliberately left unimplemented in this session** for one reason worth
-recording: `worktree-il3-gate-and-find-lift` holds +101/-7 on this exact file,
-unmerged since 2026-08-17. A competing edit here buys a conflict on a gate whose
-test suite is load-bearing. Whoever lands that branch should fold this in.
+- Compare against the **flag name** — `tok.split_once('=')` — instead of the whole
+  token, so `--porcelain=v1` matches on `--porcelain`. This replaces the
+  hard-coded `starts_with("--max-count=")`; a fourth special case was the
+  alternative.
+- Strip a leading `-n` before the digit-shorthand test, so `-n5` is not tested as
+  the bare `-<digits>` form and rejected on the `n`. A bare `-n` yields an empty
+  remainder, fails there, and is caught by the table.
 
-Note also that `--stat-width=<n>` is a real git limiter absent from the table
-entirely. That is a *missing entry*, not a *missing form*, and is not claimed as
-part of this defect — it is flagged so a fix pass can decide deliberately rather
-than inherit the omission.
+**SHA:** `058d8683` (`experiments`)
+**patch-id:** `ca87ff5592bfed0f0d5f147114e7a6f59da46d13`
 
+### The deferral rationale recorded here was false, and was falsified within the hour
+
+This section previously read *"Deliberately left unimplemented in this session:
+`worktree-il3-gate-and-find-lift` holds +101/-7 on this exact file, unmerged since
+2026-08-17, and a competing edit buys a conflict on a gate whose test suite is
+load-bearing."* Every clause of that was true except the one that mattered.
+
+The branch holds exactly **one** commit not in `experiments`, and
+`git cherry -v experiments worktree-il3-gate-and-find-lift` marks it `-` — an
+equivalent patch is already in `experiments`. `strip_heredoc_bodies` and
+`mask_heredoc_bodies` are present in `experiments`' `path_security.rs`, citing a
+different commit (`dbaeb78b`), and the bug that branch fixes
+(`docs/issues/archive/2026-08-17-source-gate-does-not-split-on-newlines.md`) is
+`status: fixed` and archived. `experiments` is **577** commits ahead of the branch,
+so the two-dot diff is 15,597 deletions against 2,038 insertions: merging it would
+have *removed* work, not added any. There was no conflict to buy.
+
+The `+101/-7` figure was not wrong — it is the three-dot diff, i.e. the content of
+that one commit measured from the merge-base. It was the *inference* from it that
+was wrong: a large diff against the fork point reads as unmerged work, and says
+nothing about whether the work already arrived by another route.
+
+Recorded because it is a clean instance of R-95 (`reconnaissance-patterns`): a
+deferral rationale is a claim, and the least-audited kind — a wrong root cause is
+corrected the moment you fix the bug, while a wrong deferral is never revisited,
+because its whole function is to stop anyone looking. The bias has a direction:
+nobody drafts an estimate that makes the work sound easier, because that estimate
+would not justify stopping. Here the true cost was one function and one test.
+The check that broke it — `git cherry`, which compares by patch equivalence rather
+than by SHA — took one command.
 ## Tests added
 
-None — no fix yet. When one lands, the natural home is beside
-`il3_allows_git_status_porcelain` (`src/util/path_security.rs:3419`) and
-`il3_allows_git_status_pipe_wc` (`src/util/path_security.rs:3714`). The
-regression test must assert the **pair**, not the fixed form alone: an assertion
-that `--porcelain=v1` is allowed passes in a world where the gate stopped
-checking anything, so it has to sit next to a still-refused unbounded case.
+`il3_limiter_matches_gits_attached_value_spellings`
+(`src/util/path_security.rs:3438`), placed beside
+`il3_allows_git_status_porcelain`.
 
+It asserts the **pair**, deliberately. Five attached forms
+(`--porcelain=v1`, `--porcelain=v2`, `--stat=200`, `--max-count=3`, `-n5`) must
+read as bounded; the five bare spellings they are equivalent to must still read as
+bounded; and three cases must still be **refused** — a limiter-free `git log`,
+`--oneline` (bounds width, not line count), and `--pretty=format:%h`.
+
+The third group is what gives the first two any force. Every allow-assertion above
+would also pass in a world where the gate stopped inspecting `git` entirely, so an
+allow-only test would be green and uninformative. `--pretty=format:%h` specifically
+guards the new `=` split: it proves splitting on `=` does not admit any flag that
+merely carries a value.
+
+Whole gate at the fix commit: `cargo fmt` clean, `cargo clippy --workspace
+--all-targets -D warnings` clean, `cargo test --workspace --all-targets` **4577
+passed / 0 failed** (up one, this test).
 ## Workarounds
 
 Spell the limiter in its detached or bare form: `--porcelain` for
@@ -189,13 +229,15 @@ already recommends and costs one extra call.
 
 ## Resume
 
-Read `git_output_is_bounded` at `src/util/path_security.rs:1208-1227` and apply
-the `split('=').next()` normalisation described in `## Fix`. Before writing it,
-re-run the verdict table in `## Reproduction` — it is nine one-line
-`run_command` calls and it is what tells you whether the branch merge already
-changed the answer. Coordinate with whoever owns
-`worktree-il3-gate-and-find-lift` first.
+N/A — fixed and verified on `experiments`.
 
+One caveat that is about the observer, not the fix: the unit tests prove the
+predicate, but the **live** MCP gate still runs the binary this session's server
+started from (pid 3691039, 23:35:01), which predates this commit. `include_str!`
+and process-start freezing mean a running server cannot pick the change up — see
+R-89. Confirming the refusals are gone at the tool surface needs `cargo rb` then
+`/mcp`, and until then the honest claim is "committed and unit-verified", not
+"live".
 ## References
 
 - `src/util/path_security.rs:1208-1227` — `git_output_is_bounded`
@@ -208,4 +250,3 @@ changed the answer. Coordinate with whoever owns
   bounded/unbounded LHS split that put `git` wholesale on the wrong side.
 - `docs/trackers/2026-08-16-iron-law-gate-firing-audit.md` — GF-1 / GF-2, the
   94-refusal measurement that motivated `git_output_is_bounded`.
-
