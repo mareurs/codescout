@@ -1538,10 +1538,22 @@ async fn heredoc_body_pipes_are_not_rewritten_into_the_written_file() {
     // `detect_terminal_filter` found the last one and spliced
     // `| tee '/tmp/codescout-unfiltered-…' |` into the text that got written.
     let write = "cat > note.txt <<'EOF'\n- Resolve: git log --all -p | git patch-id --stable | grep abc123\nEOF";
-    RunCommand
+    let wrote = RunCommand
         .call(json!({"command": write}), &ctx)
         .await
         .expect("writing the heredoc should succeed");
+
+    // A non-zero exit comes back as Ok, so the `expect` above proves the tool RAN, not
+    // that the file landed. (A blocked command does surface as Err — measured, not
+    // assumed — but a shell that fails on its own does not.) Without this check a failed
+    // write leaves no file, `cat` prints nothing, and the *first* assertion below passes
+    // vacuously on the empty string: a green that reads identically in a broken world.
+    // A timeout reports `exit_code: null`, which also fails this comparison rather than
+    // slipping through as zero.
+    assert_eq!(
+        wrote["exit_code"], 0,
+        "the heredoc write must land before the read means anything: {wrote}"
+    );
 
     let read = RunCommand
         .call(json!({"command": "cat note.txt"}), &ctx)
@@ -1555,7 +1567,7 @@ async fn heredoc_body_pipes_are_not_rewritten_into_the_written_file() {
     );
     assert!(
         content.contains("git log --all -p | git patch-id --stable | grep abc123"),
-        "the heredoc body must land byte-for-byte: {content}"
+        "the heredoc body must land byte-for-byte.\n  write: {wrote}\n  read: {read}"
     );
 }
 
