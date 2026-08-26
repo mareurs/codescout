@@ -46,6 +46,11 @@ pub struct SyncReport {
     pub updated: usize,
     pub deleted: usize,
     pub elapsed_ms: u128,
+    /// Chunks the embedder refused, as `file_path:start_line`. Non-empty means the
+    /// index is INCOMPLETE even though the sync returned `Ok` — a sync that skips
+    /// content must say so, because nothing marks a skipped chunk dirty and a
+    /// later no-op sync will never reconcile it.
+    pub skipped: Vec<String>,
 }
 
 impl std::fmt::Display for SyncReport {
@@ -54,7 +59,13 @@ impl std::fmt::Display for SyncReport {
             f,
             "added={} updated={} deleted={} elapsed_ms={}",
             self.added, self.updated, self.deleted, self.elapsed_ms
-        )
+        )?;
+        // Only rendered when non-empty: a skipped chunk means the index is
+        // incomplete, and that must not be a field a reader learns to skim past.
+        if !self.skipped.is_empty() {
+            write!(f, " SKIPPED={} (index incomplete)", self.skipped.len())?;
+        }
+        Ok(())
     }
 }
 
@@ -220,11 +231,30 @@ pub fn worktree_ids(main_repo: &Path, worktree_root: &Path) -> (String, String) 
 
 /// Embed `pending`'s chunk content and upsert it, then clear `pending` so the
 /// content + embeddings are dropped — keeping peak memory at O(flush_batch).
+///
+/// **A batch failure is not fatal, and must not be.** `POST /v1/embeddings`
+/// rejects the WHOLE request when a single member exceeds the model's context
+/// ceiling (`exceed_context_size_error`), so one oversized chunk used to fail
+/// its entire flush batch and then abort the walk through `?` at both
+/// `stream_index` call sites. Batches already flushed stay committed, so the
+/// result was a durably truncated index that `index(action="status")` reports as
+/// `indexed: true, queryable: true` — its only check being a non-zero chunk
+/// count. That is the confirmed mechanism behind an index missing an entire
+/// top-level directory:
+/// `docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
+/// and `docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`.
+///
+/// So on a batch error we retry chunk-by-chunk to isolate the offenders, store
+/// everything that does embed, and report the rest through `skipped` rather than
+/// aborting. A skipped chunk's id still goes into the caller's `local_ids`, so a
+/// previously-good server vector for that chunk is never pruned merely because
+/// this run could not re-embed it.
 async fn flush_pending(
     embedder: &dyn crate::retrieval::embedder::BatchEmbedder,
     store: &dyn crate::retrieval::code_store::CodeVectorStore,
     collection: &str,
     pending: &mut Vec<crate::retrieval::payload::CodePayload>,
+    skipped: &mut Vec<String>,
 ) -> Result<usize> {
     use crate::retrieval::embedder::EmbedOutput;
     use crate::retrieval::payload::{embed_text, CodePayload};
@@ -235,10 +265,59 @@ async fn flush_pending(
     // function's. Reading `p.content` inline here is what silently dropped the AST
     // header when its previous consumer was deleted.
     let texts: Vec<String> = pending.iter().map(embed_text).collect();
-    let embeds = embedder.embed_batch_dyn(&texts).await?;
-    let n = pending.len();
-    let chunks: Vec<(CodePayload, EmbedOutput)> = pending.drain(..).zip(embeds).collect();
-    store.upsert_chunks(collection, &chunks).await?;
+    let batch_err = match embedder.embed_batch_dyn(&texts).await {
+        Ok(embeds) => {
+            let n = pending.len();
+            let chunks: Vec<(CodePayload, EmbedOutput)> = pending.drain(..).zip(embeds).collect();
+            store.upsert_chunks(collection, &chunks).await?;
+            return Ok(n);
+        }
+        Err(e) => e,
+    };
+
+    // Isolation pass: one request per chunk, so a single unembeddable payload
+    // costs only itself.
+    let mut good: Vec<(CodePayload, EmbedOutput)> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+    for p in pending.drain(..) {
+        let text = embed_text(&p);
+        match embedder.embed_batch_dyn(std::slice::from_ref(&text)).await {
+            Ok(mut embeds) if !embeds.is_empty() => good.push((p, embeds.remove(0))),
+            // An `Ok` carrying no vector is as unusable as an `Err`; treating them
+            // alike stops a zip from silently dropping the payload.
+            Ok(_) | Err(_) => failed.push(format!("{}:{}", p.file_path, p.start_line)),
+        }
+    }
+
+    // Every chunk failed on its own. That is either an unhealthy embedder or a
+    // batch of uniformly oversized chunks, and the two need OPPOSITE handling —
+    // abort vs skip-and-continue. "All failed" cannot by itself mean "abort",
+    // because a lone oversized chunk in the tail flush is the common case and has
+    // to survive. Distinguish them empirically with a minimal probe rather than by
+    // pattern-matching error strings, which differ per backend and per version.
+    if good.is_empty()
+        && embedder
+            .embed_batch_dyn(std::slice::from_ref(&"ok".to_string()))
+            .await
+            .is_err()
+    {
+        return Err(batch_err.context(
+            "embedder rejected a minimal probe after every chunk in the batch failed — \
+             treating it as unhealthy and aborting, rather than skipping real content",
+        ));
+    }
+
+    tracing::warn!(
+        skipped = failed.len(),
+        stored = good.len(),
+        cause = %batch_err,
+        "embed batch failed; stored the chunks that embed individually and skipped the rest"
+    );
+    skipped.extend(failed);
+    let n = good.len();
+    if !good.is_empty() {
+        store.upsert_chunks(collection, &good).await?;
+    }
     Ok(n)
 }
 
@@ -348,7 +427,7 @@ async fn stream_index(
     chunk_target: usize,
     flush_batch: usize,
     ignore_patterns: &[String],
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, Vec<String>)> {
     use crate::embed::ast_chunker::split_file;
     use crate::retrieval::payload::CodePayload;
     use std::collections::HashSet;
@@ -357,6 +436,9 @@ async fn stream_index(
     let mut local_ids: HashSet<String> = HashSet::new();
     let mut pending: Vec<CodePayload> = Vec::new();
     let mut added = 0usize;
+    // Chunks that could not be embedded. Reported rather than fatal — see
+    // `flush_pending`'s doc comment for why aborting here truncated the index.
+    let mut skipped: Vec<String> = Vec::new();
 
     for (path, lang, rel_display) in indexable_files(root, ignore_patterns) {
         let source = match std::fs::read_to_string(&path) {
@@ -400,13 +482,14 @@ async fn stream_index(
             // O(all_files) — the whole-tree materialisation grew to 68 GB and
             // OOM-killed the host (docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md).
             if pending.len() >= flush_batch {
-                added += flush_pending(embedder, store, collection, &mut pending).await?;
+                added +=
+                    flush_pending(embedder, store, collection, &mut pending, &mut skipped).await?;
             }
         }
     }
     // Flush the tail.
     if !pending.is_empty() {
-        added += flush_pending(embedder, store, collection, &mut pending).await?;
+        added += flush_pending(embedder, store, collection, &mut pending, &mut skipped).await?;
     }
 
     // Delete server chunks that are no longer present locally.
@@ -422,7 +505,7 @@ async fn stream_index(
             .await?;
     }
 
-    Ok((added, deleted))
+    Ok((added, deleted, skipped))
 }
 
 /// Sync a linked worktree: reuse main's vectors for byte-identical files, embed
@@ -621,6 +704,7 @@ pub async fn sync_worktree(
     let mut pending: Vec<CodePayload> = Vec::new();
     let mut local_delta_ids: HashSet<String> = HashSet::new();
     let mut added = 0usize;
+    let mut skipped: Vec<String> = Vec::new();
     for (path, lang, rel_display) in &files {
         if !dirty.paths.contains(rel_display) {
             continue;
@@ -659,12 +743,13 @@ pub async fn sync_worktree(
                 chunk_id: did,
             });
             if pending.len() >= flush_batch {
-                added += flush_pending(embedder, store, collection, &mut pending).await?;
+                added +=
+                    flush_pending(embedder, store, collection, &mut pending, &mut skipped).await?;
             }
         }
     }
     if !pending.is_empty() {
-        added += flush_pending(embedder, store, collection, &mut pending).await?;
+        added += flush_pending(embedder, store, collection, &mut pending, &mut skipped).await?;
     }
 
     // Prune delta chunks that are no longer part of the current dirty set (a
@@ -687,6 +772,7 @@ pub async fn sync_worktree(
         deleted,
         updated: 0,
         elapsed_ms: started.elapsed().as_millis(),
+        skipped,
     })
 }
 
@@ -767,7 +853,7 @@ impl crate::retrieval::client::RetrievalClient {
             .await
             .unwrap_or_default();
 
-        let (added, deleted) = stream_index(
+        let (added, deleted, skipped) = stream_index(
             root,
             project_id,
             &collection,
@@ -782,7 +868,13 @@ impl crate::retrieval::client::RetrievalClient {
         .await?;
 
         let elapsed_ms = started.elapsed().as_millis();
-        tracing::info!(added, deleted, elapsed_ms, "retrieval sync finished");
+        tracing::info!(
+            added,
+            deleted,
+            skipped = skipped.len(),
+            elapsed_ms,
+            "retrieval sync finished"
+        );
 
         // Record the indexed HEAD for external-change freshness detection
         // (checkout/pull/HEAD move). Gated to *project* syncs — library syncs
@@ -816,6 +908,7 @@ impl crate::retrieval::client::RetrievalClient {
             deleted,
             updated: 0,
             elapsed_ms,
+            skipped,
         })
     }
 }
@@ -1259,6 +1352,204 @@ mod tests {
         }
     }
 
+    /// Mimics llama-server's `exceed_context_size_error`: a batch containing ANY
+    /// text longer than `limit` fails *entirely*. That whole-request granularity is
+    /// the point — `POST /v1/embeddings` does not embed the members it could and
+    /// reject the rest, so a fake that failed only the oversized member would not
+    /// reproduce the bug at all.
+    struct CeilingEmbedder {
+        dim: usize,
+        limit: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl BatchEmbedder for CeilingEmbedder {
+        async fn embed_batch_dyn(&self, texts: &[String]) -> Result<Vec<EmbedOutput>> {
+            if let Some(t) = texts.iter().find(|t| t.len() > self.limit) {
+                anyhow::bail!(
+                    "input ({} tokens) is larger than the max context size ({} tokens). skipping",
+                    t.len(),
+                    self.limit
+                );
+            }
+            Ok(texts
+                .iter()
+                .map(|_| EmbedOutput {
+                    dense: vec![0.1; self.dim],
+                    sparse: SparseVector {
+                        indices: vec![],
+                        values: vec![],
+                    },
+                })
+                .collect())
+        }
+    }
+
+    /// An embedder that refuses everything — a down or unhealthy backend, as
+    /// opposed to a healthy one handed a single oversized payload.
+    struct DeadEmbedder;
+
+    #[async_trait::async_trait]
+    impl BatchEmbedder for DeadEmbedder {
+        async fn embed_batch_dyn(&self, _texts: &[String]) -> Result<Vec<EmbedOutput>> {
+            anyhow::bail!("connection refused")
+        }
+    }
+
+    /// A single oversized chunk must cost only itself.
+    ///
+    /// Before the fix, `flush_pending`'s `embed_batch_dyn(...).await?` propagated
+    /// through `?` at both `stream_index` call sites, aborting the walk mid-tree.
+    /// Batches already flushed stayed committed, so the build left a durably
+    /// TRUNCATED index — and `index(action="status")` reported it as
+    /// `indexed: true, queryable: true`, because its only check is a non-zero chunk
+    /// count. That combination is why an entire top-level directory could be missing
+    /// from a "healthy" index without anything failing loudly:
+    /// docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+    #[tokio::test]
+    async fn one_oversized_chunk_is_skipped_and_the_rest_of_the_walk_still_indexes() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sources(dir.path(), 6);
+        // One file whose chunk cannot fit the ceiling however it is split: a single
+        // line, so the chunker has no boundary to break it on.
+        std::fs::write(
+            dir.path().join("huge.rs"),
+            format!("fn huge() {{ let s = \"{}\"; }}\n", "x".repeat(4000)),
+        )
+        .unwrap();
+
+        let store = RecordingStore::default();
+        let emb = CeilingEmbedder { dim: 4, limit: 500 };
+
+        // flush_batch=32 puts all 7 files in ONE batch, so the oversized chunk takes
+        // every sibling down with it unless the isolation retry works.
+        let (added, _deleted, skipped) = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &emb,
+            &store,
+            false,
+            1200,
+            32,
+            &[],
+        )
+        .await
+        .expect("an oversized chunk must not abort the whole index build");
+
+        // Deliberately NOT asserting an exact count: how many chunks a 4000-char
+        // single line splits into is the chunker's business, and pinning it here
+        // would make this test fail on an unrelated chunker change. What must hold
+        // is that every skip belongs to the offending file and nothing else does.
+        assert!(
+            !skipped.is_empty(),
+            "the oversized chunk(s) must be reported, not silently dropped"
+        );
+        assert!(
+            skipped.iter().all(|s| s.contains("huge.rs")),
+            "only the offending file's chunks may be skipped, got {skipped:?}"
+        );
+
+        let stored: Vec<String> = store
+            .upserted
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|c| c.file_path.clone())
+            .collect();
+        assert_eq!(
+            added,
+            stored.len(),
+            "`added` must count what was actually stored"
+        );
+        for i in 0..6 {
+            assert!(
+                stored.iter().any(|p| p.contains(&format!("file_{i}.rs"))),
+                "file_{i}.rs must survive a sibling's embed failure; stored={stored:?}"
+            );
+        }
+        // NOTE `huge.rs` legitimately appears in `stored` too. The chunker splits it
+        // into several chunks and the small leading/trailing ones embed fine; only
+        // the oversized ones are skipped. Isolation is per CHUNK, not per file, and
+        // storing the parts that fit is the intended granularity — a file is not
+        // condemned wholesale because one of its chunks is too big.
+        //
+        // The invariant that actually matters for this bug is CONSERVATION: every
+        // chunk the walk produced must be either stored or reported, never silently
+        // dropped. Establish the true total by running the identical tree past a
+        // healthy embedder, then assert the ceiling run accounts for all of it.
+        let control_store = RecordingStore::default();
+        let (control_added, _, control_skipped) = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &FakeEmbedder {
+                dim: 4,
+                seen: Mutex::new(Vec::new()),
+            },
+            &control_store,
+            false,
+            1200,
+            32,
+            &[],
+        )
+        .await
+        .expect("control run with a healthy embedder");
+        assert!(control_skipped.is_empty(), "control must skip nothing");
+        assert_eq!(
+            added + skipped.len(),
+            control_added,
+            "conservation violated: the ceiling run stored {added} and reported \
+             {} skipped, but the tree has {control_added} chunks — the difference \
+             vanished silently, which is the exact defect this test guards",
+            skipped.len()
+        );
+    }
+
+    /// The companion guard to the test above, and the reason the fix probes rather
+    /// than pattern-matching error strings.
+    ///
+    /// "Every chunk in the batch failed individually" is ambiguous: it is what a
+    /// batch of uniformly oversized chunks looks like, AND what a dead backend looks
+    /// like. They need opposite handling. If `flush_pending` simply skipped whatever
+    /// failed, a down embedder would produce an EMPTY index reported as a successful
+    /// sync — strictly worse than today's loud abort. So a minimal probe decides,
+    /// and this test pins that a dead embedder still aborts.
+    #[tokio::test]
+    async fn a_dead_embedder_aborts_instead_of_skipping_every_chunk() {
+        let dir = tempfile::tempdir().unwrap();
+        write_sources(dir.path(), 3);
+        let store = RecordingStore::default();
+
+        let err = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &DeadEmbedder,
+            &store,
+            false,
+            1200,
+            32,
+            &[],
+        )
+        .await
+        .expect_err("an embedder that refuses even a minimal probe must abort, not skip");
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("probe"),
+            "the error must name the probe that classified the backend as unhealthy, \
+             so the next reader knows skipping was considered and rejected: {msg}"
+        );
+        assert!(
+            store.upserted.lock().unwrap().is_empty(),
+            "nothing should be stored when the embedder is down"
+        );
+    }
+
     #[tokio::test]
     async fn stream_index_flushes_in_bounded_batches() {
         let dir = tempfile::tempdir().unwrap();
@@ -1269,7 +1560,7 @@ mod tests {
             seen: Mutex::new(Vec::new()),
         };
 
-        let (added, deleted) = stream_index(
+        let (added, deleted, skipped) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1295,6 +1586,10 @@ mod tests {
         assert!(
             batches.iter().all(|&n| n <= 3),
             "a flush exceeded flush_batch=3: {batches:?}"
+        );
+        assert!(
+            skipped.is_empty(),
+            "a healthy embedder must skip nothing: {skipped:?}"
         );
         assert_eq!(batches.iter().sum::<usize>(), added);
         assert!(
@@ -1330,7 +1625,7 @@ mod tests {
             seen: Mutex::new(Vec::new()),
         };
 
-        let (added, _) = stream_index(
+        let (added, _, _) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1388,7 +1683,7 @@ mod tests {
 
         // First pass: empty server -> everything embedded.
         let store1 = RecordingStore::default();
-        let (added1, _) = stream_index(
+        let (added1, _, _) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1407,7 +1702,7 @@ mod tests {
 
         // Second pass: server already has every chunk -> nothing re-embedded or deleted.
         let store2 = RecordingStore::default();
-        let (added2, deleted2) = stream_index(
+        let (added2, deleted2, _) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1432,7 +1727,7 @@ mod tests {
         )
         .unwrap();
         let store3 = RecordingStore::default();
-        let (added3, deleted3) = stream_index(
+        let (added3, deleted3, _) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1460,7 +1755,7 @@ mod tests {
         };
 
         let store1 = RecordingStore::default();
-        let (added1, _) = stream_index(
+        let (added1, _, _) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1478,7 +1773,7 @@ mod tests {
 
         // force_reindex re-embeds every present chunk even though the server has them.
         let store2 = RecordingStore::default();
-        let (added2, _) = stream_index(
+        let (added2, _, _) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1518,7 +1813,7 @@ mod tests {
 
         let patterns = vec!["node_modules".to_string(), ".venv".to_string()];
         let store = RecordingStore::default();
-        let (added, _) = stream_index(
+        let (added, _, _) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1551,7 +1846,7 @@ mod tests {
 
         // With no patterns, the dep files ARE indexed (more chunks).
         let store2 = RecordingStore::default();
-        let (added2, _) = stream_index(
+        let (added2, _, _) = stream_index(
             dir.path(),
             "p",
             "coll",
@@ -1596,7 +1891,7 @@ mod tests {
             seen: Mutex::new(Vec::new()),
         };
 
-        let (added, _) = stream_index(
+        let (added, _, _) = stream_index(
             dir.path(),
             "p",
             "coll",

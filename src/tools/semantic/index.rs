@@ -394,10 +394,39 @@ impl Tool for IndexProject {
                         tracing::info!(
                             added = report.added,
                             deleted = report.deleted,
+                            skipped = report.skipped.len(),
                             elapsed_ms = report.elapsed_ms,
                             extra_detail,
                             "sync task succeeded",
                         );
+                        // A sync that skipped chunks produced an INCOMPLETE index, and
+                        // saying so is the whole point of threading `skipped` up here:
+                        // nothing marks a skipped chunk dirty, so a later no-op sync
+                        // will never reconcile it. Silence here is what let an index
+                        // missing a whole directory read as healthy
+                        // (docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md).
+                        if !report.skipped.is_empty() {
+                            tracing::warn!(
+                                skipped = report.skipped.len(),
+                                sample = ?report.skipped.iter().take(10).collect::<Vec<_>>(),
+                                "index is INCOMPLETE: the embedder refused these chunks",
+                            );
+                        }
+                        let skipped_detail = if report.skipped.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " skipped={} INDEX INCOMPLETE (first: {})",
+                                report.skipped.len(),
+                                report
+                                    .skipped
+                                    .iter()
+                                    .take(3)
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        };
                         // Indexing succeeded — files are now fresh, clear the dirty set.
                         if let Some(ref arc) = dirty_files_arc {
                             arc.lock().unwrap_or_else(|e| e.into_inner()).clear();
@@ -405,7 +434,10 @@ impl Tool for IndexProject {
                         IndexingState::Done {
                             files_indexed: report.added + report.updated,
                             files_deleted: report.deleted,
-                            detail: format!("elapsed_ms={}{extra_detail}", report.elapsed_ms),
+                            detail: format!(
+                                "elapsed_ms={}{extra_detail}{skipped_detail}",
+                                report.elapsed_ms
+                            ),
                             // Total counts now live in Qdrant — IndexStatus
                             // re-route (task #91) will scroll the collection
                             // for these. For now leave 0 to avoid a sqlite
