@@ -204,6 +204,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // questions of the same body (does it carry the row / can anything cite the
     // entry) and are allowed to disagree. See `scan_undefined_entries`.
     all_violations.extend(scan_undefined_entries(&cat.conn)?);
+    // Starts from the citation graph rather than a known ledger's claimed entries — the
+    // gap neither scan_undefined_entries nor link_scan's own report reaches. See
+    // `scan_cited_prefix_with_no_definer`.
+    all_violations.extend(scan_cited_prefix_with_no_definer(&cat.conn)?);
     // And beside both, the inverse of snapshot_drift: `params` behind a body that ran
     // ahead. Same two sets, subtracted the other way; opposite remedy.
     all_violations.extend(scan_params_behind_body(&cat.conn)?);
@@ -2772,6 +2776,112 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
                 detail,
             ));
         }
+    }
+    Ok(out)
+}
+
+/// `cited_prefix_with_no_definer`: a prefix appears in ≥1 citation but has zero definers
+/// — no `## <ID> — <title>` heading anywhere in the corpus, and no artifact declares it via
+/// `entry_prefix` either. Neither `link_scan` nor `scan_undefined_entries` reaches this state:
+/// both start from an entry a ledger already claims (a heading, a `params` row, a declared
+/// namespace), and this prefix owns none of those — it is not a *broken* citation in the
+/// resolver's terms, it is not a citation candidate at all, so `link_scan`'s own resolver
+/// treats it as prose noise (`resolve.rs`'s `prefix_is_known` gate) and reports nothing.
+/// docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md
+///
+/// **Threshold, not a bare "any unknown prefix."** Extraction is deliberately dumb — `UTF-8`
+/// and `SHA-256` arrive as entry tokens exactly like `T-1` does, and a design doc that quotes
+/// `## R-4` in prose is not a namespace either. Firing on every never-defined prefix would
+/// make this check indistinguishable from noise; it fires only when the citation VOLUME looks
+/// like a real, abandoned-or-never-created namespace rather than an incidental mention.
+///
+/// **One combined corpus pass**, not three: citations, definitions, and declared prefixes are
+/// all read off the same `extract()` call per artifact — the same door
+/// [`corpus_cited_tokens`] and [`crate::librarian::catalog::augmentation::body_defined_indices`]
+/// use for the citation and definition halves respectively, so this check cannot disagree with
+/// either about what counts as one.
+fn scan_cited_prefix_with_no_definer(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    use crate::librarian::tools::link_scan::extract::{extract, CitationKind};
+
+    // Below this, a prefix reads as incidental prose rather than an abandoned namespace —
+    // see the bug's own measurement note: not yet swept against the full catalog, so treat
+    // as a starting point, not a tuned constant.
+    const MIN_CITATIONS: usize = 3;
+    const MIN_FILES: usize = 2;
+
+    let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut known_prefixes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // prefix -> (citing path -> count in that file)
+    let mut citations: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, usize>,
+    > = std::collections::BTreeMap::new();
+
+    for path in &paths {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let ex = extract(&text);
+
+        for d in &ex.definitions {
+            if let Some((prefix, _)) = d.token.rsplit_once('-') {
+                known_prefixes.insert(prefix.to_string());
+            }
+        }
+        known_prefixes.extend(ex.declared_prefixes.iter().cloned());
+
+        for c in &ex.citations {
+            let token = match c.kind {
+                CitationKind::EntryToken => Some(c.raw.as_str()),
+                CitationKind::CrossRepoToken => c.raw.rsplit_once(':').map(|(_, t)| t),
+                _ => None,
+            };
+            let Some(prefix) = token.and_then(|t| t.rsplit_once('-')).map(|(p, _)| p) else {
+                continue;
+            };
+            *citations
+                .entry(prefix.to_string())
+                .or_default()
+                .entry(path.clone())
+                .or_insert(0) += 1;
+        }
+    }
+
+    let mut out = Vec::new();
+    for (prefix, by_file) in citations {
+        if known_prefixes.contains(&prefix) {
+            continue;
+        }
+        let total: usize = by_file.values().sum();
+        if total < MIN_CITATIONS || by_file.len() < MIN_FILES {
+            continue;
+        }
+        let mut files: Vec<&String> = by_file.keys().collect();
+        files.sort();
+        out.push(Violation::new(
+            "cited_prefix_with_no_definer",
+            None,
+            files[0].clone(),
+            format!(
+                "`{prefix}-N` is cited {total} times across {} files, but no `## {prefix}-N — \
+                 <title>` heading exists anywhere in the corpus and no artifact declares \
+                 `entry_prefix: {prefix}`. These citations are neither resolved nor reported \
+                 dangling — link_scan's resolver treats a wholly-unknown prefix as prose noise \
+                 (the same gate that keeps `UTF-8`/`SHA-256` silent), so this state is reported \
+                 nowhere else. Citing files: {}. Either define the namespace (a heading per \
+                 entry) or declare it empty via `entry_prefix` if entries are coming later.",
+                by_file.len(),
+                files
+                    .iter()
+                    .map(|f| f.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
     }
     Ok(out)
 }
@@ -5649,6 +5759,124 @@ mod tests {
             "but not one of its six entries can be cited, and that is worth saying: {v:?}"
         );
         assert_eq!(v[0].check, "ledger_defines_nothing");
+    }
+
+    // ---- scan_cited_prefix_with_no_definer -----------------------------------------------
+
+    /// Regression for docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md:
+    /// a prefix with zero definers repo-wide is not a *broken* citation in the resolver's
+    /// terms (it is not a citation candidate at all), so it landed in neither `link_scan`'s
+    /// dangling/ambiguous buckets nor either existing `doctor` check. Both of those key off
+    /// entries a ledger already claims; this one has to start from the citation graph itself.
+    #[test]
+    fn cited_prefix_with_no_definer_fires_above_threshold() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "a",
+            &tmp.path().join("a.md"),
+            "See T-1 and T-2 for the plan.\n",
+        );
+        seed_ledger(
+            &cat,
+            "b",
+            &tmp.path().join("b.md"),
+            "T-1 is still open; so is T-3.\n",
+        );
+
+        let v = scan_cited_prefix_with_no_definer(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].check, "cited_prefix_with_no_definer");
+        assert!(
+            v[0].detail.contains('T') && v[0].detail.contains('4'),
+            "must name the prefix and the citation count (4: T-1 twice, T-2, T-3): {}",
+            v[0].detail
+        );
+        assert!(
+            v[0].detail.contains("a.md") && v[0].detail.contains("b.md"),
+            "must name the citing files: {}",
+            v[0].detail
+        );
+    }
+
+    /// Below the citation-count threshold, stay silent — the guard against the false
+    /// positive the guide already warns about for ledger inference (a design doc quoting
+    /// `## R-4` in prose is not a namespace).
+    #[test]
+    fn cited_prefix_with_no_definer_is_silent_below_threshold() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "a",
+            &tmp.path().join("a.md"),
+            "One passing mention of T-1.\n",
+        );
+
+        assert!(
+            scan_cited_prefix_with_no_definer(&cat.conn)
+                .unwrap()
+                .is_empty(),
+            "a single incidental citation must not fire"
+        );
+    }
+
+    /// A prefix defined anywhere in the corpus is `link_scan`'s territory (resolved or
+    /// dangling), not this check's — even when the citing file itself defines nothing.
+    #[test]
+    fn cited_prefix_with_no_definer_is_silent_when_prefix_is_defined_elsewhere() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "ledger",
+            &tmp.path().join("ledger.md"),
+            "## T-1 — the only one\n",
+        );
+        seed_ledger(
+            &cat,
+            "a",
+            &tmp.path().join("a.md"),
+            "T-1 and T-99 both come up here, alongside T-100.\n",
+        );
+
+        assert!(
+            scan_cited_prefix_with_no_definer(&cat.conn)
+                .unwrap()
+                .is_empty(),
+            "T is a known prefix (T-1 is defined), so T-99/T-100 dangle -- link_scan's job, \
+             not this check's"
+        );
+    }
+
+    /// A ledger that DECLARES `entry_prefix` but defines nothing is `ledger_defines_nothing`'s
+    /// finding, not this one's -- double-reporting the same underlying namespace under two
+    /// check names would be noise, not signal.
+    #[test]
+    fn cited_prefix_with_no_definer_is_silent_when_prefix_is_declared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "ledger",
+            &tmp.path().join("ledger.md"),
+            "---\nentry_prefix: T\n---\n\n# Queue\n\nNo headings yet.\n",
+        );
+        seed_ledger(
+            &cat,
+            "a",
+            &tmp.path().join("a.md"),
+            "T-1, T-2, and T-3 are all still pending.\n",
+        );
+
+        assert!(
+            scan_cited_prefix_with_no_definer(&cat.conn)
+                .unwrap()
+                .is_empty(),
+            "T is declared, so it's a known-but-empty namespace -- ledger_defines_nothing's \
+             territory"
+        );
     }
 
     /// The core positive. The body's index table carries ids that `params` has no

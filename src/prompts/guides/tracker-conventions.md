@@ -367,6 +367,22 @@ An undefined-but-cited id becomes a **dangling** citation. A ledger carrying 48
 row-only entries produced ~30 of this project's 39 sampled dangling entry tokens;
 a sibling ledger keeping headings for all its entries produced zero.
 
+**Heading level is not the discriminator** in the table above — `### D-6 — …` and
+`#### S-1 — …` both define. `### A-9 Addendum` fails on the missing dash, not the
+level; two readers took it as a level rule and were wrong.
+
+**A prefix with no definer ANYWHERE is a third state, distinct from dangling.**
+Dangling means the prefix is known (something, somewhere, defines a sibling
+entry or declares `entry_prefix`) but this specific id isn't. A prefix nobody
+has ever defined or declared is not a citation candidate at all in the
+resolver's terms, so it resolves as prose noise — the same gate that keeps
+`UTF-8`/`SHA-256` silent — and is reported by neither `link_scan`'s
+dangling/ambiguous buckets nor a ledger-scoped `doctor` check. `doctor`'s
+`cited_prefix_with_no_definer` check exists specifically for this state: it
+starts from the citation graph rather than a known ledger's claimed entries,
+and fires only above a citation-volume threshold to stay quiet on incidental
+prose. See `docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md`.
+
 
 ### Citing an entry — bare, or qualified
 
