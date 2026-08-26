@@ -6,7 +6,7 @@ severity: low
 owner: marius
 related: []
 tags: [tracker-conventions, guide, doc-refs, archive-flow]
-unverified: "The guide fix and step 1 (repairing the 55 archive-move citations, 7884fc7b) are both done and verified by two independent instruments. The severity-promotion policy question is MEASURED and answered `not yet`: 430 broken code-comment refs remain after step 1, still far too many to gate on. What is NOT done: step 2, excluding the audit''s own teaching placeholders — the worklist is now an exact 22 refs rather than an estimate. What is NOT characterised: the ~408 broken code-comment refs that are neither the archive-move class nor docs/issues placeholders; nobody has looked at what they are."
+unverified: "The guide fix, step 1 (55 archive-move citations, 7884fc7b) and step 2 (7 comment-borne placeholders — 1 fixed in d7d4a5c7, 6 wontfix as deliberate illustrations) are all done and verified. The severity-promotion policy question is MEASURED and answered `not yet`: ~429 broken code-comment refs remain, still far too many to gate on. What is NOT characterised: what those ~429 actually are. A 50-of-430 sample suggests roughly 76% carry severity_reason=code_comment_capped and the rest are basename_ambiguous or gitignored_path — which would already be med or low on their own merits and so are NOT part of a promotion blast radius — but the audit caps its findings array at 50 with no flag to raise it, so that split is sampled, not counted. Step 3 (re-measure) is deliberately NOT done: the composition would have to change by an order of magnitude to move the answer off `not yet`."
 kind: bug
 ---
 
@@ -171,6 +171,15 @@ fixtures the audit's tree-sitter pass correctly excludes and a regex does not) a
 placeholders. Splitting on "does a file of this basename exist in `docs/issues/archive/`?"
 separates the genuine archive-move rot cleanly, because a placeholder has no archived twin.
 
+**That same error was then made a second time, in this file, on the residue** — the "22
+refs" of step 2 below were also a regex count, and 15 of them were the same string
+literals the audit never reads. **A regex over source and a tree-sitter pass over
+documentation nodes are different instruments measuring different populations**, and the
+regex over-counts every time by exactly the fixtures. Twice in one sitting is enough to
+state it as a rule rather than an anecdote: when the question is "what does this structured
+tool see?", the only instrument that answers it is that tool — a grep answers a similar-
+sounding question about the bytes.
+
 ### Recommendation: do NOT promote, and here is the order to do it in
 
 **484 is too many to switch on at once**, and it is the wrong 484. The pain that actually
@@ -191,14 +200,41 @@ Sequence, cheapest and most certain first:
    broken code-comment refs went 484 → **430** (−54, resolved +56). The −54/55 gap is not
    rounding: `n_refs_found` rose by 2 between runs from a peer commit, and the audit's
    tree-sitter extraction groups refs slightly differently from a line-based count.
-2. Exclude the audit's own fixtures and teaching placeholders. **The worklist is now exact
-   rather than estimated — 22 refs**, every one a placeholder: `foo.md`, `x.md`, `a.md`,
-   `b.md`, `some-bug.md`, `2026-01-01-x.md`, `2026-01-01-a.md`, `2026-01-01-y.md`,
-   `2026-08-16-append-entry.md`, `2026-08-16-run-command.md`, `2026-08-07-example.md`, and
-   one written with a literal `…` ellipsis. They sit in `librarian/adapter.rs`,
-   `classify.rs`, `create.rs`, `doctor.rs`, `mod.rs`, `library/auto_register.rs`,
-   `server.rs`, `util/librarian_guard.rs` and — five of them — inside `audit_doc_refs`'
-   own `code_comments.rs`, `parser.rs` and `resolver.rs`.
+2. Exclude the audit's own fixtures and teaching placeholders. **DONE, and it turned out to
+   be almost nothing.**
+
+   The "22 refs" figure recorded here on the first pass was **wrong, and wrong the same way
+   the 77 was**: a regex over source counts string literals, and the audit's tree-sitter
+   pass reads only *documentation nodes*. Splitting on that: **15 of the 22 are string
+   literals inside test fixtures, which the audit never sees at all.** Only **7** are
+   comment-borne, and only those 7 were ever in the report.
+
+   Of the 7:
+
+   - **1 was a genuine citation, not a placeholder**, and is fixed (`d7d4a5c7`):
+     `src/library/auto_register.rs` cited
+     `docs/issues/...-edit-code-write-path-ignores-workspace-pin.md` with the date elided,
+     so it could never resolve for anyone. The real file is
+     `docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md`. An
+     ellipsis reads like a placeholder, which is precisely why it survived every sweep that
+     skipped placeholders.
+   - **6 are deliberate illustrations and are `wontfix`.** They live in the audit's own doc
+     comments and their concreteness is the point. `mod.rs:30` says "`// see
+     docs/issues/foo.md` is a pointer, and the backticks are a style habit rather than a
+     signal of intent" — templating it to `<slug>` would make it read as a template and
+     destroy the illustration. `resolver.rs:634` is sharper still: it explains that
+     "`docs/issues/x.md` has a real `docs/`, so it is judged strictly and a miss there is
+     genuine drift" — and the audit dutifully reports it as genuine drift. **The tool is
+     flagging its own worked example of a correct flag.**
+
+   Rewriting those six would falsify the documentation to satisfy a linter that, by design,
+   is not gating on them — the exact move `get_guide("tracker-conventions")` warns against
+   for archived documents. Recorded here so nobody re-opens it as cleanup.
+
+   *(A templated form would work if it were ever wanted: measured 2026-08-26,
+   `docs/issues/<slug>.md` in `tracker-conventions.md` is not extracted as a ref at all —
+   the parser stops at the directory `docs/issues/`, which resolves. That is a principled
+   escape, not a heuristic. It is simply the wrong trade here.)*
 3. Re-measure. If the residue is small, promotion becomes a cheap change rather than a
    flag day.
 
