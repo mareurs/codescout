@@ -307,7 +307,7 @@ pub(crate) async fn handle_successful_output(
     };
 
     // Attach unfiltered_output ref if we captured via tee. A non-empty capture behind an
-    // empty filtered `stdout` is exactly the case docs/issues/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md
+    // empty filtered `stdout` is exactly the case docs/issues/archive/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md
     // covers: without an explicit `"stdout": ""` and a line count, the response looks
     // identical whether the ref holds 2 lines or 20,000.
     if let Some((ref ref_id, truncated, line_count)) = unfiltered_ref {

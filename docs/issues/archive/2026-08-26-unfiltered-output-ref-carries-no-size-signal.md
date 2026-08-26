@@ -1,12 +1,13 @@
 ---
-id: '5f6e1c3122a48904'
+id: 9fabc6ccc51d865f
 kind: bug
-status: open
+status: fixed
 title: 'BUG: run_command''s unfiltered_output ref carries no size/emptiness signal — an agent cannot tell a 2-line buffer from a 20,000-line one without a blind round-trip'
 tags:
 - run_command
 - progressive-disclosure
 - usability
+closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 related: []
@@ -129,36 +130,32 @@ unconditional and directly explains the observed shape.
 
 ## Fix
 
-*Not yet implemented — filed on notice per CLAUDE.md.*
+Implemented options 1 + 2 from the original analysis, in
+`handle_successful_output` (`src/tools/run_command/output.rs`):
 
-Minimal, low-risk options, not mutually exclusive:
+1. **`stdout` is now explicit, not omitted, when an `unfiltered_output` ref is
+   attached.** The "attach unfiltered_output ref" step now sets
+   `result["stdout"] = ""` if the key is absent, right before attaching the
+   ref — scoped to exactly the case that was ambiguous (a piped-filter command
+   whose filtered result is empty). Plain commands with genuinely empty
+   output and no unfiltered capture are unaffected.
+2. **`unfiltered_output_lines` reports the FULL pre-truncation line count.**
+   `unfiltered_ref`'s tuple grew a third field, computed via `count_lines`
+   (already imported) on the raw tee capture *before* the inline-storage
+   byte-budget truncation runs — so a truncated buffer still reports its true
+   size, not just what fit inline.
 
-1. **Always set `stdout`, even when empty.** Change `if !raw_stdout.is_empty()
-   { r["stdout"] = ... }` to unconditionally set it (`r["stdout"] =
-   json!(raw_stdout)`), at least on the path where an `unfiltered_output` ref is
-   about to be attached. Makes "filtered output was empty" structurally visible
-   instead of inferred from key-absence.
-2. **Attach a size hint alongside the ref**, e.g. `unfiltered_output_lines: N`
-   (from the tee capture already read into `content` at `:129`) or a short
-   `hint` string ("57 lines available; the filter matched 0 of them"). Cheap —
-   the line count is already computable at the point the ref is created, before
-   it's discarded down to just the id.
-3. **Do not attach the ref at all when the filtered result already answers the
-   question** (e.g. grep's own `exit_code` semantics for "matched nothing" are
-   unambiguous) — riskier, since it special-cases `grep` while the mechanism is
-   meant to be filter-generic (`head`/`tail`/`sed` don't have the same
-   0-match-is-exit-1 convention), so option 1 or 2 is safer.
-
-Recommend 1 + 2 together: cheap, generalizes across every filter the mechanism
-already tracks, and doesn't need per-filter special-casing.
-
+**SHA:** `c172fe10` (`experiments`)
+**patch-id:** `e192f49af22e1302b18473795e6d725917d989d2`
 ## Tests added
 
-None yet — bug is `open`. A regression test would construct a command whose
-filter output is empty but whose pre-filter capture is not, and assert the
-response either includes `"stdout": ""` explicitly or a size hint alongside
-`unfiltered_output` — matching whichever fix option is chosen.
-
+`tools::run_command::tests::unfiltered_output_carries_a_line_count_and_explicit_empty_stdout`
+and `tools::run_command::tests::unfiltered_output_line_count_survives_inline_truncation`
+(`src/tools/run_command/tests.rs`). Verified RED before GREEN: both failed with
+`left: Null` (the fields genuinely absent) before the fix, and pass after.
+The second test's fixture asserts `unfiltered_truncated` is actually present
+before checking the line count, so it can't pass vacuously on a fixture too
+small to exercise truncation at all.
 ## Workarounds
 
 Read the ref anyway (one extra round-trip) when the filter's exit code doesn't

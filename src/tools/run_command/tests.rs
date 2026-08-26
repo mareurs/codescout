@@ -2908,7 +2908,7 @@ async fn non_filter_pipe_no_unfiltered_ref() {
     );
 }
 
-/// Regression for docs/issues/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md:
+/// Regression for docs/issues/archive/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md:
 /// when the filter matched nothing, the response used to omit `stdout` entirely (absent,
 /// not `""`) and attach a bare `unfiltered_output` ref with no size signal — an agent
 /// could not tell a 2-line buffer from a 20,000-line one without a blind round-trip.
