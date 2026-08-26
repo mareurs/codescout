@@ -316,25 +316,38 @@ jobs:
           curl -fsSL "$URL" -o "${{ runner.temp }}/PortableGit.7z.exe"
           7z x -y -o"$DIR" "${{ runner.temp }}/PortableGit.7z.exe" > /dev/null
 
-      # The value must be a WINDOWS path: wine maps `/` to `Z:`, and `resolve_git_bash`
+      # Both values must be WINDOWS paths: wine maps `/` to `Z:`, and `resolve_git_bash`
       # does a plain `is_file()` probe that a Unix path fails SILENTLY — the symptom is
       # the same 8 failures, with nothing pointing at the variable.
+      #
+      # CODESCOUT_BASH fixes the SHELL. It does not help the handful of tests that invoke
+      # `git` DIRECTLY rather than through Git Bash — those die on `program not found`
+      # until `git.exe` is on the WINDOWS path, which a Unix PATH entry does not affect.
+      # WINEPATH is that knob. Worth 3 tests, measured 2026-08-26.
       - name: Point codescout at Git Bash under wine
         shell: bash
         run: |
           set -euo pipefail
-          UNIX_PATH="${{ runner.temp }}/portable-git/bin/bash.exe"
+          DIR="${{ runner.temp }}/portable-git"
+          UNIX_PATH="$DIR/bin/bash.exe"
           test -f "$UNIX_PATH" || { echo "PortableGit missing at $UNIX_PATH" >&2; exit 1; }
+          test -f "$DIR/cmd/git.exe" || { echo "git.exe missing at $DIR/cmd" >&2; exit 1; }
           echo "CODESCOUT_BASH=Z:${UNIX_PATH//\//\\}" >> "$GITHUB_ENV"
-      # SKIP LIST — 10 entries covering 13 tests, every one classified below.
+          echo "WINEPATH=Z:${DIR//\//\\}\\cmd" >> "$GITHUB_ENV"
+      # SKIP LIST — 7 entries covering 10 tests, every one classified below.
       #
-      # MEASURED 2026-08-26 by running the suite with ZERO skips under wine 11.16: exactly
-      # these fail and everything else passes (4280 passed, 0 failed with this list). That
-      # pass dropped **22** stale entries which had accumulated since the lane gained a Git
-      # Bash and named tests that now pass — including two in the block historically blamed
-      # on a wine-broken glob walk. A stale skip is not free: it reads as coverage while
-      # silently withholding it, which is why this list is now justified per entry rather
-      # than per block.
+      # MEASURED, in two passes, and the second pass is the one that counts.
+      #   Locally (wine 11.16, zero skips): exactly these fail.
+      #   On THIS lane (wine 9.0, run 32975930504): dropping 22 stale entries passed 21 of
+      #   22 — so the local measurement transferred almost perfectly, and the ONE that did
+      #   not is now carried as its own classified entry rather than as a blanket.
+      # Then WINEPATH retired 3 more (group 2 below), leaving 7.
+      #
+      # The 22 had accumulated since the lane gained a Git Bash and named tests that pass —
+      # including two in the block historically blamed on a wine-broken glob walk. A stale
+      # skip is not free: it reads as coverage while silently withholding it, and this is
+      # CI's only gnu-ABI lane (windows-latest is MSVC). Hence per-entry justification
+      # rather than per-block.
       #
       # Add nothing here without a measured reason and an un-skip protocol.
       #
@@ -343,13 +356,12 @@ jobs:
       #    include_docs_attaches_docs_in_search_mode.
       #    Inventory: docs/issues/2026-07-02-windows-gnu-wine-20-test-failures.md (WIN-27)
       #
-      # 2. NO `git.exe` ON WINE'S PATH (3) — activate_populates_head_sha,
-      #    check_index_scope_respects_gitignore, reindex_backfills_commits_table. All three die
-      #    on `Error { kind: NotFound, message: "program not found" }`. These shell out to `git`
-      #    DIRECTLY rather than through Git Bash, so supplying PortableGit as CODESCOUT_BASH —
-      #    which fixed the shell for this lane — never reaches them.
-      #    Un-skip protocol: put PortableGit's `cmd/` on PATH for the test step, then re-measure.
-      #    This is the cheapest remaining win on this lane, and is NOT yet attempted.
+      # 2. RESOLVED 2026-08-26, kept here as the record of a protocol that worked.
+      #    activate_populates_head_sha, check_index_scope_respects_gitignore and
+      #    reindex_backfills_commits_table died on `NotFound: program not found` because they
+      #    invoke `git` DIRECTLY rather than through Git Bash, so CODESCOUT_BASH never reached
+      #    them. Setting WINEPATH to PortableGit's `cmd/` (above) fixes all three. They are no
+      #    longer skipped. If they regress, check that step's `git.exe` guard first.
       #
       # 3. format_compact_live_renders_claude_md_as_map_shape — permanent for any CROSS-COMPILED
       #    lane, by construction. The test deliberately reads the repo's real CLAUDE.md via
@@ -377,6 +389,16 @@ jobs:
       #
       # 6. heredoc_body_pipes_... — wine 9.0 ONLY; see the block below.
       #
+      # NOT skipped, deliberately, and expected to fail once more:
+      # run_command_with_overflow_emits_progressive_hint_once was the 1-of-22 that did not
+      # transfer from wine 11.16 to this lane. Its assertion was a bare
+      # "overflowing output should emit progressive-disclosure hint" — a message that reads
+      # the same whether the command timed out, produced no output, produced too little to
+      # overflow, or was refused, so skipping on it now would file an unclassified entry. The
+      # assertion has been taught to print the envelope instead; the next red run classifies
+      # it, and THEN it gets a skip with a reason or a fix. Same move that turned the heredoc
+      # "corruption" into a measured timeout (W-60).
+      #
       # Do NOT make any of these self-skip at runtime on a probe (missing bash, missing `py`,
       # missing git). Every one is load-bearing on windows-latest, where the thing being probed
       # for IS present, and a probe-gated early return disarms it there too. (WIN-32, WIN-36)
@@ -396,7 +418,7 @@ jobs:
       # (WineHQ apt repo), then drop this skip and re-measure — not by editing the test.
       # docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip activate_populates_head_sha --skip check_index_scope_respects_gitignore --skip reindex_backfills_commits_table --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file
 
   tool-docs-sync:
     name: Tool Docs Sync

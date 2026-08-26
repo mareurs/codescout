@@ -4798,6 +4798,23 @@ mod guide_hint_tests {
             .map(String::from)
     }
 
+    /// Render a content payload into a failure message, truncated.
+    ///
+    /// A bare `assert!(hint.contains(...))` reads the same in at least four different
+    /// broken worlds — the command timed out, produced no output, produced too little to
+    /// overflow, or was refused by a gate. On the windows-gnu lane that ambiguity cost a
+    /// CI round trip, because the only way to tell them apart is the envelope the
+    /// assertion was throwing away (`docs/trackers/bug-fix-session-log.md` W-60).
+    ///
+    /// Truncated on purpose: a PASSING payload here is 2000 lines, and a failure message
+    /// that dumps it is its own kind of unreadable.
+    fn render_content(content: &[rmcp::model::Content]) -> String {
+        match content.first().and_then(|c| c.as_text()) {
+            Some(t) => t.text.chars().take(600).collect(),
+            None => format!("<{} content item(s), none textual>", content.len()),
+        }
+    }
+
     /// Consume the session-opening guide slot.
     ///
     /// The opener fires on the first guide-eligible call of ANY session
@@ -6430,7 +6447,8 @@ mod guide_hint_tests {
             extract_hint(&big)
                 .unwrap_or_default()
                 .contains("progressive-disclosure"),
-            "overflowing output should emit progressive-disclosure hint"
+            "overflowing output should emit progressive-disclosure hint; got: {}",
+            render_content(&big)
         );
         let second = tool
             .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
@@ -6438,7 +6456,8 @@ mod guide_hint_tests {
             .unwrap();
         assert!(
             extract_hint(&second).is_none(),
-            "second overflow must not re-emit the hint"
+            "second overflow must not re-emit the hint; got: {}",
+            render_content(&second)
         );
     }
 }
