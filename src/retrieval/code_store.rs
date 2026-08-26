@@ -194,7 +194,7 @@ pub trait CodeVectorStore: Send + Sync {
     /// Exists because a vector table bakes its dimension in at creation and cannot
     /// widen in place, so switching embedding models is the one case a "full
     /// reindex" genuinely requires and `force=true` could not perform:
-    /// `docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
+    /// `docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
     ///
     /// **Both** halves must go. Dropping the vectors while leaving `code_chunk`
     /// rows behind leaves `chunk_refs` reporting an index that no longer exists,

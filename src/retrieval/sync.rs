@@ -2681,7 +2681,7 @@ mod tests {
     /// The defect: `sync_project` called `guard_index_dim` unconditionally *ahead* of
     /// the force-capable indexing work, so `force=true` — which advertises a full
     /// reindex — could not perform the one rebuild that genuinely requires one.
-    /// `docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
+    /// `docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
     ///
     /// Identical setup to the sibling above (stored dim 999, `test_retrieval_client`
     /// pins `model_dim: Some(3)`) with only `force_reindex` flipped on. Keeping that

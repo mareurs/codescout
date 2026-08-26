@@ -444,7 +444,7 @@ impl RetrievalClient {
     /// of the force-capable indexing work, so `force=true` — which advertises a
     /// full reindex — could not perform the one rebuild that actually requires
     /// one:
-    /// `docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
+    /// `docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`.
     pub(crate) async fn migrate_or_guard_index_dim(
         &self,
         collection: &str,

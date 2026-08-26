@@ -148,6 +148,46 @@ bug has no regression test today.
    across calls, not the field's existence.
 
 ## Fix
+### Progress 2026-08-26 — step 1 shipped, steps 2-3 still open
+
+- **SHA:** `69e78a2f` (`experiments`)
+- **patch-id:** `139205fb275ae4ec0329d5816a0ba4be243e9a6e`
+
+`fix(librarian): collect reindex embed failures instead of aborting the target
+loop`. The patch-id is the durable anchor — `experiments` is rebased after every
+ship, so the SHA will orphan.
+
+**Step 1 is done.** The embed loop no longer propagates. Failures accumulate into
+`embed_errors` and surface as `embed_error_count` plus a 20-entry capped sample,
+mirroring the `backfill_errors` field immediately below it in the same function.
+`embed_note` now leads with `DEGRADED` when anything failed and states explicitly
+that `artifact(action="find")` is accurate while semantic search will not surface
+the un-vectored artifacts. That fixes all four numbered consequences in § *Root
+cause*: the multi-target abort, the destroyed report, the skipped
+`backfill_commits`, and — partially — the missing degraded signal.
+
+**Also shipped:** `TestToolContextBuilder::with_embedding` and
+`::with_artifact_store` (`src/librarian/tools/mod.rs`). This was step 4, and it
+was a genuine prerequisite: the fields already existed, only the setters were
+missing, which is precisely why this code path had no coverage. Both are needed
+together — the embed block is gated on `if let (Some(svc), Some(store))`, so a
+test setting only the embedder would have passed while exercising nothing.
+
+**Steps 2 and 3 remain open, and they are the design half:**
+
+- **2 — a durable degraded marker.** `embed_note` is an *envelope* field. It is
+  now reachable on the failure path (it wasn't before), but it still does not
+  outlive the call: a later `artifact(action="find")` has no way to know the last
+  refresh was partial. That needs persisted state.
+- **3 — reconcile the status surfaces.** Catalog freshness, embedding freshness
+  and queryability are three distinct facts reported independently by surfaces
+  that can disagree. They should derive from one state model. This is the
+  report's "related status problem", and it overlaps
+  `docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
+  — the two should probably be designed together rather than patched separately.
+
+**Verified:** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test` → 4474 passed, 0 failed, 46 ignored.
 
 Plan (not yet implemented). Order matters — (1) is small and removes most of the
 harm:
@@ -173,13 +213,28 @@ No SHA, no patch-id — not yet fixed.
 
 ## Tests added
 
-None yet. Blocked on step 4 above. Required:
+`an_embed_failure_still_walks_every_target_and_reports_it`
+(`src/librarian/tools/reindex.rs`), shipped in `69e78a2f`.
 
-- a failing embedder + 2-target scope: assert **both** targets' rows are
-  present in the catalog afterwards, and the envelope reports a non-zero
-  `embed_error_count`;
-- assert `backfill_commits` still ran for both targets;
-- assert the successful counters (`added`/`updated`) survive an embed failure.
+Uses **two roots**, so the default `scope="all"` yields two targets — without
+that the test would not exercise the loop the `?` used to escape, which is the
+severe half of this bug. A `FailingEmbedder` bails on every call. Asserts:
+
+- `call` returns `Ok`, not `Err` — the core behavioural change;
+- `added == 2`, so **both** targets' artifacts reached the catalog;
+- `embed_error_count == 2` — every failure counted, not just the first;
+- `embed_note` contains `DEGRADED`;
+- `backfill_error_count == 0`, proving `backfill_commits` still ran. It sits
+  *after* the embed block, so the old `?` skipped it entirely.
+
+**Verified red before green.** With the pre-fix `?` restored, the test fails with
+`connection refused` propagating out of `call`. This matters more than usual here:
+the test's central assertion is that a function returns `Ok`, and a test asserting
+`Ok` is exactly the shape that can pass without the fix if the failure path is
+never actually reached. Confirming red is what rules that out.
+
+**Not yet covered:** steps 2 and 3. There is no test for a durable degraded
+marker or for status-surface agreement, because neither exists yet.
 
 ## Workarounds
 
@@ -190,15 +245,24 @@ returns an error, rather than an envelope, as "catalog state unknown".
 
 ## Resume
 
-Implement step 1 only, in `src/librarian/tools/reindex.rs:227-242`. Change the
-embed loop body to `match svc.embed_artifact(...).await { Ok(v) => …, Err(e) =>
-embed_errors.push(format!("{id}: {e}")) }`, add `embed_errors` alongside the
-existing `backfill_errors` local at `:198`, and add the two fields to the
-`json!` envelope at `:263`. Copy the `backfill_errors` shape exactly — it is
-the in-file precedent and it already solved this class of problem once (F-5).
-Do **not** start with steps 2-3; they need a design decision on where durable
-index-health state lives.
+Step 1 shipped in `69e78a2f`; the `src/librarian/tools/reindex.rs` work is done.
+What remains is a **design decision, not an edit**, so do not start by opening
+that file again.
 
+Decide where durable index-health state lives, for catalog freshness and embedding
+freshness jointly. Then read
+`docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
+§ *Fix* before writing anything: that bug's `(0,0)`-only status discriminator and
+this bug's missing degraded marker are the same missing abstraction seen from two
+tools (`index(action="status")` and `librarian(action="reindex")` /
+`artifact(action="find")`). Designing them separately will produce two
+disagreeing health surfaces, which is the third acceptance criterion this bug
+already asks for.
+
+Concretely: name the state model first (what facts, stored where, written by
+whom), and only then pick the two call sites. `src/retrieval/index_state.rs`
+already persists a sidecar for git-freshness detection and is the closest
+existing precedent — read it before inventing a new store.
 ## References
 
 - GitHub issue #19 — <https://github.com/mareurs/codescout/issues/19>

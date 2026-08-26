@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- retrieval
+- sqlite-vec
+- indexing
+- embeddings
+closed: 2026-08-26
 opened: 2026-08-26
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [retrieval, sqlite-vec, indexing, embeddings]
-kind: bug
+severity: medium
 ---
 
 # BUG: `index(action="build", force=true)` cannot migrate a SQLite-vec index across embedding dimensions
@@ -119,6 +123,49 @@ reject; only the forced path changes.
    garbage vectors. The fix is a force-aware branch, not a move.
 
 ## Fix
+### FIXED 2026-08-26
+
+- **SHA:** `8504b1cf` (`experiments`)
+- **patch-id:** `be0fdace04f3c4aacef68af3efc7338056629a07`
+
+`fix(retrieval): let force=true migrate a SQLite-vec index across embedding
+dimensions`. The patch-id is the durable anchor — `experiments` is rebased after
+every ship, so the SHA will orphan.
+
+**What shipped**, and it is not quite the plan below:
+
+- `RetrievalClient::migrate_or_guard_index_dim` (`src/retrieval/client.rs`) —
+  `force=false` delegates to `guard_index_dim` unchanged; `force=true` treats the
+  mismatch as the reason for the rebuild and resets. A separate method, not a
+  `force: bool` on the guard, because `search_in` is the guard's other caller and
+  would have to thread a permanent `false`.
+- `CodeVectorStore::reset_project_index` (`src/retrieval/code_store.rs`) with
+  **no default implementation**, so the compiler enumerated every backend rather
+  than letting one inherit a silent no-op reporting success. It named five
+  implementors. The trait already used that convention for `project_has_chunks`
+  and `collection_dim`.
+- sqlite-vec impl drops `code_vec` and clears this project's `code_chunk` rows.
+  Both halves are required: leaving metadata behind makes `chunk_refs` describe
+  an index that no longer exists, so the rebuild's prune would delete the very
+  ids it is about to re-create.
+- Qdrant impl **refuses**, with a `RecoverableError` naming the constraint. A
+  Qdrant collection is shared across projects and its width is collection-level,
+  so a per-project dimension migration does not exist there — better to say so
+  than to delete one project's points and change nothing, or recreate the
+  collection and destroy every other project's index.
+- `SyncReport.dim_migration: Option<(u64, u64)>` reports the widths, so a silent
+  successful rebuild at a different dimension is not mistaken for an ordinary
+  reindex.
+
+**Verified:** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test` → 4474 passed, 0 failed, 46 ignored.
+
+**The `vec0` shadow-table question is answered: `DROP TABLE` does take them.**
+`reset_then_reindex_migrates_the_vector_table_to_a_new_dimension` builds a real
+`vec0` table at 3 dims, resets, rebuilds at 5, and queries it — all green, so
+sqlite-vec's `xDestroy` removes `code_vec_chunks`, `code_vec_rowids`,
+`code_vec_info` and `code_vec_vector_chunks00`. Had any survived, the rebuild's
+`CREATE VIRTUAL TABLE` would have collided and that test would have failed.
 
 Plan (not yet implemented):
 
@@ -150,6 +197,29 @@ Plan (not yet implemented):
 No SHA, no patch-id — not yet fixed.
 
 ## Tests added
+**Shipped in `8504b1cf`:**
+
+- `reset_then_reindex_migrates_the_vector_table_to_a_new_dimension`
+  (`src/retrieval/sqlite_code_store.rs`) — a **real** `vec0` table, 3 dims →
+  reset → 5 dims → query. Asserts the table is *gone* rather than emptied (an
+  emptied table keeps its baked width and would still refuse the new one), that
+  chunk metadata went too, that the rebuilt width is 5, and that the migrated
+  index is searchable. A `RecordingStore` double cannot cover this: the question
+  is entirely about what sqlite-vec's `xDestroy` actually does.
+- `sync_project_force_migrates_a_dimension_mismatch_instead_of_refusing`
+  (`src/retrieval/sync.rs`) — stored 999 vs configured 3, `force_reindex: true`,
+  asserts `dim_migration == Some((999, 3))`.
+- `a_forced_sync_at_a_matching_dimension_reports_no_migration` — stops
+  `dim_migration` firing on every forced reindex, which would make the field
+  noise a reader learns to ignore.
+
+**Kept, load-bearing:** the pre-existing
+`sync_project_fails_fast_on_a_dim_mismatch_before_touching_the_store` and both
+`guard_index_dim` mutation tests (`src/retrieval/search.rs:576`, `:612`) still
+pass unchanged. The forced and non-forced tests fail in **opposite directions**,
+so no single change satisfies both unless `force` is what discriminates — that
+pairing is what prevents this bug being "fixed" by weakening the guard.
+
 
 None yet. The reporter's requested coverage, which is the right shape:
 
@@ -177,28 +247,14 @@ it is `force=true`'s advertised contract that is wrong, not the diagnosis.
 
 ## Resume
 
-Reconnaissance ran 2026-08-26 and settled the question this section used to ask;
-see `bug-fix-session-log:F-64`. Updated next actions:
+`N/A` — fixed and archived. See § *Fix* → *FIXED 2026-08-26* for the SHA and
+patch-id.
 
-1. Run `cargo test guard_index_dim` to anchor current behavior. Both existing
-   guard tests (`src/retrieval/search.rs:576`, `:612`) must still pass unchanged
-   at the end — they are mutation-resistant and the non-forced path must keep
-   rejecting.
-2. Implement in `src/retrieval/sync.rs:755`. Prefer a `migrate_or_guard` wrapper
-   over adding a `force: bool` to `guard_index_dim`: the guard is also called
-   from `search_in` (`src/retrieval/search.rs:109`), where `force` is meaningless
-   and a bool parameter would have to be threaded as a permanent `false`.
-3. The drop itself is a plain `DROP TABLE code_vec` under
-   `conn_for(project_id)` — **no project predicate needed**, per Fix step 2 as
-   struck. Then let the existing `ensure_vec_table` recreate it at the new width;
-   it already takes the dim as a parameter.
-4. Check the `vec0` shadow-table question (new Fix step 2) *before* writing the
-   migration, since it decides whether `DROP TABLE` alone suffices.
-
-**Do not** write a "sibling project survives the migration" regression test. It
-would pass for every possible implementation — siblings live in a different file
-— and enter the suite as a permanently green, uninformative assertion. See the
-counterfactual in `bug-fix-session-log:W-54`.
+One thing deliberately **not** carried forward, recorded so nobody re-adds it: do
+not write a "sibling project survives the migration" test. Sibling projects live
+in separate `.db` files, so that assertion holds for every possible
+implementation, including a wrong one. Rationale and measurement in
+`bug-fix-session-log:F-64` and `W-54`.
 ## References
 
 - GitHub issue #18 — <https://github.com/mareurs/codescout/issues/18>
