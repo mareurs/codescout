@@ -253,7 +253,7 @@ pub struct ScanMeta {
     /// server that answered. The `alias` keeps trackers written under the old name
     /// loading; nothing needs to migrate, since every scan overwrites the field.
     ///
-    /// See `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
+    /// See `docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
     #[serde(default, alias = "lsp_languages_offline")]
     pub lsp_languages_degraded: Vec<String>,
     /// Per-language reasons behind `degraded`, deduplicated and sorted.
@@ -1717,7 +1717,7 @@ mod tests {
     /// `lsp_languages_offline: ["rust"]`, concluded rust-analyzer was down, and threw
     /// away a scan whose numbers were fine.
     ///
-    /// See `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
+    /// See `docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
     #[test]
     fn scan_meta_reports_degradation_without_calling_a_live_server_offline() {
         let degradation = Degradation {

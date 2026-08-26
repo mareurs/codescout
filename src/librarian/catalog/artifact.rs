@@ -296,7 +296,7 @@ pub fn ensure_slug(conn: &rusqlite::Connection, artifact_id: &str) -> Result<Str
 /// deletes it — mint here first and `ensure_slug`'s dedup check finds the old row's slug
 /// still "taken" and hands the new row a needless `-2` suffix, permanently (slugs are
 /// immutable once minted). Moves carry the old slug forward explicitly in `graft_rows`
-/// instead. docs/issues/2026-08-21-create-mints-no-slug-so-new-entries-never-reach-the-entry-graph.md
+/// instead. docs/issues/archive/2026-08-21-create-mints-no-slug-so-new-entries-never-reach-the-entry-graph.md
 pub fn upsert_and_mint_slug(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
     upsert(cat, row)?;
     ensure_slug(&cat.conn, &row.id)?;

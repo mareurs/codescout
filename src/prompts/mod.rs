@@ -450,7 +450,7 @@ pub const GUIDE_TOPICS: &[&str] = &[
 /// a routine `artifact` call. Wiring more triggers before cutting the corpus trades one
 /// problem for another.
 ///
-/// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+/// See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
 pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
     (
         "librarian-runtime",

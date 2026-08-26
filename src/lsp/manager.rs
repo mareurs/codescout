@@ -2546,7 +2546,7 @@ mod tests {
         );
     }
 
-    /// Regression for `docs/issues/2026-08-21-mux-lsp-cold-starts-not-recorded.md`:
+    /// Regression for `docs/issues/archive/2026-08-21-mux-lsp-cold-starts-not-recorded.md`:
     /// `get_or_start`'s mux dispatch must record a real `lsp_events` success row.
     /// Before this fix, `get_or_start_via_mux` never called `do_start` — the only
     /// place `write_lsp_event`/`write_lsp_failure` lived — so every mux cold

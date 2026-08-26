@@ -36,7 +36,7 @@ pub struct TrackedIgnore {
 /// resolutions, which is why `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`
 /// added that branch. The coverage really was incomplete. Only the word "offline" was wrong.
 ///
-/// See `docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
+/// See `docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DegradedCause {
@@ -535,7 +535,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                 //
                 // The cause is `LspBehindIndex` precisely because the server ANSWERED
                 // here. Reporting this as "offline" was the defect in
-                // docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md.
+                // docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md.
                 note_degraded(ctx, lang, DegradedCause::LspBehindIndex);
                 Resolution {
                     verdict: Verdict::Unknown,
@@ -1482,7 +1482,7 @@ mod tests {
         );
         // And it must be recorded as `LspBehindIndex` specifically, because the server
         // ANSWERED on this path. Calling it offline is the defect in
-        // docs/issues/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md: a reader
+        // docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md: a reader
         // took that word literally and discarded a scan whose numbers were sound.
         assert_eq!(
             ctx.degraded_languages.borrow()[0].1.as_str(),
@@ -2295,7 +2295,7 @@ mod tests {
     /// token that was never a path. The reported reason stays `historical_drop`
     /// (the more specific, location-based explanation); the inferred-evidence floor
     /// only changes the severity, not which reason is surfaced.
-    /// docs/issues/2026-08-20-audit-doc-refs-reads-mcp-method-names-as-file-paths.md
+    /// docs/issues/archive/2026-08-20-audit-doc-refs-reads-mcp-method-names-as-file-paths.md
     #[test]
     fn mcp_method_name_ref_caps_to_low() {
         let tmp = TempDir::new().unwrap();

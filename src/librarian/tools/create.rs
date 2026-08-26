@@ -96,7 +96,7 @@ const BUG_STATUSES: &[&str] = &[
 /// parameter `update` does not have. That costs a round-trip to discover, and still does
 /// not reveal the actual constraint — that `kind` is unreachable there by design.
 ///
-/// See `docs/issues/2026-08-16-artifact-update-kind-hint-misroutes.md`.
+/// See `docs/issues/archive/2026-08-16-artifact-update-kind-hint-misroutes.md`.
 #[derive(Clone, Copy)]
 pub(crate) enum ExtraKeySurface {
     Create,
@@ -905,7 +905,7 @@ mod tests {
     /// `update` does not have. Neither existing test could catch that: both assert only
     /// that the message names the clashing key, which the wrong hint also did.
     ///
-    /// See `docs/issues/2026-08-16-artifact-update-kind-hint-misroutes.md`.
+    /// See `docs/issues/archive/2026-08-16-artifact-update-kind-hint-misroutes.md`.
     #[test]
     fn reserved_key_hint_names_a_remedy_that_exists_on_the_calling_surface() {
         let hint_for = |key: &str, surface: ExtraKeySurface| {

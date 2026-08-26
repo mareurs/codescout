@@ -3672,7 +3672,7 @@ mod tests {
         assert!(check_abs_path_must_be_absolute("a1", "").is_some());
     }
 
-    /// BL-23 / `docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`.
+    /// BL-23 / `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`.
     ///
     /// `ec9e63d0` stopped `artifact(move)` creating this drift. The population it
     /// left behind was total: all 78 unique `^id:` values in `docs/issues/archive/`

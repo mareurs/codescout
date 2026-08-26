@@ -7149,7 +7149,7 @@ fn test_ctx_with_agent(agent: Agent) -> ToolContext {
 ///
 /// Measured 2026-08-15 over the live call log: params that are required but advertised
 /// optional are **41% of all schema errors**, the largest single class.
-/// See `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md`.
+/// See `docs/issues/archive/2026-08-15-conditionally-required-params-advertised-optional.md`.
 ///
 /// Incidental guarantee worth keeping: the `requires '<param>'` substring asserted below
 /// is what `usage::db::normalize_err_family` keys on to classify this family, so the

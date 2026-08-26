@@ -1515,7 +1515,7 @@ async fn insert_code_after_caps_overextended_lsp_end() {
     );
 }
 
-/// Regression for docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md:
+/// Regression for docs/issues/archive/2026-06-05-edit-code-insert-after-last-python-method.md:
 /// inserting after the LAST child of a dedent-delimited (Python) class spliced the
 /// new sibling *before* the method's trailing statement, orphaning it.
 ///
@@ -1601,7 +1601,7 @@ async fn insert_code_after_last_python_method_keeps_trailing_stmt() {
 /// WHOLE method, including its trailing statement. The same `parent.end_line` off-by-one
 /// in `do_replace`'s `clamp_range_to_parent` call dropped the last line from the replaced
 /// range, leaving the old trailing statement orphaned after the new body.
-/// docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md
+/// docs/issues/archive/2026-06-05-edit-code-insert-after-last-python-method.md
 #[tokio::test]
 async fn replace_last_python_method_replaces_trailing_stmt() {
     // 0: "class C:"
@@ -1670,7 +1670,7 @@ async fn replace_last_python_method_replaces_trailing_stmt() {
 
 /// Companion to insert: `remove` of the LAST child of a Python class must remove the
 /// WHOLE method, including its trailing statement. Same off-by-one in `do_remove`.
-/// docs/issues/2026-06-05-edit-code-insert-after-last-python-method.md
+/// docs/issues/archive/2026-06-05-edit-code-insert-after-last-python-method.md
 #[tokio::test]
 async fn remove_last_python_method_removes_trailing_stmt() {
     let src = "class C:\n    def m(self):\n        x = compute(\n            a=1,\n        )\n\n        assert x\n";

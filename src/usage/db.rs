@@ -216,7 +216,7 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
     // from the sweep when the table exists; skip the exemption entirely on a
     // project that has never seen the plugin run, rather than reference a table
     // that isn't there.
-    // docs/issues/2026-08-20-pika-observations-orphaned-by-the-retention-sweep.md
+    // docs/issues/archive/2026-08-20-pika-observations-orphaned-by-the-retention-sweep.md
     let has_pika_observations = conn
         .query_row(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pika_observations'",
@@ -1251,7 +1251,7 @@ mod tests {
 
     #[test]
     /// Regression for
-    /// docs/issues/2026-08-20-pika-observations-orphaned-by-the-retention-sweep.md:
+    /// docs/issues/archive/2026-08-20-pika-observations-orphaned-by-the-retention-sweep.md:
     /// `pika_observations` declares `ON DELETE CASCADE` but usage.db never enables
     /// `PRAGMA foreign_keys`, so the sweep used to delete a referenced parent and leave
     /// the observation pointing at a row that no longer exists. The sweep must now skip

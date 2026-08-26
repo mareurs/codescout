@@ -5494,8 +5494,8 @@ async fn read_file_large_content_returns_file_id_not_inline() {
 /// the tail-placed `Buffer:` line past `truncate_compact`'s cut, so the one response that
 /// most needed to hand back a handle was the one that lost it.
 ///
-/// See `docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`
-/// and `docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`,
+/// See `docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`
+/// and `docs/issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`,
 /// whose fix note called this sequencing out.
 #[tokio::test]
 async fn read_file_buffered_summary_says_it_is_incomplete_and_survives_the_cut() {

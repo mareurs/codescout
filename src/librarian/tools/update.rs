@@ -890,7 +890,7 @@ mod tests {
         assert_eq!(row.status, "archived");
     }
 
-    /// Regression: docs/issues/2026-08-16-artifact-update-reserializes-frontmatter-on-a-field-patch.md
+    /// Regression: docs/issues/archive/2026-08-16-artifact-update-reserializes-frontmatter-on-a-field-patch.md
     /// (BL-36). A single-field patch used to re-emit the entire block from the
     /// parsed struct, so a hand-authored file came back requoted, reordered, with
     /// flow sequences exploded to block style, null keys dropped, and — worst —

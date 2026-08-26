@@ -30,7 +30,7 @@ fn run_cmd(tmp: &TempDir) -> Command {
     // running and only surfaces in CI. Do NOT make this hermetic by forcing
     // CODESCOUT_ARTIFACT_BACKEND=sqlite-vec instead — that skips the Qdrant path
     // entirely and could never catch the bug again.
-    // docs/issues/2026-08-08-qdrant-compat-check-printlns-to-stdout.md
+    // docs/issues/archive/2026-08-08-qdrant-compat-check-printlns-to-stdout.md
     cmd.env("CODESCOUT_QDRANT_URL", "http://127.0.0.1:1");
     cmd
 }

@@ -32,7 +32,7 @@ use crate::symbol::query::{
 /// optional convenience. Measured 2026-08-15 over the live call log, that omission is
 /// **41% of all schema errors** — the single largest class.
 ///
-/// See `docs/issues/2026-08-15-conditionally-required-params-advertised-optional.md`.
+/// See `docs/issues/archive/2026-08-15-conditionally-required-params-advertised-optional.md`.
 const BODY_REQUIRED_ACTIONS: &[&str] = &["replace", "insert"];
 
 /// Actions for which `new_name` is a precondition. Same contract as

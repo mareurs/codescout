@@ -418,7 +418,7 @@ impl Tool for Grep {
                 // sample from an exhaustive one, and a capped sample that happens to be
                 // homogeneous reads as a finding. Never print a denominator the walk
                 // never counted.
-                // BL-2 / docs/issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md
+                // BL-2 / docs/issues/archive/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md
                 let hint = if hit_cap {
                     let (stopped_at, more) = if byte_capped {
                         (
@@ -1032,7 +1032,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
             // Same rule as the filesystem path: after a collection cap, `total` is
             // what we managed to collect, not what exists. Publishing it beside an
             // equal `shown` with nothing marking it a floor reads as complete.
-            // BL-2 / docs/issues/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md
+            // BL-2 / docs/issues/archive/2026-08-15-grep-showing-n-of-n-when-collection-hit-cap.md
             let mut overflow = json!({
                 "shown": visible.len(),
                 "total": total,

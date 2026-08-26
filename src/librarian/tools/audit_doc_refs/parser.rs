@@ -940,7 +940,7 @@ Walk through `src/services/auth.rs`, then see [the sample](src/foo.py).
         // classify as a file_path and surface as an `unknown` finding carrying
         // "path outside active project; scope=umbrella required" — advice that
         // reads as actionable about a token that is not a path in any scope.
-        // docs/issues/2026-08-15-audit-doc-refs-classifies-comment-markers-as-paths.md
+        // docs/issues/archive/2026-08-15-audit-doc-refs-classifies-comment-markers-as-paths.md
         let (cands, _) = parse("Doc comments use `///`, inner ones `//!`, plain ones `//`.");
         let kinds: Vec<_> = cands
             .iter()

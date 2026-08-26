@@ -819,7 +819,7 @@ fn read_full_file(
         //
         // `shown: 0` is literal, not a placeholder: zero lines of content are shown.
         //
-        // See `docs/issues/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`.
+        // See `docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`.
         let summarised_lines = result["line_count"]
             .as_u64()
             .unwrap_or_else(|| text.lines().count() as u64) as usize;

@@ -181,7 +181,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// catalog mid-update. A failure is logged and the original content returned; the
 /// catalog still re-keys correctly, and the file is left exactly as it was.
 ///
-/// BL-23 / `docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`
+/// BL-23 / `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`
 pub(super) fn repair_frontmatter_id(
     path: &std::path::Path,
     new_id: &str,
@@ -322,7 +322,7 @@ mod tests {
         );
     }
 
-    /// BL-23 / `docs/issues/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`.
+    /// BL-23 / `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`.
     ///
     /// A move mints a new id, and the file's own `id:` keeps asserting the old one —
     /// which resolves to nothing. This has to be repaired **here**, in the same call

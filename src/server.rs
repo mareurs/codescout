@@ -173,7 +173,7 @@ pub struct CodeScoutServer {
     /// two Claude Code sessions open on one repo, both attributed their calls to
     /// whichever id the file held last, so telemetry could not tell them apart
     /// — exactly the case the env var exists to disambiguate.
-    /// docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
+    /// docs/issues/archive/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
     cc_session_id: String,
     /// Resolved conversation identity for the guide ledger. Distinct from
     /// `cc_session_id`, which is usage-correlation only.
@@ -906,7 +906,7 @@ impl CodeScoutServer {
     /// respawning the MCP subprocess, so the server keeps serving the new
     /// conversation under the old key and suppresses guides it should re-send.
     /// The server has to be *told*, and the companion hook is what tells it.
-    /// docs/issues/2026-08-18-clear-leaves-mcp-session-id-stale.md
+    /// docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md
     ///
     /// Called from `call_tool_inner`, which is the single production funnel for
     /// every tool call — MCP requests and peer-served ones alike (see
@@ -923,7 +923,7 @@ impl CodeScoutServer {
     /// caller can use it for usage-telemetry attribution instead of the
     /// construction-time `cc_session_id` snapshot — which is otherwise never
     /// updated for the lifetime of the process.
-    /// docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md
+    /// docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md
     fn poll_rendezvous(&self) -> Option<String> {
         // Two independent mutexes, never held together: the rendezvous guard is
         // scoped to the block below and drops before the ledger lock is taken.
@@ -1025,7 +1025,7 @@ impl CodeScoutServer {
         // `guide_hint_tests::a_tool_call_polls_the_rendezvous_and_re_arms`.
         //
         // The returned id is ALSO the fix for
-        // docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md:
+        // docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md:
         // `self.cc_session_id` is a construction-time snapshot that a `/clear` or a
         // subagent reusing this live process never updates, while the rendezvous is
         // polled on every call and tracks the conversation we are CURRENTLY serving.
@@ -2943,7 +2943,7 @@ mod tests {
     /// so does a stale allowlist entry, whether it names a topic that has since gained a
     /// trigger or one that no longer exists.
     ///
-    /// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+    /// See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
     ///
     /// Gated on `librarian` for the same reason as
     /// `artifact_advertises_the_append_entry_section_writer` above: the invariant is
@@ -4991,7 +4991,7 @@ mod guide_hint_tests {
     /// catalog is empty and `items: []` names no path. Populate that fixture and it would
     /// route here instead. Stated so the dependency is visible rather than a trap.
     ///
-    /// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+    /// See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
     #[tokio::test]
     async fn an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide() {
         let (_dir, server) = make_server().await;
@@ -5854,7 +5854,7 @@ mod guide_hint_tests {
     #[tokio::test]
     /// A new conversation holds nothing, so a session change re-arms the WHOLE
     /// ledger — not just the project-scoped topic. This is the `/clear` fix:
-    /// docs/issues/2026-08-18-clear-leaves-mcp-session-id-stale.md.
+    /// docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md.
     ///
     /// No `#[serial]`, no `set_var`: session id and directories are INJECTED.
     async fn session_change_rearms_everything() {
@@ -6068,7 +6068,7 @@ mod guide_hint_tests {
 
     #[tokio::test]
     /// Regression for
-    /// docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md:
+    /// docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md:
     /// `cc_session_id` used to be a construction-time snapshot, so a `/clear` (or a
     /// subagent reusing this live process) kept attributing calls to the OLD
     /// conversation forever. The fix reads the rendezvous's current id per call — the

@@ -666,7 +666,7 @@ mod tests {
         );
     }
 
-    /// BL-34 / `docs/issues/2026-08-16-frontmatter-id-repair-reserializes-the-whole-block.md`.
+    /// BL-34 / `docs/issues/archive/2026-08-16-frontmatter-id-repair-reserializes-the-whole-block.md`.
     ///
     /// The fixture is deliberately hostile to normalization — a flow sequence, a
     /// double-quoted title, a `{Placeholder}` (valid YAML for a flow *mapping*),

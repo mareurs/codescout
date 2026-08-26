@@ -58,7 +58,7 @@ pub(crate) fn format_overflow(overflow: &Value) -> String {
 /// correct and deliberately unchanged — a tail cut is right for prose; the defect was
 /// producer-side ordering.
 ///
-/// See `docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`.
+/// See `docs/issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`.
 pub(crate) fn overflow_head(val: &Value) -> String {
     match val.get("overflow").filter(|o| o.is_object()) {
         Some(overflow) => format!("{}\n", format_overflow(overflow)),
@@ -226,7 +226,7 @@ mod tests {
     /// only exercised [`overflow_head`] would pass while all nine call sites went on
     /// appending it at the tail — which is exactly the state this replaced.
     ///
-    /// See `docs/issues/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`.
+    /// See `docs/issues/archive/2026-08-15-truncate-compact-tail-cut-destroys-overflow-signal.md`.
     #[test]
     fn every_surface_keeps_its_overflow_note_above_the_truncation_cap() {
         use crate::tools::core::types::truncate_compact;

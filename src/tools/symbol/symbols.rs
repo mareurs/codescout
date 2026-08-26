@@ -80,7 +80,7 @@ impl Tool for Symbols {
         // `progressive-disclosure` keeps six other triggers (grep, tree, read_file,
         // run_command, read_markdown, semantic_search), so a session still receives it.
         //
-        // See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+        // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
         if result.get("overflow").is_some() || result.get("output_id").is_some() {
             Some("progressive-disclosure")
         } else {

@@ -131,7 +131,7 @@ impl Rendezvous {
     /// construction-time snapshot, this field is updated by every `poll()` that
     /// observes a fresh stamp, so reading it after a poll reflects the CURRENT
     /// conversation rather than the one the process was born with.
-    /// docs/issues/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md
+    /// docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md
     pub fn current(&self) -> Option<&str> {
         self.current.as_deref()
     }

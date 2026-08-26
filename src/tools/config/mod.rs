@@ -107,7 +107,7 @@ impl Tool for Workspace {
         // redundant path to the same effect. `post_compact_rearms_guide_hints`
         // covers the separate `ProjectStatus` clear.
         //
-        // See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+        // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
         Some("workspace-state")
     }
 }

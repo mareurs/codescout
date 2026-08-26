@@ -398,7 +398,7 @@ pub fn validate_write_path(
         // that makes the mechanism legible is `il3_pipe_to_trimmer`, whose message carries
         // a concrete corrective action and repeats at 3%.
         //
-        // See `docs/issues/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
+        // See `docs/issues/archive/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
         WritePathDecision::OutsideRoot { resolved } => {
             let dir = resolved.parent().unwrap_or(resolved.as_path());
             bail!(
@@ -3804,7 +3804,7 @@ EOF"#;
     /// by retrying the same denied write, the highest immediate-repeat rate in the corpus,
     /// against 3% for `il3_pipe_to_trimmer` whose message carries a concrete action.
     ///
-    /// See `docs/issues/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
+    /// See `docs/issues/archive/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
     #[test]
     fn write_denial_names_an_approve_write_call_that_can_be_run_verbatim() {
         let tmp = tempfile::tempdir().unwrap();

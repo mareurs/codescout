@@ -6,7 +6,7 @@
 //! not a symbol, not a doc link, and not a feature flag, so none of the gates that
 //! catch drift elsewhere look at it. Both scripts were unrunnable out of the box on
 //! every machine, including the author's. Full account:
-//! `docs/issues/2026-08-14-sweep-scripts-hardcode-dead-machine-specific-paths.md`.
+//! `docs/issues/archive/2026-08-14-sweep-scripts-hardcode-dead-machine-specific-paths.md`.
 //!
 //! The rule this enforces is CLAUDE.md's: per-machine values belong outside every
 //! repo, because committing one makes the file read as *false* to anyone standing on

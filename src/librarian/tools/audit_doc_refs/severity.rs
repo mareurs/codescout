@@ -83,7 +83,7 @@ impl PathEvidence {
 /// one applied (`reason != PolicyDefault`) rather than overwriting it — an
 /// archive-dropped ref stays `archive_drop`, not `inferred_path`, because the
 /// archive location is the more informative explanation once both apply. See
-/// `docs/issues/2026-08-20-audit-doc-refs-reads-mcp-method-names-as-file-paths.md`.
+/// `docs/issues/archive/2026-08-20-audit-doc-refs-reads-mcp-method-names-as-file-paths.md`.
 pub fn cap_inferred_path(
     verdict: Verdict,
     evidence: PathEvidence,

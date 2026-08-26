@@ -19,7 +19,7 @@ pub struct UsageRecorder {
     /// figure silently merged them. The server already resolves this correctly
     /// (`CLAUDE_CODE_SESSION_ID` first, which is per-process); taking it from
     /// there gives the value one resolution site instead of two that drifted.
-    /// docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
+    /// docs/issues/archive/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md
     cc_session_id: String,
 }
 
@@ -79,7 +79,7 @@ impl UsageRecorder {
         // Write it into the main checkout's db instead, tagged with the
         // worktree's own root in the `project_root` column below (unchanged),
         // so it stays distinguishable and queryable after the worktree is gone.
-        // docs/issues/2026-08-20-worktree-removal-deletes-its-usage-telemetry.md
+        // docs/issues/archive/2026-08-20-worktree-removal-deletes-its-usage-telemetry.md
         let db_root = crate::util::path_security::worktree_main_root(&project_root)
             .unwrap_or_else(|| project_root.clone());
         let conn = db::open_db(&db_root)?;
@@ -393,7 +393,7 @@ mod content_tests {
     }
 
     /// Regression for
-    /// docs/issues/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md:
+    /// docs/issues/archive/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md:
     /// the recorder used to read `.codescout/cc_session_id` itself. That file is
     /// per-PROJECT, so with two Claude Code sessions open on one repo both wrote
     /// rows under whichever id the file held last and per-session figures merged
@@ -542,7 +542,7 @@ mod content_tests {
 
     #[tokio::test]
     /// Regression for
-    /// docs/issues/2026-08-20-worktree-removal-deletes-its-usage-telemetry.md: a call
+    /// docs/issues/archive/2026-08-20-worktree-removal-deletes-its-usage-telemetry.md: a call
     /// pinned into a linked worktree used to write its telemetry to `<worktree>/.codescout/
     /// usage.db`, which is deleted along with the worktree at the end of its life. It must
     /// land in the MAIN checkout's durable db instead, still tagged with the worktree's own

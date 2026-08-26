@@ -243,7 +243,7 @@ fn clean_prefix(raw: &str) -> Option<String> {
 /// accident: a quoted id is 18 characters, failed the length test, and the file
 /// read as unmanaged. Measured 2026-08-16, `docs/trackers/` alone had 12 files
 /// guarded and 15 unguarded on that basis — including the active work queue.
-/// BL-33 / `docs/issues/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`.
+/// BL-33 / `docs/issues/archive/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`.
 ///
 /// This is only half the guard, and the cheaper half. It validates *shape*, never
 /// *value*, so a well-formed but stale id keeps the guard on — the safe direction
@@ -321,7 +321,7 @@ mod tests {
         assert!(guard_not_librarian_managed("docs/notes.md", text, None).is_ok());
     }
 
-    /// BL-33 / `docs/issues/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`.
+    /// BL-33 / `docs/issues/archive/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`.
     ///
     /// The predicate tested the raw token's length, so `'9a892c2a5976e296'` — 18
     /// characters once YAML quotes it — read as unmanaged and the guard stayed silent.

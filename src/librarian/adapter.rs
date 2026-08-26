@@ -197,7 +197,7 @@ impl crate::tools::Tool for LibrarianAdapter {
         // both over its lifetime (10.4 KB + 19.9 KB). That is the byte tension BL-25
         // records; the corpus cut is the answer to it, not withholding the guide.
         //
-        // See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+        // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
         if names_tracker_path(result) {
             return Some("tracker-conventions");
         }
@@ -798,7 +798,7 @@ mod tests {
     /// moves `input` into `call()` before the hint is computed while the result is still
     /// in scope and already carries `abs_path`.
     ///
-    /// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+    /// See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
     #[test]
     fn tracker_paths_route_to_the_tracker_guide_and_nothing_else_does() {
         // Top-level shapes — what get/create/update/move return.
