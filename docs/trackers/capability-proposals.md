@@ -697,7 +697,7 @@ correction below.
 - `scan_undefined_entries` (`src/librarian/tools/doctor.rs:1501`) is the nearest sibling in
   shape — it already emits a per-artifact finding citing the conventions guide.
 - **Check 3's ASSERTION is fully specified already**, by the bug it would have caught:
-  `docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`
+  `docs/issues/archive/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`
   names the assertion, the report shape, and says to site it next to
   `abs_path_outside_managed_roots`. **Its substrate is not** — corrected 2026-08-19 after a
   pre-implementation scout, logged as `prompt-surface-compaction-session-log:F-6`. This

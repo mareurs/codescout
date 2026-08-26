@@ -126,7 +126,7 @@ async fn write_lock_contention_produces_recoverable_error() {
     // developer's live session ledger. Redirect both into scratch. `state_dir`
     // is bound to a named local (not a temporary) so the tempdir isn't deleted
     // before the child process is done reading/writing it. See
-    // docs/issues/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md.
+    // docs/issues/archive/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md.
     let state_dir = tempfile::tempdir().unwrap();
     let mut child = Command::new(&bin)
         .args(["start", "--project", project.to_str().unwrap()])

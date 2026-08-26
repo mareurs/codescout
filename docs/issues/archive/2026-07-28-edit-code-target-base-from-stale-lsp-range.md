@@ -1,5 +1,5 @@
 ---
-id: '9e649674c95cd7bd'
+id: 01028508fdd0d089
 kind: bug
 status: mitigated
 title: edit_code derives the insert indentation from an unrepaired LSP line index, so a stale range silently picks the wrong column

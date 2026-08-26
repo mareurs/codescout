@@ -295,7 +295,7 @@ All notable changes to codescout are documented here.
   Paths in commands follow POSIX rules on both platforms as a result (`C:/Users/...`, not
   `C:\Users\...`); buffer refs are substituted forward-slashed automatically. See
   `docs/manual/src/tools/workflow-and-config.md` and
-  `docs/issues/2026-08-08-run-command-unusable-without-git-bash.md`.
+  `docs/issues/archive/2026-08-08-run-command-unusable-without-git-bash.md`.
 
 - **Path parameters are aliased consistently across every tool.** `file_path`
   works wherever `path` does, and vice versa; a wrong-but-obvious param name is

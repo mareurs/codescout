@@ -387,7 +387,7 @@ pub(crate) async fn run_command_inner(
     // for the refusal with an environmental one. On Windows every spawn goes
     // through Git Bash; without one the OS answers `program not found`, which
     // names neither the requirement nor the fix.
-    // See docs/issues/2026-08-08-run-command-unusable-without-git-bash.md (WIN-36).
+    // See docs/issues/archive/2026-08-08-run-command-unusable-without-git-bash.md (WIN-36).
     if let Some(hint) = crate::platform::shell_unavailable_hint() {
         return Err(
             RecoverableError::with_hint("no POSIX shell available to run commands", hint).into(),

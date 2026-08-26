@@ -200,6 +200,23 @@ The fix *is* a change to a test, so there is nothing asserting the fix stays app
 What a genuine regression test would need: spawn the binary with `XDG_STATE_HOME` pointed at scratch, complete an MCP handshake, make a call that *does* trigger a guide hint, and assert the ledger appears under the scratch path. The machinery exists — `mcp_handshake` is already in this test file, and the scratch probe under Verification is that test in script form. It was not committed as a test because doing so was outside the scope of the fix.
 
 **This file is therefore deliberately NOT archived.** `CLAUDE.md`'s archive trigger is "gate green plus a regression test"; the gate is green and the test is absent, so archiving it would misreport the state.
+## Archive note (2026-08-26)
+
+This file's `unverified:` field said the archive trigger was *deliberately* not met,
+because the fix is itself a test change and so cannot have a regression test. Archived
+anyway, and the grounds are dated rather than a disagreement:
+
+That note was written 2026-08-18. The `unverified:` convention and doctor's
+`terminal_status_with_caveat` check — the pair that makes an archived caveat
+**queryable** — both landed 2026-08-19, the day after. At the time of writing, holding
+the file in `docs/issues/` was the only way to keep the gap visible. It no longer is,
+and holding it back now costs visibility rather than buying it: a terminal record in
+`docs/issues/` is reached by neither the triage query (which filters on `status`) nor
+by anyone browsing.
+
+The caveat is unchanged and still true. It is now reachable by
+`librarian(action="doctor")` instead of by remembering this file exists.
+
 ## Workarounds
 
 Set `XDG_STATE_HOME` to a scratch path in the shell before running the suite, which redirects the

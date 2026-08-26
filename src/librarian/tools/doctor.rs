@@ -1141,7 +1141,7 @@ fn check_outside_managed_roots(id: &str, abs_path: &str, roots: &[PathBuf]) -> O
 /// respect: the file is gitignored, so it is per-machine and never appears in a diff.
 ///
 /// **The failure it exists to catch, measured.**
-/// `docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`:
+/// `docs/issues/archive/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`:
 /// a config authored for a `$HOME`-rooted session was persisted into `<repo>/.codescout/`,
 /// so eight *sibling repos* stood declared as sub-projects of this workspace with roots
 /// relative to the wrong base. All eight had `relative_root != "."`, so
@@ -1281,7 +1281,7 @@ fn scan_declared_project_roots(ctx: &ToolContext) -> (Vec<Violation>, Value) {
                  of \"what projects exist\" disagree and nothing else says so. Either the entry \
                  is stale, or this config was authored for a different workspace root and \
                  persisted here; see \
-                 docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md. \
+                 docs/issues/archive/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md. \
                  The file is gitignored, so no diff or review will ever show it to anyone.",
                 entry.id,
                 entry.root,

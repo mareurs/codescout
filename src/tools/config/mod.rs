@@ -921,7 +921,7 @@ async fn build_activation_response(
     // Reporting the divergence is deliberately all this does. Whether a worktree
     // SHOULD share main's memories and topology is a separate, still-open
     // semantic question; saying so out loud does not foreclose either answer.
-    // docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
+    // docs/issues/archive/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
     if crate::util::path_security::is_linked_worktree(&project_root_path) {
         let mut notice = json!({
             "main_root": crate::util::path_security::worktree_main_root(&project_root_path)

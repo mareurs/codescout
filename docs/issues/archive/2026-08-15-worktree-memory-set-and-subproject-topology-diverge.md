@@ -1,5 +1,5 @@
 ---
-id: '403e3fad0356f171'
+id: 3df245c295e3833d
 kind: bug
 status: mitigated
 title: 'BUG: a worktree activation serves that commit''s memories and auto-detects sub-projects, so memory set and topology silently diverge from the main checkout'

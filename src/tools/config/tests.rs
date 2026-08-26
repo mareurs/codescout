@@ -904,7 +904,7 @@ depends_on = ["test"]
 /// below would pass even if the block were never emitted. This one activates a
 /// real linked-worktree root and asserts the response actually carries it.
 ///
-/// docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
+/// docs/issues/archive/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
 #[tokio::test]
 async fn activating_a_linked_worktree_reports_the_divergence_it_creates() {
     let dir = tempdir().unwrap();
@@ -969,7 +969,7 @@ async fn activating_a_linked_worktree_reports_the_divergence_it_creates() {
 /// The discriminator against the sibling test above is one file: `main/.codescout/
 /// workspace.toml`. Nothing else differs.
 ///
-/// docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
+/// docs/issues/archive/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
 #[tokio::test]
 async fn a_worktree_whose_main_has_workspace_toml_reports_inherited_topology() {
     let dir = tempdir().unwrap();
@@ -1180,7 +1180,7 @@ async fn post_compact_flushes_lsp_clients_and_returns_flushed() {
     );
 }
 
-/// docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
+/// docs/issues/archive/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
 ///
 /// A worktree activation serves that commit's memories and, because
 /// `workspace.toml` is gitignored and therefore absent, an unpruned sub-project

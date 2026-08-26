@@ -21,7 +21,7 @@ Open follow-ups from the guide-ledger Phase A work stream (12 commits,
   the Phase C requirement for the cross-project-restart suppression, and § 7 carries the
   Phase B open question about a fully-expired ledger re-firing the opener. Do not
   duplicate those here.
-- `docs/issues/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md` —
+- `docs/issues/archive/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md` —
   fixed but deliberately unarchived; its `## Resume` owns the missing regression test.
 - `docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md` — fixed and
   archived by Phase B Task 7 (`experiments` `5bdb7f45..feb845aa`; companion

@@ -328,7 +328,7 @@ impl ActiveProject {
 /// no `workspace.toml` of its own. That file is gitignored, so it never travels into
 /// a worktree, and the plain fallback silently dropped `exclude_projects` there —
 /// sub-project discovery then walked into every `tests/fixtures/*` (measured 2 -> 9
-/// on this repo, `docs/issues/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md`).
+/// on this repo, `docs/issues/archive/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md`).
 ///
 /// Read-through, not copy: carrying the settings needs no file-sync obligation. A
 /// worktree's own `workspace.toml` still wins, so a deliberate per-worktree

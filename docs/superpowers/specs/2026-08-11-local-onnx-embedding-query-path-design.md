@@ -332,4 +332,4 @@ moving it into Unit 1.
   so named without code spans (see the note under the title):
   docs/issues/2026-08-08-cyberark-epm-blocks-ort-sys-build-script.md,
   docs/issues/2026-08-08-clippy-pre-existing-drift-stable-gnu-toolchain.md,
-  docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md
+  docs/issues/archive/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md

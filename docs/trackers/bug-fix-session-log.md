@@ -2489,7 +2489,7 @@ probe.
 **Observed:** 2026-07-28, scouting `src/tools/symbol/edit_code.rs` before implementing the
 fix prescribed by my own bug file from earlier the same session.
 
-**When:** About to implement `docs/issues/2026-07-28-edit-code-target-base-from-stale-lsp-range.md`.
+**When:** About to implement `docs/issues/archive/2026-07-28-edit-code-target-base-from-stale-lsp-range.md`.
 
 **Expected (what the bug file asserted, as a finding):** `edit_code` computes the insert
 column as `leading_ws(lines[editing_start_line(&sym, &lines)])` — an LSP index applied to
@@ -2533,7 +2533,7 @@ it. A bug file's `## Root cause` is what the next reader trusts instead of re-de
 **Status:** fixed-verified — file corrected, entry downgraded to `mitigated`, hazards that
 *are* verified closed with four tests.
 
-**Fix idea / Pointer:** `docs/issues/2026-07-28-edit-code-target-base-from-stale-lsp-range.md`.
+**Fix idea / Pointer:** `docs/issues/archive/2026-07-28-edit-code-target-base-from-stale-lsp-range.md`.
 Third instance this session of my own artifact failing under later scrutiny — F-34 (a
 bug file's fix option was inverted), F-35 (doc comments overstated a guarantee), F-37 (a
 root cause the code did not support). See R-49 for the pattern.

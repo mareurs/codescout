@@ -762,7 +762,7 @@ task the controller absorbs; the worktree half could have shipped as a wrong-but
 entry, before any code was written.
 
 **Fix idea / Pointer:** CAP-7 in `docs/trackers/capability-proposals.md`;
-`docs/issues/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`
+`docs/issues/archive/2026-08-08-workspace-toml-mis-rooted-declared-sibling-repos-as-projects.md`
 § Resume. The general lesson is W-4's, one level up: *a name is not a calibration*. CAP-8's
 method note asks the next author to query the catalog for prior art before proposing; this
 asks them to open the **context type** before declaring a check needs no design.
