@@ -1,12 +1,17 @@
 ---
+kind: bug
 status: open
+tags:
+- guide-ledger
+- rendezvous
+- phase-c
+- companion-plugin
+closed: null
 opened: 2026-08-19
-closed:
-severity: low
 owner: marius
 related: []
-tags: [guide-ledger, rendezvous, phase-c, companion-plugin]
-kind: bug
+severity: low
+unverified: 'Impact still UNMEASURED — no session has been observed losing guides this way; the reproduction sketch has not been run end-to-end. NEWLY measured 2026-08-26: the staleness bound this file sketches as the fix shape is refuted in that form (hook_at is not a liveness signal), and its precondition is cheaper than the file assumed. No fix is implemented.'
 ---
 
 # BUG: the rendezvous gate latches open, so a companion hook that goes quiet mid-process leaves `/clear` invisible again
@@ -112,6 +117,47 @@ whether it is wired up.
 `a_keyed_ledger_loaded_from_disk_has_no_ttl_by_default`) all pass, confirming the monotone latch and
 the absent TTL are pinned behaviour rather than incidental.
 
+
+### Measured 2026-08-26 — `hook_at` is not a liveness signal, so the sketched fix cannot work as sketched
+
+§ Fix proposes "treat the gate as open only while the last `hook_at` is within some
+window". Ten live MCP server slots under `~/.local/state/codescout/servers` were read
+directly (all ten processes confirmed alive with `kill -0`; five stamped, five with
+`hook_at: null` — the correct no-companion case):
+
+| pid | `hook_at` age | `hook_at` − `started_at` | project |
+|---|---:|---:|---|
+| 3703108 | 25.0 h | −24.4 h | codescout |
+| 3031648 | 14.7 h | +6.6 h | codescout |
+| 520218 | 14.0 h | +0.8 h | prompt-engineering |
+| 3692492 | 8.4 h | −7.8 h | codescout |
+| 973956 | 0.6 h | +13.1 h | system |
+
+**Every one of these is a healthy session with a working hook.** Their `hook_at` ages
+span **0.6 h to 25.0 h**, so a window wide enough not to false-deactivate a healthy
+session must exceed ~25 h — by which point it detects nothing. Two slots carry a
+`hook_at` *predating their own process* (by 7.8 h and 24.4 h): that is
+`publish`-time inheritance across an `/mcp` reconnect working exactly as designed
+(`4800c297`).
+
+The structural reason: the companion stamps **only on `SessionStart`**
+(`hooks/session-start.mjs` is the sole writer of the slot; verified by grep across
+`codescout-companion/hooks/`). So `hook_at` measures *"how long since this
+conversation last started or resumed"* — not *"how long since the hook was last known
+alive"*. Those are different quantities and only the second can gate liveness. No
+threshold on the first separates "hook died" from "long conversation".
+
+**What the same measurement makes CHEAPER.** § Fix costs a staleness bound as
+"re-introduces a clock, and the phase deliberately avoided adding a third on-disk
+shape". Both halves are lighter than that implies: `hook_at` is an existing field, so
+there is no third shape; and the companion **already registers** `UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, `Stop`, `SubagentStart` and `PreCompact`, so no new hook
+registration is needed either — only an existing recurring hook also stamping the
+slot. Repeated stamps of the same session are already silent by construction
+(`poll_ignores_a_stamp_repeating_the_session_we_already_have`), so the machinery
+tolerates a heartbeat today. The residual cost is real but small: a per-prompt slot
+write, and `poll()` doing one read+parse per prompt instead of a metadata-only check
+on the unchanged-mtime path.
 ## Hypotheses tried
 
 1. **Hypothesis:** an idle TTL would eventually close the gate on a stale keyed ledger.
@@ -127,22 +173,39 @@ the absent TTL are pinned behaviour rather than incidental.
 
 ## Fix
 
-**No fix proposed, and deliberately so.** The latch is correct for its designed case: a hook that
-fires once and then legitimately has nothing to say must not read as "no companion present", because
-that would re-introduce the blunt clear this phase exists to remove. Any fix trades one failure mode
-for the other.
+**Still no fix implemented** — but the shape has moved, and the reason is measured
+rather than argued. See § Evidence → *Measured 2026-08-26*.
 
-If it is ever worth addressing, the shape to consider is a **staleness bound rather than a reset** —
-treat the gate as open only while the last `hook_at` is within some window, so a hook that dies goes
-quiet gradually instead of never. That has its own cost: it re-introduces a clock, and the phase
-deliberately avoided adding a third on-disk shape (see the Phase C plan's Ruling 2). Do not implement
-it without first measuring that the failure actually occurs in practice — the reproduction sketch
-above is the prerequisite, and per this repo's own record, an unmeasured mechanism has been wrong
-more often than right.
+The latch is still correct for its designed case: a hook that fires once and then
+legitimately has nothing to say must not read as "no companion present", because that
+re-introduces the blunt clear this phase exists to remove.
 
-Status stays `open`, not `wontfix`: the asymmetry is real and the decision not to fix it rests on an
-unmeasured impact estimate.
+**The staleness bound sketched here before is refuted in that form.** It read: *"treat
+the gate as open only while the last `hook_at` is within some window."* Measured across
+five healthy hook-installed sessions, `hook_at` ages span 0.6 h to 25.0 h, and two of
+the five predate their own process by 7.8 h and 24.4 h through the deliberate
+reconnect inheritance. The window would have to exceed ~25 h to avoid false-
+deactivating a healthy session, which detects nothing. This is structural, not a
+tuning problem: the companion stamps only on `SessionStart`, so `hook_at` measures
+time-since-conversation-start, and liveness is a different quantity.
 
+**A staleness bound needs a liveness stamp first, and that is cheaper than this file
+assumed.** No third on-disk shape (`hook_at` already exists) and no new hook
+registration (`UserPromptSubmit` and four other recurring events are already wired);
+only an existing recurring hook also stamping the slot, which the poll machinery
+already tolerates. That is a **cross-repo change** in
+`../claude-plugins/codescout-companion/`, with a real per-prompt write cost, and it is
+a design decision rather than a defect repair — so it is named here, not taken
+unilaterally.
+
+**The original prerequisite still stands and is still unmet:** nobody has run the
+reproduction sketch, so the impact remains "a hypothesis wearing a conclusion's
+clothes". Measuring *whether the failure occurs* would still come before spending the
+cross-repo change. What today's measurement bought is that the fix, when it is
+considered, will not be the one this file used to recommend.
+
+Status stays `open`: the asymmetry is real, one fix shape is now closed off, and a
+viable one is named with its precondition.
 ## Tests added
 
 None — nothing was changed. The behaviour described here is already pinned by three existing tests
