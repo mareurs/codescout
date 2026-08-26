@@ -677,3 +677,100 @@ Tooling: `prompt-engineering:scripts/inspect_eval_run.py` (`--profile` / `--roun
 `--transcripts`, with `--denied`, `--tool X --full`, `--summary`, `--json`). It reports DENIED
 separately from ERROR, because they are the same field to the API and opposite facts to an
 eval.
+
+## Instrument "did it ASK?" separately from "could it FIND?" — they fail differently
+
+The blast-radius pilot set out to measure a search capability and instead measured whether a
+*goal got formed*. Handed a narrow bug report, Sonnet reached 1 of 11 dependents **with a
+purpose-built dependency-navigation tool indexed, available, and called zero times.** The
+failure was not "couldn't find". It was "didn't look".
+
+Those are different failures with different fixes, and a single completeness score collapses
+them. A tool eval that only measures *how much was found* will report a working tool as
+useless whenever the agent never forms the sub-goal that uses it — which is exactly what
+happened here: 1 vs 1 between the arms, with the tool doing nothing because it was never
+called.
+
+**So split the metric.** One signal for whether the behaviour was attempted at all, one for how
+completely it succeeded. And be careful that the "attempted" signal is not saturated by
+construction — ours was, because the file the bug report names is also one of the truth sites,
+so every run scored a freebie. A saturated attempt-metric is worse than none: it reads as
+"always asks" while the completeness metric floors, and the pair looks like a tool failure.
+
+## An affordance is worth nothing until the goal that uses it exists
+
+Same pilot, the numbers that make the point:
+
+| condition | reached /11 |
+|---|---|
+| shell, plain prompt | 1 |
+| symbol navigation, plain prompt | **1** |
+| shell, + one sentence asking for impact analysis | 5 |
+| symbol navigation, + that sentence | **9** |
+
+The identical tool is worth **zero** and then **four**, and what flips it is two sentences that
+name neither the shared function nor any dependent. **Tool value is conditional on intent.**
+
+Two consequences for design:
+
+- **A tool eval that fixes the prompt at "natural" will systematically understate the tool**,
+  because it is measuring the joint event (forms the goal AND executes it well) and reporting
+  it as the second.
+- **The prompt and the tool are substitutes, not complements, when they buy the same thing.**
+  Both here supply "get the dependents looked at", so once either provides it the other adds
+  little. Do not expect their effects to add.
+
+## Model strength substitutes for tooling — so a single-model tool eval measures the wrong thing
+
+The plain prompt on a stronger model reached **8-10 of 11 unprompted**, beating the weaker
+model's *hinted* ceiling. The whole apparatus — tool plus prompt — was replaceable by the model.
+
+The mechanism is the useful part, read from the transcripts: on the weaker model the tool's
+entire advantage was one bucket, dependents reachable only by chasing a rename (4/4 against
+0/4, perfect separation). On the stronger model the plain shell cracks that bucket too, by
+grepping and reading enough to follow the indirection itself. **`references()` was compressing a
+multi-step inference into one call — worth exactly as much as the inference the model was not
+going to perform.**
+
+The generalisable claim, and it is the opposite of how tools are usually pitched: **a
+navigation tool's value is highest where the model is weakest, and decays as the model
+strengthens.** Which means a tool measured on one model tier does not generalise to another —
+run at least two, and treat the *gap between tiers* as the result rather than either number.
+
+Cost belongs in the same sentence, because it is what makes the finding actionable: weaker
+model + tool + prompt reached 9/11 at $0.34/run; stronger model unprompted reached 10/11 at
+$0.61. **The cheap stack buys roughly the expensive model's unprompted result at half the
+price, and the prompt half of it is free.** Order the interventions that way: prompt first
+(free), tool second (cheap), model last (dear).
+
+## "Fixed it" and "knows what it broke" are near-independent — measure the second
+
+Every arm with tools scored a **perfect fix rate**, including the arms that reached 1 dependent
+of 11. Those runs shipped a correct patch alongside **11-12 unannounced behavioural changes**.
+
+Nothing catches that in the ordinary course. The fix is genuinely correct for the reported
+symptom, tests written against the symptom pass, and the diff is one character. The blast
+radius is invisible precisely because the thing that would reveal it — going to look — is the
+step that did not happen.
+
+So if an eval measures task success and stops, it will rate the most dangerous configuration
+as a complete success. Add a **silent-change** metric: outputs that moved which the answer
+never mentioned. It is the only one of our four that distinguished the plain arms from the
+hinted ones in the direction that matters (11-12 against 8.5-9).
+
+## A label in a results table is read as a property of the CONDITION, never of the run
+
+Cheap lesson, expensive way to learn it. A tracker entry recorded a behaviour — "the
+unrestricted arm does most of its searching through Bash" — and prescribed a *wording* remedy:
+relabel that arm "shell". Applied to the results table, it became a false claim about what the
+arm was **permitted**, since a column header reads as the condition. The arm in fact had the
+full native toolkit; the *restricted* arm was the other one. It shipped in the headline table
+of both the in-repo results and the published write-up, and the user caught it, not any gate.
+
+No test, gate or mutation can catch this class: **the number was right and only its name was
+wrong.** Every other instrument failure in that eval produced a wrong value; this one produced
+a correct value under a false description, which is invisible to everything that checks values.
+
+The rule: behavioural observations go in prose or in a column of their own — never in the
+column that names the arm. *"It chose X"* and *"it could only do X"* differ by one word in a
+header and completely in meaning. State the permission matrix explicitly, before any number.

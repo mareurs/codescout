@@ -10,7 +10,7 @@ tags:
 - librarian
 topic: prompt surface budget measurement eval harness compaction
 entry_high_water_F: 28
-entry_high_water_W: 19
+entry_high_water_W: 20
 entry_prefix:
 - F
 - W
@@ -51,7 +51,7 @@ surfaces, not the definition.
 | F-21 | I made a probe the acceptance gate for a question it was not precise enough to answer | fixed-verified |
 | F-23 | I relayed a subagent's self-reported bug find to the user without verifying it; the bug did not exist | open |
 | F-22 | A docstring word ending in "raise" fired a substring guard the docstring called safe | open |
-| F-24 | `gates_blast.py` keys arms by log filename stem, so a second pilot round silently overwrites the first | open |
+| F-24 | `gates_blast.py` keys arms by log filename stem, so a second pilot round silently overwrites the first | fixed-verified |
 | F-25 | I launched a paid eval run under a foreground tool timeout; the timeout killed it mid-session | fixed-verified |
 | F-26 | L2 reads only tool ARGS, so it measures "files the agent had to name" — an inverse proxy for navigation-tool effectiveness | fixed-verified |
 | F-27 | `native-tool-used` cannot tell "used a native tool" from "attempted one and was denied" — and it is counted, not excluded | fixed-verified |
@@ -76,6 +76,7 @@ surfaces, not the definition.
 | W-13 | The arms separated on a metric we already logged and never reported | validated |
 | W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
 | W-15 | Reading the generator instead of the plan's description of it caught three defects, one with no downstream gate at all | validated |
+| W-20 | Running the second baseline the spec asked for overturned the headline it was meant to confirm | validated |
 | W-19 | Staging the pilot behind a positive-control gate caught two result-fabricating defects mid-spend, for $1 | validated |
 | W-18 | Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result | validated |
 | W-17 | A pre-dispatch scout caught a forward dependency I had stated in a form the harness cannot express | validated |
@@ -2121,7 +2122,22 @@ gates that were reviewed.
 silently halve the evidence for any multi-round reading, which is what Steps 3-and-re-run and
 Step 5 are.
 
-**Status:** open — mitigated in the driver, unfixed in the scorer.
+**Fixed:** `prompt-engineering:01e2298`. `gates_blast.py` collects the rglob into a list, groups
+by stem, and **REFUSES (exit 2) naming every colliding path** rather than guessing which round
+was meant — same direction as the verdict allow-list: losing a result loudly beats reporting
+half the evidence as if it were all of it.
+
+Verified live against the real `/tmp/blast-pilot`, which by then held **five** colliding stems,
+`blast-pos-cs` across **three** files (pre-fix round, post-fix round, hand-assembled combined
+set). Before the fix it would have silently scored whichever sorted last.
+
+Three tests — two rounds refuse and name both directories and print no gates table; one round
+with unique stems still scores (without which the refusal could be unconditional and every
+other test would still pass); and the collision is keyed by **stem**, not full path, since
+rounds are separate directories by construction and path-keying would make the guard inert for
+the only case that produces it. Two mutations, both killed.
+
+**Status:** fixed-verified — driver mitigation retained, scorer now refuses.
 
 ## F-25 — I launched a paid eval run under a foreground tool timeout; the timeout killed it mid-session
 
@@ -2437,7 +2453,39 @@ Still open as an OPTION, not a debt: a third condition denying `Bash` as well, i
 native-file-tool comparison is genuinely wanted. That is a new arm and new spend, not a
 relabel, and nothing in the current result depends on it.
 
-**Status:** fixed-verified — wording corrected wherever the result is stated.
+**CORRECTED 2026-08-27, on the user's challenge — this entry caused a worse error than the one
+it reported.** The user pushed back that the no-codescout arm *should* have the shell and only
+the toolless arm should be denied it. Checked against the configs and the transcripts, they are
+right and nothing in the fixture is wrong:
+
+| arm | native file tools | Bash | codescout MCP |
+|---|---|---|---|
+| `blast-native` | **all** (only `Agent` denied) | **yes** | no |
+| `blast-cs` | denied | **denied** | yes (incl. `run_command`) |
+| `notools` | denied | denied | no |
+
+The native arm has the **full** toolkit and uses `Read` and `Edit` in every run. It merely does
+most of its *searching* through Bash. And the **restricted** arm is the cs one — it is the only
+arm denied a shell in the ordinary sense, reaching one through `mcp__codescout__run_command`.
+
+**Where this entry went wrong.** It reported a behaviour ("does 5-8 of 7-11 calls through
+Bash") and then prescribed a *wording* remedy — relabel the arm "shell". I applied that to the
+results table and the published artifact, where a column header reads as what an arm was
+**allowed**. So an observation about what the agent *chose* was promoted into a false claim
+about what it was *permitted*, and it shipped in the headline table of both.
+
+**The generalisable lesson, and it is the sharper half of this entry:** a label in a results
+table is read as a property of the *condition*, never of the *run*. Behavioural observations
+belong in prose or in a column of their own — never in the column that names the arm. "It chose
+X" and "it could only do X" differ by exactly one word in a header and completely in meaning.
+
+**Fixed:** the table now says `native (all)`, with the permission matrix stated up front in
+both RESULTS.md and the artifact, and the caveat rewritten to say which arm is actually
+restricted. The original ruling still stands — relabel, do not re-arm: what an unrestricted
+agent actually does IS the comparison worth having.
+
+**Status:** fixed-verified — and re-opened once, because the first fix introduced the real
+defect.
 
 ## W-19 — Staging the pilot behind a positive-control gate caught two result-fabricating defects mid-spend, for $1
 
@@ -2496,6 +2544,59 @@ shortfall as an instrument fault until the source says otherwise."*
 
 **Status:** validated — two independent catches within one work stream, both traced to source
 and fixed, with the third (uniform-result) application confirming a true negative.
+
+## W-20 — Running the second baseline the spec asked for overturned the headline it was meant to confirm
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-27, blast-radius. The spec said *"baseline with Sonnet and Opus."* The
+2026-08-26 pilot ran ten Sonnet runs and produced a clean, gated, fully-caveated result — and
+the Opus arms were nearly dropped as a nice-to-have, because the Sonnet result already looked
+finished.
+
+**Pattern:** when a spec names two conditions and the first one produces a publishable answer,
+**run the second anyway** — the risk is not that it adds nothing, it is that the first answer
+silently over-generalised.
+
+**Counterfactual, and it is not hypothetical.** The published headline was *"handed a narrow bug
+report, the agent does not go looking for who else depends on the code — and no toolset changes
+that."* Four Opus runs at **$2.26** showed that is a **Sonnet** fact and false of Opus, which
+reaches 8-10 of 11 unprompted, beating Sonnet's *hinted* ceiling. Worse for the original claim:
+the tool advantage that carried the entire Sonnet result — 4/4 against 0/4 on the rename-chase
+bucket — **disappears** on Opus, where the plain shell reaches it too.
+
+So the scope error was in the load-bearing sentence, and it was the kind that reads as a general
+truth about agents while resting on one model tier. Nothing in the Sonnet data hinted at it: all
+five arms scored, no gate refused, every caveat pre-registered.
+
+**What made it cheap enough to be worth doing:** the arm was a config change, not a new fixture.
+`gen.py` gained a per-dir `model` with a sonnet default, and the five existing configs
+regenerated **byte-identically** — verified, because that is the check that the already-scored
+runs were not disturbed. A model dimension that costs one dict key and $2 is not a nice-to-have.
+
+**Two guards worth copying, both added with the arm rather than after:**
+
+- `test_the_opus_arms_differ_from_their_sonnet_twins_ONLY_in_model` compares the *pair* —
+  deny-list, profile, prompt and runs must match, model must not. Every other test in that file
+  pins one field against a table in isolation, so nothing else compared the twins to **each
+  other**, and adding a row to two tables is exactly how a confound would have entered.
+- Model is pinned by value on **every** dir, not just the new ones, so an arm that silently
+  drifted to a different model fails loudly instead of becoming a confound wearing the clothes
+  of a tool condition.
+
+**Confirming data points:** this one. The nearest relative is W-19 (staging caught defects
+*before* the headline); this is the mirror — a second condition caught a defect *in* a headline
+already published.
+
+**Impact:** high — the difference between publishing a fact about agents and a fact about one
+model, at $2.26 and one config key.
+
+**Promote-when:** a second work stream finds that an unrun condition from its own spec changes a
+published conclusion. At two datapoints, promote to `eval-design` as: *"A spec's unrun condition
+is a live threat to the conclusion you already drew — run it before publishing, not after."*
+
+**Status:** validated — single datapoint, but the overturned claim was the document's headline
+and the correction is committed.
 
 ## Template for new entries
 
