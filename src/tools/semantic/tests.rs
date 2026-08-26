@@ -658,7 +658,7 @@ fn format_index_status_stale_shows_commit_count() {
 /// on the surface disagreed. `indexed` states what this path actually knows —
 /// coverage is not checked here, and the JSON's `coverage_hint` names the tool that
 /// does check it.
-/// docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+/// docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md
 #[test]
 fn format_index_status_does_not_claim_good_without_checking_coverage() {
     let result = serde_json::json!({
@@ -709,7 +709,7 @@ fn format_index_status_leads_with_degraded_when_chunks_have_no_vector() {
 /// never made it into the store at all, not merely un-embedded -- so it leads
 /// the line ahead of the hole arm, and stays queryable for the same reason holes
 /// do: the index still answers, it just cannot return what it never received.
-/// docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+/// docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md
 #[test]
 fn format_index_status_leads_with_degraded_when_the_last_sync_skipped_chunks() {
     let result = serde_json::json!({

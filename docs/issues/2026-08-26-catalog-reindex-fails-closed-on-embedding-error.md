@@ -183,7 +183,7 @@ test setting only the embedder would have passed while exercising nothing.
   and queryability are three distinct facts reported independently by surfaces
   that can disagree. They should derive from one state model. This is the
   report's "related status problem", and it overlaps
-  `docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
+  `docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
   — the two should probably be designed together rather than patched separately.
 
 **Verified:** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
@@ -244,6 +244,19 @@ re-run each explicitly after the embedder is healthy. Treat any reindex that
 returns an error, rather than an envelope, as "catalog state unknown".
 
 ## Resume
+**Update 2026-08-27:** the sibling bug this section names
+(`docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`,
+fixed in `196f1b94`) shipped a durable partial-sync marker for the CODE index
+(`IndexState.last_sync_skipped_count` / `_sample`, written by `sync_project`, read by
+`index(action="status")`). That is a worked precedent for the SHAPE of step 2 here —
+not a fix for this bug, which is a different store (the librarian catalog, not the
+code-chunk index) and a different write path (`librarian(action="reindex")`'s
+`embed_errors`, not `sync.rs`'s `SyncReport.skipped`). Read that fix before designing
+this one: same pattern (a required, no-default parameter threaded from the point of
+failure to the persisted sidecar; the compiler names every caller), applied to a
+different subsystem. Do not assume it already covers this bug — it does not; the two
+stores remain separate and this bug's own catalog/embedding path is untouched.
+
 
 Step 1 shipped in `69e78a2f`; the `src/librarian/tools/reindex.rs` work is done.
 What remains is a **design decision, not an edit**, so do not start by opening
@@ -251,7 +264,7 @@ that file again.
 
 Decide where durable index-health state lives, for catalog freshness and embedding
 freshness jointly. Then read
-`docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
+`docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
 § *Fix* before writing anything: that bug's `(0,0)`-only status discriminator and
 this bug's missing degraded marker are the same missing abstraction seen from two
 tools (`index(action="status")` and `librarian(action="reindex")` /

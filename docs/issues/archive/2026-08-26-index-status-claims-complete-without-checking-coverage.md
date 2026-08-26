@@ -1,14 +1,20 @@
 ---
-status: open
-opened: 2026-08-26
-closed:
-severity: high
-owner: marius
-related: [docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md, docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md]
-tags: [retrieval, indexing, status, silent-failure]
-unverified: 'the originally reported symptom (docs/ = 0 indexed files) is NOT reproducible at d5ed4d6f — docs/ is now fully indexed. The live, verified defect is the status-completeness gap; the original drop mechanism remains unidentified.'
-last_observed: 2026-08-26
 kind: bug
+status: fixed
+tags:
+- retrieval
+- indexing
+- status
+- silent-failure
+closed: 2026-08-27
+last_observed: 2026-08-26
+opened: 2026-08-26
+owner: marius
+related:
+- docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
+- docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+severity: high
+unverified: the originally reported symptom (docs/ = 0 indexed files) is NOT reproducible at d5ed4d6f — docs/ is now fully indexed. The live, verified defect is the status-completeness gap; the original drop mechanism remains unidentified.
 ---
 
 # BUG: `index(action="status")` reports `indexed: true, queryable: true` off a single chunk — it never checks coverage
@@ -449,17 +455,80 @@ the drop:
 
 No SHA, no patch-id — not yet fixed.
 
+### Durable marker shipped 2026-08-27 — headline defect closed
+
+**SHA:** `196f1b94` (`experiments`)
+**patch-id:** `2a8aa5e71f2ae98171628a665f81af7c9cfda31d`
+
+`fix(index): persist a durable last-sync-skipped marker, and read it in status`.
+
+**What was missing after the two entries above:** `a5f8e5ad` stopped a batch failure
+from truncating the walk and reported `skipped` in the in-memory `SyncReport`; `e5821fec`
+added opt-in walk-based detection via `verify`. Neither made the fact survive past the
+call that discovered it — `status` itself still answered `indexed: true, queryable: true`
+off a non-zero chunk count alone, exactly this file's headline complaint, for a caller who
+never ran `verify` and wasn't looking at the sync's own return value.
+
+**What shipped.** `IndexState` (`src/retrieval/index_state.rs`) gains
+`last_sync_skipped_count` / `last_sync_skipped_sample`, sourced from `SyncReport.skipped`.
+`write_index_state_with_dirty` takes a new required `skipped: &[String]` parameter — no
+default, matching this file's own existing `ModelStamp` precedent ("a defaulting
+convenience wrapper is what produced the `dirty_paths` wipe") — so the compiler named
+both production call sites. `sync_project` passes its real `skipped` list; `status` reads
+it back, sets `last_sync_skipped: {count, sample}` when non-zero, upgrades `integrity` to
+`degraded`, and `format_index_status` renders `DEGRADED · last sync skipped N chunk(s)…`
+ahead of a vector hole (a skipped chunk never reached the store at all, the more severe of
+the two cheaply-knowable facts).
+
+**Known, deliberate gap: `sync_worktree`.** Its sidecar write happens BEFORE the embed
+pass runs — a load-bearing ordering documented at that call site (I3: written early to
+avoid a double-serve race between main and a worktree delta) — so this run's own skip
+count is not knowable at the point the write happens. It passes `&[]`, commented as "not
+yet knowable here", not as a claim of cleanliness. A worktree delta sync's skips are
+therefore still invisible to `status`. Closing this would need a second sidecar write
+after the embed pass, with its own reasoning against the same early-return hazard — left
+for a follow-up rather than folded into this pass.
+
+**What is still NOT covered, and is not a new gap.** A build interrupted by something
+other than a per-chunk embed failure — a killed process, a server restart mid-walk —
+never returns, so no sidecar write happens for that run at all; `status` would then read
+the PREVIOUS successful sync's clean marker. This was already honestly disclosed by
+`coverage: "unchecked"` (added in the first Fix entry above) rather than hidden, and
+`index(action="verify")`'s walk-based check still catches it when run. Nothing here
+claims to close that residual case — only the confirmed mechanism (a batch/embed failure
+surviving as a silent truncation) is closed.
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` → 4411
+passed, 0 failed, 8 ignored.
+
+This bug's own two acceptance criteria for archiving — the cheap-tier fold (done in the
+first Fix entry) plus this durable marker — are both met. Archiving now.
 ## Tests added
 
-None yet. The reporter's requested shape is right and is the part a
-`stream_index` unit test cannot cover:
+Eight, across three files (`src/retrieval/index_state.rs`, `src/retrieval/sync.rs`,
+`src/tools/semantic/tests.rs`):
 
-- an integration test driving the **same asynchronous tool path** as
-  `index(action="build")` against a temp checkout containing `src/`, `docs/` and
-  `scripts/`, then asserting persisted file paths in the final store;
-- a status test asserting a deliberately partial store does **not** report an
-  unqualified `queryable: true`.
+- `index_state::tests::last_sync_skipped_round_trips`,
+  `::sidecar_written_before_last_sync_skipped_existed_still_parses`,
+  `::a_clean_sync_records_zero_skipped_not_a_stale_carry_over`,
+  `::last_sync_skipped_sample_is_capped_but_count_stays_exact` — the writer/reader layer.
+- `sync::tests::sync_project_records_its_own_skip_count_in_the_durable_sidecar` —
+  end-to-end through the real `sync_project` path with a `CeilingEmbedder`, asserting the
+  sidecar's count matches what the sync actually skipped and the sample names the
+  offending file.
+- `sync::tests::sync_project_clears_a_previously_recorded_skip_count_on_a_clean_run` — the
+  converse: a clean sync must not carry a stale skip count forward.
+- `semantic::tests::format_index_status_leads_with_degraded_when_the_last_sync_skipped_chunks`,
+  `::format_index_status_skipped_outranks_a_vector_hole` — the rendering layer, including
+  priority against the existing vector-hole arm.
 
+`IndexStatus::call` itself (the JSON-assembly splice reading the sidecar and setting
+`result["last_sync_skipped"]`) has no direct unit test, consistent with the rest of that
+function: it requires a live `RetrievalClient::from_env` connection and has never had one.
+The splice reads exactly the fields the writer test round-trips, in the same `if let
+Some(...)` pattern already used two lines below for `indexed_with_model` — covered by
+construction plus live verification (`cargo rb` + reconnect + a real
+`index(action="status")` call) rather than a mocked unit test.
 ## Workarounds
 
 Do not trust `indexed: true` as a completeness claim. Verify coverage directly:
@@ -476,16 +545,12 @@ force=true)` rebuilds if a directory is short.
 
 ## Resume
 
-Test hypothesis 5 first — it is the cheapest and would collapse three bugs into
-one. Read the embed-failure path in `src/retrieval/sync.rs` (`stream_index`,
-around the `flush_pending` call at `:380-381`) and determine whether a single
-oversized chunk's HTTP 400 aborts the whole walk with `?` or is skipped. If it
-aborts, that is the mechanism behind the reporter's 486-of-1606 index and this
-file's Root cause section should be rewritten to say so.
-
-Then implement Fix step 2 (zero-files-in-an-eligible-top-level-directory) as the
-smallest useful guard, in `src/tools/semantic/index.rs:507-514`.
-
+N/A — fixed and archived. The sibling gap in `librarian(action="reindex")`'s catalog/
+embedding path (`docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`
+step 2) is intentionally NOT covered here — separate store (the librarian catalog vs. this
+file's code-chunk index), separate change. That bug's own Resume now points back at this
+fix as a worked precedent for the shape of a durable partial-sync marker, not as something
+that already covers it.
 ## References
 
 - GitHub issue #17 — <https://github.com/mareurs/codescout/issues/17>

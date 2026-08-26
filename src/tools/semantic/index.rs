@@ -406,7 +406,7 @@ impl Tool for IndexProject {
                         // nothing marks a skipped chunk dirty, so a later no-op sync
                         // will never reconcile it. Silence here is what let an index
                         // missing a whole directory read as healthy
-                        // (docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md).
+                        // (docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md).
                         if !report.skipped.is_empty() {
                             tracing::warn!(
                                 skipped = report.skipped.len(),
@@ -593,7 +593,7 @@ impl Tool for IndexStatus {
                             // reported healthy. Coverage cannot be answered cheaply (it
                             // needs the indexer's walk), so say so explicitly instead of
                             // letting silence imply the opposite.
-                            // docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+                            // docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md
                             "coverage": "unchecked",
                             "coverage_hint": "file_count/chunk_count are what the store HOLDS, not proof it holds everything eligible. Run index(action='verify') for coverage against the indexer's own walk.",
                         })
@@ -717,7 +717,7 @@ impl Tool for IndexStatus {
                 if let Some(st) = crate::retrieval::index_state::read_index_state(&root) {
                     result["indexed_at"] = json!(st.last_indexed_at);
                     // The durable half of
-                    // docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md:
+                    // docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md:
                     // a caller who never runs index(action="verify") still sees whether the
                     // sync that produced THIS store's vectors skipped anything, because the
                     // fact outlives the call that discovered it. Absent (not `count: 0`) when
@@ -1148,7 +1148,7 @@ pub(crate) fn format_index_status(result: &Value) -> String {
 
     // NOT "good". That word was derived from nothing but a non-zero chunk count, and
     // it is the overclaim at the heart of
-    // docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md:
+    // docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md:
     // an index holding 486 of 1606 files with a whole top-level directory at zero
     // rendered as "good · queryable". `indexed` states what is actually known here;
     // coverage is not checked on this path, and `coverage_hint` in the JSON says so.

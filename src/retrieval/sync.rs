@@ -249,7 +249,7 @@ pub fn worktree_ids(main_repo: &Path, worktree_root: &Path) -> (String, String) 
 /// `indexed: true, queryable: true` — its only check being a non-zero chunk
 /// count. That is the confirmed mechanism behind an index missing an entire
 /// top-level directory:
-/// `docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
+/// `docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
 /// and `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`.
 ///
 /// So on a batch error we retry chunk-by-chunk to isolate the offenders, store
@@ -1767,7 +1767,7 @@ mod tests {
     /// `indexed: true, queryable: true`, because its only check is a non-zero chunk
     /// count. That combination is why an entire top-level directory could be missing
     /// from a "healthy" index without anything failing loudly:
-    /// docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+    /// docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md
     #[tokio::test]
     async fn one_oversized_chunk_is_skipped_and_the_rest_of_the_walk_still_indexes() {
         let dir = tempfile::tempdir().unwrap();
@@ -1884,7 +1884,7 @@ mod tests {
     /// DURABLE sidecar, not just the in-memory `SyncReport` -- otherwise a caller
     /// who checks `index(action="status")` on a LATER call still cannot tell the
     /// last sync was partial. This is the wiring gap
-    /// docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+    /// docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md
     /// closes: `sync_project` must thread its own `skipped` list into
     /// `write_index_state_with_dirty`, not pass `&[]`.
     #[tokio::test]
