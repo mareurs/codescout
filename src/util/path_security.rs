@@ -1208,8 +1208,16 @@ fn has_recursive_flag(cmd: &str) -> bool {
 fn git_output_is_bounded(tokens: &[String]) -> bool {
     // skip(1): the head is `git` itself; a limiter is always an argument.
     tokens.iter().skip(1).any(|tok| {
+        // Compare against the FLAG NAME, not the whole token. git spells a
+        // valued long option both ways — `--stat` and `--stat=200`,
+        // `--porcelain` and `--porcelain=v1` — and a whole-token equality test
+        // matches the bare spelling while silently missing the attached one,
+        // which is the same limiter and just as bounded. This subsumes the
+        // `--max-count=` prefix test that used to be the only attached form
+        // handled; a fourth special case was the alternative.
+        let flag = tok.split_once('=').map_or(tok.as_str(), |(name, _)| name);
         matches!(
-            tok.as_str(),
+            flag,
             // an explicit commit/line count
             "-n" | "--max-count"
                 // a single value by construction
@@ -1218,11 +1226,15 @@ fn git_output_is_bounded(tokens: &[String]) -> bool {
                 | "--porcelain" | "--short" | "-s"
                 // a name/stat listing rather than a diff body
                 | "--stat" | "--name-only" | "--name-status"
-        ) || tok.starts_with("--max-count=")
-            // git's count shorthand: `-3`, `-20`
-            || (tok.len() >= 2
-                && tok.starts_with('-')
-                && tok[1..].chars().all(|c| c.is_ascii_digit()))
+        )
+            // git's attached count shorthands: `-3`, `-20`, and `-n5`. Strip
+            // `-n` first so `-n5` is not tested as the bare `-<digits>` form
+            // and rejected on the `n`; a bare `-n` yields an empty rest, fails
+            // here, and is caught by the table above.
+            || tok
+                .strip_prefix("-n")
+                .or_else(|| tok.strip_prefix('-'))
+                .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
     })
 }
 
@@ -3420,6 +3432,53 @@ mod tests {
         // Bounded by the working tree, not by history.
         assert!(detect_il3_violation("git status --short | head -30").is_none());
         assert!(detect_il3_violation("git status --porcelain | grep foo").is_none());
+    }
+
+    #[test]
+    fn il3_limiter_matches_gits_attached_value_spellings() {
+        // git spells each of these limiters two ways. The gate used to compare
+        // WHOLE TOKENS, so the attached form matched nothing in the table and a
+        // genuinely bounded command was refused — while the refusal text
+        // recommended `git log -3`, which is the same bound spelled the other
+        // documented way. `--max-count=` was the sole attached form handled,
+        // via a hard-coded prefix test.
+        for cmd in [
+            "git status --porcelain=v1 | head -5",
+            "git status --porcelain=v2 | head -3",
+            "git show --stat=200 HEAD | head -3",
+            "git log --max-count=3 | head -5",
+            "git log -n5 | head -3",
+        ] {
+            assert!(
+                detect_il3_violation(cmd).is_none(),
+                "attached-value limiter must read as bounded: {cmd}"
+            );
+        }
+
+        // The bare spellings each of those is equivalent to, so a regression
+        // that breaks the `=` split cannot hide behind the new cases alone.
+        for cmd in [
+            "git status --porcelain | head -5",
+            "git show --stat HEAD | head -3",
+            "git log --max-count 3 | head -5",
+            "git log -n 5 | head -3",
+            "git log -3 | head -3",
+        ] {
+            assert!(
+                detect_il3_violation(cmd).is_none(),
+                "bare limiter must still read as bounded: {cmd}"
+            );
+        }
+
+        // The other half of the pair, and the reason the assertions above are
+        // worth anything: every one of them would ALSO pass in a world where
+        // the gate simply stopped inspecting `git`. These fail in that world.
+        // `--oneline` stays a non-limiter (it bounds width, not line count),
+        // and splitting on `=` must not admit any flag that merely carries a
+        // value — `--pretty=format:%h` formats output without limiting it.
+        assert!(detect_il3_violation("git log | head -3").is_some());
+        assert!(detect_il3_violation("git log --oneline | head -3").is_some());
+        assert!(detect_il3_violation("git log --pretty=format:%h | head -3").is_some());
     }
 
     #[test]
