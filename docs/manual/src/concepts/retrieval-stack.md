@@ -381,6 +381,16 @@ This restores the in-process ONNX + fastembed path. Note: the network
 retrieval pipeline (sparse fusion, cross-encoder rerank) is not available in
 this mode — `semantic_search` falls back to pure dense vector scoring.
 
+**This is a bigger step than it looks.** The ONNX path currently implies a
+model change, a full reindex of every code index and every memory, and
+dense-only retrieval — not just a backend swap. `local:<name>` only resolves a
+fixed allowlist (`NomicEmbedTextV15`, `JinaEmbeddingsV2BaseCode`,
+`BGESmallENV15`, `AllMiniLML6V2`, and their quantized variants) — it does not
+include `CodeRankEmbed`, so an index built against the network stack cannot be
+reused; every index and every memory needs a fresh `index(action="build",
+force=true)` / re-embed after switching. Budget for that before treating this
+as a quick escape hatch.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |

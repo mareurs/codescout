@@ -139,31 +139,27 @@ fn parse_model(name: &str) -> Result<fastembed::EmbeddingModel> {
 
 ## Fix
 
-The in-scope, actionable fix is documentation. Split explicitly:
+Split as originally scoped:
 
-1. **[bug — do this] Document the migration cost** where the ONNX/local path is
-   described (retrieval-stack docs). One short note, in the reporter's own
-   words: *"the ONNX local path currently implies a model change, a full reindex
-   of every code index and every memory, and dense-only retrieval."* That is
-   what would have saved an audit.
-2. **[bug — do this] Stop recommending ONNX as the remedy for
-   `…-dense-embedder-slot-context-drops-large-embeds.md`** until (3) exists. The
-   segmentation fix in that bug is the real remedy and is model-independent.
-3. **[feature — not this file] Generic user-defined-model loading on the ONNX
-   path**: load ONNX weights from a directory with *explicit* pooling and
-   quantization parameters rather than compiled-in constants. The reporter's
-   observation that CodeRankEmbed derives from nomic-embed-text-v1.5 — already
-   in fastembed's registry as `NomicEmbedTextV15` — makes this plausibly cheap
-   and would make the migration vector-compatible: same model, same dimension,
-   no reindex. Per CLAUDE.md this belongs in `docs/trackers/` or `docs/plans/`,
-   not `docs/issues/`; it is recorded here only so the request is not lost, and
-   should be moved when a home exists.
-4. **[answer the reporter] Is dense-only the intended end-state for the local
-   path, or is hybrid-with-local-backend on the roadmap?** A direct question in
-   the issue, currently unanswered. It is a roadmap decision, not a code change.
+1. **[done]** Documented the migration cost in
+   `docs/manual/src/concepts/retrieval-stack.md` § *Migration from local-embed* — a
+   short paragraph in the reporter's own words: the ONNX local path implies a model
+   change (no `CodeRankEmbed` in the `local:<name>` allowlist), a full reindex of every
+   code index and every memory, and dense-only retrieval.
+2. **[checked, already moot]** "Stop recommending ONNX as the remedy for
+   `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`"
+   — read that bug's Workarounds/Resume sections in full: it was fixed via segmentation
+   (`26feb1aa`), never via an ONNX recommendation. No live doc surface points at ONNX as
+   a remedy for it. Nothing to remove.
+3. **[not this file, unchanged]** Generic user-defined-model loading on the ONNX path
+   remains out of scope here — belongs in `docs/trackers/` or `docs/plans/` when it has a
+   home.
+4. **[still open — answer needed]** Is dense-only the intended end-state for the local
+   path, or is hybrid-with-local-backend on the roadmap? Roadmap decision, not a code
+   change — left for Marius.
 
-No SHA, no patch-id.
-
+**SHA:** `pending` — doc-only change, not yet committed at time of this write.
+**patch-id:** `pending`
 ## Tests added
 
 `N/A` — the fix is a documentation note plus a roadmap answer; there is no
