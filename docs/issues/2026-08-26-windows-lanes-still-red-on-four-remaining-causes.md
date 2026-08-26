@@ -13,7 +13,7 @@ closed: ''
 opened: 2026-08-26
 owner: marius
 severity: high
-unverified: 'Grouped from ONE wine run plus one MSVC log. The groups are inferred from panic messages, not from fixing any of them, and the wine/MSVC split is only partly established: wine cannot run the Git Bash path at all, so the 8 shell-related failures below are wine-only noise and the 9th in that module may or may not be real. Nothing here has been reproduced twice.'
+unverified: 'Groups C, D, E and F are closed and each was verified red→green under wine. What remains UNVERIFIED is the tail: the two `retrieval::index_lock` failures pass under wine and fail on MSVC, and the single real `server::guide_hint_tests` failure cannot be separated from wine''s missing Git Bash. Neither is reachable from the local loop, so neither has been reproduced even once outside a CI log.'
 ---
 
 ## Summary
@@ -157,6 +157,18 @@ the vacuous pass outlasted the loud failure.
 *"ppid must be recorded, left: 0, right: 0"*. Either the Windows parent-pid lookup returns
 0, or wine does not provide one. **Not separable from this run** — check MSVC's log for the
 same assertion before assuming it is real.
+
+**FIXED 2026-08-26 — `4824dfe3`, patch-id `25136f153b69ac064c40b7b88131fa141a3c4091`.**
+Neither guess: `parent_pid()` is `#[cfg(windows)] -> 0` **by design**, and its doc comment
+argues the case — no `getppid` there, so a zero degrades to *"never matched"* rather than
+to a WRONG match. The test was asserting against shipped intent.
+
+The two comments contradicted each other and neither noticed. The test: *"a zero or
+missing ppid makes every entry unmatchable — the feature silently dies."* The function:
+the zero is the deliberate, safe choice. **Both are true** — the rendezvous really does not
+match on ppid on Windows, and that is an accepted cost, not a defect. Split into a
+`cfg(unix)` assertion and a `cfg(windows)` sibling that pins the zero as contract, so a
+future Windows `getppid` fails loudly instead of silently changing a matcher's premise.
 
 ## Reproduction
 
