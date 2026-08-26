@@ -542,6 +542,60 @@ fn format_index_status_stale_shows_commit_count() {
     );
 }
 
+/// The compact line must not call an index "good" off a non-zero chunk count.
+///
+/// That single word was the whole overclaim: an index holding 486 of 1606 files with
+/// an entire top-level directory at zero rendered as `good · queryable`, and nothing
+/// on the surface disagreed. `indexed` states what this path actually knows —
+/// coverage is not checked here, and the JSON's `coverage_hint` names the tool that
+/// does check it.
+/// docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+#[test]
+fn format_index_status_does_not_claim_good_without_checking_coverage() {
+    let result = serde_json::json!({
+        "indexed": true,
+        "file_count": 486,
+        "chunk_count": 21557,
+        "coverage": "unchecked",
+    });
+    let out = format_index_status(&result);
+    assert!(
+        !out.contains("good"),
+        "\"good\" is derived from nothing but a non-zero chunk count: {out}"
+    );
+    assert!(
+        out.starts_with("indexed"),
+        "should state what is known, not a verdict: {out}"
+    );
+}
+
+/// A vector hole is cheaply knowable, so it leads the line rather than hiding behind
+/// the file/chunk counts.
+///
+/// `queryable` stays true on purpose — an index with a hole IS queryable, it simply
+/// cannot return the holed chunks — so the honest signal has to be an ADDITIONAL
+/// field rather than a downgrade of that one.
+#[test]
+fn format_index_status_leads_with_degraded_when_chunks_have_no_vector() {
+    let result = serde_json::json!({
+        "indexed": true,
+        "file_count": 100,
+        "chunk_count": 5000,
+        "chunks_without_vectors": 7,
+        "integrity": "degraded",
+    });
+    let out = format_index_status(&result);
+    assert!(
+        out.starts_with("DEGRADED"),
+        "a hole must lead, not trail: {out}"
+    );
+    assert!(out.contains('7'), "must name the count: {out}");
+    assert!(
+        out.contains("queryable"),
+        "and must not imply the index is unusable: {out}"
+    );
+}
+
 #[test]
 fn search_result_item_content_is_last_field() {
     // Regression: content must be last — it is the bulk payload.

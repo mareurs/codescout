@@ -538,14 +538,46 @@ impl Tool for IndexStatus {
                             "No chunks indexed for project '{project_id}' in collection '{collection}'. Run index(action='build')."
                         ),
                     }),
-                    Ok((chunk_count, file_count)) => json!({
-                        "indexed": true,
-                        "queryable": true,
-                        "project_id": project_id,
-                        "collection": collection,
-                        "file_count": file_count,
-                        "chunk_count": chunk_count,
-                    }),
+                    Ok((chunk_count, file_count)) => {
+                        // The cheap half of `index(action="verify")`, folded in here: one
+                        // indexed COUNT, no walk. Safe on this path because `status`
+                        // ALREADY pays `project_index_stats`, which enumerates the project
+                        // — and unsafe on the activation path, which is why that one asks
+                        // `project_has_chunks` instead (see `check_has_index` in
+                        // src/tools/config/mod.rs and the bug it cites).
+                        //
+                        // Orphan detection is deliberately NOT folded in: it needs
+                        // `chunk_refs` over every chunk plus a stat per stored file, which
+                        // is the enumeration class that broke the probe. It stays in
+                        // `verify`.
+                        let holes = client
+                            .code_store
+                            .count_chunks_without_vectors(&collection, &project_id)
+                            .await
+                            .unwrap_or(0);
+                        json!({
+                            "indexed": true,
+                            // Still true, and deliberately not downgraded: an index with a
+                            // hole IS queryable, it just cannot return the holed chunks.
+                            // Lying here would break every caller that branches on it.
+                            "queryable": true,
+                            "project_id": project_id,
+                            "collection": collection,
+                            "file_count": file_count,
+                            "chunk_count": chunk_count,
+                            "chunks_without_vectors": holes,
+                            "integrity": if holes > 0 { "degraded" } else { "ok" },
+                            // The point of this whole change. `indexed: true, queryable:
+                            // true` READ as "complete" — that is how an index holding 486
+                            // of 1606 files, with a whole top-level directory at zero, was
+                            // reported healthy. Coverage cannot be answered cheaply (it
+                            // needs the indexer's walk), so say so explicitly instead of
+                            // letting silence imply the opposite.
+                            // docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
+                            "coverage": "unchecked",
+                            "coverage_hint": "file_count/chunk_count are what the store HOLDS, not proof it holds everything eligible. Run index(action='verify') for coverage against the indexer's own walk.",
+                        })
+                    }
                     Err(e) => json!({
                         "indexed": false,
                         "project_id": project_id,
@@ -941,7 +973,24 @@ pub(crate) fn format_index_status(result: &Value) -> String {
     let files = result["file_count"].as_u64().unwrap_or(0);
     let chunks = result["chunk_count"].as_u64().unwrap_or(0);
 
-    let mut out = format!("good · queryable · {files} files · {chunks} chunks");
+    // NOT "good". That word was derived from nothing but a non-zero chunk count, and
+    // it is the overclaim at the heart of
+    // docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md:
+    // an index holding 486 of 1606 files with a whole top-level directory at zero
+    // rendered as "good · queryable". `indexed` states what is actually known here;
+    // coverage is not checked on this path, and `coverage_hint` in the JSON says so.
+    //
+    // A vector hole IS knowable cheaply, so when there is one, say it loudly and
+    // first. Only when there is a real signal — a permanent "coverage unchecked" nag
+    // on every call would be noise, and noise gets learned around.
+    let holes = result["chunks_without_vectors"].as_u64().unwrap_or(0);
+    let mut out = if holes > 0 {
+        format!(
+            "DEGRADED · {holes} chunk(s) have no vector · queryable · {files} files · {chunks} chunks"
+        )
+    } else {
+        format!("indexed · queryable · {files} files · {chunks} chunks")
+    };
 
     if let Some(model) = result["indexed_with_model"].as_str() {
         out.push_str(&format!(" · {model}"));
