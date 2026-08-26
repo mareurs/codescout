@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 63
-entry_high_water_W: 53
+entry_high_water_F: 65
+entry_high_water_W: 54
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -114,6 +114,8 @@ entry_high_water_W: 53
 | F-61 | 2026-08-26 | med | process | fixed-verified | Asserted "no live-pyright harness exists" from grepping ONE file, and nearly shipped an `unverified:` marker declaring the test impossible; `tests/e2e/` already held six live-LSP `find_referencing_symbols` expectations |
 | F-63 | 2026-08-26 | med | process | fixed-verified | Reported "2 open bugs" four times from a query whose filter was the thing hiding the pile — 23 files in `docs/issues/`, 2 open, 17 terminal-unarchived, 4 zombie that no query in the project reaches |
 | F-62 | 2026-08-26 | high | process | fixed-verified | All five feature-gated e2e language lanes had stopped compiling — `ToolContext` grew a field, the shared harness never got it — while `cargo test` stayed green, since it never builds a feature-gated target no lane names; recurrence guard shipped in `3784cb65` |
+| F-64 | 2026-08-26 | med | plan-prose | fixed-verified | My own #18 bug file inflated its own fix — `code_vec` is per-project by FILE, so the "most likely to be got wrong" step is vacuous and its regression test would have passed for every implementation |
+| F-65 | 2026-08-26 | low | skill-doc | open | The reconnaissance skill's worked exemplars show a `**Valid:**` form the server refuses (13-vs-0 in this tracker), and instruct you to copy them |
 
 ## Wins Index
 
@@ -175,6 +177,7 @@ entry_high_water_W: 53
 | W-52 | 2026-08-26 | high | Measure the corpus before building a detector — run its predicate over the whole population and name the true/false split | The obvious `[LIVE]`-body heuristic would have fired on 23 unaugmented artifacts of which 1 was defective; a 23:1 rot-detector gets switched off or learned-around, and the count cost ~40 seconds | validated |
 | W-53 | 2026-08-26 | med | Verify a scan's FIRST finding against reality before acting on the worklist, and treat a false one as a bug in the instrument | The single archived_fix_sha finding was a false positive; checking it found two defects in the same parser, against an alternative of hunting a dead commit the check itself sizes at 2-153 candidates | validated |
 | W-51 | 2026-08-26 | high | When a filed root cause is about persisted state, reproduce it by querying the datastore — not by re-running the tool that reported it | The filed "restore every augmentation" fix, run against the 21 trackers that were already augmented, replaces their params wholesale — the same call that took the T-N queue from 19 entries to 1 on 2026-08-16 — causing the loss it claimed to repair | validated |
+| W-54 | 2026-08-26 | med | Before implementing from a bug file or plan YOU wrote, scout the seam its Fix section SIZES — not only the seam its Root cause cites | Would have implemented a project-scoped `DELETE` plus a "sibling project survives" test for an invariant the per-project-file schema already guarantees; that test passes for every possible implementation, including a wrong one, so it enters the suite as a permanent green-but-uninformative assertion | validated |
 
 ## Category conventions
 
@@ -4590,6 +4593,215 @@ Verifying *that* turned up a second defect in the same parser: `structured_fix_p
 **Valid:** dated 2026-08-26
 
 **Rests on:** [[F-63]] and [[W-51]] — same session, same family: an instrument's output is a claim about the world, not the world.
+
+## F-64 — My own #18 bug file inflated its own fix — `code_vec` is per-project by FILE, so its "hardest part" is vacuous
+
+**Observed:** 2026-08-26, pre-implementation scout of
+`docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`
+(GitHub #18) — a bug file I had authored myself earlier in the same session.
+
+**When:** About to implement the force-aware dimension migration, scouting
+`src/retrieval/sqlite_code_store.rs` to decide how to scope the table drop.
+
+**Expected (my own bug file):** Fix step 2 read *"Scope the drop to the project.
+`src/retrieval/sqlite_code_store.rs` holds vectors for multiple projects; the
+recreate must leave unrelated projects intact. **This is the part most likely to
+be got wrong.**"* Its Resume section escalated that into the deciding question:
+whether `code_vec` is *"shared across projects with `project_id` as a column —
+that determines whether step 2 is a one-liner or the whole bug."*
+
+**Got (scouted reality):** Neither branch of that question exists.
+`SqliteVecCodeStore::conn_for` (`src/retrieval/sqlite_code_store.rs:58-77`) calls
+`open_conn(&self.dir, &self.conns, project_id, ".db", …)` — **one SQLite file per
+`project_id`**. `code_vec` is created inside that per-project DB and carries no
+`project_id` column at all (`INSERT INTO code_vec (chunk_id, embedding)` at
+`:205`; `DELETE FROM code_vec WHERE chunk_id = ?1` at `:236`; `query` reaches
+project scope only by joining `code_chunk` at `:285-286`). Cross-project
+isolation is a property of the **filesystem layout**, not of any query predicate,
+so `DROP TABLE code_vec` under `conn_for(project_id)` cannot reach another
+project. Confirmed on disk: `.codescout/embeddings/` holds `codescout.db`,
+`project.db` and `codescout.memories.db` — one file per project id.
+
+Step 2 is therefore vacuous. The residual question is far smaller and purely a
+sqlite-vec detail: whether `DROP TABLE` on a `vec0` virtual table also drops the
+shadow tables observed in the live DB (`code_vec_chunks`, `code_vec_rowids`,
+`code_vec_info`, `code_vec_vector_chunks00`).
+
+**Probable cause:** Written while triaging five GitHub issues in one pass, from
+two plausible proxies instead of the code — `guard_index_dim`'s own error hint
+(*"the vector table bakes the dimension in at creation and cannot migrate in
+place"*) and the filename `sqlite_code_store.rs`, since a store *named* for one
+backend reads as one shared store. I never opened `conn_for`. This is the
+directional bias R-95/R-92 names, in its deferral form: the sentence was written
+at the moment I decided to stop and defer, and no such sentence ever makes the
+deferred work sound cheaper than it is.
+
+**Workaround:** Corrected the bug file's Fix step 2 and Resume before writing any
+implementation. Recorded the shadow-table question as the real residual.
+
+**Severity:** med — I would have designed, implemented and tested a
+project-scoping mechanism for an invariant the schema already guarantees. The
+concrete waste: a `DELETE FROM code_vec WHERE chunk_id IN (SELECT chunk_id FROM
+code_chunk WHERE project_id = ?)` variant in place of a plain `DROP TABLE`, plus
+a "sibling project survives the migration" regression test. That test is the
+worse half — it would have **passed for the wrong reason** (siblings live in a
+different file, so every possible implementation passes it), making it exactly
+the green-but-uninformative result this skill's Phase 1 warns about.
+
+**Status:** fixed-verified — bug file corrected pre-implementation; no code was
+written against the wrong model.
+
+**Valid:** dated 2026-08-26
+
+True of `SqliteVecCodeStore`'s one-file-per-project layout at `d5ed4d6f`;
+re-verify if `conn_for` or `sqlite_vec_ext::open_conn` changes its keying.
+
+**Rests on:** `open_conn`'s `project_id` + `".db"` arguments being the file key,
+which is what makes cross-project isolation structural rather than query-enforced.
+
+**Fix idea / Pointer:** `docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`,
+Fix step 2 + Resume. Paired with the win recorded alongside this entry.
+
+## W-54 — Scouting a self-authored bug file before implementing it refuted its central sizing claim — a form R-95 does not yet cover
+
+**Observed:** 2026-08-26, immediately before implementing GitHub #18 from
+`docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`,
+authored earlier the same session.
+
+**Pattern:** Before implementing from a bug file or plan **you wrote**, scout the
+seam its Fix section *sizes* — not only the seam its Root cause cites. A sentence
+of the form "this is the hard part", "N call sites", "one of two options, both
+bad", "that determines whether this is a one-liner or the whole bug" is a claim
+about the substrate wearing the clothes of a settled decision, and it is
+load-bearing on the shape of the code you are about to write.
+
+**Counterfactual:** Without this scout I would have implemented #18's Fix step 2
+as written: a project-scoped `DELETE FROM code_vec WHERE chunk_id IN (SELECT
+chunk_id FROM code_chunk WHERE project_id = ?)` in place of a plain `DROP TABLE`,
+plus a "sibling project survives the migration" regression test. Both are dead
+weight — `conn_for` gives every project its own `.db` file
+(`src/retrieval/sqlite_code_store.rs:58-77`), so isolation is structural. The
+test is the more expensive half: siblings live in a *different file*, so **every
+possible implementation passes it**, including a wrong one. It would have entered
+the suite as a permanent green-but-uninformative assertion — the exact failure
+mode this skill's Phase 1 names — and future readers would have inherited the
+false belief that `code_vec` is a shared table needing careful scoping.
+
+**Confirming data points:**
+1. F-64 (this session) — #18's self-authored "most likely to be got wrong" step
+   was vacuous; `code_vec` is per-project by file.
+2. Same session, triage of five GitHub issues: **two of five reports were wrong
+   about their own mechanism**, and reading the code rather than the reports
+   collapsed three of them (#15, #17, #19) into one root cause — a `?` on an
+   embed call inside a loop that had already committed partial state. #17's
+   reported symptom (`docs/` = 0 indexed) was not reproducible at all; #19's
+   stated ordering ("fails before refreshing the catalog") was inverted. Neither
+   was a self-authored artifact, so this datapoint supports the general law, not
+   the authorship-specific one.
+
+**Impact:** med — one avoided dead-code path plus one avoided permanently-green
+test, per occurrence.
+
+**Promote-when:** A second instance of a self-authored **sizing** claim (as
+distinct from a *deferral* rationale) being refuted at the code. R-49 already
+covers re-scouting a self-authored *root cause*, and R-95/R-92 covers re-costing
+a *deferral rationale* — a claim written at the moment someone decided to stop.
+Neither covers this shape: a sizing claim inside a Fix plan the author fully
+intends to execute, where the same directional bias applies but the "decided to
+stop" tell is absent. At 2 datapoints, extend R-95's law from "deferral
+rationale" to "any sizing claim, deferred or not", since the remedy is identical
+— re-run the number, read the consumer, probe the premise once.
+
+**Status:** validated — single datapoint for the sizing-claim variant; drift
+caught and the bug file corrected before any code was written.
+
+**Valid:** dated 2026-08-26
+
+One confirmed datapoint for the sizing-claim variant; the promote-when threshold
+of 2 is not yet reached.
+
+**Rests on:** R-49 (authorship is no exemption) and R-95/R-92 (a deferral
+rationale is a claim) as the two adjacent promoted laws this variant falls
+between — this win is the argument that the gap between them is real, not
+independent evidence for either.
+
+## F-65 — The reconnaissance skill's worked exemplars show a `**Valid:**` form the server refuses, and tell you to copy them
+
+**Observed:** 2026-08-26, writing F-64 into this tracker via
+`artifact(action="append_entry")` during a `/codescout-companion:reconnaissance`
+run.
+
+**When:** First `append_entry` call of the session, with the entry body patterned
+on the skill's own worked exemplars as the skill instructs.
+
+**Expected (skill exemplars):** `SKILL.md` § *Worked exemplars* shows both its
+F-N and W-N examples declaring validity with a rationale appended after an
+em-dash on the same line:
+
+```
+**Valid:** dated 2026-05-18 — true of `RecoverableError`'s field/method shape at that commit; re-verify if `src/tools/core/types.rs` changes.
+```
+
+and instructs *"Pattern your new entries on these, not the bare template."*
+
+**Got:** The call was refused:
+
+```
+`**Valid:** dated 2026-08-26 — true of `SqliteVecCodeStore`'s one-file-per-project` is not an ISO date
+hint: Use `dated YYYY-MM-DD`. The three forms are:
+      **Valid:** invariant | dated YYYY-MM-DD | conditional — <event>
+```
+
+The parser consumes the **whole remainder of the line** after `dated` as the date
+token, so any trailing prose fails calendar validation.
+
+**Corroboration — the corpus agrees with the parser, not the skill.** Measured on
+this tracker, 2026-08-26:
+
+```
+grep -c '^\*\*Valid:\*\* dated' docs/trackers/bug-fix-session-log.md          → 13
+grep -c '^\*\*Valid:\*\* dated [0-9-]* *—' docs/trackers/bug-fix-session-log.md → 0
+```
+
+All 13 real declarations use the bare form. Zero use the exemplars' form. So this
+is not a recent parser tightening that stranded old entries — the exemplar shape
+has never been writable through `append_entry`, and every agent that follows the
+skill's "pattern your entries on these" instruction burns a round-trip
+discovering it.
+
+**Probable cause:** The exemplars were transcribed into `SKILL.md` from prose
+drafts rather than from entries the server had accepted, and nothing cross-checks
+the skill's examples against the validity parser. The `conditional — <event>`
+form legitimately *does* carry an em-dash, which makes the dated form's
+em-dash look idiomatic by neighbourhood.
+
+**Workaround:** Put the class alone on the `**Valid:**` line and the rationale on
+a following line. Both F-64 and W-54 in this tracker are written that way and
+were accepted.
+
+**Severity:** low — one failed call, fully self-diagnosing (the hint names the
+three legal forms). Recorded because it is *systematic* rather than incidental:
+it fires for every agent that follows the documented instruction, and the fix is
+a two-line edit to the skill.
+
+**Status:** open — the fix belongs upstream in
+`../claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
+(a different repo, so any fix commit needs the `<repo>:<sha>` citation prefix per
+CLAUDE.md). Not fixed here.
+
+**Valid:** dated 2026-08-26
+
+True of the skill text and the validity parser as of this date. Re-verify by
+re-reading `SKILL.md` § *Worked exemplars*; the entry closes when the exemplars
+show the bare form.
+
+**Rests on:** the 13-vs-0 corpus measurement above, which is what distinguishes
+"the skill's examples were never valid" from "the parser recently got stricter" —
+the two need different fixes, and only the first is a skill defect.
+
+**Fix idea / Pointer:** In `SKILL.md`, move the em-dash rationale off the
+`**Valid:**` line in both worked exemplars. Optionally note that
+`conditional — <event>` is the one form whose em-dash is part of the syntax.
 
 ## Template for new entries
 
