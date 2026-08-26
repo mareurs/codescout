@@ -1166,7 +1166,7 @@ impl CodeScoutServer {
         // function — so after a compaction every response carried project-relative
         // paths with nothing left in context saying they were relative. Keeping the two
         // stores adjacent is what stops them drifting apart again.
-        // docs/issues/2026-08-21-path-relative-banner-not-rearmed-after-compaction.md
+        // docs/issues/archive/2026-08-21-path-relative-banner-not-rearmed-after-compaction.md
         if is_activate || is_post_compact {
             self.path_note_emitted_since_activation
                 .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -4120,7 +4120,7 @@ mod tests {
         // Reproduced live before fixing: in the 2026-08-26 session the post-compact
         // `workspace(post_compact=true)` response and every call after it went
         // bannerless until an `/mcp` restart re-constructed the server.
-        // docs/issues/2026-08-21-path-relative-banner-not-rearmed-after-compaction.md
+        // docs/issues/archive/2026-08-21-path-relative-banner-not-rearmed-after-compaction.md
         let banner = "[codescout] paths are relative to";
         let carries = |r: &CallToolResult| {
             r.content

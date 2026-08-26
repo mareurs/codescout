@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- server
+- compaction
+- progressive-disclosure
+closed: 2026-08-26
 opened: 2026-08-21
-closed:
-severity: low
 owner: marius
 related: []
-tags: [server, compaction, progressive-disclosure]
-kind: bug
+severity: low
+unverified: 'The downstream harm is still INFERRED, not measured: no session has been observed mis-resolving a project-relative path against its own cwd. The mechanism, the reproduction and the fix are all measured; the consequence that motivated the filing is not, and in most sessions cwd IS the project root, which is why severity stayed low.'
 ---
 
 # BUG: the path-relative banner is not re-armed after compaction, so an agent loses the note that response paths are project-relative
@@ -32,20 +36,28 @@ Not observed in the wild as a wrong write; filed on mechanism, which is why seve
 
 ## Reproduction
 
-Not yet reproduced end-to-end — the mechanism is read out of the code, see § Root cause for
-what is and is not measured.
+**Reproduced end-to-end 2026-08-26**, in a live session rather than by reading code.
+This file previously said "not yet reproduced" — that was true of the recipe it had
+written for itself, not of the bug.
+
+The session was resumed from a `/compact`, called `workspace(post_compact=true)` as
+its first action, and then made roughly sixty tool calls. **None carried the
+banner.** It reappeared only after an `/mcp` reconnect, which re-constructs the
+server and so resets the flag through its initializer rather than through any
+re-arm path:
 
 ```
-1. Start a session; make any tool call.        → response carries the banner
-2. /compact
-3. workspace(post_compact=true)                 → guide hints re-arm; banner does not
-4. Make any tool call.                          → NO banner, and none for the rest
-                                                  of the session
+1. Session resumes post-compaction.
+2. workspace(post_compact=true)   → guide hints re-arm; NO banner
+3. ~60 tool calls                 → NO banner on any of them
+4. /mcp reconnect                 → banner returns (fresh server, flag starts false)
+5. workspace(activate)            → banner (the one re-arm that worked)
 ```
 
-Step 3 is the discriminator: the guide-hint ledger re-injects after it, so a reader seeing
-guides come back may reasonably assume the banner did too.
+Step 2 is the discriminator: the guide-hint ledger re-injects there, so a reader
+seeing guides come back may reasonably assume the banner did too. It did not.
 
+Also reproducible as a unit test through `call_tool_inner` — see § Tests added.
 ## Environment
 
 Linux, codescout `v0.15.0`, branch `experiments`, MCP stdio transport, Claude Code client
@@ -149,22 +161,57 @@ measurement to settle it.
 original "the flag was forgotten" framing, which is refuted.
 ## Fix
 
-Not implemented. The one-line shape: extend `call_tool_inner`'s existing request-shape
-match so the reset also fires on `post_compact: true`, alongside `action == "activate"`.
+**Shipped 2026-08-26** — `dd4dcad6` on `experiments`, patch-id
+`343ec8234b7e089c39d1612ae39d99a2a65e6d3e`.
 
-Worth doing as part of, or immediately after, the Project-Status carrier work in
-`docs/trackers/statement-validity-session-log.md` F-9 — that work adds a second
-response-carried block with the same persistence property and the same need to re-arm, and
-the two flags should be reset by one branch rather than drift apart the way these two did.
+Implemented in the shape this section prescribed, including the part about the two
+flags: `call_tool_inner`'s existing request-shape match now resets
+`path_note_emitted_since_activation` **and**
+`status_block_emitted_since_activation` from a single `if is_activate ||
+is_post_compact` branch, rather than from two branches one clause apart. Resetting
+them together is the actual recurrence guard — the divergence, not the missing
+clause, is what this bug was.
 
+The timing condition in the original plan is satisfied: the Project-Status carrier
+work it wanted to land alongside (`statement-validity-session-log` F-9) has already
+shipped as `status_block_emitted_since_activation`, so there was nothing left to
+wait for.
+
+Both field doc comments were corrected in the same commit, because both stated the
+old design as intentional:
+
+- `path_note_emitted_since_activation` argued the banner goes redundant once
+  `build_server_instructions` carries the root. Now says what § What is left of it
+  established — that holds for the ROOT and not for the CONVENTION.
+- `status_block_emitted_since_activation` described itself as "deliberately a
+  SEPARATE flag with a WIDER reset". The reset is no longer wider; the flags stay
+  separate because they are *consumed* against different facts. "Reset them
+  together, consume them separately."
+
+Leaving those two comments in place would have re-argued the old design to the next
+reader, which is how the divergence survived in the first place.
 ## Tests added
 
-None yet — not fixed. The regression test to write mirrors `post_compact_rearms_guide_hints`
-(`src/server.rs:5979`): emit the banner, issue `workspace(post_compact=true)`, assert the
-next eligible response carries it again. `responses_emit_paths_relative_annotation_once_per_activation`
-(`src/server.rs:3667`) is the existing test that pins the once-per-activation half and must
-keep passing.
+`compaction_rearms_the_path_relative_banner` (`src/server.rs`), driven through
+`call_tool_inner` so it exercises the request-shape match rather than
+`post_process` in isolation.
 
+It asserts a **count**, not a particular response: the banner must appear exactly
+once across the `post_compact` reply and the next two ordinary calls. The contract
+is "compaction brings the fact back, once" — not "it rides on the post_compact
+reply". Without the fix the count is 0; a double-arming regression of the kind
+`activation_and_the_next_two_calls_carry_the_banner_exactly_once` guards would make
+it 2.
+
+It loops over **both shapes** of the compaction signal — bare `{post_compact: true}`
+(what the companion hook sends) and `{action: "status", post_compact: true}` (what
+the guide-hint sibling sends). Now that both gates share one `if`, covering the
+second shape looks redundant with
+`both_shapes_of_the_compaction_signal_rearm_the_status_block`. It is not, and this
+was checked rather than argued: adding `action.is_none()` to the reset condition —
+the exact trap the code comment warns about — fails the second shape with 0 banners
+instead of 1. "Covered by construction" is precisely the argument a mutation
+defeats, and that sibling test was itself written from a surviving mutation.
 ## Workarounds
 
 Call `workspace(action="activate", path=<same root>)` after a compaction — it re-arms the
