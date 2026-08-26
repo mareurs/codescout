@@ -374,7 +374,7 @@ downstream catch is `W-4`'s required report field.
 the decay this feature exists to surface;
 `docs/superpowers/specs/2026-08-20-entry-validity-and-attestation-design.md`.
 
-**Fix idea / Pointer:** `docs/issues/2026-08-20-validity-spec-terminology-contradicts-decision-3.md`
+**Fix idea / Pointer:** `docs/issues/archive/2026-08-20-validity-spec-terminology-contradicts-decision-3.md`
 is instance 4's spec-level twin. No code fix; this is a brief-authoring discipline bound for the
 same surface as `W-4`.
 

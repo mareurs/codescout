@@ -97,7 +97,7 @@ on each call. Never brief it to call `workspace(action="activate")` itself**; th
 the one form that mutates the shared state every other concurrent caller resolves
 against.
 
-This is not hypothetical. `docs/issues/2026-08-23-subagent-activate-mutates-parent-active-project.md`
+This is not hypothetical. `docs/issues/archive/2026-08-23-subagent-activate-mutates-parent-active-project.md`
 traces a live incident where exactly this mistake, in a `Workflow` script's subagent
 prompt, broke the parent session's own writes mid-turn with a misleading "read-only"
 error — three separate times in one session, all recovered after the fact, none

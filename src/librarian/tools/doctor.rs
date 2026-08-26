@@ -1784,7 +1784,7 @@ fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBacked
 /// `docs/issues/archive/2026-08-19-doc-examples-of-citation-syntax-counted-as-real-citations.md`.
 /// That fix added a per-source breakdown to `link_scan`'s report only; this function feeds
 /// `entry_without_definition` from the same extractor with no equivalent mitigation —
-/// `docs/issues/2026-08-21-doctor-cited-uncited-partition-inherits-doc-example-defect.md`.
+/// `docs/issues/archive/2026-08-21-doctor-cited-uncited-partition-inherits-doc-example-defect.md`.
 /// Measured 2026-08-25 across the full machine-wide catalog: zero live findings are actually
 /// affected — the one current `entry_without_definition` violation
 /// (`provenance-subsystem.md`, 33 cited / 9 uncited) was independently hand-verified as

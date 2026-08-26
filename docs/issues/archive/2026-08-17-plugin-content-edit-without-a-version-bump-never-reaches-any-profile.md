@@ -1,12 +1,18 @@
 ---
+kind: bug
 status: mitigated
-opened: 2026-08-17
+tags:
+- companion-plugin
+- skills
+- ship-sequence
+- three-profiles
+- silent-failure
 closed: 2026-08-17
-severity: medium
+opened: 2026-08-17
 owner: marius
 related: []
-tags: [companion-plugin, skills, ship-sequence, three-profiles, silent-failure]
-kind: bug
+severity: medium
+unverified: Only this instance was repaired (codescout-companion bumped to 1.16.8, all three profiles re-synced and verified). Nothing gates the NEXT content edit without a version bump — durable options a/b/c in § Fix are all unshipped — and § Root cause records that remembering failed one commit after succeeding.
 ---
 
 # BUG: a plugin content edit without a version bump is committed, correct, and live nowhere

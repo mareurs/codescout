@@ -862,7 +862,7 @@ as amended, and one of them is a precondition the skill cannot check for itself.
 > `archive-cadence-policy` § 3 and `get_guide("tracker-conventions")` were live the moment
 > they were committed, while the skill's step 5 — the thing that decides what a sweep
 > actually does — was not. Filed as
-> `docs/issues/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`,
+> `docs/issues/archive/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`,
 > which stays open at `mitigated`: this instance is repaired, nothing yet gates the next one.
 
 **1. Step 5 is three sub-steps, not two.** `artifact(update, status)` →

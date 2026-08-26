@@ -1489,7 +1489,7 @@ root — the 2026-05-16 cross-profile drift is not present). The commit did not 
 `plugin.json`, so the cache key never changed and nothing re-synced.
 
 **Probable cause:** exactly the mechanism already filed in
-`docs/issues/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`:
+`docs/issues/archive/2026-08-17-plugin-content-edit-without-a-version-bump-never-reaches-any-profile.md`:
 *"the plugin cache is keyed by the version in `plugin.json` … the change is committed,
 reviewed, and in force nowhere — with no error, no warning, and nothing in `git status` to
 suggest it."* A second open bug describing the fix, unread at the moment it applied.

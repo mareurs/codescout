@@ -4598,8 +4598,9 @@ Verifying *that* turned up a second defect in the same parser: `structured_fix_p
 ## F-64 — My own #18 bug file inflated its own fix — `code_vec` is per-project by FILE, so its "hardest part" is vacuous
 
 **Observed:** 2026-08-26, pre-implementation scout of
-`docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`
-(GitHub #18) — a bug file I had authored myself earlier in the same session.
+`docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`
+(GitHub #18, archived 2026-08-26 once fixed in `8504b1cf`) — a bug file I had
+authored myself earlier in the same session.
 
 **When:** About to implement the force-aware dimension migration, scouting
 `src/retrieval/sqlite_code_store.rs` to decide how to scope the table drop.
@@ -4660,14 +4661,16 @@ re-verify if `conn_for` or `sqlite_vec_ext::open_conn` changes its keying.
 **Rests on:** `open_conn`'s `project_id` + `".db"` arguments being the file key,
 which is what makes cross-project isolation structural rather than query-enforced.
 
-**Fix idea / Pointer:** `docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`,
-Fix step 2 + Resume. Paired with the win recorded alongside this entry.
+**Fix idea / Pointer:** `docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`,
+Fix step 2 + Resume. Paired with the win recorded alongside this entry. The bug
+itself shipped as `8504b1cf` (patch-id `be0fdace04f3c4aacef68af3efc7338056629a07`)
+without the vacuous step and without the vacuously-passing test.
 
 ## W-54 — Scouting a self-authored bug file before implementing it refuted its central sizing claim — a form R-95 does not yet cover
 
 **Observed:** 2026-08-26, immediately before implementing GitHub #18 from
-`docs/issues/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`,
-authored earlier the same session.
+`docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md`
+(archived once fixed in `8504b1cf`), authored earlier the same session.
 
 **Pattern:** Before implementing from a bug file or plan **you wrote**, scout the
 seam its Fix section *sizes* — not only the seam its Root cause cites. A sentence

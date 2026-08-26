@@ -1,5 +1,5 @@
 ---
-id: '2a0d6d432c7ebc24'
+id: e0f37a5b2ec5c5ef
 kind: bug
 status: fixed
 title: 'entry-validity spec: Terminology and decision 3 disagree about undeclared entries'

@@ -1313,7 +1313,7 @@ allocator's `**Valid:** dated <today>` stamp. **Absent:**
   range) is unimplemented; the undeclared population routes to
   `entry_cited_from_outside_but_undeclared` instead. **Decision 3's semantics therefore
   hold on paper and nowhere in the code** — see
-  `docs/issues/2026-08-20-validity-spec-terminology-contradicts-decision-3.md`.
+  `docs/issues/archive/2026-08-20-validity-spec-terminology-contradicts-decision-3.md`.
 
 **Layer 2 shipped four checks, and one exposure term.** `validity_unparseable` was added
 because all three original checks swallow `parse_validity`'s `Err`, which left a

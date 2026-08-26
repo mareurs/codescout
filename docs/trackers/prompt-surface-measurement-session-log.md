@@ -123,7 +123,7 @@ process-global in the codescout MCP server, so the parent session's project
 changed underneath it and its next write — to a scratchpad path it had written to
 five times in the same turn — was refused mid-turn.
 
-**Full record:** `docs/issues/2026-08-23-subagent-activate-mutates-parent-active-project.md`
+**Full record:** `docs/issues/archive/2026-08-23-subagent-activate-mutates-parent-active-project.md`
 (severity high). Measured: exactly one activate across all agent transcripts, zero
 `read_only` occurrences, identical `[security]` config in both projects.
 
