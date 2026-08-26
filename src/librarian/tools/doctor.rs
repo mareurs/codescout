@@ -211,6 +211,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `extra`, which is not indexed. The SQL narrows first, so only terminal bug rows
     // are ever opened.
     all_violations.extend(scan_terminal_status_with_caveat(&cat.conn)?);
+    // The reader half of the one artifact state with no on-disk form. Reads frontmatter
+    // off disk for the same reason as the check above — `expects_augmentation` lands in
+    // `extra`, which is not catalog-indexed — but narrows via LEFT JOIN first, so only
+    // artifacts that could violate are ever opened.
+    all_violations.extend(scan_augmentation_declared_but_absent(&cat.conn)?);
     // Per-entry cross-file citation exposure, computed once and shared by every check
     // in the validity-decay family (Tasks 5-7) so each prices its worklist against the
     // same population rather than recomputing it. Stays GLOBAL/unscoped — Ruling 17 —
@@ -2991,6 +2996,105 @@ fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<V
     Ok(out)
 }
 
+/// YAML's several spellings of true, plus the quoting accident.
+///
+/// `expects_augmentation: "true"` must not read as absent. A declaration that silently
+/// does not count is worse than no declaration at all, because its author believes they
+/// are covered — the same reasoning that makes `validity_unparseable` a reported finding
+/// rather than a skipped line.
+fn declares_true(v: &Value) -> bool {
+    match v {
+        Value::Bool(b) => *b,
+        Value::String(s) => matches!(
+            s.trim().to_ascii_lowercase().as_str(),
+            "true" | "yes" | "on" | "1"
+        ),
+        Value::Number(n) => n.as_i64() == Some(1),
+        _ => false,
+    }
+}
+
+/// `augmentation_declared_but_absent`: frontmatter declares `expects_augmentation: true`
+/// and this catalog holds no augmentation row for the artifact.
+///
+/// **Augmentation is the one artifact state with no on-disk form.** Rows, frontmatter and
+/// body all rebuild from disk on `reindex`; `prompt`, `params`, `params_schema`,
+/// `render_template` and `entry_collection` live only in the catalog, which is
+/// machine-local and git-ignored. So the absence is invisible by construction: `reindex`
+/// preserves augmentation keyed by id rather than regenerating it, and therefore reports
+/// healthy after a loss and repairs nothing; `artifact(get)` returns `augmentation: null`
+/// without comment; and the documented `append_entry` / `update_entry` / `entry_filter`
+/// calls fail only at use, one caller at a time.
+///
+/// **Why a declaration rather than a heuristic.** The obvious detector is to read the body
+/// for a `[LIVE]` claim. Measured 2026-08-26 across 4,195 catalogued artifacts: 29 mention
+/// `[LIVE]` outside fenced code, and 23 of those carry no augmentation — essentially all of
+/// them guides, specs, plans and bug files *describing the mechanism*, including this
+/// check's own bug file. A body-sniffing gate is 23 false positives and one true one. The
+/// intent simply is not recoverable from prose, so it has to be stated.
+///
+/// This is the same remedy `entry_prefix` uses, for the same reason and in the same place:
+/// *"Frontmatter, because the catalog is machine-local and git-ignored. A declaration
+/// stored in the augmentation is absent in a fresh clone."* A ledger is declared, never
+/// inferred; so is an augmentation. Firing in a fresh clone is correct behaviour, not a
+/// false positive — that clone genuinely has no augmentation, and this check is how its
+/// owner finds out before an `append_entry` does.
+///
+/// Reports only; there is no `fix=`. Re-attaching means supplying a prompt, and often a
+/// schema and a template — authored content, not repair. The check names what is missing;
+/// it cannot know what it said.
+/// docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
+fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    // The LEFT JOIN is the cost control: only artifacts that could violate are opened, so
+    // an already-augmented artifact is never read from disk. Ordered by abs_path like every
+    // other scan here — a report nobody can diff against a prior run is half a report.
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.abs_path FROM artifact a \
+         LEFT JOIN artifact_augmentation g ON g.artifact_id = a.id \
+         WHERE g.artifact_id IS NULL AND a.missing_since IS NULL \
+         ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path) in &rows {
+        // Best-effort per file, as in `scan_terminal_status_with_caveat`: an unreadable or
+        // unparseable artifact is `missing_file`'s finding or nobody's, never a silent
+        // declaration. `content` is bound first because `parse` borrows it.
+        let Ok(content) = std::fs::read_to_string(abs_path) else {
+            continue;
+        };
+        let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
+            continue;
+        };
+        let Some(raw) = fm.extra.get("expects_augmentation") else {
+            continue;
+        };
+        if !declares_true(raw) {
+            continue;
+        }
+
+        out.push(Violation::new(
+            "augmentation_declared_but_absent",
+            Some(id.clone()),
+            abs_path.clone(),
+            "frontmatter declares `expects_augmentation: true`, but this catalog holds no \
+             augmentation for it. Its prompt, params, params_schema, render_template and \
+             entry_collection are all absent: every documented `append_entry` / \
+             `update_entry` / `entry_filter` call against this id fails at use, and it \
+             contributes no [LIVE] block to librarian(action=\"context\"). Augmentation has \
+             no on-disk form, so `reindex` cannot rebuild it and reports healthy regardless \
+             — expect this in a fresh clone or after a catalog rebuild. Re-attach with \
+             artifact_augment(id=…, prompt=…, …). See get_guide(\"librarian\") § Augmentation \
+             Lifecycle."
+                .to_string(),
+        ));
+    }
+    Ok(out)
+}
+
 /// Every structured fix pointer a bug file's `## Fix provenance` section carries.
 ///
 /// Returns one `(sha, patch_id)` per `- **SHA:**` line, each paired with the
@@ -4048,6 +4152,151 @@ mod tests {
             .with_status(status)
             .build();
         art_upsert(cat, &row).unwrap();
+    }
+
+    /// Seed an artifact whose frontmatter carries `expects_augmentation: <decl>` (omitted
+    /// when `None`), optionally with an augmentation row attached.
+    fn seed_declared(
+        cat: &Catalog,
+        dir: &std::path::Path,
+        name: &str,
+        decl: Option<&str>,
+        augmented: bool,
+    ) {
+        let line = match decl {
+            Some(v) => format!("expects_augmentation: {v}\n"),
+            None => String::new(),
+        };
+        let path = dir.join(format!("{name}.md"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!("---\nkind: tracker\nstatus: active\n{line}---\n\n# {name}\n"),
+        )
+        .unwrap();
+        let row = TestArtifactRowBuilder::new(name)
+            .with_abs_path(&path)
+            .with_kind("tracker")
+            .build();
+        art_upsert(cat, &row).unwrap();
+        if augmented {
+            crate::librarian::catalog::augmentation::upsert(
+                cat,
+                &crate::librarian::catalog::augmentation::AugmentationRow {
+                    artifact_id: name.to_string(),
+                    prompt: "p".to_string(),
+                    params: "{}".to_string(),
+                    last_refreshed_at: None,
+                    refresh_count: 0,
+                    created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                    render_template: None,
+                    params_schema: None,
+                    append_mode: false,
+                    history_cap: None,
+                    entry_collection: None,
+                    refreshed_at_commit: None,
+                },
+            )
+            .unwrap();
+        }
+    }
+
+    /// The decoys are the test. An artifact that declares AND has one is the healthy
+    /// state; an artifact that declares nothing is the ordinary case and vastly the
+    /// commonest — without both, "report every unaugmented artifact" passes, and that is
+    /// 4,000-plus findings.
+    #[test]
+    fn augmentation_declared_but_absent_reports_only_the_declared_and_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat, tmp.path(), "lost", Some("true"), false);
+        seed_declared(&cat, tmp.path(), "healthy", Some("true"), true);
+        seed_declared(&cat, tmp.path(), "ordinary", None, false);
+
+        let v = scan_augmentation_declared_but_absent(&cat.conn).unwrap();
+
+        assert_eq!(
+            v.len(),
+            1,
+            "only the declared-and-missing artifact may fire: {v:#?}"
+        );
+        assert_eq!(v[0].artifact_id.as_deref(), Some("lost"));
+        assert_eq!(v[0].check, "augmentation_declared_but_absent");
+        assert!(
+            v[0].detail.contains("reindex"),
+            "the detail must say reindex cannot rebuild it — otherwise the reader's first \
+             move is the one thing that will not work, and it will report success: {}",
+            v[0].detail
+        );
+    }
+
+    /// A quoting accident must not silently disarm the declaration, and `false` must not
+    /// arm it. Both directions, because a truthiness helper that is wrong either way
+    /// produces a gate whose author believes they are covered.
+    #[test]
+    fn augmentation_declaration_reads_yaml_truthiness_both_ways() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat, tmp.path(), "bare", Some("true"), false);
+        seed_declared(&cat, tmp.path(), "quoted", Some("\"true\""), false);
+        seed_declared(&cat, tmp.path(), "yes", Some("yes"), false);
+        seed_declared(&cat, tmp.path(), "off", Some("false"), false);
+        seed_declared(&cat, tmp.path(), "empty", Some("\"\""), false);
+
+        let fired: std::collections::BTreeSet<String> =
+            scan_augmentation_declared_but_absent(&cat.conn)
+                .unwrap()
+                .into_iter()
+                .filter_map(|v| v.artifact_id)
+                .collect();
+
+        assert_eq!(
+            fired,
+            ["bare", "quoted", "yes"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<std::collections::BTreeSet<_>>(),
+            "true/\"true\"/yes must arm the declaration; false and \"\" must not"
+        );
+    }
+
+    /// The measured reason this check is keyed on a declaration rather than on the body.
+    ///
+    /// Across 4,195 catalogued artifacts on 2026-08-26, 29 mention `[LIVE]` outside fenced
+    /// code and 23 of those carry no augmentation — guides, specs, plans and bug files
+    /// describing the mechanism, including this check's own bug file. A body-sniffing gate
+    /// is 23 false positives and one true one. This pins the property that matters: prose
+    /// about the mechanism, however emphatic, is not a declaration.
+    #[test]
+    fn a_body_that_merely_describes_live_blocks_is_not_a_declaration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let path = tmp.path().join("guide.md");
+        std::fs::write(
+            &path,
+            "---\nkind: tracker\nstatus: active\n---\n\n# Guide\n\nAugmented artifacts \
+             surface as a `[LIVE]` blockquote in librarian(action=\"context\"); the \
+             `[LIVE]` header carries the refresh count. Do not edit the [LIVE] table by \
+             hand.\n",
+        )
+        .unwrap();
+        art_upsert(
+            &cat,
+            &TestArtifactRowBuilder::new("guide")
+                .with_abs_path(&path)
+                .with_kind("tracker")
+                .build(),
+        )
+        .unwrap();
+
+        assert!(
+            scan_augmentation_declared_but_absent(&cat.conn)
+                .unwrap()
+                .is_empty(),
+            "a doc describing [LIVE] blocks must stay silent — 23 of the 29 real-corpus \
+             mentions are exactly this shape"
+        );
     }
 
     /// The population the canonical triage query hides by construction.
