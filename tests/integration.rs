@@ -181,6 +181,31 @@ async fn workflow_project_memory_config() {
 
     let (dir, ctx) = project_with_files(&[("src/main.rs", "fn main() {}\n")]).await;
 
+    // Pin the embedder to an unreachable local port BEFORE any memory write can
+    // trigger resolution. Without this, `Memory`'s cross-embed step resolves an
+    // embedder from ambient config — on a machine with a real local embedder +
+    // Qdrant configured in the shell environment, that silently cross-embeds this
+    // test's fixture content into the real, shared `memories` collection.
+    // docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md
+    //
+    // `InMemorySemanticMemoryStore` / `set_..._for_test` (the seam used elsewhere
+    // in the unit-test suite) are unreachable here: the store's test double is
+    // `pub(crate)` and the `Agent` setters are `#[cfg(test)]`, neither of which an
+    // external integration-test binary can see. This is the established fallback
+    // for exactly that case — see `agent::tests::memory_embedder_is_built_from_the_shared_code_embedder`
+    // (`src/agent/mod.rs`) and `docs/issues/archive/2026-08-26-ci-test-lanes-red-because-one-test-reads-ambient-embedder-config.md`.
+    // `url` selects the HTTP construction branch (no network on construction); the
+    // remote model name is required so `guard_local_model_with_url` doesn't reject
+    // the pair. `embed_document` then fails fast against the closed port — before
+    // `cross_embed_memory` ever reaches `semantic_memory_store()` — so the write
+    // still succeeds via the markdown fallback path this test actually verifies.
+    std::fs::write(
+        dir.path().join(".codescout/project.toml"),
+        "[project]\nname = \"memory-config-workflow\"\n\n[embeddings]\n\
+         model = \"openai:text-embedding-3-small\"\nurl = \"http://127.0.0.1:1\"\n",
+    )
+    .unwrap();
+
     // Step 1: Activate the project
     let activate_result = ActivateProject
         .call(json!({ "path": dir.path().display().to_string() }), &ctx)
