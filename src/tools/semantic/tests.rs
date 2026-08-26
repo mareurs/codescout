@@ -537,7 +537,7 @@ fn format_index_status_shows_model_and_timestamp() {
     );
 }
 
-/// A model mismatch leads the compact line, ahead of a vector hole.
+/// An AUTHORITATIVE model mismatch leads the compact line, ahead of a vector hole.
 ///
 /// Ordering is the design, not a preference. A hole means some chunks cannot be
 /// returned; a mismatch means every score is compared across two embedding spaces — the
@@ -556,6 +556,7 @@ fn format_index_status_leads_with_model_mismatch_over_a_vector_hole() {
         "model_mismatch": {
             "indexed_with": "local:AllMiniLML6V2Q",
             "configured": "local:BGESmallENV15",
+            "name_is_authoritative": true,
         },
     });
     let out = format_index_status(&result);
@@ -571,6 +572,47 @@ fn format_index_status_leads_with_model_mismatch_over_a_vector_hole() {
         out.matches("local:AllMiniLML6V2Q").count(),
         1,
         "the stored model must not be printed twice: {out}"
+    );
+}
+
+/// A NON-authoritative name difference must not shout MISMATCH.
+///
+/// When the backend is a configured endpoint, the model name is a field in the request
+/// that the server is free to ignore. Measured 2026-08-26 against this host's
+/// llama-server: `CodeRankEmbed`, `all-minilm` and `total-nonsense-model` all returned
+/// the byte-identical 768-d vector, because it serves whichever gguf is loaded. So the
+/// labels differing proves two writers disagreed, NOT that there are two embedding
+/// spaces — and this repo's own sidecar hit exactly that on the first live call of the
+/// feature, which is why the distinction is pinned rather than trusted.
+#[test]
+fn format_index_status_softens_a_name_difference_on_a_remote_endpoint() {
+    let result = serde_json::json!({
+        "indexed": true,
+        "file_count": 100,
+        "chunk_count": 5000,
+        "indexed_with_model": "all-minilm",
+        "model_mismatch": {
+            "indexed_with": "all-minilm",
+            "configured": "CodeRankEmbed",
+            "name_is_authoritative": false,
+        },
+    });
+    let out = format_index_status(&result);
+    assert!(
+        !out.contains("MODEL MISMATCH"),
+        "must not announce a verdict the name cannot support: {out}"
+    );
+    assert!(
+        !out.contains("crosses two embedding spaces"),
+        "that consequence is exactly what a name difference does NOT establish here: {out}"
+    );
+    assert!(
+        out.contains("all-minilm") && out.contains("CodeRankEmbed"),
+        "still names both, so the reader can check: {out}"
+    );
+    assert!(
+        out.contains("may ignore the name"),
+        "and says why it is not a verdict: {out}"
     );
 }
 

@@ -531,12 +531,25 @@ impl Tool for IndexStatus {
         // for the same reason the migration budget is: two copies of this setting exist,
         // and only this one describes the embedder the store was actually built through.
         let mut configured_model: Option<String> = None;
+        // Does the model NAME determine the vectors, or is it only a label?
+        //
+        // `embedder_url: None` means the backend is resolved FROM the model spec
+        // (`local:`, `local-dir:`, ...), so two names are two models and a difference is a
+        // real embedding-space difference. With a url set, the name is a field in an
+        // OpenAI-compatible request the server may ignore — measured 2026-08-26 against
+        // llama-server on this host: `CodeRankEmbed`, `all-minilm` and
+        // `total-nonsense-model` all returned the byte-identical 768-d vector, because it
+        // serves whichever gguf is loaded. Reporting a name difference as an
+        // embedding-space mismatch there is an overclaim, and this repo's own sidecar hit
+        // it on the first live call of this feature.
+        let mut model_name_authoritative = false;
         let mut result = match crate::retrieval::client::RetrievalClient::from_env(root.as_deref())
             .await
         {
             Ok(client) => {
                 let collection = client.config.collection("code_chunks");
                 configured_model = Some(client.config.model.clone());
+                model_name_authoritative = client.config.embedder_url.is_none();
                 match client.project_index_stats(&collection, &project_id).await {
                     Ok((0, 0)) => json!({
                         "indexed": false,
@@ -709,14 +722,32 @@ impl Tool for IndexStatus {
                         // swaps share one (AllMiniLM/BGESmall both 384d, CodeRankEmbed/Jina
                         // both 768d), so only a stored identity sees them.
                         if configured_model.as_deref().is_some_and(|c| c != m) {
+                            // Two claims of different strength, because the name means
+                            // different things on the two backends. Saying "two embedding
+                            // spaces" when the endpoint ignores the name is the overclaim
+                            // this whole field exists to avoid making.
+                            let hint = if model_name_authoritative {
+                                "The stored vectors were built by a different model than \
+                                 the one configured now. The backend is resolved FROM the \
+                                 model spec, so these are genuinely different models and \
+                                 queries are being scored across two embedding spaces. Run \
+                                 index(action='build', force=true) to re-embed."
+                            } else {
+                                "The stored and configured model NAMES differ. The backend \
+                                 is a configured endpoint, which may ignore the requested \
+                                 model and serve whatever it has loaded — so this is not \
+                                 proof of two embedding spaces, only that two writers \
+                                 disagreed about what they were using. Check the endpoint \
+                                 (GET /v1/models) before rebuilding; if it serves one \
+                                 model, the labels are wrong and the vectors are fine."
+                            };
                             result["model_mismatch"] = json!({
                                 "indexed_with": m,
                                 "configured": configured_model.clone(),
-                                "hint": "The stored vectors were built by a different model \
-                                     than the one configured now. Queries are embedded \
-                                     with the configured model, so scores are being \
-                                     compared across two embedding spaces. Run \
-                                     index(action='build', force=true) to re-embed.",
+                                // Names the strength of the claim, so a caller can branch
+                                // instead of re-deriving it from the prose.
+                                "name_is_authoritative": model_name_authoritative,
+                                "hint": hint,
                             });
                         }
                     }
@@ -1121,11 +1152,28 @@ pub(crate) fn format_index_status(result: &Value) -> String {
         let configured = result["model_mismatch"]["configured"]
             .as_str()
             .unwrap_or("?");
-        format!(
-            "MODEL MISMATCH · indexed with {indexed_with}, configured {configured} — \
-             queries are embedded with the configured model, so every score crosses two \
-             embedding spaces · {files} files · {chunks} chunks"
-        )
+        // Two strengths, matching the JSON's `name_is_authoritative`. On a configured
+        // endpoint the model name is a request field the server may ignore (measured: this
+        // host's llama-server returns the byte-identical vector for any name), so a name
+        // difference is a flag to check, not a verdict to announce. Shouting MISMATCH
+        // there is a false alarm on a line people see constantly — and a line that cries
+        // wolf is one nobody reads.
+        if result["model_mismatch"]["name_is_authoritative"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            format!(
+                "MODEL MISMATCH · indexed with {indexed_with}, configured {configured} — \
+                 different models, so every score crosses two embedding spaces · \
+                 {files} files · {chunks} chunks"
+            )
+        } else {
+            format!(
+                "model label differs · indexed as {indexed_with}, configured {configured} \
+                 — the endpoint may ignore the name; check before rebuilding · {files} \
+                 files · {chunks} chunks"
+            )
+        }
     } else if holes > 0 {
         format!(
             "DEGRADED · {holes} chunk(s) have no vector · queryable · {files} files · {chunks} chunks"
