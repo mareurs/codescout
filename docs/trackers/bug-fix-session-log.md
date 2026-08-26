@@ -5594,6 +5594,31 @@ the message was fully detailed and described a world that does not exist. Both a
 redirected a diagnosis. At two datapoints this belongs in `systematic-debugging` Phase 1,
 as the question to ask before Phase 2: *is this output reachable at all?*
 
+### Correction, same day — the reasoning held, the conclusion over-reached
+
+CI run `32997878934` then failed **two of those three tests** on a GitHub runner. So "it
+was just a bad run" was wrong about the tests, and it is worth being precise about which
+half of this entry survives.
+
+The **payload** was different: `{"timed_out":true,…}`, the wine-9.0 hang signature, not the
+partial-key payload. Those two tests have **two unrelated failure modes** that share a
+name, and only the envelope distinguishes them. They are now group 6 of the lane's skip
+list, alongside the heredoc and `yes | head` cases; the local flake this entry describes
+narrows to one test.
+
+**What survives, and is now better evidenced:** the impossible payload *did* correctly
+identify a bad observation — that specific run really was contention, and the code really
+was fine. What it did not license was the inference "therefore these tests are healthy".
+An impossible result tells you *this observation* is untrustworthy. It says nothing about
+whether a **different**, entirely trustworthy failure is also waiting in the same test.
+
+So the rule tightens rather than weakens: *interrogate the instrument before the subject* —
+and when the instrument turns out to be faulty, you have learned nothing yet about the
+subject. Discarding a bad observation is not evidence of health; it returns you to having
+no observation.
+
+**Status:** validated (with the scope correction above)
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
