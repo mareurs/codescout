@@ -184,6 +184,50 @@ let dense = ctx.agent.memory_embedder().await?
    warning and the envelope still says `ok`.
 
 ## Fix
+### Segmentation shipped 2026-08-26 — core fix done, step 4 still open
+
+- **SHA:** `26feb1aa` (`experiments`)
+- **patch-id:** `97a8127b4e761e065a2a8090107473f9a1186082`
+
+`fix(memory): segment and mean-pool oversized memory embeds instead of losing
+them`. Both call sites (`cross_embed_memory` **and** `create_semantic_anchors`,
+which re-upserts the same point id and would otherwise have overwritten a good
+pooled vector with a truncated one) now segment on a budget from
+`chunk_size_for_model(&model_spec)`, embed each segment, mean-pool, and
+re-normalise.
+
+**This closes the silent-truncation case too, without needing the "make the
+truncating backend complain" item.** Segmenting to 652 chars (~217 tokens) for
+AllMiniLM keeps every request under fastembed's 512-token default, so truncation
+never triggers. That item stays worth doing as defence-in-depth — if a budget is
+ever wrong for some model, the local path would still lose the overflow in
+silence — but it is no longer a prerequisite.
+
+**Verified against the real embedder, not fixtures.** `test-design-discipline.md`
+(19 314 chars), the one memory in this repo that cannot be embedded today:
+
+```
+whole content        -> HTTP 500 input is too large to process
+segment 1  5170 chars -> OK          concatenation == original: byte-exact
+segment 2  5184 chars -> OK          pooled vector: dim 768, L2 = 1.0
+segment 3  5137 chars -> OK
+segment 4  3823 chars -> OK
+```
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` →
+4483 passed, 0 failed, 46 ignored.
+
+**Still open — Fix step 4, the repair path.** Segmentation fixes every *future*
+write. It does **nothing** for memories already on disk without a vector, or
+already stored with a truncated one — and those are invisible by construction:
+a missing vector cannot be found by `recall`, and a truncated vector looks
+perfectly healthy. Nothing in this commit re-embeds them. That needs a migration
+that keys off "has no vector / was written before this SHA" rather than off the
+old naming convention, and it is the only reason this bug is not archived.
+
+Also unchanged: step 3 (a startup probe reporting the effective per-request
+ceiling) is still absent, so a misconfigured backend is still discovered at first
+oversized write rather than at connect.
 ### Revised 2026-08-26 — two backends, two failure modes, one fix and one extra
 
 The plan below was written for a backend that *errors*. The reporter's backend
