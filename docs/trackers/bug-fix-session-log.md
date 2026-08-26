@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 65
-entry_high_water_W: 55
+entry_high_water_W: 56
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -179,6 +179,7 @@ entry_high_water_W: 55
 | W-51 | 2026-08-26 | high | When a filed root cause is about persisted state, reproduce it by querying the datastore — not by re-running the tool that reported it | The filed "restore every augmentation" fix, run against the 21 trackers that were already augmented, replaces their params wholesale — the same call that took the T-N queue from 19 entries to 1 on 2026-08-16 — causing the loss it claimed to repair | validated |
 | W-54 | 2026-08-26 | med | Before implementing from a bug file or plan YOU wrote, scout the seam its Fix section SIZES — not only the seam its Root cause cites | Would have implemented a project-scoped `DELETE` plus a "sibling project survives" test for an invariant the per-project-file schema already guarantees; that test passes for every possible implementation, including a wrong one, so it enters the suite as a permanent green-but-uninformative assertion | validated |
 | W-55 | 2026-08-26 | high | Before trusting a diagnostic, confirm the serving process is not running a DELETED binary — `ls -l /proc/<pid>/exe`, with the pid found by walking `ps -o ppid=` up from a `run_command` shell | A peer session's `cargo rb` unlinked this session's server binary 70 minutes after it started; `doctor` then reported a check as broken that had been fixed 80 minutes earlier, and the next step was reopening a closed bug to repair a guard that works. Unlike R-89 the rebuild was someone else's, so commit, tree and binary mtime all read green and nothing in the transcript hinted at it | validated |
+| W-56 | 2026-08-26 | high | EXECUTE a bug file's archive precondition rather than asserting it is met — it is a check someone deliberately deferred, so the cheapest disposal is also the only silent failure | "Confirm CI, then archive" read as boilerplate from a stricter era. CI had been red on every Test lane since 2026-08-19 — 3 OSes × 3 feature sets — on one test that resolves an embedder from ambient config; the mandated local gate runs in the developer's environment by construction and can never show it. Cost two gh calls; the alternative was archiving six files under a green that was true only on this machine | validated |
 
 ## Category conventions
 
@@ -4852,6 +4853,50 @@ overtaken.
 **Promote-when:** a second session hits a peer-rebuild ghost, or the deleted-inode probe
 lands in the reconnaissance skill's freshness bullet (which today prescribes the
 string-grep probe only).
+
+## W-56 — Executing a bug file's own archive precondition, instead of asserting it was met, found a month-old CI outage the mandated gate structurally cannot show
+
+**Valid:** invariant
+
+**Observed:** six terminal bug files were queued for archiving. Five had no precondition;
+`2026-08-07-edit-code-remove`'s `## Resume` step 1 said *"Confirm CI, then archive."* The
+cheap reading was boilerplate from a stricter era — the fix was 18 days old, its two tests
+were mutation-verified, and the local gate had been green all session.
+
+**Got:** CI has been red on **every** `Test` lane since at least 2026-08-19 — ubuntu,
+macos and windows × default, no-features and local-embed, plus `server-stack` — while
+`Clippy`, `Format`, `MSRV`, `Feature check` and `Tool Docs Sync` all pass. One test causes
+it: `memory_embedder_is_built_from_the_shared_code_embedder` resolves an embedder through
+`RetrievalConfig::from_env_and_project`, and this machine exports
+`CODESCOUT_EMBEDDER_URL`. Reproduced by removing one variable:
+
+```
+env -u CODESCOUT_EMBEDDER_URL cargo test --lib   →  4326 passed; 1 failed; 8 ignored
+```
+
+**Why the mandated gate cannot show this, ever.** `cargo fmt && cargo clippy && cargo test`
+runs *in the developer's environment* by construction, so a test that reads ambient config
+is green there and red everywhere else, and the gate has no vocabulary for "green, but only
+here". The pinpoint is what makes it durable rather than obvious: **one** test of 4335, so
+4326 green lines scroll past the one that is green by luck — and locally it never fails at
+all, not even intermittently. Every *"gate green"* line written into a bug file this month
+rests on that reading.
+
+**The precondition was the project's only instrument pointing at CI.** Nothing else in the
+hygiene machinery reads it — not `doctor`, not the verify-open cadence, not
+`audit_doc_refs`. One sentence in one file's Resume, written 2026-08-08 by an author who
+could not have known, is what put the question. It cost two `gh` calls.
+
+**The generalisable form:** an archive precondition is a **check someone deliberately
+deferred**, so it is the one line in a bug file whose cheapest disposal — asserting it is
+met — is also the only way it can fail silently. This is the deferral-rationale law
+(`reconnaissance-patterns:R-95`) applied to preconditions rather than to fix estimates, and
+it has the same direction of bias: the person discharging it wants to archive.
+
+**Status:** validated
+
+**Promote-when:** a second archive precondition turns up a live defect, or CI status becomes
+something a routine check reads rather than something a human remembers to look at.
 
 ## Template for new entries
 
