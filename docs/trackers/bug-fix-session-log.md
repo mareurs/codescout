@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 71
-entry_high_water_W: 69
+entry_high_water_W: 70
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -195,6 +195,7 @@ entry_high_water_W: 69
 | W-65 | 2026-08-26 | high | When a result is IMPOSSIBLE rather than merely wrong, suspect the RUN, not the code | A failing payload carried 2 of 4 keys that output.rs sets in ONE `if let` block; grep confirmed a single producer, so no branch could emit it. Re-running unchanged: 4293/0, twice. I was two steps from filing a platform defect against a peer's hour-old feature and "fixing" correct production code — with a wine Cygwin warning in the payload ready to anchor the wrong diagnosis. Wrong values mean wrong logic; impossible combinations mean a wrong observation, and that second hunt is invisible if you start from "which line computed this?" | validated |
 | W-66 | 2026-08-26 | med | RED-before-GREEN on a bug's own prescribed fix, not just "bare vs. my fix" | Would have shipped a fix that changed nothing and closed a live defect | validated |
 | W-67 | 2026-08-26 | low-med | Measured the 3 live zombie records before picking doc-fix vs. doctor-check | Would have built a staleness detector for a population with no measured neglect | validated |
+| W-70 | 2026-08-26 | high | Publish the retraction to the peer immediately even when you cannot fix it — two accidental sweeps of the same ledger, four minutes apart in opposite directions, both harmless solely because each session was told within ~3 min | Sweep 2 (`66671bf5`) happened with `git diff -- <file>` honestly run and PASSED; the peer's write landed between the diff and the add, so the guard narrows the race and does not close it. The only thing that prevented rather than repaired was a wire handshake — "file is clear as of `<sha>`, write freely". Absent disclosure, a session whose entry vanished re-runs `append_entry`, allocating a fresh id for content already in HEAD: two ids, divergent bodies, nothing validating for duplication | validated |
 | W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 ## Category conventions
@@ -6088,6 +6089,41 @@ That is why this needs no new operational bullet. The reconnaissance skill's pos
 **Rests on:** the three tool outputs as returned this session, and on `.buddy/.session-start-trace.log`'s last row being 22:05:13 — an hour before the 23:01–23:13 commit window — which is what proves the session census cannot support a commit attribution.
 
 **Promote-when:** a fourth instance from an independent work stream. Not before: the phrasing is crisper than the evidence, and `claude-plugins:F-13` is a same-day measured case of promoting a law off thin evidence and nearly deleting shipped content on the strength of it. Related: `W-69` (explicit-path staging under concurrent sessions), `F-70` (the citation-side form), `F-67` (tree-wide writes swallowing peer work).
+
+## W-70 — Publish the retraction to the peer immediately even when you cannot fix it, because they can — two accidental sweeps four minutes apart, both harmless for that reason alone
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, 23:13–23:22, two sessions appending to `docs/trackers/bug-fix-session-log.md` while a third committed to the same checkout.
+
+**Pattern:** When you discover you have clobbered, mis-stated, or swept a peer's work — say so on the wire **within minutes, before you know how to fix it, and even if you cannot**. The peer can act on information you cannot act on yourself.
+
+**Counterfactual — two sweeps, opposite directions, four minutes apart:**
+
+| # | who swept whom | how it was caught |
+|---|---|---|
+| 1 | `codescout-df`'s `02d80963` (a `W-69` correction) absorbed this session's in-flight `F-71` body | they announced it unprompted, ~3 min later |
+| 2 | this session's `66671bf5` absorbed three of their `W-69` correction edits | they announced it unprompted, ~3 min later |
+
+**Neither was prevented.** Sweep 2 happened with the prescribed guard — `git diff -- <file>` immediately before `git add <file>` — **honestly run and passed**: the diff showed only this session's hunks, and their artifact write landed in the window *between the diff and the add*. Verified after the fact: `git show 66671bf5:…` contains "Correction 2 (2026-08-26, 23:17)" and "This protects you from the wrong FILES"; `git show 66671bf5~1:…` contains neither.
+
+So what made both harmless was **not** a check. It was that the losing session was told in time to still do something.
+
+**What would have happened otherwise, concretely.** A session whose entry vanished from its working tree does not conclude "a peer committed it" — it concludes the write failed. The repair reflex is to re-run `append_entry`, which allocates a **fresh id** for content already in `HEAD` under another number. That yields two entries, two ids, and divergent bodies in a ledger with nothing that validates for duplication; `link_scan` reports both as defined, so every citation resolves to whichever copy is active. Nobody finds it until a reader hits the contradiction. Both sweeps were three minutes from that outcome, twice.
+
+**Why this is the entry and "retract before it hardens" is not.** That formulation was proposed earlier in the same exchange and **failed twice the same evening** — one claim hardened in a peer's committed ledger before the retraction landed (`F-71`, step 2), and one entry was swept despite a passing guard. Speed of retraction is not the variable. **Reach** is. The correct form is not *retract before it hardens*; it is *tell the person who can still act, immediately, and before you have a remedy.*
+
+**The mechanism that actually closed the race was a message, not a command.** Both sessions converged on an explicit handshake — "`bug-fix-session-log.md` is clear as of `<sha>`, nothing in flight, write freely" — and that is the only thing in the exchange that prevented rather than repaired. `git diff` narrows the window from minutes to seconds; a handshake removes it, because it establishes that no peer *holds* uncommitted work in the file, which no local command can observe. Stated as a rule: **two sessions should not hold uncommitted work in the same file at the same time**, and the only instrument that can establish that is the wire.
+
+**Impact:** high — two silent ledger corruptions avoided in one evening, in a file both sessions had been appending to for hours.
+
+**Status:** validated
+
+**Rests on:** the two commits above and their parents, read this session; and on `claude-plugins:W-4` + `F-71` for the instrument-with-no-resolving-power framing that made both sweeps legible as one class rather than two accidents.
+
+**Credit:** `codescout-df` named this practice and declined to file it, on the grounds that it belonged with the session that had the second sweep. Sweep 2 is mine. Their `84b705d8` carries the complementary boundary on `W-69`'s rule 2.
+
+**Promote-when:** a second, independent work stream reports a peer-sweep made harmless by prompt disclosure — target `docs/RELEASE.md` § Concurrent-Work Rules, which per `W-49` documents git-state safety and says nothing about disclosure. Two datapoints here, four minutes apart, one work stream, one evening: that is one event with two halves, not two events, and promoting on it would be the accretion the reconnaissance skill's audit exists to prevent.
 
 ## Template for new entries
 
