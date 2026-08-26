@@ -66,6 +66,19 @@ These are **security-layer** tests, so the fixtures must be fixed in a way that 
 testing the same predicate rather than one that merely goes green — the boundary check in
 `containing_root` is the guard `delete` and `move` rely on.
 
+**FIXED 2026-08-26 — `cd0bfcaa`, patch-id `65de6c9d9f660dc657915fe7d7f9c5a19546e0a6`.**
+Two were the spelling bug and are drive-prefixed. The third was not: it needs `..` to
+survive canonicalization, and Windows normalizes `..` lexically, so the arm is unreachable
+there — measured, not assumed, once the test's `let … else` was made to name what it got
+(`Allowed("\\?\C:\…\.tmpC5EDa4\escape.rs")`). Split into a `cfg(not(windows))` test plus a
+`cfg(windows)` sibling that pins the lexical resolution, so the difference fails loudly if
+it ever changes rather than sitting behind a skip.
+
+**The vacuous half was the worse half.** In `unsatisfiable_absolute_glob`'s test every case
+degraded to `None` on Windows: that failed the two `Some` assertions loudly, and made the
+three `None` assertions pass while asserting nothing. A fixture that cannot reach the
+branch it names is a green that reads the same in a broken world.
+
 ### D. Verbatim `\\?\` prefix vs plain, in worktree detection (4) — looks like production
 
 - `tools::config::tests::activating_a_linked_worktree_reports_the_divergence_it_creates`
@@ -140,4 +153,3 @@ None yet.
   — the 46th failure
 - `scripts/build-windows.sh` — the local loop, and its ABI caveat
 - `.github/workflows/ci.yml` — the wine job's skip list, which is group A's precedent
-
