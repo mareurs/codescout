@@ -148,6 +148,79 @@ pub(crate) fn sanitize_topic(topic: &str) -> String {
     }
 }
 
+/// Coverage of the semantic memory store against the markdown memories on disk.
+///
+/// Counterpart to [`crate::retrieval::sync::IndexIntegrity`], for the other collection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryIntegrity {
+    pub on_disk: usize,
+    pub in_store: usize,
+    /// On disk with no point in the store — undiscoverable via `recall`.
+    pub missing_count: usize,
+    pub missing_sample: Vec<String>,
+    /// A point whose markdown is gone — a stale row `recall` can still return.
+    pub orphan_count: usize,
+    pub orphan_sample: Vec<String>,
+}
+
+/// How many names to name. Enough to act on, short enough to read.
+const MEMORY_INTEGRITY_SAMPLE: usize = 20;
+
+/// Compare the memories on disk against the points in the semantic store.
+///
+/// **Why the store alone cannot answer this.** `cross_embed_memory` is best-effort and
+/// non-fatal (`src/tools/memory/mod.rs:871-877`): a failed embed logs a warning, the
+/// markdown write proceeds, and no point is ever created. A lost memory therefore leaves
+/// *no trace in the store*, so every store-side instrument is blind to it by
+/// construction. `reembed_memories_in_place` (`src/migrate/memories.rs:203`) enumerates
+/// via `store.list()`, which is why it re-derives vectors for memories that already have
+/// points and can never recover the ones that do not. Disk is the only enumeration that
+/// sees them — hence `topics` from the writer's own walk ([`MemoryStore::list`]) rather
+/// than a re-derivation of eligibility here.
+///
+/// Measured on this repo 2026-08-26, before any of this existed: 23 on disk, 18 in store,
+/// **8 undiscoverable** (`eval-design` at 31 KB among them), 3 stale points whose
+/// markdown was gone.
+///
+/// **Pass the SHARED topic list only.** `cross_embed_memory` runs under `if !private`, so
+/// a private memory correctly has no point; passing `private_memory.list()` here would
+/// report every one of them as missing. The asymmetry is deliberate on both sides.
+///
+/// Read-only, on the same grounds as [`crate::retrieval::sync::verify_index_coverage`]: a
+/// negative result must never authorise a deletion, so a wrong answer costs a misleading
+/// report rather than a destroyed corpus.
+pub async fn verify_memory_coverage(
+    topics: &[String],
+    store: &dyn semantic_store::SemanticMemoryStore,
+    project_id: &str,
+) -> Result<MemoryIntegrity> {
+    use std::collections::BTreeSet;
+
+    let expected: BTreeSet<&str> = topics.iter().map(String::as_str).collect();
+    let hits = store
+        .list(project_id, semantic_store::MemoryFilter::default())
+        .await?;
+    let stored: BTreeSet<&str> = hits.iter().map(|h| h.memory.title.as_str()).collect();
+
+    let missing: Vec<String> = expected
+        .difference(&stored)
+        .map(|s| (*s).to_string())
+        .collect();
+    let orphans: Vec<String> = stored
+        .difference(&expected)
+        .map(|s| (*s).to_string())
+        .collect();
+
+    Ok(MemoryIntegrity {
+        on_disk: expected.len(),
+        in_store: stored.len(),
+        missing_count: missing.len(),
+        missing_sample: missing.into_iter().take(MEMORY_INTEGRITY_SAMPLE).collect(),
+        orphan_count: orphans.len(),
+        orphan_sample: orphans.into_iter().take(MEMORY_INTEGRITY_SAMPLE).collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,5 +456,106 @@ mod tests {
         let (_dir, store) = make_store();
         let path = store.topic_path("../../etc/passwd");
         assert!(path.starts_with(&store.memories_dir));
+    }
+
+    // --- verify_memory_coverage ---
+
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::memory_payload::SemanticMemory;
+
+    async fn store_with(project: &str, titles: &[&str]) -> InMemorySemanticMemoryStore {
+        let store = InMemorySemanticMemoryStore::default();
+        for t in titles {
+            let m = SemanticMemory {
+                project_id: project.to_string(),
+                bucket: "structured".to_string(),
+                title: (*t).to_string(),
+                content: format!("content of {t}"),
+                anchors: vec![],
+                created_at: "2026-08-26T00:00:00Z".to_string(),
+                updated_at: "2026-08-26T00:00:00Z".to_string(),
+            };
+            store.upsert(&m, &[0.1, 0.2, 0.3]).await.unwrap();
+        }
+        store
+    }
+
+    /// The discrimination test, and the reason it is first: a memory present on BOTH
+    /// sides must land in neither list.
+    ///
+    /// A mutation that dropped either operand of the diff — reporting `expected` as
+    /// missing, or `stored` as orphaned — still satisfies a test that only asserts
+    /// `missing_count == 1`. This one fails for both mutations, because the shared topic
+    /// would appear in a list it must never appear in.
+    #[tokio::test]
+    async fn coverage_separates_missing_orphan_and_present() {
+        let store = store_with("p", &["shared", "orphaned"]).await;
+        let topics = vec!["shared".to_string(), "lost".to_string()];
+
+        let m = verify_memory_coverage(&topics, &store, "p").await.unwrap();
+
+        assert_eq!(m.on_disk, 2);
+        assert_eq!(m.in_store, 2);
+        assert_eq!(m.missing_sample, vec!["lost"], "on disk, no point");
+        assert_eq!(m.orphan_sample, vec!["orphaned"], "point, no file");
+        assert!(
+            !m.missing_sample.contains(&"shared".to_string())
+                && !m.orphan_sample.contains(&"shared".to_string()),
+            "a topic present on both sides must appear in NEITHER list: {m:?}"
+        );
+    }
+
+    /// Nested topics are slash-joined by [`MemoryStore::list`] and stored verbatim as the
+    /// title, so they must match rather than read as missing. `infra/friction-measurement`
+    /// is a real one on this repo.
+    #[tokio::test]
+    async fn coverage_matches_nested_topics() {
+        let store = store_with("p", &["infra/friction-measurement"]).await;
+        let topics = vec!["infra/friction-measurement".to_string()];
+
+        let m = verify_memory_coverage(&topics, &store, "p").await.unwrap();
+
+        assert_eq!(m.missing_count, 0, "nested topic must match: {m:?}");
+        assert_eq!(m.orphan_count, 0);
+    }
+
+    /// Another project's points must not count as coverage for this one. The tempdir
+    /// pollution measured 2026-08-26 (1959 fixture points under 1909 `.tmp*` project ids)
+    /// makes this the realistic failure: a cross-project leak would report a broken
+    /// index as complete.
+    #[tokio::test]
+    async fn coverage_ignores_other_projects_points() {
+        let store = store_with("other-project", &["gotchas"]).await;
+        let topics = vec!["gotchas".to_string()];
+
+        let m = verify_memory_coverage(&topics, &store, "p").await.unwrap();
+
+        assert_eq!(m.in_store, 0, "must not see another project's points");
+        assert_eq!(m.missing_count, 1, "so the topic IS missing here: {m:?}");
+    }
+
+    #[tokio::test]
+    async fn coverage_clean_when_both_sides_agree() {
+        let store = store_with("p", &["a", "b"]).await;
+        let topics = vec!["a".to_string(), "b".to_string()];
+
+        let m = verify_memory_coverage(&topics, &store, "p").await.unwrap();
+
+        assert_eq!((m.missing_count, m.orphan_count), (0, 0), "{m:?}");
+        assert!(m.missing_sample.is_empty() && m.orphan_sample.is_empty());
+    }
+
+    /// The sample is capped but the COUNT is not — a report that silently truncated its
+    /// own total would understate the damage while looking precise.
+    #[tokio::test]
+    async fn coverage_caps_sample_but_not_count() {
+        let store = store_with("p", &[]).await;
+        let topics: Vec<String> = (0..35).map(|i| format!("topic-{i:02}")).collect();
+
+        let m = verify_memory_coverage(&topics, &store, "p").await.unwrap();
+
+        assert_eq!(m.missing_count, 35, "count must be the true total");
+        assert_eq!(m.missing_sample.len(), MEMORY_INTEGRITY_SAMPLE);
     }
 }

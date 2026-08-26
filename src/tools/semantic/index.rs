@@ -899,10 +899,53 @@ impl crate::tools::Tool for IndexVerify {
             )
         };
 
+        // Memories are the OTHER collection, and they leak differently: a failed
+        // cross-embed is non-fatal, so the markdown lands and no point is ever
+        // written. That damage is invisible to every store-side instrument, which is
+        // why it is checked against disk here rather than left to
+        // `reembed_memories_in_place`, whose own enumeration cannot see it.
+        //
+        // Folded into this verdict-bearing report rather than given a `memory`
+        // action of its own, for two reasons: a new action costs advertised
+        // tool-surface bytes against a budget that is already at its cap, and a
+        // SECOND health surface is the thing
+        // docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+        // asks us to stop creating.
+        //
+        // Degrades rather than propagates: the code index is this tool's primary
+        // subject, and a memory-store outage must not turn its report into an error.
+        let memories = match ctx.agent.semantic_memory_store().await {
+            Ok(store) => {
+                // SHARED topics only — `cross_embed_memory` runs under `if !private`,
+                // so private memories have no point BY DESIGN and would otherwise
+                // report as missing, every one of them, forever.
+                let topics = ctx
+                    .agent
+                    .with_project_at(ctx.workspace_override.as_deref(), |p| p.memory.list())
+                    .await?;
+                match crate::memory::verify_memory_coverage(&topics, store.as_ref(), &project_id)
+                    .await
+                {
+                    Ok(m) => json!({
+                        "on_disk": m.on_disk,
+                        "in_store": m.in_store,
+                        "missing_count": m.missing_count,
+                        "missing_sample": m.missing_sample,
+                        "orphan_count": m.orphan_count,
+                        "orphan_sample": m.orphan_sample,
+                        "hint": memory_coverage_hint(&m),
+                    }),
+                    Err(e) => json!({"status": "unchecked", "reason": format!("{e:#}")}),
+                }
+            }
+            Err(e) => json!({"status": "unchecked", "reason": format!("{e:#}")}),
+        };
+
         Ok(json!({
             "verdict": verdict,
             "project_id": project_id,
             "collection": collection,
+            "memories": memories,
             "expected_files": integrity.expected_files,
             "stored_files": integrity.stored_files,
             "missing_count": integrity.missing_count,
@@ -963,6 +1006,41 @@ fn integrity_verdict(
     } else {
         "complete"
     }
+}
+
+/// The one next action for a memory-coverage result.
+///
+/// Names `memory(action="write")` rather than a bespoke repair, deliberately. Re-writing a
+/// memory with its current disk content re-runs `cross_embed_memory`, so the repair
+/// inherits segmentation and mean-pooling (`26feb1aa`) and anchor seeding for free. A
+/// dedicated "embed the missing ones" path would have to re-derive `bucket` and the
+/// UUIDv5 `point_id` from `project_id`/`bucket`/`title`, and any divergence there writes a
+/// DUPLICATE point instead of the intended one — a repair that silently doubles the
+/// corpus is worse than the gap it closes.
+fn memory_coverage_hint(m: &crate::memory::MemoryIntegrity) -> String {
+    if m.missing_count == 0 && m.orphan_count == 0 {
+        return "Every memory on disk has a point, and every point has a file.".to_string();
+    }
+    let mut parts = Vec::new();
+    if m.missing_count > 0 {
+        parts.push(format!(
+            "{} memory/memories are on disk with NO point — invisible to recall, and \
+             invisible to `codescout migrate-memories --in-place` too, which enumerates \
+             from the store. Re-run memory(action='write') with each one's current \
+             content to repair: {}",
+            m.missing_count,
+            m.missing_sample.join(", ")
+        ));
+    }
+    if m.orphan_count > 0 {
+        parts.push(format!(
+            "{} point(s) have no file on disk — recall can still return them. Drop with \
+             memory(action='forget'): {}",
+            m.orphan_count,
+            m.orphan_sample.join(", ")
+        ));
+    }
+    parts.join(" ")
 }
 
 pub(crate) fn format_index_status(result: &Value) -> String {
@@ -1054,6 +1132,59 @@ pub(crate) fn running_elsewhere_indexing_block(holder_pid: Option<u32>) -> Value
 #[cfg(test)]
 mod integrity_verdict_tests {
     use super::integrity_verdict;
+
+    fn mem_integrity(missing: &[&str], orphans: &[&str]) -> crate::memory::MemoryIntegrity {
+        crate::memory::MemoryIntegrity {
+            on_disk: 23,
+            in_store: 18,
+            missing_count: missing.len(),
+            missing_sample: missing.iter().map(|s| (*s).to_string()).collect(),
+            orphan_count: orphans.len(),
+            orphan_sample: orphans.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+
+    /// The hint must name the repair, and must say that the OBVIOUS repair does not work.
+    ///
+    /// `codescout migrate-memories --in-place` is what anyone would reach for, and it
+    /// cannot fix this: `reembed_memories_in_place` enumerates via `store.list()`, so a
+    /// memory with no point is invisible to it. A hint that reported the gap without
+    /// saying so would send every reader to the one tool guaranteed to report success and
+    /// change nothing.
+    #[test]
+    fn missing_hint_names_the_repair_and_rules_out_the_wrong_one() {
+        let h = super::memory_coverage_hint(&mem_integrity(&["eval-design"], &[]));
+        assert!(h.contains("eval-design"), "must name the memory: {h}");
+        assert!(
+            h.contains("memory(action='write')"),
+            "must name the repair that works: {h}"
+        );
+        assert!(
+            h.contains("migrate-memories"),
+            "must rule out the repair that does not: {h}"
+        );
+    }
+
+    /// Both kinds present must both be reported — an early return on the first would hide
+    /// the second, and they need different commands.
+    #[test]
+    fn hint_reports_missing_and_orphans_together() {
+        let h = super::memory_coverage_hint(&mem_integrity(&["lost"], &["stale-point"]));
+        assert!(h.contains("lost") && h.contains("stale-point"), "{h}");
+        assert!(
+            h.contains("memory(action='write')") && h.contains("memory(action='forget')"),
+            "each kind needs its own command: {h}"
+        );
+    }
+
+    /// A clean result must not read as a warning. This surface is checked routinely, so a
+    /// permanently alarming hint is how the whole report gets learned around.
+    #[test]
+    fn clean_memory_hint_is_not_a_warning() {
+        let h = super::memory_coverage_hint(&mem_integrity(&[], &[]));
+        assert!(!h.contains("memory(action="), "no repair to name: {h}");
+        assert!(!h.to_lowercase().contains("missing"), "{h}");
+    }
 
     /// The arm ordering is the whole design, so it gets pinned directly.
     ///
