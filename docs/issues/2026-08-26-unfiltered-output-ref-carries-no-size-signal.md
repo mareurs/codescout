@@ -97,6 +97,30 @@ re-run the expensive command," but "look wider" requires the agent to already
 suspect there's something to look at — nothing in the response suggests that
 either way.
 
+### `unfiltered_output` is the only exception to a documented universal invariant
+
+`docs/trackers/reconnaissance-patterns.md`'s distilled Law B ("The instrument decides the
+answer") states, as the project's own codescout-specific corollary: *"every buffered
+response reports `buffered_bytes` and names an `@ref`; if the byte count exceeds what the
+summary could account for, the summary is not the result. That number is the cheapest
+completeness check available and it is already in the response."* This is stated as a
+universal law other reconnaissance work relies on (R-50's whole technique is "check
+`buffered_bytes` before trusting a summary").
+
+A repo-wide search for the shape that attaches a secondary buffer reference outside the
+standard `call_content` overflow-envelope path (`grep '= json!(ref_id)\|_output"\] = json'
+across src/**/*.rs`) returns exactly **one** hit: `unfiltered_output` at
+`src/tools/run_command/output.rs:306`. `buffered_bytes` itself is constructed in exactly
+one place, `src/tools/core/types.rs:855` inside `Tool::call_content` — the shared path
+every other tool's overflow envelope goes through. `unfiltered_output` bypasses that path
+entirely; it is not one instance of a widespread pattern, it is the sole counterexample to
+a law the project believes holds everywhere.
+
+This narrows the fix: no broader sweep of `src/` turned up a second offender. What likely
+reads as "a lot similar" (Marius, 2026-08-26) is frequency of *encounter*, not count of
+distinct code sites — any bounded-producer-into-filter command whose filter narrows to
+nothing hits this exact, singular gap, and does so often given how common that shape is
+(`cat|grep`, `ls|grep`, `find|grep`, all IL3-compliant and all routing through this code).
 ## Hypotheses tried
 
 None yet — this is a first-pass root cause from reading the function, not a
