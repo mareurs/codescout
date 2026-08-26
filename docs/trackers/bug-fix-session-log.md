@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 66
-entry_high_water_W: 58
+entry_high_water_W: 59
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -183,6 +183,7 @@ entry_high_water_W: 58
 | W-55 | 2026-08-26 | high | Before trusting a diagnostic, confirm the serving process is not running a DELETED binary — `ls -l /proc/<pid>/exe`, with the pid found by walking `ps -o ppid=` up from a `run_command` shell | A peer session's `cargo rb` unlinked this session's server binary 70 minutes after it started; `doctor` then reported a check as broken that had been fixed 80 minutes earlier, and the next step was reopening a closed bug to repair a guard that works. Unlike R-89 the rebuild was someone else's, so commit, tree and binary mtime all read green and nothing in the transcript hinted at it | validated |
 | W-56 | 2026-08-26 | high | EXECUTE a bug file's archive precondition rather than asserting it is met — it is a check someone deliberately deferred, so the cheapest disposal is also the only silent failure | "Confirm CI, then archive" read as boilerplate from a stricter era. CI had been red on every Test lane since 2026-08-19 — 3 OSes × 3 feature sets — on one test that resolves an embedder from ambient config; the mandated local gate runs in the developer's environment by construction and can never show it. Cost two gh calls; the alternative was archiving six files under a green that was true only on this machine | validated |
 | W-58 | 2026-08-26 | med-high | Read the live envelope AND its formatter in ONE pass — the live response is a census of the keys that path emits, so any `Option`-guarded reader of a key absent from it is dead code | `format_index_status`'s model and timestamp arms have had no producer anywhere in the repo since `79e0e4f2` (2026-05-13, whose own message lists them as dropped). The test covering them hand-builds the response it asserts on, so it stayed green for 3.5 months across 4494 tests — and `docs/manual/src/troubleshooting.md:231` still tells users to compare `configured_model` against `indexed_with_model` to diagnose the exact model mismatch #18 was about, when `configured_model` has never been emitted by any commit in this repo's history | validated |
+| W-59 | 2026-08-26 | high | "Cannot be separated" / "only CI can see this" is a claim about the SUBSTRATE, not the defect — price changing the substrate before accepting the limit | wine failed 9 guide_hint tests, MSVC 1, and the bug file recorded "whether the ninth is real cannot be separated from this run". Extracting PortableGit with `7z x` (a self-extracting archive — no installer runs) and pointing CODESCOUT_BASH at its Windows path took the module 9 → exactly the 1 MSVC had → 0. Cost ~5 min and 56 MB. The ninth was the ONLY production defect among all six Windows causes and 44 tests — noise is where a real signal is cheapest to lose | validated |
 
 ## Category conventions
 
@@ -5120,6 +5121,49 @@ subject is a pure formatting function.
 **Rests on:** `docs/RELEASE.md` Standard Ship Sequence step 1 (live-output sub-clause);
 the reconnaissance skill's *"a green result certifies the path that actually EXECUTED"*
 rule, of which this is a new mechanism rather than a new instance.
+
+## W-59 — When a diagnostic says two signals "cannot be separated", price the separation before accepting it — the blocker was a 56 MB download
+
+**Valid:** invariant
+
+**Observed:** the wine lane failed **9** tests in `server::guide_hint_tests`; MSVC failed
+**1**. Eight were `no POSIX shell available` — wine has no Git Bash. I filed that split as
+inference and wrote, in the bug file, *"whether the ninth is real cannot be separated from
+this run."* That sentence is the friction: it reads as a fact about the problem and is
+actually a fact about the **environment**, which is the mutable half.
+
+**Got:** the separation cost one download. PortableGit is a 7z **self-extracting archive**,
+so `7z x` unpacks it on Linux with no installer executing; `CODESCOUT_BASH` set to its
+*Windows* path (wine maps `/` to `Z:`) satisfies a plain `is_file()` probe; Git Bash then
+runs under wine — `uname -s` → `MINGW64_NT-10.0-19045`.
+
+The module went **9 failures → exactly the 1 MSVC also had**, which *confirmed* the
+eight-vs-one split rather than leaving it inferred, and then → **0**.
+
+**And the ninth was the only production defect in the entire sweep.** Six Windows causes,
+44 tests: 43 were fixtures. The one that touched a real user — `names_tracker_path` picking
+a guide on a hardcoded forward-slash substring, so a Windows caller creating a tracker
+silently got the *general* guide — was the one hiding behind the environment noise. That is
+not a coincidence worth ignoring: **noise is where a real signal is cheapest to lose**,
+because every explanation for the pile also explains the one.
+
+**The generalisable form.** *"Cannot be separated"* / *"not reproducible here"* / *"only CI
+can see this"* are claims about the **substrate**, not the defect, and substrate is the
+part you can change. Before accepting one, price the change: an extractable archive, a
+container, an env var, a target already installed. The reconnaissance law already says a
+proposed fix is a claim about current state that must be verified — this is its complement
+for a proposed **limit**. Cost here: ~5 minutes and 56 MB, against a defect that had
+survived every Windows CI run since 2026-08-20 and would have survived this session too.
+
+**Counterfactual:** the bug file would have shipped with group A reading *"8 noise, 1
+unknowable"*, the production defect would have stayed unfound behind it, and the next
+person would have re-derived the same split from the same two logs.
+
+**Status:** validated
+
+**Promote-when:** a second "cannot reproduce locally" is dissolved by changing the
+substrate rather than the reasoning — or `scripts/build-windows.sh`'s new `CODESCOUT_BASH`
+note is used by someone who did not write it.
 
 ## Template for new entries
 
