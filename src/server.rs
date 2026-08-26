@@ -2380,6 +2380,13 @@ mod tests {
     /// dependency), deferred under rule-of-three; see the spec's Revisit-when.
     ///
     /// `docs/issues/archive/2026-08-18-append-entry-body-writer-undeclared-in-artifact-schema.md`
+    ///
+    /// Gated on `librarian` because the `artifact` tool IS that feature: under
+    /// `--no-default-features` — CI's `no-features` and `local-embed` lanes — it is never
+    /// registered, and the `expect` below asserts about a tool that does not exist. Failing
+    /// there said "artifact tool is registered", which reads as a regression in the
+    /// registry rather than as a build config in which the tool is correctly absent.
+    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn artifact_advertises_the_append_entry_section_writer() {
         let (_dir, server) = make_server().await;
@@ -2937,6 +2944,15 @@ mod tests {
     /// trigger or one that no longer exists.
     ///
     /// See `docs/issues/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
+    ///
+    /// Gated on `librarian` for the same reason as
+    /// `artifact_advertises_the_append_entry_section_writer` above: the invariant is
+    /// "every guide topic has a trigger", and a trigger lives on a TOOL. Under
+    /// `--no-default-features` the `artifact` tool is absent, so the `librarian` topic has
+    /// no trigger *by construction* and the gate reports a wiring defect that is really a
+    /// build config. It still runs in the `default` and `server-stack` lanes, which are the
+    /// ones that compile every tool it is meant to police.
+    #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_guide_topic_is_triggered_or_declared_pull_only() {
         use crate::prompts::{GUIDE_TOPICS, PULL_ONLY_GUIDE_TOPICS};
