@@ -1,13 +1,18 @@
 ---
-status: open
-opened: 2026-08-26
-closed:
-severity: low
-owner: marius
-related: [docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md]
-tags: [embeddings, docs, onnx, retrieval]
-unverified: 'both reported blockers are working-as-designed with documented remedies — the only defect here is the undocumented migration cost. The CodeRankEmbed-on-ONNX request is a feature, not a bug, and is recorded here only because it has no tracker home yet.'
 kind: bug
+status: fixed
+tags:
+- embeddings
+- docs
+- onnx
+- retrieval
+closed: 2026-08-26
+opened: 2026-08-26
+owner: marius
+related:
+- docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
+severity: low
+unverified: both reported blockers are working-as-designed with documented remedies — the only defect here is the undocumented migration cost. The CodeRankEmbed-on-ONNX request is a feature, not a bug, and is recorded here only because it has no tracker home yet.
 ---
 
 # BUG: the ONNX local-embed path is recommended as an escape from #15 without documenting that it forces a model change, a full reindex, and dense-only
@@ -158,8 +163,8 @@ Split as originally scoped:
    path, or is hybrid-with-local-backend on the roadmap? Roadmap decision, not a code
    change — left for Marius.
 
-**SHA:** `pending` — doc-only change, not yet committed at time of this write.
-**patch-id:** `pending`
+**SHA:** `652589fa` (`experiments`)
+**patch-id:** `14e7e21a09c938934c689ac260a08a4eba622628`
 ## Tests added
 
 `N/A` — the fix is a documentation note plus a roadmap answer; there is no
@@ -176,13 +181,10 @@ segmentation fix in the related bug, which does not require changing models.
 
 ## Resume
 
-Find where the ONNX / `local:` / `local-dir:` backends are described for
-operators — start with `grep -rn 'local-dir:\|local:' docs/ README.md` and the
-`scripts/retrieval-stack.sh` header comments — and add the three-clause cost
-note from Fix item 1 at whichever surface an operator actually reads before
-switching. Then decide item 4 and answer GitHub #16, since the reporter is
-blocked on a roadmap answer rather than on code.
-
+Doc fix (items 1–2) is complete and committed. What remains is item 4 — not code:
+ask Marius whether dense-only is the intended end-state for the local-embed path, or
+whether hybrid-with-local-backend is on the roadmap. Item 3 (generic ONNX model loading)
+stays parked until it has a home in `docs/trackers/` or `docs/plans/`.
 ## References
 
 - GitHub issue #16 — <https://github.com/mareurs/codescout/issues/16>
