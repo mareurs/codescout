@@ -6307,6 +6307,17 @@ needed was there.
    inside an entry about premises nobody checks. Replaced below with
    `claude-plugins-15`'s criterion.
 
+**What the instance ratio measures — read this before drawing anything from it.** Four of
+the five instances above are mine or corrections to mine. That is **not** evidence about
+who is worse at this; it is evidence about **who was holding the lens**. The author of a
+ledger on unchecked premises generates instances at a rate nobody else in the room does,
+because they are the only one auditing at that depth — `claude-plugins-15`'s two are here
+because I went looking at their work, and there is no reason to expect the ratio to
+survive anyone auditing mine as closely. Same defect as the `get_guide` samples: a count
+assembled by looking is a fact about the looking. The `Promote-when` below forbids the
+flattering reading and the unflattering one alike, which is the sign it sits at the right
+place. (Observation `claude-plugins-15`'s.)
+
 **Mechanism.** A caveat is written at the moment you become aware a check is missing.
 Writing it converts an open question into a *recorded* one, and recorded reads as handled.
 The obligation is not dropped — it is discharged, by the act of describing it. That is why
