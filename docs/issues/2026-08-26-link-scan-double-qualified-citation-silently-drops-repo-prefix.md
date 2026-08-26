@@ -11,7 +11,7 @@ tags:
 opened: 2026-08-26
 owner: marius
 related:
-- '0b40a6e83053c1d2'
+- '08072e4a358640f0'
 severity: low
 unverified: Only the extraction-regex slide hypothesis was confirmed by test; the exact regex source (extract.rs scan_tokens) was not read line-by-line to cite its pattern text — the mechanism was inferred from black-box test behavior plus resolve.rs's split_once(':') semantics, not from reading the regex literal itself.
 ---
@@ -20,7 +20,7 @@ unverified: Only the extraction-regex slide hypothesis was confirmed by test; th
 
 `get_guide("tracker-conventions")`'s own worked example distinguishes a repo-only
 qualifier (`codescout:A-11`) from a file-stem qualifier (`bug-fix-session-log:F-33`), and a
-bug file (`docs/issues/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md`)
+bug file (`docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md`)
 combined the two into a THREE-part form, `<repo>:<file-stem>:<ID>`, to solve a case that
 needs both — the current fix's own testing shows the resolver never sees that as three
 parts. The leading `<repo>:` segment is silently dropped, and the citation resolves
@@ -62,7 +62,7 @@ add_artifact(&ctx, dir.path(), "docs/trackers/topic-session-log.md", ID_TEMPLATE
 
 - codescout @ branch `experiments`, `src/librarian/tools/link_scan/{extract,resolve}.rs`
 - Discovered while implementing the fix for
-  `docs/issues/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md`
+  `docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md`
 
 ## Root cause
 
@@ -181,13 +181,13 @@ Pick option 1 or 2 in § Fix. If 1: extend `extract.rs`'s qualifier-capturing re
 accept a second colon-delimited segment, and give `resolve.rs`'s `CrossRepoToken` arm
 (`resolve.rs:233-270`) a repo-name lookup path alongside `corpus.by_stem`. If 2: grep the
 repo for any other place prescribing `<repo>:<file-stem>:<ID>` (only
-`docs/issues/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md` at time of
+`docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md` at time of
 filing — already corrected) and close this as `wontfix` with the rationale above, keeping
 the doctor/warn suggestion as a separate, smaller follow-up.
 
 ## References
 
-- `docs/issues/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md` — the bug
+- `docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md` — the bug
   whose fix surfaced this; its `## Fix` table originally prescribed the 3-part form this
   file shows does not work, and was corrected during implementation
 - `docs/issues/archive/2026-08-18-link-scan-dangling-count-is-prefix-gated-so-a-whole-namespace-reads-as-healthy.md`
@@ -199,4 +199,3 @@ the doctor/warn suggestion as a separate, smaller follow-up.
   slide regression test
 - `get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified* — the
   guide's own examples, both single-qualifier, never wrong
-

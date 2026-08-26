@@ -1,7 +1,7 @@
 ---
-id: '0b40a6e83053c1d2'
+id: 08072e4a358640f0
 kind: bug
-status: open
+status: fixed
 title: docs/templates/session-log.md cites codescout's own ledger ids bare, so every copy into another repo imports dangling citations — and one that resolves to the wrong entry
 tags:
 - librarian
@@ -10,6 +10,7 @@ tags:
 - session-log
 - reconnaissance
 - cross-repo
+closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 related:
@@ -157,7 +158,8 @@ to any template this repo ships that quotes a local ledger. Checked: `docs/templ
 has exactly one file (`session-log.md`, this one). Not checked: templates distributed from
 `claude-plugins`.
 
-Fix commit SHA + `git patch-id --stable`: recorded below once committed.
+**SHA:** `70e5d2fc` (`experiments`)
+**patch-id:** `71c6bf2c1e408d936cd7e4f819e94551be6c97c9`
 ## Tests added
 
 `session_log_template_citations_never_bind_to_a_foreign_repos_namesakes`

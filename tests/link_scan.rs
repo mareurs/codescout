@@ -417,14 +417,16 @@ async fn reindex_id_churn_cascade_is_healed_by_rescan() {
     assert_eq!(out2["counts"]["edges_pruned"], 0, "{out2}");
 }
 
-/// Regression for docs/issues/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md:
+/// Regression for docs/issues/archive/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md:
 /// the template's own R-N/F-N/W-N citations must be repo-qualified. Unqualified, they
 /// resolve against whatever the COPYING repo's own ledgers happen to define — silently
 /// binding to an unrelated entry rather than reporting cross-repo or dangling.
 ///
 /// A foreign repo's own, wholly unrelated ledgers define every number the template
-/// cites, so a bare token has somewhere wrong to bind. RED (pre-fix) form: paste the
-/// template's citations back to their pre-fix bare form and watch this fail.
+/// cites, so an unqualified token would have somewhere wrong to bind. Reads the LIVE
+/// template file off disk, so a regression back to bare citations reproduces the
+/// original wrong-binding failure and fails this test, not just a vacuous empty-corpus
+/// pass.
 #[tokio::test]
 async fn session_log_template_citations_never_bind_to_a_foreign_repos_namesakes() {
     let dir = TempDir::new().unwrap();
