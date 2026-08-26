@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 65
+entry_high_water_F: 66
 entry_high_water_W: 56
 ---
 
@@ -116,6 +116,7 @@ entry_high_water_W: 56
 | F-62 | 2026-08-26 | high | process | fixed-verified | All five feature-gated e2e language lanes had stopped compiling — `ToolContext` grew a field, the shared harness never got it — while `cargo test` stayed green, since it never builds a feature-gated target no lane names; recurrence guard shipped in `3784cb65` |
 | F-64 | 2026-08-26 | med | plan-prose | fixed-verified | My own #18 bug file inflated its own fix — `code_vec` is per-project by FILE, so the "most likely to be got wrong" step is vacuous and its regression test would have passed for every implementation |
 | F-65 | 2026-08-26 | low | skill-doc | open | The reconnaissance skill's worked exemplars show a `**Valid:**` form the server refuses (13-vs-0 in this tracker), and instruct you to copy them |
+| F-66 | 2026-08-26 | high | process | open | Quoted the substrate law at the user, then measured a retired sqlite store all session — backend is Qdrant, `codescout.db` untouched since Aug 25; five published figures described a dead world, and a passing positive control validated the instrument against the wrong database |
 
 ## Wins Index
 
@@ -4897,6 +4898,91 @@ it has the same direction of bias: the person discharging it wants to archive.
 
 **Promote-when:** a second archive precondition turns up a live defect, or CI status becomes
 something a routine check reads rather than something a human remembers to look at.
+
+## F-66 — I quoted the substrate law at the user, then spent a session measuring a retired datastore
+
+**Observed:** 2026-08-26, immediately after `index(action="verify")` returned its
+first live output. Its numbers disagreed with the numbers I had been quoting all
+session, and the reconciliation found the cause in my own measurements, not the
+tool's.
+
+**When:** Building index-integrity checks, having earlier in the same session
+recited this exact law to the user from the reconnaissance skill: *"A tool that
+resolves its target from the environment has a SUBSTRATE as well as a verdict…
+A retired-but-still-present datastore keeps answering, so the failure is a
+confident wrong number, never an exception. When two tools disagree, the question
+is not whose logic is wrong but which world each one read."*
+
+**Expected:** `sqlite3 .codescout/embeddings/codescout.db` reads this project's
+live semantic index. I assumed this from a *reporter's* bug text
+(`CODESCOUT_VECTOR_BACKEND=sqlite-vec`, on their machine) plus the presence of a
+247 MB `codescout.db` on disk.
+
+**Got:** The live backend is **Qdrant**. `CODESCOUT_VECTOR_BACKEND` is unset;
+`VectorBackend::resolve` (`src/retrieval/code_store.rs:247-262`) defaults to
+`Qdrant` when `server-stack` is compiled in, and `CODESCOUT_QDRANT_URL=http://127.0.0.1:6334`
+is set and answering. `codescout.db` has an mtime of **Aug 25 09:13** — it was not
+written once during this session.
+
+The two worlds, measured minutes apart:
+
+| | live tool (Qdrant) | `codescout.db` (retired) |
+|---|---|---|
+| distinct files | 1611 | 1593 |
+| chunks | 47 647 | 46 979 |
+| paths absent from disk | 6 | 18 |
+
+**Probable cause:** three compounding steps, none of which raised anything.
+(1) I took the backend from the *reporter's* environment block rather than from
+this host's. (2) A 247 MB file with exactly the right name and schema is a
+powerful false confirmation — the queries all succeeded and returned plausible,
+internally consistent numbers. (3) I ran a **positive control** on the join and it
+passed, which felt like rigor: the deliberately-broken key returned all 46 979
+rows, proving the predicate discriminated. It did. Against the wrong database. A
+positive control validates the instrument, never the substrate — and I had just
+finished telling the user that rule 4 of `docs/PROBES.md` covers this class.
+
+**Workaround / what actually survives.** The split is clean, because it follows
+what each measurement talked to:
+
+- **Invalidated — read the retired store:** `docs/` at 1089 files / 25 232 chunks;
+  `MAX(LENGTH(content)) = 1200` in every language with 0 over 8000; `scripts/` at
+  15 of 19; "0 vector holes, 46 979 = 46 979"; "18 orphans".
+- **Unaffected — measured against the live embedder or filesystem directly:** the
+  CodeRankEmbed 2048-token ceiling; the n_batch error string; 19 of 23 memories
+  over ~2000 chars; `test-design-discipline.md` failing to embed; the four-segment
+  verification and its unit-norm pooled vector. Every fix shipped this session
+  rests on these, so no shipped code is affected.
+- **Conclusions that survive on better evidence:** "docs/ is fully covered" is now
+  confirmed by the live tool's `empty_eligible_dirs: []`. "An oversized chunk is
+  not reachable" rests on `chunk_target = 1200` being enforced in code and on the
+  independent measurement in
+  `docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md`,
+  not on the stale table I cited for it.
+
+**Severity:** high — five figures published to the user as measurements of live
+state were measurements of a retired one, and two landed in committed bug-file
+prose as evidence. Nothing shipped is wrong, which is the only reason this is not
+worse; the defect is entirely in the evidence layer.
+
+**Status:** open — the two bug files citing stale-store numbers still need their
+evidence re-labelled.
+
+**Valid:** invariant
+
+The law is invariant; the specific backend resolution is `dated 2026-08-26` and
+changes if `CODESCOUT_VECTOR_BACKEND` is ever set on this host.
+
+**Rests on:** `VectorBackend::resolve`'s `server-stack` default and the unset env
+var — the two facts that make a present-and-plausible sqlite file the wrong
+substrate rather than merely a stale one.
+
+**Fix idea / Pointer:** Before quoting any number about "the index", read the
+BACKEND first — `env | grep CODESCOUT_VECTOR_BACKEND` plus
+`VectorBackend::resolve`'s default — and prefer the tool over the store file.
+`index(action="verify")` now exists precisely so this question has a
+substrate-correct answer; use it instead of `sqlite3`. Pairs with W-54: I scouted
+my own sizing claim and not my own instrument.
 
 ## Template for new entries
 

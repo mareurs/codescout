@@ -354,11 +354,25 @@ memory surface"). That was read from the code and never measured. Corrected:
 |---|---|
 | per-input ceiling, binary search | **8000-8250 chars** (~2000-2062 tokens), matching `n_ctx_train` = 2048 |
 | `256 × 1200` chars in one request (production `DEFAULT_FLUSH_BATCH`) | HTTP 200 — the limit is per **input**, not per batch total |
-| `MAX(LENGTH(content))` over 47k live chunks, by language | **1200 in every language**, markdown included; zero over 8000 |
+| `MAX(LENGTH(content))` by language | **1200 in every language**, markdown included; zero over 8000 — **read from a retired sqlite store**, see below |
 
 `chunk_target` defaults to 1200 chars and the chunker enforces it as a hard cap,
 so a chunk sits ~6.7× under the ceiling. The same holds on the reporter's
 `--ctx-size 8192 --parallel 8` (1024 tokens/slot ≈ 4000 chars): still 3× clear.
+
+> **⚠ Substrate correction, 2026-08-26 (`bug-fix-session-log:F-66`).** The third
+> row above queried `.codescout/embeddings/codescout.db`, which on this host is a
+> **retired** store — `CODESCOUT_VECTOR_BACKEND` is unset and
+> `VectorBackend::resolve` defaults to Qdrant under `server-stack`, so the live
+> index is Qdrant and that file had not been written all session. It is therefore
+> evidence about a dead world.
+>
+> **The conclusion is unaffected**, because chunk size is a property of the code
+> (`chunk_target` = 1200, enforced by the chunker) rather than of any store, and
+> the same ceiling was measured independently in
+> `docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md`.
+> Rows one and two are also unaffected — both were direct HTTP calls to the live
+> embedder, as is every measurement the segmentation fix rests on.
 
 So the two surfaces rank the other way round:
 

@@ -140,7 +140,21 @@ Measured on the live stack, 2026-08-26:
 |---|---|
 | Per-input ceiling, by binary search on `POST /v1/embeddings` | between **8000 and 8250 chars** (~2000-2062 tokens) — matches CodeRankEmbed's `n_ctx_train` = 2048 exactly |
 | `256 × 1200`-char inputs in one request (production's `DEFAULT_FLUSH_BATCH`) | **HTTP 200** — the limit is per input, not per batch total |
-| `MAX(LENGTH(content))` over all 47k live chunks, grouped by language | **1200 for every language**, markdown included; **zero** chunks over 8000 |
+| `MAX(LENGTH(content))` grouped by language | **1200 for every language**, markdown included; **zero** chunks over 8000 — but see the substrate warning below |
+
+> **⚠ Substrate correction, 2026-08-26 (`bug-fix-session-log:F-66`).** The third
+> row read `.codescout/embeddings/codescout.db`, which on this host is a
+> **retired** store: `CODESCOUT_VECTOR_BACKEND` is unset, `VectorBackend::resolve`
+> defaults to Qdrant under `server-stack`, and that file's mtime predates the
+> session. The live index reports 1611 files / 47 647 chunks where the sqlite file
+> says 1593 / 46 979.
+>
+> **The conclusion stands on other evidence.** `chunk_target` defaults to 1200 and
+> the chunker enforces it as a hard cap — a property of the code, not of any store
+> — and the same ceiling was independently measured in
+> `docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md`.
+> The first two rows are unaffected: both were direct HTTP calls to the live
+> embedder. Only the per-language table needs its provenance re-labelled.
 
 `chunk_target` defaults to 1200 chars (`src/retrieval/sync.rs`,
 `STACK_CHUNK_TARGET`) and the chunker enforces it as a hard cap — so a code or
@@ -266,6 +280,64 @@ genuinely anomalous.
    **Verdict:** rejected — both returned HTTP 200. The limit is per input.
 
 ## Fix
+### `index(action="verify")` shipped 2026-08-26 — headline defect closed
+
+- **SHA:** `e5821fec` (`experiments`)
+- **patch-id:** `1d51dfb60e6b913f2478de9d848c96d36eb352cc`
+
+`feat(index): add index(action="verify") — a read-only integrity check`. Reports
+coverage against the indexer's own walk, orphaned rows, chunks with no vector, and
+`empty_eligible_dirs` — this file's requested minimum bar — then derives **one**
+verdict (`complete | stale | incomplete`) rather than leaving a reader to
+reconcile six fields.
+
+The verdict ordering is the design: `stale` is checked **before** `incomplete`,
+because an index legitimately behind HEAD is *expected* to be short of the files
+those commits added. Calling that incomplete would fire on nearly every project
+nearly all the time, and a check that always complains gets turned off. A vector
+hole or a wholly-absent eligible directory outranks staleness, since no number of
+pending commits explains either. Four tests pin those arms.
+
+**Live output on this repo, read after `cargo rb` + reconnect** — and this is the
+first substrate-correct measurement of this project's index in the whole
+investigation:
+
+```
+verdict: "stale"          expected_files: 1612   stored_files: 1611
+missing_count: 7          orphan_count: 6        empty_eligible_dirs: []
+chunks_without_vectors: 0 git_sync: behind 12 (c0e3a574 → 8baa4952)
+hint: "Index is 12 commit(s) behind HEAD; the 7 missing file(s) are explained by that."
+```
+
+Three things worth reading off that:
+
+1. **`stale`, not `incomplete`** — 7 missing and 6 orphans while 12 commits behind
+   is exactly the case that must not cry wolf. The arm ordering earns its keep on
+   the first real invocation.
+2. **The missing and orphan lists are a matched pair.** Six of the seven missing
+   are `docs/issues/archive/X`; all six orphans are `docs/issues/X` — the same
+   files either side of an archive move. Neither list alone says that; together
+   they diagnose it.
+3. **`empty_eligible_dirs: []` is the independent confirmation** that `docs/` is
+   fully covered — the claim the retired-store table was originally cited for
+   (see the substrate warning under § *Root cause*).
+
+**`chunks_without_vectors: 0` proves nothing on this host.** The backend is
+Qdrant, whose impl returns `Ok(0)` structurally because a point carries payload
+and vector together. The field is only a measurement under sqlite-vec. That is
+documented at both impls, and is exactly why the trait method has no default.
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` →
+4492 passed, 0 failed, 46 ignored.
+
+**Still open.** This closes the *detection* gap, not the reporting one:
+`index(action="status")` itself is unchanged and still answers `indexed: true,
+queryable: true` off a non-zero chunk count. `verify` is opt-in, so a caller who
+never runs it sees exactly what they saw before. Folding the cheap tier
+(vector holes, orphans) into `status` needs no walk and would make the default
+surface honest — that plus the durable degraded marker from
+`docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`
+step 2 is what would let this bug be archived.
 ### Progress 2026-08-26 — root cause fixed, headline defect still open
 
 **Fixed:** the mechanism that *created* the partial index. `flush_pending`
