@@ -241,27 +241,44 @@ mod tests {
     // writes are GONE rather than coordinated. See
     // docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
 
+    /// Absolute on BOTH platforms. `/tmp/x` carries no drive letter, so on Windows it is
+    /// RELATIVE — and `global_config_dir_from` ignores relative XDG values by spec. Every
+    /// "honours an absolute value" case below therefore turned into an "ignores a relative
+    /// value" case on Windows: two failed outright, and
+    /// `config_dir_ignores_relative_xdg_and_falls_back_to_home` kept passing while no
+    /// longer discriminating anything, since both of its inputs were relative there.
+    ///
+    /// Deliberately NOT applied to the `relative/state` literals — those must stay
+    /// relative on both platforms, or the spec gate they pin goes untested.
+    #[cfg(windows)]
+    fn abs(p: &str) -> std::ffi::OsString {
+        std::ffi::OsString::from(format!("C:{p}"))
+    }
+    #[cfg(not(windows))]
+    fn abs(p: &str) -> std::ffi::OsString {
+        std::ffi::OsString::from(p)
+    }
+
     #[test]
     fn config_dir_prefers_xdg_config_home() {
-        let dir =
-            global_config_dir_from(Some(OsStr::new("/tmp/xdg-test-codescout")), None).unwrap();
-        assert_eq!(dir, PathBuf::from("/tmp/xdg-test-codescout/codescout"));
+        let xdg = abs("/tmp/xdg-test-codescout");
+        let dir = global_config_dir_from(Some(&xdg), None).unwrap();
+        assert_eq!(dir, PathBuf::from(&xdg).join("codescout"));
     }
 
     #[test]
     fn config_dir_falls_back_to_home_dot_config() {
-        let dir = global_config_dir_from(None, Some(OsStr::new("/tmp/fake-home"))).unwrap();
-        assert_eq!(dir, PathBuf::from("/tmp/fake-home/.config/codescout"));
+        let home = abs("/tmp/fake-home");
+        let dir = global_config_dir_from(None, Some(&home)).unwrap();
+        assert_eq!(dir, PathBuf::from(&home).join(".config").join("codescout"));
     }
 
     #[test]
     fn config_dir_xdg_wins_over_home() {
-        let dir = global_config_dir_from(
-            Some(OsStr::new("/tmp/xdg")),
-            Some(OsStr::new("/tmp/fake-home")),
-        )
-        .unwrap();
-        assert_eq!(dir, PathBuf::from("/tmp/xdg/codescout"));
+        let xdg = abs("/tmp/xdg");
+        let home = abs("/tmp/fake-home");
+        let dir = global_config_dir_from(Some(&xdg), Some(&home)).unwrap();
+        assert_eq!(dir, PathBuf::from(&xdg).join("codescout"));
     }
 
     #[test]
@@ -276,12 +293,9 @@ mod tests {
     /// the process CWD. Mirrors `state_dir_from`'s gate in `src/util/fs.rs`.
     #[test]
     fn config_dir_ignores_relative_xdg_and_falls_back_to_home() {
-        let dir = global_config_dir_from(
-            Some(OsStr::new("relative/state")),
-            Some(OsStr::new("/tmp/fake-home")),
-        )
-        .unwrap();
-        assert_eq!(dir, PathBuf::from("/tmp/fake-home/.config/codescout"));
+        let home = abs("/tmp/fake-home");
+        let dir = global_config_dir_from(Some(OsStr::new("relative/state")), Some(&home)).unwrap();
+        assert_eq!(dir, PathBuf::from(&home).join(".config").join("codescout"));
     }
 
     /// The relative value is *ignored*, not used as a base — so with no `HOME` to
@@ -294,11 +308,11 @@ mod tests {
 
     #[test]
     fn env_path_derives_from_config_dir() {
-        let dir =
-            global_config_dir_from(Some(OsStr::new("/tmp/xdg-test-codescout")), None).unwrap();
+        let xdg = abs("/tmp/xdg-test-codescout");
+        let dir = global_config_dir_from(Some(&xdg), None).unwrap();
         assert_eq!(
             dir.join(".env"),
-            PathBuf::from("/tmp/xdg-test-codescout/codescout/.env")
+            PathBuf::from(&xdg).join("codescout").join(".env")
         );
     }
 
