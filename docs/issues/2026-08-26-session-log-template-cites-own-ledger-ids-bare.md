@@ -12,7 +12,8 @@ tags:
 - cross-repo
 opened: 2026-08-26
 owner: marius
-related: []
+related:
+- '4975d27ed2aa9550'
 severity: medium
 unverified: Only one downstream repo was measured (claude-plugins). The wrong-resolution of `R-1` was confirmed there by elimination from link_scan's edge list, not by a direct per-token resolver dump. Other consuming repos were not surveyed.
 ---
@@ -126,37 +127,53 @@ dangling; `R-1` is the only token in the copied file that can produce that edge.
 
 ## Fix
 
-Qualify every id in `docs/templates/session-log.md` with the repo prefix:
+Qualify every id in `docs/templates/session-log.md` so it survives a copy elsewhere.
 
-| Line | Now | Should be |
+| Line | Was (bare) | Now |
 |---|---|---|
-| 29–30 | `` `F-2`/`W-3` ``, `` `F-1`/`W-1` ``, `` `F-3` `` | `codescout:statement-validity-session-log:F-2`, … |
+| 29–30 | `` `F-2`/`W-3` ``, `` `F-1`/`W-1` ``, `` `F-3` `` | `statement-validity-session-log:F-2`, `statement-validity-session-log:W-3`, etc. |
 | 105 | `` `R-89` `` | `codescout:R-89` |
 | 108 | `R-1 + R-7` | `codescout:R-1 + codescout:R-7` |
-| 116 | `` `W-4` `` | `codescout:W-4` |
+| 116 | `` `W-4` `` | `calendar-insight-panel-session-log-2026-08-18:W-4` |
 
-Lines 29–30 need the double qualification (`<repo>:<file-stem>:<ID>`) because `F-N`/`W-N`
-are namespaced per work stream and the prose already names
-`statement-validity-session-log` as the owner.
+**Correction made during implementation, 2026-08-26:** this table originally prescribed
+`codescout:statement-validity-session-log:F-2` and
+`eduplanner-ui:calendar-insight-panel-session-log-2026-08-18:W-4` — a three-part
+`<repo>:<file-stem>:<ID>` form for lines 29–30 and 116. That form does not work: the
+resolver silently drops the leading `<repo>:` segment (a regex-slide, same class as the
+already-fixed `long_file_stem_qualifier_is_captured_whole_not_truncated_to_a_suffix`
+regression) and resolves it identically to the plain `<file-stem>:<ID>` form. Verified by
+writing both forms into an identical test fixture and observing byte-identical
+`link_scan` output — see `docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md`,
+filed to track the resolver-level defect separately. The table above is the corrected,
+verified-working form; R-89/R-1/R-7 keep the (working, tested) `codescout:` repo-only
+qualifier since `R-N` is a single-ledger namespace and needs no file-stem.
+
+`docs/templates/session-log.md` has no siblings under `docs/templates/` — the "sweep the
+siblings" instruction below found nothing else to fix.
 
 **Then sweep the siblings.** This is a class, not an instance — the same reasoning applies
-to any template this repo ships that quotes a local ledger. Check at minimum
-`docs/templates/` in full and the reconnaissance/tracker-hygiene ledger templates
-distributed from `claude-plugins`.
+to any template this repo ships that quotes a local ledger. Checked: `docs/templates/`
+has exactly one file (`session-log.md`, this one). Not checked: templates distributed from
+`claude-plugins`.
 
-Fix commit SHA + `git patch-id --stable`: not yet applied.
-
+Fix commit SHA + `git patch-id --stable`: recorded below once committed.
 ## Tests added
 
-None yet. The durable regression is cheap and directly targets the gap: copy each
-`docs/templates/*.md` into a scratch repo with no ledgers, run `link_scan`, and assert zero
-dangling and zero materialised edges. A template that resolves to *anything* in a foreign
-repo has a bug by construction.
+`session_log_template_citations_never_bind_to_a_foreign_repos_namesakes`
+(`tests/link_scan.rs`). Reads the LIVE `docs/templates/session-log.md` off disk (not a
+hardcoded excerpt), drops it into a scratch repo alongside two adversarial local
+ledgers — one under codescout's own `reconnaissance-patterns.md` stem defining
+unrelated `R-1`/`R-7`/`R-89`, one under an unrelated `local-session-log.md` stem
+defining unrelated `F-1..F-3`/`W-1`/`W-3`/`W-4` — and asserts `link_scan(write=true)`
+produces zero edges, zero dangling, zero ambiguous from the template artifact.
 
-This is the third defect of the shape *"reconnaissance boilerplate that does not survive
-being copied into another repo"* — see § References — which is the argument for the test
-rather than a fourth manual fix.
-
+**Verified RED before GREEN, twice.** First against the pre-fix bare citations (verbatim
+from § Reproduction): 3 wrong edges materialized, matching this bug's own symptom
+exactly. Then, after applying the (initially wrong) three-part qualification, RED
+again — byte-identical failure, which is what surfaced
+`docs/issues/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md`.
+Only the corrected single-qualifier form goes green.
 ## Workarounds
 
 Downstream: after copying the template, qualify or delete the imported citations before the
@@ -178,4 +195,3 @@ is not repo-qualified.
 - `claude-plugins:roster-audit-session-log:F-3` — sibling defect: the recon skill's `**Valid:**` exemplar is rejected by `append_entry`
 - `claude-plugins:repo-hygiene-session-log:F-2` — sibling defect: the template's own example index row burned the id it displayed
 - `claude-plugins` `docs/issues/2026-08-20-reconnaissance-skill-prescribes-hand-allocated-edit-markdown-appends.md` — the same class, fixed at source 2026-08-20
-

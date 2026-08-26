@@ -416,3 +416,65 @@ async fn reindex_id_churn_cascade_is_healed_by_rescan() {
     assert_eq!(out2["counts"]["edges_added"], 0, "{out2}");
     assert_eq!(out2["counts"]["edges_pruned"], 0, "{out2}");
 }
+
+/// Regression for docs/issues/2026-08-26-session-log-template-cites-own-ledger-ids-bare.md:
+/// the template's own R-N/F-N/W-N citations must be repo-qualified. Unqualified, they
+/// resolve against whatever the COPYING repo's own ledgers happen to define — silently
+/// binding to an unrelated entry rather than reporting cross-repo or dangling.
+///
+/// A foreign repo's own, wholly unrelated ledgers define every number the template
+/// cites, so a bare token has somewhere wrong to bind. RED (pre-fix) form: paste the
+/// template's citations back to their pre-fix bare form and watch this fail.
+#[tokio::test]
+async fn session_log_template_citations_never_bind_to_a_foreign_repos_namesakes() {
+    let dir = TempDir::new().unwrap();
+    let ctx = mk_ctx(dir.path().to_path_buf());
+
+    // codescout's own R-N ledger, unrelated entries under the same numbers the
+    // template cites — proves the repo-qualified `codescout:R-N` form stays
+    // cross-repo rather than binding here.
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/trackers/reconnaissance-patterns.md",
+        ID_A,
+        "## R-1 — unrelated local entry\n## R-7 — unrelated local entry\n## R-89 — unrelated local entry\n",
+    );
+    // The copying repo's OWN session log, numbering its own F-N/W-N from F-1 —
+    // the realistic collision (many session logs restart at F-1) under a
+    // DIFFERENT file stem than the ones the template cites. Proves the
+    // stem-qualified form doesn't fall back to a same-number/different-file
+    // match the way a bare token would.
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/trackers/local-session-log.md",
+        ID_B,
+        "## F-1 — unrelated\n## F-2 — unrelated\n## F-3 — unrelated\n## W-1 — unrelated\n## W-3 — unrelated\n## W-4 — unrelated\n",
+    );
+
+    // The real, live template — this is the copy every reconnaissance pass ships.
+    // A regression back to bare citations here reproduces the wrong-binding
+    // failure this test's `local-session-log.md` fixture exists to catch.
+    let template = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/templates/session-log.md"
+    ))
+    .unwrap();
+    const ID_TEMPLATE: &str = "eeeeeeeeeeeeeeee5";
+    add_artifact(
+        &ctx,
+        dir.path(),
+        "docs/trackers/topic-session-log.md",
+        ID_TEMPLATE,
+        &template,
+    );
+
+    let out = link_scan::call(&ctx, serde_json::json!({"write": true}))
+        .await
+        .unwrap();
+    assert_eq!(out["counts"]["edges_added"], 0, "{out}");
+    assert_eq!(out["counts"]["dangling"], 0, "{out}");
+    assert_eq!(out["counts"]["ambiguous"], 0, "{out}");
+    assert!(edge_set(&ctx).is_empty());
+}

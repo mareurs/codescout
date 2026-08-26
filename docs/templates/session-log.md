@@ -26,8 +26,8 @@
 > take the number between your scan and your write. Pre-written rows are
 > worse: the allocator counts an id claimed by an index row, so rows
 > written ahead of their sections consume the ids they name — which is why
-> codescout's `statement-validity-session-log` starts at `F-2`/`W-3`
-> rather than `F-1`/`W-1` (see `F-3` there).
+> codescout's `statement-validity-session-log` starts at `statement-validity-session-log:F-2`/`statement-validity-session-log:W-3`
+> rather than `statement-validity-session-log:F-1`/`statement-validity-session-log:W-1` (see `statement-validity-session-log:F-3` there).
 >
 > **`edit_markdown` is not the append path**, though it works at first.
 > This template ships without frontmatter, so a fresh copy is directly
@@ -102,10 +102,10 @@ either way. Record one of:
 
 > ⚠️ **Anchor on a back-citation, not a verbatim quote.** A quote goes red when the
 > promoted rule is legitimately reworded — a false positive produced by the
-> promotion working as intended, observed 2026-08-20 when `R-89`'s bullet was
+> promotion working as intended, observed 2026-08-20 when `codescout:R-89`'s bullet was
 > rewritten and the tracker's stored quote had to be edited to match. The durable
 > form is the promoted text citing its own entry id —
-> *"(R-1 + R-7 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"* — so
+> *"(codescout:R-1 + codescout:R-7 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"* — so
 > verification is a `grep` for the id and survives every rewording. Keep the quote
 > as a reading aid; do not make it the predicate.
 
@@ -113,7 +113,7 @@ Run this when the work stream wraps, **and** whenever a criterion fires
 mid-stream — an audit that only happens at archive time is one that happens
 after the lesson was needed. Prior art:
 `eduplanner-ui:docs/trackers/archive/calendar-insight-panel-session-log-2026-08-18.md`, whose
-audit correctly caught its own `W-4` as fired-and-unapplied and named the exact
+audit correctly caught its own `calendar-insight-panel-session-log-2026-08-18:W-4` as fired-and-unapplied and named the exact
 text to promote.
 
 ## Category conventions
