@@ -1,5 +1,5 @@
 ---
-id: '59d74b3c091fa369'
+id: ba92f44408947e1d
 kind: bug
 status: fixed
 title: 'BUG: semantic code index build fails with "embed_batch sparse send" on this machine, leaving the index permanently behind HEAD'
@@ -149,11 +149,18 @@ served the stale pre-fix index; `grep`/`symbols`/`references` were the fallback 
 anything landed after `d7988aca`.)
 ## Resume
 
-1. Find where `sparse_base` (and `dense_base`) are actually resolved for a live `EmbedderHttp` on this project (likely `.codescout/project.toml`, an env var, or a hardcoded default in whatever constructs the embedder for `index(action="build")`) — `grep -rn "EmbedderHttp::new\|EmbedderHttp::with_config" src/`.
-2. Once the resolved `sparse_base` value is known, `curl -sf "<sparse_base>/info"` (or equivalent) from this machine to confirm reachability directly — that turns hypothesis 2 above from inferred to measured.
-3. If unreachable: either point this machine's config at a reachable sparse-embedding endpoint, or confirm whether `local-embed`/`no-features` build variants (mentioned in CLAUDE.md's CI matrix as existing feature configs) avoid the remote dependency entirely and could serve as a same-machine workaround.
-4. Re-run `index(action="build")` after any config change and confirm `git_sync.status` reaches `"up_to_date"`.
+N/A — fixed and verified. Of the four-step plan this section used to hold, only step 4
+still mattered, and it is done: `index(action="status")` reports `git_sync.behind_commits:
+0` with `last_indexed_commit == head_commit`, measured 2026-08-26.
 
+*(Corrected 2026-08-26. This section previously held a live plan to locate `sparse_base`
+and curl it for reachability, written while the cause was still believed to be an
+unreachable sparse-embedding endpoint. The established cause is a different one — a stale
+`~/.config/codescout/.env` symlink pointing at a removed compose profile that re-enabled
+the sparse leg, while the profile actually running keeps that container stopped by design
+— so steps 1–3 would send a reader after the wrong thing. The plan was simply left behind
+when the diagnosis moved. Archiving it unedited would have preserved a wrong instruction
+in the permanent record, and nothing re-reads `archive/`.)*
 ## References
 
 - `src/retrieval/embedder.rs:159-350` (`EmbedderHttp` construction), `:490-600` (`embed_one_batch`, the failing call).

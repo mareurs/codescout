@@ -22,7 +22,7 @@ path = "src/config/global.rs"
 hash = "6c959f05ef0d37a70d217a45644db3596d4edb9ea1d65ac2b1da115f33a37c86"
 
 [[anchors]]
-path = "docs/issues/2026-08-23-index-build-fails-embed-batch-sparse-send.md"
+path = "docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md"
 hash = "a3a3fd451efdcbdafb5ffc107a92d44af82a1fd43e846802abe2e2b8225aedb8"
 
 [[anchors]]

@@ -4343,7 +4343,7 @@ session hazard (commits landing under me) this session already hit twice.
 
 **Status:** fixed-verified
 
-**Fix idea / Pointer:** `docs/issues/2026-08-23-index-build-fails-embed-batch-sparse-send.md` (root cause section rewritten with the corrected chain and citations).
+**Fix idea / Pointer:** `docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md` (root cause section rewritten with the corrected chain and citations).
 
 ---
 
@@ -5697,7 +5697,7 @@ re-pointing `docs/issues/archive/<slug>.md` citations to `docs/issues/<slug>.md`
 citation drift in exactly one direction — archive the file, then re-point every
 citation **in the same commit as the move**, using the prescribed `grep -rn` sweep
 (whose `--include` list was itself widened on 2026-08-26 by
-`docs/issues/2026-08-26-archive-citation-sweep-grep-cannot-see-shell-or-yaml.md`).
+`docs/issues/archive/2026-08-26-archive-citation-sweep-grep-cannot-see-shell-or-yaml.md`).
 
 **Got (scouted reality):** **4 citations across 3 files** named
 `docs/issues/archive/<slug>.md` for two bugs that had **never been archived** and

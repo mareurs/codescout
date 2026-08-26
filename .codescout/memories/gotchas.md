@@ -208,5 +208,5 @@ running (`docker ps -a`), not the repo's own `.env`/`.env.gpu`/`.env.amd` files 
 loader never reads those regardless of which one looks current. The symlink target can
 drift stale silently (e.g. left pointing at a profile whose compose services were later
 removed) with nothing warning on mismatch. See
-`docs/issues/2026-08-23-index-build-fails-embed-batch-sparse-send.md` and
+`docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md` and
 `bug-fix-session-log:F-59`.

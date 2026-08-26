@@ -1283,7 +1283,7 @@ write-approval instructions despite the sub-agent having already found its answe
 - The 7 unclear `Valid:` entries and the 1 cross-repo fix-anchor bug (both above).
 
 **Also filed this session (adjacent, not a sweep finding):**
-`docs/issues/2026-08-23-index-build-fails-embed-batch-sparse-send.md` — the *semantic code*
+`docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md` — the *semantic code*
 index (a separate mechanism from the librarian catalog) fails to rebuild on this machine at
 all (`embed_batch sparse send`), independently confirming the "different machine, stale
 index" pattern this whole session started from.

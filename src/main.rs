@@ -155,11 +155,14 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
 
-        /// Re-embed the memories already in the store, in place, instead of
-        /// importing from a legacy db. Preserves point ids, content, anchors and
-        /// timestamps — only the vectors change. A failed row keeps its existing
-        /// vector, so a misconfigured embedder cannot degrade the corpus.
-        /// Mutually exclusive with --db-path.
+        /// Re-derive every memory vector from current embedding config, instead of
+        /// importing from a legacy db. Runs TWO passes, and the second is easy to
+        /// miss: memories already in the store are re-embedded in place (point ids,
+        /// content, anchors and timestamps preserved — only the vector changes), and
+        /// memories on disk with NO point at all are embedded from disk, which the
+        /// store-driven pass cannot see because it enumerates from the store. A
+        /// failed row keeps its existing state, so a misconfigured embedder cannot
+        /// degrade the corpus. Mutually exclusive with --db-path.
         #[arg(long, conflicts_with = "db_path")]
         in_place: bool,
     },
