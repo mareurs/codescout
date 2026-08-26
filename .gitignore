@@ -29,6 +29,7 @@ crates/*/.codescout/usage.db-shm
 /com/
 tests/fixtures/*/.codescout/
 /.codescout/workspace.toml
+/.codescout/peers.toml
 # memories/, projects/*/memories/, and system-prompt.md are intentionally tracked
 /scripts/node_modules/
 /scripts/package-lock.json
