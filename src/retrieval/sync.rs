@@ -823,15 +823,24 @@ pub async fn sync_worktree(
     // committed to the store at this point, so failing here leaves the index
     // exactly as it was rather than half-updated with no record of it.
     let dirty_vec: Vec<String> = dirty.paths.iter().cloned().collect();
-    crate::retrieval::index_state::write_index_state_with_dirty(worktree_root, &dirty_vec)
-        .with_context(|| {
-            format!(
-                "recording this worktree's dirty set ({} paths) before upserting the \
+    // `Preserve`, not `Record`: this function has no config to read a model from, and
+    // by its own design it is not where a model change lands — see the `dim_migration:
+    // None` note at the end of this function, and the fact that it deliberately does not
+    // call `ensure_collection`. Stamping a model here would let a worktree delta
+    // overwrite main's record of what built the index.
+    crate::retrieval::index_state::write_index_state_with_dirty(
+        worktree_root,
+        &dirty_vec,
+        crate::retrieval::index_state::ModelStamp::Preserve,
+    )
+    .with_context(|| {
+        format!(
+            "recording this worktree's dirty set ({} paths) before upserting the \
                  delta -- refusing to index without it, since main would keep serving \
                  stale chunks for every path listed",
-                dirty_vec.len()
-            )
-        })?;
+            dirty_vec.len()
+        )
+    })?;
 
     // Pass 2: re-visit the same file list, materialising full chunk content
     // only for files `dirty_paths` marked dirty.
@@ -1039,9 +1048,16 @@ impl crate::retrieval::client::RetrievalClient {
             let existing_dirty = crate::retrieval::index_state::read_index_state(root)
                 .map(|s| s.dirty_paths)
                 .unwrap_or_default();
-            if let Err(e) =
-                crate::retrieval::index_state::write_index_state_with_dirty(root, &existing_dirty)
-            {
+            // `Record`, because this is the path that just did the embedding: the
+            // vectors now in the store were produced by `self.config.model`, and that
+            // is the only fact `index(action="status")` can honestly report as
+            // `indexed_with_model`. Reporting the CONFIGURED model under that name
+            // would make a mismatch invisible by construction.
+            if let Err(e) = crate::retrieval::index_state::write_index_state_with_dirty(
+                root,
+                &existing_dirty,
+                crate::retrieval::index_state::ModelStamp::Record(&self.config.model),
+            ) {
                 tracing::warn!(error = %e, "failed to write index-state sidecar");
             }
         }
@@ -3112,6 +3128,7 @@ mod tests {
         crate::retrieval::index_state::write_index_state_with_dirty(
             dir.path(),
             &["src/changed.rs".to_string()],
+            crate::retrieval::index_state::ModelStamp::Preserve,
         )
         .unwrap();
 

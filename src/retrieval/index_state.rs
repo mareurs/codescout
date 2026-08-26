@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 /// version-gated. See the `index-state.json` schema section of
 /// `docs/state-protocol.md`. If version-gated degradation is ever built, update
 /// this comment to describe the real mechanism rather than the aspiration.
-pub const INDEX_STATE_SCHEMA_VERSION: u32 = 2;
+pub const INDEX_STATE_SCHEMA_VERSION: u32 = 3;
 
 /// The on-disk shape of `.codescout/index-state.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +46,49 @@ pub struct IndexState {
     /// parse as "no sidecar" -- i.e. "never indexed" -- for the whole project.
     #[serde(default)]
     pub dirty_paths: Vec<String>,
+    /// The embedding model spec that produced the vectors currently in the store,
+    /// in codescout-embed's grammar (`local:`, `openai:`, a bare name, ...).
+    ///
+    /// This is the *stored* model, which is NOT the configured one. They differ in
+    /// exactly the failure the manual's troubleshooting section exists to diagnose,
+    /// and reporting the configured value under this name would make a mismatch
+    /// invisible by construction -- the two fields a reader is told to compare
+    /// would be one value read twice.
+    ///
+    /// `None` means "not recorded": a sidecar written before this field existed, or
+    /// a write by a path that is not the model-migration surface. Absence is not a
+    /// mismatch, and must never be reported as one.
+    ///
+    /// Why it cannot be derived instead: a dimension check already catches a
+    /// dimension *change* (`migrate_or_guard_index_dim`), but the common model swaps
+    /// share a dimension -- `local:AllMiniLML6V2Q` and `local:BGESmallENV15` are
+    /// both 384d, `CodeRankEmbed` and `JinaEmbeddingsV2BaseCode` both 768d -- so
+    /// nothing but a stored identity can see them.
+    ///
+    /// `#[serde(default)]` for the same reason as `dirty_paths` above.
+    #[serde(default)]
+    pub indexed_with_model: Option<String>,
+}
+
+/// What a sidecar write should do about [`IndexState::indexed_with_model`].
+///
+/// An explicit two-state choice rather than an `Option<&str>`, because this file has
+/// already produced one silent-wipe defect of exactly this shape: `write_index_state`
+/// delegates to `write_index_state_with_dirty(root, &[])`, which clears a worktree's
+/// recorded `dirty_paths` -- a HUMAN RULING and a regression test
+/// (`sync_project_preserves_existing_dirty_paths_never_clears_via_plain_write_index_state`)
+/// exist solely to keep callers off that path. `None` would read as "no model" and be
+/// mistaken for "clear it"; `Preserve` cannot be misread.
+#[derive(Debug, Clone, Copy)]
+pub enum ModelStamp<'a> {
+    /// Record this model. For the writer that actually performed the embedding and
+    /// therefore knows which model produced the vectors.
+    Record(&'a str),
+    /// Leave whatever is already stored. For a writer that is not the
+    /// model-migration surface -- `sync_worktree` documents itself as one
+    /// (`src/retrieval/sync.rs`: *"a worktree delta is never the surface a model
+    /// migration happens on"*), and it has no config to read a model from anyway.
+    Preserve,
 }
 
 fn state_path(root: &Path) -> PathBuf {
@@ -67,19 +110,44 @@ fn head_commit_full(root: &Path) -> Option<String> {
 /// `.codescout` dir already exists in any indexed project), and callers
 /// log-and-continue. A non-git root records an empty commit, which
 /// [`git_sync_status`] reads as "freshness indeterminate".
+///
+/// **Test-only in practice, and left that way on purpose.** Every production writer
+/// goes through [`write_index_state_with_dirty`] — a HUMAN RULING requires it,
+/// because this wrapper passes `&[]` and would clear a worktree's recorded
+/// `dirty_paths`. That semantics is unchanged here. The model is `Preserve`d rather
+/// than cleared, since nothing about this wrapper's contract says a caller with no
+/// dirty set also intends to forget which model built the index.
 pub fn write_index_state(root: &Path) -> std::io::Result<()> {
-    write_index_state_with_dirty(root, &[])
+    write_index_state_with_dirty(root, &[], ModelStamp::Preserve)
 }
 
 /// As [`write_index_state`], additionally recording the paths a worktree's delta
-/// sync must not inherit from the main index. See the worktree sync mode in
-/// `sync.rs`.
-pub fn write_index_state_with_dirty(root: &Path, dirty: &[String]) -> std::io::Result<()> {
+/// sync must not inherit from the main index, and what to do with the stored model
+/// spec. See the worktree sync mode in `sync.rs`.
+///
+/// `model` is a required argument, deliberately. A defaulting convenience wrapper is
+/// what produced the `dirty_paths` wipe this file already carries a HUMAN RULING
+/// about, so a new field gets no default and the compiler names every caller that
+/// has to decide.
+pub fn write_index_state_with_dirty(
+    root: &Path,
+    dirty: &[String],
+    model: ModelStamp<'_>,
+) -> std::io::Result<()> {
+    // Read-back-and-preserve for the model, mirroring what `sync_project` already
+    // does by hand for `dirty_paths`. Done INSIDE the writer rather than at each
+    // call site because every caller that is not the embedding path wants the same
+    // thing, and the one that does want to change it says so via `Record`.
+    let indexed_with_model = match model {
+        ModelStamp::Record(m) => Some(m.to_string()),
+        ModelStamp::Preserve => read_index_state(root).and_then(|s| s.indexed_with_model),
+    };
     let state = IndexState {
         last_indexed_commit: head_commit_full(root).unwrap_or_default(),
         last_indexed_at: chrono::Utc::now().to_rfc3339(),
         schema_version: INDEX_STATE_SCHEMA_VERSION,
         dirty_paths: dirty.to_vec(),
+        indexed_with_model,
     };
     std::fs::create_dir_all(root.join(".codescout"))?;
     let body = serde_json::to_string_pretty(&state).map_err(std::io::Error::other)?;
@@ -219,7 +287,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
-        write_index_state_with_dirty(root, &["src/a.rs".to_string()]).unwrap();
+        write_index_state_with_dirty(root, &["src/a.rs".to_string()], ModelStamp::Preserve)
+            .unwrap();
         let st = read_index_state(root).expect("sidecar should exist");
         assert_eq!(st.dirty_paths, vec!["src/a.rs".to_string()]);
     }
@@ -239,6 +308,86 @@ mod tests {
         .unwrap();
         let st = read_index_state(root).expect("old sidecar must still parse");
         assert!(st.dirty_paths.is_empty());
+        assert_eq!(st.last_indexed_commit, "abc");
+    }
+
+    /// `Record` stores the model; a later `Preserve` write must not erase it.
+    ///
+    /// This is the whole hazard [`ModelStamp`] exists for. `sync_worktree` writes with
+    /// `Preserve`, and a worktree delta happens far more often than a full reindex — so
+    /// if `Preserve` cleared the field, the model record would survive only until the
+    /// next worktree sync and `index(action="status")` would go back to reporting
+    /// nothing, with no error anywhere. Exactly the shape of the `dirty_paths` wipe this
+    /// file already carries a HUMAN RULING about.
+    #[test]
+    fn preserve_does_not_erase_a_recorded_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        write_index_state_with_dirty(root, &[], ModelStamp::Record("local:BGESmallENV15")).unwrap();
+        assert_eq!(
+            read_index_state(root)
+                .unwrap()
+                .indexed_with_model
+                .as_deref(),
+            Some("local:BGESmallENV15")
+        );
+
+        write_index_state_with_dirty(root, &["src/a.rs".to_string()], ModelStamp::Preserve)
+            .unwrap();
+        let st = read_index_state(root).unwrap();
+        assert_eq!(
+            st.indexed_with_model.as_deref(),
+            Some("local:BGESmallENV15"),
+            "a Preserve write must carry the model forward"
+        );
+        assert_eq!(
+            st.dirty_paths,
+            vec!["src/a.rs".to_string()],
+            "and must still record its own dirty set"
+        );
+    }
+
+    /// `Record` overwrites, because a reindex under a new model makes the old record
+    /// false. The field must track the vectors actually in the store, not the first
+    /// model ever used.
+    #[test]
+    fn record_replaces_a_previously_recorded_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        write_index_state_with_dirty(root, &[], ModelStamp::Record("local:AllMiniLML6V2Q"))
+            .unwrap();
+        write_index_state_with_dirty(root, &[], ModelStamp::Record("CodeRankEmbed")).unwrap();
+
+        assert_eq!(
+            read_index_state(root)
+                .unwrap()
+                .indexed_with_model
+                .as_deref(),
+            Some("CodeRankEmbed")
+        );
+    }
+
+    /// A sidecar written before this field existed must still parse, and read as "not
+    /// recorded" rather than failing.
+    ///
+    /// `read_index_state` treats a parse failure as "no sidecar" — "never indexed" for
+    /// the whole project — so a missing `#[serde(default)]` here would not be a small
+    /// bug. Same reasoning as the `dirty_paths` case above.
+    #[test]
+    fn sidecar_written_before_the_model_field_existed_still_parses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(
+            root.join(".codescout").join("index-state.json"),
+            r#"{"last_indexed_commit":"abc","last_indexed_at":"2026-08-01T00:00:00Z","schema_version":2,"dirty_paths":[]}"#,
+        )
+        .unwrap();
+
+        let st = read_index_state(root).expect("must parse, not read as absent");
+        assert_eq!(st.indexed_with_model, None, "absence is not a mismatch");
         assert_eq!(st.last_indexed_commit, "abc");
     }
 }

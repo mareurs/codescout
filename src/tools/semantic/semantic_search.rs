@@ -1386,6 +1386,7 @@ mod worktree_search_tests {
             last_indexed_commit: String::new(),
             last_indexed_at: last_indexed_at.to_string(),
             schema_version: crate::retrieval::index_state::INDEX_STATE_SCHEMA_VERSION,
+            indexed_with_model: None,
             dirty_paths: Vec::new(),
         };
         std::fs::write(

@@ -216,21 +216,41 @@ ollama pull <your-model-name>
 The index was built with a different embedding model. Vectors from different
 models are incompatible -- mixing them produces meaningless similarity scores.
 
-**Fix:** Rebuild the index from scratch:
+**You do not have to suspect this to find out.** `index(action="status")` reports
+both models and says so outright when they disagree:
+
+```json
+{ "tool": "index", "arguments": { "action": "status" } }
+```
+
+- `indexed_with_model` -- the model that produced the vectors now in the store.
+- `configured_model` -- the model configured right now, which is what your
+  queries are embedded with.
+
+When they differ, the response carries a `model_mismatch` block naming both, and
+the summary line leads with `MODEL MISMATCH` instead of `indexed`. When they
+agree, neither appears.
+
+`indexed_with_model` is absent on an index built before codescout recorded it
+(2026-08-26). Absence means *not recorded* -- it is not a mismatch, and nothing
+reports it as one. One `index(action="build", force=true)` records it.
+
+**Why a dimension check is not enough.** A model change usually keeps the vector
+dimension: `local:AllMiniLML6V2Q` and `local:BGESmallENV15` are both 384-d,
+`CodeRankEmbed` and `local:JinaEmbeddingsV2BaseCode` are both 768-d. The
+dimension guard catches a *dimension* change and reports it on the next build;
+a same-dimension swap is invisible to it, and the stored model identity is the
+only thing that sees one.
+
+**Fix:** Rebuild the index from scratch, which re-embeds every chunk with the
+configured model and updates the stored record:
 
 ```json
 { "tool": "index", "arguments": { "action": "build", "force": true } }
 ```
 
-Then verify the models match:
-
-```json
-{ "tool": "workspace", "arguments": { "action": "status" } }
-```
-
-The response includes `configured_model` and `indexed_with_model`. They must
-be the same.
-
+Then re-run `index(action="status")` and confirm the `model_mismatch` block is
+gone.
 ### Indexing is very slow
 
 Embedding large codebases with Ollama on CPU can take minutes or longer.

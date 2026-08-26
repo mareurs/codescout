@@ -525,11 +525,18 @@ impl Tool for IndexStatus {
             .agent
             .project_root_for(ctx.workspace_override.as_deref())
             .await;
+        // Captured inside the arm below, because `client` is dropped with it and the
+        // model-mismatch check further down needs the CONFIGURED model to compare the
+        // stored one against. Taken from `client.config` rather than the project config,
+        // for the same reason the migration budget is: two copies of this setting exist,
+        // and only this one describes the embedder the store was actually built through.
+        let mut configured_model: Option<String> = None;
         let mut result = match crate::retrieval::client::RetrievalClient::from_env(root.as_deref())
             .await
         {
             Ok(client) => {
                 let collection = client.config.collection("code_chunks");
+                configured_model = Some(client.config.model.clone());
                 match client.project_index_stats(&collection, &project_id).await {
                     Ok((0, 0)) => json!({
                         "indexed": false,
@@ -683,6 +690,44 @@ impl Tool for IndexStatus {
                 .require_project_root_for(ctx.workspace_override.as_deref())
                 .await
             {
+                // The two fields docs/manual/src/troubleshooting.md tells users to compare.
+                // They were dropped in 79e0e4f2 and their readers in `format_index_status`
+                // outlived them by three and a half months, so the manual's recipe for
+                // diagnosing a model mismatch named two keys nothing emitted.
+                // docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
+                //
+                // `indexed_with_model` is the STORED model — what actually produced the
+                // vectors — and `configured_model` is what is set now. Reporting the
+                // configured value under both names is the shortcut that would make a
+                // mismatch invisible by construction, which is why the sidecar records the
+                // model at sync time rather than this path deriving it.
+                if let Some(st) = crate::retrieval::index_state::read_index_state(&root) {
+                    result["indexed_at"] = json!(st.last_indexed_at);
+                    if let Some(m) = st.indexed_with_model.as_deref() {
+                        result["indexed_with_model"] = json!(m);
+                        // A dimension check already catches a dimension change; the common
+                        // swaps share one (AllMiniLM/BGESmall both 384d, CodeRankEmbed/Jina
+                        // both 768d), so only a stored identity sees them.
+                        if configured_model.as_deref().is_some_and(|c| c != m) {
+                            result["model_mismatch"] = json!({
+                                "indexed_with": m,
+                                "configured": configured_model.clone(),
+                                "hint": "The stored vectors were built by a different model \
+                                     than the one configured now. Queries are embedded \
+                                     with the configured model, so scores are being \
+                                     compared across two embedding spaces. Run \
+                                     index(action='build', force=true) to re-embed.",
+                            });
+                        }
+                    }
+                }
+                // Always present, even with no sidecar: it describes config, not the store,
+                // so it is knowable regardless — and absence of `indexed_with_model` is
+                // "never recorded", never a mismatch.
+                if let Some(c) = configured_model.as_deref() {
+                    result["configured_model"] = json!(c);
+                }
+
                 if let Some(gs) = crate::retrieval::index_state::git_sync_status(&root) {
                     result["git_sync"] = gs;
                 }
@@ -1062,11 +1107,26 @@ pub(crate) fn format_index_status(result: &Value) -> String {
     // rendered as "good · queryable". `indexed` states what is actually known here;
     // coverage is not checked on this path, and `coverage_hint` in the JSON says so.
     //
-    // A vector hole IS knowable cheaply, so when there is one, say it loudly and
-    // first. Only when there is a real signal — a permanent "coverage unchecked" nag
-    // on every call would be noise, and noise gets learned around.
+    // Two conditions ARE knowable cheaply, so when either holds it leads the line.
+    // A model mismatch outranks a vector hole: a hole means some chunks cannot be
+    // returned, while a mismatch means every score is being compared across two
+    // embedding spaces — the results still arrive, and they are quietly wrong, which
+    // is the worse failure to leave unsaid.
     let holes = result["chunks_without_vectors"].as_u64().unwrap_or(0);
-    let mut out = if holes > 0 {
+    let mismatch = result["model_mismatch"].is_object();
+    let mut out = if mismatch {
+        let indexed_with = result["model_mismatch"]["indexed_with"]
+            .as_str()
+            .unwrap_or("?");
+        let configured = result["model_mismatch"]["configured"]
+            .as_str()
+            .unwrap_or("?");
+        format!(
+            "MODEL MISMATCH · indexed with {indexed_with}, configured {configured} — \
+             queries are embedded with the configured model, so every score crosses two \
+             embedding spaces · {files} files · {chunks} chunks"
+        )
+    } else if holes > 0 {
         format!(
             "DEGRADED · {holes} chunk(s) have no vector · queryable · {files} files · {chunks} chunks"
         )
@@ -1074,8 +1134,15 @@ pub(crate) fn format_index_status(result: &Value) -> String {
         format!("indexed · queryable · {files} files · {chunks} chunks")
     };
 
-    if let Some(model) = result["indexed_with_model"].as_str() {
-        out.push_str(&format!(" · {model}"));
+    // Live again. These two arms read keys that `79e0e4f2` stopped emitting, and they
+    // sat unreachable for three and a half months while a test that hand-built the
+    // envelope kept them green — so the model is appended only when it is NOT already
+    // in the mismatch banner above, or the line names it twice.
+    // docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
+    if !mismatch {
+        if let Some(model) = result["indexed_with_model"].as_str() {
+            out.push_str(&format!(" · {model}"));
+        }
     }
     if let Some(ts) = result["indexed_at"].as_str() {
         out.push_str(&format!(" · {ts}"));

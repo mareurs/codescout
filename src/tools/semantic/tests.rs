@@ -498,6 +498,16 @@ fn semantic_search_score_alignment() {
 
 // --- format_index_status tests ---
 
+/// The model and timestamp arms are live again.
+///
+/// This test passed continuously from `79e0e4f2` (2026-05-13) to 2026-08-26 while both
+/// arms were unreachable, because it hand-builds the response it asserts on — the
+/// product had stopped emitting `indexed_with_model` and `indexed_at` and nothing said
+/// so. The fixture is left in place deliberately, since it is still the right unit test
+/// for the formatter, but the keys are now genuinely produced: `IndexStatus::call` reads
+/// them from the sidecar, and `preserve_does_not_erase_a_recorded_model` pins the write
+/// side.
+/// docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
 #[test]
 fn format_index_status_shows_model_and_timestamp() {
     let result = serde_json::json!({
@@ -524,6 +534,63 @@ fn format_index_status_shows_model_and_timestamp() {
     assert!(
         out.contains("2026-03-01"),
         "should show timestamp, got: {out}"
+    );
+}
+
+/// A model mismatch leads the compact line, ahead of a vector hole.
+///
+/// Ordering is the design, not a preference. A hole means some chunks cannot be
+/// returned; a mismatch means every score is compared across two embedding spaces — the
+/// results still arrive and are quietly wrong, which is the worse thing to leave unsaid.
+/// The two common swaps share a dimension (`AllMiniLM`/`BGESmall` both 384d,
+/// `CodeRankEmbed`/`Jina` both 768d), so the existing dimension guard cannot see them
+/// and this line is the only place a user finds out.
+#[test]
+fn format_index_status_leads_with_model_mismatch_over_a_vector_hole() {
+    let result = serde_json::json!({
+        "indexed": true,
+        "file_count": 100,
+        "chunk_count": 5000,
+        "chunks_without_vectors": 7,
+        "indexed_with_model": "local:AllMiniLML6V2Q",
+        "model_mismatch": {
+            "indexed_with": "local:AllMiniLML6V2Q",
+            "configured": "local:BGESmallENV15",
+        },
+    });
+    let out = format_index_status(&result);
+    assert!(
+        out.starts_with("MODEL MISMATCH"),
+        "a mismatch must outrank a hole: {out}"
+    );
+    assert!(
+        out.contains("local:AllMiniLML6V2Q") && out.contains("local:BGESmallENV15"),
+        "must name both models — one alone tells the reader nothing: {out}"
+    );
+    assert_eq!(
+        out.matches("local:AllMiniLML6V2Q").count(),
+        1,
+        "the stored model must not be printed twice: {out}"
+    );
+}
+
+/// No mismatch key means no banner. An index built and queried with one model is the
+/// normal case, and it must render as the plain line.
+#[test]
+fn format_index_status_has_no_mismatch_banner_when_models_agree() {
+    let result = serde_json::json!({
+        "indexed": true,
+        "file_count": 10,
+        "chunk_count": 100,
+        "indexed_with_model": "CodeRankEmbed",
+        "configured_model": "CodeRankEmbed",
+    });
+    let out = format_index_status(&result);
+    assert!(out.starts_with("indexed"), "{out}");
+    assert!(!out.contains("MISMATCH"), "{out}");
+    assert!(
+        out.contains("CodeRankEmbed"),
+        "still names the model: {out}"
     );
 }
 
