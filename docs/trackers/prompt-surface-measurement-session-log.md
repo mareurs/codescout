@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 23
-entry_high_water_W: 18
+entry_high_water_F: 28
+entry_high_water_W: 19
 entry_prefix:
 - F
 - W
@@ -51,6 +51,11 @@ surfaces, not the definition.
 | F-21 | I made a probe the acceptance gate for a question it was not precise enough to answer | fixed-verified |
 | F-23 | I relayed a subagent's self-reported bug find to the user without verifying it; the bug did not exist | open |
 | F-22 | A docstring word ending in "raise" fired a substring guard the docstring called safe | open |
+| F-24 | `gates_blast.py` keys arms by log filename stem, so a second pilot round silently overwrites the first | open |
+| F-25 | I launched a paid eval run under a foreground tool timeout; the timeout killed it mid-session | fixed-verified |
+| F-26 | L2 reads only tool ARGS, so it measures "files the agent had to name" — an inverse proxy for navigation-tool effectiveness | fixed-verified |
+| F-27 | `native-tool-used` cannot tell "used a native tool" from "attempted one and was denied" — and it is counted, not excluded | fixed-verified |
+| F-28 | The "native" arm is in practice a SHELL arm — it does almost everything through Bash | fixed-verified |
 
 ## Wins Index
 
@@ -71,6 +76,7 @@ surfaces, not the definition.
 | W-13 | The arms separated on a metric we already logged and never reported | validated |
 | W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
 | W-15 | Reading the generator instead of the plan's description of it caught three defects, one with no downstream gate at all | validated |
+| W-19 | Staging the pilot behind a positive-control gate caught two result-fabricating defects mid-spend, for $1 | validated |
 | W-18 | Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result | validated |
 | W-17 | A pre-dispatch scout caught a forward dependency I had stated in a form the harness cannot express | validated |
 | W-16 | Three dilution rounds converged without closing; one measurement of the shared cause moved it further than all three | validated |
@@ -2062,6 +2068,434 @@ instrument/subject verdict boundary* and *A green suite is not evidence*, which 
 the reusable half.
 
 **Status:** validated — three datapoints in one session, all caught before any spend.
+
+## F-24 — `gates_blast.py` keys arms by log filename stem, so a second pilot round silently overwrites the first
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, Task 9 Step 1, writing the pilot driver. Deciding the log
+directory layout, so I read how the gates actually discover logs rather than assuming.
+
+**Expected:** `gates_blast.py --logs <dir>` reads the logs under `<dir>` and scores them.
+
+**Got:** `gates_blast.py:377-378` is `for log in sorted(root.rglob("*.log")): arms[log.stem]
+= summarise(parse_log(log))`. Two facts compose badly:
+
+- `rglob` is **recursive**, so it descends into every round directory beneath `--logs`.
+- `arms[log.stem]` is a **plain dict assignment keyed by filename stem**, and
+  `run_arms.py:98` names every log `f"{arm}.log"`. So the stem is the arm name and is
+  identical across rounds.
+
+Therefore, pointed at a parent holding two rounds, the gates silently keep **one file per
+arm** — whichever `sorted()` yields last — and drop the rest. No warning, no error.
+
+**Why it is not caught by the existing guard:** `--expect` (default 2) exists precisely to
+catch a truncated denominator — "a shortfall means runs died before logging". But the
+surviving file is a *complete* round, so `n == 2` and the shortfall check passes. The row
+reads full and correct while describing one round of two.
+
+**Why it matters here specifically:** the plan's own Task 9 Step 5 is
+`gates_blast.py --logs /tmp/blast-pilot` — the **parent**, and also the module's default
+(`gates_blast.py:369`). Step 3 is explicitly a stop-and-fix-and-re-run gate, so a second
+round into the same parent is the *expected* path, not an edge case. Following the plan
+literally after one re-run scores half the evidence and looks fine doing it.
+
+This is the third instance of this eval's signature failure mode: an instrument fault that
+surfaces as a plausible number rather than an error. See W-18 and the ledger's "How to read
+the pilot without being fooled".
+
+**Mitigated, not fixed** (`prompt-engineering:93da2a7`): `run_pilot.sh` gives every
+invocation its own timestamped round directory, never deletes one (F-1), and prints the
+exact stamped `--logs` path to score. So the driver's happy path is safe. The residual risk
+is anyone invoking `gates_blast.py` with its default or a parent path by hand.
+
+**Fix idea:** make it structurally impossible rather than documented — collect logs into a
+list first and **refuse** (exit 2) on a duplicate stem, naming the colliding paths and
+telling the operator to pass a single round dir. Same shape as Task 7's ruling: the safe
+direction is losing a result loudly, never manufacturing a complete-looking one. Deliberately
+NOT done mid-pilot: the user authorised Step 3 only, and changing the scorer between writing
+the driver and reading the first numbers would mean the gates that scored round 1 are not the
+gates that were reviewed.
+
+**Severity:** med — cannot corrupt a single-round score, which is what Step 3 produces; can
+silently halve the evidence for any multi-round reading, which is what Steps 3-and-re-run and
+Step 5 are.
+
+**Status:** open — mitigated in the driver, unfixed in the scorer.
+
+## F-25 — I launched a paid eval run under a foreground tool timeout; the timeout killed it mid-session
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, Task 9 Step 3, the first paid step of the blast-radius eval.
+
+**What I did:** launched the pilot driver with `nohup … &` inside `run_command`, then
+`sleep 20; head` in the same command, with `timeout_secs=60`. I reached for `nohup` and `&`
+*because* I had correctly predicted the run would outlive any tool timeout — 4 sessions at a
+300s per-session timeout is up to ~20 minutes.
+
+**Got:** the tool timed out at 60s and the driver died with it. `pgrep` found nothing, the
+round directory was empty, and the driver log stopped at `── running blast-pos-cs …`,
+frozen at its start timestamp. The `nohup` did not save it: `&` leaves the background
+process holding the stdout pipe open, so the tool never sees EOF, times out, and takes the
+process group down. The tool's own hint says exactly this and names the fix
+(`run_in_background: true`, which spawns via a log file instead).
+
+**Cost:** a partial, unmeasurable spend. `~/.prompt-tdd/blast-radius-golden/` was
+re-published at the kill time, so the arm's `setup.commands` had run and a Claude Code
+session was live when it died. Not free, not recoverable, and it produced no scoreable log —
+the worst shape a spend can take.
+
+**Root cause, and why the reasoning was half-right:** I identified the hazard (a tool
+timeout must not kill a paid run) and then picked a mechanism from general shell habit
+rather than from this tool's documented one. `nohup` detaches from SIGHUP; it does not
+detach the *pipe*, and the pipe is what the timeout is keyed to. The harness has a
+first-class answer, and I had not read for it before spending.
+
+**Generalisable rule:** anything that costs money or takes minutes goes out under
+`run_in_background: true` on the FIRST launch — never a foreground call with a generous
+timeout, and never `nohup … &` as a substitute for it. Poll the returned `@bg_*` handle.
+The cost asymmetry is total: backgrounding a fast command wastes nothing, while
+foregrounding a slow paid one burns spend and yields no evidence.
+
+**Related:** this is the same class as the ledger's standing warning that a broken
+instrument surfaces as a plausible number — here it surfaced as a plausible *log*, with a
+correct header, a correct round dir and a correct arm banner, that simply stopped. Nothing
+in the output says "killed".
+
+**Severity:** med — small absolute spend, zero data, and it would recur on every future
+pilot step (Steps 4 and 5 are longer than Step 3) if not written down.
+
+**Status:** fixed-verified — relaunched under `run_in_background: true`; the run proceeded
+past the point where the first attempt died.
+
+## F-26 — L2 reads only tool ARGS, so it measures "files the agent had to name" — an inverse proxy for navigation-tool effectiveness
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, blast-radius Task 9 Step 3 — the positive-control pilot, the
+first paid step. $1.02 spent. The Step 3 stop-gate fired and this is why.
+
+**Expected:** both hinted arms reach `asked=1` and `l2 >= 5`. The prompt explicitly says
+*"before changing anything that other code shares, enumerate what depends on it"*, so a
+detector that cannot see the behaviour here cannot see it anywhere.
+
+**Got:**
+
+| arm | l1 asked | l2 (of 12) | per-run l2 | calls |
+|---|---|---|---|---|
+| blast-pos-native | 1.0 | 6.5 | {6, 7} | 14 |
+| blast-pos-cs | 1.0 | **2.0** | **{0, 4}** | 20 |
+
+The cs positive control **failed the gate**, and one of its two runs reached **zero**
+dependents while making *more* tool calls than the native arm.
+
+**Root cause — verified end to end, not inferred.** L2 counts a dependent as reached when
+the dependent's path string appears in a tool call's **arguments**:
+
+- `check_blast.py:115-123` `_dependents_seen` builds its blob from `_paths(call, _L2_KEYS)`.
+- `check_blast.py:89-96` `_paths` reads `call["args"]` and nothing else.
+- `_L2_KEYS` = `("file_path","path","notebook_path","glob")` + `("command","pattern",
+  "symbol","query","name","old_string",…)` — all argument keys.
+
+That equates "reached" with "named in an argument". The two tool families address files in
+opposite ways:
+
+- **Native** is path-addressed. `Read(file_path="src/intl/manifest.py")` puts the dependent's
+  path in the args, so the natural workflow — grep, then open each hit — scores one L2 hit
+  per file opened.
+- **codescout** is query-addressed. `references(symbol=…)`, `grep(pattern=…)`,
+  `semantic_search(query=…)` return the dependent paths **in the result**; the whole point is
+  that the caller never has to name them. Args carry the query, so they score **nothing**.
+
+**The smoking gun.** The zero-scoring run called
+
+    mcp__codescout__references(path="src/intl/duties.py", symbol="duty_multiplier")
+
+which is *literally the behaviour this eval exists to measure* — "who depends on this?" — plus
+a broad `grep(pattern="TARIFF_MULTIPLIER|border_total|landed_cost|duty_rate|unit_duty|
+apply_duty\b")`. Its L2 blob is `"src/intl/duties.py duty_multiplier"`: `duties.py` is the
+**definition** site, not a dependent, so no `DEPENDENT_PATH` matches and the run scores 0/12.
+The agent performed the target behaviour perfectly and the metric recorded nothing.
+
+**So L2 as built is close to an INVERSE measure of what the eval is testing.** The better a
+navigation tool is at finding dependents without being told their names, the lower it scores.
+Note the direction: this compounds with the pre-registered fixture tilt, which also leans
+against the symbol-navigation arm. Two independent biases, same sign.
+
+**Why L1 is unaffected:** `_L1_KEYS` adds `prompt`/`description` but already contained
+`symbol`/`query`/`pattern`, and *asking* is visible in the args by nature. Both arms scored
+`asked=1.0`. It is specifically L2's dependent-**path** counting that inverts.
+
+**The data reaches the checker at run time — this is a drop, not a harness limitation.**
+Verified through the stack: `types.py:52-57` `ToolCall` has a `result` field;
+`_shared.py:176-191` `parse_transcript` attaches each `tool_result` block to its call via
+`by_use_id`; `assertions.py:537-540` writes `{"name","args","result"}` into the trace file
+the checker reads. Only `surface_lib.collect_facts()` (`:121-123`) drops it, projecting
+`tool_calls` down to `{"name","args"}`. **No harness change is needed** — the fix is
+scenario-local.
+
+**CORRECTION to this entry's first version, which claimed the four captured logs could test
+a fix at $0. They cannot.** `assertions.py:513` creates the trace as a
+`NamedTemporaryFile(delete=False)` and `:574-577` `os.unlink`s it in a `finally` block after
+every run. Results exist only for the lifetime of the checker subprocess. What the per-run
+log preserves is the `facts` block, which `collect_facts` had **already stripped of results
+before writing** — so no amount of re-scoring recovers them, and `score_arm.py` re-runs
+checkers over logged text with no trace file at all (`assertions.py:557-559` says so
+explicitly). Consequence for planning: the fix is unit-testable at $0 against synthetic
+trace fixtures (which is how `test_check_blast.py`'s 26 tests already work), but producing
+real post-fix numbers requires **re-running Step 3** at roughly the same ~$1. The error was
+mine: I read that results are written into the trace and stopped there, without following
+the file's lifetime to the `finally` block eleven lines further down.
+
+**The design rationale was right and the implementation over-shot it.** The module docstring
+(`check_blast.py:25-31`) is emphatic that L2 must come from the trace, never the answer text,
+because "an answer can name a file the run never opened" — that is the exact defect the
+sibling `hidden-info` eval shipped. Correct. But it conflated two different things: the
+**answer text** is authored by the model and untrustworthy, while a **tool result** is
+produced by the harness and observed. Excluding results bought nothing against
+confident-wrong answers and cost the entire query-addressed arm.
+
+**Fix idea:** extend the L2 blob to the call's `result` as well as its args — carry `result`
+through `collect_facts` (or read the trace directly in `check_blast.py`) and scan it for
+`DEPENDENT_PATHS`. Two things to settle in review, not here: (a) a result blob is large, so
+cap or path-extract rather than substring-matching megabytes; (b) decide explicitly whether
+a path merely *listed* in a result counts as "reached" or whether reached requires a
+subsequent read — and pre-register that choice, because it is the definition the headline
+number rests on. Both arms must be re-scored under whichever rule wins; the existing four
+logs are enough to test it at $0.
+
+**Severity:** high — this invalidates the eval's primary metric for one of its two arms. Had
+Step 3 not been staged as a hard stop, Step 4 would have produced a clean-looking
+"codescout reaches fewer dependents" result that is substantially an artifact of how
+codescout's tools take arguments.
+
+**Fixed in code, NOT yet validated on live runs** — `prompt-engineering:3ce3bb2`, patch-id
+`5f2205fcb5eef24436465f0dfd60f6c7f1fbc38c`. `_dependents_in_results` reads the live trace and
+caches its derived set into facts; `l2_enumerated` unions the two sources. Suite **277
+passed, 28/28 mutations killed**, including three new ones: `l2_ignores_tool_results` (the
+direct guard — blanking the result blob reverts the detector to the state that produced the
+{0,4} vs {6,7} split), `l2_double_counts_across_sources` (the hazard the fix introduces: grep
+then read is ONE reach), and `excl_freebie_ignores_the_result_side`. The rule is
+pre-registered in `scenarios/blast-radius/README.md` § *PRE-REGISTERED DEFINITION*, written
+before the implementing code.
+
+Two things the fix surfaced that are worth keeping:
+
+- **`l2_enumerated` counts `len(seen) + len(extra)`, not `len(seen | set(results))`.** The
+  union form makes the args side a set expression, so an intra-source dedup regression is
+  either silently *repaired* (if the left side is coerced) or turned into a **TypeError** (if
+  it is not). A guard that repairs a defect and a guard that explodes are both worse than one
+  that reports it — the existing `l2_counts_duplicates` mutation went from killed, to
+  crashing every l2 test, and back to cleanly killed across those three shapes.
+- **`_clean_env` did not clear `PROMPT_TDD_TRACE_FILE`.** Harmless until the checker started
+  reading the trace directly; after that, a suite run from a shell with it still exported —
+  which is exactly what a checker subprocess sees, and what an operator debugging a pilot is
+  likely to have — would score a foreign run's results into these tests' L2 numbers.
+
+**Status:** open — code fixed, **live validation owed**. Step 3 must be re-run (~$1) before
+Step 4, and pre-fix logs must never be pooled with post-fix ones: the four captured runs have
+no `_deps_in_results` key and their L2 values are args-only. This is exactly the outcome the
+staging was designed to buy, at $1.02.
+
+## F-27 — `native-tool-used` cannot tell "used a native tool" from "attempted one and was denied" — and it is counted, not excluded
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, blast-radius Task 9 Step 3 re-run (post-F-26-fix round,
+`/tmp/blast-pilot/20260826-224303`). One of two `blast-pos-cs` runs scored
+`FAIL(native-tool-used)`.
+
+**What is in the trace:** exactly one native call in the whole run —
+
+    {"args": {"file_path": "/tmp/prompt-test-q6hn_4s8/pricing.toml"}, "name": "Read"}
+
+— in an arm whose `disallowed_tools` is `"Read Grep Glob Bash Edit Write NotebookEdit Agent"`.
+That run scored `l1_asked=true`, **`l2_enumerated=12`** (every dependent) over 37 calls.
+
+**What is verified:** the deny-list is passed correctly. `claude_code.py:74-76` returns
+`["--disallowedTools", *session.disallowed_tools.split()]`, i.e. the flag followed by one
+argv element per tool name — the CLI's documented form. `Read` was genuinely denied to this
+arm, so the model's call should have been refused rather than executed.
+
+**What is NOT verified, and cannot be from the log:** whether that `Read` *executed* or was
+*blocked*. `ToolCall` carries both `result` and `error` (`types.py:52-57`), and
+`parse_transcript` sets `error = "tool_result reported is_error"` (`_shared.py:191`) — but
+`collect_facts()` projects every call down to `{"name", "args"}` (`surface_lib.py:121-123`),
+so neither reaches the checker's facts block. The verdict therefore fires on the **tool_use
+block alone**, which the model emits whether or not the call is subsequently refused.
+
+**Why that matters more than one run.** `native-tool-used` is on `COUNTABLE_VERDICTS` — it is
+treated as arm-accountable and **counted in every rate the run produced a value for**, by
+deliberate design (the Task 7 allow-list ruling). If it fires on blocked attempts, then the
+cs arm is penalised precisely when its tool restriction is *working*, and the penalty lands
+on the metric the whole eval compares. The two readings are opposite:
+
+- **Blocked** (the likely one): the arm is intact and the verdict is over-strict. Evidence,
+  circumstantial: a single `Read` appears in 37 calls and is never retried — the shape of one
+  refusal, not of an agent that found a working tool. And the run still reached 12/12 through
+  codescout tools.
+- **Executed**: the arm's isolation leaked and that run is not a cs observation at all.
+
+Circumstantial evidence is not a verdict, and this one is load-bearing.
+
+**Same root cause as F-26.** Both are the facts block dropping something the trace already
+carries. F-26 dropped `result` and inverted L2; this drops `error` and blurs an
+arm-accountable verdict into an instrument question. The fix shape is the same and now has a
+precedent in-tree: `_dependents_in_results` already reads the live trace directly and caches a
+small derived value into facts. A `_native_tool_executed` reading `error`/`is_error` would sit
+beside it.
+
+**Fix idea:** distinguish the two at scoring time — `native-tool-used` for a call that
+returned without `is_error`, and a separate non-penalising class (or nothing at all) for a
+blocked attempt. Pre-register which one counts before re-running, for the same reason the L2
+rule was pre-registered: the choice moves the headline number.
+
+**Severity:** high for interpretation, though it did not change Step 3's outcome — the gate
+criterion (`asked=1` and `l2 >= 5` on both hinted arms) is met either way, since the affected
+run scored l2=12. It becomes load-bearing at Step 4, where the cs/native separation is the
+result.
+
+**SETTLED, and the arm did NOT leak.** Claude Code writes a complete session transcript to
+`~/.prompt-tdd/profiles/<profile>/projects/<sanitised-workdir>/<uuid>.jsonl` and does **not**
+remove it with the temp dir. The run's transcript was still on disk:
+
+    TOOL_USE Read -> {"file_path": "/tmp/prompt-test-q6hn_4s8/pricing.toml"}
+    IS_ERROR : True
+    RESULT   : "<tool_use_error>Error: No such tool available: Read. Read is disabled
+                for this session, in subagents as well as here.</tool_use_error>"
+
+The deny-list held. The agent tried once, was refused, and finished through codescout tools
+reaching 12/12. Across all five cs runs to date — **110 tool calls — exactly one denied**. The
+veto was over-strict; the arm was intact.
+
+**Fixed:** `prompt-engineering:3580004`. `_native_tools_executed` reads the live trace and
+vetoes only on a native call whose result lacks the `<tool_use_error>` marker, with a
+deliberately **conservative fallback**: no cache and no readable trace → return every native
+name, i.e. the old behaviour. A run that cannot be *shown* to have been blocked stays vetoed,
+because losing one cs observation costs a run while silently declaring an escaped arm clean
+corrupts the comparison. Two mutations guard it (`native_veto_counts_denied_calls`,
+`native_veto_fallback_declares_clean`). Suite 283 passed, 30/30 mutations killed.
+
+**Status:** fixed-verified — settled against the primary record, not by inference.
+
+## F-28 — The "native" arm is in practice a SHELL arm — it does almost everything through Bash
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, first use of `scripts/inspect_eval_run.py` on the post-fix control
+round. Nothing in any per-run `.log` shows this — the facts block keeps `tool_names`, but no
+one had ever looked at the distribution.
+
+**Got**, per-run tool mix for the two positive-control arms:
+
+| arm | run | calls | mix |
+|---|---|---|---|
+| blast-pos-cs | bu1qooj2 | 26 | `symbols` 12, `grep` 6, `ToolSearch` 3, `references` 2, `edit_code` 1, `run_command` 1, `memory` 1 |
+| blast-pos-cs | q6hn-4s8 | 37 | `symbols` 20, `grep` 6, `run_command` 3, `read_file` 2, `edit_code` 2, `references` 1, `Read` **DENIED** |
+| blast-pos-native | 8qhx9vi1 | 11 | **`Bash` 8** (+1 ERROR), `Read` 1, `Edit` 1 |
+| blast-pos-native | svj5hnwq | 8 | **`Bash` 6**, `Read` 1, `Edit` 1 |
+
+**The native arm barely uses the native file tools it is named for.** Its `disallowed_tools`
+is `"Agent"` alone, so `Bash` is available, and it does essentially all of its searching and
+reading through the shell — `grep`, `sed`, `cat` — with a single `Read` and a single `Edit`.
+This is not a defect in the arm: it is what an unrestricted agent chooses. But it means the
+comparison is **codescout tools vs. a shell**, not codescout tools vs. Claude Code's native
+file tools, and every result should be worded that way.
+
+**Two consequences that bite the metrics, not just the prose:**
+
+- **L2 attribution differs by mechanism.** `_TEXT_KEYS` includes `command`, so a
+  `Bash(command="grep -rn duty_multiplier src/")` puts the *pattern* in args and the
+  *dependent paths* in the result, while `Bash(command="cat src/intl/manifest.py")` puts the
+  path in args. Post-F-26 both count, which is right — but it means the native arm's L2 is
+  assembled from shell strings, and any future change to how command strings are parsed moves
+  that arm alone.
+- **The call-count asymmetry is large and in the unintuitive direction.** cs used 26-37 calls
+  to reach 8-12 dependents; native used 8-11 calls to reach 6. Reaching more is not free, and
+  a headline that reports only L2 would hide the cost. Whatever Step 4 concludes about
+  completeness should be read next to `calls` and `cost`, both already in the gates table.
+
+**Fix idea:** none to the arm — this is the honest behaviour of an unrestricted agent, and
+constraining it to make the contrast cleaner would be measuring a strawman. What is owed is
+**wording**: say "shell" where the design says "native", in the README, the gates output, and
+any write-up. Optionally add a third condition that denies `Bash` too, if the native-file-tool
+comparison is genuinely wanted — but that is a new arm and new spend, not a relabel.
+
+**Severity:** med — no number is wrong, but the obvious reading of the arm's NAME is, and that
+reading is the one a write-up would carry.
+
+**Wording paid, 2026-08-26.** `scenarios/blast-radius/RESULTS.md` labels the arm "shell" in
+the results table, states the caveat explicitly ("the comparison is codescout **vs. a shell**,
+not vs. Claude Code's native file tools"), and carries `calls` and `cost` beside every l2x
+figure so the reach-is-not-free point cannot be dropped by a reader taking only the headline.
+The ruling stands: **relabel, do not re-arm** — constraining the native agent's Bash to make
+the contrast look cleaner would measure a strawman, and what an unrestricted agent actually
+does IS the comparison worth having.
+
+Still open as an OPTION, not a debt: a third condition denying `Bash` as well, if the
+native-file-tool comparison is genuinely wanted. That is a new arm and new spend, not a
+relabel, and nothing in the current result depends on it.
+
+**Status:** fixed-verified — wording corrected wherever the result is stated.
+
+## W-19 — Staging the pilot behind a positive-control gate caught two result-fabricating defects mid-spend, for $1
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, blast-radius Task 9. The plan staged the pilot as: positive controls
+first, 2 runs, **hard stop** unless both hinted arms reach `asked=1` and `l2 >= 5`; main arms
+only after. Total spend to a complete answer: **$2.61**.
+
+**Pattern:** run the *controls* before the *arms*, with a numeric stop-criterion written down
+in advance, and treat a control failure as an instrument question before an arm question.
+
+**Counterfactual, and it is not hypothetical — both defects fired.**
+
+1. **F-26.** The first control round stopped at the gate: `blast-pos-cs` l2 2.0 against a
+   required ≥5, one run at zero. Root cause was that L2 read tool **args** only, so
+   query-addressed tools scored ~nothing while path-addressed ones scored per file opened —
+   close to an *inverse* proxy for the capability under test. Without the staging, Step 4
+   would have run first and produced a clean, fully-scored, entirely plausible **"codescout
+   reaches fewer dependents"** headline. Nothing in any verdict would have flagged it: all
+   four runs scored PASS.
+2. **F-27.** The post-fix round surfaced `FAIL(native-tool-used)` on a cs run. That verdict is
+   on `COUNTABLE_VERDICTS` and lands in every rate. The transcript showed the call was
+   **refused** — `<tool_use_error>` — so an intact arm was being penalised for its own
+   deny-list working.
+
+**Two properties made the staging work, and both are copyable:**
+
+- **The criterion was numeric and written before the spend.** "Both hinted arms reach
+  `asked=1` and `l2 >= 5`" is falsifiable at a glance. A prose criterion ("check the controls
+  look sensible") would have accommodated l2 = 2.0, because 2.0 is not obviously wrong.
+- **The controls are the arm that MUST succeed.** The hinted prompt says "enumerate what
+  depends on it". An arm that is *told* to do the thing and still scores near zero is an
+  instrument failure with very high prior — which is what turned a disappointing number into
+  a source read rather than a finding written up.
+
+**And the staging paid a third time, in the other direction.** Step 4's main arms came back
+*uniform* — l2x exactly 1.0 in all four runs, span 0.0000 — which is the same shape as a
+broken detector. The same reflex applied (`distinct == 2`, transcripts read, tool mixes
+inspected, `_native_executed` empty) confirmed the floor was **real**: the cs runs called
+`references` and `symbols` zero times. Without the habit already established, that genuine
+finding would have been indistinguishable from the two artifacts that preceded it.
+
+**Confirming data points:** F-26 and F-27 (this session); W-18's three pre-spend defects, same
+work stream. Four instrument failures in one eval, every one of which would have surfaced as a
+number rather than an error.
+
+**Impact:** high — the difference between publishing a measurement and publishing an artifact
+of one's own tooling, at a cost of roughly $1 and one extra control round.
+
+**Promote-when:** a second work stream stages a paid measurement behind a written numeric
+control gate and catches an instrument failure with it. At two datapoints, promote to
+CLAUDE.md / `eval-design` as: *"Never run the treatment arms first. Run the arm that must
+succeed, with a numeric stop-criterion written down before spending, and read a control
+shortfall as an instrument fault until the source says otherwise."*
+
+**Status:** validated — two independent catches within one work stream, both traced to source
+and fixed, with the third (uniform-result) application confirming a true negative.
 
 ## Template for new entries
 

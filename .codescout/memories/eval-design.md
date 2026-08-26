@@ -577,3 +577,103 @@ Not read the test and reason about it. The reusable rules:
   indistinguishable from "the copied tree does not run at all" — the same shape as a checker
   missing its exec bit reporting a clean `0/N`.
 - **A surviving mutation is a finding, not a nuisance.** It names a behaviour nothing tests.
+
+## Measure the floor and BOTH ceilings, or you cannot tell "no effect" from "no attempt"
+
+Measured 2026-08-26, blast-radius pilot, 10 runs / $1.79. The eval asked whether an agent
+handed a narrow bug report goes looking for who else depends on the code it is changing, and
+whether better tools change the answer. Five arms: a no-tools floor, two plain-prompt arms
+(shell vs symbol navigation), and the same two arms with the sub-goal explicitly prompted.
+
+| step | dependents reached (of 11) | what it isolates |
+|---|---|---|
+| no tools → shell, plain prompt | 0 → 1 | having tools at all |
+| shell → symbol nav, **plain** | 1 → **1** | **better tools, no sub-goal: ZERO** |
+| shell, plain → hinted | 1 → 5 | the sub-goal, with a shell |
+| symbol nav, plain → hinted | 1 → 9 | the sub-goal, with symbol nav |
+| shell → symbol nav, **hinted** | 5 → **9** | better tools, GIVEN the sub-goal |
+
+**A design with only the two treatment arms would have measured 1 vs 1 and concluded the
+tools do nothing.** The true statement is stronger and completely different: tool quality is
+worth nothing until the sub-goal exists, and nearly doubles reach once it does. The prompt
+creates the behaviour; the tools scale it.
+
+The generalisable rule: **when an eval compares capabilities, a null result between treatment
+arms is ambiguous between "the capability does not help" and "the behaviour was never
+attempted."** Only a prompted ceiling separates them, and it costs one extra arm. Add the
+hinted variant of every arm you care about, not just a floor.
+
+Corollary for reading: the plain-prompt arms fixed the bug correctly (l0 = 1.0) while silently
+changing 11-12 other outputs they never mentioned. **"Did it fix the bug?" and "does it know
+what it broke?" are near-independent**, and only the first is usually instrumented.
+
+## A negative control's job is to prove the metric CAN fail
+
+Same pilot. Four arms scored `l0 = 1.0` — a perfect fix rate. That figure means nothing on its
+own: a checker that says "fixed" too easily produces exactly that. The no-tools arm scored
+`l0 = 0.0` on both runs, having made exactly one tool call (a `Bash` the deny-list refused)
+before it had no way to act.
+
+**That single 0.0 is what makes the other four 1.0s interpretable.** Before it, "every arm
+fixed the bug" and "the checker cannot distinguish a fix from a non-fix" were the same
+observation.
+
+So a floor arm is not a formality to satisfy a gate. Budget it whenever a metric saturates
+across your real arms — saturation is precisely when you cannot tell a working detector from a
+broken one, and precisely when the floor is cheapest ($0.19 here, ~10% of the run).
+
+## A metric that reads tool ARGS measures what the agent had to SPELL
+
+The sharpest instrument defect this project has produced (F-26). L2 — "how many dependents did
+the run reach" — extracted paths from each tool call's **arguments**. That silently encodes an
+assumption about how tools are addressed:
+
+- **path-addressed** tools (`Read(file_path=…)`, `cat X`): the target is in the args, so
+  grep-then-open scores one hit per file.
+- **query-addressed** tools (`references(symbol=…)`, `grep(pattern=…)`, `semantic_search`):
+  the targets come back in the **result**; the args hold only the query.
+
+So the metric scored ~zero for exactly the tools whose value proposition is *not having to
+name the files*. One run called `references()` on the shared symbol — literally the behaviour
+under test — and scored 0/12, because the definition site is not a dependent. **Args-only
+made the metric an inverse proxy for the capability it was measuring**, and every verdict was
+PASS while it did so.
+
+The rule: **before scoring tool use, ask where the answer physically lands for each tool
+family you compare.** If it lands in different places, an args-only or results-only metric is
+arm-biased by construction. Read both, dedupe across them (a file named in args *and* listed
+in a result is one reach), and pre-register the rule before the fix is written.
+
+The related trap, same session (F-27): a verdict that fires on a tool_use block cannot tell
+"used a forbidden tool" from "attempted one and was refused". A denied call means the
+restriction **held**; scoring it penalises an arm for its own isolation working. `is_error`
+and the result text distinguish them — if your pipeline still carries them.
+
+## The per-run log is a projection — read the primary record before believing a number
+
+Three hops in prompt-tdd discard evidence, none of them an error, each leaving something that
+still looks like a complete record:
+
+    Claude Code transcript (.jsonl)   every tool_use, tool_result, is_error
+      -> parse_transcript             ToolCall(name, args, result, error)
+      -> assertions.py:537-540        {name, args, result}        ERROR DROPPED
+      -> surface_lib.collect_facts    {name, args}                RESULT DROPPED
+      -> the per-run .log             facts block only
+      -> assertions.py:574-577        trace file UNLINKED
+
+Both of that day's defects lived in that gap. Both were settled in one look at the transcript,
+which was complete the whole time and which Claude Code does **not** delete with the temp dir
+(`~/.prompt-tdd/profiles/<profile>/projects/<sanitised-workdir>/<uuid>.jsonl`).
+
+Two habits follow. **Preserve the primary record into the round directory at capture time** —
+a profile accumulates every run ever made under it, so "the newest one" stops being
+unambiguous the moment a second round exists. And **when a result is uniform, read the
+transcripts before writing it up**: `span 0.0000` is the signature of a broken detector *and*
+of a genuine floor, and only the primary record tells you which. In this pilot it was a
+genuine floor — confirmed by `distinct == 2` and by the cs arm calling `references` zero
+times — but the two preceding uniform-looking results had both been artifacts.
+
+Tooling: `prompt-engineering:scripts/inspect_eval_run.py` (`--profile` / `--round` /
+`--transcripts`, with `--denied`, `--tool X --full`, `--summary`, `--json`). It reports DENIED
+separately from ERROR, because they are the same field to the API and opposite facts to an
+eval.
