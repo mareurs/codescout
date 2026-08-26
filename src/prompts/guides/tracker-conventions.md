@@ -531,17 +531,24 @@ by the default scope:
 artifact(action="find", kind="tracker")
 ```
 
-For bugs, swap the kind. **Constrain on both non-terminal states, not just `open`** —
-the vocabulary has two, and `investigating` is what this guide tells you to set while
-you are actively working a bug, so `status="open"` alone hides exactly the bugs someone
-is in the middle of:
+For bugs, swap the kind. **Constrain on all three non-terminal states, not just `open`**
+— `status="open"` alone hides `investigating` (this guide tells you to set that while
+actively working a bug) and `zombie` (recurring-but-unconfirmed, kept open in case it
+comes back). `zombie` sits between "no longer observed" and "closed" precisely because
+no other status fits — which is what makes it unreachable if the canonical triage query
+omits it too:
 
 ```
 artifact(action="find", kind="bug",
-         filter={"status": {"in": ["open", "investigating"]}})
+         filter={"status": {"in": ["open", "investigating", "zombie"]}})
 ```
 
-`status="open"` remains right when you specifically mean *not yet started*.
+A `zombie` hit in that query is a "has this recurred?" check, not a task to pick up —
+most zombie records have no available work by design (see § Status vocabulary). Filter
+it back out explicitly (`{"status": {"in": ["open", "investigating"]}}`) when you
+specifically want only the actionable two.
+
+`status="open"` alone remains right when you specifically mean *not yet started*.
 
 Surface archived rows when needed:
 

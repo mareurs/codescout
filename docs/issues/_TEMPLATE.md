@@ -18,10 +18,10 @@ To open a bug:
   3. Done — the librarian discovers the file on next reindex via its
      `kind: bug` frontmatter. List active bugs with:
        artifact(action="find", kind="bug",
-                filter={"status": {"in": ["open", "investigating"]}})
-     Both non-terminal states — status="open" alone hides any bug marked
-     `investigating`, which is what you set while actively working one.
-     No manual index file. (Pre-2026-05-18 there was a docs/issues/INDEX.md
+                filter={"status": {"in": ["open", "investigating", "zombie"]}})
+     status="open" alone hides any bug marked `investigating` (actively being
+     worked) or `zombie` (recurring-but-unconfirmed -- a "has this come back?"
+     check, not a task to pick up). No manual index file. (Pre-2026-05-18 there was a docs/issues/INDEX.md
      to maintain by hand; that workflow was retired when bug files gained
      `kind: bug` frontmatter and the librarian classifier started picking
      them up automatically — see CLAUDE.md "Querying active trackers".)
