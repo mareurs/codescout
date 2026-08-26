@@ -1052,7 +1052,7 @@ dependencies {
 
     #[tokio::test]
     async fn auto_register_deps_honors_workspace_override_pin() {
-        // BUG (docs/issues/...-edit-code-write-path-ignores-workspace-pin.md,
+        // BUG (docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
         // sibling finding): auto_register_deps mutated the project registry
         // via raw `ctx.agent.inner.write().await.active_project_mut()`,
         // bypassing `with_project_at_mut` entirely — so a pinned call would
