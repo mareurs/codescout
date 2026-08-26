@@ -132,6 +132,25 @@ Open question this group turns on, and it is a **decision**, not a bug to fix bl
 `XDG_CONFIG_HOME` meant to be honoured on Windows at all? If not, the tests are wrong; if
 so, the resolver is. Answer that before touching either.
 
+**FIXED 2026-08-26 — `b1681d76`, patch-id `f35b49bee1eb754961ae06610b90fbc073839acb`. There
+was no decision to make, and the paragraph above is left standing because that is the
+lesson.** `global_config_dir_from` has **no platform branch**: XDG is honoured everywhere,
+and the only gate is `.filter(|p| p.is_absolute())`, implementing the spec's rule that a
+relative value is invalid. Reading the function took less time than drafting the question.
+
+So E is C wearing a different hat. `/tmp/xdg` has no drive letter, so on Windows it is
+relative, is dropped as spec-invalid, and falls through to `HOME` — which is precisely
+what the panic showed. Fixed with an `abs()` helper that drive-prefixes on Windows,
+applied to every literal meant to be absolute and deliberately **not** to the
+`relative/state` ones, which must stay relative on both platforms or the spec gate they
+pin goes untested.
+
+The third effect is the one worth carrying forward:
+`config_dir_ignores_relative_xdg_and_falls_back_to_home` kept **passing** on Windows while
+discriminating nothing, because both its inputs were relative there — it could no longer
+tell *"ignores a relative value"* from *"ignores everything"*. Third time in this file that
+the vacuous pass outlasted the loud failure.
+
 ### F. Parent pid is 0 (1)
 
 `tools::rendezvous::tests::publish_records_the_parent_pid_the_hook_matches_on` —
