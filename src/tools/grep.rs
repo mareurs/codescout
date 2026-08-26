@@ -1367,14 +1367,33 @@ mod tests {
     /// and a negation is not an absolute path whatever it negates.
     #[test]
     fn unsatisfiable_absolute_glob_flags_only_absolute_paths_outside_the_root() {
-        let root = std::path::Path::new("/home/u/proj");
+        // "Absolute" is platform-defined, and this test is entirely about that predicate.
+        // `/home/u/proj` carries no drive letter, so on Windows it is RELATIVE: every case
+        // degraded to `None`, which failed the two `Some` assertions and — worse — made the
+        // three `None` assertions pass VACUOUSLY, asserting nothing at all. Drive-prefix the
+        // literals so both halves are live on both platforms.
+        //
+        // Forward slashes are kept on Windows deliberately: Rust accepts `/` as a separator
+        // there, `Path::starts_with` compares by component either way, and a backslash inside
+        // a GLOB is an escape, not a separator. Same treatment `containing_root_tests` in
+        // `src/librarian/tools/mod.rs` gives the same problem.
+        #[cfg(windows)]
+        const P: &str = "C:";
+        #[cfg(not(windows))]
+        const P: &str = "";
+
+        let root = format!("{P}/home/u/proj");
+        let root = std::path::Path::new(&root);
+        let outside = format!("{P}/home/u/other/x.rs");
+        let inside = format!("{P}/home/u/proj/src/**/*.rs");
+        let elsewhere = format!("{P}/elsewhere/y.rs");
 
         assert_eq!(
-            unsatisfiable_absolute_glob(&["/home/u/other/x.rs".to_string()], root).as_deref(),
-            Some("/home/u/other/x.rs")
+            unsatisfiable_absolute_glob(std::slice::from_ref(&outside), root).as_deref(),
+            Some(outside.as_str())
         );
         assert_eq!(
-            unsatisfiable_absolute_glob(&["/home/u/proj/src/**/*.rs".to_string()], root),
+            unsatisfiable_absolute_glob(&[inside], root),
             None,
             "an absolute glob INSIDE the root shares the prefix every candidate carries"
         );
@@ -1384,14 +1403,13 @@ mod tests {
             "relative globs are the normal case and are matched against the root"
         );
         assert_eq!(
-            unsatisfiable_absolute_glob(&["!/home/u/other/x.rs".to_string()], root),
+            unsatisfiable_absolute_glob(&[format!("!{outside}")], root),
             None,
             "a negation is not an absolute path"
         );
         assert_eq!(
-            unsatisfiable_absolute_glob(&["*.rs".to_string(), "/elsewhere/y.rs".to_string()], root)
-                .as_deref(),
-            Some("/elsewhere/y.rs"),
+            unsatisfiable_absolute_glob(&["*.rs".to_string(), elsewhere.clone()], root).as_deref(),
+            Some(elsewhere.as_str()),
             "the offending glob is named even when it is not first"
         );
     }

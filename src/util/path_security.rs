@@ -2653,10 +2653,20 @@ mod tests {
         // root was absolute and outside — with a hint (`grep(pattern, path)`)
         // that resolves against the active project and therefore has no correct
         // invocation for that repo at all.
-        let root = Path::new("/home/u/work/myproj");
+        // Drive-prefixed on Windows, where `/home/...` is RELATIVE — without this the
+        // search root is not "absolute and outside" at all, the premise the case rests on
+        // collapses, and the assertion fails for a reason unrelated to the filter/operand
+        // distinction it exists to pin.
+        #[cfg(windows)]
+        const P: &str = "C:";
+        #[cfg(not(windows))]
+        const P: &str = "";
+
+        let root = format!("{P}/home/u/work/myproj");
+        let root = Path::new(&root);
         assert!(
             check_source_file_access(
-                "grep -rn 'x' /home/u/work/otherrepo --include='*.mjs'",
+                &format!("grep -rn 'x' {P}/home/u/work/otherrepo --include='*.mjs'"),
                 root
             )
             .is_none(),
@@ -3815,6 +3825,15 @@ EOF"#;
     /// The hard denials share the `write_scope_denied` family with the approvable case, so
     /// they must say that approving will not help — otherwise a reader who has learned
     /// "write denied → approve_write" spends a call finding out.
+    ///
+    /// **Unix-only, and that is a platform semantic rather than a skip.** The fixture needs
+    /// `..` to SURVIVE canonicalization, which happens only when an intermediate directory
+    /// does not exist. Windows normalizes `..` lexically instead, without consulting the
+    /// filesystem, so this input lands on `<root>/escape.rs` and is allowed — measured under
+    /// wine 2026-08-26 as `Allowed("\\?\C:\…\.tmpC5EDa4\escape.rs")`. The *decision* is
+    /// correct on both platforms; only this arm's MESSAGE contract is unreachable on Windows,
+    /// and the sibling below pins the difference instead of leaving it implicit.
+    #[cfg(not(windows))]
     #[test]
     fn hard_denials_say_that_approve_write_will_not_help() {
         let tmp = tempfile::tempdir().unwrap();
@@ -3823,16 +3842,34 @@ EOF"#;
         // `..` only survives canonicalization when an intermediate directory does not
         // exist — the branch's own comment says so, and `/var/..` resolves cleanly, so a
         // path built from real directories takes the OutsideRoot arm instead.
-        let WritePathDecision::Denied(msg) =
-            classify_write_path("no-such-dir-xyz/../escape.rs", tmp.path(), &cfg, &[])
-        else {
+        let decision = classify_write_path("no-such-dir-xyz/../escape.rs", tmp.path(), &cfg, &[]);
+        let WritePathDecision::Denied(msg) = decision else {
             // If this ever classifies differently the message contract still needs a home;
-            // fail loudly rather than skipping the assertion.
-            panic!("an unresolved '..' must be a hard Denied, not approvable");
+            // fail loudly rather than skipping the assertion — and NAME what it got, since
+            // "not Denied" has more than one value and a bare panic sends the reader off to
+            // re-derive which arm fired. Windows is where this bites, and the answer there
+            // may be that a different fixture is needed rather than a different assertion.
+            panic!("an unresolved '..' must be a hard Denied, not approvable; got: {decision:?}");
         };
         assert!(
             msg.contains("approve_write cannot grant this"),
             "an unapprovable denial must say so: {msg}"
+        );
+    }
+
+    /// The Windows half of the split above. Pinned rather than skipped: if Windows ever
+    /// stops normalizing `..` lexically, the unresolved-`..` arm becomes reachable there,
+    /// this test fails, and that is the signal to re-unify the two rather than a mystery.
+    #[cfg(windows)]
+    #[test]
+    fn windows_resolves_dotdot_lexically_so_the_unresolved_arm_is_unreachable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = PathSecurityConfig::default();
+        let decision = classify_write_path("no-such-dir-xyz/../escape.rs", tmp.path(), &cfg, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if p.ends_with("escape.rs")),
+            "Windows normalizes `..` without touching the filesystem, so this must resolve \
+             INSIDE the root and be allowed: {decision:?}"
         );
     }
 
