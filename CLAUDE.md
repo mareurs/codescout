@@ -83,7 +83,7 @@ Trackers of note there: `skill-eval-log`, `skill-eval-playbook`, and
 `prompt-tdd-harness-backlog` (harness gaps the evals surfaced — several are
 codescout-adjacent, e.g. the `AnthropicMcpRegistry` setup-file parity fix).
 
-**Before running an eval, read `docs/trackers/prompt-tdd-operating-guide.md` there.** It is
+**Before running an eval, read `prompt-engineering:docs/trackers/prompt-tdd-operating-guide.md`.** It is
 a ledger of ways the harness does what you asked in a way that reads as something else —
 and the failure mode is a *number*, not an error, so nothing stops you publishing it. The
 two that have bitten hardest: `Summary: 1/1 passed` is the **scenario** count (a `runs: 10`
@@ -91,9 +91,9 @@ arm reporting `0/1` has not failed ten times), and a checker missing its **exec 
 reports as a clean `0/N`, character-identical to a genuine floor — which nearly published a
 fabricated ceiling in hamsa A-25.
 
-Don't hand-roll the scoring. `scripts/run_arms.py --config <cfg> --all` runs every arm and
-prints rate + failure classes + distinct-answer count; `scripts/score_arm.py <checker>
-<log>…` re-scores logs you already have. Checkers write each run to `$PROMPT_TDD_RUN_LOG`
+Don't hand-roll the scoring. `prompt-engineering:scripts/run_arms.py --config <cfg> --all`
+runs every arm and prints rate + failure classes + distinct-answer count;
+`prompt-engineering:scripts/score_arm.py <checker> <log>…` re-scores logs you already have. Checkers write each run to `$PROMPT_TDD_RUN_LOG`
 when set — six lines, and it is what makes failures spot-readable, which every
 pre-registration in `docs/trackers/prompt-hamsa-audit-log.md` requires before a count is
 believed.

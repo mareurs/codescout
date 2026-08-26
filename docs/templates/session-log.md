@@ -111,8 +111,8 @@ either way. Record one of:
 
 Run this when the work stream wraps, **and** whenever a criterion fires
 mid-stream — an audit that only happens at archive time is one that happens
-after the lesson was needed. Prior art: `eduplanner-ui`
-`docs/trackers/archive/calendar-insight-panel-session-log-2026-08-18.md`, whose
+after the lesson was needed. Prior art:
+`eduplanner-ui:docs/trackers/archive/calendar-insight-panel-session-log-2026-08-18.md`, whose
 audit correctly caught its own `W-4` as fired-and-unapplied and named the exact
 text to promote.
 
