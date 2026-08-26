@@ -10,7 +10,7 @@
 //! Measured 2026-08-26: `migrate-memories --in-place` recovered 7 of 8 missing memories
 //! and failed on `eval-design` (31 596 B) with llama.cpp's
 //! `input is too large to process. increase the physical batch size`.
-//! `docs/issues/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`
+//! `docs/issues/archive/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`
 //!
 //! The budget itself comes from [`super::chunk_size_for_model`], which is re-exported
 //! from this module's parent — the reason this is the right home for the pooling that

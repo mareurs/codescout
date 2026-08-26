@@ -46,7 +46,7 @@ pub trait MigrationEmbedder: Send + Sync {
 /// largest memory in the corpus. Measured 2026-08-26: `eval-design` (31 596 B) failed with
 /// llama.cpp's `input is too large to process. increase the physical batch size` while
 /// every smaller memory succeeded.
-/// `docs/issues/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`
+/// `docs/issues/archive/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`
 pub struct HttpMigrationEmbedder {
     inner: std::sync::Arc<dyn crate::retrieval::embedder::CodeEmbedder>,
     budget_chars: usize,
@@ -1038,7 +1038,7 @@ mod tests {
     }
 
     /// The regression test for
-    /// `docs/issues/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`.
+    /// `docs/issues/archive/2026-08-26-migration-embedder-lacks-the-segmentation-the-tool-path-has.md`.
     ///
     /// The double refuses any input over 20 chars, exactly as the real backend refused
     /// `eval-design` at 31 596 B. With a 10-char budget the content is segmented so every

@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-26
 severity: medium
 owner: marius
@@ -7,6 +7,7 @@ related:
   - docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
 tags: [memory, migration, embedder, segmentation]
 kind: bug
+closed: 2026-08-26
 ---
 
 # BUG: `migrate-memories` embeds raw, so it cannot repair a memory larger than the embedder's per-request ceiling
@@ -122,7 +123,42 @@ the ≈2048-token figure measured for CodeRankEmbed in
 
 ## Fix
 
-*Not yet implemented.*
+**Fixed 2026-08-26.**
+
+- **SHA:** `6546a718` (`experiments`)
+- **patch-id:** `c0bc53350495aa2b00540ec3eb609a77bcc47a71`
+
+`embed_document_pooled`, `segment_for_budget` and `mean_pool_normalized` moved to
+`src/embed/document.rs`, beside `chunk_size_for_model` (the budget they depend on, already
+re-exported from that module's parent). `HttpMigrationEmbedder` gained `budget_chars` and
+bridges through `CodeDenseAdapter` — the sanctioned bridge, since `CodeEmbedder`
+deliberately lacks `DenseEmbedder` as a supertrait to stop inherent resolution winning a
+name collision (`src/retrieval/embedder.rs:37-39`). Still the document side, never the
+query seam.
+
+**The budget comes from `client.config.model`, not `p.config.embeddings.model`.** Two
+copies of the same setting exist and can diverge; `client.embedder` is built from the
+former, so only that one describes the embedder actually being wrapped. The wrong choice
+surfaced because `p.config` is private to the lib and `cargo build --lib` does not cover
+`main.rs` — worth knowing, since the lib-only build is the fast inner loop.
+
+**Verified live:**
+
+```
+migrate-memories --in-place: 25 re-derived, 1 newly embedded from disk
+{"read":26,"upserted":26,"skipped":0, ...}
+```
+
+All 23 memories on disk now have points; `eval-design` is 768d at **L2 = 1.000000**. The
+norm is the part worth checking rather than assuming — sqlite-vec queries with
+`embedding MATCH vec_f32(?)`, an L2 metric, so an unnormalised pooled vector would rank
+every segmented memory systematically further from every query in proportion to how varied
+its content is.
+
+**Not done, and deliberately:** `--dry-run` still cannot surface this class (it returns
+before the embed call). Left as-is rather than changed in the same commit — making a dry
+run embed-but-not-upsert is a behaviour change to a flag whose whole contract is "touch
+nothing", and it deserves its own decision rather than riding along with a fix.
 
 Lift the segmentation helpers out of the tool layer and use them in
 `HttpMigrationEmbedder`. `segment_for_budget`, `mean_pool_normalized` and
@@ -142,11 +178,26 @@ one that only counts rows.
 
 ## Tests added
 
-None yet. The regression test embeds a document larger than the model's budget through
-`HttpMigrationEmbedder` and asserts a unit-norm vector comes back rather than an error —
-the same shape as `tools::memory::tests::under_budget_makes_one_call_and_over_budget_pools_to_unit_norm`,
-which already pins this for the tool path and is the test the migration path lacks.
+3 tests in `src/migrate/memories.rs`.
 
+- `http_migration_embedder_segments_past_the_backend_ceiling` — the regression test. Its
+  `CeilingEmbedder` double refuses any input over 20 chars, exactly as the real backend
+  refused `eval-design`, and returns the same error string llama.cpp emits. With a 10-char
+  budget the content segments and every request clears the ceiling; embedding raw sends it
+  in one request and fails. So it fails on the defect itself rather than on a proxy for it,
+  and it also asserts the pooled vector is unit-norm.
+- `http_migration_embedder_leaves_small_documents_as_one_call` — the common case must not
+  pay for the fix: under budget is one un-pooled call.
+- `http_migration_embedder_budget_opt_out_embeds_raw` — `usize::MAX` genuinely restores raw
+  behaviour, so the escape hatch documented on the constructor is not a lie.
+
+The moved helpers keep their existing coverage, re-pointed to the new path:
+`segmenting_never_drops_or_duplicates_content`,
+`pooling_returns_a_unit_vector_and_rejects_ragged_input`,
+`under_budget_makes_one_call_and_over_budget_pools_to_unit_norm`,
+`content_within_budget_is_never_segmented` (`src/tools/memory/tests.rs`).
+
+Gate: 4516 passed, 0 failed; `clippy --all-targets -- -D warnings` clean.
 ## Workarounds
 
 Re-write the memory through the tool path, which *is* segmented:
@@ -158,13 +209,12 @@ why this bug blocks the last memory rather than merely inconveniencing it.
 
 ## Resume
 
-Read `src/tools/memory/mod.rs`'s `embed_document_pooled` and decide its new home
-(`src/embed/` is the candidate — `chunk_size_for_model` already lives there and is its
-dependency). Then `HttpMigrationEmbedder::embed` wraps it. Verify with
-`./target/release/codescout migrate-memories --in-place` and confirm `skipped: 0` and
-`eval-design` present in the `structured` bucket — currently the one memory still missing
-of this repo's 23.
+N/A — fixed and verified on `experiments`, archived.
 
+One follow-up is named in `## Fix` rather than left implicit: `--dry-run` reports
+`skipped: 0` on a run that would fail, because it returns before the embed call. Making it
+embed-but-not-upsert would make the dry run predictive, and is a deliberate behaviour
+change to a flag whose contract is "touch nothing" — its own decision, not a rider.
 ## References
 
 - `src/migrate/memories.rs:53-62` (`HttpMigrationEmbedder::embed`), `:292-370`
