@@ -563,6 +563,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "dangling": dangling_total,
             "cross_repo": cross_repo_total,
             "prefix_conflicts": prefix_conflicts.len(),
+            // `len(dangling) == FINDINGS_CAP` reads identically whether the true count is
+            // exactly the cap or 100x it — this states which arrays actually got cut, so a
+            // reader never has to compare a count against an array length to find out.
+            "truncated": {
+                "ambiguous": ambiguous_total > ambiguous.len(),
+                "dangling": dangling_total > dangling.len(),
+                "cross_repo": cross_repo_total > cross_repo.len(),
+            },
         },
         "edges_missing": edge_view(&d.to_add),
         "edges_stale": edge_view(&d.stale),
@@ -1096,5 +1104,60 @@ mod tests {
         assert_eq!(f["candidates_total"], 2);
         assert_eq!(f["candidates"].as_array().unwrap().len(), 2);
         assert_eq!(f["raw"], "B-1", "the shared shape survives the merge");
+    }
+
+    #[tokio::test]
+    async fn counts_flags_truncation_per_finding_array_when_the_cap_is_exceeded() {
+        // `FINDINGS_CAP` (50) caps every finding array; without a `truncated` flag,
+        // `len(dangling) == 50` reads identically whether the true count is 50 or 5000 —
+        // docs/issues/2026-08-26-cited-prefix-with-no-definer-is-invisible.md.
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // One entry defines the `F` prefix, so `F-2..F-52` are DANGLING (prefix known,
+        // ids undefined) rather than inert (prefix unknown, reported nowhere at all).
+        let dst = tmp.path().join("target.md");
+        std::fs::write(&dst, "## F-1 — anchor entry\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "dst", &dst, "target");
+
+        let mut body = String::new();
+        for n in 2..=52 {
+            body.push_str(&format!("See F-{n}.\n"));
+        }
+        let src = tmp.path().join("source.md");
+        std::fs::write(&src, &body).unwrap();
+        seed_scan_artifact(&cat, "src", &src, "source");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": false })).await.unwrap();
+
+        assert_eq!(out["counts"]["dangling"], json!(51), "{out:#?}");
+        assert_eq!(
+            out["dangling"].as_array().unwrap().len(),
+            50,
+            "the array itself stays capped: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["truncated"]["dangling"],
+            json!(true),
+            "51 > the 50-entry cap must be visible without comparing two fields: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["truncated"]["ambiguous"],
+            json!(false),
+            "an array at or under its cap (here: empty) must not read as truncated: {out:#?}"
+        );
     }
 }
