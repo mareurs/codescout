@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 71
-entry_high_water_W: 70
+entry_high_water_W: 71
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -195,6 +195,7 @@ entry_high_water_W: 70
 | W-65 | 2026-08-26 | high | When a result is IMPOSSIBLE rather than merely wrong, suspect the RUN, not the code | A failing payload carried 2 of 4 keys that output.rs sets in ONE `if let` block; grep confirmed a single producer, so no branch could emit it. Re-running unchanged: 4293/0, twice. I was two steps from filing a platform defect against a peer's hour-old feature and "fixing" correct production code — with a wine Cygwin warning in the payload ready to anchor the wrong diagnosis. Wrong values mean wrong logic; impossible combinations mean a wrong observation, and that second hunt is invisible if you start from "which line computed this?" | validated |
 | W-66 | 2026-08-26 | med | RED-before-GREEN on a bug's own prescribed fix, not just "bare vs. my fix" | Would have shipped a fix that changed nothing and closed a live defect | validated |
 | W-67 | 2026-08-26 | low-med | Measured the 3 live zombie records before picking doc-fix vs. doctor-check | Would have built a staleness detector for a population with no measured neglect | validated |
+| W-71 | 2026-08-26 | high | Replace the question, don't tighten the answer — a predicate needing an exhaustive population fails silently (which processes are stale / which commits are the peer's); one whose subject is self has a population of one, so completeness is not a precondition. Corollary: each session publishes its own list; nobody derives everyone's | Instance 1 would have left the oldest stale server running — the same process that then needed `-9` and is the clearest pre-fix datapoint for `ca2b0226`. Instance 2 would have credited the wrong session for the `EMBED_API_KEY` test repair, the [[F-71]] shape again. Note [[W-70]] described this class 40 min before I repeated it: a lesson requiring you to notice you are guessing is weaker than one removing the guess from the procedure (R-49's temporal-not-attentional argument, from the other side) | validated |
 | W-70 | 2026-08-26 | high | Publish the retraction to the peer immediately even when you cannot fix it — two accidental sweeps of the same ledger, four minutes apart in opposite directions, both harmless solely because each session was told within ~3 min | Sweep 2 (`66671bf5`) happened with `git diff -- <file>` honestly run and PASSED; the peer's write landed between the diff and the add, so the guard narrows the race and does not close it. The only thing that prevented rather than repaired was a wire handshake — "file is clear as of `<sha>`, write freely". Absent disclosure, a session whose entry vanished re-runs `append_entry`, allocating a fresh id for content already in HEAD: two ids, divergent bodies, nothing validating for duplication | validated |
 | W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
@@ -6162,6 +6163,72 @@ is why this one claim is argued from the contract instead of demonstrated.
 **Credit:** `codescout-df` named this practice and declined to file it, on the grounds that it belonged with the session that had the second sweep. Sweep 2 is mine. Their `84b705d8` carries the complementary boundary on `W-69`'s rule 2.
 
 **Promote-when:** a second, independent work stream reports a peer-sweep made harmless by prompt disclosure — target `docs/RELEASE.md` § Concurrent-Work Rules, which per `W-49` documents git-state safety and says nothing about disclosure. Two datapoints here, four minutes apart, one work stream, one evening: that is one event with two halves, not two events, and promoting on it would be the accretion the reconnaissance skill's audit exists to prevent.
+
+## W-71 — Replace the question, don't tighten the answer — a predicate needing an exhaustive population fails silently; one with a population of one has no such precondition
+
+**Valid:** invariant
+
+**Observed:** 2026-08-26, ~23:35–23:50, three concurrent sessions in this checkout. Two
+sessions independently made the same *shape* of error within an hour, and both remedies
+converged on changing the question rather than being more careful with the answer.
+
+**The two instances.**
+
+1. **Which processes are stale?** A peer needed to kill MCP server processes predating a
+   23:33:54 rebuild. They listed nine pids, pulled start times for six, and reported on the
+   sample as though it were the population — missing the oldest, a two-and-a-half-hour
+   process. Self-corrected. The remedy was not "pull all nine": it was
+   `P=$PPID; while ...; do ps -o pid=,lstart=,comm= -p $P; P=$(ps -o ppid= -p $P); done` —
+   walk your own parent chain. That answers *which process serves me*, whose population is
+   one.
+2. **Which commits are the peer's?** I attributed `b3d2a0c1` and `9eb0dd62` to that peer,
+   in a report to the user and in a message to the peer themselves, on nothing but "new
+   commits appeared and a peer was active." They were a **third** session's — one neither
+   of us had in our population. The remedy is the same: *which commits are mine* needs no
+   inference, because I know what I committed.
+
+**The mechanism, stated generally.** A predicate of the form *"which members of set S have
+property P"* is correct only if the enumeration of S is exhaustive. Nothing signals a
+short enumeration — the query returns a complete-looking answer over whatever it saw, so
+the failure is a confident wrong result, never an error. A predicate whose subject is
+**self** has a population of one; completeness is not a precondition, so there is nothing
+to under-sample. That is a structural fix, not a diligence fix.
+
+**Corollary — a protocol, not a habit.** When sessions in a shared checkout need to know
+who wrote what, each **publishes its own list**; nobody derives everyone's. Derivation
+cannot detect an absent participant. Publication does not need to.
+
+**Got — and this is the part worth the entry.** [[W-70]] was written **forty minutes
+before** instance 2, by me, in this file, about exactly this error class ("no instrument was
+consulted at all, because the answer I wanted was already written"). Writing the lesson down
+did not prevent the repeat. That is a datum about ledgers, not a confession: an entry that
+describes an error class trains recognition *after* the fact, and this class is defined by
+feeling like knowledge at the time. It is the same argument the reconnaissance skill makes in
+R-49 — "the countermeasure is temporal, not attentional" — reaching the same conclusion from
+the other side. A lesson that requires you to *notice* you are guessing is weaker than one
+that removes the guess from the procedure.
+
+**Counterfactual.** Instance 1 would have left a two-and-a-half-hour stale server running
+while its owner reported the kill complete — and that process was one of the two that
+turned out to need `-9`, i.e. the single clearest pre-fix datapoint for the
+`ca2b0226` SIGTERM work. Instance 2 propagated one repo-visible layer before retraction
+(a message to the peer) and, unretracted, would have credited the wrong session for the
+`EMBED_API_KEY` test repair — the same shape as [[F-71]], where a wrong attribution
+hardened in a peer's committed ledger before the correction landed.
+
+**Cross-checks that did work, recorded so the entry is not one-sided.** The parent-walk
+gave `3691039 started 23:35:01`, but start time is an upstream proxy; the served bytes
+were confirmed separately by checking three markers the peer named against the
+`tracker-conventions` text actually received. And this entry's own two instances were
+each confirmed by their subject, not inferred by their observer.
+
+**Status:** validated
+
+**Promote-when:** a third instance appears in any repo where the subject is neither
+processes nor commits — i.e. the shape generalises past "concurrent sessions in one
+checkout." Candidate home is `reconnaissance-patterns` as a sibling to R-79 (a search that
+finds nothing is evidence about the search), which is the same law for a *query*; this is
+that law for a *population*.
 
 ## Template for new entries
 
