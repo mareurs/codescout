@@ -1027,7 +1027,7 @@ fn memory_coverage_hint(m: &crate::memory::MemoryIntegrity) -> String {
             "{} memory/memories are on disk with NO point — invisible to recall, and \
              invisible to `codescout migrate-memories --in-place` too, which enumerates \
              from the store. Re-run memory(action='write') with each one's current \
-             content to repair: {}",
+             content to repair: {}.",
             m.missing_count,
             m.missing_sample.join(", ")
         ));
@@ -1035,7 +1035,7 @@ fn memory_coverage_hint(m: &crate::memory::MemoryIntegrity) -> String {
     if m.orphan_count > 0 {
         parts.push(format!(
             "{} point(s) have no file on disk — recall can still return them. Drop with \
-             memory(action='forget'): {}",
+             memory(action='forget'): {}.",
             m.orphan_count,
             m.orphan_sample.join(", ")
         ));
@@ -1174,6 +1174,26 @@ mod integrity_verdict_tests {
         assert!(
             h.contains("memory(action='write')") && h.contains("memory(action='forget')"),
             "each kind needs its own command: {h}"
+        );
+    }
+
+    /// The two clauses must not run together.
+    ///
+    /// `parts.join(" ")` put the missing list's last entry flush against the orphan
+    /// count, rendering `... system-prompt 3 point(s) have no file` — which reads as a
+    /// list item with a number stuck on it. The three `contains` assertions above all
+    /// passed on that output; only reading the live bytes showed it. So this pins the
+    /// SEAM rather than the substrings.
+    #[test]
+    fn hint_clauses_are_separated_sentences() {
+        let h = super::memory_coverage_hint(&mem_integrity(&["lost"], &["stale-point"]));
+        assert!(
+            !h.contains("lost 1 point"),
+            "clauses ran together — a name flush against a count reads as one token: {h}"
+        );
+        assert!(
+            h.contains("lost."),
+            "the missing clause must close before the next one opens: {h}"
         );
     }
 

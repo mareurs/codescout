@@ -166,6 +166,21 @@ pub struct MemoryIntegrity {
 /// How many names to name. Enough to act on, short enough to read.
 const MEMORY_INTEGRITY_SAMPLE: usize = 20;
 
+/// The bucket topic-backed memories live in.
+///
+/// `MemoryStore` topics and this bucket are one namespace: `cross_embed_memory` writes
+/// here, and `memory(action="forget")` derives its point id as
+/// `point_id_for(project_id, "structured", topic)` (`src/tools/memory/mod.rs:1031`).
+///
+/// The other buckets have NO disk file by design, which is why coverage must filter
+/// rather than compare everything. `memory(action="remember")` upserts straight to the
+/// store — no markdown — defaulting to `"unstructured"`, and the preferences surface
+/// (`crate::prompts::builders::append_preferences_section`) reads `"preferences"`.
+/// Measured on this repo 2026-08-26: 17 `structured`, 1 `preferences` — and comparing
+/// unfiltered reported that one preference as a missing-file orphan, a signal no action
+/// could ever clear, on a report meant to be checked routinely.
+pub const TOPIC_BUCKET: &str = "structured";
+
 /// Compare the memories on disk against the points in the semantic store.
 ///
 /// **Why the store alone cannot answer this.** `cross_embed_memory` is best-effort and
@@ -178,13 +193,15 @@ const MEMORY_INTEGRITY_SAMPLE: usize = 20;
 /// sees them — hence `topics` from the writer's own walk ([`MemoryStore::list`]) rather
 /// than a re-derivation of eligibility here.
 ///
-/// Measured on this repo 2026-08-26, before any of this existed: 23 on disk, 18 in store,
-/// **8 undiscoverable** (`eval-design` at 31 KB among them), 3 stale points whose
-/// markdown was gone.
+/// Measured on this repo 2026-08-26, before any of this existed: 23 on disk, 17 in the
+/// `structured` bucket, **8 undiscoverable** (`eval-design` at 31 KB among them), 2 stale
+/// points whose markdown was gone.
 ///
 /// **Pass the SHARED topic list only.** `cross_embed_memory` runs under `if !private`, so
 /// a private memory correctly has no point; passing `private_memory.list()` here would
-/// report every one of them as missing. The asymmetry is deliberate on both sides.
+/// report every one of them as missing. That is the disk-side twin of the
+/// [`TOPIC_BUCKET`] filter on the store side — both exclude a population whose absence is
+/// correct, and both, left in, produce a permanently unclearable warning.
 ///
 /// Read-only, on the same grounds as [`crate::retrieval::sync::verify_index_coverage`]: a
 /// negative result must never authorise a deletion, so a wrong answer costs a misleading
@@ -198,7 +215,13 @@ pub async fn verify_memory_coverage(
 
     let expected: BTreeSet<&str> = topics.iter().map(String::as_str).collect();
     let hits = store
-        .list(project_id, semantic_store::MemoryFilter::default())
+        .list(
+            project_id,
+            semantic_store::MemoryFilter {
+                bucket: Some(TOPIC_BUCKET.to_string()),
+                ..Default::default()
+            },
+        )
         .await?;
     let stored: BTreeSet<&str> = hits.iter().map(|h| h.memory.title.as_str()).collect();
 
@@ -557,5 +580,46 @@ mod tests {
 
         assert_eq!(m.missing_count, 35, "count must be the true total");
         assert_eq!(m.missing_sample.len(), MEMORY_INTEGRITY_SAMPLE);
+    }
+
+    /// A store-only memory in another bucket is NOT an orphan — it has no disk file by
+    /// design.
+    ///
+    /// `memory(action="remember")` upserts straight to the store with no markdown
+    /// (`src/tools/memory/mod.rs:1044`), and the preferences surface reads its own bucket.
+    /// Comparing unfiltered reports every one of them as a missing-file orphan, forever,
+    /// with no action that could clear it — and a report that always complains is one
+    /// nobody reads. Caught on the LIVE read of this tool, not by the first five tests
+    /// here: a real `preferences` memory was reported as an orphan.
+    #[tokio::test]
+    async fn coverage_ignores_points_outside_the_topic_bucket() {
+        let store = InMemorySemanticMemoryStore::default();
+        for (bucket, title) in [
+            (TOPIC_BUCKET, "gotchas"),
+            ("preferences", "Auto mode kept on"),
+            ("unstructured", "some remembered note"),
+        ] {
+            let m = SemanticMemory {
+                project_id: "p".to_string(),
+                bucket: bucket.to_string(),
+                title: title.to_string(),
+                content: "c".to_string(),
+                anchors: vec![],
+                created_at: "2026-08-26T00:00:00Z".to_string(),
+                updated_at: "2026-08-26T00:00:00Z".to_string(),
+            };
+            store.upsert(&m, &[0.1, 0.2, 0.3]).await.unwrap();
+        }
+
+        let m = verify_memory_coverage(&["gotchas".to_string()], &store, "p")
+            .await
+            .unwrap();
+
+        assert_eq!(m.in_store, 1, "only the topic bucket counts: {m:?}");
+        assert_eq!(
+            m.orphan_count, 0,
+            "a store-only memory in another bucket is not an orphan: {m:?}"
+        );
+        assert_eq!(m.missing_count, 0);
     }
 }
