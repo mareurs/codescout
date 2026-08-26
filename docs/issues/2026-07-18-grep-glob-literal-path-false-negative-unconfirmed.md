@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: zombie
+status: investigating
 title: 'BUG: `grep`''s `glob` param reported to miss real matches on literal (non-wildcard) file paths — not reproducible on immediate re-test'
 tags:
 - grep
@@ -367,3 +367,16 @@ watched rather than let it lapse back to zombie. Re-open trigger from the
 original filing (capture `path`/`workspace` state and call sequence the
 moment it recurs) still stands and is now the single highest-value next
 data point.
+
+
+### Bookkeeping correction — 2026-08-26 zombie-verify pass
+
+The `Status change: zombie → investigating` line above was written 2026-07-18, same day as
+the second recurrence, but only as prose — the frontmatter `status:` field was never
+actually flipped, so every `artifact(find, status="zombie")`-style query kept reporting
+this as a settled, no-action zombie for over five weeks. Caught during a routine
+verify-open sweep of this project's three zombie bug files; corrected to match what the
+file itself already concluded. No new evidence gathered — this is a catalog-vs-prose
+reconciliation, not a re-investigation. The re-open trigger from the original filing
+(capture `path`/`workspace` state and call sequence at the moment of recurrence) is still
+the next useful action if this fires again.
