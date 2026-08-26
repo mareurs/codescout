@@ -24,7 +24,9 @@ use std::path::{Path, PathBuf};
 /// RAII handle for the per-project index lock.
 ///
 /// The `flock` is released on drop, and by the kernel if the process dies — so a
-/// leftover lock file is inert and needs no recovery logic.
+/// leftover lock file is inert and needs no recovery logic. The same is true of a
+/// leftover [`pid_path`] sidecar: it is only ever read when a lock is genuinely held,
+/// and every acquirer replaces it wholesale.
 #[derive(Debug)]
 pub struct IndexLock {
     file: File,
@@ -40,6 +42,11 @@ impl IndexLock {
 
 impl Drop for IndexLock {
     fn drop(&mut self) {
+        // Remove the PID record BEFORE releasing, so any window in which a contender
+        // can read it is a window in which the lock is genuinely still held. The
+        // reverse order would let the next holder acquire and write its own record
+        // between our unlock and our cleanup, and we would then delete *its* record.
+        let _ = std::fs::remove_file(pid_path(&self.path));
         // Explicit unlock documents intent; closing the fd would also release it.
         let _ = FileExt::unlock(&self.file);
     }
@@ -55,18 +62,29 @@ impl Drop for IndexLock {
 pub struct LockHeldError {
     pub project_id: String,
     pub path: PathBuf,
-    /// Best-effort — the PID line is written only after the holder acquires the lock,
-    /// so it can be absent, and it is read without holding the lock so it can be stale
-    /// by the time the caller looks. `None` means "couldn't determine", never "no holder".
+    /// Best-effort — the PID is written to the [`pid_path`] sidecar only after the holder
+    /// acquires the lock, so it can be absent, and it is read without holding the lock so
+    /// it can be stale by the time the caller looks. `None` means "couldn't determine",
+    /// never "no holder".
     pub holder_pid: Option<u32>,
 }
 
 impl std::fmt::Display for LockHeldError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Print the PID rather than telling the reader to go open a file: on Windows the
+        // lock file cannot be read at all while the lock is held (see `pid_path`), so the
+        // old "its first line is the holder's PID" advice was impossible to follow there.
+        let holder = match self.holder_pid {
+            Some(pid) => format!("PID {pid}"),
+            None => format!(
+                "an undetermined PID — see {}",
+                pid_path(&self.path).display()
+            ),
+        };
         write!(
             f,
             "another codescout index is already running for project '{}' \
-             (lock file: {} — its first line is the holder's PID). The holder may be \
+             (held by {holder}; lock file: {}). The holder may be \
              a CLI `codescout index` run OR an in-process background index (e.g. an \
              MCP server's auto-index task) — check the PID, don't assume `pgrep -af \
              'codescout index'` will show it.",
@@ -90,6 +108,22 @@ pub fn lock_path_in(dir: &Path, project_id: &str) -> PathBuf {
     dir.join(format!("codescout-index-{}.lock", &digest[..16]))
 }
 
+/// Path of the PID sidecar beside a lock file: `codescout-index-<hash>.pid`.
+///
+/// The holder's PID cannot live *inside* the lock file. `fs4` takes the lock over the
+/// whole byte range (`LockFileEx(.., 0, !0, !0)`), and Windows byte-range locks are
+/// **mandatory** rather than advisory: while the lock is held, a read through any other
+/// handle fails with `ERROR_LOCK_VIOLATION` — which is exactly the moment a waiter wants
+/// to know who holds it. Unix never showed this, because `flock` is advisory and the read
+/// simply succeeds. A separate, never-locked file reads the same on both.
+///
+/// Measured on CI run `32961510592` (`windows-latest`): `holder_pid` came back `None`,
+/// which `index(action="status")` and `index(action="build")` both surface to the caller
+/// as `holder_pid: null`, and the error text advised opening a file Windows would refuse.
+fn pid_path(lock_path: &Path) -> PathBuf {
+    lock_path.with_extension("pid")
+}
+
 /// Deterministic lock-file path for `project_id`.
 ///
 /// Hashed so any `project_id` — including one with path separators or spaces —
@@ -111,8 +145,10 @@ pub fn lock_path(project_id: &str) -> PathBuf {
 pub fn acquire_in(dir: &Path, project_id: &str) -> Result<IndexLock> {
     let path = lock_path_in(dir, project_id);
 
-    // create(true) + truncate(false): `File::create` truncates on open, which
-    // would erase the current holder's PID line before we even try to lock.
+    // The lock file is a pure lock token and carries no content — the holder's PID
+    // lives in the [`pid_path`] sidecar. `truncate(false)` because there is nothing to
+    // truncate and no reason to write to a file another process is holding a lock on;
+    // `File::create` would truncate on open.
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -121,9 +157,10 @@ pub fn acquire_in(dir: &Path, project_id: &str) -> Result<IndexLock> {
         .with_context(|| format!("failed to open index lock file: {}", path.display()))?;
 
     if file.try_lock_exclusive().is_err() {
-        // Read the holder's PID without holding the lock — best-effort, and
-        // decoupled from `file`'s write-only handle above.
-        let holder_pid = std::fs::read_to_string(&path)
+        // Read the holder's PID from the sidecar, never from `path`: the lock covers
+        // every byte of that file, and on Windows that makes it unreadable through any
+        // other handle for as long as it is held. See [`pid_path`].
+        let holder_pid = std::fs::read_to_string(pid_path(&path))
             .ok()
             .and_then(|s| s.lines().next().and_then(|l| l.trim().parse::<u32>().ok()));
         return Err(LockHeldError {
@@ -136,10 +173,9 @@ pub fn acquire_in(dir: &Path, project_id: &str) -> Result<IndexLock> {
 
     // PID for diagnostics, mirroring src/lsp/mux/process.rs:81. Only after the
     // lock is held, so we never clobber another holder's record. Best-effort:
-    // a failed write must not fail an otherwise-valid lock.
-    use std::io::Write;
-    let _ = file.set_len(0);
-    let _ = writeln!(&file, "{}", std::process::id());
+    // a failed write must not fail an otherwise-valid lock. `fs::write` truncates,
+    // so a longer record left by a dead process cannot leave a tail behind.
+    let _ = std::fs::write(pid_path(&path), format!("{}\n", std::process::id()));
 
     Ok(IndexLock { file, path })
 }
@@ -285,41 +321,69 @@ mod tests {
         acquire_in(dir.path(), "release").expect("must be re-acquirable after the guard drops");
     }
 
-    /// A leftover lock *file* must never block a new run, and the PID write must
-    /// TRUNCATE rather than overwrite in place.
+    /// The PID record is cleaned up on release, so a later reader cannot mistake a
+    /// leftover file for a live holder.
     ///
-    /// The planted content is shaped to kill two distinct mutations at once, which
-    /// requires both properties in one value:
-    ///   - it starts with our OWN live pid, so a PID-liveness check ("is the holder
-    ///     still alive? then refuse") would refuse and fail this test. Planting a
-    ///     dead pid like 999999 would NOT pin that — 999999 is above `pid_max` on
-    ///     most Linux configs and reads as dead anyway.
-    ///   - it is LONGER than what `acquire` writes, so deleting `set_len(0)` leaves a
-    ///     visible tail. Planting only our pid would NOT pin that either: `acquire`
-    ///     writes identical bytes at offset 0, making the truncate unobservable.
+    /// Pins the ORDER too, indirectly: the record is removed before the unlock, so the
+    /// re-acquire below — which only succeeds once the lock is released — proves the
+    /// removal already happened by then. Reversing the two would let a fresh holder's
+    /// record be deleted by the outgoing guard.
+    #[test]
+    fn drop_removes_the_pid_record() {
+        let dir = scratch();
+        let path = lock_path_in(dir.path(), "pid-cleanup");
+        {
+            let _held = acquire_in(dir.path(), "pid-cleanup").expect("acquire");
+            assert!(
+                pid_path(&path).exists(),
+                "the holder must record its pid while it holds the lock"
+            );
+        }
+        assert!(
+            !pid_path(&path).exists(),
+            "the pid record must not outlive the lock it describes"
+        );
+
+        let again = acquire_in(dir.path(), "pid-cleanup").expect("re-acquire after release");
+        assert!(
+            pid_path(&path).exists(),
+            "a fresh holder must have its own record, not the previous holder's deletion"
+        );
+        drop(again);
+    }
+
+    /// A leftover lock *file* must never block a new run, and a leftover PID record
+    /// must be replaced wholesale rather than believed or appended to.
+    ///
+    /// The planted PID is our OWN live pid, which kills a specific mutation: a
+    /// PID-liveness check ("is the holder still alive? then refuse") would refuse and
+    /// fail this test. Planting a dead pid like 999999 would NOT pin that — 999999 is
+    /// above `pid_max` on most Linux configs and reads as dead anyway. The planted
+    /// record is also LONGER than what `acquire` writes, so an append rather than a
+    /// replace leaves a visible tail.
     #[test]
     fn preexisting_lock_file_does_not_block() {
         let dir = scratch();
         let path = lock_path_in(dir.path(), "stale");
+        std::fs::write(&path, "leftover bytes from an older codescout\n")
+            .expect("simulate a lock file left by a dead process");
         std::fs::write(
-            &path,
-            format!(
-                "{}\nstale-tail-that-must-be-truncated\n",
-                std::process::id()
-            ),
+            pid_path(&path),
+            format!("{}\nstale-tail-that-must-be-replaced\n", std::process::id()),
         )
-        .expect("simulate a lock file left by a dead process");
+        .expect("simulate a PID record left by a dead process");
 
         let lock =
             acquire_in(dir.path(), "stale").expect("a stale lock file must not block acquisition");
-        drop(lock);
 
-        let contents = std::fs::read_to_string(&path).expect("read lock file");
+        // Read before dropping: the guard removes the record on release.
+        let recorded = std::fs::read_to_string(pid_path(&path)).expect("read pid sidecar");
         assert_eq!(
-            contents.trim(),
+            recorded.trim(),
             std::process::id().to_string(),
-            "lock file must contain exactly the holder's pid, with no stale tail"
+            "the PID record must be replaced wholesale, with no stale tail"
         );
+        drop(lock);
     }
 
     /// The seam itself is the regression guard. Asserting "the real runtime dir
