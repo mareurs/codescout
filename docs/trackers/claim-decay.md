@@ -89,8 +89,25 @@ days earlier, one citing a file that has never existed at any path) and one `DC-
 > scope alongside the finding; it is recorded here so a later reader cannot mistake the
 > one for the other.)
 
-Also out of scope: a plain typo, and any claim where a trigger **did** fire and someone
-ignored it — that is a process friction (`F-N`), not an absent trigger.
+Also out of scope: a plain typo; any claim where a trigger **did** fire and someone ignored
+it (a process friction, `F-N`, not an absent trigger); and a statement that is **true but
+incomplete** — one that licenses a false inference without ever becoming false itself.
+
+That last one is the subtlest boundary and it has a worked example. `CLAUDE.md` says the
+kotlin-lsp bug file *“was pruned as a dupe in `c6184884`”*. Probed 2026-08-26
+(`--diff-filter=AD`, both paths): `c6184884` (2026-04-30) did delete
+`docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`, so the sentence is accurate
+and **cannot decay** — it is a fact about history. What it omits is the second copy:
+`cbf7456d` added `docs/issues/archive/…` on 2026-04-21, and `771d9516` deleted it
+separately on 2026-05-02. One sentence, one commit named, two paths and two deletions in
+fact — which leaves a reader to infer the archive path was live until the prune, and that
+inference is what reads as `decayed`.
+
+Nothing there is hostage to a changing substrate, so it is not DC however much the
+misreading it produces looks like one. It belongs in `F-N` (filed by `codescout-77` as
+`bug-fix-session-log:F-70`). Keeping this boundary sharp matters: scope is the thing this
+ledger has already gotten wrong twice, and *“true, and misleading”* is the case most likely
+to be argued into it.
 
 ## The questions this ledger is built to answer
 
