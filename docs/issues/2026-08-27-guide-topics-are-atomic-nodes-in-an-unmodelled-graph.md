@@ -106,6 +106,80 @@ settled something. The original text stated the delivered-vs-used limit honestly
 but still led with the byte count, which is the interpretation that limit does not
 support.)
 
+## The delivery census exists — 91 sessions, and it corrects both anecdotes
+
+Added 2026-08-27. A peer went looking for the per-session record that would fix
+the sampling defect and reported it absent from three locations. It is not absent;
+the search had the wrong predicate. `.gitignore:49` names `.codescout/guide_hints/`,
+but `src/server.rs:438-439` resolves the real path from the XDG **state** dir:
+
+```rust
+let guide_hints_dir = env.guide_hints_dir.clone().or_else(|| {
+    crate::util::fs::per_user_state_dir().map(|d| d.join("codescout").join("guide_hints"))
+});
+```
+
+`~/.local/state/codescout/guide_hints/` — not `~/.cache`, not `~/.local/share`.
+**91 session ledgers, 2026-08-18 to 2026-08-27.** The keyed tier is live and the
+`workspace-state` guide's persistence claim is accurate on this machine.
+
+### What 91 sessions say about delivery
+
+| topic | sessions | % | bytes | × sessions |
+|---|---|---|---|---|
+| `project-activation-bootstrap` | 89 | 98% | 2,594 | 230,866 |
+| `symbol-navigation` | 56 | 62% | 3,145 | 176,120 |
+| `tracker-conventions` | 41 | 45% | 34,333 | **1,407,653** |
+| `progressive-disclosure` | 41 | 45% | 5,669 | 232,429 |
+| `librarian` | 41 | 45% | 20,545 | 842,345 |
+| `workspace-state` | 13 | 14% | 10,355 | 134,615 |
+| `error-handling` | 1 | 1% | 1,857 | 1,857 |
+| `iron-laws-detail` | **0** | 0% | 11,238 | 0 |
+| `librarian-runtime` | **0** | 0% | 9,774 | 0 |
+| `untrusted-content` | **0** | 0% | 5,317 | 0 |
+
+≈ **3.0 MB of guide text auto-delivered across 91 sessions.**
+`tracker-conventions` is **46.5%** of every guide byte ever auto-delivered here;
+with `librarian` it is **74.4%**.
+
+### Three findings the anecdotes could not reach
+
+**1. Three topics have never auto-injected — 26,329 bytes, 25% of the corpus.**
+And the most telling of them is `librarian-runtime`, the topic `librarian.md:407`
+split out by hand *specifically to keep the parent lean*. That split moved 9,774
+bytes behind an edge, and in 91 sessions **nothing has ever followed it.** The
+hand-split did not redistribute the cost; it made a quarter of the guide
+unreachable by the delivery path while leaving the parent's 20 KB intact. This is
+direction (b)'s outcome, already run as an experiment, now with a result.
+
+**2. Both anecdotes in this issue are atypical, in the same direction.** Topics
+per session: median **2** (38 of 91 sessions received exactly two). The filing
+session received 5 — top 24%. The counterexample session received 6 — top 11%.
+**Two sessions that found each other interesting were both guide-heavy outliers**,
+which is exactly the selection defect `Not yet done` warned about, now measured
+rather than suspected. Neither arm was representative; the disagreement between
+them was real but it was a disagreement between two tails.
+
+**3. The 63% headline was itself unrepresentative.** The typical session receives
+two topics, most often `project-activation-bootstrap` (2.6 KB) plus one other.
+The median session's guide burden is small. The cost is concentrated, not diffuse
+— which sharpens the case for targeting `tracker-conventions` and `librarian`
+specifically, and weakens any argument about the corpus as a whole.
+
+### What this census is NOT
+
+**It measures delivery, never use.** The delivered-is-not-used limit stands
+entirely; nothing here says whether any of those 3.0 MB were read. It resolves the
+sampling defect for the delivery half only.
+
+And it is a floor, not a history. The ledger is live dedup state with **five**
+deletion paths, not an audit log: `persist()` **deletes the file** when the map
+empties (deliberately — an empty ledger lacks `SESSION_OPENING_GUIDE`, so the
+opener re-fires), `gc()` prunes ledgers idle past `GC_MAX_IDLE_DAYS = 35`,
+`clear()` and `rekey()` forget every topic, and `expire_idle()` drops topics past
+TTL. So 91 is *sessions whose ledger survived*, biased toward the recent and the
+non-empty. Real counts are higher and the true denominator is unrecoverable.
+
 ## Root cause
 
 Bodies are `include_str!`'d and dispatched by a hardcoded match on topic name:
