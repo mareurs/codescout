@@ -96,6 +96,39 @@ This is R-89's process axis with a write side. R-89 and `W-55` both concern a
 stale process producing a wrong *answer*; here it produces a wrong *record*, in a
 file other processes then read.
 
+
+### Measured during the 2026-08-26 cleanup — the reaping mechanism, and a correction
+
+Killing the pile produced better evidence than the filing did, and it **corrects** the
+leak explanation above.
+
+**`SIGTERM` reaps nothing.** All eleven stale servers were sent `SIGTERM`; **every one
+survived**, and each needed `SIGKILL`. So the normal way to reap a process does not work
+on this server, and any supervisor, script, or human reaching for `kill` will conclude it
+worked and be wrong.
+
+**But a clean client disconnect DOES reap.** The authoring session's own server
+(`1455816`) vanished on the next `/mcp` reconnect without being signalled. So the exit
+path is stdio EOF — the client closing the pipe — not a signal.
+
+**Which makes the leak specific**, and narrower than "nothing reaps them": a session that
+ends by closing its pipe cleans up after itself, and a session that dies *without*
+closing it (client SIGKILL, crash, a `/clear` that reassigns the conversation, a
+terminal closed out from under it) leaves a server alive **forever**, because the one
+remaining lever — a signal — is ignored. That is why the survivors skewed old: they are
+exactly the sessions that did not exit cleanly, accumulated over days.
+
+**Scale, measured rather than estimated.** 14 processes matched `codescout start`.
+**12 of 14 were on deleted binaries**, the authoring session's own included — so this was
+not two stale outliers from Aug 24–25 but effectively *every* long-lived server on the
+host executing code that no longer existed. After killing 11 and reconnecting, 4 remain,
+all on live inodes.
+
+**The control that validates the diagnosis.** One server (`2119451`, started 20:59) sat
+alongside the zombies with the *same* env and the *same* repo but a **live** inode. Same
+shape, healthy. That is what makes "deleted binary" the discriminator rather than "old
+pid" or "missing env" — both of which also correlated, and neither of which is the
+mechanism.
 ## Evidence
 
 ### Why the vectors are nonetheless intact
@@ -158,6 +191,26 @@ connect. That makes the symptom intermittent — whichever process last reconnec
 wins — which is strictly worse than a stable wrong value, because it defeats
 exactly the kind of investigation that found this.
 
+
+### Re-ordered 2026-08-26 after the cleanup — a signal handler now outranks both
+
+The two directions above stand, but a third is cheaper and fixes more, and the
+measurements put it first:
+
+0. **Exit on `SIGTERM`.** Eleven processes ignored it and needed `SIGKILL`. A server that
+   dies when asked is what makes every other mitigation — a supervisor, a reaper script,
+   a human with `kill` — work at all, and its absence is why days-old processes were still
+   holding stale config. It also has no cross-platform problem, unlike the
+   `/proc/self/exe` check in direction 2.
+
+With `SIGTERM` honoured, the remaining exposure is only the window between a client dying
+uncleanly and someone noticing — which is what direction 1 (record *who* wrote the
+sidecar) makes visible, and what direction 2 (refuse to write from a deleted binary) makes
+harmless. All three compose; none replaces another.
+
+**Still do not "fix" this by reaping on connect.** The reasoning above is unchanged and
+the cleanup reinforced it: whichever process last reconnected would win, making the
+symptom intermittent, which defeats exactly the investigation that found it.
 ## Tests added
 
 None yet. The tractable unit is a `should_write_shared_state()` predicate over a
