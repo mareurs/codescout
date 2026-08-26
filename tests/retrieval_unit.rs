@@ -141,25 +141,38 @@ fn config_from_env_and_project_env_wins_over_project_toml() {
     );
 }
 
+/// Constructing a client from env must go through `temp_env` like every other test in
+/// this binary — a bare `set_var` here is not a style nit, it is a live flake.
+///
+/// `temp_env::with_vars` serializes on a global `ReentrantMutex`, so the guarded tests
+/// never see each other's values. A bare `set_var` does not take that lock: it mutates
+/// the process env of every test running in parallel in this binary, and the trailing
+/// `remove_var` cleanup then unsets the variable underneath them. Measured 2026-08-26 on
+/// the `server-stack` lane — this test's own `http://127.0.0.1:8081` surfaced inside
+/// `config_from_env_and_project_env_wins_over_project_toml`, which had asked for
+/// `http://from-env:8`. A lock only protects its participants.
+///
+/// It shows up on `server-stack` alone because that is the only lane where the `cfg`
+/// below compiles this test into the binary at all.
 #[cfg(feature = "server-stack")]
 #[test]
-
 fn client_from_env_constructs_when_urls_present() {
-    std::env::set_var("CODESCOUT_QDRANT_URL", "http://127.0.0.1:6334");
-    std::env::set_var("CODESCOUT_EMBEDDER_URL", "http://127.0.0.1:8081");
-    std::env::set_var("CODESCOUT_SPARSE_EMBEDDER_URL", "http://127.0.0.1:8084");
-    std::env::set_var("CODESCOUT_RERANKER_URL", "http://127.0.0.1:8083");
-    let cfg = codescout::retrieval::config::RetrievalConfig::from_env().unwrap();
-    let _ = codescout::retrieval::client::RetrievalClient::from_config_only(cfg);
-    // doesn't connect — just constructs
-    for k in [
-        "CODESCOUT_QDRANT_URL",
-        "CODESCOUT_EMBEDDER_URL",
-        "CODESCOUT_SPARSE_EMBEDDER_URL",
-        "CODESCOUT_RERANKER_URL",
-    ] {
-        std::env::remove_var(k);
-    }
+    temp_env::with_vars(
+        [
+            ("CODESCOUT_QDRANT_URL", Some("http://127.0.0.1:6334")),
+            ("CODESCOUT_EMBEDDER_URL", Some("http://127.0.0.1:8081")),
+            (
+                "CODESCOUT_SPARSE_EMBEDDER_URL",
+                Some("http://127.0.0.1:8084"),
+            ),
+            ("CODESCOUT_RERANKER_URL", Some("http://127.0.0.1:8083")),
+        ],
+        || {
+            let cfg = codescout::retrieval::config::RetrievalConfig::from_env().unwrap();
+            // doesn't connect — just constructs
+            let _ = codescout::retrieval::client::RetrievalClient::from_config_only(cfg);
+        },
+    );
 }
 
 use codescout::retrieval::drift::{diff_chunks, ChunkRef};
