@@ -2054,7 +2054,7 @@ nominate. Both steps are cheap; step 2 is what turned this from a falsified
 hypothesis into a filed defect.
 
 **Evidence:** `docs/trackers/bug-fix-session-log.md` W-43 (full narrative and
-counterfactual); `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`
+counterfactual); `docs/issues/archive/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`
 (the defect); `docs/trackers/structural-debt-refactor.md` SD-3 → SD-10.
 
 **Promote-when:** a second instance where an instrument-nominated group's axis

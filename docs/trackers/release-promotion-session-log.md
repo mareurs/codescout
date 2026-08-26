@@ -2788,7 +2788,7 @@ Both failed on first run, and neither was a test bug:
 ## F-28 — Three bug files in a row, three wrong Root causes; each was fixed only after reading the function
 
 **Observed:** 2026-08-08, round 22. Working the tool-surface cluster
-(`63279f39570cd44a`, `9f823aabb84378a0`, `0fad8145011692a9`) back to back.
+(`63279f39570cd44a`, `9f823aabb84378a0`, `14e944e4bc0821cc`) back to back.
 
 **Expected (each bug file):** the Root cause section names the mechanism, so the fix is
 implementation work.
@@ -2866,7 +2866,7 @@ observed, on which machine, on which date), not guidance.
 ## W-21 — The full suite caught a design flaw in my own fix, and the failure message was the argument
 
 **Observed:** 2026-08-08, implementing the `SyntaxBroken` verdict
-(`0fad8145011692a9`). Unit tests for the new code were green.
+(`14e944e4bc0821cc`). Unit tests for the new code were green.
 
 **Pattern:** run the **whole** suite before believing a new verdict/ordering is right, not
 just the tests written for it. A new branch in a shared decision function changes which

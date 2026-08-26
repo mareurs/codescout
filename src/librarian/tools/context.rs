@@ -2419,7 +2419,7 @@ mod tests {
         // is NOT aliased to `umbrella`, so orientation can reach a project the
         // umbrella does not contain. Confirmed by a live A/B against the running
         // server, then ruled intentional by the owner — see
-        // docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md.
+        // docs/issues/archive/2026-08-15-context-scope-all-crosses-umbrella-boundary.md.
         //
         // Before `UmbrellaPolicy` this behaviour was defended by nothing: it existed
         // only as the ABSENCE of a block two sibling handlers carried, which is why

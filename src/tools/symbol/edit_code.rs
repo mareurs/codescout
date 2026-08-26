@@ -737,7 +737,7 @@ impl EditCode {
         // once, when an AST-repaired range overshot the start by two lines and took the
         // preceding function's `)` and `}` with it, leaving the file invalid under
         // `status: "ok"`. See
-        // docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
+        // docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
         let pre_set = pre_ast.as_ref().map(|s| collect_all_name_paths(s));
         let target_ast_name_path = pre_ast
@@ -1094,7 +1094,7 @@ impl EditCode {
             // `Clean` with `status: "ok"` and no rollback, leaving the file invalid.
             // Reported once, on a removal whose AST-repaired range overshot the start by
             // two lines and took the previous function's `)` and `}` with it.
-            // See docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
+            // See docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
             CorruptionVerdict::SyntaxBroken => Some((
                 format!(
                     "edit_code('{name_path}') left the file syntactically invalid — it \

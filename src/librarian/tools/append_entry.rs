@@ -401,7 +401,7 @@ mod tests {
         .unwrap();
     }
 
-    /// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    /// docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
     ///
     /// The append succeeds and the row lands in the catalog, which is
     /// machine-local and git-ignored. Without this the response was a bare

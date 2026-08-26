@@ -12,6 +12,7 @@ opened: 2026-08-16
 owner: marius
 related: []
 severity: high
+unverified: Root cause NOT addressed — `append_entry` still writes catalog-only state, so a tracker's committed snapshot still drifts from its live rows. The 11 tests cover the new REPORTING (doctor, append_entry and update_entry now name rows that never reached the body); nothing prevents the drift, and a caller who ignores the warning reproduces the original silent divergence.
 ---
 
 # BUG: `append_entry` writes catalog-only state, so a tracker's committed snapshot silently drifts from its live rows

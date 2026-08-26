@@ -1,5 +1,5 @@
 ---
-id: '9c953c973226d4e0'
+id: a162c62985fc7ec0
 kind: bug
 status: fixed
 title: 'BUG: frontmatter_id_mismatch asserts one cause for every mismatch, and its repair would overwrite a template''s id placeholder'

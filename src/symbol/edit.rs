@@ -401,7 +401,7 @@ pub enum CorruptionVerdict {
 /// closing `)` and `}` of the preceding function left the file syntactically invalid while
 /// every symbol name survived — verdict `Clean`, `status: "ok"`, no rollback. Closing
 /// delimiters are not symbols. See
-/// `docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md`.
+/// `docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md`.
 ///
 /// **Gated on the pre-image parsing.** Without that clause every edit to an
 /// already-broken file would be refused, which is exactly when someone is trying to

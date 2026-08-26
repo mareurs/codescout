@@ -1,5 +1,5 @@
 ---
-id: '93c237f6cb13e67a'
+id: 94e449c896beb016
 kind: bug
 status: mitigated
 title: 'BUG: an archived bug file''s fix SHA orphans when experiments is rebased, and nothing re-reads archive/ to notice'
@@ -9,11 +9,12 @@ tags:
 - citations
 - provenance
 - patch-id
-closed: ''
+closed: 2026-08-19
 opened: 2026-08-19
 owner: marius
 related: []
 severity: high
+unverified: '10 of the 63 archived records were ALREADY unrecoverable when this was mitigated — their objects are gone from the object DB — and no patch-id can restore them. The 53 recoverable ones were back-filled, but nothing gates a FUTURE archive that omits the pair at write time; detection rests on `doctor`''s `terminal_status_without_fix_anchor`, which is run manually. `patch-id` also dies under squash, since a union diff hashes differently.'
 ---
 
 # BUG: an archived fix SHA orphans on rebase, and nothing re-reads archive/ to notice

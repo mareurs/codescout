@@ -937,7 +937,7 @@ authoritative instead of derived.
 1. Settle open decision 2, then 1 — neither needs code.
 2. Prototype gram computation over the existing corpus and re-run the collision measurement
    before writing any resolver change; the numbers above are reproducible from
-   `docs/issues/2026-08-19-archived-fix-shas-orphan-when-experiments-rebases.md`'s method.
+   `docs/issues/archive/2026-08-19-archived-fix-shas-orphan-when-experiments-rebases.md`'s method.
 3. Treat the `repair_frontmatter_id` inversion as its own change with its own decision — it
    changes what `doctor` considers a defect.
 

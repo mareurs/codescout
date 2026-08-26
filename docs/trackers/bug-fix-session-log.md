@@ -3594,7 +3594,7 @@ one copy drifted (SD-10) — and that copy is not a tidiness question but a live
 `librarian(action="context", scope="all")` runs with no scope clause where
 `artifact(action="find", scope="all")` narrows to the umbrella, measured on the
 running server, returning an artifact from outside the umbrella. Filed as
-`docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`.
+`docs/issues/archive/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`.
 
 Had the extraction gone ahead on the hypothesised axis, the three-way duplication
 would have been left untouched *and* made harder to see, since two of its three

@@ -179,7 +179,7 @@ mod tests {
         .unwrap();
     }
 
-    /// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    /// docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
     ///
     /// The sub-shape no id comparison can see: the row IS in the body, showing
     /// its previous values. `append_entry`'s missing-id check would report

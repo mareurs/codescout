@@ -2526,7 +2526,7 @@ fn scan_validity_unparseable(
 /// `append_entry`/`update_entry` write params and return success while the
 /// committed file stays byte-identical, so `git status` is clean and the row
 /// exists on exactly one machine.
-/// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+/// docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
 ///
 /// **The gate is the body, not the augmentation config.** A tracker is treated
 /// as snapshot-keeping iff its body already line-anchors at least one
@@ -5811,7 +5811,7 @@ mod tests {
         );
     }
 
-    /// docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    /// docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
     ///
     /// Rows live in `params`, params live in the catalog, and the catalog is
     /// machine-local and git-ignored. A tracker that keeps a rendered snapshot

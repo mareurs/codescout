@@ -46,7 +46,7 @@ the third.
 
 > Mirrored from the catalog's `findings` collection. The catalog is **machine-local and not in
 > git**, so this table is the only form a reader outside this machine can see — keep them in sync
-> when a row's status changes (`docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md`,
+> when a row's status changes (`docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md`,
 > which bit this very tracker on its first status update).
 
 | ID | Finding | Sev | Status | Target |

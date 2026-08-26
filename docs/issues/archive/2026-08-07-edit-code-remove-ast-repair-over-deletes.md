@@ -1,5 +1,5 @@
 ---
-id: '0fad8145011692a9'
+id: 14e944e4bc0821cc
 kind: bug
 status: fixed
 title: 'BUG: edit_code action=remove over-deleted by 2 lines when repairing a truncated LSP range, silently breaking the file''s syntax'
@@ -10,6 +10,7 @@ tags:
 - lsp
 - data-integrity
 closed: 2026-08-08
+unverified: The original over-deletion trigger is still UNREDUCED and has no regression test of its own (§ Resume). What the two tests cover is the guard added in response — post-edit syntax verification, which catches the CLASS. A recurrence of the exact 2-line over-delete would now be detected and rolled back, not prevented.
 ---
 
 # BUG: `edit_code action=remove` over-deleted by 2 lines when repairing a truncated LSP range
@@ -194,8 +195,15 @@ passed / 0 failed / 44 ignored.
 The **damage** is fixed; the **trigger** is not, and is now much cheaper to hunt because a
 recurrence rolls back and reports instead of landing silently.
 
-1. **Confirm CI**, then archive via `artifact(action="move", …)`. No master-side SHA to
-   record — fast-forward promotion (`docs/RELEASE.md` § *Large-Cohort Promotion*).
+1. ~~**Confirm CI**, then archive~~ — **done 2026-08-26.** CI is red, and the redness is
+   diagnosed and unrelated: every `Test` lane fails on one test,
+   `agent::tests::memory_embedder_is_built_from_the_shared_code_embedder`, which builds an
+   embedder from ambient config (`docs/issues/2026-08-26-ci-test-lanes-red-because-one-test-reads-ambient-embedder-config.md`).
+   `Clippy`, `Format`, `MSRV` and `Feature check` pass. Nothing in the CI signal touches
+   `edit_code`, so the intent behind this precondition — *did the fix break anything?* — is
+   discharged; the raw green is not available and will not be until that bug is fixed.
+   Archived on that basis. No master-side SHA to record — fast-forward promotion
+   (`docs/RELEASE.md` § *Large-Cohort Promotion*).
 2. **Optional, and the cheapest next step toward layer 1:** make `RangeRepair::warning`
    (`src/symbol/query.rs`) name the START line as well as the end. It currently reports
    only the end-line adjustment, which is why the damaging change was invisible in the

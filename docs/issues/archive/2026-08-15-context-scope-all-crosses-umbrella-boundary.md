@@ -1,5 +1,5 @@
 ---
-id: '66e8a27d0ed97a90'
+id: 3648e50b78f3229a
 kind: bug
 status: wontfix
 title: 'BUG: librarian(action="context") drops the umbrella alias and the no-umbrella guard, so scope="all" crosses into non-member projects'

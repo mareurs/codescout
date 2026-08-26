@@ -45,7 +45,7 @@ pub enum UmbrellaPolicy {
     /// Orientation surfaces (`context`). `all` means all — reaching across every
     /// project is the point of the tool, so no umbrella is imposed. Deliberate,
     /// not an omission; see
-    /// `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`.
+    /// `docs/issues/archive/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`.
     Literal,
 }
 
@@ -433,7 +433,7 @@ mod tests {
         // The behaviour `librarian(action="context")` is built on: an explicit
         // `all` reaches every project, umbrella or not. Intentional — confirmed by
         // a live A/B against the running server, then by the owner. See
-        // docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md.
+        // docs/issues/archive/2026-08-15-context-scope-all-crosses-umbrella-boundary.md.
         let c = cp("/w/p", "/w/p", Some("main"));
         let (scope, fallback) =
             resolve_scope(Some(Scope::All), Some(&c), UmbrellaPolicy::Literal).unwrap();

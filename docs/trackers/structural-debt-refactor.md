@@ -423,7 +423,7 @@ The hypothesised "apply overlay" phase is 2 of 4, not 4 of 4: `get` and `find` s
 
 **What the reading found instead (SD-10).** The scope-resolution prologue is written three times. `src/librarian/tools/find.rs:524` and `src/librarian/tools/workspace_state_at.rs:98` carry the same ~30-line block verbatim — down to the line-wrap position of the shared error string. `src/librarian/tools/context.rs:56` carries a **truncated copy**: it keeps the no-current-project fallback and drops both the `scope="all"` umbrella guard and the `All → Umbrella` alias. Since `apply_scope` maps `Scope::All` to no clause at all (`src/librarian/tools/scope.rs:75`), `context` runs unfiltered where its two siblings narrow to umbrella members.
 
-This was **measured, not inferred**. Both calls were run against the live server: `artifact(find, scope="all")` reported `scope.applied = "umbrella"`; `librarian(context, scope="all")` reported `"all"` and returned an artifact belonging to a project outside the umbrella. The duplicated error string names the exact harm its missing copy permits — *"without one it crosses into unrelated workspace projects"* — and `find`'s own overflow hint actively recommends `scope="all"`, so the narrower meaning is what an agent learns and the wider one is what `context` delivers. Filed as `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`.
+This was **measured, not inferred**. Both calls were run against the live server: `artifact(find, scope="all")` reported `scope.applied = "umbrella"`; `librarian(context, scope="all")` reported `"all"` and returned an artifact belonging to a project outside the umbrella. The duplicated error string names the exact harm its missing copy permits — *"without one it crosses into unrelated workspace projects"* — and `find`'s own overflow hint actively recommends `scope="all"`, so the narrower meaning is what an agent learns and the wider one is what `context` delivers. Filed as `docs/issues/archive/2026-08-15-context-scope-all-crosses-umbrella-boundary.md`.
 
 **The instrument caveat repeats, one level up.** SD-3 already carried a warning that `legibility_scan` attributes cost too coarsely to rank *within* its group. The deeper limit is that it ranks by body size and per-symbol cost at all, so it can only ever see a law duplicated **within** one symbol. A law duplicated **across** symbols in different files is structurally invisible to it — which is why the highest-value structural finding here was invisible to the very ranking that opened the group, and why `src/librarian/tools/workspace_state_at.rs` (comfortably under the body budget, never flagged) turned out to hold one of the three copies.
 
@@ -459,7 +459,7 @@ once read as different kinds of surface: `find` narrowing `all` to the umbrella
 is a safety default for a *search* tool, and `context` taking `all` literally is
 correct for an *orientation* one.
 
-So `docs/issues/2026-08-15-context-scope-all-crosses-umbrella-boundary.md` is
+So `docs/issues/archive/2026-08-15-context-scope-all-crosses-umbrella-boundary.md` is
 closed `wontfix`, its Hypothesis 2 moved from `deferred` to `confirmed`, and the
 file kept rather than deleted — it was right about the mechanism and wrong about
 what the mechanism meant, which is worth being able to read back.

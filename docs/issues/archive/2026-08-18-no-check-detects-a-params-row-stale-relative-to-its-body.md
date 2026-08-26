@@ -1,5 +1,5 @@
 ---
-id: '2a4d51f2e0521468'
+id: 640c4fc65a64461c
 kind: bug
 status: mitigated
 title: 'BUG: no check detects a params row whose content has gone stale relative to its body counterpart'
@@ -9,7 +9,9 @@ tags:
 - snapshot-stale
 - windows-platform-support
 topic: tracker-entry-identity
+closed: 2026-08-18
 no_fix_commit: true
+unverified: The detection gap itself is NOT fixed — no `doctor` check compares an existing params row's fields against its body counterpart. What was repaired is the seven known-stale `WIN-N` rows on ONE tracker, live via `update_entry` against the machine-local catalog, so the same drift on any other tracker is still invisible. Whether the check should be report-only or a write-time guard is an open design question recorded in § Fix.
 ---
 
 ## Summary

@@ -408,7 +408,7 @@ pub fn update_entry(
     // table still shows the old value) had nothing that could have noticed.
     // One read, after the write is committed: the signal is advisory and must
     // never be able to fail the mutation the caller asked for.
-    // docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    // docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
     let claimed_indices: std::collections::BTreeSet<u64> = params
         .get(entry_collection)
         .and_then(|v| v.as_array())
@@ -667,7 +667,7 @@ pub fn append_entry(
     // The id just assigned is included on purpose: at this moment the body does
     // not carry it, and naming it is the reminder to write the row while the
     // caller still has the context to do it.
-    // docs/issues/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
+    // docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
     let snapshot_missing: Vec<String> = {
         let mut claimed: std::collections::BTreeSet<u64> = existing_ids
             .iter()

@@ -504,7 +504,7 @@ All notable changes to codescout are documented here.
   checks structurally cannot see — dropping a delimiter loses no symbol *name*, so the file
   was reported clean. The check only fires when the file parsed **before** the edit, so
   editing an already-broken file is never refused. See
-  `docs/issues/2026-08-07-edit-code-remove-ast-repair-over-deletes.md`.
+  `docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md`.
 
 - **`edit_code(action="rename")` no longer reports a partial rename as a success.** When
   the language server resolves no reference outside the declaration file — measured and
