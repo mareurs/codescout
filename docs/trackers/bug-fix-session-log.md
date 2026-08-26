@@ -111,6 +111,8 @@ entry_high_water_W: 51
 | F-58 | 2026-08-21 | low | plan-prose | mitigated | A same-day concurrent commit made a bug's own prescribed fix wrong before I got to it — `link_scan` gained a real `entry_cite` write path mid-day, inverting the bug's root cause |
 | F-59 | 2026-08-25 | med | codescout-tool | fixed-verified | A filed bug's own root cause was wrong ("desktop-only remote host"); reproduction found a stale global symlink instead |
 | F-60 | 2026-08-25 | low | cross-session | mitigated | Even after ListAgents/SendMessage coordination, a peer's routine commit silently absorbed this session's uncommitted append_entry writes |
+| F-61 | 2026-08-26 | med | process | fixed-verified | Asserted "no live-pyright harness exists" from grepping ONE file, and nearly shipped an `unverified:` marker declaring the test impossible; `tests/e2e/` already held six live-LSP `find_referencing_symbols` expectations |
+| F-62 | 2026-08-26 | high | process | fixed-verified | All five feature-gated e2e language lanes had stopped compiling — `ToolContext` grew a field, the shared harness never got it — while `cargo test` stayed green, since it never builds a feature-gated target no lane names; recurrence guard shipped in `3784cb65` |
 
 ## Wins Index
 
@@ -4415,13 +4417,21 @@ One field fixed it. `cargo test --features e2e --no-run` now builds every lane, 
 
 **Severity:** high — not for the missing field, which is trivial, but for the duration and the silence. Every live-LSP behavioural assertion in the repo (24 for Python alone, plus four other languages) was not merely unrun but unbuildable, while `cargo test` reported green. Any regression those lanes exist to catch has been uncaught for the whole window.
 
-**Status:** fixed-verified — `--features e2e` compiles all five; python lane 25/25 including the new expectation.
+**Status:** fixed-verified — the one-field fix (`bd293162`) restored all five lanes, python 25/25; the recurrence guard shipped 2026-08-26 (`3784cb65`).
 
 **Valid:** dated 2026-08-26
 
 **Rests on:** the cfg-gating in `tests/e2e/mod.rs` and the feature list in `Cargo.toml:209-211`.
 
-**Fix idea / Pointer:** A feature-gated test lane needs a compile-only CI step (`cargo test --features e2e --no-run`) — cheap, needs no language servers, and would have caught this the day it broke. `tests/feature_lanes.rs` exists and may already be the intended home for that guard; worth checking before adding a new one. Not done in this pass — filed rather than bundled into a `references` fix.
+**Fix idea / Pointer:** **SHIPPED 2026-08-26** — `3784cb65` on `experiments`, patch-id `91594f7eada1d5747a9b5683b96a37753f69998f`.
+
+The pointer was right that `tests/feature_lanes.rs` was the intended home, and checking it first — rather than adding a new guard — found something better than a missing step. **The guard already covered these features. They were `EXEMPT` entries.** Its doc comment defined an exemption as *"this cannot be built on a CI runner"*, while every reason in the list actually names a missing language server — a reason not to *execute*. `cargo check` needs none of them. So the lanes were never overlooked by the guard; they were let through its escape hatch, behind a rationale that read as a settled decision and was really a conflation of *run* with *compile*. That is the deferral-rationale law applying to a **guard's own exemption list**, which is a place worth watching: an exemption is the one kind of entry whose whole function is to stop anyone looking.
+
+The project had already drawn the distinction once, for `retrieval-e2e` — exempt from running, compiled by the feature-check lane anyway, after 4 call sites rotted under a signature change. That reasoning sits in the CI job's own comment, two lines above where the e2e lanes should have been.
+
+What shipped: `cargo check --features e2e --all-targets` in the `feature-check` job (the meta-feature covers all five); `every_exempt_feature_is_still_compiled_somewhere`, which fails if any exemption loses its compile lane and resolves meta-features transitively via `closure_from`; and a rewritten `EXEMPT` doc comment that says "not run" rather than "cannot be built", and names why the two differ.
+
+Verified against the real defect rather than against its own green: with `workspace_override` removed again, `cargo test --test feature_lanes` still reported **3 passed** while `cargo check --features e2e --all-targets` failed with `E0063`. The structural test proves a lane is *declared*; only the lane proves the code *compiles*. Neither substitutes for the other, and the structural test reading green over broken code is this entry's own law in miniature.
 
 ## W-50 — Recon run at the commit boundary converted "unverifiable, ask the user to /mcp" into a measured red→green
 
