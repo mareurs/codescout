@@ -6262,6 +6262,22 @@ The peer read it. It resolved in one look: the ledger is at
 `src/server.rs:438-439`), holding **91 session ledgers**. Everything the investigation
 needed was there.
 
+3. **`claude-plugins-15` again, and this is the strongest instance because its
+   counterfactual is MEASURED rather than argued.** Filing a bug about the companion
+   hard-blocking `Bash` after an MCP disconnect, they recorded fix option (c) as *"needs a
+   PostToolUse path that sees MCP transport errors — **not confirmed to exist**."* They did
+   not confirm it. When their user later said "go", `codescout-companion/hooks/hooks.json`
+   turned out to have carried PostToolUse matchers on MCP tools all along —
+   `mcp__.*__workspace` on line 141, plus a line-151 matcher covering nearly every
+   codescout tool. Verified here before recording: `git log -S` dates that matcher to
+   `2926543`, **2026-05-01**, roughly four months before the bug was filed.
+
+   So the caveat did not merely fail to prompt the work. **It authorised skipping the
+   work, it was false, and (c) shipped the moment anyone looked.** It also survived the
+   author's own review and a commit message that quoted it approvingly — two further
+   passes over a false premise, each of which read it as a finding because it was
+   labelled as a limit.
+
 **Mechanism.** A caveat is written at the moment you become aware a check is missing.
 Writing it converts an open question into a *recorded* one, and recorded reads as handled.
 The obligation is not dropped — it is discharged, by the act of describing it. That is why
@@ -6295,8 +6311,15 @@ be drawn from the top 11%.
 
 **Status:** validated
 
-**Promote-when:** a third instance appears where the caveat names a next action that is
-then not taken. Candidate home is `reconnaissance-patterns` beside R-95, as its
+**Promote-when:** TWO instances arrive from work streams that were **not about caveats at
+all**. Deliberately not "a third instance", and the reason is this entry's own subject
+matter. Five instances surfaced in one night, between two agents, inside a conversation
+explicitly about this mechanism — that is evidence about the search, not about the base
+rate, and it is the same tail defect that made both of our `get_guide` samples
+unrepresentative (median 2 topics per session; the two of us at 6 and 5). Promoting a law
+about false confidence on a corpus assembled by hunting for it would be a poor joke.
+Criterion proposed by `claude-plugins-15`, who declined to promote it to the
+reconnaissance skill for exactly this reason. Candidate home is `reconnaissance-patterns` beside R-95, as its
 inside-view; the pairing is what makes both actionable, since R-95 tells you to re-cost a
 deferral and this tells you why the author will not.
 
