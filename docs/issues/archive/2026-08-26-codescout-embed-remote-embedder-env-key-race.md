@@ -1,7 +1,7 @@
 ---
-id: a1deddf51fb81a65
+id: 95c74a543d0c9804
 kind: bug
-status: open
+status: fixed
 title: codescout-embed's RemoteEmbedder::from_url still reads EMBED_API_KEY from ambient env — three of its tests race the sibling tests that mutate it
 owners:
 - marius
@@ -10,6 +10,7 @@ tags:
 - codescout-embed
 - env-race
 - concurrency
+closed: 2026-08-26
 ---
 
 ## Summary
@@ -90,15 +91,29 @@ inspection, not by an observed flake.*
 
 ## Fix
 
-*Not yet implemented — filed as a discovered-but-not-fixed sibling issue, not part of the
-work that found it.*
+**Shipped 2026-08-26 — narrower than originally planned, and the narrowing is deliberate.**
 
-Mirror `EmbedderHttp`'s already-fixed shape: resolve `EMBED_API_KEY` once at the real
-call site (`create_embedder_with_config` in `src/lib.rs`, or wherever `RemoteEmbedder` is
-constructed outside tests) and pass it explicitly; stop `from_url`/`custom`/`ollama` from
-reading `std::env::var` internally. Tests then construct with an explicit `Option<String>`
-and need no `#[serial]` at all — same remedy `test-env-isolation.md` already prescribes,
-applied to the one struct in this workspace that didn't get it.
+**SHA:** `b3d2a0c1` (`experiments`)
+**patch-id:** `a571303308f46ef17aa208d9c09de8f1b11fb557`
+
+`fix(codescout-embed): stop RemoteEmbedder::from_url reading EMBED_API_KEY from env`.
+
+The plan above said mirror `EmbedderHttp` across `from_url`/`custom`/`ollama` together.
+Only `from_url` was actually changed. Re-reading the confirmed race before writing code
+found that `custom()`'s three `EMBED_API_KEY`-touching tests are ALL already tagged
+`#[serial_test::serial]` — no untagged test calls `custom()`, so nothing races it today.
+`ollama()` doesn't read `EMBED_API_KEY` at all (it reads `OLLAMA_HOST`, an unrelated var,
+under no confirmed race). Changing either would have been speculative scope creep against
+an unproven problem, not a fix for a measured one — so `custom`/`ollama` are untouched,
+and their existing `#[serial]` tags stay exactly as needed.
+
+`from_url` no longer accepts an implicit ambient fallback at all: `api_key` is used
+exactly as given by the caller. The one production caller
+(`create_embedder_with_config`) already receives an explicitly-resolved value from
+`RetrievalConfig`/`LibrarianEnv` in every real call site (verified by reading
+`src/retrieval/client.rs:283`, `src/librarian/mod.rs:99,368` — all three pass an
+already-resolved `config.api_key`/`env.embed_api_key`, never rely on the internal
+fallback), so removing it changes no production behavior.
 
 Do not "fix" this by tagging the three untagged tests `#[serial]` instead — that keeps
 the ambient-read shape `test-env-isolation.md` already ruled out project-wide, and only
@@ -107,7 +122,18 @@ was retired, not patched).
 
 ## Tests added
 
-None yet — no fix implemented.
+`from_url_falls_back_to_env_api_key` (`crates/codescout-embed/src/remote.rs`, kept its
+name despite now testing the opposite) rewritten as the regression test: sets
+`EMBED_API_KEY=sk-should-be-ignored`, calls `from_url(loopback_url, model, None)`, asserts
+`api_key.is_none()`. Confirmed RED first for the right reason — the initial version used a
+non-loopback host and failed on the HTTPS guard instead of the assertion; corrected to a
+loopback host (matching the sibling `from_url_normalizes_*` tests' own style) and
+re-confirmed RED (`assertion failed` on the intended line) before GREEN.
+
+Full-crate gate, both feature configurations: `cargo test` (default features, 19 passed)
+and `cargo test --features remote-embed` (33 passed, 5 correctly `ignored` — real-Ollama
+tests) both green, plus the main `codescout` crate's full suite (4543 passed) and
+`cargo fmt`/`cargo clippy --all-targets -- -D warnings` clean in both crates.
 
 ## Workarounds
 
@@ -116,12 +142,11 @@ flaky around `api_key`/endpoint assertions, this file is the first thing to chec
 
 ## Resume
 
-Read `create_embedder_with_config` (`crates/codescout-embed/src/lib.rs:197-326`) to find
-where `RemoteEmbedder` is actually constructed in production, thread an explicit
-`api_key: Option<String>` through from there (resolved once, at that edge), and remove
-the internal `std::env::var("EMBED_API_KEY")` reads from `custom`/`from_url`/`ollama`.
-Then drop `#[serial_test::serial]` from the four tests that no longer need it and confirm
-`cargo test` (in `crates/codescout-embed`) stays green with no serial coordination at all.
+Fixed and verified. Nothing outstanding on `from_url`. `custom()`'s ambient
+`EMBED_API_KEY` read is UNCHANGED and still not a confirmed problem — leave it unless a
+future untagged test starts calling `custom()` directly, at which point re-open or file
+fresh rather than reusing this record (the race that would justify touching it doesn't
+exist yet).
 
 ## References
 
@@ -133,4 +158,3 @@ Then drop `#[serial_test::serial]` from the four tests that no longer need it an
   instance was invisible to the project-wide sweep that would otherwise have caught it
 - `docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md` — the
   sibling investigation this one was found while doing
-
