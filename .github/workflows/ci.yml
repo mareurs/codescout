@@ -267,7 +267,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 wine wine64
+          sudo apt-get install -y gcc-mingw-w64-x86-64 wine wine64 p7zip-full
       - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
         with:
@@ -282,6 +282,47 @@ jobs:
       # docs/issues/archive/2026-08-08-clippy-pre-existing-drift-stable-gnu-toolchain.md
       - name: Cross-clippy (default features)
         run: scripts/build-windows.sh clippy --all-targets -- -D warnings
+
+      # Anything that shells out needs a WINDOWS bash: codescout runs commands through
+      # Git Bash, and wine ships none. Without one, 8 tests die on "no POSIX shell
+      # available" — 6 of them the guide_hint cluster this lane deliberately UN-skipped
+      # on 2026-07-05 (see the skip-list comment below), plus 2 run_command tests.
+      # Re-skipping them would hand back coverage someone argued for; giving the lane a
+      # shell keeps it. It also matters for signal, not just count: locally this gap was
+      # hiding a real Windows defect behind 8 environmental failures until the shell was
+      # supplied (W-59, docs/trackers/bug-fix-session-log.md).
+      #
+      # PortableGit is a 7z SELF-EXTRACTING archive, so `7z x` unpacks it here with no
+      # installer executing. Cache restores BEFORE the download, same convention as the
+      # ONNX weights step in the matrix job above.
+      - name: Cache PortableGit
+        id: portablegit-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/portable-git
+          key: portable-git-2.55.0.5-64-bit
+
+      - name: Seed PortableGit (cache miss)
+        if: steps.portablegit-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIR="${{ runner.temp }}/portable-git"
+          mkdir -p "$DIR"
+          URL="https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/PortableGit-2.55.0.5-64-bit.7z.exe"
+          curl -fsSL "$URL" -o "${{ runner.temp }}/PortableGit.7z.exe"
+          7z x -y -o"$DIR" "${{ runner.temp }}/PortableGit.7z.exe" > /dev/null
+
+      # The value must be a WINDOWS path: wine maps `/` to `Z:`, and `resolve_git_bash`
+      # does a plain `is_file()` probe that a Unix path fails SILENTLY — the symptom is
+      # the same 8 failures, with nothing pointing at the variable.
+      - name: Point codescout at Git Bash under wine
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNIX_PATH="${{ runner.temp }}/portable-git/bin/bash.exe"
+          test -f "$UNIX_PATH" || { echo "PortableGit missing at $UNIX_PATH" >&2; exit 1; }
+          echo "CODESCOUT_BASH=Z:${UNIX_PATH//\//\\}" >> "$GITHUB_ENV"
       # 12 pre-existing wine failures skipped (bisect-proven pre-existing; NOT regressions),
       # plus one NEW test (59df5c9e) that exercises the same wine-broken glob-walk path.
       # The 8-test guide_hint cluster is no longer skipped: fixed 2026-07-05 by seeding
