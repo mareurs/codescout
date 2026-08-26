@@ -5732,15 +5732,40 @@ archived (`severity.rs:251`, `matches_archive(md_file)`), not the target.
 
 **Workaround:** Corrected in `fcb86c16` (*fix(docs): correct premature archive/
 citations for two still-open bugs*), patch-id
-`51a4af509be224cc87839ebbada5d35f68ee3b4a`. Scout re-swept the class repo-wide:
-exactly 4 sites, all now `docs/issues/`, no stragglers.
+`51a4af509be224cc87839ebbada5d35f68ee3b4a`. Scout re-swept **the two slugs named
+above**: exactly 4 sites, all now `docs/issues/`.
+
+**Correction 2026-08-26 — “no stragglers” was unsupported, in this entry's own failure
+mode.** That sentence originally read *“re-swept the class repo-wide … no stragglers.”* It
+was not a class sweep. The grep was
+`2026-08-26-(link-scan-double-qualified|cited-prefix-with-no-definer)` — two slugs — and a
+two-slug predicate cannot license a statement about the class. The claim was therefore
+**wrong when written**, not overtaken by events, which is the distinction that keeps it out
+of `claim-decay` (`DC` is for claims that were exact at write time) and squarely here.
+
+Peer session `codescout-77` swept the real population — **321 distinct
+`docs/issues/archive/` citations** — and found one straggler this entry missed: **F-59**
+cited `2026-08-23-index-build-fails-embed-batch-sparse-send.md` at its `archive/` path
+while it was still unarchived. They resolved it by *completing the archive* rather than
+editing the citation — the better fix, because it makes the prediction true instead of
+retracting it, and leaves the narrative intact. Verified here: the file is now in
+`docs/issues/archive/`, nothing matching `sparse` remains in `docs/issues/`, and F-59's
+citation resolves as written.
+
+The entry's *conclusion* is unaffected — the procedural hole is real and the guide rule
+stands. Only its coverage claim was overstated. Recording it plainly because this is
+R-3/R-79 (*a search that finds nothing is evidence about the search; the trigger is “I am
+about to say all X are Y”*) firing inside the entry that was documenting a different
+instance of the same drift — the law was in context, quoted in the skill that produced
+this scout, and still did not fire.
 
 **Severity:** med — 4 dead citations needing a dedicated repair commit; two of them
 in a surface CI is designed never to gate on, so absent the scout they would have
 persisted until a reader followed the link.
 
-**Status:** fixed-verified — repaired in `fcb86c16`; class swept repo-wide this
-session with zero remaining `docs/issues/archive/` citations for either slug.
+**Status:** fixed-verified — repaired in `fcb86c16`; both slugs swept this session with
+zero remaining `docs/issues/archive/` citations. The full 321-citation class was swept by
+`codescout-77`, which found and resolved one further straggler — see the correction above.
 
 **Valid:** dated 2026-08-26
 
