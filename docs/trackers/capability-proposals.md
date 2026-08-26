@@ -11,7 +11,7 @@ tags:
 - reflective
 - backlog
 topic: capability-proposals
-entry_high_water_CAP: 10
+entry_high_water_CAP: 11
 entry_prefix: CAP
 expects_augmentation: true
 ---
@@ -46,6 +46,7 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-8 | 2026-08-19 | proposed | large | Content-addressed identity — a "gram" for entries, stored-not-derived ids for artifacts (Layer 3) |
 | CAP-10 | 2026-08-20 | proposed | medium | Practice rules — a curated, agent-agnostic rule set injected at the moment it applies |
 | CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then **S-A only** (S-B falsified 2026-08-20) and an in-band `friction()` self-report |
+| CAP-11 | 2026-08-26 | proposed | small–medium | Reconcile memory files against memory points — a doctor check, because only doctor can see both projects |
 
 ## CAP-1 — Session artifact-touch ledger
 
@@ -1216,6 +1217,141 @@ Most of the mechanism already exists.
 1. Settle Open decision 1. It determines whether this is a small change or a subsystem, and it needs no code to decide.
 2. Draft **three** rules only, from the strongest existing evidence, and measure whether injecting them changes behaviour before curating more. Candidates: *a plan that names a function must have opened it* (6/6 this session); *name what the predicate literally counts before reporting the number* (CLAUDE.md's Measurement rule — today's `{"ne": null}`, `split('\n')`, `status='archived'` and fence-toggle instances); *apply the mutation, do not reason about it* (validated at 6 datapoints in `W-4`).
 3. The eval harness is `prompt-engineering` (prompt-tdd), the same one that scores the reconnaissance trigger string. **An injected rule that does not measurably change behaviour is decoration.**
+
+## CAP-11 — Reconcile memory files against memory points — a doctor check, because only doctor can see both projects
+
+**Status:** proposed
+
+**Valid:** dated 2026-08-26
+
+**Rests on:** the two `ToolContext` definitions read this session
+(`src/librarian/tools/mod.rs:84-103` and `src/tools/core/types.rs:58-85`), doctor's
+pre-lock call ordering (`doctor.rs:193-195`), and `verify_memory_coverage`'s existing
+signature (`src/memory/mod.rs:209-212`).
+
+### The ask
+
+`librarian(action="doctor")` should reconcile, per project, the memory **files** on disk
+against the memory **points** in the semantic store, and — the part that matters — pair
+the two halves across projects.
+
+Three violations:
+
+| check | means |
+|---|---|
+| `memory_missing_point` | file on disk, no point — invisible to `recall` in its own repo |
+| `memory_orphan_point` | point, no file — `recall` returns content nothing backs |
+| `memory_displaced_across_projects` | the same topic is `missing` in project A **and** `orphan` in project B — one memory, filed under the wrong id |
+
+The third is the real defect. The first two are its halves, and each on its own reads as
+ordinary untidiness.
+
+### Why doctor, and not `index(action="verify")`
+
+`index(action="verify")` **already computes the per-project half** and is the instrument
+that surfaced this. It cannot compute the third row, structurally: it is scoped to one
+project, so it reports `orphan` from one side and `missing` from the other and has no way
+to know they are the same memory. Finding the 2026-08-26 instance took two `verify` runs
+against two repos and a hand-pairing.
+
+Doctor is the only surface with the right scope — its catalog spans every repo on the
+machine (a live run this session: 449 violations, 383 of them `abs_path_outside_managed_roots`
+from other repos). Same argument CAP-7 makes for putting decay checks there.
+
+### Substrate check (2026-08-26)
+
+**What exists:**
+
+- `verify_memory_coverage(topics, store, project_id)` — `src/memory/mod.rs:209-212`. The
+  per-project comparison is **already written and already filters by bucket**. Doctor
+  reuses it; only the cross-project pairing is new.
+- `scan_declared_project_roots(ctx)` — `doctor.rs:1186`, called at `doctor.rs:193`
+  **before** `let cat = ctx.catalog.lock()` at `:195`, with the comment *"reads
+  `.codescout/workspace.toml` off disk and touches no connection, so it runs outside the
+  lock."* An async `scan_memory_store_drift(ctx).await` drops into that exact slot — no
+  `.await` inside the catalog critical section.
+- `pub async fn call(ctx: &ToolContext, args: Value)` — `doctor.rs:159`. Already async, so
+  awaiting a store needs no signature change.
+- Two field precedents in the librarian `ToolContext` itself:
+  `artifact_store: Option<Arc<dyn ArtifactVectorStore>>`, documented *"`None` when no
+  backend could be constructed (e.g. the configured Qdrant is unreachable)"* — the exact
+  degradation this check needs; and `lsp`, documented as *"the same shared instance the
+  core MCP `ToolContext` uses — threaded in at construction (`build_tool_context`), never
+  a second independent instance,"* citing
+  `docs/issues/archive/2026-07-05-audit-doc-refs-lsp-stubbed-off.md` for why reuse rather
+  than duplication is load-bearing. That is the wiring pattern, already justified.
+
+**What is genuinely missing:** the librarian `ToolContext` has **no** handle on the memory
+semantic store. It holds `artifact_store` — a *different collection*. The `memory` tool
+reaches the store through `ctx.agent.semantic_memory_store()` on the **core** `ToolContext`
+(`src/tools/core/types.rs:58-85`), which has an `agent` field the librarian context does
+not. So the work is: one `memory_store: Option<Arc<dyn SemanticMemoryStore>>` field
+mirroring `artifact_store`, threaded at `build_tool_context` the way `lsp` already is.
+
+**The trap, already solved upstream — do not re-derive it.** Only the `structured` bucket
+has disk files. `src/memory/mod.rs:169-177` states it plainly: *"The other buckets have NO
+disk file by design, which is why coverage must filter rather than compare everything."*
+`memory(action="remember")` upserts straight to the store with no markdown, defaulting to
+`unstructured`. A naive files-vs-points diff would report **every remembered memory as an
+orphan**. `verify_memory_coverage` already filters to `TOPIC_BUCKET`; any new code path
+must too.
+
+### Why it matters (measured 2026-08-26)
+
+|  | on disk | in store | |
+|---|---|---|---|
+| prompt-engineering | 10 | 7 | 3 missing: `language-patterns`, `onboarding`, `prompt-tdd-skill-eval-confounds` |
+| codescout | 23 | 25 | 2 orphan: `prompt-tdd-skill-eval-confounds`, `zz-probe-delete-me` |
+
+`prompt-tdd-skill-eval-confounds` appears in **both** rows. One memory, displaced: the file
+is prompt-engineering's, the point is keyed to codescout. Traced to the workspace-pin
+cross-embed defect fixed in `0cefd1f3` on 2026-07-13 — the point's `created_at` is
+~2026-07-04, nine days inside the window. Full account:
+`docs/issues/2026-08-26-cross-embed-pin-fix-left-mis-keyed-memory-points-behind.md`.
+
+Its content is a ledger of three ways a prompt-tdd skill A/B silently measures base-model
+behaviour instead of the skill — the class of thing `CLAUDE.md` says to read *before*
+running an eval. It sat unreachable by `recall` in its own repo for seven weeks, and
+nothing reported that.
+
+The generalisation is the point: **`memory(list)` reads a directory and `recall` reads the
+store, and nothing reconciles them.** Each answers confidently in its own substrate, so
+they never disagree out loud. That is the same failure shape as
+`bug-fix-session-log:F-66` (a retired sqlite store answering plausibly all session) and
+the reconnaissance skill's substrate rule.
+
+### Open decisions
+
+1. **Which projects to enumerate.** Resolving an arbitrary store `project_id` back to a
+   root is exactly the undecided fork in
+   `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
+   two surfaces read two different directories and the fix is a decision about which owns
+   a sub-project's memories. **Proposed sidestep:** scan the *resident* workspace projects,
+   whose roots are known, and report unresolvable store `project_id`s as a separate
+   low-severity count rather than blocking on that fork.
+2. **Private memories.** `memory(list, include_private=true)` shows codescout has 23 shared
+   + 1 private, but `verify` reported `on_disk: 23`. If the walk excludes the gitignored
+   private store while the collection holds its points, every private memory reads as an
+   orphan. Not observed — both codescout orphans are explained — so this is a question, not
+   a finding. Settle it before shipping, or the check's first run is noise.
+3. **No `fix=`, at least initially.** A repair is well-defined per half
+   (`codescout migrate-memories --in-place` for missing, `memory(action="forget")` for
+   orphan) but the *displaced* case has a mandatory order: restore the losing project
+   first, because until then the mis-keyed point is the only embedded copy of the content
+   anywhere. Naming both commands in the hint — as `index(action="verify")` already does —
+   is safer than automating a deletion whose correctness depends on another project's state.
+
+### Resume
+
+1. Settle open decision 2 (private store) — cheapest, and it gates signal quality.
+2. Add `memory_store` to the librarian `ToolContext`, threaded at `build_tool_context`
+   alongside `lsp`.
+3. `async fn scan_memory_store_drift(ctx)` before the catalog lock, reusing
+   `verify_memory_coverage` per project and pairing displaced topics across them.
+4. Tests: the two this repo's checks always carry — one that fires, one that must **not**
+   (a healthy project, and an `unstructured`-bucket memory with no disk file, which is the
+   by-design case a naive diff breaks on).
+5. Doctor's numbered module docstring, and a `docs/PROBES.md` row naming the blind spot.
 
 ## Anti-goals
 
