@@ -18,9 +18,14 @@ follow the links for the controlling convention.
 
 A **declared ledger** carries `entry_prefix: <PREFIX>` in its frontmatter (committed,
 so it survives a fresh clone) and gets server-assigned ids from
-`artifact(action="append_entry", id=…, id_prefix=…)`. **Thirteen are declared today** (measured 2026-08-19 by
-reading `entry_prefix:` out of every frontmatter block): AA, CAP, F, FND, FT, GF, H, HY,
-R, S, SD, U, W.
+`artifact(action="append_entry", id=…, id_prefix=…)`. **Fifteen are declared today** (re-measured 2026-08-26 by
+reading `entry_prefix:` out of every frontmatter block): AA, CAP, CTX, DC, F, FND, FT, GF,
+H, HY, R, S, SD, U, W.
+
+*(This sentence read "Thirteen" until 2026-08-26 and was **exact when measured** on
+2026-08-19 — `CTX` was declared on 2026-08-21 by `711a25cf`, two days later, and nothing
+re-counted. Recorded as `claim-decay:DC-3`; a count written into prose owns no repair
+trigger, so re-measure it whenever you add a prefix.)*
 
 > ⚠️ **F and W now appear among the declared prefixes, which contradicts the F/W row
 > below.** One session log declared `entry_prefix: [F, W]`. That is a real, unresolved
@@ -44,6 +49,7 @@ R, S, SD, U, W.
 | **PV-N** | `docs/trackers/provenance-subsystem.md` (augmented artifact `e12cd7e0060ed9b8`) | Provenance/attribution **programme** state: measurement verdicts vs pre-registered kill conditions, standing design decisions, hazards not to rediscover, open decisions, buildable work. Typed `finding \| gap \| decision \| hazard \| task` | `artifact(action="append_entry", id_prefix="PV", entry_collection="items", entry={...})` — atomic monotonic id; query with `entry_filter` | Implementation plan (`docs/plans/`) once phase moves past MEASUREMENT; a `decision` flips to `settled` in place |
 | **CAP-N** | `docs/trackers/capability-proposals.md` (augmented artifact `01291679a5ee4707`) | **Pre-plan** proposal for a codescout capability we do not have: the ask, a substrate check citing what exists today at `path:line` and what is genuinely missing, and the open decisions. Reflective — judgment, not gathering | Append a `## CAP-N` section above `## Anti-goals` + an Index row, via `artifact(action="update", patch={body_edits: [...]})` | A spec + plan under `docs/superpowers/` once it has tasks and a file structure; or `rejected` in place with the reason kept |
 | **BUG (slug)** | `docs/issues/YYYY-MM-DD-<slug>.md` | Per-bug investigation file: Symptom / Repro / Root cause / Fix / Workaround | Create from `docs/issues/_TEMPLATE.md`; status field in frontmatter | Archived to `docs/issues/archive/` once the fix is verified on `experiments` — reaching master is NOT required. Record the SHA **labelled with its branch** *and* its `git patch-id --stable` — the SHA is positional and dies when `experiments` is rebased; the patch-id is a content hash of the diff and survives rebase and cherry-pick. **No pending-master-SHA Resume line, and no later reconciliation** — record both once and the record stays resolvable whichever path the fix takes to `master`. Measured 2026-08-19: 10 of 63 archived files had already lost their SHA to a rebase, while zero patch-ids collided across 3594 commits. Move via `artifact(action="move", …)`, never `git mv` |
+| **DC-N** | `docs/trackers/claim-decay.md` (augmented artifact `7d813ce54cb9f1c5`) | A durable written claim that decayed where **no process event is scheduled to repair it** — typed `measured-value-drift \| premature-assertion \| stale-pointer \| deferral-rationale \| status-zombie \| freshness-gap \| undecidable-green \| prohibition-false`. Records the *missing trigger*, not the wrong text. Evidence only: the narrative stays in the F-N / R-N / bug file the row cites | `artifact(action="append_entry", id="7d813ce54cb9f1c5", entry_collection="claims", id_prefix="DC", entry={…})` for the row, **then** a `## DC-N — <title>` section via `artifact(action="update", patch={body_edits:[…]})`. Both writes, always — the row is what `entry_filter` reads, the heading is what makes it citable. **Never** `artifact_augment(merge=true, params={claims:[…]})`: that REPLACES the array | A `librarian(action="doctor")` check, an `audit_doc_refs` severity rule, or a test — flip the row to `check-shipped` via `update_entry` when it lands |
 
 ## Work-stream-specific prefixes (not durable taxonomy slots)
 
