@@ -227,14 +227,28 @@ pub struct CodeScoutServer {
     /// becomes redundant after the first eligible call. See U-25 in
     /// `docs/trackers/codescout-usage-frictions.md` and the bug file at
     /// `docs/issues/archive/2026-05-28-path-annotation-spam.md`.
+    ///
+    /// **That redundancy holds for the ROOT and not for the CONVENTION**, which is why
+    /// the reset also fires on compaction. `- **Active project:** <name> at <path>` tells
+    /// a reader where the project is; it never says that allowlisted path fields in
+    /// responses are rendered relative to it. This banner is the only surface that says so
+    /// in push form, and `/compact` discards it with the rest of the conversation.
+    /// `get_guide("progressive-disclosure")` § Path-relative annotation states the
+    /// convention in pull form and re-arms on compaction too, but only for an agent that
+    /// re-triggers the topic. See
+    /// `docs/issues/archive/2026-08-21-path-relative-banner-not-rearmed-after-compaction.md`.
     path_note_emitted_since_activation: Arc<std::sync::atomic::AtomicBool>,
     /// Tracks whether the `## Project Status (details)` block has been emitted since the
     /// last activation **or compaction**.
     ///
-    /// Same novelty-gate shape as `path_note_emitted_since_activation`, and deliberately a
-    /// SEPARATE flag with a WIDER reset, because the two carry facts with different
-    /// lifetimes. The path note is redundant once the persistent surface names the root
-    /// (see that field's comment). This block is not redundant with anything: it holds the
+    /// Same novelty-gate shape as `path_note_emitted_since_activation`, and a SEPARATE
+    /// flag because the two are CONSUMED against different facts — but since 2026-08-26
+    /// the same reset, in one branch. This comment previously called the wider reset
+    /// deliberate, on the grounds that the path note goes redundant once the persistent
+    /// surface names the root. That holds for the root and not for the convention, and
+    /// the two gates quietly drifting apart is what cost the banner every post-compaction
+    /// session. Reset them together; consume them separately. This block is not redundant
+    /// with anything either: it holds the
     /// `Substitutable` segments — languages, memories, index state, workspace topology,
     /// Kotlin known issues — which used to live in `server_instructions` and moved here
     /// because that channel is 2048 characters and they were the first thing dropped.
@@ -1131,15 +1145,11 @@ impl CodeScoutServer {
         // untouched clone `record_content` only borrowed.
         let is_activate = req.name == "workspace"
             && input_for_record.get("action").and_then(|v| v.as_str()) == Some("activate");
-        if is_activate {
-            self.path_note_emitted_since_activation
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-        }
 
-        // The status block re-arms on activation AND on compaction. Matched on request
+        // Both gates below re-arm on activation AND on compaction. Matched on request
         // shape here rather than in `ProjectStatus::call`'s `post_compact` arm for a
-        // mechanical reason: the flag lives on `CodeScoutServer` and that handler has only
-        // `ToolContext`, which is why the activate reset is already here.
+        // mechanical reason: the flags live on `CodeScoutServer` and that handler has
+        // only `ToolContext`.
         //
         // `post_compact` is read WITHOUT requiring `action` to be absent — passing it with
         // no action infers `action="status"` (`src/tools/config/mod.rs`), so a match that
@@ -1149,7 +1159,17 @@ impl CodeScoutServer {
                 .get("post_compact")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+        // Reset together, in one block, because they carry the same kind of fact:
+        // something stated once INTO THE CONVERSATION, which is precisely what
+        // `/compact` discards. The path banner used to re-arm on activation only while
+        // the status block already re-armed on both — one clause apart in this same
+        // function — so after a compaction every response carried project-relative
+        // paths with nothing left in context saying they were relative. Keeping the two
+        // stores adjacent is what stops them drifting apart again.
+        // docs/issues/2026-08-21-path-relative-banner-not-rearmed-after-compaction.md
         if is_activate || is_post_compact {
+            self.path_note_emitted_since_activation
+                .store(false, std::sync::atomic::Ordering::Relaxed);
             self.status_block_emitted_since_activation
                 .store(false, std::sync::atomic::Ordering::Relaxed);
         }
@@ -4083,6 +4103,114 @@ mod tests {
             flags[1],
             flags[2],
         );
+    }
+
+    #[tokio::test]
+    async fn compaction_rearms_the_path_relative_banner() {
+        // The banner lives in the CONVERSATION, and `/compact` is exactly what
+        // discards it. Its novelty gate used to be re-armed only by
+        // `workspace(activate)` — while the sibling
+        // `status_block_emitted_since_activation` gate, reset one clause later in this
+        // same function, already re-armed on `post_compact` too. Two gates of identical
+        // shape, adjacent in one function, disagreed; only one was right. The
+        // consequence: after a compaction every later response carried project-relative
+        // paths with nothing in context saying they were relative, and an agent
+        // resolving one against its own cwd resolves against the wrong base.
+        //
+        // Reproduced live before fixing: in the 2026-08-26 session the post-compact
+        // `workspace(post_compact=true)` response and every call after it went
+        // bannerless until an `/mcp` restart re-constructed the server.
+        // docs/issues/2026-08-21-path-relative-banner-not-rearmed-after-compaction.md
+        let banner = "[codescout] paths are relative to";
+        let carries = |r: &CallToolResult| {
+            r.content
+                .iter()
+                .any(|c| c.as_text().is_some_and(|t| t.text.contains(banner)))
+        };
+
+        // Both shapes, for the reason `both_shapes_of_the_compaction_signal_rearm_the_
+        // status_block` documents: the companion hook sends `{post_compact: true}`
+        // bare, the guide-hint sibling sends `{action: "status", post_compact: true}`,
+        // and a reset handling only one silently drops half its callers. The two gates
+        // now share a single `if`, which makes looping look redundant with that test —
+        // it is not. "Covered by construction" is exactly the argument a mutation
+        // defeats, and that test was itself written from a surviving one.
+        for args in [
+            serde_json::json!({"post_compact": true}),
+            serde_json::json!({"action": "status", "post_compact": true}),
+        ] {
+            let (dir, server) = make_server().await;
+            let tree = || {
+                CallToolRequestParams::new("tree").with_arguments(
+                    serde_json::from_value(serde_json::json!({"path": "."})).unwrap(),
+                )
+            };
+            let token = tokio_util::sync::CancellationToken::new;
+
+            // Spend the activation window the way a real session does.
+            server
+                .call_tool_inner(
+                    CallToolRequestParams::new("workspace").with_arguments(
+                        serde_json::from_value(serde_json::json!({
+                            "action": "activate",
+                            "path": dir.path().to_string_lossy(),
+                        }))
+                        .unwrap(),
+                    ),
+                    None,
+                    None,
+                    token(),
+                )
+                .await
+                .unwrap();
+
+            let before = server
+                .call_tool_inner(tree(), None, None, token())
+                .await
+                .unwrap();
+            assert!(
+                !carries(&before),
+                "precondition ({args}): the activation window must already be spent, so \
+                 a plain call carries no banner"
+            );
+
+            // `/compact` happened; the agent reports it.
+            let post_compact = server
+                .call_tool_inner(
+                    CallToolRequestParams::new("workspace")
+                        .with_arguments(serde_json::from_value(args.clone()).unwrap()),
+                    None,
+                    None,
+                    token(),
+                )
+                .await
+                .unwrap();
+
+            let after_1 = server
+                .call_tool_inner(tree(), None, None, token())
+                .await
+                .unwrap();
+            let after_2 = server
+                .call_tool_inner(tree(), None, None, token())
+                .await
+                .unwrap();
+
+            // Asserted as a count, not against one particular response: the contract is
+            // "compaction brings the fact back, once", not "it rides on the
+            // post_compact reply". Without the fix this is 0; a double-arming bug of the
+            // kind `activation_and_the_next_two_calls_carry_the_banner_exactly_once`
+            // guards would make it 2.
+            let flags = [carries(&post_compact), carries(&after_1), carries(&after_2)];
+            assert_eq!(
+                flags.iter().filter(|f| **f).count(),
+                1,
+                "compaction signalled as {args} must re-arm the path-relative banner \
+                 exactly once; post_compact={}, next={}, next2={}",
+                flags[0],
+                flags[1],
+                flags[2],
+            );
+        }
     }
 
     #[tokio::test]
