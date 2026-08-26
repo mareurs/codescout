@@ -1,5 +1,5 @@
 ---
-status: open
+status: investigating
 opened: 2026-08-26
 severity: high
 owner: marius
@@ -129,6 +129,32 @@ alongside the zombies with the *same* env and the *same* repo but a **live** ino
 shape, healthy. That is what makes "deleted binary" the discriminator rather than "old
 pid" or "missing env" — both of which also correlated, and neither of which is the
 mechanism.
+
+### Corrected 2026-08-26 — the `SIGTERM` handler already exists; the real gap is an unbounded LSP shutdown
+
+The "exit on `SIGTERM`" framing below is wrong about current code, and it is worth stating
+plainly rather than quietly rewriting: `src/server.rs`'s `shutdown_signal()` has installed a
+`tokio::signal::unix::signal(SignalKind::terminate())` handler since `e4c70c8f` (2026-02-26,
+six months before this bug), and it is correctly raced into the stdio server's main
+`tokio::select!` loop. A `codescout start` process that receives `SIGTERM` does not ignore it.
+
+What actually blocks the exit: after that `select!` resolves — by any arm, signal included —
+the code unconditionally awaits `lsp.shutdown_all()` with **no overall deadline**.
+`LspManager::shutdown_all` (`src/lsp/manager.rs`) drains every LSP client and calls
+`client.shutdown().await` on each in sequence; `LspClient::shutdown` (`src/lsp/client.rs`) sends
+a `"shutdown"` request and an `"exit"` notification — each internally bounded to ~30s per
+attempt, with retries possible during LSP cold-start — before a reader-task join that itself has
+only a 5s timeout. A wedged LSP client (or a `self.clients` lock held by something else that is
+itself stuck) can block this chain well past what a human would wait before reaching for
+`SIGKILL`. The process *did* receive and start handling `SIGTERM`; it just never got back out of
+graceful shutdown to actually call `Ok(())` and exit. From outside, that is indistinguishable
+from ignoring the signal — which is exactly what this bug's reproduction observed.
+
+This does not touch directions 1 or 2 below, and does not explain **why** any particular client
+was wedged (kotlin-lsp's known cold-start/circuit-breaker behavior per memory `gotchas` is a
+plausible candidate, not a confirmed one for these specific zombies — the eleven original
+processes were `SIGKILL`ed before their logs could be inspected, so the exact hang site for
+*this* incident is not proven, only that the code path has no ceiling regardless).
 ## Evidence
 
 ### Why the vectors are nonetheless intact
@@ -197,11 +223,18 @@ exactly the kind of investigation that found this.
 The two directions above stand, but a third is cheaper and fixes more, and the
 measurements put it first:
 
-0. **Exit on `SIGTERM`.** Eleven processes ignored it and needed `SIGKILL`. A server that
-   dies when asked is what makes every other mitigation — a supervisor, a reaper script,
-   a human with `kill` — work at all, and its absence is why days-old processes were still
-   holding stale config. It also has no cross-platform problem, unlike the
-   `/proc/self/exe` check in direction 2.
+0. **[superseded, see the Corrected subsection above] Exit on `SIGTERM`.** Restated: a
+   `SIGTERM` handler already existed (since `e4c70c8f`, 2026-02-26) and was correctly wired
+   in — the actual gap was that the LSP-shutdown step it hands off to had no deadline, so a
+   wedged client could block the process past the signal that asked it to exit.
+
+0'. **[done 2026-08-26] Bound the LSP shutdown step to a deadline.** `shutdown_with_deadline()`
+    wraps `lsp.shutdown_all()` with a 20s ceiling in the stdio server's shutdown path, so the
+    process now guarantees it returns from `main()` — and therefore exits — within a fixed grace
+    period after any `select!` arm fires (signal, idle timeout, or client disconnect), regardless
+    of what hangs inside LSP shutdown. Does not fix the underlying LSP-wedge cause (out of scope
+    here); makes it survivable. **SHA:** `ca2b0226` (`experiments`). **patch-id:**
+    `fd44c45488695a8870ddc6080520ee8a3b5a7119`.
 
 With `SIGTERM` honoured, the remaining exposure is only the window between a client dying
 uncleanly and someone noticing — which is what direction 1 (record *who* wrote the
@@ -213,10 +246,20 @@ the cleanup reinforced it: whichever process last reconnected would win, making 
 symptom intermittent, which defeats exactly the investigation that found it.
 ## Tests added
 
-None yet. The tractable unit is a `should_write_shared_state()` predicate over a
-`/proc/self/exe`-deleted signal, testable by injecting the signal rather than by
-staging a real zombie.
+For the 2026-08-26 `shutdown_with_deadline` fix (`ca2b0226`), two unit tests in
+`src/server.rs`, both `#[tokio::test(start_paused = true)]` per this file's established
+timing-test convention (real-clock sleeps flake under CI/wine — see
+`docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md`):
 
+- `shutdown_with_deadline_returns_after_deadline_when_inner_never_resolves` — a
+  `std::future::pending::<()>()` inner future; asserts the wrapper still returns at/after the
+  20s deadline instead of hanging forever.
+- `shutdown_with_deadline_returns_promptly_when_inner_resolves` — an immediately-ready inner
+  future; asserts the wrapper returns well before the deadline rather than always waiting it out.
+
+None yet for the still-open directions 1/2. The tractable unit there is a
+`should_write_shared_state()` predicate over a `/proc/self/exe`-deleted signal, testable by
+injecting the signal rather than by staging a real zombie.
 ## Workarounds
 
 Kill the stale servers and re-index:
@@ -231,7 +274,9 @@ Verify with `index(action="status")` — `indexed_with_model` should equal
 
 ## Resume
 
-Decide between the two Fix directions before writing code; direction 1 is
+**[done 2026-08-26, `ca2b0226`]** the shutdown-deadline fix (0') is shipped and tested; a
+process that receives `SIGTERM` now provably exits within ~20s regardless of LSP-shutdown
+hangs. **Still open:** decide between the two Fix directions before writing code; direction 1 is
 diagnostic and additive, direction 2 changes behaviour under a condition that is
 hard to test in CI. Both need the non-Linux answer for `/proc/self/exe`. Start by
 reading `write_index_state_with_dirty`

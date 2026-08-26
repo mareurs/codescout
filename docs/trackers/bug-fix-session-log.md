@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 69
-entry_high_water_W: 67
+entry_high_water_W: 68
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -193,6 +193,7 @@ entry_high_water_W: 67
 | W-65 | 2026-08-26 | high | When a result is IMPOSSIBLE rather than merely wrong, suspect the RUN, not the code | A failing payload carried 2 of 4 keys that output.rs sets in ONE `if let` block; grep confirmed a single producer, so no branch could emit it. Re-running unchanged: 4293/0, twice. I was two steps from filing a platform defect against a peer's hour-old feature and "fixing" correct production code — with a wine Cygwin warning in the payload ready to anchor the wrong diagnosis. Wrong values mean wrong logic; impossible combinations mean a wrong observation, and that second hunt is invisible if you start from "which line computed this?" | validated |
 | W-66 | 2026-08-26 | med | RED-before-GREEN on a bug's own prescribed fix, not just "bare vs. my fix" | Would have shipped a fix that changed nothing and closed a live defect | validated |
 | W-67 | 2026-08-26 | low-med | Measured the 3 live zombie records before picking doc-fix vs. doctor-check | Would have built a staleness detector for a population with no measured neglect | validated |
+| W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -5757,6 +5758,35 @@ archive flow will put it.** A citation is written when the fix is authored; the
 archive move is a separate, later event that a partial fix may cancel outright. The
 archive sweep repairs citations that *were* correct — it can never reach one that
 was wrong on the day it was written.
+
+## W-68 — A bug's own root-cause claim ("no SIGTERM handler") was false — reading the actual code before implementing the prescribed fix found the real gap two layers deeper
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, picking up
+`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`'s
+top-priority Fix item ("0. Exit on `SIGTERM`. ... its absence is why days-old processes were
+still holding stale config"). Before implementing it, `references(shutdown_signal)` and a
+`git log -S` check were run first.
+
+**Pattern:** A `tokio::signal::unix::signal(SignalKind::terminate())` handler already existed
+in `src/server.rs`, correctly wired into the stdio server's main `select!` loop, since `e4c70c8f`
+(2026-02-26) — six months before the bug was filed. The bug's own reproduction (SIGTERM sent,
+process survived, SIGKILL required) was real; its diagnosis of *why* was not. The actual gap was
+one step downstream: the unconditional `lsp.shutdown_all().await` that runs after the `select!`
+resolves has no overall deadline, so a wedged LSP client can block the process past the signal
+that correctly woke it. Fixed by wrapping that call in `shutdown_with_deadline()` (20s ceiling)
+— `ca2b0226`.
+
+**Counterfactual:** Implementing the bug's own item 0 as written ("install a SIGTERM handler")
+would have added no code that compiles differently from what already exists, closed nothing, and
+left the actual defect — an unbounded await able to mask a correctly-delivered signal —
+unaddressed and undocumented, with the bug file reading `fixed` for a mechanism that was never
+broken. Same shape as W-66, one layer further from the surface: there the prescribed fix compiled
+and ran but changed nothing observable; here it would have compiled, run, and changed nothing
+because the premise itself no longer held.
+
+**Status:** validated
 
 ## Template for new entries
 
