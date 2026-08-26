@@ -7,6 +7,7 @@ tags:
 - prompt-hamsa
 - prompt
 - audit
+expects_augmentation: true
 ---
 
 ---

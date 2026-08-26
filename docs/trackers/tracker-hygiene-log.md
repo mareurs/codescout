@@ -9,6 +9,7 @@ tags:
 - lifecycle
 entry_high_water_HY: 20
 entry_prefix: HY
+expects_augmentation: true
 next-sweep-due: 2026-09-24
 sweep-interval-days: 30
 ---

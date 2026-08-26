@@ -13,6 +13,7 @@ tags:
 - audit-doc-refs
 topic: refactoring
 entry_prefix: SD
+expects_augmentation: true
 ---
 
 ## Why this exists

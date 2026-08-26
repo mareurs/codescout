@@ -8,6 +8,7 @@ tags:
 - scout
 entry_high_water_R: 115
 entry_prefix: R
+expects_augmentation: true
 ---
 
 # Reconnaissance patterns

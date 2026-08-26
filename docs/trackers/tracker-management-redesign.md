@@ -9,6 +9,7 @@ tags:
 - graph
 - lifecycle
 topic: tracker management redesign
+expects_augmentation: true
 ---
 
 # Tracker Management Redesign

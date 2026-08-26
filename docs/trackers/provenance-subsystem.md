@@ -10,6 +10,7 @@ tags:
 - programme
 - design-log
 topic: provenance-attribution
+expects_augmentation: true
 ---
 
 # Provenance Subsystem — Programme Tracker (PV-N)

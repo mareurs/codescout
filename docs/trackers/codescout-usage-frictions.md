@@ -8,6 +8,7 @@ tags:
 - usage
 entry_high_water_U: 49
 entry_prefix: U
+expects_augmentation: true
 ---
 
 # Codescout Usage Frictions — U-N Log

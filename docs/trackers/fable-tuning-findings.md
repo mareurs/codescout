@@ -8,6 +8,7 @@ tags:
 - prompt-tuning
 - model-behavior
 entry_prefix: FND
+expects_augmentation: true
 ---
 
 ## What this tracks

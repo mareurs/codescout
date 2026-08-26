@@ -11,6 +11,7 @@ tags:
 - bugs
 - work-queue
 topic: work-queue
+expects_augmentation: true
 ---
 
 > **Prefix:** `BL-N` — a row in this queue. Work-stream-scoped, defined here, not a project-wide

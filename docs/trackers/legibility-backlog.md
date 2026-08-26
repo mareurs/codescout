@@ -3,13 +3,11 @@ id: cd886c414f6751b4
 kind: tracker
 status: draft
 title: Legibility Backlog
-owners: []
 tags:
 - codescout
 - legibility
 - dzo
-topic: null
-time_scope: null
+expects_augmentation: true
 ---
 
 ## Backlog (auto-managed)

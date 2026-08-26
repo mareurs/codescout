@@ -8,6 +8,7 @@ tags:
 - promotion-candidates
 entry_high_water_H: 7
 entry_prefix: H
+expects_augmentation: true
 ---
 
 # Codescout Usage Hookify Candidates — H-N Log

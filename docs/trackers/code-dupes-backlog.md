@@ -9,8 +9,7 @@ tags:
 - code-quality
 - duplication
 - refactor
-topic: null
-time_scope: null
+expects_augmentation: true
 ---
 
 ## Audit scope and methodology

@@ -14,6 +14,7 @@ tags:
 - agent-guidance
 topic: iron-law-gate-firing
 entry_prefix: GF
+expects_augmentation: true
 ---
 
 # Iron-Law Gate Firing Audit — 2026-08-16

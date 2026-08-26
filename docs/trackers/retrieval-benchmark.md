@@ -10,6 +10,7 @@ tags:
 - benchmark
 - qdrant
 - embedding
+expects_augmentation: true
 ---
 
 ## Why this tracker exists

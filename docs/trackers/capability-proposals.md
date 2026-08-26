@@ -13,6 +13,7 @@ tags:
 topic: capability-proposals
 entry_high_water_CAP: 10
 entry_prefix: CAP
+expects_augmentation: true
 ---
 
 ## Why this exists

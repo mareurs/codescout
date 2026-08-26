@@ -12,6 +12,7 @@ tags:
 - portability
 - ci
 topic: windows
+expects_augmentation: true
 ---
 
 # Windows Platform Support — WIN-N Issue Index
