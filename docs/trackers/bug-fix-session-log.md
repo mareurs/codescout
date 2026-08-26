@@ -5112,11 +5112,57 @@ months across every gate the project has — 4494 green tests included, one of w
 *about* the missing fields.
 
 **Promote-when:** the RELEASE.md step is already `required`, so no promotion is owed for
-the step itself. Promote the **structural tell** — *a formatter/renderer test that
-hand-builds the value it formats proves nothing about the keys the product emits* — to
-`docs/conventions/` or the reconnaissance skill's green-result bullet at a second
-datapoint. Search shape for the second: a `json!` / dict literal inside a test whose
-subject is a pure formatting function.
+the step itself. The structural tell — *a formatter/renderer test that hand-builds the
+value it formats proves nothing about the keys the product emits* — was to be promoted at
+a second datapoint. **Swept 2026-08-26: there is no second datapoint. Do not re-run this
+sweep; read the result below.**
+
+### Sweep result 2026-08-26 — the class has exactly one member
+
+Enumerated per CLAUDE.md's *"when a scout finds a defect CLASS, enumerate it across the
+whole corpus before writing any fix."* Scope: all 59 `format_*` / `render_*` functions
+taking `&Value`, across 24 files — every site where a formatter consumes an envelope
+built elsewhere. Method: census every JSON key **read** by production code against every
+key **written** by production code, with `#[cfg(test)]` bodies and `tests.rs` excluded
+from the write-set on purpose, since a key whose only writer is a test literal is the
+defect itself.
+
+**Verdict: `indexed_with_model` and `indexed_at` are the only two.** 307 production read
+keys; 16 survived the final predicate; 14 of those are legitimate — read from an
+*external* producer that by design has no writer in `src/`: TOML config
+(`vector_backend`, `ignored_paths`, `force_include`, `poetry`), markdown frontmatter
+(`expects_augmentation`, `no_fix_commit`), an HTTP header (`authorization`), a
+`package.json` (`scripts`, `packages`), an embedder's `/props` (`max_client_batch_size`),
+an LSP protocol message (`registrations`), a caller-supplied tool argument (`timeout`),
+and two Serialize struct fields (`by_tool`, `p50_ms` on `UsageStats` / `ToolStats`,
+`src/usage/db.rs:753`+`:761`).
+
+**The instrument took four passes, and each pass's own false positives were the only
+thing that revealed the previous predicate was wrong** — which is the transferable part,
+more than the zero:
+
+| run | hits | what was wrong |
+|-----|-----:|----------------|
+| 1 | 114 | `result["k"] = json!(..)` counted as a *read*. Caught only because `legacy_semantic_index` appeared, and this session had **watched that key come back live** from `workspace(activate)` — a failed negative control, not a code review |
+| 2 | 40 | `=` at end of line escaped the assignment exclusion (`more_hint`); `Some(&["reviewed"])` slice literals parsed as key lookups |
+| 3 | 23 | writes via `"k".to_string()` on its own line (`members_hint`) and `.with_extra("k", ..)` (`section_map`) were invisible |
+| 4 | 16 | stopped enumerating write *idioms* — there is no closed set — and asked instead whether the literal appears anywhere in production but the read |
+
+**Known blind spot, stated so the zero is not over-trusted:** run 4's predicate cannot
+see a key produced by `serde_json::to_value(struct)`, because the field name never appears
+as a string literal. That is exactly how `by_tool` / `p50_ms` reached the final list, and
+it is the one way a real instance could still be hiding. The known pair was re-checked
+against it by hand — no Serialize struct declares an `indexed_with_model` or `indexed_at`
+field (`IndexState` carries `last_indexed_at`, a different name) — so the confirmed
+finding does not rest on the blind spot. Probe kept at
+`scratchpad/key_census.py`; it is session-local, so re-deriving it costs more than
+re-reading this table.
+
+**What the zero is worth.** It is evidence the project does not have a systemic
+formatter-test problem, which is what a two-instance result would have implied and what
+would have justified a convention. One instance justifies a bug file, which is already
+filed. Recording the negative here is the point: without it, the next session reading
+W-58's Promote-when re-runs a four-pass sweep to rediscover the same zero.
 
 **Rests on:** `docs/RELEASE.md` Standard Ship Sequence step 1 (live-output sub-clause);
 the reconnaissance skill's *"a green result certifies the path that actually EXECUTED"*
