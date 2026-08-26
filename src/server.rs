@@ -1698,6 +1698,27 @@ fn idle_shutdown_from_env() -> Option<std::time::Duration> {
     )
 }
 
+/// Run `fut` to completion, or give up after `deadline` and return anyway.
+///
+/// A shutdown step that hangs (a wedged LSP client, a stuck lock) must never keep this
+/// process alive past a signal that asked it to exit — see
+/// `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`:
+/// a correctly-installed `SIGTERM` handler is worthless if the code it hands off to can
+/// block forever. `what` names the step in the warning log so a timed-out shutdown is
+/// diagnosable after the fact.
+pub(crate) async fn shutdown_with_deadline<F>(fut: F, deadline: std::time::Duration, what: &str)
+where
+    F: std::future::Future<Output = ()>,
+{
+    if tokio::time::timeout(deadline, fut).await.is_err() {
+        tracing::warn!(
+            what,
+            deadline_secs = deadline.as_secs(),
+            "shutdown_deadline_exceeded_abandoning"
+        );
+    }
+}
+
 /// Complete once no tool call has arrived for `limit`; never complete when `limit` is `None`.
 ///
 /// The `None` arm awaits `pending()`, so the caller's `select!` arm stays unconditional and the
@@ -1967,9 +1988,17 @@ pub async fn run(
                 }
             }
 
-            // Gracefully shut down all LSP servers
+            // Gracefully shut down all LSP servers. Bounded: a wedged LSP client must
+            // never keep this process alive past a signal that asked it to exit — see
+            // shutdown_with_deadline's doc comment.
+            const LSP_SHUTDOWN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
             tracing::info!("Shutting down LSP servers...");
-            lsp.shutdown_all().await;
+            shutdown_with_deadline(
+                lsp.shutdown_all(),
+                LSP_SHUTDOWN_DEADLINE,
+                "lsp_shutdown_all",
+            )
+            .await;
             tracing::info!("All LSP servers shut down");
             Ok(())
         }
@@ -4853,6 +4882,38 @@ mod tests {
         assert!(
             t0.elapsed() >= std::time::Duration::from_secs(600),
             "resolved early, at {:?}",
+            t0.elapsed()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_with_deadline_returns_after_deadline_when_inner_never_resolves() {
+        let t0 = tokio::time::Instant::now();
+        shutdown_with_deadline(
+            std::future::pending::<()>(),
+            std::time::Duration::from_secs(20),
+            "test_never_resolves",
+        )
+        .await;
+        assert!(
+            t0.elapsed() >= std::time::Duration::from_secs(20),
+            "resolved early, at {:?}",
+            t0.elapsed()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_with_deadline_returns_promptly_when_inner_resolves() {
+        let t0 = tokio::time::Instant::now();
+        shutdown_with_deadline(
+            async {},
+            std::time::Duration::from_secs(20),
+            "test_resolves_immediately",
+        )
+        .await;
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(20),
+            "waited out the deadline instead of returning promptly, at {:?}",
             t0.elapsed()
         );
     }
