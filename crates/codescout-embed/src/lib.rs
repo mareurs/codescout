@@ -100,6 +100,19 @@ pub fn chunk_size_for_model(model_spec: &str) -> usize {
         if l.contains("all-minilm") || l.contains("minilm-l6") {
             return 256;
         }
+        // CodeRankEmbed. MEASURED against a live llama-server 2026-08-26 by binary
+        // search on input length: 8000 chars of repeated 'x' embedded, 8250 failed with
+        // HTTP 500 `input is too large to process` — i.e. ~2048 tokens, the model's
+        // n_ctx_train.
+        //
+        // It derives from nomic-embed-text-v1.5 but does NOT inherit that model's
+        // 8192-token window, and the string "CodeRankEmbed" contains no "nomic"
+        // substring — so without this arm it fell to the 512 fallback below, and a
+        // consumer sizing work off this function would segment ~4x more finely than the
+        // model requires.
+        if l.contains("coderank") {
+            return 2048;
+        }
         // Unknown — conservative fallback
         512
     }

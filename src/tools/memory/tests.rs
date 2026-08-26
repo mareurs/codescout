@@ -413,6 +413,180 @@ async fn cross_embed_memory_stores_under_pinned_project_not_session_default() {
     );
 }
 
+/// CONSERVATION: segmenting must not drop or duplicate a single character.
+///
+/// This is the invariant that matters, because the defect being fixed IS silent
+/// content loss — a segmenter that quietly dropped a tail would remove the error
+/// while preserving the data loss, which is strictly worse than the bug. Checked
+/// across budgets that divide the input evenly and unevenly, and against content
+/// whose lines fall both under and over the budget.
+#[test]
+fn segmenting_never_drops_or_duplicates_content() {
+    let cases: Vec<String> = vec![
+        "short".into(),
+        "a\nb\nc\n".into(),
+        "line of moderate length\n".repeat(50),
+        // One line far longer than any budget below: no boundary can help, so this
+        // exercises the hard-split path.
+        format!("prefix\n{}\nsuffix\n", "x".repeat(5000)),
+        "no trailing newline at all".into(),
+        "\n\n\n".into(),
+    ];
+    for content in &cases {
+        for budget in [1usize, 7, 64, 1000, 100_000] {
+            let segs = super::segment_for_budget(content, budget);
+            assert_eq!(
+                segs.concat(),
+                *content,
+                "budget={budget} must preserve content exactly (len {})",
+                content.len()
+            );
+            for s in &segs {
+                assert!(
+                    s.chars().count() <= budget,
+                    "segment of {} chars exceeds budget {budget}",
+                    s.chars().count()
+                );
+            }
+        }
+    }
+}
+
+/// Content at or under the budget is ONE segment — the pre-fix path, byte-identical.
+///
+/// Without this, a conservative budget would quietly start pooling ordinary memories,
+/// trading a data-loss bug for a retrieval-quality one.
+#[test]
+fn content_within_budget_is_never_segmented() {
+    for content in ["", "one line", "two\nlines\n"] {
+        let segs = super::segment_for_budget(content, 1000);
+        assert!(
+            segs.len() <= 1,
+            "{content:?} fits the budget and must not be split: {segs:?}"
+        );
+    }
+}
+
+/// Re-normalising after pooling is load-bearing, not cosmetic.
+///
+/// Two orthogonal unit vectors mean-pool to norm 1/sqrt(2) ≈ 0.707. The sqlite-vec
+/// store queries with `embedding MATCH vec_f32(?)`, whose metric is L2 — so an
+/// unnormalised pooled vector would sit measurably closer to the origin than any
+/// unpooled embedding, putting every segmented memory further from every query in
+/// proportion to how varied its content is. A test that only asserted "a vector came
+/// back" would pass against that.
+#[test]
+fn pooling_returns_a_unit_vector_and_rejects_ragged_input() {
+    let pooled = super::mean_pool_normalized(&[vec![1.0, 0.0], vec![0.0, 1.0]]).unwrap();
+    let norm: f32 = pooled.iter().map(|x| x * x).sum::<f32>().sqrt();
+    assert!(
+        (norm - 1.0).abs() < 1e-5,
+        "pooled vector must be unit-norm, got {norm}"
+    );
+    assert!(
+        (pooled[0] - pooled[1]).abs() < 1e-5,
+        "orthogonal inputs must pool symmetrically, got {pooled:?}"
+    );
+
+    assert!(
+        super::mean_pool_normalized(&[]).is_err(),
+        "nothing to pool must error, not return a bogus vector"
+    );
+    assert!(
+        super::mean_pool_normalized(&[vec![1.0, 0.0], vec![1.0]]).is_err(),
+        "ragged dimensions must error rather than silently produce a truncated vector"
+    );
+
+    // Degenerate all-zero input must not divide by zero into NaNs — a NaN vector
+    // poisons the index silently, where a zero vector reads as "no signal".
+    let zero = super::mean_pool_normalized(&[vec![0.0, 0.0]]).unwrap();
+    assert!(
+        zero.iter().all(|x| x.is_finite()),
+        "all-zero input must not produce NaNs: {zero:?}"
+    );
+}
+
+/// The budget is derived from the CONFIGURED MODEL, not a constant — and the two
+/// backends this bug spans must land far apart.
+#[test]
+fn the_embedding_budget_tracks_the_model() {
+    // The reporter's backend. fastembed truncates at 512 and the table clamps to
+    // min(256, 512) = 256 tokens.
+    let mini = crate::embed::chunk_size_for_model("local:AllMiniLML6V2Q");
+    // This stack's backend, measured at 2048 tokens on 2026-08-26.
+    let coderank = crate::embed::chunk_size_for_model("CodeRankEmbed");
+    assert!(mini > 0 && coderank > 0);
+    assert!(
+        coderank > mini * 3,
+        "CodeRankEmbed's measured 2048-token window must yield a far larger budget \
+         than AllMiniLM's 256 — a shared constant would make these equal: \
+         {coderank} vs {mini}"
+    );
+}
+
+/// End to end through the embedder seam: under budget is one call, over budget pools
+/// into a still-unit-norm vector.
+#[tokio::test]
+async fn under_budget_makes_one_call_and_over_budget_pools_to_unit_norm() {
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingEmbedder {
+        calls: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl DenseEmbedder for CountingEmbedder {
+        async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+            self.embed_document(text).await
+        }
+        async fn embed_document(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            // Real backends return unit-norm vectors (measured 2026-08-26:
+            // CodeRankEmbed L2 = 1.000000). Vary the direction by input length so
+            // pooling has something non-trivial to average.
+            let n = (text.len() % 7) as f32 + 1.0;
+            let norm = (n * n + 1.0).sqrt();
+            Ok(vec![n / norm, 1.0 / norm])
+        }
+        #[cfg(test)]
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    let short = CountingEmbedder {
+        calls: AtomicUsize::new(0),
+    };
+    let v = super::embed_document_pooled(&short, "well under budget", 1000)
+        .await
+        .unwrap();
+    assert_eq!(
+        short.calls.load(Ordering::SeqCst),
+        1,
+        "under budget must be exactly ONE call — the pre-fix path, unchanged"
+    );
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    assert!((norm - 1.0).abs() < 1e-5, "got {norm}");
+
+    let long_embedder = CountingEmbedder {
+        calls: AtomicUsize::new(0),
+    };
+    let long = "some line of text\n".repeat(300); // ~5400 chars
+    let v2 = super::embed_document_pooled(&long_embedder, &long, 500)
+        .await
+        .unwrap();
+    let calls = long_embedder.calls.load(Ordering::SeqCst);
+    assert!(
+        calls >= 10,
+        "a ~5400-char memory at budget 500 must segment; got {calls} call(s)"
+    );
+    let norm2: f32 = v2.iter().map(|x| x * x).sum::<f32>().sqrt();
+    assert!(
+        (norm2 - 1.0).abs() < 1e-5,
+        "a pooled vector must still be unit-norm, got {norm2}"
+    );
+}
+
 #[tokio::test]
 async fn memory_recall_signals_has_more_when_capped() {
     // Silent-cap regression: a limit-capped recall must flag that more memories

@@ -335,25 +335,160 @@ fn topic_not_found_error(topic: &str, available: Vec<String>) -> RecoverableErro
     err
 }
 
+/// Split `content` into pieces no longer than `budget_chars`, preferring line
+/// boundaries.
+///
+/// Pure, so the boundary logic is testable without an embedder — which matters
+/// because the interesting cases (a single over-long line, an exact-budget fit) are
+/// awkward to provoke through a live backend.
+///
+/// A line longer than the budget on its own is hard-split by characters: no
+/// boundary can help, and dropping it would be the silent loss this exists to stop.
+fn segment_for_budget(content: &str, budget_chars: usize) -> Vec<String> {
+    let budget = budget_chars.max(1);
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_len = 0usize;
+
+    for line in content.split_inclusive('\n') {
+        let line_len = line.chars().count();
+
+        if line_len > budget {
+            if !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+                cur_len = 0;
+            }
+            let mut piece = String::new();
+            let mut piece_len = 0usize;
+            for ch in line.chars() {
+                if piece_len == budget {
+                    out.push(std::mem::take(&mut piece));
+                    piece_len = 0;
+                }
+                piece.push(ch);
+                piece_len += 1;
+            }
+            if !piece.is_empty() {
+                out.push(piece);
+            }
+            continue;
+        }
+
+        if cur_len + line_len > budget && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            cur_len = 0;
+        }
+        cur.push_str(line);
+        cur_len += line_len;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Mean-pool `vectors` and re-normalise to unit length.
+///
+/// **Re-normalising is not cosmetic.** Every backend measured returns unit-norm
+/// vectors (verified 2026-08-26: CodeRankEmbed L2 = 1.000000 for both a short and a
+/// long input), and the sqlite-vec store queries with `embedding MATCH vec_f32(?)`,
+/// whose metric is L2 distance — where magnitude is emphatically not free. The mean
+/// of k unit vectors has norm ≤ 1 and shrinks as they diverge, so an unnormalised
+/// pooled vector would put every *segmented* memory systematically further from every
+/// query than a short one, in proportion to how varied its content is. That is a
+/// ranking bug that no test of "did it embed" would catch.
+fn mean_pool_normalized(vectors: &[Vec<f32>]) -> anyhow::Result<Vec<f32>> {
+    let first = vectors
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("nothing to pool: no segment produced a vector"))?;
+    let dim = first.len();
+    anyhow::ensure!(dim > 0, "embedder returned a zero-dimension vector");
+
+    let mut acc = vec![0f64; dim];
+    for v in vectors {
+        anyhow::ensure!(
+            v.len() == dim,
+            "embedder returned inconsistent dimensions across segments: {} vs {dim}",
+            v.len()
+        );
+        for (a, x) in acc.iter_mut().zip(v.iter()) {
+            *a += f64::from(*x);
+        }
+    }
+
+    let norm = acc.iter().map(|x| x * x).sum::<f64>().sqrt();
+    if norm == 0.0 {
+        // Degenerate (all-zero segments). Return it as-is rather than dividing by
+        // zero — a zero vector is a legible "no signal", a NaN vector poisons the
+        // index silently.
+        return Ok(vec![0f32; dim]);
+    }
+    Ok(acc.into_iter().map(|x| (x / norm) as f32).collect())
+}
+
+/// Embed `content` as a document, segmenting and mean-pooling when it exceeds the
+/// configured model's budget.
+///
+/// Below the budget this is exactly the previous single call — no pooling, no change
+/// in behaviour, so the common case is untouched. Above it, the old code sent the
+/// whole thing in one request and the two backends then diverged: llama-server
+/// returned HTTP 500 and the caller stored the memory with NO vector (invisible to
+/// `recall`), while the local ONNX path silently truncated at fastembed's 512-token
+/// default and stored a vector representing only the opening fraction. The second is
+/// worse, because nothing anywhere reports it.
+///
+/// `docs/issues/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`
+async fn embed_document_pooled(
+    embedder: &dyn crate::retrieval::embedder::DenseEmbedder,
+    content: &str,
+    budget_chars: usize,
+) -> anyhow::Result<Vec<f32>> {
+    if content.chars().count() <= budget_chars {
+        return embedder.embed_document(content).await;
+    }
+
+    let segments = segment_for_budget(content, budget_chars);
+    tracing::debug!(
+        segments = segments.len(),
+        budget_chars,
+        content_chars = content.chars().count(),
+        "memory exceeds the embedding model's budget — segmenting and mean-pooling"
+    );
+
+    let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(segments.len());
+    for seg in &segments {
+        vectors.push(embedder.embed_document(seg).await?);
+    }
+    mean_pool_normalized(&vectors)
+}
+
 /// Best-effort cross-embed a markdown memory into the semantic store.
 /// Called on `write` so that structured memories are also discoverable via `recall`.
 async fn cross_embed_memory(ctx: &ToolContext, topic: &str, content: &str) -> anyhow::Result<()> {
-    let project_id = ctx
+    let (project_id, model_spec) = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
-            Ok(p.config.project.name.clone())
+            Ok((
+                p.config.project.name.clone(),
+                p.config.embeddings.model.clone(),
+            ))
         })
         .await?;
 
     // `embed_document`, not `embed`: this is a document being stored. `embed` is
     // the query side and carries an asymmetric model's query prefix.
     // docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md
-    let dense = ctx
-        .agent
-        .memory_embedder()
-        .await?
-        .embed_document(content)
-        .await?;
+    //
+    // Budget from the CONFIGURED MODEL, not a constant. `chunk_size_for_model` was
+    // kept alive precisely for consumers like this one — the decision in
+    // docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md
+    // rejected it for sizing CODE CHUNKS (where 1200 chars is benchmark-backed and
+    // model-independent), while keeping the function because it is correct for the
+    // per-model arms. Memory content has no such benchmarked size; its only real
+    // constraint is the ceiling, which is what this returns.
+    let budget_chars = crate::embed::chunk_size_for_model(&model_spec);
+    let embedder = ctx.agent.memory_embedder().await?;
+    let dense = embed_document_pooled(embedder.as_ref(), content, budget_chars).await?;
 
     let now = now_epoch_string();
     let memory = crate::retrieval::memory_payload::SemanticMemory {
@@ -385,13 +520,14 @@ async fn create_semantic_anchors(
     content: &str,
     path_anchor_files: &HashSet<String>,
 ) -> anyhow::Result<()> {
-    let (project_id, min_sim, top_n) = ctx
+    let (project_id, min_sim, top_n, model_spec) = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
             Ok((
                 p.config.project.name.clone(),
                 p.config.memory.semantic_anchor_min_similarity,
                 p.config.memory.semantic_anchor_top_n,
+                p.config.embeddings.model.clone(),
             ))
         })
         .await?;
@@ -399,12 +535,14 @@ async fn create_semantic_anchors(
     // `embed_document` for the stored vector — see `cross_embed_memory`. The
     // anchor *search* below is a query and stays on the query side, which is the
     // asymmetry this seam exists to express.
-    let dense = ctx
-        .agent
-        .memory_embedder()
-        .await?
-        .embed_document(content)
-        .await?;
+    //
+    // Segmented on the same budget as `cross_embed_memory`, and for the same reason:
+    // this call re-upserts the SAME point id, so leaving it unsegmented would let the
+    // anchor pass overwrite a correctly-pooled vector with a truncated or missing one
+    // — the second write silently undoing the first.
+    let budget_chars = crate::embed::chunk_size_for_model(&model_spec);
+    let embedder = ctx.agent.memory_embedder().await?;
+    let dense = embed_document_pooled(embedder.as_ref(), content, budget_chars).await?;
 
     // Code chunk search still goes through the full RetrievalClient — the
     // embedder seam only covers the dense vector path. When the retrieval
