@@ -308,14 +308,42 @@ mod tests {
         assert!(r.path().is_some());
     }
 
+    #[cfg(unix)]
     #[test]
     fn publish_records_the_parent_pid_the_hook_matches_on() {
         // The hook selects entries whose ppid is on its own ancestry. A zero or
         // missing ppid makes every entry unmatchable — the feature silently dies.
+        //
+        // Unix only, because `parent_pid()` is `#[cfg(windows)] -> 0` BY DESIGN: there is
+        // no `getppid` there, and its doc comment argues a zero degrades to "never
+        // matched" rather than to a WRONG match. This assertion therefore contradicted
+        // shipped intent on Windows and failed on all three lanes. The sibling below pins
+        // the Windows contract instead of leaving it to a skip.
         let dir = tempfile::tempdir().unwrap();
         Rendezvous::publish(Some(dir.path().to_path_buf()), None);
         let e = entry_at(dir.path(), std::process::id()).unwrap();
         assert_ne!(e.ppid, 0, "ppid must be recorded");
+    }
+
+    /// The Windows contract, pinned rather than skipped: `parent_pid()` returns 0 there
+    /// on purpose, so the rendezvous never matches on ppid and the hook's ancestry walk
+    /// is the only path. That is a real, accepted cost — and writing it down is what
+    /// stops the next reader "fixing" the zero without also updating the matcher, or
+    /// deleting this file's Unix assertion as platform-flaky.
+    ///
+    /// If someone does implement a Windows `getppid` equivalent, this fails, and that is
+    /// the signal to re-unify the two rather than a mystery.
+    #[cfg(windows)]
+    #[test]
+    fn publish_records_a_zero_parent_pid_on_windows_by_design() {
+        let dir = tempfile::tempdir().unwrap();
+        Rendezvous::publish(Some(dir.path().to_path_buf()), None);
+        let e = entry_at(dir.path(), std::process::id()).unwrap();
+        assert_eq!(
+            e.ppid, 0,
+            "Windows has no getppid here; 0 is deliberate and means 'never matched', \
+             which is the safe direction versus a wrong match"
+        );
     }
 
     #[test]
