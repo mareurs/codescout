@@ -1,16 +1,18 @@
 ---
 kind: bug
-status: zombie
+status: open
 tags:
 - memory
 - workspace
 - multi-project
 closed: null
-last_observed: 2026-07-07
+last_observed: 2026-08-26
 opened: 2026-07-07
 owner: marius
 related: []
+reopened: 2026-08-26
 severity: medium
+unverified: 'REPRODUCED but the mechanism is only half-established. Confirmed by reading the handlers: `list` and `read` never look at `project_id` at all. NOT established: why a bare-id focus-switch also returns 0, since `with_project_at` does resolve `ws.focused_active()` and `activate_within_workspace` does call `MemoryStore::open` on promotion. Two hypotheses were formed and both refuted by reading the code; do not inherit either.'
 ---
 
 # BUG: `memory(list/read)` only sees 2 topics for a project that `workspace(activate)` reports has 16
@@ -28,7 +30,14 @@ severity: medium
 > defect in the same tool — it does not address topic visibility. Do not read it as a fix
 > for this.
 ## Summary
-> **STATUS: zombie — not reproducible as of 2026-07-28.** A verify-open pass ran
+> **RE-OPENED 2026-08-26 — REPRODUCED on the foreign/multi-project path this file said had
+> never been covered.** The trigger below fired verbatim: `memory(action="list")` returned
+> **materially fewer topics than `.codescout/memories/` holds on disk**. Full reproduction,
+> evidence and what is *not* yet established are in § *Reproduction — 2026-08-26*. The
+> historical note below is kept unedited; it was accurate for the home-project path it
+> tested, and it is the note that named the untested path.
+>
+> **STATUS (historical): zombie — not reproducible as of 2026-07-28.** A verify-open pass ran
 > `memory(action="list")` against this project: it returned **21 topics**, not 2
 > (`architecture`, `cargo-test-lib-skips-integration`, `catalog-sql-hazards`,
 > `claude-code-mcp-env`, `conventions`, `development-commands`, `domain-glossary`,
@@ -89,6 +98,62 @@ Meanwhile `workspace(action="activate", path="codescout", read_only=false)` retu
   "system-prompt"
 ]
 ```
+
+## Reproduction — 2026-08-26 (re-open, foreign multi-project workspace)
+
+Run against `/home/marius/work/mirela`, a 12-sub-project workspace — structurally the
+shape the original report named and the two prior verify passes could not test, because
+both ran on the home project.
+
+| # | call | result |
+|---|---|---|
+| 1 | `workspace(activate, path="/home/marius/work/mirela", read_only=true)` | `memories: []` |
+| 2 | `memory(list, include_private=true)` | `0 shared, 0 private` — **correct**, root has none on disk |
+| 3 | `memory(list, project_id="eduplanner-ui")` | **0 topics** |
+| 4 | `memory(read, topic="architecture", project_id="eduplanner-ui")` | **not found**, `available_topics: []` |
+| 5 | `workspace(activate, path="eduplanner-ui")` — **bare id** | reports **12 memories** |
+| 6 | `memory(list)` | **0 topics** |
+| 7 | `workspace(activate, path="/home/marius/work/mirela/eduplanner-ui")` — **absolute** | reports 12 |
+| 8 | `memory(list)` | **12 topics** — correct |
+
+On disk: `eduplanner-ui/.codescout/memories/` holds 22 files = **12 `.md` topics** plus 10
+`.anchors.toml` sidecars. Rows 5→6 are the original report's exact shape — one surface says
+12, the other says 0, same project, same instant.
+
+**Rows 7→8 are the discriminator.** Same project, same session, same `read_only=true`; the
+only variable is whether it was addressed by bare id or by absolute path. That rules out
+disk permissions, `read_only`, and the store being absent — all three were candidates.
+
+### What IS established
+
+**`list` and `read` ignore `project_id` entirely.** Their handlers
+(`src/tools/memory/mod.rs`, the `list` arm and the `read` arm) call
+`agent.with_project_at(ctx.workspace_override, …)` and never read the parameter. Only
+`resolve_memory_dir` consults it — and that function's own doc comment promises exactly the
+routing the read surfaces do not perform: *"If `project_id` … is provided, route to the
+per-project directory … Otherwise use the focused project's memory dir."* Rows 3 and 4 are
+that contradiction, and it also explains why the 2026-07-07 reporter got nothing when they
+passed `project_id` explicitly.
+
+The error text makes it worse rather than neutral: row 4 answered *"no memory topics exist
+yet — create one with `memory(action='write', …)`"* for a project holding twelve. A caller
+acting on that hint writes a thirteenth into the wrong store.
+
+### What is NOT established — do not inherit a guess here
+
+Why row 6 returns 0. Two hypotheses were formed and **both refuted by reading the code**:
+
+1. *"The bare-id focus-switch never opens the sub-project's `MemoryStore`."* Refuted:
+   `Agent::activate_within_workspace` calls `MemoryStore::open(&abs_root)` on the
+   dormant→activated promotion.
+2. *"`with_project_at` resolves the workspace default rather than the focused project."*
+   Refuted: it ends in `ws.focused_active().and_then(|p| p.as_active())`.
+
+So the store is opened and the resolver does look at `focused` — and the answer is still
+empty. The next step is to instrument between those two points rather than to theorise a
+third time. Worth checking first: whether the `memories` array in the *activate response*
+is read from disk directly, which would let the display be right while the store the tool
+reads is a different one.
 
 ## Reproduction
 1. Commit: `c5e6aee938503bb7e5109ac5b5acbeb50b4726c3` (branch `experiments`)

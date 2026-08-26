@@ -11,6 +11,7 @@ tags:
 - timing
 closed: ''
 last_observed: 2026-08-07
+last_verified: 2026-08-26
 opened: 2026-08-07
 owner: marius
 related:
@@ -45,6 +46,26 @@ severity: medium
 >
 > Nothing about the analysis below is retracted — it stays as the starting point for whoever picks
 > this up when it fires.
+>
+> **Verified 2026-08-26 — stays `zombie`; no trigger has fired.** Checked against CI run
+> `32740102144` (`047dd433`, 2026-08-24), the most recent run on `experiments`:
+>
+> 1. **Not fired.** That run's `windows-latest / default` lane failed **46** tests, and
+>    *neither* named test is among them — not `cold_start_over_budget_returns_none_but_keeps_warming`,
+>    not `background_command_with_quotes_captures_output`. The lane is red for an unrelated
+>    reason (31 of the 46 are `librarian::tools::doctor::tests`, a scoping cluster), which is
+>    precisely the discrimination this trigger exists to make: *a red Windows lane is not this
+>    bug* unless it names one of these two tests.
+> 2. **Not fired.** No new test asserts on wall-clock elapsed time.
+> 3. **Not fired.** All seven `#[tokio::test(start_paused = true)]` sites in the crate
+>    (`src/lsp/mod.rs`, `src/tools/progress.rs` ×2, `src/server.rs` ×3 plus the `last_activity`
+>    field) use `tokio::time::Instant`; `grep std::time::Instant src/tools/progress.rs` returns
+>    zero. The virtual-time trap is closed everywhere it could apply.
+>
+> This is the first re-check since the status was set, and it is the point of the status: a
+> `zombie` is a claim that *nothing has been observed*, and that claim decays silently unless
+> someone runs the trigger. Three months of green `windows-latest` cannot be the archive
+> criterion while the lane is red for other reasons — re-check by trigger, not by lane colour.
 
 Two single-test failures turned a 15-job CI run red with no code defect, at the exact moment a
 440-commit promotion was waiting on that gate. Re-running only the two failed jobs, with zero
