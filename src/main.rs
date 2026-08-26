@@ -323,13 +323,38 @@ async fn main() -> Result<()> {
                 tracing::info!(
                     "migrate-memories --in-place: project_id={project_id} dry_run={dry_run}"
                 );
-                codescout::migrate::memories::reembed_memories_in_place(
+                let mut r = codescout::migrate::memories::reembed_memories_in_place(
                     store.as_ref(),
                     &embedder,
                     &project_id,
                     dry_run,
                 )
-                .await?
+                .await?;
+
+                // The store-driven pass above cannot see a memory whose point was never
+                // written — it enumerates from the store, and that is exactly the damage
+                // a failed cross-embed leaves. Disk is the only side that sees them, so
+                // --in-place runs both passes and finally does what its name claims:
+                // every memory's vector re-derived from current config.
+                // docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
+                let disk = codescout::memory::MemoryStore::open(&root)?;
+                let missing = codescout::migrate::memories::embed_missing_memories(
+                    &disk,
+                    store.as_ref(),
+                    &embedder,
+                    &project_id,
+                    dry_run,
+                )
+                .await?;
+                tracing::info!(
+                    "migrate-memories --in-place: {} re-derived, {} newly embedded from disk",
+                    r.upserted,
+                    missing.upserted
+                );
+                r.read += missing.read;
+                r.upserted += missing.upserted;
+                r.skipped += missing.skipped;
+                r
             } else {
                 tracing::info!(
                     "migrate-memories: src={} project_id={} dry_run={}",

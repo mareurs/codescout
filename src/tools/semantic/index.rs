@@ -1010,13 +1010,18 @@ fn integrity_verdict(
 
 /// The one next action for a memory-coverage result.
 ///
-/// Names `memory(action="write")` rather than a bespoke repair, deliberately. Re-writing a
-/// memory with its current disk content re-runs `cross_embed_memory`, so the repair
-/// inherits segmentation and mean-pooling (`26feb1aa`) and anchor seeding for free. A
-/// dedicated "embed the missing ones" path would have to re-derive `bucket` and the
-/// UUIDv5 `point_id` from `project_id`/`bucket`/`title`, and any divergence there writes a
-/// DUPLICATE point instead of the intended one — a repair that silently doubles the
-/// corpus is worse than the gap it closes.
+/// Names `codescout migrate-memories --in-place`, which reads the missing memories from
+/// disk **server-side**. The first cut of this hint said to re-run `memory(action='write')`
+/// with each memory's current content — correct for a human with the file open, wrong for
+/// an agent. That routes the bytes through the caller's context, making the caller a lossy
+/// channel with no checksum until after the write has already overwritten the file, and at
+/// `eval-design`'s 31 KB it is not possible at all: a result that large comes back as a
+/// buffer handle that cannot be re-emitted as a tool argument.
+///
+/// `--in-place` could not fix this either until `embed_missing_memories` was added
+/// alongside it, because the store-driven pass cannot see a point that was never written.
+/// Both passes now run under that one flag, so the hint names one command rather than
+/// ruling one out.
 fn memory_coverage_hint(m: &crate::memory::MemoryIntegrity) -> String {
     if m.missing_count == 0 && m.orphan_count == 0 {
         return "Every memory on disk has a point, and every point has a file.".to_string();
@@ -1024,10 +1029,9 @@ fn memory_coverage_hint(m: &crate::memory::MemoryIntegrity) -> String {
     let mut parts = Vec::new();
     if m.missing_count > 0 {
         parts.push(format!(
-            "{} memory/memories are on disk with NO point — invisible to recall, and \
-             invisible to `codescout migrate-memories --in-place` too, which enumerates \
-             from the store. Re-run memory(action='write') with each one's current \
-             content to repair: {}.",
+            "{} memory/memories are on disk with NO point — invisible to recall. Repair \
+             with `codescout migrate-memories --in-place`, which reads them from disk \
+             server-side: {}.",
             m.missing_count,
             m.missing_sample.join(", ")
         ));
@@ -1144,35 +1148,37 @@ mod integrity_verdict_tests {
         }
     }
 
-    /// The hint must name the repair, and must say that the OBVIOUS repair does not work.
+    /// The hint must name a repair the CALLER CAN ACTUALLY PERFORM, and must not name the
+    /// one it cannot.
     ///
-    /// `codescout migrate-memories --in-place` is what anyone would reach for, and it
-    /// cannot fix this: `reembed_memories_in_place` enumerates via `store.list()`, so a
-    /// memory with no point is invisible to it. A hint that reported the gap without
-    /// saying so would send every reader to the one tool guaranteed to report success and
-    /// change nothing.
+    /// It first said to re-run `memory(action='write')` with each memory's current
+    /// content. That routes the bytes through the caller's context — a lossy channel with
+    /// no checksum until after the write has already overwritten the file — and for the
+    /// 31 KB `eval-design` it is impossible outright, since a result that size comes back
+    /// as a buffer handle that cannot be re-emitted as a tool argument.
     #[test]
     fn missing_hint_names_the_repair_and_rules_out_the_wrong_one() {
         let h = super::memory_coverage_hint(&mem_integrity(&["eval-design"], &[]));
         assert!(h.contains("eval-design"), "must name the memory: {h}");
         assert!(
-            h.contains("memory(action='write')"),
-            "must name the repair that works: {h}"
+            h.contains("migrate-memories --in-place"),
+            "must name the server-side repair: {h}"
         );
         assert!(
-            h.contains("migrate-memories"),
-            "must rule out the repair that does not: {h}"
+            !h.contains("memory(action='write')"),
+            "must not route the bytes through the caller's own context: {h}"
         );
     }
 
     /// Both kinds present must both be reported — an early return on the first would hide
-    /// the second, and they need different commands.
+    /// the second, and they need different commands: the missing ones are recovered from
+    /// disk server-side, the stale points are dropped through the tool.
     #[test]
     fn hint_reports_missing_and_orphans_together() {
         let h = super::memory_coverage_hint(&mem_integrity(&["lost"], &["stale-point"]));
         assert!(h.contains("lost") && h.contains("stale-point"), "{h}");
         assert!(
-            h.contains("memory(action='write')") && h.contains("memory(action='forget')"),
+            h.contains("migrate-memories --in-place") && h.contains("memory(action='forget')"),
             "each kind needs its own command: {h}"
         );
     }

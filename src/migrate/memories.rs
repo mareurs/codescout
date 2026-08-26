@@ -259,6 +259,116 @@ pub async fn reembed_memories_in_place(
     Ok(report)
 }
 
+/// Embed the markdown memories that have **no point in the store at all**.
+///
+/// The complement of [`reembed_memories_in_place`], and the two are not
+/// interchangeable. That one enumerates via `store.list()`, so it re-derives vectors for
+/// memories that already have points and **cannot see** one whose point was never
+/// written. This one enumerates from disk, which is the only side that sees them.
+///
+/// Why the gap exists: `cross_embed_memory` is best-effort and non-fatal
+/// (`src/tools/memory/mod.rs:871-877`) — a failed embed logs a warning, the markdown write
+/// proceeds, and no point is created. Measured on this repo 2026-08-26: 23 memories on
+/// disk, 17 in the store, 8 undiscoverable via `recall`, `eval-design` at 31 KB among
+/// them.
+///
+/// **Why this is a command and not an instruction.** `index(action="verify")` first told
+/// callers to re-run `memory(action="write")` with each memory's current content. That is
+/// fine for a human with the file open and wrong for an agent: it routes the bytes through
+/// the caller's context, making the caller a lossy channel with no checksum until after
+/// the write has already overwritten the file — and at 31 KB it is not possible at all,
+/// since a result that large comes back as a buffer handle that cannot be re-emitted as an
+/// argument. Reading from disk server-side removes the channel.
+///
+/// Deliberately reuses [`crate::memory::TOPIC_BUCKET`] and lets `store.upsert` derive the
+/// point id (UUIDv5 over `project_id`/`bucket`/`title`) rather than computing one here. A
+/// divergent bucket or title would write a DUPLICATE point instead of the intended one, so
+/// the constant is the mitigation for the one hazard this function has.
+///
+/// Report fields: `read` = memories on disk with no point, `upserted` = newly embedded,
+/// `skipped` = embed-or-upsert failures (existing state untouched — a broken embedder does
+/// nothing rather than degrading the corpus). `anchors_attached` is always 0: anchors are
+/// seeded by the tool-layer write path, and inventing them here would diverge from it.
+pub async fn embed_missing_memories(
+    disk: &crate::memory::MemoryStore,
+    store: &dyn SemanticMemoryStore,
+    embedder: &dyn MigrationEmbedder,
+    project_id: &str,
+    dry_run: bool,
+) -> Result<MigrationReport> {
+    use std::collections::BTreeSet;
+
+    let mut report = MigrationReport {
+        dry_run,
+        ..Default::default()
+    };
+
+    let topics = disk.list().context("list memories on disk")?;
+    let stored: BTreeSet<String> = store
+        .list(
+            project_id,
+            crate::memory::semantic_store::MemoryFilter {
+                bucket: Some(crate::memory::TOPIC_BUCKET.to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .with_context(|| format!("list stored memories for {project_id}"))?
+        .into_iter()
+        .map(|h| h.memory.title)
+        .collect();
+
+    for topic in topics {
+        if stored.contains(&topic) {
+            continue;
+        }
+        // A topic the walk found but whose file cannot be read is a real anomaly, not a
+        // missing memory — skip it loudly rather than embedding an empty body over it.
+        let content = match disk.read(&topic) {
+            Ok(Some(c)) => c,
+            Ok(None) | Err(_) => {
+                tracing::warn!("embed-missing: {topic} listed but unreadable — skipped");
+                report.skipped += 1;
+                continue;
+            }
+        };
+        report.read += 1;
+
+        if dry_run {
+            report.upserted += 1;
+            continue;
+        }
+
+        let dense = match embedder.embed(&content).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("embed-missing: embed failed for {topic}: {e}");
+                report.skipped += 1;
+                continue;
+            }
+        };
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let memory = crate::retrieval::memory_payload::SemanticMemory {
+            project_id: project_id.to_string(),
+            bucket: crate::memory::TOPIC_BUCKET.to_string(),
+            title: topic.clone(),
+            content,
+            anchors: Vec::new(),
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        if let Err(e) = store.upsert(&memory, &dense).await {
+            tracing::warn!("embed-missing: upsert failed for {topic}: {e}");
+            report.skipped += 1;
+            continue;
+        }
+        report.upserted += 1;
+    }
+
+    Ok(report)
+}
+
 #[derive(Debug)]
 struct LegacyRow {
     bucket: String,
@@ -660,5 +770,203 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(report, MigrationReport::default());
+    }
+
+    // --- embed_missing_memories: the disk-driven complement ---
+
+    fn disk_with(topics: &[(&str, &str)]) -> (tempfile::TempDir, crate::memory::MemoryStore) {
+        let dir = tempdir().unwrap();
+        let store = crate::memory::MemoryStore::open(dir.path()).unwrap();
+        for (topic, content) in topics {
+            store.write(topic, content).unwrap();
+        }
+        (dir, store)
+    }
+
+    /// The whole point: a memory on disk with no point gets one, and
+    /// `reembed_memories_in_place` provably cannot do it.
+    ///
+    /// Both passes run against the same pair of stores. The store-driven one reports
+    /// `read: 0` — it enumerates from the store, and the store is empty — while the
+    /// disk-driven one embeds the memory. That contrast is the bug
+    /// `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`
+    /// step 4 asked about, so it is asserted rather than described.
+    #[tokio::test]
+    async fn embed_missing_recovers_what_the_store_driven_pass_cannot_see() {
+        let (_d, disk) = disk_with(&[("gotchas", "beware the thing")]);
+        let store = InMemorySemanticMemoryStore::default();
+        let emb = FixedEmbedder {
+            vec: vec![0.5, 0.5],
+        };
+
+        let store_driven = reembed_memories_in_place(&store, &emb, "p", false)
+            .await
+            .unwrap();
+        assert_eq!(
+            store_driven.read, 0,
+            "the store-driven pass cannot see a memory with no point"
+        );
+
+        let r = embed_missing_memories(&disk, &store, &emb, "p", false)
+            .await
+            .unwrap();
+
+        assert_eq!((r.read, r.upserted, r.skipped), (1, 1, 0), "{r:?}");
+        let hits = store.list("p", MemoryFilter::default()).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].memory.title, "gotchas");
+        assert_eq!(
+            hits[0].memory.bucket,
+            crate::memory::TOPIC_BUCKET,
+            "must land in the bucket the topic-backed write path uses, or `forget` and \
+             the coverage check will both miss it"
+        );
+        assert_eq!(hits[0].memory.content, "beware the thing");
+    }
+
+    /// A memory that already has a point must NOT be re-embedded here.
+    ///
+    /// Not an optimisation — this function writes `anchors: Vec::new()`, so re-embedding
+    /// an existing memory would silently strip anchors that the tool-layer write path had
+    /// seeded. The store-driven pass is the one that touches existing rows, and it passes
+    /// `&hit.memory` verbatim precisely to preserve them.
+    #[tokio::test]
+    async fn embed_missing_leaves_already_stored_memories_alone() {
+        let (_d, disk) = disk_with(&[("gotchas", "on disk")]);
+        let store = InMemorySemanticMemoryStore::default();
+        let existing = crate::retrieval::memory_payload::SemanticMemory {
+            project_id: "p".to_string(),
+            bucket: crate::memory::TOPIC_BUCKET.to_string(),
+            title: "gotchas".to_string(),
+            content: "already stored, with anchors".to_string(),
+            anchors: vec![MemoryAnchor {
+                path: "src/lib.rs".to_string(),
+            }],
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        store.upsert(&existing, &[0.1, 0.9]).await.unwrap();
+
+        let r = embed_missing_memories(
+            &disk,
+            &store,
+            &FixedEmbedder {
+                vec: vec![0.5, 0.5],
+            },
+            "p",
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!((r.read, r.upserted), (0, 0), "nothing was missing: {r:?}");
+        let hits = store.list("p", MemoryFilter::default()).await.unwrap();
+        assert_eq!(hits[0].memory.content, "already stored, with anchors");
+        assert_eq!(hits[0].memory.anchors.len(), 1, "anchors must survive");
+    }
+
+    /// A point in another bucket does not count as coverage for a topic.
+    ///
+    /// `memory(action="remember")` and the preferences surface both write store-only
+    /// memories in their own buckets. If those counted, a topic sharing a title with one
+    /// would be skipped forever and stay invisible to `recall`.
+    #[tokio::test]
+    async fn embed_missing_does_not_treat_another_bucket_as_coverage() {
+        let (_d, disk) = disk_with(&[("gotchas", "on disk")]);
+        let store = InMemorySemanticMemoryStore::default();
+        let elsewhere = crate::retrieval::memory_payload::SemanticMemory {
+            project_id: "p".to_string(),
+            bucket: "preferences".to_string(),
+            title: "gotchas".to_string(),
+            content: "a preference that happens to share the title".to_string(),
+            anchors: vec![],
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        store.upsert(&elsewhere, &[0.1, 0.9]).await.unwrap();
+
+        let r = embed_missing_memories(
+            &disk,
+            &store,
+            &FixedEmbedder {
+                vec: vec![0.5, 0.5],
+            },
+            "p",
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(r.upserted, 1, "the topic was still missing: {r:?}");
+    }
+
+    /// A failing embedder must leave the corpus exactly as it was — doing nothing is the
+    /// correct outcome, never a partial or empty-vector write.
+    #[tokio::test]
+    async fn embed_missing_writes_nothing_when_the_embedder_is_down() {
+        let (_d, disk) = disk_with(&[("a", "x"), ("b", "y")]);
+        let store = InMemorySemanticMemoryStore::default();
+
+        let r = embed_missing_memories(&disk, &store, &ErrEmbedder, "p", false)
+            .await
+            .unwrap();
+
+        assert_eq!((r.upserted, r.skipped), (0, 2), "{r:?}");
+        assert!(store
+            .list("p", MemoryFilter::default())
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn embed_missing_dry_run_neither_embeds_nor_writes() {
+        let (_d, disk) = disk_with(&[("a", "x")]);
+        let store = InMemorySemanticMemoryStore::default();
+
+        let r = embed_missing_memories(&disk, &store, &ErrEmbedder, "p", true)
+            .await
+            .unwrap();
+
+        assert!(r.dry_run);
+        assert_eq!(
+            (r.read, r.upserted),
+            (1, 1),
+            "reports what it WOULD do: {r:?}"
+        );
+        assert!(
+            store
+                .list("p", MemoryFilter::default())
+                .await
+                .unwrap()
+                .is_empty(),
+            "dry run must not write — and must not even embed, hence ErrEmbedder passing"
+        );
+    }
+
+    /// Nested topics are slash-joined by `MemoryStore::list` and must round-trip through
+    /// `read` unchanged, or `infra/friction-measurement` would be re-embedded every run.
+    #[tokio::test]
+    async fn embed_missing_handles_nested_topics() {
+        let (_d, disk) = disk_with(&[("infra/friction-measurement", "nested body")]);
+        let store = InMemorySemanticMemoryStore::default();
+        let emb = FixedEmbedder {
+            vec: vec![0.5, 0.5],
+        };
+
+        let first = embed_missing_memories(&disk, &store, &emb, "p", false)
+            .await
+            .unwrap();
+        assert_eq!(first.upserted, 1);
+        let hits = store.list("p", MemoryFilter::default()).await.unwrap();
+        assert_eq!(hits[0].memory.title, "infra/friction-measurement");
+
+        let second = embed_missing_memories(&disk, &store, &emb, "p", false)
+            .await
+            .unwrap();
+        assert_eq!(
+            second.upserted, 0,
+            "a nested topic must match its stored title, or it re-embeds forever: {second:?}"
+        );
     }
 }
