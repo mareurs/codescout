@@ -1009,17 +1009,27 @@ fn count_dead_root(
 /// so a truncated sample can still account for every row it dropped, and it
 /// never decides whether a row is a violation.
 fn outside_roots_group(path: &str) -> String {
-    let p = std::path::Path::new(path);
-    let mut prefix = std::path::PathBuf::new();
-    for comp in p.components() {
-        if comp.as_os_str() == "docs" {
-            return prefix.to_string_lossy().into_owned();
+    // Split the string, not a `PathBuf`. `input` is a catalog `abs_path`, forward-slash
+    // by invariant (check #1) — but `PathBuf::push` re-joins with the NATIVE separator,
+    // so the round-trip emitted `\home\u\work\proj` on Windows and this function was
+    // producing the very spelling `check_backslash` exists to forbid.
+    let mut end = None;
+    let mut cursor = 0usize;
+    for part in path.split('/') {
+        if part == "docs" {
+            end = Some(cursor);
+            break;
         }
-        prefix.push(comp);
+        cursor += part.len() + 1; // component plus the '/' that followed it
     }
-    p.parent()
-        .map(|d| d.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string())
+    if let Some(end) = end {
+        // `end` indexes the '/' before `docs`; slicing there drops the trailing separator.
+        return path[..end.saturating_sub(1)].to_string();
+    }
+    match path.rsplit_once('/') {
+        Some((parent, _)) => parent.to_string(),
+        None => path.to_string(),
+    }
 }
 
 /// Pulls every `(id, abs_path)` row once and runs six per-row checks
@@ -7286,7 +7296,15 @@ root = "work/elsewhere/ghost"
     /// key that is not there. Taking the path explicitly is the point — `F-1` is defined
     /// in every session log, and a bare token no longer identifies a Statement.
     fn deg_key(path: &std::path::Path, token: impl Into<String>) -> (String, String) {
-        (path.to_string_lossy().into_owned(), token.into())
+        // `RepoPath`, not `to_string_lossy`: the scans key this map on the CATALOG's
+        // `abs_path`, which is forward-slash by invariant (check #1). `to_string_lossy`
+        // yields the NATIVE spelling, so on Windows every lookup missed, exposure read as
+        // zero, and 30 of this module's tests asserted 1 and got 0 — green on Linux,
+        // red on all three Windows lanes since 2026-08-20.
+        (
+            crate::util::fs::RepoPath::from_path(path).into_string(),
+            token.into(),
+        )
     }
 
     #[test]
@@ -9280,8 +9298,11 @@ root = "work/elsewhere/ghost"
         let scoped = out["catalog_health"]["entry_validity_scoped_by_project"]
             .as_object()
             .unwrap_or_else(|| panic!("scoped-out rows must be announced: {out:#?}"));
-        let root_a_key = sibling_a.to_string_lossy().into_owned();
-        let root_b_key = sibling_b.to_string_lossy().into_owned();
+        // Forward-slash, like `deg_key` and for the same reason: `outside_roots_group`
+        // keys this map on the catalog's `abs_path` spelling, so a native lookup key
+        // misses on Windows.
+        let root_a_key = crate::util::fs::RepoPath::from_path(&sibling_a).into_string();
+        let root_b_key = crate::util::fs::RepoPath::from_path(&sibling_b).into_string();
         assert_eq!(
             scoped.len(),
             2,
