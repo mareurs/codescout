@@ -17,12 +17,22 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-/// Features intentionally absent from CI, each with the reason.
+/// Features intentionally not **run** in CI, each with the reason.
 ///
-/// Adding an entry here is a real decision — it says "this cannot be built on a CI
-/// runner", not "I have not got round to it". Everything currently listed needs
-/// external services or language servers installed on the machine; the reasons are
-/// Cargo.toml's own, not invented here.
+/// Adding an entry here is a real decision — it says "this cannot be *executed* on a CI
+/// runner", not "I have not got round to it". Everything currently listed needs external
+/// services or language servers installed on the machine; the reasons are Cargo.toml's
+/// own, not invented here.
+///
+/// It does **not** exempt a feature from being *compiled*. `cargo check` needs none of
+/// those services, and `every_exempt_feature_is_still_compiled_somewhere` enforces that
+/// every entry here keeps a compile lane.
+///
+/// That distinction is the whole of F-62. This comment used to say an exemption meant
+/// "cannot be built on a CI runner"; the five `e2e-*` entries were taken at their word,
+/// nothing ever compiled them, and all five stopped compiling at once while `cargo test`
+/// reported green — the same bit-rot this file exists to prevent, let in through the
+/// escape hatch rather than around it.
 const EXEMPT: &[(&str, &str)] = &[
     ("e2e", "meta-feature enabling the e2e-* family below"),
     ("e2e-rust", "needs rust-analyzer installed on the runner"),
@@ -85,12 +95,13 @@ fn features_named_in_workflows() -> BTreeSet<String> {
     found
 }
 
-/// `default` plus everything it pulls in, transitively. A feature reached this way is
-/// built by any lane that does not pass `--no-default-features`, and the test matrix
-/// has such a lane.
-fn default_closure(features: &toml::Table) -> BTreeSet<String> {
+/// Transitive closure over `[features]`, from an arbitrary starting set.
+fn closure_from(
+    features: &toml::Table,
+    start: impl IntoIterator<Item = String>,
+) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    let mut stack = vec!["default".to_string()];
+    let mut stack: Vec<String> = start.into_iter().collect();
 
     while let Some(name) = stack.pop() {
         if !out.insert(name.clone()) {
@@ -109,6 +120,20 @@ fn default_closure(features: &toml::Table) -> BTreeSet<String> {
         }
     }
     out
+}
+
+/// Everything CI actually **compiles**: the closure of every feature named in a
+/// `--features` flag. A lane passing `--features e2e` builds `e2e-python` too, so the
+/// raw token set understates coverage wherever a meta-feature is used.
+fn compiled_in_ci(features: &toml::Table) -> BTreeSet<String> {
+    closure_from(features, features_named_in_workflows())
+}
+
+/// `default` plus everything it pulls in, transitively. A feature reached this way is
+/// built by any lane that does not pass `--no-default-features`, and the test matrix
+/// has such a lane.
+fn default_closure(features: &toml::Table) -> BTreeSet<String> {
+    closure_from(features, ["default".to_string()])
 }
 
 fn declared_features() -> toml::Table {
@@ -180,5 +205,43 @@ fn the_guard_is_not_vacuous() {
         !via_workflow.contains("librarian"),
         "`librarian` was matched as a --features argument; the workflow scan has \
          widened and can now mark features covered by accident"
+    );
+}
+
+/// An exemption says a feature cannot be **run** on a CI runner. It does not say the
+/// feature cannot be **compiled** there, and those are different claims: every reason
+/// in `EXEMPT` names a missing service or language server, which is a reason not to
+/// execute the tests — `cargo check` needs none of them.
+///
+/// The project already learned this once. `retrieval-e2e` stays exempt from running
+/// and is compiled by the `feature-check` lane anyway, after 4 call sites rotted under
+/// a signature change with nothing to catch it. The lesson was written into that job's
+/// comment and not applied to the five `e2e-*` lanes — which then stopped compiling
+/// **entirely**: `ToolContext` grew a field, `tests/e2e/harness.rs` never got it, and
+/// `cargo test` stayed green throughout, because nothing builds a feature-gated target
+/// that no lane names. Found by accident on 2026-08-26, not by any gate.
+/// `docs/trackers/bug-fix-session-log.md` F-62.
+#[test]
+fn every_exempt_feature_is_still_compiled_somewhere() {
+    let features = declared_features();
+    let compiled = compiled_in_ci(&features);
+
+    let uncompiled: Vec<&str> = EXEMPT
+        .iter()
+        .map(|(f, _)| *f)
+        .filter(|f| !compiled.contains(*f))
+        .collect();
+
+    assert!(
+        uncompiled.is_empty(),
+        "these features are exempt from RUNNING in CI, but nothing compiles them \
+         either: {uncompiled:?}\n\n\
+         A reason like \"needs <language server> on the runner\" justifies not \
+         executing the tests. It does not justify never building them: a feature-gated \
+         target that no lane names is indistinguishable from a target that does not \
+         exist, and it rots silently while `cargo test` reports green.\n\n\
+         Add a `cargo check --features <name> --all-targets` step to the \
+         `feature-check` job in .github/workflows/ci.yml — naming a meta-feature \
+         covers the whole family it enables."
     );
 }

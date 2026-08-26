@@ -245,6 +245,17 @@ jobs:
       # change with nothing here to catch it) — the same shape as the archived
       # server-stack bit-rot (0863519e142b71bc) this job exists to prevent.
       - run: cargo check --features retrieval-e2e --all-targets
+      # The five `e2e-*` lanes are EXEMPT (tests/feature_lanes.rs) from *running* too —
+      # each needs a language server (rust-analyzer, pyright, typescript-language-server,
+      # kotlin-lsp, jdtls) no runner has. Exactly the distinction drawn for
+      # `retrieval-e2e` above, and it was simply never applied here: all five then
+      # stopped compiling at once — `ToolContext` grew a field and `tests/e2e/harness.rs`
+      # never got it — while `cargo test` stayed green throughout, because nothing builds
+      # a feature-gated target that no lane names. Found by accident, not by a gate
+      # (bug-fix-session-log F-62). `e2e` is the meta-feature enabling all five, so this
+      # one check covers the family; `every_exempt_feature_is_still_compiled_somewhere`
+      # now fails if any exemption loses its compile lane.
+      - run: cargo check --features e2e --all-targets
 
   windows-gnu:
     name: Windows-gnu cross (MinGW + wine)
