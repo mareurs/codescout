@@ -136,7 +136,11 @@ impl RetrievalClient {
     /// wins over an explicitly-chosen `local:` model.
     /// (Learned the hard way: the wider guard failed
     /// `agent::tests::memory_embedder_is_built_from_the_shared_code_embedder`, which
-    /// builds from a root-less config and so gets exactly that default.)
+    /// built from a root-less config and so got exactly that default. That test now
+    /// supplies its own project config — it had to, because the root-less path made it
+    /// read the developer's environment and held CI red for a week — so it would no
+    /// longer be the thing that catches a widening. The reasoning above stands on its
+    /// own: the default is indistinguishable from a chosen `local:` without provenance.)
     ///
     /// `RecoverableError` for the same reason as `guard_sparse`: an operator-fixable
     /// config conflict, not a bug — isError: false, so sibling parallel calls survive.
@@ -247,11 +251,17 @@ impl RetrievalClient {
     /// No url means the model names the backend: the codescout-embed resolver
     /// picks `local-dir:` / `local:` / `ollama:` / `openai:`.
     ///
-    /// A url combined with a `local:` / `local-dir:` model is neither of those
-    /// cases but a contradiction, and is rejected by `guard_local_model_with_url`
-    /// before the url branch is reached. It used to be silently resolved in the
-    /// url's favour, which defeated the offline guarantee the prefix exists to
-    /// provide.
+    /// A url combined with a `local-dir:` model is neither of those cases but a
+    /// contradiction, and is rejected by `guard_local_model_with_url` before the
+    /// url branch is reached. It used to be silently resolved in the url's favour,
+    /// which defeated the offline guarantee the prefix exists to provide.
+    ///
+    /// `local:` is deliberately NOT rejected — it is what "url set, model unset"
+    /// resolves to, so rejecting it would break every ordinary remote deployment.
+    /// This line said `local:` / `local-dir:` until 2026-08-26 and misled a reader
+    /// into predicting a rejection that cannot happen; the authoritative account of
+    /// the asymmetry, and of what covering `local:` would cost, is on
+    /// [`Self::guard_local_model_with_url`] itself.
     ///
     /// Calls `guard_sparse` itself (rather than leaving that to each caller)
     /// so every caller of this function — not just `from_env` — gets the

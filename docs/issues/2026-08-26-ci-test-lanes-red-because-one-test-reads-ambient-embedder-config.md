@@ -1,7 +1,7 @@
 ---
 id: '1440b07375a1e30f'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: every CI Test lane is red because one test builds an embedder from ambient config, and the local gate is green only because a dev env var is set'
 tags:
 - ci
@@ -9,10 +9,11 @@ tags:
 - embeddings
 - false-green
 - gate
-closed: ''
+closed: 2026-08-26
 opened: 2026-08-26
 owner: marius
 severity: high
+unverified: CI has NOT been re-run — origin/experiments is 62 commits behind local, so no lane has seen this fix. What is established is that the reproduction goes red→green and the whole lib suite passes with the variable unset (4330/0), which is the environment CI runs in for this test. Separately, the 2026-08-24 local-embed lane failed on two OTHER tests (artifact_advertises_the_append_entry_section_writer, every_guide_topic_is_triggered_or_declared_pull_only) that were never assessed against HEAD; both pass locally today, but that is not the same as a green lane.
 ---
 
 ## Summary
@@ -101,36 +102,69 @@ against HEAD, 57 commits later, and out of scope for this file.
 
 ## Fix
 
-Not chosen. Three options, each with precedent in this crate, and the trade-off is real:
+Taken: **option 2, inject via project config rather than env.** The test now builds its
+`Agent` over a `tempfile::tempdir()` carrying `.codescout/project.toml`:
 
-1. **Thread a `RetrievalConfig` through `Agent`.** Named as the correct close by
-   `EnvGuard`'s own doc comment — *"worth doing, not done here"*. Largest change, removes
-   the ambient dependency at the source, and would let the test construct the path
-   explicitly.
-2. **Inject via project config rather than env.** `RetrievalConfig::from_env_and_project`
-   takes a `root`; build the `Agent` over a temp project carrying
-   `.codescout/config.toml` with an `[embeddings].url`. Uses the blessed injection points
-   (`GlobalConfig::load_from_dir` / `ProjectConfig::load_with_global_base`) instead of
-   mutating env, and keeps the construction path under test. Needs confirming that
-   `from_env_and_project` reads the file for this key, and note that a set env var still
-   wins over it (`docs/issues/archive/2026-08-13-url-silently-overrides-local-dir-model.md`)
-   — harmless here, since the assertion is about wiring and not about which backend.
-3. **Move the test behind `server-stack` and use `EnvGuard`.** Matches the one env-mutating
-   helper the crate deliberately kept, whose stated reason — *"exercises the ENV-DRIVEN
-   construction path; injecting past it would delete the thing under test"* — is verbatim
-   this test's situation. Cheapest, but it drops the guard from eight lanes to one, and
-   that lane is currently red for unrelated reasons.
+```toml
+[project]
+name = "embedder-wiring"
 
-**What is NOT acceptable:** skipping when no embedder is configured
-(`if from_env().is_err() { return }`). That is green on CI in a world where the wiring is
-broken, and the `Arc::ptr_eq` assertion — sabotage-verified by a previous author — is
-precisely what would stop proving anything.
+[embeddings]
+model = "openai:text-embedding-3-small"
+url = "http://127.0.0.1:1"
+```
 
+`url` is what does the work — it selects `build_embedder`'s HTTP branch, which only
+*constructs* an `EmbedderHttp`; no network call is made, so a deliberately dead port is
+fine. The env-driven construction path stays fully under test, which is why
+`set_memory_embedder_for_test` could not be used. No process env is mutated, so the
+`EnvGuard` prohibition is respected and no `serial_test` ordering is needed.
+
+The seam was already proven: `tests/retrieval_unit.rs` has two tests
+(`config_from_env_and_project_prefers_project_toml_when_env_silent` and its `env_wins`
+twin) that exercise exactly this root → `ProjectConfig::load_or_default` → merge chain.
+The unit test simply never got the same treatment.
+
+**Two doc-comment corrections fell out of verifying it**, both in
+`src/retrieval/client.rs`:
+
+- `build_embedder`'s doc said a url combined with a **`local:` or `local-dir:`** model is
+  rejected by `guard_local_model_with_url`. Only `local-dir:` is — deliberately, and the
+  guard's own doc comment explains at length why covering `local:` would break every
+  ordinary remote deployment. The wrong line is what led this fix to predict a rejection
+  that cannot happen.
+- `guard_local_model_with_url`'s doc cited this very test as the reason the wider guard
+  was abandoned, describing it as building "from a root-less config". That is no longer
+  true, and the parenthetical would have quietly become false. Updated to say so, and to
+  note that the reasoning stands without the example.
+
+**What was NOT done:** option 1 (threading a `RetrievalConfig` through `Agent`) remains
+the correct close for the ambient-config class as a whole — `from_env_and_project` still
+reads a dozen `CODESCOUT_*` variables directly, and this fix only removes the one that
+had a victim.
 ## Tests added
 
-None yet. The reproduction above is the failing case, and any fix must be checked with the
-variable unset, not on a developer shell.
+None added — the repair is to the setup of an existing test, and that test's `Arc::ptr_eq`
+assertion is unchanged.
 
+**Verified by mutation and by control, because a rewritten setup can silently neuter the
+assertion it feeds:**
+
+| probe | result |
+|---|---|
+| the fix, `env -u CODESCOUT_EMBEDDER_URL` | **green** (was the original panic) |
+| delete the `[embeddings]` block | **red**, original panic — the config is load-bearing |
+| set `model = "local:AllMiniLML6V2Q"` alongside the url | **green** — mutant survives |
+
+The surviving mutant is the interesting one. It was predicted to fail, and its survival is
+what exposed the `build_embedder` doc error above: `guard_local_model_with_url` covers
+`local-dir:` only. Recorded rather than "fixed" — the narrow guard is correct, and the
+prediction was wrong.
+
+Full gate, with the variable unset — the environment CI runs in for this test:
+`cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean, `cargo test --lib`
+**4330 passed / 0 failed / 8 ignored**. Identical counts with the variable set, so the
+gate is now environment-independent where it was not before.
 ## References
 
 - `src/agent/mod.rs` — `Agent::memory_embedder`, the test at 2305-2327, and `EnvGuard`'s
@@ -139,4 +173,3 @@ variable unset, not on a developer shell.
 - `docs/conventions/test-env-isolation.md`
 - `docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md`
   — why env mutation in default-feature tests was removed in the first place
-

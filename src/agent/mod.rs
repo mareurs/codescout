@@ -2305,7 +2305,33 @@ mod tests {
     async fn memory_embedder_is_built_from_the_shared_code_embedder() {
         use crate::retrieval::embedder::{CodeDenseAdapter, DenseEmbedder};
 
-        let agent = Agent::new(None).await.unwrap();
+        // The embedder is resolved from CONFIGURATION, so this test supplies it instead of
+        // inheriting whatever the developer's shell exports. It inherited it until
+        // 2026-08-26, which held every CI `Test` lane red for a week while the local gate
+        // read green — one failure among 4326 passes, and never reproducible locally.
+        // docs/issues/archive/2026-08-26-ci-test-lanes-red-because-one-test-reads-ambient-embedder-config.md
+        //
+        // A project.toml and not an env var: mutating env in a default-feature test is what
+        // `EnvGuard`'s doc comment in this module warns against. `url` is what does the work
+        // — it selects `build_embedder`'s HTTP branch, which only CONSTRUCTS, no network.
+        // The model is named explicitly even though that branch ignores it: leaving it to
+        // `default_embed_model()` is what produced the ambient dependency in the first
+        // place, and `guard_local_model_with_url` rejects a `local-dir:` model against a
+        // url, so a remote name states the intent and cannot drift into that pair.
+        //
+        // Verified by control, not assumed: delete the `[embeddings]` block and this test
+        // fails again with the original panic. (A `local:` model here would NOT fail — that
+        // guard covers `local-dir:` only, on purpose; see its doc comment.)
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join(".codescout/project.toml"),
+            "[project]\nname = \"embedder-wiring\"\n\n[embeddings]\n\
+             model = \"openai:text-embedding-3-small\"\nurl = \"http://127.0.0.1:1\"\n",
+        )
+        .unwrap();
+
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
         let mem: std::sync::Arc<dyn DenseEmbedder> = agent.memory_embedder().await.unwrap();
 
         let seen_client_embedder = agent
