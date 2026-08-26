@@ -447,6 +447,10 @@ mod dim_guard_tests {
             self.reset.store(true, Ordering::SeqCst);
             Ok(())
         }
+
+        async fn count_chunks_without_vectors(&self, _c: &str, _p: &str) -> Result<usize> {
+            Ok(0)
+        }
     }
 
     /// A `CodeEmbedder` fake standing in for `CodeEmbedderAdapter` (a local

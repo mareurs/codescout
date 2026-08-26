@@ -210,6 +210,25 @@ pub trait CodeVectorStore: Send + Sync {
     /// be destructive beyond its stated scope — that backend must say so rather
     /// than inherit a silent no-op that reports success.
     async fn reset_project_index(&self, collection: &str, project_id: &str) -> Result<()>;
+
+    /// How many of this project's chunk rows have no vector.
+    ///
+    /// An integrity probe, not a hot path: `index(action="verify")` is the only
+    /// caller. Zero is the healthy answer and the only one a sound index gives.
+    ///
+    /// Whether this can even be non-zero is a property of the backend, which is why
+    /// it has **no default implementation** — a default returning `Ok(0)` would make
+    /// "sound" the answer a new backend gives by not thinking about it, and that is
+    /// indistinguishable from a real all-clear. The sqlite-vec store keeps metadata
+    /// and vectors in two tables (`code_chunk`, `code_vec`) written by separate
+    /// statements, so a partial write genuinely can leave a hole. Qdrant stores the
+    /// payload and the vector as one point, so it structurally cannot — and says so
+    /// explicitly rather than inheriting the same number for a different reason.
+    async fn count_chunks_without_vectors(
+        &self,
+        collection: &str,
+        project_id: &str,
+    ) -> Result<usize>;
 }
 /// Which code-vector backend the retrieval client uses.
 ///
@@ -422,6 +441,21 @@ impl CodeVectorStore for crate::retrieval::qdrant::QdrantWrap {
         )
         .into())
     }
+
+    /// Structurally always zero, and that is a real answer rather than a stub.
+    ///
+    /// A Qdrant point carries its payload and its vector together — there is no
+    /// second write that could fail on its own, so the hole this counts cannot
+    /// exist on this backend. Stated here so a reader does not mistake the zero for
+    /// "not implemented yet", and so the sqlite-vec impl's non-trivial join is
+    /// visibly the exception rather than the norm.
+    async fn count_chunks_without_vectors(
+        &self,
+        _collection: &str,
+        _project_id: &str,
+    ) -> Result<usize> {
+        Ok(0)
+    }
 }
 
 /// Walk a Qdrant collection-info response down to the size of its dense
@@ -602,6 +636,12 @@ mod tests {
                 .lock()
                 .retain(|(p, _)| p.project_id != project_id);
             Ok(())
+        }
+
+        /// Structurally zero, like Qdrant: this double holds `(payload, dense)` as one
+        /// tuple, so metadata cannot exist without its vector.
+        async fn count_chunks_without_vectors(&self, _c: &str, _p: &str) -> Result<usize> {
+            Ok(0)
         }
     }
 

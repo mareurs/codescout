@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 
 pub struct IndexProject;
 pub struct IndexStatus;
+pub struct IndexVerify;
+
 pub struct Index;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -690,7 +692,7 @@ impl Tool for Index {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["build", "status", "cancel"],
+                    "enum": ["build", "status", "cancel", "verify"],
                     "description": "Operation to perform."
                 },
                 "force": {
@@ -721,6 +723,7 @@ impl Tool for Index {
         match action {
             "build" => IndexProject.call(input, ctx).await,
             "status" => IndexStatus.call(input, ctx).await,
+            "verify" => IndexVerify.call(input, ctx).await,
             "cancel" => {
                 let handle = ctx
                     .agent
@@ -743,14 +746,19 @@ impl Tool for Index {
             }
             other => Err(crate::tools::RecoverableError::with_hint(
                 format!("unknown index action: {}", other),
-                "Valid actions: 'build', 'status', 'cancel'.",
+                "Valid actions: 'build', 'status', 'cancel', 'verify'.",
             )
             .into()),
         }
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
-        if result.get("indexed").is_some() || result.get("file_count").is_some() {
+        // `verdict` FIRST: a verify envelope carries neither `indexed` nor
+        // `file_count`, so without this arm it fell through to IndexProject's
+        // formatter and rendered an integrity report as a build summary.
+        if result.get("verdict").is_some() {
+            IndexVerify.format_compact(result)
+        } else if result.get("indexed").is_some() || result.get("file_count").is_some() {
             IndexStatus.format_compact(result)
         } else {
             IndexProject.format_compact(result)
@@ -766,6 +774,165 @@ fn format_index_project(result: &Value) -> String {
     let status = result["status"].as_str().unwrap_or("?");
     format!("index {status}")
 }
+#[async_trait::async_trait]
+impl crate::tools::Tool for IndexVerify {
+    fn name(&self) -> &str {
+        "index_verify"
+    }
+
+    fn description(&self) -> &str {
+        "Verify the semantic index against the filesystem: coverage, orphaned rows, \
+         and chunks missing vectors. Read-only."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({"type": "object", "properties": {}})
+    }
+
+    /// Read-only by construction, and that is the design rather than a limitation. A
+    /// negative result must never authorise a deletion: a bad walk reporting every
+    /// file as an orphan would, if this pruned, destroy a live index. Repair stays
+    /// with `index(action="build")`, whose prune runs against a walk it performed
+    /// itself.
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
+        let (project_id, ignore_patterns) = ctx
+            .agent
+            .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                Ok((
+                    p.project_id().to_string(),
+                    p.config.ignored_paths.patterns.clone(),
+                ))
+            })
+            .await?;
+        let root = ctx
+            .agent
+            .require_project_root_for(ctx.workspace_override.as_deref())
+            .await?;
+
+        let client = crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
+        let collection = client.config.collection("code_chunks");
+
+        let integrity = crate::retrieval::sync::verify_index_coverage(
+            &root,
+            &project_id,
+            &collection,
+            client.code_store.as_ref(),
+            &ignore_patterns,
+        )
+        .await?;
+
+        let git = crate::retrieval::index_state::git_sync_status(&root);
+        let behind = git
+            .as_ref()
+            .and_then(|v| v.get("behind_commits"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+
+        let empty_dirs = integrity.empty_eligible_dirs.len();
+        let verdict = integrity_verdict(
+            behind,
+            integrity.missing_count,
+            empty_dirs,
+            integrity.chunks_without_vectors,
+        );
+
+        // The hint names the ONE next action for this verdict. A report that lists
+        // problems without saying which command addresses them gets read as noise.
+        let hint = if verdict == "complete" {
+            "Index is level with HEAD and covers every eligible file.".to_string()
+        } else if verdict == "stale" {
+            format!(
+                "Index is {behind} commit(s) behind HEAD; the {} missing file(s) are \
+                 explained by that. Run index(action='build') to catch up.",
+                integrity.missing_count
+            )
+        } else if integrity.chunks_without_vectors > 0 {
+            format!(
+                "{} chunk(s) have no vector — they answer chunk_refs and count toward \
+                 status, but can never match a query. Run index(action='build', \
+                 force=true).",
+                integrity.chunks_without_vectors
+            )
+        } else if empty_dirs > 0 {
+            format!(
+                "These eligible top-level directories have files on disk and NONE in \
+                 the index: {}. Run index(action='build', force=true).",
+                integrity.empty_eligible_dirs.join(", ")
+            )
+        } else {
+            format!(
+                "Index is level with HEAD but missing {} eligible file(s). Run \
+                 index(action='build').",
+                integrity.missing_count
+            )
+        };
+
+        Ok(json!({
+            "verdict": verdict,
+            "project_id": project_id,
+            "collection": collection,
+            "expected_files": integrity.expected_files,
+            "stored_files": integrity.stored_files,
+            "missing_count": integrity.missing_count,
+            "missing_sample": integrity.missing_sample,
+            "orphan_count": integrity.orphan_count,
+            "orphan_sample": integrity.orphan_sample,
+            "empty_eligible_dirs": integrity.empty_eligible_dirs,
+            "chunks_without_vectors": integrity.chunks_without_vectors,
+            "git_sync": git,
+            "hint": hint,
+        }))
+    }
+
+    fn format_compact(&self, result: &Value) -> Option<String> {
+        let verdict = result["verdict"].as_str()?;
+        Some(format!(
+            "{verdict} · {}/{} files · missing {} · orphans {} · no-vector {}",
+            result["stored_files"].as_u64().unwrap_or(0),
+            result["expected_files"].as_u64().unwrap_or(0),
+            result["missing_count"].as_u64().unwrap_or(0),
+            result["orphan_count"].as_u64().unwrap_or(0),
+            result["chunks_without_vectors"].as_u64().unwrap_or(0),
+        ))
+    }
+
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::Always
+    }
+}
+
+/// Derive ONE verdict from the integrity axes.
+///
+/// Separate booleans are what the originating report asked to eliminate: *"status
+/// surfaces can disagree… these should derive from one authoritative state model that
+/// distinguishes catalog freshness, embedding freshness, and queryability."* Six
+/// independent fields make the reader do that reconciliation, and readers do it
+/// inconsistently.
+///
+/// Order matters, and the `stale` arm before `incomplete` is the whole point. An index
+/// legitimately behind HEAD is *expected* to be missing the files those commits added
+/// — calling that "incomplete" would cry wolf on every project that has not re-synced,
+/// which is most of them most of the time. Only an index that is level with HEAD and
+/// still missing files is actually broken.
+fn integrity_verdict(
+    behind_commits: u64,
+    missing: usize,
+    empty_dirs: usize,
+    holes: usize,
+) -> &'static str {
+    if holes > 0 || empty_dirs > 0 {
+        // A vector hole or a wholly-absent eligible directory is broken regardless of
+        // freshness: no number of pending commits explains either.
+        "incomplete"
+    } else if behind_commits > 0 {
+        "stale"
+    } else if missing > 0 {
+        "incomplete"
+    } else {
+        "complete"
+    }
+}
+
 pub(crate) fn format_index_status(result: &Value) -> String {
     let indexed = result["indexed"].as_bool().unwrap_or(false);
     if !indexed {
@@ -833,4 +1000,48 @@ pub(crate) fn running_elsewhere_indexing_block(holder_pid: Option<u32>) -> Value
         "status": "running_elsewhere",
         "holder_pid": holder_pid,
     })
+}
+
+#[cfg(test)]
+mod integrity_verdict_tests {
+    use super::integrity_verdict;
+
+    /// The arm ordering is the whole design, so it gets pinned directly.
+    ///
+    /// An index legitimately behind HEAD is EXPECTED to be missing the files those
+    /// commits added. Reporting that as `incomplete` would fire on almost every
+    /// project almost all the time, and a check that always complains gets switched
+    /// off — which is the failure mode this verdict exists to avoid.
+    #[test]
+    fn behind_head_with_missing_files_is_stale_not_incomplete() {
+        assert_eq!(integrity_verdict(10, 42, 0, 0), "stale");
+    }
+
+    /// The converse, and the actual defect: level with HEAD and still short.
+    #[test]
+    fn level_with_head_but_missing_files_is_incomplete() {
+        assert_eq!(integrity_verdict(0, 42, 0, 0), "incomplete");
+    }
+
+    /// Two conditions no amount of pending commits can explain, so they outrank
+    /// staleness rather than hiding behind it. A vector hole and a wholly-absent
+    /// eligible directory are both broken at any freshness.
+    #[test]
+    fn holes_and_empty_directories_outrank_staleness() {
+        assert_eq!(
+            integrity_verdict(10, 0, 0, 3),
+            "incomplete",
+            "a chunk with no vector can never match a query, however fresh the index"
+        );
+        assert_eq!(
+            integrity_verdict(10, 0, 1, 0),
+            "incomplete",
+            "an eligible directory holding nothing is not explained by lag"
+        );
+    }
+
+    #[test]
+    fn a_level_fully_covered_index_is_complete() {
+        assert_eq!(integrity_verdict(0, 0, 0, 0), "complete");
+    }
 }

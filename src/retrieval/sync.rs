@@ -361,11 +361,18 @@ pub(crate) fn is_always_skipped(name: &str, is_dir: bool) -> bool {
 /// already marked dirty).
 ///
 /// Single source of truth for "which files does the code index see" --
-/// `stream_index` and `sync_worktree` both call this (the latter once,
-/// iterating the collected result twice, not walking twice) so a change to
-/// the walk predicate (a new `ALWAYS_SKIP_DIRS` entry, changed ignore
-/// semantics, a new `lang_for_ext` extension) can never apply to one walk
-/// and not another. `dirty_paths`' entire correctness rests on main's chunk
+/// `stream_index`, `sync_worktree` and `index(action="verify")` all call this
+/// (the second once, iterating the collected result twice, not walking twice)
+/// so a change to the walk predicate (a new `ALWAYS_SKIP_DIRS` entry, changed
+/// ignore semantics, a new `lang_for_ext` extension) can never apply to one
+/// walk and not another.
+///
+/// The verify caller ([`verify_index_coverage`]) lives in this module for that
+/// reason — so it can use this walk directly while the function stays private.
+/// It inherits the obligation above with a twist: a coverage check that
+/// reimplemented the walk would measure its own reimplementation and report a
+/// healthy index as broken (or the reverse) with nothing able to say which. It
+/// must call THIS function or it is not a coverage check. `dirty_paths`' entire correctness rests on main's chunk
 /// set (produced by this walk when main was last synced) and the worktree's
 /// chunk set (produced by this SAME walk under `sync_worktree`) agreeing on
 /// what a "file" even is -- a silent divergence would make files appear
@@ -420,6 +427,112 @@ fn indexable_files(
         out.push((path.to_path_buf(), lang, rel_display));
     }
     out
+}
+
+/// What an integrity check found. Counts are exact; the `*_sample` lists are capped,
+/// because a genuinely broken index can be missing tens of thousands of files and the
+/// report has to stay readable.
+#[derive(Debug, Default)]
+pub(crate) struct IndexIntegrity {
+    /// Files the walk says belong in the index.
+    pub expected_files: usize,
+    /// Distinct `file_path`s the store actually holds.
+    pub stored_files: usize,
+    /// Eligible on disk, absent from the store.
+    pub missing_count: usize,
+    pub missing_sample: Vec<String>,
+    /// In the store, not eligible on disk — deleted, renamed, or newly ignored.
+    pub orphan_count: usize,
+    pub orphan_sample: Vec<String>,
+    /// Top-level directories where the walk found files and the store holds NONE.
+    /// This is the invariant the original report asked for as a minimum bar.
+    pub empty_eligible_dirs: Vec<String>,
+    /// Chunk rows with no vector. Backend-dependent whether this can be non-zero.
+    pub chunks_without_vectors: usize,
+}
+
+/// Cap on every sample list. Counts stay exact.
+const INTEGRITY_SAMPLE: usize = 20;
+
+/// First path component of a forward-slashed project-relative path, or `<root>` for a
+/// file sitting directly in the project root.
+///
+/// `<root>` rather than the filename: grouping a top-level file under its own name
+/// would make every deleted root file look like an "empty eligible directory", which
+/// is the check's loudest signal and must not fire on a one-file change.
+fn top_level_of(rel_path: &str) -> &str {
+    match rel_path.split_once('/') {
+        Some((head, _)) => head,
+        None => "<root>",
+    }
+}
+
+/// Compare what the walk says belongs in the index against what the store holds.
+///
+/// Deliberately uses [`indexable_files`] — the same walk `stream_index` uses — rather
+/// than re-deriving eligibility. A coverage check built on its own walk measures its
+/// own reimplementation: it would report a healthy index as broken, or a broken one as
+/// healthy, with nothing able to say which. `ignore_patterns` must likewise be the
+/// caller's RESOLVED config, not a re-read of the file — `scripts/` in this repo sits
+/// at 15 indexed of 19 tracked and is entirely correct, because two entries are in
+/// `[ignored_paths]` and two are extensions outside `languages`.
+///
+/// Read-only, and that is load-bearing: a negative result must never authorise a
+/// deletion. A bad walk that reported every file as an orphan would, if this pruned,
+/// delete a live index. Reporting leaves the repair to `index(action="build")`, whose
+/// prune runs against a walk it performed itself.
+pub(crate) async fn verify_index_coverage(
+    root: &Path,
+    project_id: &str,
+    collection: &str,
+    store: &dyn crate::retrieval::code_store::CodeVectorStore,
+    ignore_patterns: &[String],
+) -> Result<IndexIntegrity> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let expected: BTreeSet<String> = indexable_files(root, ignore_patterns)
+        .into_iter()
+        .map(|(_, _, rel)| rel)
+        .collect();
+
+    let stored: BTreeSet<String> = store
+        .chunk_refs(collection, project_id)
+        .await?
+        .into_iter()
+        .map(|c| c.file_path)
+        .collect();
+
+    let missing: Vec<String> = expected.difference(&stored).cloned().collect();
+    let orphans: Vec<String> = stored.difference(&expected).cloned().collect();
+
+    // Per-top-level-directory coverage. Only a directory the walk found files in can
+    // be "empty" — a directory absent from both sides is simply not part of the
+    // project and must not appear.
+    let mut per_dir: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+    for p in &expected {
+        per_dir.entry(top_level_of(p)).or_default().0 += 1;
+    }
+    for p in &stored {
+        per_dir.entry(top_level_of(p)).or_default().1 += 1;
+    }
+    let empty_eligible_dirs: Vec<String> = per_dir
+        .iter()
+        .filter(|(_, (exp, got))| *exp > 0 && *got == 0)
+        .map(|(d, _)| (*d).to_string())
+        .collect();
+
+    Ok(IndexIntegrity {
+        expected_files: expected.len(),
+        stored_files: stored.len(),
+        missing_count: missing.len(),
+        missing_sample: missing.into_iter().take(INTEGRITY_SAMPLE).collect(),
+        orphan_count: orphans.len(),
+        orphan_sample: orphans.into_iter().take(INTEGRITY_SAMPLE).collect(),
+        empty_eligible_dirs,
+        chunks_without_vectors: store
+            .count_chunks_without_vectors(collection, project_id)
+            .await?,
+    })
 }
 
 /// Walk `root`, diff against `server` chunk refs, and embed+upsert changed chunks
@@ -1204,6 +1317,10 @@ mod tests {
         /// double is that an error and an empty result are DIFFERENT answers,
         /// which `unwrap_or_default()` used to flatten into the same one.
         chunk_refs_error_for: Mutex<Option<String>>,
+        /// Reported by `count_chunks_without_vectors`. Default 0 (healthy); a verify
+        /// test sets it non-zero to prove the count actually reaches the envelope
+        /// rather than the envelope hardcoding the healthy answer.
+        vector_holes: Mutex<usize>,
     }
 
     #[async_trait::async_trait]
@@ -1305,6 +1422,13 @@ mod tests {
             *up = projs;
             Ok(())
         }
+
+        /// Overridable so a verify test can assert the hole count reaches the envelope
+        /// rather than being hardcoded to the healthy answer — a double that always
+        /// said 0 could not distinguish "checked and clean" from "not wired up".
+        async fn count_chunks_without_vectors(&self, _c: &str, _p: &str) -> Result<usize> {
+            Ok(*self.vector_holes.lock().unwrap())
+        }
     }
 
     impl RecordingStore {
@@ -1401,6 +1525,148 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    /// The invariant the originating report asked for as a minimum bar: an eligible
+    /// top-level directory with files on disk and NONE in the index.
+    ///
+    /// This is the check that would have caught `docs/` at 0 of 1086 while `src/` held
+    /// 298 — a state `index(action="status")` reported as `indexed: true,
+    /// queryable: true`, because its only test was a non-zero chunk count.
+    #[tokio::test]
+    async fn verify_names_an_eligible_directory_the_index_holds_nothing_for() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join("src/b.rs"), "fn b() {}\n").unwrap();
+        std::fs::write(dir.path().join("docs/one.md"), "# one\n").unwrap();
+        std::fs::write(dir.path().join("docs/two.md"), "# two\n").unwrap();
+
+        // A store holding ONLY src/ — the shape of the reported defect.
+        let store = RecordingStore::seeded_for_main("p", &[("src/a.rs", "fn a() {}\n")]);
+
+        let report = verify_index_coverage(dir.path(), "p", "coll", &store, &[])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            report.empty_eligible_dirs,
+            vec!["docs".to_string()],
+            "docs/ has files on disk and none indexed — it must be named, not summed \
+             into a missing count that reads as ordinary lag"
+        );
+        assert!(
+            report.missing_count >= 3,
+            "src/b.rs plus both docs files are missing, got {}",
+            report.missing_count
+        );
+        assert!(
+            report.missing_sample.iter().any(|p| p.contains("docs/")),
+            "the sample must surface the affected directory: {:?}",
+            report.missing_sample
+        );
+    }
+
+    /// Coverage is measured against the indexer's OWN walk, so config-ignored files
+    /// are not defects.
+    ///
+    /// This is the mistake the original report made and I nearly repeated: `scripts/`
+    /// sat at 15 indexed of 19 tracked and was entirely correct, because two entries
+    /// were in `[ignored_paths]` and two were extensions outside `languages`. A verify
+    /// that re-derived eligibility would have called that a hole.
+    #[tokio::test]
+    async fn verify_does_not_count_config_ignored_files_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
+        std::fs::write(dir.path().join("scripts/keep.rs"), "fn keep() {}\n").unwrap();
+        std::fs::write(dir.path().join("scripts/skip.rs"), "fn skip() {}\n").unwrap();
+
+        let store = RecordingStore::seeded_for_main("p", &[("scripts/keep.rs", "fn keep() {}\n")]);
+
+        // Unignored: the second file is a genuine hole.
+        let bare = verify_index_coverage(dir.path(), "p", "coll", &store, &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            bare.missing_count, 1,
+            "without the ignore pattern skip.rs is genuinely missing"
+        );
+
+        // Ignored: the same on-disk state is now complete.
+        let ignored = verify_index_coverage(
+            dir.path(),
+            "p",
+            "coll",
+            &store,
+            &["scripts/skip.rs".to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            ignored.missing_count, 0,
+            "an ignored file is not a coverage defect — this is the `scripts/` \
+             false positive, pinned"
+        );
+        assert!(
+            ignored.empty_eligible_dirs.is_empty(),
+            "and it must not make scripts/ look empty either"
+        );
+    }
+
+    /// Rows for files the walk no longer sees are reported, never deleted.
+    #[tokio::test]
+    async fn verify_reports_orphans_and_never_prunes_them() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/live.rs"), "fn live() {}\n").unwrap();
+
+        let store = RecordingStore::seeded_for_main(
+            "p",
+            &[
+                ("src/live.rs", "fn live() {}\n"),
+                ("src/deleted.rs", "fn gone() {}\n"),
+            ],
+        );
+
+        let report = verify_index_coverage(dir.path(), "p", "coll", &store, &[])
+            .await
+            .unwrap();
+
+        assert_eq!(report.orphan_count, 1, "src/deleted.rs is an orphan");
+        assert!(report.orphan_sample[0].contains("deleted.rs"));
+        assert!(
+            store.deleted.lock().unwrap().is_empty(),
+            "verify is READ-ONLY: a bad walk that reported every file as an orphan \
+             must not be able to delete a live index"
+        );
+    }
+
+    /// The hole count reaches the report rather than being hardcoded healthy.
+    #[tokio::test]
+    async fn verify_surfaces_chunks_that_have_no_vector() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RecordingStore::default();
+        *store.vector_holes.lock().unwrap() = 7;
+
+        let report = verify_index_coverage(dir.path(), "p", "coll", &store, &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            report.chunks_without_vectors, 7,
+            "a double that always reported 0 could not tell 'checked and clean' from \
+             'never wired up'"
+        );
+    }
+
+    /// `<root>` grouping, so a deleted top-level file cannot masquerade as an empty
+    /// eligible directory — the check's loudest signal must not fire on a one-file
+    /// change.
+    #[test]
+    fn a_root_level_file_is_grouped_under_root_not_its_own_name() {
+        assert_eq!(super::top_level_of("README.md"), "<root>");
+        assert_eq!(super::top_level_of("docs/x.md"), "docs");
+        assert_eq!(super::top_level_of("docs/deep/x.md"), "docs");
     }
 
     /// Mimics llama-server's `exceed_context_size_error`: a batch containing ANY
@@ -2376,6 +2642,10 @@ mod tests {
         async fn reset_project_index(&self, _c: &str, _p: &str) -> Result<()> {
             unreachable!("SlowChunkRefsStore is only used for lock-duration timing")
         }
+
+        async fn count_chunks_without_vectors(&self, _c: &str, _p: &str) -> Result<usize> {
+            unreachable!("SlowChunkRefsStore is only used for lock-duration timing")
+        }
     }
 
     #[tokio::test]
@@ -2492,6 +2762,10 @@ mod tests {
 
         /// Never exercised — see `SlowChunkRefsStore::reset_project_index`.
         async fn reset_project_index(&self, _c: &str, _p: &str) -> Result<()> {
+            unreachable!("SlowEnsureStore is only used for lock-duration timing")
+        }
+
+        async fn count_chunks_without_vectors(&self, _c: &str, _p: &str) -> Result<usize> {
             unreachable!("SlowEnsureStore is only used for lock-duration timing")
         }
     }

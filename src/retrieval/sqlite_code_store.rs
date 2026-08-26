@@ -401,6 +401,58 @@ impl CodeVectorStore for SqliteVecCodeStore {
         .context("clear code_chunk for dimension migration")?;
         Ok(())
     }
+
+    /// The backend where this can genuinely be non-zero: `code_chunk` and `code_vec`
+    /// are two tables written by two statements inside `upsert_chunks`, so an
+    /// interrupted or partially-failed write can leave metadata without a vector.
+    ///
+    /// Joins on `code_vec.chunk_id`, which is a declared `TEXT PRIMARY KEY` column of
+    /// the vec0 table and the same column `query` already joins on — deliberately
+    /// NOT on sqlite-vec's `code_vec_rowids` shadow table, which is an
+    /// implementation detail that a version bump may rename.
+    ///
+    /// A hole is invisible from every other surface: the chunk still answers
+    /// `chunk_refs`, still counts toward `project_index_stats`, and still makes
+    /// `index(action="status")` report `indexed: true` — it simply never matches a
+    /// query. Measured on this repo 2026-08-26: 0 of 46 979.
+    async fn count_chunks_without_vectors(
+        &self,
+        _collection: &str,
+        project_id: &str,
+    ) -> Result<usize> {
+        let conn = self.conn_for(project_id)?;
+        let conn = conn.lock();
+        // No `code_vec` yet means nothing has been embedded, so every chunk row
+        // (if any) is a hole — but a fresh project has no chunk rows either, so this
+        // correctly returns 0 rather than erroring on a missing table.
+        let vec_tables: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='code_vec'",
+                [],
+                |r| r.get(0),
+            )
+            .context("probe code_vec existence")?;
+        if vec_tables == 0 {
+            let orphans: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM code_chunk WHERE project_id = ?1",
+                    rusqlite::params![project_id],
+                    |r| r.get(0),
+                )
+                .context("count chunks with no vec table")?;
+            return Ok(orphans as usize);
+        }
+        let missing: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM code_chunk c
+                   LEFT JOIN code_vec v ON v.chunk_id = c.chunk_id
+                  WHERE c.project_id = ?1 AND v.chunk_id IS NULL",
+                rusqlite::params![project_id],
+                |r| r.get(0),
+            )
+            .context("count chunks without vectors")?;
+        Ok(missing as usize)
+    }
 }
 
 #[cfg(test)]
