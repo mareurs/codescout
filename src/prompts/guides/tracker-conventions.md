@@ -129,11 +129,24 @@ dangling refs across 15 files, and the one in `docs/manual/src/concepts/`
 failed CI's `Audit Doc Refs` gate on the tip commit of a release promotion.
 
 ```
-grep -rn 'docs/issues/<slug>.md' . --include='*.md' --include='*.rs' --include='.env*'
+grep -rn 'docs/issues/<slug>.md' . \
+  --include='*.md' --include='*.rs' --include='*.sh' --include='*.py' \
+  --include='*.yml' --include='*.toml' --include='.env*'
 ```
 
-Fix the **live** surfaces — the manual, `CHANGELOG.md`, `README`s, active trackers,
-`.env*` templates, source doc comments. **Leave `docs/issues/archive/**` and
+**The `--include` list is itself a hypothesis about where citations live, and it is the
+part that fails silently** — a filter that misses a file type returns a clean zero, which
+reads exactly like "no citations to fix". This list was `*.md`, `*.rs`, `.env*` until
+2026-08-26, when an archive move left a dangling citation in `scripts/build-windows.sh`
+and the sweep that ran reported nothing. Measured on this repo the same day: **6 live
+non-`.md`/`.rs` surfaces cite `docs/issues/`** — `.github/workflows/ci.yml`,
+`docker-compose.yml`, `scripts/build-windows.sh`, `scripts/fetch-models.sh`,
+`scripts/friction-probe.py`, and a `tests/fixtures` `.toml`. If you are unsure, drop the
+filters entirely and read the extension histogram; `.jsonl` and `.diff` hits are session
+artefacts under `.buddy/` and `.superpowers/` and are not surfaces.
+
+Fix the **live** surfaces — the manual, `CHANGELOG.md`, `README`s, active trackers, CI
+workflows, `scripts/`, `.env*` templates, source doc comments. **Leave `docs/issues/archive/**` and
 superseded session-log rounds alone**: those are historical snapshots, and
 `apply_drops`' `archive_drop` exists precisely so a retired document citing a moved
 path does not gate. Rewriting them would falsify the record to satisfy a linter that
@@ -143,6 +156,15 @@ Note the gate only catches the subset that lands in a full-severity surface, and
 does not scan `CHANGELOG.md` at all
 (`docs/issues/2026-08-08-audit-doc-refs-never-scans-changelog-or-contributing.md`),
 so the grep is the check — not a green CI run.
+
+Be precise about *why* a green run proves nothing here, because the plausible reason is
+the wrong one. `audit_doc_refs` **does** scan source files, shell scripts included —
+`DEFAULT_AUDIT_CODE_GLOBS` in `src/librarian/tools/audit_doc_refs/mod.rs` lists `**/*.sh`,
+and `bash` has a grammar, so the citation *is* found. It is reported at **`Med`**, on
+purpose: `scan_code_comments` forces that severity so someone archiving a bug file cannot
+break the build via a comment they never touched. `--fail-on high` then passes, correctly.
+So the finding exists and the gate is silent by design — which is exactly why the grep is
+the check.
 
 ## Tracker artifacts (docs/trackers/)
 
