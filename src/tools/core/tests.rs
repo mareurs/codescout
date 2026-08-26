@@ -612,9 +612,17 @@ async fn a_read_says_which_tree_it_answered_from_when_worktrees_are_unchosen() {
         first.contains("_workspace_notice"),
         "the first read must say which tree it resolved against, got: {first}"
     );
+    // Read the notice out of the JSON rather than substring-matching the serialized
+    // text: `first` is a JSON document, so on Windows every separator in a path is
+    // escaped to `\\` there while `wt.display()` yields single backslashes, and the
+    // check could never match. On Linux the two forms coincide, which is why this
+    // passed for a year and failed on all three Windows lanes.
+    let parsed: serde_json::Value = serde_json::from_str(&first)
+        .unwrap_or_else(|e| panic!("echo output is JSON: {e}: {first}"));
+    let notice = parsed["_workspace_notice"].as_str().unwrap_or_default();
     assert!(
-        first.contains(&wt.display().to_string()),
-        "the notice must name the worktree the caller might mean, got: {first}"
+        notice.contains(&wt.display().to_string()),
+        "the notice must name the worktree the caller might mean, got: {notice}"
     );
     assert!(
         first.contains("workspace(action='activate'"),

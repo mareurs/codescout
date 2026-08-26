@@ -560,7 +560,17 @@ mod content_tests {
         // a `.git` FILE pointing `gitdir: <main>/.git/worktrees/<name>`.
         std::fs::write(
             worktree.path().join(".git"),
-            format!("gitdir: {}/.git/worktrees/feat\n", canon_main.display()),
+            // `join`, not concatenation — `canon_main` is canonicalized, and a verbatim
+            // Windows path does not treat `/` as a separator, so the concatenated form
+            // parses as a single component and the worktree goes undetected.
+            format!(
+                "gitdir: {}\n",
+                canon_main
+                    .join(".git")
+                    .join("worktrees")
+                    .join("feat")
+                    .display()
+            ),
         )
         .unwrap();
 

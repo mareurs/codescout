@@ -198,6 +198,42 @@ mod tests {
         assert!(!is_linked_worktree(&plain), "non-git dir is not a worktree");
     }
 
+    /// The primitive above is handed a PLAIN path. Every real caller hands it a
+    /// CANONICALIZED one — `resolve()` canonicalizes before calling, and so does
+    /// `activate_project`. On Windows canonicalization yields the verbatim `\\?\C:\…`
+    /// form, and a detector that quietly answers `false` for it would leave every
+    /// worktree activation reporting nothing, silently, on that platform only.
+    ///
+    /// Added while chasing exactly that: the primitive passed under wine while four
+    /// worktree-reporting tests failed, and the canonicalized form was the one
+    /// difference between them.
+    #[test]
+    fn is_linked_worktree_survives_canonicalization() {
+        let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().join("main/.worktrees/feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!(
+                "gitdir: {}/main/.git/worktrees/feat\n",
+                tmp.path().display()
+            ),
+        )
+        .unwrap();
+
+        assert!(is_linked_worktree(&wt), "plain path must be detected");
+
+        let canon = std::fs::canonicalize(&wt).unwrap();
+        assert!(
+            is_linked_worktree(&canon),
+            "the canonicalized form is what every real caller passes: {canon:?}"
+        );
+        assert!(
+            worktree_main_root(&canon).is_some(),
+            "main-root derivation must survive canonicalization too: {canon:?}"
+        );
+    }
+
     #[test]
     fn worktree_main_root_from_gitdir_pointer() {
         let tmp = TempDir::new().unwrap();

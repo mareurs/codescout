@@ -917,7 +917,20 @@ async fn activating_a_linked_worktree_reports_the_divergence_it_creates() {
     std::fs::write(wt.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
     std::fs::write(
         wt.join(".git"),
-        format!("gitdir: {}/main/.git/worktrees/feat\n", base.display()),
+        // `join`, not string concatenation. `base` is canonicalized, which on Windows is
+        // the verbatim `\\?\C:\…` form — and inside a verbatim path Rust does NOT treat
+        // `/` as a separator. A hand-built `<verbatim>/main/.git/worktrees/feat` then
+        // parses as ONE component, `is_linked_worktree` never sees a `worktrees`
+        // component, and the activation silently reports no worktree at all. Git itself
+        // never writes that spelling; only a fixture concatenating strings does.
+        format!(
+            "gitdir: {}\n",
+            base.join("main")
+                .join(".git")
+                .join("worktrees")
+                .join("feat")
+                .display()
+        ),
     )
     .unwrap();
 
@@ -988,7 +1001,20 @@ async fn a_worktree_whose_main_has_workspace_toml_reports_inherited_topology() {
     std::fs::write(wt.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
     std::fs::write(
         wt.join(".git"),
-        format!("gitdir: {}/main/.git/worktrees/feat\n", base.display()),
+        // `join`, not string concatenation. `base` is canonicalized, which on Windows is
+        // the verbatim `\\?\C:\…` form — and inside a verbatim path Rust does NOT treat
+        // `/` as a separator. A hand-built `<verbatim>/main/.git/worktrees/feat` then
+        // parses as ONE component, `is_linked_worktree` never sees a `worktrees`
+        // component, and the activation silently reports no worktree at all. Git itself
+        // never writes that spelling; only a fixture concatenating strings does.
+        format!(
+            "gitdir: {}\n",
+            base.join("main")
+                .join(".git")
+                .join("worktrees")
+                .join("feat")
+                .display()
+        ),
     )
     .unwrap();
 
