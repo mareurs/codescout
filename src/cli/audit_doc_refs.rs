@@ -10,8 +10,15 @@ use crate::cli::{open_ctx, CommonOpts};
 
 #[derive(Debug, Args)]
 pub struct AuditArgs {
-    /// Glob patterns to scan, repeatable. Defaults to docs/**/*.md, CLAUDE.md,
-    /// **/README.md (with docs/agents/** excluded) when omitted.
+    /// Glob patterns to scan, repeatable. When omitted the scan covers BOTH
+    /// `DEFAULT_AUDIT_GLOBS` (docs/**/*.md, CLAUDE.md, **/CLAUDE.md, **/README.md,
+    /// CHANGELOG.md, CONTRIBUTING.md) and `DEFAULT_AUDIT_CODE_GLOBS` (**/*.rs, *.py,
+    /// *.sh, *.yml-adjacent source types with a tree-sitter grammar, ...), minus
+    /// `DEFAULT_AUDIT_EXCLUDES`. Source files are routed through `scan_code_comments`,
+    /// so only their COMMENTS are scanned and every finding there is forced to `med`.
+    /// See `src/librarian/tools/audit_doc_refs/mod.rs` for the authoritative lists —
+    /// this text drifted from them once and understated the scan by two markdown
+    /// surfaces and the entire code glob set.
     #[arg(long = "paths")]
     pub paths: Vec<String>,
 

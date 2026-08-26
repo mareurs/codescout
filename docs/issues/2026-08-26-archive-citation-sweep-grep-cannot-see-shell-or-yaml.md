@@ -6,7 +6,7 @@ severity: low
 owner: marius
 related: []
 tags: [tracker-conventions, guide, doc-refs, archive-flow]
-unverified: 'The guide fix is done and verified. What is NOT decided: whether code-comment citations should keep their forced `Med` severity. One datapoint is recorded below; the policy is deliberately left alone, because the reason for `Med` is still good and one incident is not evidence enough to overturn it.'
+unverified: "The guide fix is done and verified. The severity-promotion policy question is now MEASURED (484 broken code-comment refs; ~55 of them the archive-move class) and answered `not yet`, with a three-step order recorded. What is NOT done: step 1 of that order, repairing the ~55 archive-move citations in source comments — deliberately deferred because it is a tree-wide write across ~30 files with a peer session active in this checkout. What is NOT measured: the composition of the other ~429 broken code-comment refs, which the audit''s 50-finding display cap hides."
 kind: bug
 ---
 
@@ -134,24 +134,68 @@ and `guide_topics_have_bodies` invariants cover it structurally (92 guide tests 
 the edit). A test asserting a particular `--include` list would pin the exact defect this
 bug is about — a hard-coded guess at where citations live — one layer further down.
 
-## The policy question this raises, and does NOT answer
+## The policy question this raises — now measured
 
 `scan_code_comments`' own comment says the forced `Med` should be promoted *"later if the
 surface earns it; that is a policy change worth making on evidence rather than on the first
-day."*
+day."* This section is that evidence, gathered 2026-08-26.
 
-**This is one datapoint toward that.** An archive move left a `Med` finding in a live,
-load-bearing script — `scripts/build-windows.sh`'s header is the documentation for the
-whole local Windows loop — and it went unnoticed until someone opened the file for an
-unrelated reason.
+### The numbers
 
-It is deliberately not acted on. The reason for `Med` has not weakened: a contributor
+| measure | value |
+|---|---|
+| broken refs, whole repo | **11,952** |
+| findings originating in code comments | **1,781** of 51,941 (**3.4%**), across 219 files |
+| **broken** refs originating in code comments | **484** (4.1% of all broken) |
+| of those, the `docs/issues/` archive-move class | **~55**, in ~30 files |
+
+Method, and its two independent instruments — they agree, which is the only reason either
+is quoted:
+
+1. **The audit's own census.** `overflow.by_file` is a complete per-file map over *every*
+   finding, not the 50-finding display window, so it can be bucketed by extension without
+   the cap. Cross-check: it sums exactly to `overflow.total`.
+2. **A scoped re-run** (`--paths` restricted to `DEFAULT_AUDIT_CODE_GLOBS`) whose top-level
+   `n_refs_broken` is the broken count for code files alone. It found 1,784 refs where the
+   census attributed 1,781 to code files — 0.2% apart, the delta being that an explicit
+   `paths` argument drops `DEFAULT_AUDIT_EXCLUDES`.
+3. **An independent grep + existence check** for the `docs/issues/` subset, which the audit
+   cannot isolate (the display cap hides all but 50). Positive-controlled against the audit:
+   `src/librarian/frontmatter.rs:669` cites an archived path from a `///` comment, and the
+   audit independently reports it `verdict: missing, severity: med, severity_reason:
+   code_comment_capped`.
+
+The grep needed a correction worth recording: its first pass returned **77**, which included
+15 string literals (`docs/issues/2026-08-16-some-bug.md`, `docs/issues/foo.md` — test
+fixtures the audit's tree-sitter pass correctly excludes and a regex does not) and 7 teaching
+placeholders. Splitting on "does a file of this basename exist in `docs/issues/archive/`?"
+separates the genuine archive-move rot cleanly, because a placeholder has no archived twin.
+
+### Recommendation: do NOT promote, and here is the order to do it in
+
+**484 is too many to switch on at once**, and it is the wrong 484. The pain that actually
+occurred is the archive-move class — ~55 refs, each repaired by inserting one path segment.
+The other ~429 are unclassified, and the 50-finding sample shows the population includes
+**deliberate teaching placeholders inside the audit's own doc comments** — `docs/issues/foo.md`,
+`docs/issues/2026-01-01-x.md`, and `docs/issues/….md` (a Unicode ellipsis) all appear as
+`verdict: missing`. Promoting severity today would gate CI on the documentation of the very
+tool doing the gating.
+
+Sequence, cheapest and most certain first:
+
+1. Repair the ~55 archive-move citations (mechanical: insert `archive/`). **Not done here** —
+   it is a tree-wide write across ~30 source files, and a peer session is active in this
+   checkout; `bug-fix-session-log:F-67` is that exact hazard.
+2. Exclude the audit's own fixtures and teaching placeholders, or teach the parser to skip a
+   ref whose basename is a known placeholder.
+3. Re-measure. If the residue is small, promotion becomes a cheap change rather than a
+   flag day.
+
+The rationale for `Med` has not weakened and is not challenged by any of this: a contributor
 archiving a bug file still should not break everyone's build via a comment they never
-touched, and this repo carries **11,940** broken refs at the last full audit, so the blast
-radius of a severity promotion is unmeasured and probably large. The right next step is to
-count how many of those are code-comment citations before anyone proposes promoting them —
-not to promote on one incident.
-
+touched. What the measurement changes is that the cost of promotion is now known (484) and
+the benefit is now bounded (55), which is enough to say "not yet" with a reason instead of a
+shrug.
 ## Workarounds
 
 Drop the `--include` filters and read the extension histogram, as the guide now suggests.

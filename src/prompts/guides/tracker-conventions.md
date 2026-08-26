@@ -152,10 +152,16 @@ superseded session-log rounds alone**: those are historical snapshots, and
 path does not gate. Rewriting them would falsify the record to satisfy a linter that
 is already ignoring them.
 
-Note the gate only catches the subset that lands in a full-severity surface, and it
-does not scan `CHANGELOG.md` at all
-(`docs/issues/2026-08-08-audit-doc-refs-never-scans-changelog-or-contributing.md`),
-so the grep is the check — not a green CI run.
+Note the gate only catches the subset that lands in a full-severity surface, so the grep
+is the check — not a green CI run.
+
+*(Corrected 2026-08-26. This sentence used to add "and it does not scan `CHANGELOG.md` at
+all", citing a bug that has since been fixed and archived —
+`docs/issues/archive/2026-08-08-audit-doc-refs-never-scans-changelog-or-contributing.md`.
+`DEFAULT_AUDIT_GLOBS` now lists both `CHANGELOG.md` and `CONTRIBUTING.md`, and a live run
+counts 127 findings in the former. What is true of `CHANGELOG.md` is narrower: refs inside
+already-released sections are capped by `released_history_boundary`, so a shipped section
+cannot be "corrected" into falsehood.)*
 
 Be precise about *why* a green run proves nothing here, because the plausible reason is
 the wrong one. `audit_doc_refs` **does** scan source files, shell scripts included —
