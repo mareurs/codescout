@@ -172,19 +172,25 @@ impl RemoteEmbedder {
     /// `RetrievalConfig::normalize_embedder_url` rather than duplicated, since
     /// the two used to be independent copies of the same three branches.
     ///
-    /// Rejects plaintext HTTP when an `api_key` is supplied (from argument or
-    /// the `EMBED_API_KEY` env var). Loopback hosts (`localhost`, `127.0.0.1`,
-    /// `[::1]`) are permitted to support local Ollama / llama.cpp setups where
-    /// the key is only meaningful as a request-shape parameter.
+    /// `api_key` is used exactly as given — no ambient-env fallback. The one
+    /// production caller (`create_embedder_with_config`) always receives an
+    /// already-resolved value from its own caller's `RetrievalConfig`/
+    /// `LibrarianEnv`, so resolving `EMBED_API_KEY` again here was a second,
+    /// redundant read of the same var — and the one that let tests calling
+    /// `from_url` directly race the tests that mutate that var under
+    /// `#[serial]`. See docs/conventions/test-env-isolation.md.
+    ///
+    /// Rejects plaintext HTTP when an `api_key` is supplied. Loopback hosts
+    /// (`localhost`, `127.0.0.1`, `[::1]`) are permitted to support local
+    /// Ollama / llama.cpp setups where the key is only meaningful as a
+    /// request-shape parameter.
     pub fn from_url(url: &str, model: &str, api_key: Option<String>) -> Result<Self> {
         let endpoint = format!("{}/v1/embeddings", crate::normalize_embeddings_base(url));
-
-        let api_key = api_key.or_else(|| std::env::var("EMBED_API_KEY").ok());
 
         if api_key.is_some() && !is_https_or_loopback(url) {
             bail!(
                 "HTTPS required when api_key is set — \
-                 refusing to send API key over plaintext HTTP to {}",
+                     refusing to send API key over plaintext HTTP to {}",
                 url
             );
         }
@@ -559,11 +565,19 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn from_url_falls_back_to_env_api_key() {
-        // When api_key param is None, from_url checks EMBED_API_KEY env var.
-        // We don't set it here, so it should be None.
+        // `from_url` used to fall back to EMBED_API_KEY when the argument was
+        // None — that made it read ambient config, which is exactly the shape
+        // docs/conventions/test-env-isolation.md rules out (an untagged test
+        // elsewhere reading the same var can race a tagged one that sets it).
+        // Loopback host so a leaked key doesn't also trip the HTTPS guard —
+        // that guard is orthogonal to this test and is covered elsewhere.
+        unsafe { std::env::set_var("EMBED_API_KEY", "sk-should-be-ignored") };
+        let e = RemoteEmbedder::from_url("http://127.0.0.1:43300", "model", None).unwrap();
         unsafe { std::env::remove_var("EMBED_API_KEY") };
-        let e = RemoteEmbedder::from_url("http://host:8080", "model", None).unwrap();
-        assert!(e.api_key.is_none());
+        assert!(
+            e.api_key.is_none(),
+            "from_url must not consult EMBED_API_KEY at all — the caller is the only source"
+        );
     }
 
     #[test]
