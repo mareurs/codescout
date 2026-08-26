@@ -56,6 +56,66 @@ HTTP 400 {"error":{"code":400,"message":"input (1682 tokens) is larger than the 
   (`CodeRankEmbed-Q4_K_M.gguf`), ports 48081 / 48083 / 48084.
 
 ## Root cause
+### 2026-08-26 — the reporter is on AllMiniLM LOCAL, and that inverts the symptom
+
+The reporter's backend is the **local ONNX path (AllMiniLM-L6-v2)**, not
+llama-server. That matters more than a config detail, because the two backends
+fail in opposite directions on the same input, and this file was written against
+only one of them.
+
+**On the local path there is no error at all.** `LocalEmbedder::embed`
+(`crates/codescout-embed/src/local.rs:263-274`) calls fastembed's
+`model.embed(owned, None)`, and fastembed **truncates**. Already measured, link
+by link, in `docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md`
+§ *2026-08-14 — the truncation question, measured*:
+
+| Link | Value |
+|---|---|
+| codescout never calls `with_max_length` | `local.rs:153` |
+| fastembed's `DEFAULT_MAX_LENGTH` | 512 |
+| clamped against the tokenizer's `model_max_length` | 512 |
+| the truncation itself | `with_truncation(Some(TruncationParams{…}))` — **truncates, does not error** |
+
+Effective ceiling: **512 tokens ≈ 2000 chars**, and overflow is discarded
+silently. So on the reporter's stack an oversized memory does not fail — it
+succeeds, with a vector computed from only its opening fraction.
+
+**That is worse than what this file describes.** The llama-server path at least
+emits a `cross-embed failed` warning; the local path emits nothing, returns `ok`,
+and stores a plausible-but-wrong vector. `local.rs`'s own doc comment already
+warns about "plausible but silently wrong vectors" for a different reason
+(wrong-model weights in a `local-dir:`); this is the same hazard reached by size.
+
+Exposure, measured on this repo 2026-08-26: **19 of 23 memories exceed ~2000
+chars.** The largest (`test-design-discipline.md`, 19 314 chars) is ~10× the
+ceiling, so roughly 90% of it would never reach its vector.
+
+### Live reproduction on THIS host (llama-server / CodeRankEmbed)
+
+Posting each real memory file to the running embedder, 2026-08-26:
+
+```
+ 19314 chars  FAIL HTTP 500: input is too large to process. increase the physical batch size   test-design-discipline.md
+ 16212 chars  OK embedded                                                                      eval-design.md
+ ... all 18 smaller memories OK
+```
+
+So one real memory in this project **cannot be embedded on this host right now**.
+`memory(action="write")` on it returns `status: "ok"` with a `cross-embed failed`
+warning and no vector — the bug, reproduced, not inferred.
+
+Note the boundary for real prose (between 16 212 and 19 314 chars) sits far above
+the 8000-8250 chars measured with a repeated-character payload; `x`-runs tokenize
+much less efficiently than English. **Do not use the synthetic number as the
+operational limit.**
+
+### Not evidence, recorded so it is not mistaken for evidence
+
+The semantic memory store currently holds **1 item of 23** (`gotchas`, which
+embeds fine). That is *not* a symptom of this bug — it is legacy-migration state:
+activation still reports `legacy_semantic_index: .codescout/embeddings/project.db`
+with a `codescout migrate-memories` hint. Do not cite the 1-of-23 as data loss
+from truncation.
 
 Two independent mechanisms, both read from the code on 2026-08-26 (the HTTP 400
 itself was measured by the reporter, not by this session):
@@ -124,6 +184,37 @@ let dense = ctx.agent.memory_embedder().await?
    warning and the envelope still says `ok`.
 
 ## Fix
+### Revised 2026-08-26 — two backends, two failure modes, one fix and one extra
+
+The plan below was written for a backend that *errors*. The reporter's backend
+*truncates*. Segmentation (step 2) fixes both and remains the core fix — but a
+truncating backend needs one thing the plan does not have:
+
+- **A truncating backend must be made to complain.** No amount of error handling
+  helps when the transport returns `200 OK` with a short-changed vector.
+  `local.rs:153` never calls `with_max_length`, so fastembed applies its 512
+  default and truncates in silence. Either pass an explicit max and pre-check the
+  token count against it, or tokenize first and refuse/segment above the ceiling.
+  Until then, oversized memories on the local path are **undetectable from any
+  codescout surface** — no warning, no `skipped` entry, no failed write.
+- **The segment budget is per-backend and must be discovered, not assumed.**
+  Measured: ~512 tokens for AllMiniLM local, ~2048 for CodeRankEmbed. Hardcoding
+  either is how `chunk_size_for_model` became dead code
+  (`docs/issues/archive/2026-08-11-chunk-size-for-model-dead-on-production-path.md`) —
+  and CLAUDE.md cites that same measurement as a case where the prescribed fix
+  direction *inverted* on contact with the real ceiling. Read the ceiling from the
+  embedder, or make it configurable with a per-model default.
+- **Two "max length" values exist for AllMiniLM and both are real**:
+  `model_max_length: 512` (hard truncation, what fastembed reads) and
+  `max_seq_length: 256` (the sentence-transformers tuned regime). Segmenting to
+  512 is correct for *data loss*; it still sits above the tuned regime, so
+  retrieval quality between 256 and 512 tokens is a separate open question, not
+  something this fix closes.
+
+Step 1 (lift the HTTP body) shipped in `67c548b9` / `5f8c42ec` and helps the
+erroring backend only. **It does nothing for the local path**, which has no error
+to attach a body to — worth stating plainly so the shipped work is not mistaken
+for a fix of the reporter's actual symptom.
 ### Progress 2026-08-26 — code-index surface fixed, memory surface still open
 
 **Fixed: the code-index surface**, which re-triage showed was the severe one.
