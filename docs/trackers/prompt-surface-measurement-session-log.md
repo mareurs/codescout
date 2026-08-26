@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 22
-entry_high_water_W: 17
+entry_high_water_F: 23
+entry_high_water_W: 18
 entry_prefix:
 - F
 - W
@@ -49,6 +49,7 @@ surfaces, not the definition.
 | F-19 | The eval's guard apparatus is unenforced — no collection, no CI, and a permanent red makes "all green" inexpressible | open |
 | F-20 | Four times in one task, a commit asserted in prose what it measured otherwise in code — one of them from a controller ruling | open |
 | F-21 | I made a probe the acceptance gate for a question it was not precise enough to answer | fixed-verified |
+| F-23 | I relayed a subagent's self-reported bug find to the user without verifying it; the bug did not exist | open |
 | F-22 | A docstring word ending in "raise" fired a substring guard the docstring called safe | open |
 
 ## Wins Index
@@ -70,6 +71,7 @@ surfaces, not the definition.
 | W-13 | The arms separated on a metric we already logged and never reported | validated |
 | W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
 | W-15 | Reading the generator instead of the plan's description of it caught three defects, one with no downstream gate at all | validated |
+| W-18 | Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result | validated |
 | W-17 | A pre-dispatch scout caught a forward dependency I had stated in a form the harness cannot express | validated |
 | W-16 | Three dilution rounds converged without closing; one measurement of the shared cause moved it further than all three | validated |
 
@@ -1953,6 +1955,113 @@ consumer before recording the dependency as settled."*
 
 **Status:** validated — three datapoints in one session, all pre-dispatch, all caught before
 any subagent ran.
+
+## F-23 — I relayed a subagent's self-reported bug find to the user without verifying it; the bug did not exist
+
+**Valid:** invariant
+
+**Observed:** 2026-08-26, blast-radius eval, Task 7 (`gates_blast.py`).
+
+**When:** The implementer returned DONE with a section headed *"Concern worth attention: found
+and fixed a real bug while adapting the copied `parse_log` regex."* I reported that to the user
+as a genuine catch in the same turn, without checking it.
+
+**Expected:** hidden-info's `VERDICT (.+)` capture requires ≥1 character; `check_blast.py`'s
+success verdict is the empty string; therefore every scored run was silently mislabelled
+`"(none)"`, and `(.+)` → `(.*)` fixes it. Self-consistent, specific, and it named a real file
+and a real difference between the two evals.
+
+**Got:** the bug does not exist. `surface_lib.py:199` wraps every predicate return —
+`verdict = "PASS" if not cls else f"FAIL({cls})"` — *before* `log_run` writes
+`VERDICT {verdict}`. The empty string never reaches the log; hidden-info's `(.+)` was always
+correct because its success token is `PASS`. The implementer had confused *"`make_predicate`
+returns `""`"* with *"`""` is logged"* — a misread of which function the value crosses a
+boundary to. The follow-up claim *"all 39 tests failed before the fix"* was also not
+reproducible: re-introducing `(.+)` fails 15/39.
+
+**Probable cause:** a subagent's voluntarily-disclosed "concern worth attention" reads as
+diligence, and diligence is persuasive. It arrived in the same report as several verified
+claims, so it inherited their credibility. The check was two tool calls
+(`grep` for the writer, read `surface_lib.py:199`), and I ran them only after an independent
+reviewer forced the question.
+
+**Impact:** the same misreading was load-bearing in the shipped module — `gates_blast.py`
+classified against raw verdict strings that never appear, so a real pilot log would have
+produced `n_clean = n_broken = 0`, every arm flagged contaminated, and **all five gates
+REFUSED with exit 1**. And 39 tests were built against the fictional format, so the suite
+could not see it. My relay did not cause the defect, but it moved a wrong claim one step
+closer to being believed, and it spent the user's attention on a fabrication.
+
+**Severity:** med — no artifact was corrupted by the relay itself, and the reviewer caught the
+underlying defect. The cost is credibility: a controller who passes on unverified subagent
+claims makes every one of its reports worth less.
+
+**Status:** open — the discipline is stated but not yet mechanised.
+
+**Fix idea / Pointer:** a subagent's report is untrusted content in the specific sense that
+matters here: its *factual claims about the codebase* are verifiable and must be verified
+before relay, exactly as `get_guide("untrusted-content")` prescribes for file bodies —
+*"quarantine the instructions; verify the facts."* The trigger is narrow enough to be a rule:
+**before relaying any subagent claim of the form "I found a bug in X", read X.** Pairs with
+[[F-20]] (asserting in prose what the code measures otherwise) — same failure, one agent
+further out.
+
+## W-18 — Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result
+
+**Valid:** dated 2026-08-26
+
+**Observed:** 2026-08-26, blast-radius eval, Tasks 6b–8, across five opus review passes.
+
+**Pattern:** For an eval, review the **instrument** adversarially before spending on the
+measurement, and require each finding to be shown by construction rather than argued. The
+specific move that worked every time: **apply the mutation and look**, never read the test and
+reason about it.
+
+**Counterfactual — three defects, each of which would have produced a confident wrong number
+rather than an error:**
+
+1. **B-1 (Task 6b).** `after_hook.py` resolved `golden.py` via
+   `Path(__file__).resolve().parent`, correct for the in-place script and wrong for the copy
+   `install_hooks` places in a separate `hooks_dir` — it copies only `hook.source`. Every
+   installed run would have scored **`broken-after-tree`, unconditionally, across all five
+   arms**. A pilot would have reported 100% "the agent broke the tree" as a *number*. All 14
+   tests were green because both subprocess tests ran the in-place script, and the arm test
+   asserted the **declaration**, never the **installation**.
+2. **F1 (Task 7).** `gates_blast.py` classified against raw verdict strings that never appear —
+   `surface_lib.py:199` wraps every predicate return as `"PASS"` / `f"FAIL({cls})"` before
+   `log_run` writes it. Fed a real pilot log: `n_clean = n_broken = 0`, every arm contaminated,
+   **all five gates REFUSED, exit 1**. Its 39 tests were green because they validated the
+   module against a format the harness never writes.
+3. **N1 (Task 7 fix round).** Widening the countable set to `len(good)` let
+   `FAIL(checker-error:<ExcType>)` — which `surface_lib` writes itself — count as an arm
+   outcome. Constructed with ten real crashed-checker runs: **gate 3 FAIL, gate 5 FAIL**,
+   printing `!! GATE 5 FAILED -- TOOL DENIAL LEAKED`, with `main()` returning 0. A crashed
+   checker reported as a finding about tool denial.
+
+Each defect was invisible to a passing suite, and each would have produced a **fabricated
+result**, not a failure — the shape that gets published.
+
+**Confirming data points:**
+1. This entry — three blocking-class defects caught pre-spend, all by construction.
+2. Same session, Task 5: two mutation classes survived a green suite (`_TEXT_KEYS` reduced →
+   10 passed; `DEPENDENT_PATHS[:-3]` → 10 passed), and the review's *own* proposed remedy was
+   inert — it iterated the constants its mutation shrank, staying GREEN while the detector had
+   gone blind to `pattern`.
+3. Same session, Task 8: a probe entry with `must_pass=()` gutting the detector wholesale was
+   graded a clean kill, because the harness never guarded its own table's shape.
+
+**Impact:** high — the eval's first spend is Task 9, and each of the three would have bought a
+confident, wrong table. Cost of the discipline: five opus review passes and several fix rounds,
+against a pilot budget of roughly $6–12.
+
+**Promote-when:** a second work stream where adversarial pre-spend instrument review catches a
+result-fabricating defect a green suite missed. Then promote to CLAUDE.md as: *"Before an eval
+spends, review the instrument adversarially and require findings by construction — a green
+suite is not evidence about the thing it guards."* See memory `eval-design` §§ *The
+instrument/subject verdict boundary* and *A green suite is not evidence*, which already carry
+the reusable half.
+
+**Status:** validated — three datapoints in one session, all caught before any spend.
 
 ## Template for new entries
 

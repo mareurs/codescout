@@ -511,3 +511,69 @@ coupling** (the dependent hardcodes the constant, so grep-by-*value* works and
 grep-by-*name* does not) and **test golden files** (an expected value baked into an
 assertion, naming nothing). Both are real, both are classic agent blind spots, and both need
 a different detector.
+
+
+## The instrument/subject verdict boundary — allow-list it, never deny-list it
+
+Any eval that classifies run outcomes has a boundary between *the subject did something* and
+*the instrument broke*. Crossing it in the dangerous direction produces a **confident finding
+about the subject out of an instrument fault** — which looks like a number, not an error, and
+is therefore indistinguishable from a result. It happened **three times in one task** on
+blast-radius, each time surviving a green suite:
+
+| the fault | how it scored |
+|---|---|
+| `BLAST_GOLDEN_AFTER_ROOT` not exported | `broken-after-tree` — *"the agent's own edit broke the tree"* |
+| Stop hook could not locate `golden.py` once installed | same, **unconditionally, on every arm** |
+| checker raised, caught as `FAIL(checker-error:KeyError)` | `!! GATE 5 FAILED -- TOOL DENIAL LEAKED` |
+
+**The structural fix is an allow-list with a safe default, and the reason is not stylistic.**
+The instrument-failure set is **unbounded by construction**: `surface_lib.run` writes
+`FAIL(checker-error:<ExcType>)`, interpolating *any* exception type name. No deny-list can
+enumerate that. So a run counts only if its verdict is in an explicit, justified set —
+blast-radius's is exactly three (`PASS`, `FAIL(broken-after-tree)`, `FAIL(native-tool-used)`),
+each traceable to a branch in the checker where the **arm** did something. Everything else,
+including verdicts nobody anticipated, is an instrument failure and excludes the run.
+
+Two properties make it hold:
+
+- **Direction of default decides the failure mode.** Deny-listing counts every unforeseen
+  class; allow-listing excludes it. Same information, opposite outcome — and only one fails
+  toward *"we cannot tell"* rather than toward a confident wrong number.
+- **Pin the set from BOTH sides.** Narrowing it must break tests (it drops real results) and
+  widening it must break tests (it manufactures fake ones). A one-directional mutation proves
+  half a set. Measured: narrowing to `PASS` alone failed 14 tests; widening to swallow
+  `checker-error` failed 3.
+
+**The generalisation:** a deny-list inherited from a sibling eval keeps its syntax and loses
+its guarantee. `hidden-info`'s `"indeterminate:" not in verdict` was correct *there*, where the
+instrument classes were closed. Copied into an eval whose checker can raise arbitrary
+exceptions, the same predicate silently changed meaning. **When copying a classifier across
+evals, re-derive what its complement contains.**
+
+## A green suite is not evidence about the thing it guards
+
+Three consecutive tasks shipped guards that could not fail, every one under a passing suite:
+
+- **39/39 tests validated a module against a log format the harness never writes.**
+  `surface_lib.py:199` wraps every predicate return as `"PASS"` / `f"FAIL({cls})"` before
+  logging; the module classified against the raw class. Fed real logs, all five gates REFUSED
+  with exit 1. The tests were real, they passed, and they measured a format nothing produces.
+- A proposed remedy iterated `_PATH_KEYS + _TEXT_KEYS` to check `_PATH_KEYS + _TEXT_KEYS` —
+  so the mutation shrank the test's own loop and it stayed GREEN while the detector had gone
+  blind to `pattern`, the only key that sees a `grep` in **either** arm.
+- A gate on detector symmetry read the L2 variant carrying a structural floor, so it passed on
+  precisely the input it existed to catch.
+
+**What separated truth from colour every time was the same move: apply the mutation and look.**
+Not read the test and reason about it. The reusable rules:
+
+- **Never let a guard iterate the thing it guards.** Pin literals (`_ALL_DETECTOR_KEYS`), so a
+  shrunken constant shows up as a diff instead of a smaller loop.
+- **A fix's own verification must exercise the deployed artifact, not the authored one.** The
+  hook worked in place and failed as installed, because every test ran the in-place script;
+  `install_hooks` copies only `hook.source`.
+- **A mutation harness needs a null control**, or "the mutation was caught" is
+  indistinguishable from "the copied tree does not run at all" — the same shape as a checker
+  missing its exec bit reporting a clean `0/N`.
+- **A surviving mutation is a finding, not a nuisance.** It names a behaviour nothing tests.
