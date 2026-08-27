@@ -13,7 +13,8 @@ owner: marius
 related: []
 reopened: 2026-08-26
 severity: medium
-unverified: 'Fixes ONLY the bare-project-id activation route, which is the one this file reports. Activating the same sub-project by absolute PATH still returns the empty set — same mechanism, different dispatch branch — and is filed separately at docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md with an #[ignore]d executable reproduction.'
+superseded_by: '020ea69a — reads union both layouts; fc1bbf21''s single-store reasoning generalised from one workspace and would have reported zero on a project-local one'
+unverified: 'The DEFECT is fixed and verified live, but this file''s reasoning is superseded: fc1bbf21 moved the readers onto the write path, which is correct only for a workspace whose memories live in the workspace tree. Measured on mirela the same day, the opposite layout holds (49 project-local .md, 0 in the workspace tree) and fc1bbf21 would have made both surfaces agree at zero. 020ea69a supersedes it by unioning both layouts. Also still open: the by-path activation route, filed at docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md — and correctly NOT closed by the union, since that route builds a standalone workspace where no second layout is loaded to union.'
 ---
 
 # BUG: `memory(list/read)` only sees 2 topics for a project that `workspace(activate)` reports has 16
@@ -386,3 +387,43 @@ dispatch decision (should an absolute path naming a workspace member focus-switc
 standalone?) that moves `read_only` defaults, focus, and the response shape:
 
 `docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md`
+
+
+## 2026-08-27 (later) — correction: agreement is not correctness, and one workspace is not a population
+
+`fc1bbf21` is superseded in its reasoning by `020ea69a`, which reads the **union** of
+both layouts instead of moving the readers onto one. The section above is kept as
+written because the way it went wrong is the point.
+
+**What it got right:** the two surfaces did contradict each other, `activate` was the
+outlier, and the create-on-read litter was real. Those all still hold, and the
+regression test written for them survives — `020ea69a` uses it as a mutation control
+in two of its three passes.
+
+**What it got wrong:** it concluded the fork was *settled* by the write path. That
+inference rests on where memories actually live, and it was drawn from **one
+workspace**. Codescout keeps them in the workspace tree — git-tracked, deliberately
+un-gitignored — so here the write path and the data agree and "the readers move"
+costs nothing.
+
+Measured the same day on `mirela`, a second real workspace on this machine, the
+layout is populated in the **opposite** direction: 49 `.md` files across 9
+project-local `.codescout/memories` trees, and **0** in `.codescout/projects/`.
+There, `fc1bbf21` would have made the two surfaces agree at **zero** — hiding every
+one of those files behind a reader that now looks authoritative. The contradiction it
+removed was, on that workspace, the only remaining signal that the memories existed
+at all.
+
+So "no migration needed" was true of this repo and false as a general claim. Neither
+layout is debris; neither can be declared the loser without a migration that is
+unfree in both directions (moving codescout's down would untrack ~35 files under
+`.gitignore`'s `tests/fixtures/*/.codescout/` rule — which is *why* the workspace tree
+exists; moving mirela's up would land 49 files under a workspace with no
+`workspace.toml`). `020ea69a` therefore unions the reads, leaves writes untouched, and
+leaves the ownership question open rather than settling it by whoever shipped last.
+
+**The transferable lesson:** a defect that presents as *two surfaces disagreeing* has
+two fixes that look identical on the repo you are standing in — make them agree, or
+make them both right. They separate only on a second workspace, and this fix never
+looked at one. Reaching for the write path as an oracle felt like finding the ground
+truth; it was reading one instance's configuration as if it were the contract.
