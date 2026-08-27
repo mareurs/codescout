@@ -1,7 +1,7 @@
 ---
-id: '48b75c1ccd4f3abb'
+id: 71e099a2bfb8ad98
 kind: bug
-status: open
+status: fixed
 title: 'BUG: 17 librarian entry points answer a required-param miss with a bare serde field name — and on artifact(update) that gate pre-empts an auto-correction written for exactly that call'
 tags:
 - errors
@@ -9,11 +9,13 @@ tags:
 - params
 - progressive-disclosure
 - policy
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 related:
 - docs/adrs/2026-08-27-negative-results-name-their-scope.md
 severity: medium
+unverified: 'Not live-verified through a running server: needs `cargo rb` + `/mcp`, then one call per routed action with its required params withheld. Gate-green and mutation-verified only — though the bare BEHAVIOUR was measured live on the pre-fix binary for all 17 entry points, so what is unverified is the repair, not the diagnosis. Out of scope and deliberately not done: the 8 already-adequate sites name their action but carry no `with_hint` corrected call, so they satisfy clause 2 only partly.'
 ---
 
 ## Summary
@@ -298,6 +300,70 @@ close. That guard is the whole risk of the slice, and it needs its own test.
 SHA `60df0d76` (`experiments`), patch-id `0ed42a3f21585845d1993da053bc19441d816693` —
 **first slice only**, covering 1 of 17 sites.
 
+## Closed 2026-08-27 — the class is empty, and the count was wrong in both directions
+
+**`685a6c77323006e1483eee9247ebf26cdec9be63`** · patch-id **`e573af2423474037c75b9e65ad4f7a44fa6ed7ff`**
+**`630291766dee51390c842200cd1762f606fb6e95`** · patch-id **`722d1be5c3f8b91daf227bed6249dac76b865997`**
+
+### The "16 of 17 remain" was my own estimate, and re-costing refuted it
+
+§ *Scope* said 16 of 17 sites remained. That number was written at fix time without probing, and
+R-95 says a deferral estimate is the least-audited kind of claim. Probing the live surface — calling
+each entry point with its required params withheld, which fails at the serde gate before touching
+anything — gave a different picture:
+
+| | count | sites |
+|---|---:|---|
+| bare (`missing field \`x\``) | **9** | append_entry, update_entry, link, create, event_create, graph, refresh(gather), get, timeline |
+| already routed / adequate | **8** | move, graft, delete, merge_worktree, artifact_augment, state_at, workspace_state_at, update |
+
+**Nearly half were already adequate.** `move`, `graft`, `delete` and `merge_worktree` have carried a
+`map_err` naming the action since before this bug was filed — so the fix was **reuse of the repo's
+own pattern, not invention**, and the per-site "policy decision" § *Scope* warned would resist
+mechanization was already made in four places.
+
+The total, 17, matched the file's claim exactly. The *remaining* count did not.
+
+### Probing beat parsing, and the parser was actively wrong
+
+The first instrument was a regex census of `struct Args` required fields. It reported field names
+`none`, `yourself`, `true`, `enumeration` and `Shortcut` — it had matched prose inside doc comments.
+Those numbers were **discarded rather than published**; every figure above comes from calling the
+tool and reading what came back. A static census answers *"what does the source look like?"*; the
+question was *"what does the caller see?"*, and only one instrument can answer that.
+
+### What shipped
+
+All nine now use the pattern the eight good ones already had — `map_err` naming the tool, action and
+required fields — **plus** a `with_hint` carrying a concrete corrected call, which is what § *The
+rule* clause 2 asks for and what the pre-existing four stop short of. Example:
+
+```
+artifact(action="append_entry") requires 'id' and 'id_prefix': missing field `id_prefix`
+hint: Name the ledger and its id namespace, e.g. artifact(action="append_entry",
+      id="<16-hex>", id_prefix="R"). For a PROSE ledger pass anchor_heading + title +
+      body TOGETHER and the section is written for you; for a params ledger pass
+      entry_collection + entry.
+```
+
+### One open question from this file, now settled
+
+An earlier note wondered whether the bare sites' `isError: true` aborts sibling parallel calls. It
+does not: four bare failures issued in a single parallel block all returned their own errors.
+
+### Tests
+
+One, table-driven over all nine, in `src/librarian/tools/mod.rs`. Table-driven **because the defect
+is a class** — a per-site test would let the next entry point be added bare without failing
+anything. Each case asserts three things: the error is recoverable (not a bare serde error), the
+message names the tool and action, and a hint carries a concrete call.
+
+Mutation-verified by reverting `graph` to bare, which failed naming that exact site:
+*"graph: a required-param miss must be recoverable, not a bare serde error — got: missing field
+`id`"*.
+
+Gate: `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`,
+`cargo test` — **4738 passed, 0 failed**.
 ## Tests added
 
 None — not yet fixed. When the first slice lands it needs at least:

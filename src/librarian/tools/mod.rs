@@ -479,7 +479,7 @@ mod required_param_routing_tests {
     use crate::tools::RecoverableError;
     use serde_json::json;
 
-    /// docs/issues/2026-08-27-required-param-failures-neither-correct-nor-suggest.md
+    /// docs/issues/archive/2026-08-27-required-param-failures-neither-correct-nor-suggest.md
     ///
     /// A required-parameter failure must either repair the call and say so, or
     /// refuse WITH A ROUTE — never answer with a bare serde field name. Measured

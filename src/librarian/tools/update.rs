@@ -862,7 +862,7 @@ mod tests {
     /// written to repair — twice, after the same defect shipped twice. Until `patch`
     /// gained `#[serde(default)]` the repair was unreachable by the call shape that needs
     /// it: serde rejected the request for a missing `patch` before any lift could run.
-    /// docs/issues/2026-08-27-required-param-failures-neither-correct-nor-suggest.md
+    /// docs/issues/archive/2026-08-27-required-param-failures-neither-correct-nor-suggest.md
     #[tokio::test]
     async fn top_level_status_is_lifted_when_no_patch_is_supplied() {
         let tmp = TempDir::new().unwrap();
