@@ -94,20 +94,59 @@ struct Draft {
     status: Option<String>,
 }
 
+/// True if `line` is an ATX heading (`#` through `######`), tolerant of leading
+/// whitespace and any run of whitespace/tab (or end-of-line) after the marker —
+/// per CommonMark's ATX rule, and matching the tolerance `entry_heading` applies
+/// to its own `##` marker below.
+///
+/// Used in `parse_ledger` to close an open draft on ANY heading, not just entry
+/// headings: a prose section between two entries (`## How to add an entry`, a
+/// dash-less `## OP-3`, or an entry heading whose dash lacks a trailing space)
+/// must not leave the previous entry's draft open to absorb its `**Key:**
+/// value` lines.
+fn is_heading_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.bytes().take_while(|&b| b == b'#').count();
+    if hashes == 0 || hashes > 6 {
+        return false;
+    }
+    matches!(
+        trimmed.as_bytes().get(hashes),
+        None | Some(b' ') | Some(b'\t')
+    )
+}
+
 /// `link_scan`'s definition shape: `## <ID> — <title>`. A heading missing the
 /// dash-and-title defines no token, so it is not an entry here either.
+///
+/// Ledger-scoped `OP` prefix (not the general `[A-Z]{1,3}-\d+` grammar quoted
+/// in Global Constraints): this ledger declares `entry_prefix: OP`, and this
+/// function has exactly one caller (`parse_ledger`), so narrowing to `OP` here
+/// is a ledger filter, not a grammar reinvention. What DOES have to match
+/// `def_re`'s semantics: whitespace tolerance around the marker and the dash.
+/// `##  OP-1 — Title` (two spaces after the marker) is accepted — `def_re`'s
+/// `^\s*` doesn't care how much whitespace separates tokens. `## OP-7 —Title`
+/// (no space after the dash) is rejected — `def_re` requires `\s+` on both
+/// sides of the dash, so a title-typo like that defines no `link_scan` token,
+/// and letting it become a rule here would mean every citation of it dangles.
 fn entry_heading(line: &str) -> Option<(String, String)> {
-    let rest = line.strip_prefix("## ")?;
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("##")?;
+    if !rest.starts_with([' ', '\t']) {
+        return None;
+    }
+    let rest = rest.trim_start();
     let (token, tail) = rest.split_once(char::is_whitespace)?;
     let (prefix, num) = token.split_once('-')?;
     if prefix != "OP" || num.is_empty() || !num.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let title = tail
-        .trim_start()
-        .strip_prefix(['—', '–', '-'])?
-        .trim()
-        .to_string();
+    let tail = tail.trim_start();
+    let after_dash = tail.strip_prefix(['—', '–', '-'])?;
+    if !after_dash.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let title = after_dash.trim().to_string();
     if title.is_empty() {
         return None;
     }
@@ -204,6 +243,13 @@ fn finish(d: Draft) -> Result<Rule> {
 ///
 /// Fence-aware: a worked example inside a code block teaches the syntax and is
 /// not an entry. Frontmatter is stripped first so a `##` inside it cannot match.
+///
+/// Any heading line — not just a recognised `## OP-N — Title` entry heading —
+/// closes the currently-open draft. Without this, a trailing prose section
+/// (`## How to add an entry`) or a malformed entry heading (`## OP-3` with no
+/// dash-and-title, or a dash with no trailing space) would leave the previous
+/// entry's draft open, and any `**Key:** value` line inside that prose would
+/// silently overwrite a field on the wrong rule.
 pub fn parse_ledger(doc: &str) -> Result<Vec<Rule>> {
     let body = strip_frontmatter(doc);
     let mut fence = FenceState::new();
@@ -214,15 +260,19 @@ pub fn parse_ledger(doc: &str) -> Result<Vec<Rule>> {
         if fence.feed(line) || fence.in_fence() {
             continue;
         }
-        if let Some((id, title)) = entry_heading(line) {
-            if let Some(d) = cur.take() {
+        if is_heading_line(line) {
+            if let Some((id, title)) = entry_heading(line) {
+                if let Some(d) = cur.take() {
+                    out.push(finish(d)?);
+                }
+                cur = Some(Draft {
+                    id,
+                    title,
+                    ..Default::default()
+                });
+            } else if let Some(d) = cur.take() {
                 out.push(finish(d)?);
             }
-            cur = Some(Draft {
-                id,
-                title,
-                ..Default::default()
-            });
             continue;
         }
         let Some(d) = cur.as_mut() else { continue };
@@ -337,11 +387,50 @@ entry_high_water_OP: 2
     }
 
     /// `def_re` requires the dash-and-title. A bare `## OP-3` defines no token,
-    /// so it must not silently become a rule with an empty title.
+    /// so it must not silently become a rule with an empty title — and,
+    /// crucially, the orphan section it opens must not leave OP-2's draft open:
+    /// `**Imperative:** Orphan.` must not overwrite OP-2's own imperative.
     #[test]
     fn a_heading_without_a_dash_and_title_is_not_an_entry() {
         let doc = format!("{LEDGER}\n## OP-3\n\n**Imperative:** Orphan.\n");
         let rules = parse_ledger(&doc).unwrap();
         assert_eq!(rules.len(), 2, "OP-3 lacks the dash-and-title shape");
+        assert_eq!(
+            rules[1].imperative, "Never dispatch an implementer or reviewer subagent on Haiku.",
+            "the orphan `## OP-3` section must close OP-2's draft, not feed it"
+        );
+    }
+
+    /// `def_re`'s `^\s*` around the marker doesn't care how much whitespace
+    /// separates tokens — two spaces after `##` must still be recognised.
+    #[test]
+    fn extra_whitespace_after_the_marker_is_tolerated() {
+        let doc = format!(
+            "{LEDGER}\n##  OP-3 — Extra space\n\n**Imperative:** Hi.\n**Binding:** always\n\
+             **Shape:** imperative\n**Covers:** x\n**Evidence:** unmeasured\n**Status:** active\n"
+        );
+        let rules = parse_ledger(&doc).unwrap();
+        assert_eq!(rules.len(), 3, "two spaces after ## must still open OP-3");
+        assert_eq!(rules[2].id, "OP-3");
+        assert_eq!(rules[2].title, "Extra space");
+    }
+
+    /// `def_re` requires `\s+` on both sides of the dash. A dash with no
+    /// trailing space defines no `link_scan` token, so it must not become a
+    /// rule — but it is still a heading, so it must still close the prior
+    /// entry's draft rather than leak `**Imperative:** Orphan.` into it.
+    #[test]
+    fn a_dash_with_no_trailing_space_is_not_an_entry_but_still_closes_the_draft() {
+        let doc = format!("{LEDGER}\n## OP-3 —NoSpace\n\n**Imperative:** Orphan.\n");
+        let rules = parse_ledger(&doc).unwrap();
+        assert_eq!(
+            rules.len(),
+            2,
+            "no def_re token: dash has no trailing space"
+        );
+        assert_eq!(
+            rules[1].imperative, "Never dispatch an implementer or reviewer subagent on Haiku.",
+            "the malformed OP-3 heading must still close OP-2's draft"
+        );
     }
 }
