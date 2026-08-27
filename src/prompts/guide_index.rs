@@ -652,11 +652,16 @@ n body
         assert!(s.matches(Some("artifact.get"), &empty));
         assert!(!s.matches(Some("artifact.find"), &empty));
         assert!(!s.matches(None, &empty));
+        // An action-carrying shape must not match a bare-tool (actionless) selector —
+        // the mirror of the tool-only rule below.
+        assert!(!s.matches(Some("artifact"), &empty));
 
         // Tool-only shape matches any action of that tool, and a keyless call.
         let t = parse_shape("artifact").unwrap();
         assert!(t.matches(Some("artifact.get"), &empty));
         assert!(t.matches(Some("artifact"), &empty));
+        // ...but not a different tool entirely.
+        assert!(!t.matches(Some("grep.search"), &empty));
 
         // Path predicate reads the RESULT.
         let p = parse_shape("artifact.get(path~docs/issues/)").unwrap();
@@ -667,31 +672,37 @@ n body
         ));
     }
 
-    /// A hand-built guide with a real `requires:` chain: A serves the call and
-    /// requires B; B requires C; C is declared by nothing. No guide in the live
-    /// corpus carries any declaration until Task 6 lands, so a closure test must
-    /// build its own fixture rather than assert on `GuideIndex::try_build()` —
+    /// A hand-built guide with a real `requires:` chain: Zeta serves the call and
+    /// requires Alpha; Alpha requires Mu; Mu is declared by nothing. No guide in the
+    /// live corpus carries any declaration until Task 6 lands, so a closure test
+    /// must build its own fixture rather than assert on `GuideIndex::try_build()` —
     /// asserting on the live corpus today would pass on an empty vec and keep
     /// passing even if the closure were completely broken.
+    ///
+    /// Headings are deliberately NOT in alphabetical order (Zeta, Alpha, Mu):
+    /// `match_sections`'s working set is a `BTreeSet<&str>`, which iterates
+    /// lexicographically, so an alphabetically-ordered fixture cannot distinguish
+    /// "returns in document order" from "returns in set order" — the single most
+    /// plausible ordering regression would pass unchanged against one.
     const CHAIN_GUIDE: &str = "\
 # Synthetic
 
 Preamble.
 
-## Section A
+## Zeta
 <!-- serves: artifact.append_entry -->
-<!-- requires: Section B -->
+<!-- requires: Alpha -->
 
-Body A.
+Body Zeta.
 
-## Section B
-<!-- requires: Section C -->
+## Alpha
+<!-- requires: Mu -->
 
-Body B.
+Body Alpha.
 
-## Section C
+## Mu
 
-Body C.
+Body Mu.
 ";
 
     #[test]
@@ -703,11 +714,9 @@ Body C.
             &serde_json::json!({}),
         );
         let headings: Vec<&str> = got.iter().map(|s| s.heading.as_str()).collect();
-        assert_eq!(headings, vec!["Section A", "Section B", "Section C"]);
-        // No duplicates.
-        let mut sorted = headings.clone();
-        sorted.dedup();
-        assert_eq!(headings, sorted);
+        // Document order (Zeta, Alpha, Mu), not alphabetical (Alpha, Mu, Zeta) — a
+        // set-ordered implementation fails this exact assertion.
+        assert_eq!(headings, vec!["Zeta", "Alpha", "Mu"]);
     }
 
     #[test]
@@ -730,6 +739,10 @@ Body C.
             Some("artifact.append_entry"),
             &serde_json::json!({}),
         );
-        assert!(got.is_empty());
+        assert!(
+            got.is_empty(),
+            "this pin is EXPECTED to trip once Task 6 lands `librarian` declarations — \
+         update it to assert the sections that should now match, or delete it"
+        );
     }
 }
