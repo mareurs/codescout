@@ -832,3 +832,53 @@ as n grows, so more runs would have made every arm look better and all arms look
 concealing exactly the spread the extra runs were bought to expose. Switching to per-bucket
 **means** is what let n=6 speak. **A union is the wrong aggregate for anything you intend to
 compare** — it answers a capability question while you are asking a frequency one.
+
+## A control only tests what it is pointed at when something pushes on it
+
+Measured 2026-08-27, two independent instrument defects found by one control arm on its
+first run — after both had silently corrupted an entire study.
+
+**The mechanism, and it decides WHICH control to add.** In most evals nearly every arm
+behaves the same way on most runs. So an instrument broken in a way *all* your arms share
+pairs, denies, or scores things that **happen to be equal**, and its output is
+indistinguishable from correct. **The arm that detects it is the one whose runs DIFFER from
+the others.**
+
+Both defects fit exactly:
+
+- A FIFO queue paired each run's post-edit tree with a checker by arrival order, and was
+  never isolated per round. Every run was scored against an *earlier* run's tree. Invisible
+  while every tree was the fixed one; glaring the moment a floor run left the tree unfixed.
+  The offset showed up inverted — the floor "fixed the bug" while reaching zero dependents;
+  the ceilings "failed" while reaching 11 of 12.
+- A no-tools deny-list never named a tool that takes a `command` and runs it. Invisible
+  while the weaker model never reached for it; glaring the moment the stronger one did and
+  used it as a full shell — `find`, `grep`, `cat`, `python3`, and a patch to the fixture.
+
+**A passing control is a claim about the runs that produced it, nothing more.** Four clean
+0.00 runs were read as "tool denial holds." They meant "this model did not go looking."
+
+**Corollary — an opt-in mitigation is an off mitigation.** The queue fix already existed, was
+read by both sides at import time, and was documented in the README naming this exact hazard
+in this exact wording. Nothing made the driver use it. Full understanding plus a working fix
+plus no default is the same as no fix.
+
+**Corollary — separate the verified fact from the inference drawn from it.** The un-denied
+tool was left off *deliberately*, with a written reason: absent from one registry, "therefore
+not on the headless surface at all." The first half was verified; the second was never tested;
+both were written in one sentence at one confidence. When an exclusion carries a reason, the
+reason is the thing to re-check — and check it *empirically*, not by re-reading it.
+
+## When a control fails, ask what it measured before calling it a finding
+
+Same session, twice, and the obvious cause was wrong both times:
+
+- The floor scoring above zero read as *"the stronger model answers from priors"* — a
+  publishable finding. The transcripts showed it had run a shell. Not a model fact at all.
+- The deny-list gap read as version drift; the tool was present in *both* the old and new
+  CLI bundles. Not drift.
+
+**A control's failure is evidence about the INSTRUMENT until you have shown otherwise.**
+Reading it as a result inverts the one thing the control exists for. The check is cheap —
+read the transcript, diff the two versions — and in both cases it changed the published
+cause, not merely its confidence.

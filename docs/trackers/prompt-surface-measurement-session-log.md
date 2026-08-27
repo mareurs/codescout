@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 31
-entry_high_water_W: 23
+entry_high_water_F: 33
+entry_high_water_W: 24
 entry_prefix:
 - F
 - W
@@ -59,6 +59,8 @@ surfaces, not the definition.
 | F-29 | I published between-arm claims at n=2; thickening to n=6 killed all three of them | fixed-verified |
 | F-30 | I led a surface report with a session anecdote the artifact under review had already measured and labelled unrepresentative | fixed-verified |
 | F-31 | The evidence behind every published number sat on tmpfs; F-1's fix guarded one of the two mechanisms that delete it | fixed-verified |
+| F-32 | The no-tools floor could run a shell — Monitor left un-denied by a documented ruling resting on an untested inference | fixed-verified |
+| F-33 | Runs were scored against other runs' trees; the fix existed, was documented, and was never wired into the driver | fixed-verified |
 
 ## Wins Index
 
@@ -82,6 +84,7 @@ surfaces, not the definition.
 | W-21 | Thickening n turned a dead claim into a better one — the mechanism came back stronger than it died | validated |
 | W-22 | Reading the source artifact's own limits sections before designing overturned my headline and re-pointed the target | validated |
 | W-23 | Re-running the verification after compaction found what re-reading the summary structurally could not | validated |
+| W-24 | The control arm found two instrument defects instead of the effect it measured — it was the only arm whose runs differed | validated |
 | W-20 | Running the second baseline the spec asked for overturned the headline it was meant to confirm | validated |
 | W-19 | Staging the pilot behind a positive-control gate caught two result-fabricating defects mid-spend, for $1 | validated |
 | W-18 | Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result | validated |
@@ -2969,6 +2972,210 @@ it — a record cannot carry properties of the substrate it ran on."*
 
 **Rests on:** F-31, same session — this win is that entry's counterfactual,
 not independent evidence of the pattern.
+
+## F-32 — The no-tools floor could run a shell; the tool was left un-denied by a documented ruling whose reason was an untested inference
+
+**Observed:** 2026-08-27. Added `notools-opus` (a negative control for the Opus
+half of the design) and ran it. First run, gate 5 FAILED: L1 0.50, L2 3.00,
+l0 0.50 — the "no tools" arm fixed the bug.
+
+**Expected:** a floor. The Sonnet twin had scored a clean 0.00 across four runs
+against the same deny-list, and I justified the new arm as testing a claim about
+*model priors* — "is this task answerable without tools, for a stronger model?"
+
+**Got (from the transcripts, not the score):** the arm called `Monitor` eight
+times and used it as a complete Bash replacement — `find`, `grep -rn`, `cat`,
+`python3 -c`, and finally a heredoc that patched `src/intl/duties.py` and ran
+pytest. `CronList` too. `Monitor` takes a `command` parameter and executes it.
+Neither name was in `NOTOOLS_DENY`.
+
+**What that says about the Sonnet floor, which is the point.** The same leaky
+list produced `blast-notools`' 0.00 across four runs. That was never evidence
+the denial held — it is evidence Sonnet did not go looking. The mechanism has
+been incomplete for the entire study and no gate could see it.
+
+**Probable cause — and it is not carelessness, which is why it is worth an
+entry.** The omission was *deliberate and documented*. `hidden-info/gen.py`,
+where this list originates, contains: *"KNOWINGLY LEFT UN-DENIED, and why none
+of them can reach the fixture: … Monitor / Artifact / EnterWorktree /
+ExitWorktree / SendMessage — absent from BUILTIN_TOOL_NAMES, i.e. not on the
+headless `claude -p` surface at all."*
+
+That sentence contains a **verified fact** (Monitor is absent from
+`BUILTIN_TOOL_NAMES`) and an **untested inference from it** (therefore it is not
+available headless), written at one confidence, in one breath — and the
+inference carries all the load. The list even names the "wider surface registry"
+that *does* contain Monitor, two lines above.
+
+I nearly published the wrong cause: CLI 2.1.245 → 2.1.247 since the derivation
+looked like obvious version drift. Checked it — `Monitor` appears in **both**
+bundles. Not drift. The inference was wrong on the day it was written.
+
+The list also already had a category for this failure mode — *"surface a
+deferred tool that could do any of the above"* — holding `ToolSearch` alone.
+That mitigation assumed deferred tools are reachable only *through* ToolSearch.
+Monitor was called with no ToolSearch call anywhere in the transcript. **An
+anticipated failure mode with the wrong mechanism is not a mitigated one.**
+
+There is no allow-list escape: `claude --help` confirms `--allowedTools` is
+auto-approval, not restriction. `--disallowedTools` is the only mechanism, so
+the floor's denial is exactly as complete as a hand-typed list of names — and a
+list is a snapshot of a registry that grows.
+
+**Fix:** `prompt-engineering:e67d419`, patch-id `7e470bc8165b2424`. Four new
+categories (run-a-command-by-another-name, delegation, non-file-shaped file
+access, worktree entry), a named regression test for the tools actually
+observed leaking, and gate 5 now prints each floor's attempted tool names so
+the next leak names its own missing entry. Verified by re-running:
+
+    pre-fix   [ FAIL ]  tools attempted: CronList, Monitor      L1 0.50  L2 3.00
+    post-fix  [ PASS ]  tools attempted: Bash, Glob, Grep, Read L1 0.00  L2 0.00
+
+Once denial holds, the Opus floor is 0.00 — the same as Sonnet's.
+
+**Severity:** high — the control every other gate rests on was not enforcing
+what it claimed, silently, for the whole study.
+
+**Status:** fixed-verified
+
+**Valid:** dated 2026-08-27
+
+## F-33 — Runs were scored against other runs' trees for the whole study; the fix existed, was documented, and was never wired into the driver
+
+**Observed:** 2026-08-27, while checking why the freshly-fixed `notools-opus`
+floor still reported `l0_fix_correct: true` in both runs. The agents had refused
+outright — *"every tool I'd need is disabled … I'm not going to hand you a diff
+for code I haven't seen"* — and made only denied calls.
+
+**Expected:** an arm that touches nothing scores `l0 = false`. Its own round-1
+zero-call run had.
+
+**Got:** `golden_after.international_total = 108.25` (the *fixed* value) against
+`golden_before = 100.0`, and `changed: 13`. The after-tree was not the agent's
+tree.
+
+**Root cause, verified rather than inferred.** The after-hook queue pairs each
+run's post-edit tree with that run's checker **strictly by FIFO arrival order**
+(`check_blast.py:_consume_after_queue`). One unconsumed entry offsets every
+later pairing by one, permanently. `run_pilot.sh` never isolated the queue, so
+every round since the first shared `~/.prompt-tdd/blast-radius-after-queue`.
+
+The proof is airtight and was sitting on disk: the shared queue held **three
+unconsumed entries**, two of them timestamped 08:32 carrying `100.0` — which can
+only have come from round `20260827-083202`'s two floor runs, the only runs at
+that minute. Those runs were scored `108.25`. Their own entries were still in
+the queue while I read them. They had been scored against a tree left behind by
+an earlier run that patched the fixture through `Monitor` (F-32).
+
+The same round shows the offset in its cleanest possible form: **l0 is inverted
+between arms.** The floor "fixed the bug" (1.00) while reaching zero dependents
+and asking nothing; the two ceilings "failed to fix it" (0.00) while reaching 11
+and 12. Each was scored against the other's tree.
+
+**The mitigation already existed and was never wired in.**
+`BLAST_AFTER_QUEUE_DIR` is read by both `after_hook.py` and `check_blast.py` at
+import time, and `README.md` documents this exact export as the fix, naming this
+exact hazard: *"one entry left behind by a Ctrl-C'd prior invocation shifts every
+subsequent pairing by one, permanently."* A hazard can be fully understood,
+documented, and given a working mitigation, and still fire — because nothing
+made the driver use it. **A mitigation that is opt-in is a mitigation that is
+off.**
+
+**Why it survived the whole study.** Nearly every *tooled* run fixes the bug, so
+an offset among runs that all produce the same tree pairs wrong values that
+happen to be **equal**. Only an arm whose runs differ from each other can expose
+it — which is why the floor found it, on the day the floor was added. Same shape
+as F-32, same session, and the reason that shape is now stated once in
+`RESULTS.md`.
+
+**Blast radius, stated precisely because it is narrower than it first looks.**
+`l0_fix_correct`, `l3_silent_changes` and the `broken-after-tree` verdict all
+read the golden pair and are unusable wherever the offset was non-zero — this
+puts the published "100% fix rate" and every silent-change count in doubt. **L1
+and L2 are computed from the trace and are untouched**, which is every headline
+reach finding in `RESULTS.md`.
+
+**Fix:** `prompt-engineering:163bdde`, patch-id `9874f1fbd20a6e66`. Private
+per-round queue, plus a drain check after **every arm** rather than once at the
+end — isolation alone would have left a within-round offset exactly as silent as
+the cross-round one, and the per-arm check names which arm first went out of
+step.
+
+**Severity:** high — silent, plausible-looking wrong values on two published
+metrics, with no error anywhere.
+
+**Status:** fixed-verified
+
+**Valid:** dated 2026-08-27
+
+**Rests on:** F-32, same session — the 108.25 tree the offset served up was
+produced by that entry's `Monitor` leak.
+
+## W-24 — The control arm found two instrument defects instead of the effect it was added to measure — because it was the only arm whose runs differed
+
+**Observed:** 2026-08-27. Asked to add the Opus hinted ceilings and an Opus
+floor, I justified the floor as testing a claim about *model priors*: "is this
+task answerable without tools, for a stronger model? Sonnet's 0.00 does not
+transfer." It ran once and found **two instrument defects instead** (F-32,
+F-33), both of which had been silently corrupting the study from the start.
+
+**Pattern:** **A control arm is the only instrument that can detect a broken
+control mechanism, and it detects it by being the arm whose runs DIFFER from
+each other.**
+
+The mechanism is worth stating precisely, because it says *which* control to add
+and not merely "add controls":
+
+> Nearly every *tooled* run in this eval behaves the same way — reaches many
+> dependents, fixes the bug. So a broken instrument that pairs, denies, or scores
+> the wrong thing pairs values that **happen to be equal**, and produces output
+> indistinguishable from correct. The defect is invisible precisely *because* the
+> arms agree. An arm that produces a **different** value is the only probe that
+> can separate them.
+
+Both defects fit exactly. The FIFO queue offset (F-33) served every run some
+earlier run's tree — invisible while every tree was the fixed one, glaring the
+moment a floor run left the tree *unfixed*. The deny-list hole (F-32) let any
+model reach a shell — invisible while Sonnet never reached for `Monitor`, glaring
+the moment Opus did.
+
+**Counterfactual, and it is concrete.** Without this arm, the two ceilings would
+have run, produced clean-looking numbers, and I would have published a completed
+2×2×2 with a correct headline (the hint *is* additive) resting on a "100% fix
+rate" that was partly other runs' trees, and against a floor of 0.00 that
+recorded Sonnet's incuriosity rather than any enforced denial. Both defects would
+have survived into every future round, and the fix rate is exactly the kind of
+number that gets quoted without its provenance.
+
+**What I would have got wrong without checking.** Twice in one session the
+obvious cause was the wrong one, and both were cheap to check:
+
+1. Gate 5 failing read as "Opus answers from priors" — a *finding*. The
+   transcripts showed a shell. Not a model fact at all.
+2. The deny-list omission read as version drift (CLI 2.1.245 → 2.1.247 since the
+   list was derived). `Monitor` is in **both** bundles. The real cause was an
+   untested inference written at the same confidence as a verified fact.
+
+**Confirming data points:**
+1. F-32 and F-33, this session — two independent defects, one arm, one run.
+2. W-23, this session — same underlying shape one level up: re-executing found
+   what re-reading structurally could not.
+
+**Impact:** high — the arm cost ~$1 and invalidated two published metrics before
+they were quoted again.
+
+**Promote-when:** a second session where a control arm surfaces an instrument
+defect rather than the effect it was added to measure. At two, promote to the
+`eval-design` memory as: *"add the control whose runs will DIFFER from the
+others — an instrument that is broken in a way all your arms share cannot be
+detected by any of them."*
+
+**Status:** validated — single session, two independent defects found and fixed.
+
+**Valid:** dated 2026-08-27
+
+**Rests on:** F-32 and F-33, same session — this win is their shared
+counterfactual, not independent evidence.
 
 ## Template for new entries
 
