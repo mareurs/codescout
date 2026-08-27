@@ -1,5 +1,5 @@
 ---
-id: 71e099a2bfb8ad98
+id: '71e099a2bfb8ad98'
 kind: bug
 status: fixed
 title: 'BUG: 17 librarian entry points answer a required-param miss with a bare serde field name — and on artifact(update) that gate pre-empts an auto-correction written for exactly that call'
@@ -15,7 +15,7 @@ owner: marius
 related:
 - docs/adrs/2026-08-27-negative-results-name-their-scope.md
 severity: medium
-unverified: 'Not live-verified through a running server: needs `cargo rb` + `/mcp`, then one call per routed action with its required params withheld. Gate-green and mutation-verified only — though the bare BEHAVIOUR was measured live on the pre-fix binary for all 17 entry points, so what is unverified is the repair, not the diagnosis. Out of scope and deliberately not done: the 8 already-adequate sites name their action but carry no `with_hint` corrected call, so they satisfy clause 2 only partly.'
+unverified: 'Out of scope and deliberately not done: the 8 already-adequate sites name their action but carry no `with_hint` corrected call, so they satisfy clause 2 only partly. The 9 repaired sites are live-verified (2026-08-28) — see § Tests.'
 ---
 
 ## Summary
@@ -364,6 +364,28 @@ Mutation-verified by reverting `graph` to bare, which failed naming that exact s
 
 Gate: `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`,
 `cargo test` — **4738 passed, 0 failed**.
+
+**Live-verified 2026-08-28** on a rebuilt binary, all three R-89 axes checked before believing
+any of it. *Build*: `target/release/codescout` built 01:17:50, carrying all nine routed strings
+(`strings -a | grep -c`, positive control `was given nothing to change` → 4, so the instrument
+works). *Distribution*: `~/.cargo/bin/codescout` is a symlink resolving to that same inode — the
+served copy is the built copy, not a stale install. *Process*: the serving MCP started 01:18:05,
+fifteen seconds **after** the build, so it loaded it.
+
+Then the only test that actually settles it — nine live calls through the running server, one per
+routed action with its required params withheld. All nine returned `ok: false` with the action
+named and a concrete corrected call; none returned a bare serde message. Issued as one parallel
+block, which re-confirms the finding under § *One open question from this file, now settled*: nine
+simultaneous errors, no sibling aborted.
+
+One wrong-predicate zero on the way, worth recording because this file's own `related` ADR is
+about exactly it. A binary probe for `requires 'rel_path' and 'title'` returned **0** — not
+because `create` had failed to ship, but because the real message is `requires 'rel_path',
+'kind', 'title' and 'body'`. The passing positive control is what said *the instrument is fine,
+your predicate is wrong*; without it, the honest-looking conclusion was "one site didn't make
+it." A census is then only as good as the strings you guessed, so the count was redone by
+extracting the messages rather than testing for them: `strings -a $BIN | grep -oE 'artifact(_[a-z]+)?\(action=…\) requires [^:]*' | sort -u` → exactly **9**, matching the nine patched sites
+with none missing and none spurious.
 ## Tests added
 
 None — not yet fixed. When the first slice lands it needs at least:
