@@ -186,7 +186,7 @@ async fn workflow_project_memory_config() {
     // embedder from ambient config — on a machine with a real local embedder +
     // Qdrant configured in the shell environment, that silently cross-embeds this
     // test's fixture content into the real, shared `memories` collection.
-    // docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md
+    // docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md
     //
     // `InMemorySemanticMemoryStore` / `set_..._for_test` (the seam used elsewhere
     // in the unit-test suite) are unreachable here: the store's test double is

@@ -66,7 +66,7 @@ async fn test_ctx_with_project_raw() -> (tempfile::TempDir, ToolContext) {
     )
 }
 
-/// Regression for docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md:
+/// Regression for docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md:
 /// `test_ctx_with_project_raw()` resolves its store/embedder from ambient
 /// config, and on a machine with a real local Qdrant + embedder configured in
 /// the shell environment, that silently cross-embeds fixture memories into the
@@ -94,7 +94,7 @@ async fn test_ctx_with_project() -> (tempfile::TempDir, ToolContext) {
     (dir, ctx)
 }
 
-/// Regression for docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md:
+/// Regression for docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md:
 /// the default `test_ctx_with_project()` must resolve a store/embedder that is
 /// pre-installed and deterministic, never one resolved from ambient config —
 /// on a machine with a real local Qdrant + embedder configured in the shell
@@ -1909,7 +1909,7 @@ async fn memory_read_sections_filter_private_integration() {
 /// Two-project workspace (`test` at the root, `svc` beneath it), with the
 /// semantic store and embedder isolated exactly as `test_ctx_with_project` does —
 /// a workspace fixture must not become the ambient-resolution hole that
-/// `docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md`
+/// `docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md`
 /// closed.
 async fn workspace_ctx_with_sub_project() -> (tempfile::TempDir, ToolContext) {
     use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;

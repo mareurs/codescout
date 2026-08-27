@@ -155,7 +155,7 @@ directory and is unaffected — it is only `recall` that cannot see it.
 - `docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
   same family, different axis: that one is disk-vs-disk (two surfaces reading two
   *directories*); this one is disk-vs-store
-- `docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md` — the
+- `docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md` — the
   other live source of junk in the same collection
 - `docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md` —
   `index(action="status")` reports `ok`/`up_to_date` for a store `verify` calls incomplete

@@ -5881,7 +5881,7 @@ Compare the two. Nothing cheaper works, and every unaided attempt in this sessio
 **Observed:** 2026-08-26, ~22:45–23:10. Three Claude sessions committing to one
 `experiments` checkout simultaneously — this one, `codescout-77`, and **a third session
 neither of us has been able to identify** (mid-fix on the memory-pollution bug
-`1275a6ada95c7182`, "91.5% of the live memories collection is test-fixture data").
+`1fbfc9b2dd6cb376`, "91.5% of the live memories collection is test-fixture data").
 **Read both corrections before this entry's title.** The title overclaims: the practice
 held against a peer's *other* files and failed against a *shared* one, three minutes later
 and in this very ledger (Correction 2). Correction 1 strikes a third-session name this
