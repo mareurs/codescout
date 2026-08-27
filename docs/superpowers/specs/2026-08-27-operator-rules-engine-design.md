@@ -106,9 +106,9 @@ Required fields:
 | `**Shape:**` | `imperative` \| `guard` \| `procedure` \| `contract` | measured to matter; § 2 |
 | `**Covers:**` | short kebab-case failure-mode slug | Gate 3(a) compares failure modes; without a field to compare, non-overlap is unenforceable. Added 2026-08-27 during planning — the first draft stated the gate and omitted the field it reads. |
 | `**Serves:**` | selector, `triggered` only | grammar borrowed from § 4 |
-| `**Evidence:**` | `measured: <arm> <base>% → <shipped>% (n=N)` \| `unmeasured` | a law and a hunch must not read alike |
+| `**Evidence:**` | `measured: <arm> <base>% -> <shipped>% (n=N)` \| `unmeasured` | a law and a hunch must not read alike |
 | `**Rests on:**` | citation to the arm, audit entry, or observation | existing ledger field |
-| `**Valid:**` | `invariant` \| `dated <ISO>` \| `conditional — <event>` | existing decay vocabulary |
+| `**Valid:**` | `invariant` \| `dated <ISO>` \| `conditional — <event>` | existing decay vocabulary — recorded in the ledger for human review and `doctor`-style tooling; the Phase 1 engine does not parse or model this field (not on `Rule`) |
 | `**Status:**` | `active` \| `candidate` \| `retired` | disposition |
 
 `**Evidence:** unmeasured` is a first-class value, not an omission. It is what makes the

@@ -7,8 +7,22 @@ use crate::util::markdown_fence::FenceState;
 /// Local rather than `librarian::frontmatter::parse`: that module is behind
 /// `#[cfg(feature = "librarian")]` (`src/lib.rs:32`) and this parser discards the
 /// frontmatter, so depending on it would gate the compiler on a feature it does
-/// not use. An unterminated block is returned whole and harmlessly — a `---` line
-/// matches no entry heading.
+/// not use.
+///
+/// Bounded (X5): a leading `---` is treated as the *open* of a frontmatter block
+/// only if a bare `---` line closes it within [`FRONTMATTER_LINE_CAP`] lines AND
+/// before the first Markdown heading (`is_heading_line`) — real frontmatter is a
+/// short flat key/value block and never contains a heading. If either bound is
+/// crossed with no closing `---` found, the leading `---` was never frontmatter
+/// at all (a thematic break, a `---` section separator — this repo's own docs,
+/// including the spec this ledger cites, use `---` that way throughout) and the
+/// whole document, that line included, is returned unchanged. The previous
+/// version of this scan was unbounded: it kept walking past a `---` separator
+/// into whatever section followed, silently eating every entry in between (see
+/// `a_leading_dash_separator_used_as_a_section_break_does_not_eat_the_first_entry`
+/// below).
+const FRONTMATTER_LINE_CAP: usize = 50;
+
 fn strip_frontmatter(doc: &str) -> &str {
     let Some(rest) = doc
         .strip_prefix("---\n")
@@ -17,9 +31,16 @@ fn strip_frontmatter(doc: &str) -> &str {
         return doc;
     };
     let mut idx = 0usize;
-    for line in rest.split_inclusive('\n') {
-        if line.trim_end_matches(['\r', '\n']) == "---" {
+    for (i, line) in rest.split_inclusive('\n').enumerate() {
+        if i >= FRONTMATTER_LINE_CAP {
+            break;
+        }
+        let content = line.trim_end_matches(['\r', '\n']);
+        if content == "---" {
             return &rest[idx + line.len()..];
+        }
+        if is_heading_line(content) {
+            break;
         }
         idx += line.len();
     }
@@ -431,6 +452,50 @@ entry_high_water_OP: 2
         assert_eq!(
             rules[1].imperative, "Never dispatch an implementer or reviewer subagent on Haiku.",
             "the malformed OP-3 heading must still close OP-2's draft"
+        );
+    }
+
+    /// X5 regression. Bug: `strip_frontmatter` used to scan unbounded for the
+    /// next bare `---` line, so a ledger that opens with `---` and later uses
+    /// `---` as a section separator (this repo's own docs do, including the
+    /// spec this ledger cites) had everything between the two swallowed as
+    /// "frontmatter" and silently dropped — OP-1 vanished, `compile` exited
+    /// 0, and the manifest listed only OP-2. The fix stops the scan at the
+    /// first Markdown heading (real frontmatter never contains one) and
+    /// within `FRONTMATTER_LINE_CAP` lines; the leading `---` is then left
+    /// alone as ordinary body text, which `parse_ledger` already ignores
+    /// (it is neither a heading nor a `**Key:** value` line).
+    #[test]
+    fn a_leading_dash_separator_used_as_a_section_break_does_not_eat_the_first_entry() {
+        let doc = "---\n\n## OP-1 — First\n\n\
+                   **Imperative:** First.\n**Binding:** always\n**Shape:** imperative\n\
+                   **Covers:** mode-1\n**Evidence:** unmeasured\n**Status:** active\n\n\
+                   ---\n\n## OP-2 — Second\n\n\
+                   **Imperative:** Second.\n**Binding:** always\n**Shape:** imperative\n\
+                   **Covers:** mode-2\n**Evidence:** unmeasured\n**Status:** active\n";
+        let rules = parse_ledger(doc).unwrap();
+        let ids: Vec<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["OP-1", "OP-2"],
+            "the leading `---` is a section break, not YAML frontmatter — both rules \
+             must survive: {rules:#?}"
+        );
+    }
+
+    #[test]
+    fn strip_frontmatter_still_strips_well_formed_frontmatter() {
+        let doc = "---\nkind: tracker\nstatus: active\n---\n\nBody.\n";
+        assert_eq!(strip_frontmatter(doc), "\nBody.\n");
+    }
+
+    #[test]
+    fn strip_frontmatter_leaves_a_leading_dash_separator_alone_when_a_heading_precedes_the_close() {
+        let doc = "---\n\n## Not frontmatter\n\nBody.\n\n---\n\nMore.\n";
+        assert_eq!(
+            strip_frontmatter(doc),
+            doc,
+            "no bare `---` closes before the heading, so nothing is stripped"
         );
     }
 }

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{bail, Result};
 
+use crate::operator_rules::render::{BEGIN, END};
 use crate::operator_rules::rule::{Binding, Rule};
 
 /// Gate 6 — every rule has a disposition and a coherent binding.
@@ -27,9 +28,38 @@ pub fn validate(rules: &[Rule]) -> Result<()> {
             ),
             _ => {}
         }
+        // X6: `Rule::finish`'s `need` closure only checks `Option::is_some` — a
+        // field present but blank (`**Imperative:**` with nothing after it)
+        // still satisfies it. This is the non-blank sweep for the fields that
+        // matter most: a rule with no `covers` cannot be deduplicated by
+        // failure mode (Gate 3a), and one with no `imperative`/`title` compiles
+        // a block that asserts delivery of a rule with no text.
         if r.covers.trim().is_empty() {
             bail!("{}: **Covers:** must name a failure mode", r.id);
         }
+        if r.imperative.trim().is_empty() {
+            bail!("{}: **Imperative:** must not be blank", r.id);
+        }
+        if r.title.trim().is_empty() {
+            bail!("{}: title must not be blank", r.id);
+        }
+        // X1 (second half): a rule whose rendered text contains the
+        // operator-rules marker corrupts every profile it is spliced into —
+        // the block boundary stops being unambiguous once the marker text can
+        // also occur *inside* the block's own content. Reject it here, before
+        // it ever reaches `render` or `splice`.
+        reject_marker(&r.id, "**Imperative:**", &r.imperative)?;
+        reject_marker(&r.id, "title", &r.title)?;
+    }
+    Ok(())
+}
+
+fn reject_marker(id: &str, field: &str, value: &str) -> Result<()> {
+    if value.contains(BEGIN) {
+        bail!("{id}: {field} contains the operator-rules BEGIN marker");
+    }
+    if value.contains(END) {
+        bail!("{id}: {field} contains the operator-rules END marker");
     }
     Ok(())
 }
@@ -95,5 +125,56 @@ mod tests {
         let err = validate(&[r]).unwrap_err().to_string();
         assert!(err.contains("OP-1"), "names the rule: {err}");
         assert!(err.contains("Covers"), "names the field: {err}");
+    }
+
+    #[test]
+    fn a_blank_imperative_is_refused() {
+        let mut r = rule("OP-1", Binding::Always, &[]);
+        r.imperative = "   ".into();
+        let err = validate(&[r]).unwrap_err().to_string();
+        assert!(err.contains("OP-1"), "names the rule: {err}");
+        assert!(err.contains("Imperative"), "names the field: {err}");
+    }
+
+    #[test]
+    fn a_blank_title_is_refused() {
+        let mut r = rule("OP-1", Binding::Always, &[]);
+        r.title = "".into();
+        let err = validate(&[r]).unwrap_err().to_string();
+        assert!(err.contains("OP-1"), "names the rule: {err}");
+        assert!(err.contains("title"), "names the field: {err}");
+    }
+
+    /// X1's second half — a rule whose imperative quotes the real BEGIN marker
+    /// must be refused before it ever reaches `render`/`splice`, where it would
+    /// make `compile` non-idempotent.
+    #[test]
+    fn an_imperative_containing_the_begin_marker_is_refused() {
+        use crate::operator_rules::render::BEGIN;
+        let mut r = rule("OP-1", Binding::Always, &[]);
+        r.imperative = format!("Quote the marker: {BEGIN}");
+        let err = validate(&[r]).unwrap_err().to_string();
+        assert!(err.contains("OP-1"), "names the rule: {err}");
+        assert!(err.contains("BEGIN"), "names the marker: {err}");
+    }
+
+    #[test]
+    fn an_imperative_containing_the_end_marker_is_refused() {
+        use crate::operator_rules::render::END;
+        let mut r = rule("OP-1", Binding::Always, &[]);
+        r.imperative = format!("Quote the marker: {END}");
+        let err = validate(&[r]).unwrap_err().to_string();
+        assert!(err.contains("OP-1"), "names the rule: {err}");
+        assert!(err.contains("END"), "names the marker: {err}");
+    }
+
+    #[test]
+    fn a_title_containing_a_marker_is_refused() {
+        use crate::operator_rules::render::BEGIN;
+        let mut r = rule("OP-1", Binding::Always, &[]);
+        r.title = BEGIN.to_string();
+        let err = validate(&[r]).unwrap_err().to_string();
+        assert!(err.contains("OP-1"), "names the rule: {err}");
+        assert!(err.contains("title"), "names the field: {err}");
     }
 }

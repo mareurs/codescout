@@ -80,13 +80,34 @@ pub fn compile(ledger: &str, profiles: &OperatorProfiles) -> Result<Vec<PathBuf>
     let block = resident_block(ledger)?;
     let mut written = Vec::new();
     for path in &profiles.paths {
-        let doc = std::fs::read_to_string(path)
-            .with_context(|| format!("reading profile {}", path.display()))?;
-        let next = profiles::splice(&doc, &block)?;
-        if next != doc {
-            crate::util::fs::atomic_write(path, &next)
-                .with_context(|| format!("writing profile {}", path.display()))?;
-            written.push(path.clone());
+        let step: Result<()> = (|| {
+            let doc = std::fs::read_to_string(path)
+                .with_context(|| format!("reading profile {}", path.display()))?;
+            let next = profiles::splice(&doc, &block)
+                .with_context(|| format!("splicing profile {}", path.display()))?;
+            if next != doc {
+                crate::util::fs::atomic_write(path, &next)
+                    .with_context(|| format!("writing profile {}", path.display()))?;
+                written.push(path.clone());
+            }
+            Ok(())
+        })();
+        // X4 (partial-apply half): compile is idempotent, so a re-run recovers —
+        // but the operator sees only the LAST profile's error unless the ones
+        // already written before it are named here.
+        if let Err(e) = step {
+            let already = if written.is_empty() {
+                "none".to_string()
+            } else {
+                written
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            return Err(e.context(format!(
+                "profiles already written before this error: {already}"
+            )));
         }
     }
     Ok(written)
@@ -106,15 +127,44 @@ pub fn check(ledger: &str, profiles: &OperatorProfiles) -> Result<Vec<Drift>> {
     for path in &profiles.paths {
         let doc = std::fs::read_to_string(path)
             .with_context(|| format!("reading profile {}", path.display()))?;
-        let Some(found) = profiles::extract_block(&doc) else {
-            drift.push(Drift {
-                path: path.clone(),
-                reason: format!(
-                    "no generated block; expected rules: {}",
-                    want_ids.join(", ")
-                ),
-            });
-            continue;
+        let found = match profiles::extract_block(&doc) {
+            profiles::BlockScan::Absent => {
+                drift.push(Drift {
+                    path: path.clone(),
+                    reason: format!(
+                        "no generated block; expected rules: {}",
+                        want_ids.join(", ")
+                    ),
+                });
+                continue;
+            }
+            profiles::BlockScan::Malformed => {
+                // X4: a distinct diagnosis from "no generated block" — `compile` will
+                // refuse this exact profile (`splice`'s unterminated-BEGIN error), so
+                // reporting it as ordinary "missing" drift would send the operator
+                // toward a remedy that cannot succeed.
+                drift.push(Drift {
+                    path: path.clone(),
+                    reason: "a BEGIN operator-rules marker has no matching END marker; \
+                             compile will refuse to write this profile until it is \
+                             repaired by hand"
+                        .to_string(),
+                });
+                continue;
+            }
+            profiles::BlockScan::Duplicate(_) => {
+                // X2: surfaced as drift rather than silently comparing against only
+                // the first block found.
+                drift.push(Drift {
+                    path: path.clone(),
+                    reason: "a second BEGIN operator-rules marker was found after the \
+                             first block ends; compile will refuse to write this \
+                             profile until the duplicate is removed by hand"
+                        .to_string(),
+                });
+                continue;
+            }
+            profiles::BlockScan::Present(found) => found,
         };
         let got_ids = manifest_of(found);
         if got_ids != want_ids {
