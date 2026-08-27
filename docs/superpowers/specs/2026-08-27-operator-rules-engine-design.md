@@ -104,6 +104,7 @@ Required fields:
 | `**Imperative:**` | one sentence, imperative mood | the delivered text; see § 2 |
 | `**Binding:**` | `always` \| `triggered` | selects the delivery path (§ 3, § 4) |
 | `**Shape:**` | `imperative` \| `guard` \| `procedure` \| `contract` | measured to matter; § 2 |
+| `**Covers:**` | short kebab-case failure-mode slug | Gate 3(a) compares failure modes; without a field to compare, non-overlap is unenforceable. Added 2026-08-27 during planning — the first draft stated the gate and omitted the field it reads. |
 | `**Serves:**` | selector, `triggered` only | grammar borrowed from § 4 |
 | `**Evidence:**` | `measured: <arm> <base>% → <shipped>% (n=N)` \| `unmeasured` | a law and a hunch must not read alike |
 | `**Rests on:**` | citation to the arm, audit entry, or observation | existing ledger field |
