@@ -207,7 +207,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // counters were discarded, and `backfill_commits` was skipped — while the
     // catalog writes for earlier targets had already committed. The caller then saw
     // an error and could not tell which half had happened.
-    // docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+    // docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
     //
     // Same shape as `backfill_errors` above, deliberately: that field exists
     // because F-5 swallowed a failure silently, and the remedy — keep going, report
@@ -277,7 +277,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // (including a clean 0/[] run, which is what clears a stale marker left by
     // an earlier failure) — never when `want_embeddings` is false, since a run
     // with no embedder configured has no evidence about embed health either way.
-    // docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+    // docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
     if want_embeddings {
         let cat = ctx.catalog.lock();
         let embed_error_sample: Vec<&String> = embed_errors.iter().take(20).collect();
@@ -429,7 +429,7 @@ mod tests {
     /// so the assertions below pin the real contract: catalog work completes for
     /// EVERY target, and the embedding failure is reported rather than fatal.
     ///
-    /// `docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`
+    /// `docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`
     #[tokio::test]
     async fn an_embed_failure_still_walks_every_target_and_reports_it() {
         use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
@@ -512,7 +512,7 @@ mod tests {
         );
     }
 
-    /// Step 2 of docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:
+    /// Step 2 of docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:
     /// the envelope's `embed_error_count` does not outlive the call — a later
     /// `artifact(action="find")` has no way to know the last refresh was partial.
     /// This pins the durable half: a failed embed run must persist a marker in

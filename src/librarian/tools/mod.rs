@@ -157,7 +157,7 @@ impl TestToolContextBuilder {
     /// says so: *"`TestToolContextBuilder` has no `with_embedding` setter today"*.
     /// That gap is what let a bare `?` on the embed call sit in a target loop
     /// unnoticed
-    /// (`docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`).
+    /// (`docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md`).
     ///
     /// Both are needed together: the embed block is gated on
     /// `if let (Some(svc), Some(store))`, so setting one alone silently skips it —

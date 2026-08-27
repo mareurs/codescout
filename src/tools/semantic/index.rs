@@ -1000,7 +1000,7 @@ impl crate::tools::Tool for IndexVerify {
         // action of its own, for two reasons: a new action costs advertised
         // tool-surface bytes against a budget that is already at its cap, and a
         // SECOND health surface is the thing
-        // docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+        // docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
         // asks us to stop creating.
         //
         // Degrades rather than propagates: the code index is this tool's primary

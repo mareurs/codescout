@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-26
 closed:
 severity: high
@@ -210,6 +210,62 @@ freshness, embedding freshness, and queryability into one state model across
 
 **Verified:** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 `cargo test --lib` → 4414 passed, 0 failed, 8 ignored.
+
+### Progress 2026-08-27 (later) — step 3 decided and closed
+
+- **SHA:** `3207819b` (`experiments`)
+- **patch-id:** `b997adbbce0f8c3ba60af36aa351f66256a315d8`
+
+`fix(semantic_search): warn when the index it searched is known incomplete`.
+
+Step 3 was posed as a **decision**, not an edit — "deciding whether that remains two
+facts a caller must know to check separately, or becomes one queryable health surface".
+Here is the decision, and the measurement it rests on.
+
+**The two markers stay two.** No shared abstraction was built and none should be. Read
+side by side they have almost nothing in common beyond shape: different stores (a JSON
+sidecar per project root vs a SQLite `catalog_meta` row per catalog), different scopes
+(one project vs every repo the catalog spans), different write paths, and no existing
+dependency between `retrieval` and `librarian` to hang a shared trait on. Extracting one
+would couple two subsystems for the sake of ~15 lines of near-duplicate logic.
+
+**But the framing hid the part that WAS an edit, and it was the part that mattered.**
+The cost of "two facts to check separately" is not that there are two facts. It is that
+only one of them **self-reported**:
+
+| marker | written by | read by | reaches a caller who did not ask? |
+|---|---|---|---|
+| `catalog_meta.last_reindex_embed_error_count` | `librarian(reindex)` | `artifact(find)`'s `build_hints` | **yes** — on every find |
+| `IndexState.last_sync_skipped_count` | `sync_project` | `index(action="status")` | **no** — only if asked |
+
+`semantic_search`, the tool that actually *consumes* the code index, surfaced neither.
+So the health signal existed, was durable, was correct — and sat where nobody reads it.
+You learned your index was incomplete only if you thought to run a status command, which
+is exactly what you do not think to do when a search returned plausible-looking results.
+An empty result set over a partial index reads as *"the code does not contain this"*.
+
+`3207819b` closes that: `index_skip_note` reads the same marker and stamps
+`index_degraded_note` onto both search return paths, including the worktree branch that
+would otherwise have been the one search shape that never reports it. It couples nothing
+new — `semantic_search` already reads `read_index_state` for worktree classification.
+
+The note is a **string** on purpose, so it joins `format_semantic_search`'s existing
+head-placed `state_lines` list rather than needing new rendering: that list exists
+because `truncate_compact` keeps only the prefix, so anything after the result rows is
+cut on exactly the searches large enough to need it. The sample stays in
+`index(action="status")`, the surface built to carry it.
+
+**3 tests**, all verified to fail under a two-way revert while the pre-existing
+head-placement test correctly kept passing. Two assert the **rendered string** rather
+than the JSON, and one covers the zero-results case specifically — a field no formatter
+renders is inert and reads as done, a failure that shipped once already the same day
+(`21507a26`).
+
+**Verified:** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
+→ **4600 passed, 0 failed**.
+
+With both markers now self-reporting, no caller has to know to check two places, which
+is what step 3 was actually protecting against. Closing.
 ## Tests added
 
 `an_embed_failure_still_walks_every_target_and_reports_it`
@@ -269,7 +325,14 @@ returns an error, rather than an envelope, as "catalog state unknown".
 
 ## Resume
 
-**Update 2026-08-27:** steps 1 and 2 are both shipped (`69e78a2f`, `050ec61a`).\nWhat remains is step 3 only — a **design decision, not an edit** — so do not\nstart by opening `reindex.rs` or `find.rs` again for this bug; both are done.\n\nReconcile catalog freshness, embedding freshness, and queryability into one\nstate model. Right now there are **two** independently-written, independently-\nread degraded markers, not one:\n\n- Code index: `IndexState.last_sync_skipped_count` / `_sample`\n  (`src/retrieval/index_state.rs`, written by `sync_project`, read by\n  `index(action=\"status\")`) — shipped fixing\n  `docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`.\n- Librarian catalog: `catalog_meta.last_reindex_embed_error_count` / `_sample`\n  (`src/librarian/catalog/gc.rs` get/set, written by `librarian(action=\"reindex\")`,\n  read by `artifact(action=\"find\")`'s `build_hints`) — shipped by step 2 above.\n\nBoth now exist, both work, and both were deliberately built as parallel\nimplementations of the same shape rather than one shared abstraction — that\nwas the right call for shipping each independently (different store, different\nwrite path, no shared code to extract without coupling two subsystems that\ndon't otherwise depend on each other). **Step 3 is deciding whether that\nremains two facts a caller must know to check separately, or becomes one\nqueryable health surface** — and if the latter, where it lives (a shared\ntrait/module both `sync_project` and `reindex.rs`'s `call` write through, vs.\na single aggregating tool that reads both `catalog_meta` and the `IndexState`\nsidecar). Read both shipped implementations before designing this — they are\nnow the two data points step 3 has to unify, not precedents to repeat a third\ntime.\n
+Nothing outstanding. All three steps are done: 1 (`69e78a2f`) stopped the abort,
+2 (`050ec61a`) persisted the durable marker, 3 (`3207819b`) decided the two-markers
+question and closed the reporting gap it was really about.
+
+The one thing deliberately **not** done, with its reasoning recorded above so it is not
+re-opened by default: no shared freshness abstraction across `retrieval` and `librarian`.
+If a third subsystem ever grows the same marker, that is the moment to revisit — three
+instances is a pattern, two is a coincidence, and the coupling cost is real either way.
 ## References
 
 - GitHub issue #19 — <https://github.com/mareurs/codescout/issues/19>

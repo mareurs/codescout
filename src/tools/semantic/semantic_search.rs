@@ -859,7 +859,7 @@ fn search_response(hits: &[crate::retrieval::search::Hit], limit: usize) -> Valu
 /// Presence means a problem; absent when clean, never `count: 0`. Same
 /// convention as `index(status)`'s `last_sync_skipped` and `model_mismatch`.
 ///
-/// BUG docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+/// BUG docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
 fn index_skip_note(root: Option<&std::path::Path>) -> Option<String> {
     let st = crate::retrieval::index_state::read_index_state(root?)?;
     if st.last_sync_skipped_count == 0 {
@@ -1470,7 +1470,7 @@ mod worktree_search_tests {
     /// no sidecar at all, is one a reader learns to ignore, and it would look
     /// correct in the positive case alone.
     ///
-    /// BUG docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+    /// BUG docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
     #[test]
     fn index_skip_note_fires_only_when_the_last_sync_actually_skipped() {
         let tmp = tempfile::tempdir().unwrap();

@@ -343,7 +343,7 @@ fn build_hints(
     }
 
     // Read the durable degraded marker `reindex.rs` persists into `catalog_meta`
-    // (see docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+    // (see docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
     // step 2). Global, not scope-filtered — the marker is one call's aggregate
     // across every target that call walked, not a per-artifact fact, so it
     // surfaces unconditionally rather than only under Project/Repo scope like
@@ -1566,7 +1566,7 @@ mod tests {
         );
     }
 
-    /// Step 2 of docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:
+    /// Step 2 of docs/issues/archive/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:
     /// the `catalog_meta` marker `reindex.rs` now persists (see
     /// `librarian::tools::reindex::tests::an_embed_failure_persists_a_durable_catalog_meta_marker`)
     /// is dead weight until something reads it back. `find` is the surface a caller
