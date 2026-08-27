@@ -1,19 +1,20 @@
 ---
 id: ad610ff996e932fa
 kind: bug
-status: open
+status: fixed
 title: 'BUG: artifact(get) reports a doubly-defined heading as `heading_missing`, in a response whose own heading map lists it twice'
 tags:
 - librarian
 - artifact-get
 - error-diagnosis
 - headings
-closed: null
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 related:
 - docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md
 severity: medium
+unverified: Gate-verified only. The serving MCP binary predates 25fe3fb5, so heading_ambiguous and artifact(get, occurrence=N) have not been exercised over the wire. Probe named in Resume; archive after it runs.
 ---
 
 # BUG: artifact(get) reports a doubly-defined heading as `heading_missing`, in a response whose own heading map lists it twice
@@ -117,7 +118,32 @@ response would have answered it immediately, had anything pointed at it.
 
 ## Fix
 
-*Plan; not implemented.*
+**Shipped 2026-08-27** — `25fe3fb5` (`experiments`), patch-id
+`95e0f2047c6e29cbee2b38ebb3a9f8041af6268e`. All three steps landed.
+
+The discriminant rides on the **error**, not on its message text: `dup_error` attaches
+`heading_ambiguous` + `occurrences` through `RecoverableError::with_extra`, which already
+existed and is chainable. `find_heading_section` returns the error instead of an `Option`,
+and a new `heading_miss_meta` helper reads the extras back. Parsing the message would have
+worked and would have been wrong — the message is prose and its wording is not a contract.
+
+One thing the plan under-specified: the plural `headings` selector takes **bare strings**,
+so there is nowhere to put a per-member `occurrence`. Resolved by reporting an ambiguous
+member under `headings_ambiguous` (with its line numbers) rather than folding it in with
+the absent ones, and pointing the caller at the singular `heading` + `occurrence` to
+actually read one. The distinction is what the test pins; the reach is what the singular
+form provides.
+
+**A budget gate fired, and paying it improved the change.** `tool_surface_under_budget`
+refused the commit at +193 chars over 56266, with "Do NOT raise the budget — find the
+bytes." The bytes came from this change's own two additions to `artifact`, already the
+largest of the 26 tools at 13249 chars. The principle that settled *which* bytes: a tool
+schema is advertised on **every** request — a fixed tax paid by all callers — while an
+error hint is paid only by the caller who hits the case. So the teaching sentence
+("identical headings admit no distinguishing query") stays in the runtime hint, where it
+already lived, and the schema only names the parameter and its observable effect. It had
+been duplicated into both. Headroom afterwards: **28 chars** — the next schema addition
+hits this gate immediately.
 
 1. Stop discarding the distinction. Have `find_heading_section` return the
    `RecoverableError` (or a small enum) rather than `Option`, so `get.rs:503-511` can tell
@@ -135,14 +161,34 @@ would leave a caller guessing that `occurrence` is even relevant.
 
 ## Tests added
 
-None yet — not implemented. Owed:
+Four, in `src/librarian/tools/get.rs`, each with its mutation control named before the
+run:
 
-- a heading present twice yields `heading_ambiguous` with both line numbers, and **not**
-  `heading_missing` (mutation control: collapsing both to `heading_missing` fails it)
-- a heading present zero times still yields `heading_missing` (guards over-correction)
-- `heading` + `occurrence: 2` returns the second section's bytes
-- the plural `headings` path reports an ambiguous member distinctly from a missing one
+- `duplicate_heading_reports_ambiguous_not_missing` — asserts `heading_ambiguous`, asserts
+  `heading_missing` is **absent**, and asserts both line numbers arrive in document order.
+  The occurrences are checked structurally (length 2, strictly increasing) rather than by
+  literal line number, because the frontmatter-stripping frame is exactly what this bug's
+  sibling is about and hard-coding it would couple the test to the thing still in dispute.
+- `absent_heading_still_reports_missing_not_ambiguous` — the over-correction guard.
+- `heading_with_occurrence_returns_the_named_match` — the reach, not just the report.
+- `multi_heading_selector_separates_ambiguous_from_missing` — the plural path.
 
+The pre-existing `heading_missing_sets_meta_flag` (`get.rs`) still passes unchanged, which
+is the guard that the genuine-miss contract did not move.
+
+**Mutation verification — blast radius predicted before each run, and matched exactly:**
+
+1. Rename the `occurrences` extra at its source (modelling the pre-fix world where the
+   resolver carries no discriminant): the singular and plural ambiguity tests fail; the
+   absent-heading and occurrence tests correctly stay green. The plural failure prints the
+   pre-fix behaviour verbatim — `headings_missing: ["## A", "## Nowhere"]`, the ambiguous
+   member filed as absent.
+2. Pass `None` instead of `a.occurrence`: **only** the occurrence test fails — and the
+   compiler independently flags `field occurrence is never read`, a second signal that the
+   threading is load-bearing rather than decorative.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean, `cargo test`
+4628 passed / 0 failed / 46 ignored.
 ## Workarounds
 
 - Read the `preview.headings` array in the same response — it lists every occurrence with
@@ -154,11 +200,16 @@ None yet — not implemented. Owed:
 
 ## Resume
 
-Change `find_heading_section` (`src/librarian/tools/get.rs:26-30`) to propagate the error
-instead of `.ok()`, then widen the `None` arm at `get.rs:503-511` into two arms. Anchor on
-the existing tests in the same file: `heading_missing_sets_meta_flag` (`get.rs:815`) pins
-the genuine-miss behaviour and must keep passing unchanged.
+**Not live-probed.** The gate is green but the serving MCP binary predates `25fe3fb5`, so
+nothing has exercised `heading_ambiguous` or `artifact(get, occurrence=N)` over the wire.
+After `cargo rb` + `/mcp`, the reproduction in § Reproduction is the probe: `artifact(get,
+id="01291679a5ee4707", heading="### The ask")` must return `heading_ambiguous: true` with
+the lines of all four CAP-entry occurrences, and `occurrence=2` must return the CAP-8 copy.
+That file is a good permanent fixture — its repeated `### The ask` is correct per-entry
+template structure and will not be "fixed" away.
 
+Nothing else outstanding; this file is otherwise complete and can be archived once that
+probe runs.
 ## References
 
 - `src/librarian/tools/get.rs:26-30` — `find_heading_section`, the `.ok()` that erases the distinction
@@ -166,4 +217,3 @@ the genuine-miss behaviour and must keep passing unchanged.
 - `src/librarian/tools/get.rs:815` — `heading_missing_sets_meta_flag`, the genuine-miss test
 - `src/usage/db.rs:288-290` — the comment documenting that `artifact(get)` swallows the miss and stays success
 - `docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md` — the write-surface half, fixed in `164c8bd6`; this is the read surface it did not reach
-
