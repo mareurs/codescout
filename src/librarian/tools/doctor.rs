@@ -295,6 +295,61 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // files predate the rule, and the guide calls those stale instructions rather than debt.
     all_violations.extend(scan_terminal_status_without_fix_anchor(ctx, &cat.conn)?);
 
+    // Ruling 17 for the row-grain checks that carry no per-row state, applied as one
+    // filter over the finished list rather than five scoping blocks.
+    //
+    // The two in-scan precedents scope inside their own loop because they need
+    // something that loop already computed — `scan_artifact_paths` the known-elsewhere
+    // set, the entry-validity family an indegree key. These five need only the row's
+    // own path, so a single filter is both less code and more auditable: the scoped set
+    // is a list you can read in one place instead of five blocks you have to find.
+    //
+    // **`worktree_scoped_row` is deliberately absent, and the omission is the
+    // interesting half.** The discriminator is not "is the finding foreign" but *does
+    // this check's repair write files*:
+    //
+    // - `repair_frontmatter_id` writes to disk. It therefore refuses to run without a
+    //   scope and filters `scan_frontmatter_id_mismatches` to one root (`run_fix`), so
+    //   its REPORT was the outlier — it named rows its own repair declines to touch.
+    // - `fix=reseat_worktree` only re-keys catalog rows. It takes no root and filters by
+    //   none, reseating every unregistered worktree-scoped row in the catalog. Scoping
+    //   its report while the repair stays machine-wide would understate what
+    //   `confirm=true` is about to do — a worse defect than the two rows of noise it
+    //   would remove.
+    //
+    // The remaining row-grain checks (`snapshot_drift`, `params_behind_body`,
+    // `augmentation_declared_but_absent`) report zero findings here today, so they are
+    // left out rather than swept in on an unmeasured assumption — see the bug file's
+    // Resume. `entry_without_definition` IS listed despite reporting zero foreign rows
+    // today: it shares a scan with `ledger_defines_nothing`, and one scan whose two
+    // outputs scope differently is a trap for the next reader.
+    const SCOPED_ROW_CHECKS: &[&str] = &[
+        "frontmatter_id_mismatch",
+        "frontmatter_id_is_not_a_catalog_id",
+        "ledger_defines_nothing",
+        "entry_without_definition",
+        "terminal_status_with_caveat",
+    ];
+    let mut row_checks_scoped_by_project: std::collections::BTreeMap<String, usize> =
+        Default::default();
+    // No active project means no scoping — the same degradation the scans themselves
+    // use, so a config-only caller is never handed a silently empty worklist.
+    if let Some(cp) = ctx.current_project.as_deref() {
+        let git_root = std::slice::from_ref(&cp.git_root);
+        all_violations.retain(|v| {
+            if !SCOPED_ROW_CHECKS.contains(&v.check.as_str()) {
+                return true;
+            }
+            if super::containing_root(git_root, Path::new(&v.path)).is_some() {
+                return true;
+            }
+            *row_checks_scoped_by_project
+                .entry(outside_roots_group(&v.path))
+                .or_insert(0) += 1;
+            false
+        });
+    }
+
     // Catalog health: hidden-row count from the GC lifecycle (Tasks 1-5).
     // Reads happen while the lock is still held — kept minimal, then dropped
     // before computing the summary below.
@@ -458,6 +513,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              repo fire here as unowned, so the metric is not scoped — only the worklist is."
         ));
     }
+    if !row_checks_scoped_by_project.is_empty() {
+        let total_scoped: usize = row_checks_scoped_by_project.values().sum();
+        let n_projects = row_checks_scoped_by_project.len();
+        hint_parts.push(format!(
+            "{total_scoped} row-grain finding(s) (frontmatter_id_mismatch / \
+             frontmatter_id_is_not_a_catalog_id / ledger_defines_nothing / \
+             entry_without_definition / terminal_status_with_caveat) across {n_projects} other \
+             project root(s) were scoped OUT of this report — see \
+             catalog_health.row_checks_scoped_by_project. worktree_scoped_row is deliberately NOT \
+             scoped: fix=reseat_worktree takes no root and reseats every unregistered row in the \
+             catalog, so narrowing its report would understate what confirm=true is about to do."
+        ));
+    }
     if hidden_rows > 0 {
         hint_parts.push(format!(
             "{hidden_rows} row(s) hidden as missing (>{grace}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", old_root, new_root) to migrate a moved repo."
@@ -529,6 +597,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         catalog_health.insert(
             "cited_prefix_scoped_by_project".to_string(),
             json!(cited_prefix_scoped),
+        );
+    }
+    if !row_checks_scoped_by_project.is_empty() {
+        catalog_health.insert(
+            "row_checks_scoped_by_project".to_string(),
+            json!(row_checks_scoped_by_project),
         );
     }
     // Always present, even when nothing fired: its `note` is how a SKIP (linked worktree,
@@ -7903,6 +7977,97 @@ mod tests {
             out["skipped"].as_array().unwrap().len(),
             1,
             "the registered row is reported as skipped: {out}"
+        );
+    }
+
+    /// Ruling 17 for the row-grain checks, and the deliberate exception beside it.
+    ///
+    /// Three rows, one call, because the exception is the part a future reader will try
+    /// to "finish": `worktree_scoped_row` looks exactly like the four scoped checks —
+    /// row-grain, 100% foreign in the live report — and adding it would be wrong.
+    /// `fix=reseat_worktree` takes no root and filters by none, so a narrowed report
+    /// would understate what `confirm=true` is about to reseat. Its sibling
+    /// `repair_frontmatter_id` DOES write files, refuses to run without a scope, and
+    /// already filters to one root — which is why `frontmatter_id_mismatch`'s report was
+    /// the outlier rather than its repair.
+    ///
+    /// Regression for
+    /// docs/issues/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md.
+    #[tokio::test]
+    async fn row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not() {
+        let (_wt_tmp, _main_root, worktree_root) = make_worktree_fixture();
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // A stale frontmatter id (declared 16-hex, differs from the catalog row) is the
+        // cheapest of the four scoped checks to seed, and the one whose repair is
+        // root-scoped — so it is the check the scoping is supposed to bring into line.
+        let stale = "---\nid: aaaaaaaaaaaaaaaa\nkind: bug\n---\n\n# x\n";
+        seed_ledger(
+            &cat,
+            "bbbbbbbbbbbbbbbb",
+            &active_root.join("docs/in.md"),
+            stale,
+        );
+        seed_ledger(
+            &cat,
+            "cccccccccccccccc",
+            &sibling_root.join("docs/out.md"),
+            stale,
+        );
+        // Outside the active project, and must survive anyway.
+        seed_ledger(
+            &cat,
+            "wt-row",
+            &worktree_root.join("docs/w.md"),
+            "# plain\n",
+        );
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out["summary"]["by_check"]["frontmatter_id_mismatch"],
+            json!(1),
+            "the sibling-root row must be scoped out and the in-project one kept: {out:#?}"
+        );
+        let kept: Vec<&serde_json::Value> = out["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["check"] == "frontmatter_id_mismatch")
+            .collect();
+        assert!(
+            kept[0]["path"].as_str().unwrap().contains("active-project"),
+            "the survivor is the ACTIVE project's row, not whichever sorted first: {:#?}",
+            kept[0]
+        );
+
+        let scoped = &out["catalog_health"]["row_checks_scoped_by_project"];
+        let total: u64 = scoped
+            .as_object()
+            .expect("the drop must be announced, not silent")
+            .values()
+            .map(|n| n.as_u64().unwrap())
+            .sum();
+        assert_eq!(total, 1, "the dropped row must be COUNTED: {scoped:#?}");
+        assert!(
+            scoped
+                .as_object()
+                .unwrap()
+                .keys()
+                .any(|k| k.contains("sibling-project")),
+            "attributed to the project that owns it: {scoped:#?}"
+        );
+
+        assert_eq!(
+            out["summary"]["by_check"]["worktree_scoped_row"],
+            json!(1),
+            "worktree_scoped_row must NOT scope — fix=reseat_worktree reseats every \
+             unregistered row in the catalog regardless of root, so a narrowed report \
+             would understate what confirm=true is about to do: {out:#?}"
         );
     }
 
