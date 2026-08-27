@@ -97,6 +97,91 @@ pub fn split_sections(src: &'static str) -> (&'static str, Vec<RawSection>) {
     (preamble, sections)
 }
 
+/// A call shape a section declares itself relevant to.
+///
+/// Grammar, deliberately minimal — widening it requires amending the spec:
+/// ```text
+/// shape := tool ["." action] ["(" "path~" substring ")"]
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shape {
+    pub tool: String,
+    pub action: Option<String>,
+    pub path_contains: Option<String>,
+}
+
+pub fn parse_shape(s: &str) -> Result<Shape, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty shape".to_string());
+    }
+    let (head, path_contains) = match s.find('(') {
+        Some(open) => {
+            if !s.ends_with(')') {
+                return Err(format!("unterminated predicate in `{s}`"));
+            }
+            let inner = &s[open + 1..s.len() - 1];
+            let needle = inner
+                .strip_prefix("path~")
+                .ok_or_else(|| format!("only `path~<substring>` is supported, got `{inner}`"))?;
+            if needle.is_empty() {
+                return Err(format!("empty path predicate in `{s}`"));
+            }
+            (&s[..open], Some(needle.to_string()))
+        }
+        None => (s, None),
+    };
+    let head = head.trim();
+    if head.is_empty() {
+        return Err(format!("missing tool name in `{s}`"));
+    }
+    let (tool, action) = match head.split_once('.') {
+        Some((t, a)) if !t.is_empty() && !a.is_empty() => (t.to_string(), Some(a.to_string())),
+        Some(_) => return Err(format!("malformed tool.action in `{s}`")),
+        None => (head.to_string(), None),
+    };
+    Ok(Shape {
+        tool,
+        action,
+        path_contains,
+    })
+}
+
+/// Parse the `serves:` / `requires:` comment block directly under a heading.
+///
+/// Only comments before the first blank line count. Everything after is prose,
+/// including worked examples — a guide that teaches this syntax must not
+/// declare itself by accident.
+pub fn parse_declarations(body: &str) -> Result<(Vec<Shape>, Vec<String>), String> {
+    let mut serves = Vec::new();
+    let mut requires = Vec::new();
+    for line in body.split_inclusive('\n').skip(1) {
+        let t = line.trim();
+        if t.is_empty() {
+            break;
+        }
+        let Some(inner) = t.strip_prefix("<!--").and_then(|r| r.strip_suffix("-->")) else {
+            // A non-comment, non-blank line ends the declaration block.
+            break;
+        };
+        let inner = inner.trim();
+        if let Some(rest) = inner.strip_prefix("serves:") {
+            for part in rest.split(',') {
+                serves.push(parse_shape(part)?);
+            }
+        } else if let Some(rest) = inner.strip_prefix("requires:") {
+            for part in rest.split(',') {
+                let h = part.trim();
+                if h.is_empty() {
+                    return Err("empty heading in `requires:`".to_string());
+                }
+                requires.push(h.to_string());
+            }
+        }
+    }
+    Ok((serves, requires))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +284,60 @@ n body
                 "`{topic}`: a fenced example line was parsed as a heading"
             );
         }
+    }
+
+    #[test]
+    fn parse_shape_forms() {
+        assert_eq!(
+            parse_shape("artifact.append_entry").unwrap(),
+            Shape {
+                tool: "artifact".into(),
+                action: Some("append_entry".into()),
+                path_contains: None
+            }
+        );
+        assert_eq!(
+            parse_shape("grep").unwrap(),
+            Shape {
+                tool: "grep".into(),
+                action: None,
+                path_contains: None
+            }
+        );
+        assert_eq!(
+            parse_shape("artifact.update(path~docs/issues/)").unwrap(),
+            Shape {
+                tool: "artifact".into(),
+                action: Some("update".into()),
+                path_contains: Some("docs/issues/".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_shape_is_an_error_not_a_skip() {
+        // Gate 1: a typo must fail loudly. A silently-skipped declaration is
+        // indistinguishable from a section nobody declared.
+        assert!(parse_shape("artifact.update(path=docs/)").is_err());
+        assert!(parse_shape("artifact.update(").is_err());
+        assert!(parse_shape("").is_err());
+        assert!(parse_shape("artifact.get(mode~x)").is_err());
+    }
+
+    #[test]
+    fn declarations_are_read_from_the_comment_block_under_the_heading() {
+        let body = "## Entry ids\n<!-- serves: artifact.append_entry, artifact.update_entry -->\n<!-- requires: Declaring a ledger -->\n\nprose\n<!-- serves: not.parsed -->\n";
+        let (serves, requires) = parse_declarations(body).unwrap();
+        assert_eq!(serves.len(), 2);
+        assert_eq!(serves[0].action.as_deref(), Some("append_entry"));
+        assert_eq!(requires, vec!["Declaring a ledger".to_string()]);
+    }
+
+    #[test]
+    fn a_fenced_declaration_is_documentation_not_a_declaration() {
+        let body = "## Teaching\n```markdown\n<!-- serves: artifact.get -->\n```\n";
+        let (serves, requires) = parse_declarations(body).unwrap();
+        assert!(serves.is_empty());
+        assert!(requires.is_empty());
     }
 }
