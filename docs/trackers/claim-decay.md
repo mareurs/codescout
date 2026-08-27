@@ -196,6 +196,80 @@ The byte counts are true of `73ccb495` and HEAD respectively; both were measured
 number.
 
 
+
+### Update 2026-08-27 — repaired, plus three things this entry got wrong about itself
+
+**Repaired.** Two sites, two different repairs, because the number does different work in
+each:
+
+- **`src/server.rs`** — the figure sat in a test doc comment listing what the guide
+  covers. It did no work there, so it was **deleted**. That site now has no decay surface
+  at all; this is the entry's own first recommendation (*"delete the number"*), taken.
+- **`src/librarian/adapter.rs`** — here the magnitude *is* the point (it explains the
+  byte tension `BL-25` records), so deletion would gut the comment. It now states the
+  durable **relation** — the two largest guides in the corpus, by a wide margin — with a
+  **dated** snapshot beside it. The relation survives growth; the figure is honest about
+  being an instant.
+
+**A test was considered and declined.** The obvious guard is a test parsing every `N KB`
+figure near a guide topic name and checking it against `topic_body(topic).len()`. Declined:
+it would guard a single dated figure at the cost of a fragile comment parser that itself
+becomes something to maintain. Deleting one site and dating the other costs nothing and
+leaves less to go wrong. Recorded as a decision, not an oversight.
+
+**Three ways this entry decayed while sitting in a decay ledger** — which is the most
+useful thing it produced:
+
+1. **The figure moved again.** 33,402 → **35,492 bytes** in the day *after* filing — a
+   further 2,090 B, part of it from the filer's own edit to that same guide. Against the
+   10,377 B the comment was written from, the drift is now **3.4× in 11 days**, not 3.2×
+   in 10.
+2. **The `Site:` pointer decayed.** This entry recorded `src/server.rs:5184`; the line
+   was **5245** a day later. A line number is a measured value about a substrate that
+   changes — it is a member of the very class this entry describes, and it went stale
+   inside the record of that class.
+3. **It named one site when there were two.** `src/librarian/adapter.rs:197` carried the
+   same stale `10.4 KB`, unrecorded. Same lesson as `bug-fix-session-log:F-69`: when a
+   scout finds a defect *class*, enumerate it across the corpus before writing the entry —
+   one `git grep` would have found both.
+
+**And the observation worth carrying forward.** The `adapter.rs` sentence held **two**
+figures: `10.4 KB` (242% wrong) and `19.9 KB` (against a real 20,545 B — **accurate to
+1%**). Two claims, one sentence, written the same day by the same author, and nothing
+distinguishes the rotten one from the sound one to a reader. Age is not the discriminator
+and neither is authorship; only re-measurement is. That is the argument for dating figures
+rather than trusting them.
+
+The heading above still reads *"it is 33.4 KB"*. Left as written, deliberately — it was
+true at filing, and this ledger's whole thesis is that such claims are not errors. This
+block is the correction.
+
+#### Watch item — four more sites, currently accurate, deliberately not swept
+
+The repair grep (`git grep '10\.4 KB\|19\.9 KB' -- src/`) found the `19.9 KB` figure for
+`librarian.md` in **four further places**, none of them recorded when this entry was
+filed:
+
+- `src/prompts/README.md:25` — *"`librarian` alone is 19.9 KB"*
+- `src/prompts/mod.rs:449` — same sentence, in a doc comment
+- `src/prompts/mod.rs:457` and `:459` — inside a **`PULL_ONLY_GUIDE_TOPICS` reason
+  string**, which is user-facing text rather than a comment
+
+**Left alone on purpose.** `librarian.md` measures **20,545 B** today — the claim is
+accurate to **1%**, so there is nothing to repair, and dating four currently-true figures
+would be churn. They are recorded here because they are the same *class*: undated absolute
+byte counts about a file that grows, with no consumer that would fail. If `librarian.md`
+ever grows the way `tracker-conventions.md` did, all four rot at once and in silence — and
+the `mod.rs:457` pair is the one that matters, because a reason string is read by an agent,
+not only by a maintainer.
+
+This is the **third** time this single entry has under-enumerated its own class: one site
+became two, and two became six. That is not a criticism of the filing — it is the measured
+rate at which a `git grep` beats a scout's memory, and the argument for running the class
+sweep *before* writing the entry rather than after (`bug-fix-session-log:F-69`).
+
+
+**Valid:** dated 2026-08-27
 ## DC-2 — Bug-file citations written at a future `archive/` path: the sweep that repairs them is triggered by an event that never fired
 
 **Site:** `src/librarian/tools/doctor.rs:2790` and `:5766`;
@@ -229,6 +303,45 @@ always wrong and needs no severity judgement.
 **Rests on:** `cap_code_comment`'s High→Med forcing and `matches_archive`'s citer-side
 keying, both read in `severity.rs` on 2026-08-26.
 
+
+### Update 2026-08-27 — the proposed check was built verbatim and now ships
+
+**Status is now `check-shipped`, and this is the ledger's first closed class** — not just
+a repaired instance.
+
+The `Detectable by` paragraph above ends with a proposal: *"flag any citation to
+`docs/issues/archive/<slug>` where `docs/issues/<slug>` exists on disk — a state that is
+always wrong and needs no severity judgement."* That is now
+`librarian(action="doctor")`'s **`premature_archive_citation`** check, built to that
+description.
+
+- Detector: `564505d7` (patch-id `fa537bd2ae3c9dc7c55c06fe8d3d6688c6b461bf`), on
+  `experiments`.
+- Sites: `fcb86c16` (patch-id `51a4af509be224cc87839ebbada5d35f68ee3b4a`).
+- Reads **0** on the binary rebuilt 2026-08-27 — a *true* zero, since `fcb86c16` had
+  already repaired the four motivating sites. The positive control is at unit level and
+  does fire.
+
+**Why it needed no threshold**, unlike its neighbour `cited_prefix_with_no_definer`
+(which needs `MIN_CITATIONS`/`MIN_FILES` to stay quiet on `UTF-8`): this state is wrong in
+every world, so there is no tuning constant to get wrong later. Both remedies are
+legitimate — repoint the citation, or complete the archive — and the check prefers
+neither.
+
+**What it does not cover, stated rather than left to be discovered.** Scope is catalogued
+artifacts only, so it reaches markdown and **not** `.rs` doc comments. Of DC-2's four
+original citations it would reach the two in markdown — exactly the two that carried full
+severity anyway. The two `.rs` sites remain `audit_doc_refs`' territory, `Med`-capped by
+design, which is why `repair_trigger` is `gate-exists-but-capped` and not simply
+`gate-exists`.
+
+One design note recorded at build time: `link_scan::extract` was **not** used, because it
+emits `RelPathLink` only for `Event::Start(Tag::Link)` — markdown links — while inline
+code routes to `scan_tokens`. The backticked-path form that actually occurs in this repo
+would have been invisible to it, and the check would have read green forever.
+
+**Valid:** conditional — until `cap_code_comment`'s High→Med forcing changes, at which
+point the `.rs` half becomes gateable and this entry can close outright.
 ## DC-3 — TAXONOMY.md's "Thirteen are declared today" was exact when measured and became wrong two days later
 
 **Site:** `docs/TAXONOMY.md:21`.

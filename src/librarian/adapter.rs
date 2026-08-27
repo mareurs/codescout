@@ -194,8 +194,17 @@ impl crate::tools::Tool for LibrarianAdapter {
         // carries `abs_path` on every artifact response. No clone, no plumbing.
         //
         // The ledger deduplicates per topic, so a session doing tracker work can receive
-        // both over its lifetime (10.4 KB + 19.9 KB). That is the byte tension BL-25
-        // records; the corpus cut is the answer to it, not withholding the guide.
+        // both over its lifetime — the two largest guides in the corpus, by a wide margin
+        // (34.7 KB + 20.1 KB, measured 2026-08-27; the third-largest is 11.7 KB). That is
+        // the byte tension BL-25 records; the corpus cut is the answer to it, not
+        // withholding the guide.
+        //
+        // The RELATION is what carries the point and it survives growth; the figures are a
+        // dated snapshot on purpose. An undated one here read "10.4 KB" for eleven days
+        // while the file grew to 3.4x that — and the same sentence's other figure was
+        // accurate to 1%, with nothing to tell a reader which was which. See
+        // `claim-decay:DC-1`, which is also why the sibling claim in `server.rs` was
+        // deleted outright rather than corrected: there the number did no work.
         //
         // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
         if names_tracker_path(result) {

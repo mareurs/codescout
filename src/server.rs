@@ -5242,7 +5242,7 @@ mod guide_hint_tests {
     /// An artifact call that touches a tracker or bug file delivers the guide about
     /// tracker conventions, not the general librarian guide.
     ///
-    /// `tracker-conventions` (10.4 KB: frontmatter, the status vocabulary,
+    /// `tracker-conventions` (frontmatter, the status vocabulary,
     /// archive-through-the-catalog) was authored, cited from prose, and wired to nothing
     /// — one of the 7 of 10 topics BL-25 found firing for nobody. Two guides serve this
     /// tool and only one is delivered per call, so the choice is made from what the call
