@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 117
+entry_high_water_R: 118
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -3677,6 +3677,68 @@ invariant.
 `check_outside_managed_roots`'s `containing_root(...).is_some()` early return,
 both read this session; [[R-106]] and the context-utilisation entry for the two
 prior datapoints; `bug-fix-session-log:F-74` for the full narrative.
+
+## R-118 — Hit: scouting a fix primed me to find its bug where it wasn't — and a BLOCKED ground-truth check left the belief unmarked
+
+**Verdict:** hit — recon's own controls caught it before anything was written down.
+
+**Law:** C — *A search that finds nothing is evidence about the search.* This entry is
+that law **over**-applied, which is the first of its kind in the ledger's 16 C-entries.
+Every other one is law C under-applied: a zero read as fact when it was an artefact of the
+search. This is the inverse, and it has a distinct trigger.
+
+**Context:** 2026-08-27, scouting a rebuilt binary after `444d756c`
+(*"fix(grep): a zero from a glob that opened no file says so"*) — a fix for a grep **false
+negative**. First probe: `grep(pattern="pub fn", glob="src/tools/grep.rs")` → `0 matches`,
+and *without* the new glob warning. I read that as the fix having a gap on the exact case
+its own bug file is named after, and had begun framing it as a finding.
+
+**What was actually true:** `src/tools/grep.rs` has 62 function declarations and **zero**
+`pub fn` or `pub(crate) fn` — they are all module-private. The zero was a faithful report
+about the pattern. The tool was correct in all four probes, and correct to withhold the
+glob clause, because the glob *had* opened the file.
+
+**The trigger, and why it is worth its own entry: scouting a fix primes you to find the
+bug it fixed.** I was inspecting a freshly-patched false-negative surface, so a zero
+*looked* like a false negative. Law C normally guards against trusting a zero; here the
+expectation supplied the law's conclusion before the evidence did. The tool had said the
+right thing — only the hidden-paths caveat, no glob clause — and I supplied the stronger
+reading myself.
+
+**The mechanism that let it get that far:** my ground-truth check was
+`run_command("grep -c 'pub fn' src/tools/grep.rs")` and it was **refused by IL-3** (shell
+content-readers on in-project source). I proceeded on the belief the blocked call was
+meant to test. A refused verification returns an *error*, not a fact — but it leaves the
+prior belief exactly where it was, with nothing marking it unverified. A failed check and
+an unrun check are indistinguishable one turn later.
+
+**What caught it:** running controls instead of concluding. `pattern="e"` on the same glob
+returned 1731 matches in that same file, which proved the glob opened it and collapsed the
+false-negative reading in one call.
+
+**Proposal (for SKILL.md, at a second datapoint):** when a probe's ground-truth check is
+*refused* rather than answered, treat the probe as un-grounded and re-establish ground
+truth through a permitted tool before reading the result. Concretely: a blocked
+`run_command` is not a null result, and the cheapest recovery is usually the same question
+asked through the codescout tool the guard is pointing at.
+
+**Confirming data points:**
+
+1. This entry.
+2. Related but distinct: `prompt-surface-measurement-session-log:F-41` (a filtered query
+   reported as a finding, refuted by its own unfiltered control) — same remedy, a control,
+   but that one was a missing control rather than a *blocked* one.
+
+**Promote-when:** a second occurrence where a refused or errored verification is followed
+by a claim that depended on it. At two, promote the proposal above into the skill's
+Phase 1.
+
+**Status:** validated — single datapoint, caught in-flight, nothing published.
+
+**Valid:** invariant
+
+**Rests on:** law C as stated in this ledger, and CLAUDE.md *Conclude Last* — specifically
+its warning that a claim which "sounds right" is when verification matters most.
 
 ## Template for new entries
 
