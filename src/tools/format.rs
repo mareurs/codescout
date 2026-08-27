@@ -66,6 +66,29 @@ pub(crate) fn overflow_head(val: &Value) -> String {
     }
 }
 
+/// The buffer-truncation notice rendered for placement at the **head** of a result.
+///
+/// Sibling of [`overflow_head`], and head-placed for the same load-bearing reason: a
+/// notice appended after the content is cut first on exactly the results big enough to
+/// need it. Here the stakes are sharper still — the whole point of the notice is that
+/// the content above it is a PREFIX, so letting that content push it off the end would
+/// reproduce the defect the notice exists to report.
+///
+/// Returns `""` when the result carries no `buffer_truncated` array, so callers can
+/// push it unconditionally without a surrounding `if let`.
+///
+/// BUG docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
+pub(crate) fn truncation_head(val: &Value) -> String {
+    match val.get("buffer_truncated").and_then(|v| v.as_array()) {
+        Some(notices) if !notices.is_empty() => notices
+            .iter()
+            .filter_map(|n| n.as_str())
+            .map(|n| format!("{n}\n"))
+            .collect(),
+        _ => String::new(),
+    }
+}
+
 /// Place `extra` immediately below `body`'s first line.
 ///
 /// Two requirements meet here and neither yields. The overflow note must land inside the

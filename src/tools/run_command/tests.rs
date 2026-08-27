@@ -3130,6 +3130,64 @@ async fn a_complete_buffer_carries_no_sentinel_and_no_notice() {
     );
 }
 
+/// The `read_file` half of Option C, pinned on the RENDERED surface.
+///
+/// `run_command` returns its JSON straight through, so asserting on the `Value` is
+/// the whole story there. `read_file` does not: `format_read_file` builds a text
+/// string from a fixed set of keys and drops every other field, so a
+/// `buffer_truncated` sitting correctly in the JSON reached no reader at all. That
+/// is how the first cut of this fix shipped an inert field — caught by a live probe,
+/// not by a test, because no test looked at this surface.
+///
+/// Asserting on `format_read_file` rather than on `.call()`'s Value is therefore the
+/// point of the test, not an implementation detail of it.
+///
+/// BUG docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
+#[tokio::test]
+async fn read_file_renders_the_truncation_notice_not_just_carries_it() {
+    let (_dir, ctx) = project_ctx().await;
+    let line_count = 20_000;
+    let first = RunCommand
+        .call(
+            json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        first.get("unfiltered_truncated").is_some(),
+        "fixture must actually truncate: {first}"
+    );
+    let handle = first["unfiltered_output"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+
+    let res = crate::tools::read_file::ReadFile
+        .call(
+            json!({ "path": handle, "start_line": 1, "end_line": 2 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        res.get("buffer_truncated").is_some(),
+        "the field must be on the result: {res}"
+    );
+
+    let rendered = crate::tools::read_file::format_read_file(&res);
+    // Second line exactly: below the header a reader anchors on, above content that
+    // may be cut. This is `insert_below_header`'s contract, and asserting the position
+    // rather than mere presence is what keeps a future "just append it" refactor from
+    // silently recreating the defect on large reads.
+    let second_line = rendered.lines().nth(1).unwrap_or("");
+    assert!(
+        second_line.contains(crate::tools::output_buffer::TRUNCATION_SENTINEL_PREFIX),
+        "the notice must be the rendered second line, or it reaches nobody. \
+         got: {second_line:?}\nfull:\n{rendered}"
+    );
+}
+
 #[tokio::test]
 async fn il3_blocks_chained_unbounded_pipe() {
     // Chained pipes off an unbounded LHS still block (was originally

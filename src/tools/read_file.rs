@@ -986,6 +986,23 @@ pub(super) fn markdown_coverage(
 }
 
 pub(super) fn format_read_file(val: &Value) -> String {
+    // Applied at the WRAPPER, not inside the body, because the body has five return
+    // paths (summary mode, the `shown_lines` slice, the legacy no-content buffered
+    // mode, empty content, and whole content) and the notice belongs on all of them.
+    // The live probe that caught this hit the `shown_lines` path; a fix threaded
+    // through only that one would have been just as invisible on the other four.
+    //
+    // Head-placed via `insert_below_header` for the reason `overflow_head` documents:
+    // the content this notice describes is a PREFIX, so appending the notice after it
+    // lets the content push it out of the kept window — reproducing the exact defect
+    // the notice reports.
+    insert_below_header(
+        format_read_file_body(val),
+        &crate::tools::format::truncation_head(val),
+    )
+}
+
+fn format_read_file_body(val: &Value) -> String {
     // Summary modes have a "type" key
     if let Some(file_type) = val["type"].as_str() {
         return format_read_file_summary(val, file_type);
