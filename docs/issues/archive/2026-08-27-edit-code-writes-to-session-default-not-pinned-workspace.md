@@ -9,7 +9,7 @@ tags:
 - silent-corruption
 - regression
 closed: 2026-08-27
-unverified: 'Not live-verified through a running server: needs `cargo rb` + `/mcp` reconnect, then one unpinned write in this repo (which has a linked worktree) to confirm `wrote_to` actually appears in the response. Gate-green and mutation-verified only. Separately and by design, the `guard_worktree_write` session latch is unchanged — an unpinned write still routes to the session default, it now just says so.'
+unverified: By design, the `guard_worktree_write` session latch is unchanged — an unpinned write still routes to the session default, it now just says so. Live verification of the annotation itself is COMPLETE (2026-08-27, see § Live verification); nothing else is outstanding.
 ---
 
 # edit_code writes to the session-default project, not the `workspace=` pin
@@ -283,6 +283,44 @@ All four mutations were run with the blast radius predicted in advance; each mat
 
 Gate: `cargo fmt` clean, `cargo clippy --workspace --all-targets --features local-embed -- -D
 warnings` clean, `cargo test` 4676 passed / 0 failed / 46 ignored.
+## Live verification (2026-08-27, post-`cargo rb` + `/mcp`)
+
+Verified through a rebuilt, freshly-reconnected server. Freshness first, on all three R-89 axes:
+
+| axis | evidence |
+|---|---|
+| build | binary `21:14:30` > last commit `295ce8c9` at `21:11:39` |
+| distribution | `wrote_to` = 1 in the symlink-resolved binary; positive controls `"another codescout instance is writing"` = 4 and `"was given nothing to change"` = 4; negative control = 0 |
+| process | serving pid `2117173`, PPID = this session's `claude`, started `21:16:25` > build |
+
+Five probes, all as designed:
+
+| probe | result |
+|---|---|
+| unpinned write, no worktrees present | bare `"ok"` — no-echo convention preserved |
+| unpinned write, worktree present, before `activate` | refused by `guard_worktree_write` |
+| unpinned `create_file`, after `activate` | `{"status": "ok", "wrote_to": "/home/marius/work/claude/codescout"}` |
+| unpinned `edit_file` (bare-string result promoted) | `wrote_to` present |
+| **pinned** write | bare `"ok"` — correctly not annotated |
+
+### Two instrument failures worth recording, because both would have read as "the fix did not ship"
+
+**1. `grep -c` on the binary returned 0 for every string, including a known-present control.**
+The first distribution pass reported 0 for `wrote_to` *and* for `"was given nothing to change"` — a
+string verified present in this same binary during an earlier recon. Four strings, four zeros.
+Had only the new string been probed, that 0 would have been read as the change missing.
+`grep -c` does not count matches inside a binary the way the probe assumed; `strings -a | grep -c`
+does. **The known-present control is the entire reason the instrument was suspected rather than
+the code** — R-3, in the form where the instrument answers confidently rather than erroring.
+
+**2. The feature's precondition vanished between commit and probe.** The first functional probe
+returned a bare `"ok"` with no annotation — indistinguishable from the annotation failing. It was
+correct: a concurrent session had removed the `.worktrees/operator-rules-phase-1` worktree, so
+`list_git_worktrees` was empty and `annotate_write_root` early-returned exactly as
+`a_write_without_worktrees_keeps_the_bare_ok` specifies. Confirming the feature required
+**manufacturing** the condition — `git worktree add --detach` to a scratch path, probe, then
+`git worktree remove`. A feature gated on an environmental fact cannot be verified in an
+environment where that fact is absent, and the absence looks identical to a defect.
 ## Reproduction sketch (not yet minimised)
 
 1. Open a linked worktree of this repo.
