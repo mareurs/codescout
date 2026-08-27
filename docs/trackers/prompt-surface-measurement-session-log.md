@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 40
+entry_high_water_F: 41
 entry_high_water_W: 26
 entry_prefix:
 - F
@@ -68,6 +68,7 @@ surfaces, not the definition.
 | F-38 | I selected traces by content-matching a prompt string my own session contained, and published the table as a between-condition finding | fixed-verified |
 | F-39 | A profile's settings.json `env` silently overrules an exported ANTHROPIC_BASE_URL — the guard I shipped validates its own input, not the client's | fixed-verified |
 | F-40 | Two sessions added the same routing guard to one file within an hour, and both were wrong the same way | fixed-verified |
+| F-41 | I reported "semantic search doesn't find these" from one filtered query, with no control — the unfiltered control refuted it | fixed-verified |
 
 ## Wins Index
 
@@ -3642,6 +3643,11 @@ measurement — and only the mechanism check could have told me which.
    F-37; this log's F-38).
 2. F-38 itself — an axis ("harness vs manual probe") produced by a selection the
    investigator never validated.
+3. **F-41, ninety minutes after this entry was written** — I concluded "semantic search
+   doesn't find these" from a single *filtered* query and published it to the user. The
+   unfiltered control refuted it immediately. The promote-when criterion below has
+   therefore fired: three datapoints, the third against my own report rather than a
+   third-party system.
 
 **Impact:** high — prevented a no-op behaviour change to shared infrastructure, and
 converted an open bug into a `zombie` with its residue named.
@@ -3651,7 +3657,10 @@ where a mechanism capture was available and cheap. At three datapoints, promote 
 CLAUDE.md as *"Before running another comparison, ask whether the mechanism can be
 observed directly — and if it can, observe it first."*
 
-**Status:** validated — two datapoints, both this work stream.
+**Status:** promote-when FIRED 2026-08-27 at three datapoints (F-37, F-38, F-41) — awaiting
+promotion to CLAUDE.md as *"Before running another comparison, ask whether the mechanism can
+be observed directly — and if it can, observe it first. Before believing a filtered query's
+result, re-run it unfiltered."*
 
 ## F-39 — A profile's settings.json `env` silently overrules an exported ANTHROPIC_BASE_URL
 
@@ -3735,6 +3744,47 @@ the first time the proxy was genuinely down.
 the removed site recording why there were two.
 
 **Status:** fixed-verified — one guard remains, `bash -n` clean, 379 tests pass.
+
+## F-41 — I reported "semantic search doesn't find these" from one filtered query, with no control
+
+**Valid:** dated 2026-08-27
+
+**Observed:** 2026-08-27, verifying that the three repos' new trackers were discoverable.
+
+**Got:** I ran one query — `find(kind="tracker", semantic="<paraphrase>", limit=8)` — got
+eight unrelated trackers, and reported to the user that *"semantic ranking doesn't find
+these… they're indexed and embedded; they just don't rank."* I offered it as a limitation
+I could not fix.
+
+**It was wrong, and one control refuted it.** The same query **unfiltered** returns the two
+genuinely-best artifacts at #1 and #3. They are `kind: bug`; my `kind="tracker"` filter
+excluded them, and `semantic_find` backfilled the page with the nearest surviving trackers
+(`src/librarian/catalog/find.rs:255-276` — the loop widens `k` until the page is *full*,
+not until the results are *close*). A verbatim-title query with the same filter returns the
+target at #1, proving filter and ranking both work.
+
+**Why it got past me:** the response carries no score and no starvation hint, so a starved
+page is byte-identical in shape to a satisfied one. But the response's silence is only half
+of it — the other half is that I ran a filtered query and no control, which is the same
+omission as F-38 (selection never validated) and the same shape W-26 names: *a comparison
+establishes that two groups differ, never which knob names the group.* I had written W-26
+ninety minutes earlier.
+
+**Third datapoint for W-26, and the sharpest**, because here the wrong conclusion was not
+about a third-party system — it was my own report to the user, delivered with a hedge
+("I didn't want to report it as solved") that made it read as careful rather than
+unverified. Confidence-hedging is not a substitute for a control.
+
+**Severity:** med — one wrong claim published to the user, self-caught within the same
+session when the user asked for proof. Nothing was built on it.
+
+**Fix:** the real defect is filed as `docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md`
+(`34c415cd19084788`) with a one-call reproduction. The behavioural half is in the
+workarounds there: never conclude "nothing is indexed about X" from a single *filtered*
+semantic query — drop the filter and re-run before believing it.
+
+**Status:** fixed-verified — claim retracted to the user in-session; bug filed with proof
+and a reproduction that was re-run after filing and reproduced byte-identically.
 
 ## Template for new entries
 
