@@ -1,20 +1,20 @@
 ---
 id: b010f1812f5a74ed
 kind: bug
-status: open
-title: 'BUG: scope has three different defaults across the librarian surface, and all four doc surfaces say "project" while find compiles to repo'
+status: fixed
+title: 'BUG: scope has three different defaults across the librarian surface, and every documentation surface says "project" while find compiles to repo'
 tags:
 - librarian
 - scope
 - doc-drift
 - prompt-surface
-closed: null
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 related:
 - docs/issues/archive/2026-07-05-audit-doc-refs-scope-param-ignored.md
 severity: medium
-unverified: Hypothesis 2 deferred — whether the Repo default was deliberate is inferred from a missing doc comment, not established. Blast radius is currently zero (project == repo root in 923/923 observed scope blocks), so no wrong answer has been observed, only a false contract.
+unverified: 'Not live-verified. The fix is committed and the suite is green, but this session''s MCP server runs a binary built before the change, so a live artifact(action="find") still reports applied: "repo". Observing the new default needs `cargo rb` plus `/mcp`. Committed and tested is not live — see reconnaissance-patterns:R-89 (freshness is a property of the copy that SERVES you).'
 ---
 
 # BUG: `scope` has three different defaults across the librarian surface, and all four documentation surfaces say "project" — the compiled default for `find` is `repo`
@@ -98,7 +98,14 @@ compiled default returns the whole repo.
 
 ## Evidence
 
-### The four documentation surfaces, all saying "project"
+### The documentation surfaces, all saying "project" — three live, one inert
+
+**Corrected 2026-08-27 (`bug-fix-session-log:F-73`).** This section originally
+called all four live. `companion_hint.md` is not: its only reference in the whole
+tree is `tests/librarian/companion_hint.rs:7`, which `include_str!`s it to assert
+it names no unknown tools. Nothing under `src/` reads it — it is a leftover of the
+crate dissolved in `d48bf992`. A grep cannot tell a live `include_str!` from a
+test-only one, and this list was built by grep.
 | Surface | Text |
 |---|---|
 | `src/librarian/tools/artifact.rs:70` | `"find: scope for listing. Defaults to active project."` |
@@ -137,60 +144,100 @@ contract that is false, and a latent divergence, not an observed wrong answer.
    **Test:** read `scope.rs:24-30`; the attribute carries no comment, while the
    neighbouring `UmbrellaPolicy` enum (`scope.rs:39-50`) has a long doc comment
    explaining exactly why *its* two answers both exist.
-   **Verdict:** deferred — the asymmetry suggests the `Repo` default was not a
-   documented choice, but that is an inference from a missing comment, not proof.
-   Whoever fixes this should decide the intended default rather than assume.
+   **Verdict:** **resolved 2026-08-27 — not an endorsement.** `git log -S` on the
+   enum found `649dc0a4` (*"one scope-resolution prologue, with the divergence
+   declared (SD-10)"*), whose commit body states: *"the umbrella GUARD keys off
+   the raw Option (a.scope == Some(All)) while the ALIAS keys off the defaulted
+   value — equivalent today because the default is Repo, and **preserved
+   regardless in case that default changes**."* The author who built
+   `resolve_scope` knew the default was `Repo` and deliberately wrote the
+   guard/alias split to survive it being changed. That is anticipation of this
+   change, not a defence of the value — which is what moved the decision from (B)
+   toward (A)/(C).
 3. **Hypothesis:** `link_scan`'s divergence is a copy that fell behind.
    **Test:** `link_scan/mod.rs:29` imports `{apply_scope, Scope}` and deliberately
    not `resolve_scope`, so it never had the `unwrap_or_default()` path.
    **Verdict:** confirmed as intentional-looking, but undocumented.
 
 ## Fix
-*Plan — decide first, then make it uniform.* Two coherent endpoints:
 
-- **(A) Make the code match the docs.** Move `#[default]` to `Project`. Narrower
-  by default, matches every documentation surface and the principle already
-  adopted for `doctor`'s worklist. Behaviour change is nil on every observed
-  call (project == repo everywhere measured) and only bites sub-project setups —
-  where it is arguably the correct answer anyway.
-- **(B) Make the docs match the code.** Leave `Repo` and correct all four
-  surfaces. Cheaper, but leaves three defaults for one parameter and leaves
-  `librarian.rs:61` needing per-action wording.
+**Option C**, chosen by the owner over (A) *move the attribute* and (B) *correct
+the docs*. Shipped in `bf3c2c78` on `experiments`.
 
-**(A) is preferred**, with `link_scan` then already correct and `reindex`'s
-`Project`-or-`All` fallback kept but documented (its `All` arm is the no-active-
-project case, which `resolve_scope` handles as `scope_fallback` for the others).
+- `Scope` loses `Default` entirely (`src/librarian/tools/scope.rs`). The default
+  is a property of each SURFACE, not of the enum; a derive attribute cannot say
+  which surface it speaks for. The enum's new doc comment says exactly that.
+- `resolve_scope` takes `default: Scope` as a required argument. `find`,
+  `context` and `workspace_state_at` each pass `Scope::Project` with a call-site
+  comment. Same argument `UmbrellaPolicy` already makes, applied to the other
+  half of the same decision.
+- `link_scan` (`unwrap_or(Scope::Project)`) and `reindex` (`Project`-or-`All`)
+  were already explicit and are unchanged.
 
-Either way, the enum's `#[default]` should carry a doc comment saying which
-answer it is and why — the neighbouring `UmbrellaPolicy` is the model, and its
-comment exists because *"a deliberate choice indistinguishable from a truncated
-copy"* was the exact failure mode (`scope.rs:41-44`).
+**Three of the four documentation surfaces became true without being edited** —
+`artifact.rs:70`, `guides/librarian.md:79` and `companion_hint.md:56` all already
+said "active project". That is most of the argument for C over B. Only
+`librarian.rs:61` changed, because `reindex` genuinely differs and one sentence
+was covering four actions with three defaults.
 
-Not started. No SHA, no patch-id yet.
+No `all`-handling moved: the guard still keys off the raw `Some(All)` and the
+alias off the defaulted value, and the `project`/`repo` → `all` fallback arm is
+untouched.
 
+**Fix commit — record both, they fail differently:**
+
+- SHA `bf3c2c78e42a55d5433e4fbb93cc54227d38e770` on **`experiments`** (positional;
+  dies when `experiments` is rebased)
+- patch-id `9cf83021d688fc033493a92bdecf4a5d271e96d8` (`git show <sha> | git
+  patch-id --stable`; content hash of the diff, survives rebase and cherry-pick)
 ## Tests added
-None yet. A regression test should assert `resolve_scope(None, Some(&cp),
-UmbrellaPolicy::Require).0 == <the decided default>` and — more valuable — a test
-that pins **all three** entry points to the same answer, so the next divergence
-fails a test rather than a reader. `scope.rs`'s existing
-`scope_fallback_arm_is_not_inlined_outside_resolve_scope` (`scope.rs:512`) is the
-precedent for pinning a policy rather than a value.
 
+`every_resolve_scope_call_names_project_as_its_default` —
+`src/librarian/tools/scope.rs`, in the `tests` module beside the sibling DRY gate
+`scope_fallback_arm_is_not_inlined_outside_resolve_scope`.
+
+It scans **source text**, not behaviour, on purpose: a test that calls
+`resolve_scope(None, .., Scope::Project)` and asserts it returns `Project` is
+computed from the thing it judges and cannot fail. It asserts every
+`resolve_scope` CALL under `src/` names `Scope::Project`, skipping the definition
+and line comments, with the needles assembled character-wise so the test's own
+source does not match them.
+
+It carries a **positive control** — `assert!(checked >= 3)` — so a needle that
+stops matching reads as a broken scan rather than a clean tree.
+
+**Mutation-verified, not merely green.** Flipping `find.rs`'s argument to
+`Scope::Repo` failed the gate with
+`Offenders: ["librarian/tools/find.rs:704"]`; reverted after.
+
+Also: `context::tests::repo_scope_excludes_other_repos` renamed to
+`default_scope_is_project_and_excludes_other_repos`, its `applied` assertion
+flipped `"repo"` → `"project"`. Worth noting for its fixture — it is the only
+place in the suite where `abs_path != git_root`, the one shape that can tell the
+two defaults apart, and a shape `scripts/probe_librarian_scope.py` measured at
+**0 of 923** real recorded scope blocks. The suite is a better oracle for this
+change than the usage log.
+
+Gate at fix time: 4598 passed / 0 failed / 51 ignored; `cargo fmt --all --
+--check` clean; `cargo clippy --workspace --all-targets -D warnings` clean.
 ## Workarounds
 Pass `scope` explicitly. Currently 84.0% of scope-accepting calls omit it, so in
 practice: read `$.scope.applied` on the response — every scope-aware surface
 reports what actually resolved, and that field has been correct throughout.
 
 ## Resume
-Decide (A) or (B) with the user — the choice is a product decision, not a
-mechanical fix, and Hypothesis 2 is explicitly unresolved. If (A): move
-`#[default]` from `Repo` to `Project` in `src/librarian/tools/scope.rs:26`, run
-`cargo test` and expect fallout in `scope.rs`'s own test module (several tests
-construct `Scope` via `..Default::default()`-adjacent paths), then re-run
-`python3 scripts/probe_librarian_scope.py --crosstab` and confirm the
-`find <omitted> -> ...` row reads `project`. If (B): correct the four surfaces in
-the Evidence table, giving `librarian.rs:61` per-action wording.
 
+One step outstanding, and it is the reason `unverified:` is set rather than
+cleared: **live-verify**. Run `cargo rb`, then `/mcp` to reconnect, then
+`artifact(action="find", kind="tracker", limit=1)` and confirm
+`$.scope.applied == "project"`. Until then the honest claim is *committed and
+tested*, not *live* — this session's server still serves the pre-change binary
+and still answers `"repo"`.
+
+A second, optional confirmation once live:
+`python3 scripts/probe_librarian_scope.py --crosstab` should start recording
+`find <omitted> -> project` in its requested→applied table, where the 2026-08-27
+baseline reads `find <omitted> -> repo 822`.
 ## References
 - `src/librarian/tools/scope.rs:24-30` — the `#[default]` on `Repo`
 - `src/librarian/tools/scope.rs:59` — `resolve_scope`'s `unwrap_or_default()`
@@ -201,4 +248,3 @@ the Evidence table, giving `librarian.rs:61` per-action wording.
   `src/prompts/guides/librarian.md:79`, `src/librarian/prompts/companion_hint.md:56` — the four drifting surfaces
 - `scripts/probe_librarian_scope.py` — `--crosstab` prints the requested → applied table
 - `docs/issues/archive/2026-07-05-audit-doc-refs-scope-param-ignored.md` — prior bug of the same class (scope declared, behaviour different)
-
