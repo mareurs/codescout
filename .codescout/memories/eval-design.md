@@ -774,3 +774,61 @@ a correct value under a false description, which is invisible to everything that
 The rule: behavioural observations go in prose or in a column of their own — never in the
 column that names the arm. *"It chose X"* and *"it could only do X"* differ by one word in a
 header and completely in meaning. State the permission matrix explicitly, before any number.
+
+## Budget n by EFFECT SIZE — a between-arm difference is always the smallest claim you make
+
+Measured the expensive way, 2026-08-27. Three headline claims published from **n=2** were
+falsified by twenty more runs. Every one was a claim about a **difference between two treatment
+arms**. Every claim about a *large* effect survived untouched.
+
+| survived n=2 → n=6 | died |
+|---|---|
+| the floor (0.00, 4/4 runs) | "arm A reaches exactly 1, zero spread" → 2.00 / 2.25 |
+| the manipulation (~2 → ~7) | "A beats B 9 to 5" → 7.67 vs 6.67, supports overlapping |
+| the model effect (2.0 → 7.8, non-overlapping) | "bucket X separates 4/4 vs 0/4" → 3.17 vs 1.33 |
+
+**The pattern is structural, not luck. A between-arm difference is what is left after the
+floor, the manipulation and the model have each taken their share** — so it is the smallest
+effect in the design, needs the most runs, and is invariably the thing the eval was built to
+measure. Plan n against *that* claim, never against the ones that will look convincing early.
+
+**Why n=2 looked sufficient, which is the trap.** The numbers were not noisy-looking: two arms
+read `{1, 1}` — *zero* spread — and the bucket read 0/4 twice against 4/4 twice, in the
+direction the fixture had predicted **before any run**. A confirmed prediction at n=2 is still
+n=2, and apparent zero-variance from two draws is the *least* informative agreement, not the
+most. The support block printed `{1.0000 x2}` and I read consistency into a sample too small to
+show any.
+
+**So: state n next to each claim, not once in a caveats section.** A caveat at the bottom does
+not travel with a number that gets quoted, and the number is what gets quoted. Sort the claims
+by effect size before publishing and draw a line: large effects may go out at low n; a
+between-arm difference may not.
+
+## When higher n kills a claim, read what replaced it before recording a loss
+
+Same event, the other half — and the reason thickening is worth doing even when you expect it
+to hurt. The three dead claims were **crude versions of a truer one**, and the truer one is
+more defensible:
+
+| | n=2 | n=6 |
+|---|---|---|
+| the bucket the tool should win | 4/4 vs 0/4 | **3.17 vs 1.33** (+1.84) |
+| the bucket the tool should lose | noise | **1.83 vs 2.33** (−0.50) |
+| net | +4, strictly dominant | **+1.0, a trade** |
+
+At n=2 the tool looked *strictly dominant* — it swept one bucket and the other was noise. At n=6
+it shows the **trade the design predicted**: better at one mechanism, worse at another. *A tool
+better at one thing and worse at another is a more credible finding than one that wins
+everywhere.* The sweep was the artifact; the trade was the result.
+
+Thickening also produced a finding n=2 could not contain: over 6 runs the strong model called
+the navigation tool **zero** times where the weaker model called it in 5 of 6 — so the tool's
+advantage tracks **usage, not availability**, and its bucket score was *lower* on the stronger
+model with the same tools. At n=2 that reads as variance.
+
+**One aggregation choice decided whether any of this was visible.** The bucket probe first
+reported a **union** across an arm's runs — "could this arm ever reach it". A union *saturates*
+as n grows, so more runs would have made every arm look better and all arms look more alike,
+concealing exactly the spread the extra runs were bought to expose. Switching to per-bucket
+**means** is what let n=6 speak. **A union is the wrong aggregate for anything you intend to
+compare** — it answers a capability question while you are asking a frequency one.

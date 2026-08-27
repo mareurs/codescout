@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 28
-entry_high_water_W: 20
+entry_high_water_F: 29
+entry_high_water_W: 21
 entry_prefix:
 - F
 - W
@@ -56,6 +56,7 @@ surfaces, not the definition.
 | F-26 | L2 reads only tool ARGS, so it measures "files the agent had to name" — an inverse proxy for navigation-tool effectiveness | fixed-verified |
 | F-27 | `native-tool-used` cannot tell "used a native tool" from "attempted one and was denied" — and it is counted, not excluded | fixed-verified |
 | F-28 | The "native" arm is in practice a SHELL arm — it does almost everything through Bash | fixed-verified |
+| F-29 | I published between-arm claims at n=2; thickening to n=6 killed all three of them | fixed-verified |
 
 ## Wins Index
 
@@ -76,6 +77,7 @@ surfaces, not the definition.
 | W-13 | The arms separated on a metric we already logged and never reported | validated |
 | W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
 | W-15 | Reading the generator instead of the plan's description of it caught three defects, one with no downstream gate at all | validated |
+| W-21 | Thickening n turned a dead claim into a better one — the mechanism came back stronger than it died | validated |
 | W-20 | Running the second baseline the spec asked for overturned the headline it was meant to confirm | validated |
 | W-19 | Staging the pilot behind a positive-control gate caught two result-fabricating defects mid-spend, for $1 | validated |
 | W-18 | Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result | validated |
@@ -2597,6 +2599,111 @@ is a live threat to the conclusion you already drew — run it before publishing
 
 **Status:** validated — single datapoint, but the overturned claim was the document's headline
 and the correction is committed.
+
+## F-29 — I published between-arm claims at n=2; thickening to n=6 killed all three of them
+
+**Valid:** dated 2026-08-27
+
+**Observed:** 2026-08-27. A published artifact and a committed `RESULTS.md` carried three
+headline claims derived from **two runs per arm**. Twenty more runs ($7.28) falsified every one.
+
+| claim at n=2 | at n=4-6 |
+|---|---|
+| Sonnet-plain reaches **exactly 1**, all four runs, zero spread | **2.00 / 2.25** — one run in each arm reached 5 |
+| Hinted: **9 vs 5**, tools nearly double reach | **7.67 vs 6.67**, supports heavily overlapping |
+| `CHASE_REQUIRED` **4/4 vs 0/4**, perfect separation, *the entire gap* | **3.17 vs 1.33** |
+
+**The pattern in what died is exact and was predictable.** All three were claims about a
+**difference between two tooled arms**. Every claim about a *large* effect survived untouched —
+the floor (0.00, 4/4 runs), the prompt effect (~2 → ~7), and Opus supplying the sub-goal
+unprompted (7.00/7.83 against 2.00/2.25, non-overlapping supports).
+
+That is not luck. **A between-arm difference is structurally the smallest effect in any
+comparative design**: it is what remains after the floor, the manipulation and the model have
+each taken their share. So it is always the claim that needs the most runs — and it is
+invariably the one the eval was built to make.
+
+**Why n=2 looked sufficient at the time, which is the part worth remembering.** The numbers
+were not noisy-looking. Sonnet-plain read `{1, 1}` and `{1, 1}` — *zero* spread, four runs
+agreeing exactly. `CHASE_REQUIRED` read 0/4 twice against 4/4 twice — perfect, in the direction
+the fixture predicted before any run. **A confirmed prediction at n=2 is still n=2**, and
+apparent zero-variance from two draws is the least informative kind of agreement, not the most.
+The support block printed `{1.0000 x2}` on every row and I read consistency where there was
+only a small sample.
+
+**What I should have done:** published the floor, the prompt effect and the model effect — all
+robust at n=2 and all large — and withheld the tool comparison pending more runs. Instead the
+tool comparison was the headline of both the artifact and the commit message.
+
+**Cost:** a correction box at the top of `RESULTS.md`, a redeployed artifact, and a commit whose
+subject line records that three of its predecessor's claims were wrong. Cheap in absolute terms
+because it was caught internally, at the user's prompting, before anyone acted on it.
+
+**Fix idea:** before publishing any comparative claim, sort the claims by effect size and draw a
+line: large effects can go out at low n, between-arm differences cannot. State the n *next to
+each claim*, not once in a caveats section — a caveat at the bottom does not travel with a
+number that gets quoted.
+
+**Severity:** high — the falsified claims were the eval's stated purpose, and they were
+published, not merely believed.
+
+**Status:** fixed-verified — all three corrected in `RESULTS.md` (correction box at the top
+mapping each claim to its n=6 value) and in the artifact; `prompt-engineering:42c55fe`.
+
+## W-21 — Thickening n turned a dead claim into a better one — the mechanism came back stronger than it died
+
+**Valid:** dated 2026-08-27
+
+**Observed:** 2026-08-27. Twenty runs, $7.28, taking every arm from n=2 to n=4-6.
+
+**Pattern:** when thickening n kills a claim, **look at what replaces it before recording a
+loss.** A claim that dies at higher n is often a crude version of a truer one, and the truer one
+is usually more defensible than the original.
+
+**The counterfactual, both directions.** Three published claims died (F-29). But the *mechanism*
+behind them — the fixture's pre-registered theory that symbol navigation must win the
+rename-chase bucket and lose the string-dispatch one — came back in **better** shape:
+
+| | n=2 | n=4-6 |
+|---|---|---|
+| `CHASE_REQUIRED`, hinted cs vs native | 4/4 vs 0/4 | **3.17 vs 1.33** (+1.84) |
+| `LEXICAL_ONLY`, hinted cs vs native | 0/4→4/4 vs 2/4 | **1.83 vs 2.33** (−0.50) |
+| net total reach | +4 | **+1.0** |
+
+At n=2 the tool looked **strictly dominant**: it swept one bucket and the other was noise. At
+n=6 it shows the **trade the design predicted** — better at following a rename, worse at names
+held as strings. *A tool that is better at one thing and worse at another is a more credible
+finding than one that wins everywhere*, and it is the finding the fixture was built to produce.
+The clean sweep was the artifact; the trade is the result.
+
+**And thickening produced a genuinely new finding that n=2 could not have contained.** Across
+6 hinted-Sonnet codescout runs, `symbols` was called in 5 of them (1-24 calls) and `references`
+in 5 (1-8). Across 6 Opus codescout runs, **`symbols` was called zero times** and `references`
+in only 2. Opus-codescout's `CHASE_REQUIRED` (1.33) therefore sits *below* hinted-Sonnet
+codescout's (3.17) — stronger model, same tools, no other route to the filesystem. **A
+navigation tool pays only when the agent chooses to navigate with it**, and a model strong
+enough not to need it will not reach for it. That needed six runs per arm to see; at two it
+would have read as variance.
+
+**One method change made the difference visible**, and it is copyable: `bucket_breakdown.py` was
+reporting a **union** across an arm's runs — "could this arm ever reach it". A union saturates
+as n grows, so more runs would have made every arm look *better* and the arms look *more alike*,
+hiding the very spread that thickening was meant to expose. Switching to per-bucket **means**
+is what let n=6 speak. **A union is the wrong aggregate for anything you intend to compare.**
+
+**Confirming data points:** this one. Related: W-19 (staging caught defects before a headline)
+and W-20 (an unrun condition overturned a published headline) — all three are the same family:
+*the cheap extra measurement is the one that changes the conclusion.*
+
+**Impact:** high — converted three false claims into one credible mechanism plus a new finding,
+for $7.28.
+
+**Promote-when:** a second work stream finds that raising n replaced a dead claim with a better
+one. At two datapoints, promote to `eval-design` as: *"When higher n kills a claim, read what
+replaced it — the crude claim usually dies into a truer one."*
+
+**Status:** validated — the replacement claims are committed (`prompt-engineering:42c55fe`) and
+the method change is in the probe.
 
 ## Template for new entries
 
