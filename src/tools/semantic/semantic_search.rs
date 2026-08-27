@@ -756,6 +756,9 @@ impl Tool for SemanticSearch {
 
                 let mut out = search_response(&hits, limit);
                 apply_worktree_plan_notes(&mut out, &plan);
+                if let Some(note) = index_skip_note(root.as_deref()) {
+                    out["index_degraded_note"] = serde_json::json!(note);
+                }
                 return Ok(out);
             }
         }
@@ -767,7 +770,14 @@ impl Tool for SemanticSearch {
                 let hint = classify_search_error(&e.to_string(), &project_id);
                 crate::tools::RecoverableError::with_hint(format!("stack search failed: {e}"), hint)
             })?;
-        Ok(search_response(&hits, limit))
+        let mut out = search_response(&hits, limit);
+        // Both return paths stamp it, not just this one: the worktree branch above
+        // returns its own response and would otherwise be the single search shape
+        // that never reports an incomplete index.
+        if let Some(note) = index_skip_note(root.as_deref()) {
+            out["index_degraded_note"] = serde_json::json!(note);
+        }
+        Ok(out)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -830,6 +840,39 @@ fn search_response(hits: &[crate::retrieval::search::Hit], limit: usize) -> Valu
     out
 }
 
+/// The durable code-index skip marker, rendered as a one-line note, or `None`
+/// when the last sync was clean.
+///
+/// `index(action="status")` has surfaced `last_sync_skipped` since
+/// `docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`,
+/// and `artifact(action="find")` surfaces its catalog twin (`catalog_degraded`)
+/// on every call. `semantic_search` — the tool that actually CONSUMES this index
+/// — surfaced neither, so the one health signal that existed sat where nobody
+/// reads it: a caller learned their index was incomplete only if they thought to
+/// run a status command, which is exactly what you do not think to do when the
+/// search returned plausible-looking results.
+///
+/// Returns a STRING, deliberately, so it drops into `format_semantic_search`'s
+/// `state_lines` list and inherits its head placement. The sample stays in
+/// `index(action="status")`, the surface built to carry it.
+///
+/// Presence means a problem; absent when clean, never `count: 0`. Same
+/// convention as `index(status)`'s `last_sync_skipped` and `model_mismatch`.
+///
+/// BUG docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+fn index_skip_note(root: Option<&std::path::Path>) -> Option<String> {
+    let st = crate::retrieval::index_state::read_index_state(root?)?;
+    if st.last_sync_skipped_count == 0 {
+        return None;
+    }
+    Some(format!(
+        "the last index sync SKIPPED {} file(s), so these results are computed over an \
+         incomplete index — an absent match here does not mean the code lacks it. \
+         `index(action=\"status\")` lists them; `index(action=\"build\")` retries.",
+        st.last_sync_skipped_count
+    ))
+}
+
 pub(crate) fn format_semantic_search(val: &Value) -> String {
     let results = match val["results"].as_array() {
         Some(arr) => arr,
@@ -859,6 +902,7 @@ pub(crate) fn format_semantic_search(val: &Value) -> String {
     for (field, label) in [
         ("hint", "Hint"),
         ("worktree_state_warning", "Warning"),
+        ("index_degraded_note", "Warning"),
         ("main_never_indexed_note", "Note"),
         ("drift_note", "Note"),
         ("truncated_hint", "Note"),
@@ -1396,6 +1440,125 @@ mod worktree_search_tests {
             serde_json::to_string(&state).unwrap(),
         )
         .unwrap();
+    }
+
+    /// Writes a sidecar recording `skipped` skipped files, so `index_skip_note`
+    /// has a real durable marker to read — the same one `sync_project` writes.
+    fn write_sidecar_with_skips(root: &std::path::Path, skipped: &[&str]) {
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let state = crate::retrieval::index_state::IndexState {
+            last_indexed_commit: String::new(),
+            last_indexed_at: "2026-08-27T00:00:00Z".to_string(),
+            schema_version: crate::retrieval::index_state::INDEX_STATE_SCHEMA_VERSION,
+            indexed_with_model: None,
+            dirty_paths: Vec::new(),
+            last_sync_skipped_count: skipped.len(),
+            last_sync_skipped_sample: skipped.iter().map(|s| s.to_string()).collect(),
+        };
+        std::fs::write(
+            root.join(".codescout").join("index-state.json"),
+            serde_json::to_string(&state).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// The marker `sync_project` persists must reach the tool that CONSUMES the
+    /// index, not only `index(action="status")` — which a caller only runs if they
+    /// already suspect a problem.
+    ///
+    /// Both controls are the point: a warning that fires on a clean index, or with
+    /// no sidecar at all, is one a reader learns to ignore, and it would look
+    /// correct in the positive case alone.
+    ///
+    /// BUG docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+    #[test]
+    fn index_skip_note_fires_only_when_the_last_sync_actually_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        // No sidecar at all — nothing is known, so nothing may be claimed.
+        assert!(
+            index_skip_note(Some(root)).is_none(),
+            "absent sidecar must not read as degraded"
+        );
+
+        // Clean sync — the marker exists and says zero.
+        write_sidecar_with_skips(root, &[]);
+        assert!(
+            index_skip_note(Some(root)).is_none(),
+            "a clean sync must not warn"
+        );
+
+        // Dirty sync.
+        write_sidecar_with_skips(root, &["src/a.rs", "src/b.rs", "src/c.rs"]);
+        let note = index_skip_note(Some(root)).expect("a skipped sync must warn");
+        assert!(note.contains('3'), "the note must name the count: {note}");
+        assert!(
+            note.contains("index(action=\"status\")"),
+            "the note must route to the surface holding the sample: {note}"
+        );
+    }
+
+    /// The note must reach a READER, not merely sit in the JSON. `call_content`'s
+    /// overflow path shows `truncate_compact(format_semantic_search(val), …)` and
+    /// nothing else, so a field appended after the result rows is cut away on
+    /// exactly the searches large enough to need it.
+    ///
+    /// Asserting on the rendered string rather than the Value is the point of this
+    /// test: a correctly-populated field that no formatter renders is an inert
+    /// field, and reads as done.
+    #[test]
+    fn the_incomplete_index_warning_survives_rendering_and_truncation() {
+        let long_content = "x".repeat(200);
+        let results: Vec<serde_json::Value> = (0..80)
+            .map(|i| {
+                serde_json::json!({
+                    "file_path": format!("src/f_{i}.rs"),
+                    "start_line": 1,
+                    "end_line": 2,
+                    "content": long_content.clone(),
+                })
+            })
+            .collect();
+        let val = serde_json::json!({
+            "results": results,
+            "total": 80,
+            "index_degraded_note": "SKIP-MARKER-MUST-SURVIVE",
+        });
+
+        let formatted = format_semantic_search(&val);
+        assert!(
+            formatted.contains("SKIP-MARKER-MUST-SURVIVE"),
+            "the note must be rendered at all: {formatted}"
+        );
+        assert!(
+            formatted.len() > 3_000,
+            "fixture must exceed the hard cap to test anything: {} bytes",
+            formatted.len()
+        );
+        let truncated = crate::tools::core::types::truncate_compact(&formatted, 2_000, 3_000);
+        assert!(
+            truncated.contains("SKIP-MARKER-MUST-SURVIVE"),
+            "the note must survive the tail cut, or it vanishes on exactly the \
+             searches big enough to need it: {truncated}"
+        );
+    }
+
+    /// And it must reach the zero-results case, which is where an incomplete index
+    /// is most likely to be misread: "0 results" over a partial index is the shape
+    /// that reads as "the code does not contain this".
+    #[test]
+    fn the_incomplete_index_warning_reaches_the_zero_results_case() {
+        let val = serde_json::json!({
+            "results": [],
+            "total": 0,
+            "index_degraded_note": "SKIP-MARKER-MUST-SURVIVE",
+        });
+        let formatted = format_semantic_search(&val);
+        assert!(
+            formatted.contains("SKIP-MARKER-MUST-SURVIVE"),
+            "an empty result set is exactly when this matters most: {formatted}"
+        );
     }
 
     #[test]
