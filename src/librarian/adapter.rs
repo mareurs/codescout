@@ -16,6 +16,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::librarian::tools::{all_tools as lib_all_tools, ToolContext as LibToolContext};
+use crate::util::librarian_response::names_path_containing;
 
 /// Build the librarian runtime, with the environment inputs supplied explicitly so
 /// tests can point it at a tempdir workspace/db without `set_var`. See
@@ -283,53 +284,6 @@ impl LibrarianAdapter {
             lsp: Arc::clone(&self.ctx.lsp),
         })
     }
-}
-
-/// Whether a librarian response names a path containing `needle`.
-///
-/// Generalised from the bug-file/tracker-path check below so a section declaration
-/// (Task 5) can carry an arbitrary `path~<substring>` predicate. The scanned shapes
-/// are unchanged and still deliberately shallow: top-level `abs_path`/`rel_path`,
-/// one level into a `find`-style `items` array, and `path` inside a `doctor`-style
-/// `violations` array. Each is enumerated explicitly because a missing shape fails
-/// as a *wrong guide* rather than an error — see
-/// `docs/issues/archive/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
-/// for the case where `doctor` was the missing shape.
-///
-/// Separators are normalized before matching. A backslash-spelled Windows path
-/// matched nothing against the hardcoded forward-slash needle and silently
-/// delivered the *wrong* guide instead of erroring — measured under wine,
-/// 2026-08-26, once Git Bash was available there to separate this from the
-/// no-POSIX-shell failures it had been hiding behind.
-pub fn names_path_containing(result: &Value, needle: &str) -> bool {
-    fn hit(v: Option<&Value>, needle: &str) -> bool {
-        v.and_then(Value::as_str)
-            .is_some_and(|p| p.replace('\\', "/").contains(needle))
-    }
-    fn any_path_field(obj: &Value, needle: &str) -> bool {
-        hit(obj.get("abs_path"), needle) || hit(obj.get("rel_path"), needle)
-    }
-
-    if any_path_field(result, needle) {
-        return true;
-    }
-    if result
-        .get("items")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(|i| any_path_field(i, needle)))
-    {
-        return true;
-    }
-    // `doctor` is the one action whose rows carry neither `abs_path`/`rel_path` nor an
-    // `items` array: it returns `violations: [{check, artifact_id, path, detail}]`
-    // (`src/librarian/tools/doctor.rs:466`, field at `:135`). Scanned as its own key
-    // rather than folded into `any_path_field`, which would widen the TOP-LEVEL check
-    // across every response shape to serve one action; `violations` is unique to
-    // `doctor`, so the blast radius is exactly that response.
-    result
-        .get("violations")
-        .and_then(Value::as_array)
-        .is_some_and(|rows| rows.iter().any(|row| hit(row.get("path"), needle)))
 }
 
 /// Whether a librarian response names a path under the bug-file or tracker directories.
@@ -1076,18 +1030,6 @@ mod tests {
             a.selector_key(&json!({"id": "x"})),
             Some(a.name().to_string())
         );
-    }
-
-    #[test]
-    fn names_path_containing_generalises_and_normalises_separators() {
-        let v = json!({"abs_path": "docs\\issues\\x.md"});
-        assert!(names_path_containing(&v, "docs/issues/"));
-        assert!(!names_path_containing(&v, "docs/trackers/"));
-        // find-style items and doctor-style violations keep working.
-        let items = json!({"items": [{"rel_path": "docs/trackers/t.md"}]});
-        assert!(names_path_containing(&items, "docs/trackers/"));
-        let viol = json!({"violations": [{"path": "docs/issues/b.md"}]});
-        assert!(names_path_containing(&viol, "docs/issues/"));
     }
 
     #[test]

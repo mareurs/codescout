@@ -191,7 +191,7 @@ impl Shape {
             }
         }
         if let Some(needle) = &self.path_contains {
-            if !crate::librarian::adapter::names_path_containing(result, needle) {
+            if !crate::util::librarian_response::names_path_containing(result, needle) {
                 return false;
             }
         }
