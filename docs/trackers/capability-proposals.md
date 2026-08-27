@@ -1307,7 +1307,7 @@ must too.
 is prompt-engineering's, the point is keyed to codescout. Traced to the workspace-pin
 cross-embed defect fixed in `0cefd1f3` on 2026-07-13 — the point's `created_at` is
 ~2026-07-04, nine days inside the window. Full account:
-`docs/issues/2026-08-26-cross-embed-pin-fix-left-mis-keyed-memory-points-behind.md`.
+`docs/issues/archive/2026-08-26-cross-embed-pin-fix-left-mis-keyed-memory-points-behind.md`.
 
 Its content is a ledger of three ways a prompt-tdd skill A/B silently measures base-model
 behaviour instead of the skill — the class of thing `CLAUDE.md` says to read *before*
