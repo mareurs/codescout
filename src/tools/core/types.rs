@@ -716,24 +716,65 @@ pub trait Tool: Send + Sync {
             }
         }
 
-        fn inject_hint(val: &mut Value, topic: &str) {
+        /// Which shape of guide content actually shipped in the second (or
+        /// later) content block, so the legacy `_guide_hint` JSON field can
+        /// describe THAT, not a fixed sentence written for the whole-topic
+        /// world. Before this existed, `inject_hint` always emitted "Full
+        /// guide auto-injected ... do not re-call get_guide" regardless of
+        /// what shipped — true for `Whole`, but false for `Section` (a
+        /// slice, not "the full guide") and actively backwards for
+        /// `Preamble` (the whole point of the preamble fallback is that the
+        /// model SHOULD re-call `get_guide(topic)`; telling it not to
+        /// neutered the fallback into a ~700-byte no-op).
+        #[derive(Clone, Copy)]
+        enum GuideDeliveryShape {
+            /// Non-declaring topic: the entire topic body shipped, once.
+            Whole,
+            /// Declaring topic, at least one section matched: only the
+            /// matched slice(s) shipped — other sections may still arrive
+            /// on later, differently-shaped calls this session.
+            Section,
+            /// Declaring topic, no section matched this call's shape: the
+            /// topic's preamble shipped, with an explicit pointer to call
+            /// `get_guide(topic)` for the full body.
+            Preamble,
+        }
+
+        fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShape) {
+            let text = match shape {
+                GuideDeliveryShape::Whole => format!(
+                    "First call this session for topic '{topic}'. \
+                     Full guide auto-injected as a separate content \
+                     block below; do not re-call get_guide(\"{topic}\")."
+                ),
+                GuideDeliveryShape::Section => format!(
+                    "Section(s) of '{topic}' auto-injected below, selected for \
+                     this call. Other sections may arrive on later calls; \
+                     `get_guide(\"{topic}\")` returns the full topic."
+                ),
+                GuideDeliveryShape::Preamble => format!(
+                    "No section of '{topic}' declares this call shape; its \
+                     preamble is below. Call `get_guide(\"{topic}\")` for the \
+                     full topic."
+                ),
+            };
             if let Some(obj) = val.as_object_mut() {
-                obj.insert(
-                    "_guide_hint".to_string(),
-                    Value::String(format!(
-                        "First call this session for topic '{topic}'. \
-                         Full guide auto-injected as a separate content \
-                         block below; do not re-call get_guide(\"{topic}\")."
-                    )),
-                );
+                obj.insert("_guide_hint".to_string(), Value::String(text));
             }
         }
 
         /// Build the second-block content for V2 hard-injection of a
         /// non-declaring (whole-topic) guide. Returns `None` when the
-        /// topic's body is not registered (defensive — the `_guide_hint`
-        /// field still ships in that case so the model knows to call
-        /// `get_guide(topic)` manually).
+        /// topic's body is not registered. The caller (`guide_blocks_for`)
+        /// treats `None` as "nothing shipped": it does NOT burn the topic's
+        /// ledger key and does NOT set the `_guide_hint` field for it, so a
+        /// misregistered/renamed topic degrades to silence rather than a
+        /// false promise of content that never arrives, and a later call
+        /// against the same topic still gets a chance to succeed once the
+        /// registration is fixed. This should not happen for any topic
+        /// actually reachable via `relevant_guide_topic` in production; it
+        /// exists as a defensive guard against drift between that side and
+        /// the registered-topics table, not as a supported delivery path.
         fn guide_block(topic: &str) -> Option<Content> {
             let body = crate::prompts::topic_body(topic)?;
             let wrapped = format!(
@@ -781,14 +822,26 @@ pub trait Tool: Send + Sync {
             selector: Option<&str>,
             result: &Value,
             emitted: &mut crate::tools::guide_ledger::GuideLedger,
-        ) -> Vec<Content> {
+        ) -> (Vec<Content>, Option<GuideDeliveryShape>) {
             use crate::prompts::guide_index::GUIDE_INDEX;
 
             if !GUIDE_INDEX.declares(topic) {
-                if !emitted.insert(topic.to_string()) {
-                    return Vec::new();
+                if emitted.contains(topic) {
+                    return (Vec::new(), None);
                 }
-                return guide_block(topic).into_iter().collect();
+                // Only burn the ledger key once the block actually builds —
+                // `guide_block` returning `None` (topic not registered) must
+                // not consume the slot on silence (fix for the fail-safe
+                // inversion flagged in Task 8 review: an unregistered topic
+                // used to burn its key with nothing shipped at all, which is
+                // ambiguity resolving toward suppression).
+                return match guide_block(topic) {
+                    Some(block) => {
+                        emitted.insert(topic.to_string());
+                        (vec![block], Some(GuideDeliveryShape::Whole))
+                    }
+                    None => (Vec::new(), None),
+                };
             }
 
             let matched = GUIDE_INDEX.match_sections(topic, selector, result);
@@ -798,21 +851,24 @@ pub trait Tool: Send + Sync {
             if matched.is_empty() {
                 let key = format!("{topic}#<preamble>");
                 if !emitted.insert(key) {
-                    return Vec::new();
+                    return (Vec::new(), None);
                 }
                 return match GUIDE_INDEX.topic(topic) {
-                    Some(entry) => vec![Content::text(format!(
-                        "<!-- auto-injected get_guide('{topic}') preamble — no section \
-                         declares this call's shape. -->\n\
-                         \n\
-                         {}\n\
-                         \n\
-                         Call `get_guide(\"{topic}\")` for the full topic.\n\
-                         \n\
-                         <!-- end auto-injected get_guide('{topic}') preamble -->",
-                        entry.preamble.trim()
-                    ))],
-                    None => Vec::new(),
+                    Some(entry) => (
+                        vec![Content::text(format!(
+                            "<!-- auto-injected get_guide('{topic}') preamble — no section \
+                             declares this call's shape. -->\n\
+                             \n\
+                             {}\n\
+                             \n\
+                             Call `get_guide(\"{topic}\")` for the full topic.\n\
+                             \n\
+                             <!-- end auto-injected get_guide('{topic}') preamble -->",
+                            entry.preamble.trim()
+                        ))],
+                        Some(GuideDeliveryShape::Preamble),
+                    ),
+                    None => (Vec::new(), None),
                 };
             }
 
@@ -838,16 +894,24 @@ pub trait Tool: Send + Sync {
                     )));
                 }
             }
-            out
+            let shape = if out.is_empty() {
+                None
+            } else {
+                Some(GuideDeliveryShape::Section)
+            };
+            (out, shape)
         }
 
-        // Compute the hint topic (drives the legacy `_guide_hint` field) and
-        // the guide content blocks together, in one pass, under one lock —
-        // `hint_topic` is Some(topic) exactly when `guide_content` is
-        // non-empty for the `relevant_guide_topic` branch, so the two never
-        // drift apart (a stale `_guide_hint` field with no matching content
-        // block, or vice versa, is what a two-pass version would risk).
-        let (hint_topic, guide_content): (Option<String>, Vec<Content>) = {
+        // Compute the hint (topic + delivery shape, driving the legacy
+        // `_guide_hint` field) and the guide content blocks together, in one
+        // pass, under one lock — `hint` is `Some((topic, shape))` exactly
+        // when `guide_content` is non-empty, so the two never drift apart (a
+        // stale `_guide_hint` field with no matching content block, or vice
+        // versa, is what a two-pass version would risk). Carrying `shape`
+        // alongside `topic` (rather than just `topic`) is what lets
+        // `inject_hint` say something true about what actually shipped —
+        // see `GuideDeliveryShape`.
+        let (guide_hint, guide_content): (Option<(String, GuideDeliveryShape)>, Vec<Content>) = {
             let mut emitted = ctx.guide_hints_emitted.lock();
             // Anonymous tier only (a no-op when no TTL is configured): re-arm
             // topics the model plausibly no longer holds. Must run BEFORE the
@@ -898,7 +962,7 @@ pub trait Tool: Send + Sync {
                 let topic = crate::prompts::SESSION_OPENING_GUIDE;
                 emitted.insert(topic.to_string());
                 let blocks: Vec<Content> = guide_block(topic).into_iter().collect();
-                (Some(topic.to_string()), blocks)
+                (Some((topic.to_string(), GuideDeliveryShape::Whole)), blocks)
             } else if let Some(topic) = self.relevant_guide_topic(&val) {
                 // Either the default-path buffering kicked in (large JSON),
                 // or the tool itself pre-buffered (e.g. run_command storing
@@ -917,11 +981,15 @@ pub trait Tool: Send + Sync {
                     _ => true,
                 };
                 if should {
-                    let blocks = guide_blocks_for(topic, selector.as_deref(), &val, &mut emitted);
-                    if blocks.is_empty() {
-                        (None, Vec::new())
-                    } else {
-                        (Some(topic.to_string()), blocks)
+                    let (blocks, shape) =
+                        guide_blocks_for(topic, selector.as_deref(), &val, &mut emitted);
+                    // `shape.is_none()` iff `blocks.is_empty()` — every return
+                    // path in `guide_blocks_for` keeps the two in lockstep —
+                    // so branching on `shape` alone is sufficient and avoids
+                    // restating the emptiness check.
+                    match shape {
+                        Some(shape) => (Some((topic.to_string(), shape)), blocks),
+                        None => (None, Vec::new()),
                     }
                 } else {
                     (None, Vec::new())
@@ -966,8 +1034,8 @@ pub trait Tool: Send + Sync {
                 "hint": hint,
                 "buffered_bytes": json_len,
             });
-            if let Some(topic) = &hint_topic {
-                inject_hint(&mut buffered, topic);
+            if let Some((topic, shape)) = &guide_hint {
+                inject_hint(&mut buffered, topic, *shape);
             }
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut buffered, notice);
@@ -979,8 +1047,8 @@ pub trait Tool: Send + Sync {
         } else {
             // Small output path.
             let mut val = val;
-            if let Some(topic) = &hint_topic {
-                inject_hint(&mut val, topic);
+            if let Some((topic, shape)) = &guide_hint {
+                inject_hint(&mut val, topic, *shape);
             }
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut val, notice);

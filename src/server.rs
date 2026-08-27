@@ -5678,11 +5678,21 @@ mod guide_hint_tests {
             )
             .await
             .unwrap();
+        // `extract_hint` only proves SOMETHING shipped — the `_guide_hint`
+        // field fires for a matched section AND for the preamble fallback
+        // alike, so it cannot tell "artifact_event.list matched its declared
+        // section" apart from "no section matched, here's the preamble".
+        // Deleting `librarian.md`'s `<!-- serves: artifact_event.create,
+        // artifact_event.list -->` declaration would leave this assertion
+        // green while its stated claim ("delivers its own section") went
+        // false. Assert on the actual section marker instead.
+        let first_guide = guide_blocks(&first).join("");
         assert!(
-            extract_hint(&first).is_some(),
-            "a distinct declared shape (artifact_event.list) must still deliver \
-             its own section, even though a differently-shaped librarian-topic \
-             call already fired this session"
+            first_guide.contains("§ artifact_event — Event Log"),
+            "a distinct declared shape (artifact_event.list) must deliver its own \
+             `artifact_event — Event Log` section, even though a differently-shaped \
+             librarian-topic call already fired this session; got: {}",
+            first_guide.chars().take(400).collect::<String>()
         );
         let second = event
             .call_content(
@@ -6942,9 +6952,17 @@ mod guide_hint_tests {
             "preamble fallback must be small, got {} B",
             guide.len()
         );
+        // The one guard that actually catches deleting the pointer line
+        // (`types.rs`'s preamble-fallback block): a bare `contains("get_guide")`
+        // is vacuous here, because `librarian.md`'s own preamble text embeds
+        // `see get_guide("tracker-conventions")` (lines 5-6) and is included
+        // verbatim in the fallback block regardless of whether the pointer
+        // line below it survives. Assert the emitted pointer sentence itself.
         assert!(
-            guide.contains("get_guide"),
-            "fallback must point at the full topic"
+            guide.contains("Call `get_guide(\"librarian\")` for the full topic"),
+            "fallback must point at the full topic with the actual emitted \
+             pointer sentence, got: {}",
+            guide.chars().take(600).collect::<String>()
         );
     }
 
@@ -6956,8 +6974,42 @@ mod guide_hint_tests {
         // tempdir does not contain) — any existing directory is enough for
         // the call to succeed, which is all this path needs.
         let out = call_tool(&server, "symbols", json!({"path": "."})).await;
-        let guide = guide_blocks(&out).join("");
-        assert!(guide.contains(crate::prompts::topic_body("symbol-navigation").unwrap()));
+        let guide = guide_blocks(&out);
+        // `guide_blocks` is "everything after block 0" — for a fresh/unonboarded
+        // tempdir, `symbols` also appends unrelated hint blocks (a
+        // paths-are-relative-to notice, a project-status summary) that have
+        // nothing to do with the guide-delivery system this test covers. Isolate
+        // the one auto-injected guide block by its marker comment instead of
+        // asserting on the raw trailing-block count, which those unrelated
+        // blocks would otherwise inflate.
+        let guide_shaped: Vec<&String> = guide
+            .iter()
+            .filter(|b| b.contains("<!-- auto-injected get_guide("))
+            .collect();
+        assert_eq!(
+            guide_shaped.len(),
+            1,
+            "a non-declaring topic must ship exactly one whole-topic guide block, got {}: {:?}",
+            guide_shaped.len(),
+            guide
+        );
+        // Assert full equality against the exact wrapper `guide_block` builds
+        // (`types.rs`), not a `contains()` check — `contains` passes even if
+        // the wrapper text were RE-DERIVED with a one-character difference
+        // from the pre-Task-8 original (the failure mode Task 8 review's
+        // hazard 2 exists to catch: this branch must be a pass-through to the
+        // original wrapper, never a re-implementation of it). This is the
+        // sole guard on the Phase 1 containment property.
+        let body = crate::prompts::topic_body("symbol-navigation").unwrap();
+        let expected = format!(
+            "<!-- auto-injected get_guide('symbol-navigation') — first call this session \
+         that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\
+         \n\
+         {body}\n\
+         \n\
+         <!-- end auto-injected get_guide('symbol-navigation') -->"
+        );
+        assert_eq!(*guide_shaped[0], expected);
     }
 }
 
