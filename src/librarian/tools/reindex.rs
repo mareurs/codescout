@@ -270,6 +270,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
+    // Persist the durable half of the degraded signal. `embed_note` above is an
+    // envelope field — gone the moment this call returns — so a later
+    // `artifact(action="find")` has no way to know the last refresh was partial.
+    // Written unconditionally whenever embeddings were attempted this run
+    // (including a clean 0/[] run, which is what clears a stale marker left by
+    // an earlier failure) — never when `want_embeddings` is false, since a run
+    // with no embedder configured has no evidence about embed health either way.
+    // docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+    if want_embeddings {
+        let cat = ctx.catalog.lock();
+        let embed_error_sample: Vec<&String> = embed_errors.iter().take(20).collect();
+        crate::librarian::catalog::gc::set_meta(
+            &cat.conn,
+            "last_reindex_embed_error_count",
+            &embed_errors.len().to_string(),
+        )?;
+        crate::librarian::catalog::gc::set_meta(
+            &cat.conn,
+            "last_reindex_embed_errors_sample",
+            &serde_json::to_string(&embed_error_sample)?,
+        )?;
+    }
+
     let unknown_count = all_unknown_ids.len();
     const UNKNOWN_SAMPLE: usize = 20;
     let sample: Vec<&String> = all_unknown_ids.iter().take(UNKNOWN_SAMPLE).collect();
@@ -486,6 +509,148 @@ mod tests {
             0,
             "backfill_commits sits AFTER the embed block and the `?` used to skip it, \
              so it must now run for every target"
+        );
+    }
+
+    /// Step 2 of docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:
+    /// the envelope's `embed_error_count` does not outlive the call — a later
+    /// `artifact(action="find")` has no way to know the last refresh was partial.
+    /// This pins the durable half: a failed embed run must persist a marker in
+    /// `catalog_meta`, the same key-value table `gc.rs` already uses for
+    /// `gc_grace_days`.
+    #[tokio::test]
+    async fn an_embed_failure_persists_a_durable_catalog_meta_marker() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::catalog::gc;
+
+        struct FailingEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for FailingEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, _texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                anyhow::bail!("connection refused")
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# A\nbody\n").unwrap();
+        std::fs::write(root.join("docs/specs/b.md"), "# B\nbody\n").unwrap();
+
+        let rules =
+            load_rules("[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n").unwrap();
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: root.to_path_buf(),
+            })
+            .with_rules(rules)
+            .with_embedding(std::sync::Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
+                    FailingEmbedder,
+                )),
+            ))
+            .with_artifact_store(std::sync::Arc::new(InMemoryArtifactStore::default()))
+            .build();
+
+        let v = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            v["embed_error_count"].as_u64().unwrap(),
+            2,
+            "test setup sanity"
+        );
+
+        let cat = ctx.catalog.lock();
+        let count = gc::get_meta(&cat.conn, "last_reindex_embed_error_count").unwrap();
+        assert_eq!(
+            count.as_deref(),
+            Some("2"),
+            "the embed failure count must survive past the call, in catalog_meta"
+        );
+        let sample = gc::get_meta(&cat.conn, "last_reindex_embed_errors_sample")
+            .unwrap()
+            .expect("sample marker must be written alongside the count");
+        let parsed: Vec<String> = serde_json::from_str(&sample).unwrap();
+        assert_eq!(
+            parsed.len(),
+            2,
+            "both failures' messages must be sampled: {parsed:?}"
+        );
+    }
+
+    /// A fixed embedder must clear the marker, not just stop adding to it — a
+    /// stuck-true degraded flag would misreport a healthy catalog forever, same
+    /// invariant as `sync_project_clears_a_previously_recorded_skip_count_on_a_clean_run`
+    /// in `src/retrieval/sync.rs` for the sibling code-index bug.
+    #[tokio::test]
+    async fn a_clean_reindex_after_a_failure_clears_the_persisted_marker() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::catalog::gc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        struct FlakyEmbedder(Arc<AtomicBool>);
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for FlakyEmbedder {
+            fn dimensions(&self) -> usize {
+                4
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                if self.0.load(Ordering::SeqCst) {
+                    anyhow::bail!("connection refused")
+                } else {
+                    Ok(texts.iter().map(|_| vec![0.0f32; 4]).collect())
+                }
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/a.md"), "# A\nbody\n").unwrap();
+
+        let rules =
+            load_rules("[[rule]]\nglob = \"**/docs/specs/*.md\"\nkind = \"spec\"\n").unwrap();
+        let should_fail = Arc::new(AtomicBool::new(true));
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: root.to_path_buf(),
+            })
+            .with_rules(rules)
+            .with_embedding(std::sync::Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
+                    FlakyEmbedder(should_fail.clone()),
+                )),
+            ))
+            .with_artifact_store(std::sync::Arc::new(InMemoryArtifactStore::default()))
+            .build();
+
+        call(&ctx, json!({})).await.unwrap();
+        {
+            let cat = ctx.catalog.lock();
+            assert_eq!(
+                gc::get_meta(&cat.conn, "last_reindex_embed_error_count")
+                    .unwrap()
+                    .as_deref(),
+                Some("1"),
+                "marker must be set after the failing run"
+            );
+        }
+
+        should_fail.store(false, Ordering::SeqCst);
+        call(&ctx, json!({})).await.unwrap();
+
+        let cat = ctx.catalog.lock();
+        assert_eq!(
+            gc::get_meta(&cat.conn, "last_reindex_embed_error_count")
+                .unwrap()
+                .as_deref(),
+            Some("0"),
+            "a clean run must reset the marker, not just leave it stuck at the last failure"
         );
     }
 

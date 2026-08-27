@@ -342,6 +342,28 @@ fn build_hints(
         }
     }
 
+    // Read the durable degraded marker `reindex.rs` persists into `catalog_meta`
+    // (see docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md
+    // step 2). Global, not scope-filtered — the marker is one call's aggregate
+    // across every target that call walked, not a per-artifact fact, so it
+    // surfaces unconditionally rather than only under Project/Repo scope like
+    // `unindexed_files` above.
+    if let Some(count_str) =
+        crate::librarian::catalog::gc::get_meta(&cat.conn, "last_reindex_embed_error_count")?
+    {
+        let count: usize = count_str.parse().unwrap_or(0);
+        if count > 0 {
+            hints.insert("catalog_degraded".into(), json!(count));
+            hints.insert(
+                "catalog_degraded_hint".into(),
+                json!(format!(
+                    "the last librarian(action=\"reindex\") left {count} artifact(s) without a \
+                     vector; semantic_find will not surface them until reindex succeeds cleanly"
+                )),
+            );
+        }
+    }
+
     let mut expand = Vec::new();
     if hints.contains_key("more_in_repo") {
         expand.push("scope=\"repo\"");
@@ -1478,6 +1500,59 @@ mod tests {
             out_after["count"].as_u64(),
             Some(2),
             "both files are indexed now"
+        );
+    }
+
+    /// Step 2 of docs/issues/2026-08-26-catalog-reindex-fails-closed-on-embedding-error.md:
+    /// the `catalog_meta` marker `reindex.rs` now persists (see
+    /// `librarian::tools::reindex::tests::an_embed_failure_persists_a_durable_catalog_meta_marker`)
+    /// is dead weight until something reads it back. `find` is the surface a caller
+    /// actually queries after the call that failed has already returned — same shape
+    /// as `unindexed_hint` above, sourced from a different signal.
+    #[tokio::test]
+    async fn catalog_degraded_hint_appears_after_a_persisted_embed_failure_then_clears() {
+        use crate::librarian::catalog::gc;
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("a", "A")).unwrap();
+        gc::set_meta(&cat.conn, "last_reindex_embed_error_count", "2").unwrap();
+        gc::set_meta(
+            &cat.conn,
+            "last_reindex_embed_errors_sample",
+            r#"["a: embed failed: connection refused","b: embed failed: connection refused"]"#,
+        )
+        .unwrap();
+
+        let ctx = mk_ctx(cat);
+
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            out["hints"]["catalog_degraded"].as_u64(),
+            Some(2),
+            "the persisted marker must surface on the very next find, not just the \
+             call that wrote it: {:?}",
+            out["hints"]
+        );
+        assert!(
+            out["hints"]["catalog_degraded_hint"]
+                .as_str()
+                .unwrap()
+                .contains("reindex"),
+            "hint must name the fix: {:?}",
+            out["hints"]
+        );
+
+        {
+            let cat = ctx.catalog.lock();
+            gc::set_meta(&cat.conn, "last_reindex_embed_error_count", "0").unwrap();
+            gc::set_meta(&cat.conn, "last_reindex_embed_errors_sample", "[]").unwrap();
+        }
+
+        let out_after = call(&ctx, json!({})).await.unwrap();
+        assert!(
+            out_after["hints"].get("catalog_degraded").is_none(),
+            "a clean reindex clearing the marker must clear the hint too: {:?}",
+            out_after["hints"]
         );
     }
 
