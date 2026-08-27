@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 122
+entry_high_water_R: 123
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-123 | 2026-08-27 | miss (x2) | **Adjacency is not causation — the nearest recent commit is a suspect, not a cause.** Twice in one session an observation was attributed to the most recent commit touching that surface, and both times the real cause predated it: `Monitor` executing in a deny-list arm was a list that lacked it (fixed 16 min earlier in `e67d419`), and `artifact(get)`'s `headings_truncated` was six weeks old (`3bccb234`), not the peer commit 12 min prior. Adjacency is what makes the check feel unnecessary — same file, same day, plausible subject line | cost: two bug reports, one filed `high` against the wrong layer, then retracted; sibling of [[R-118]] (a check that was refused) with the opposite origin and the same output |
 | R-122 | 2026-08-27 | miss | **Writing the lesson down was the act that broke the instrument.** `R-121` prescribed *"record how it was verified unique rather than the token itself"* and named its probe token inline in the same sentence; the token now returns a hit from the tracker, so the recorded repro would tell the next session the fix regressed — or worse, that the bug never existed. Structural, not careless: a probe for an EXCLUSION mechanism must live only in the excluded region, and any ledger recording it sits in the searched region by construction, so the write *is* the contamination | verified live on the rebuilt binary at `ee7d9a3a`; `R-121` repaired in the same pass to carry the two-command derivation; kin [[R-118]] (a refused verification returns an error, not a fact) |
 | R-121 | 2026-08-27 | hit | **A fix justified as "symmetric with the existing X" inherits X's scope without the property that made that scope honest.** `hidden_at_root`'s root-only `read_dir` is honest because its remedy (`include_hidden=true`) is root-agnostic. A gitignore clause copied to that shape names the six gitignored entries at this repo's root and misses `.superpowers/sdd/.gitignore:1:*` at depth 2 — the one rule that caused the reported zero. `completeness_warning`'s own doc already condemns it: *"naming an unchecked cause ends the search for the real one"* | `0f7105b8bebc600b` § Fix, corrected in the same pass; the repro also needed a fresh probe, the bug file's text having come to match its own old one; kin [[R-117]] (a proposed fix that would pass green and move nothing), [[R-118]] (ground truth before the claim) |
 | R-120 | 2026-08-27 | hit | **A decision procedure is a seam — reading it far enough to get an ANSWER is not far enough to get its PRECONDITIONS.** A promotion route was picked straight from the routing test, skipping two paragraphs gating the adjacent destination and an entire successor section imposing a promoted-set audit; the target ledger's own required-field contract was missed the same way. Both omissions sit *after* the answer, and neither raises: a malformed entry is invisible to field-presence sweeps, an unaudited PR merges as cleanly as an audited one | `prompt-surface-measurement-session-log:F-43`; kin [[R-49]] (own plan, one turn old), [[R-95]] (a verdict reads as settled, not as a claim), [[R-89]] (19 cached plugin versions checked — the served copy is what has reach) |
@@ -3936,6 +3937,33 @@ So the "symmetric" fix would emit a warning naming six innocent paths and still 
 **Repair applied:** `R-121`'s paragraph now carries the two-command derivation (`git grep -l` returning zero tracked files against `grep -c` returning one in the excluded path) and names no token, which restores the probe it had spent.
 
 **Status:** validated — caught live, repaired in the same pass.
+
+## R-123 — Adjacency is not causation — the nearest recent commit is a suspect, not a cause
+
+**Valid:** invariant
+
+**Law:** A — ground truth is the artifact.
+
+**Verdict:** miss, twice in one session, same shape both times.
+
+**Observed:** 2026-08-27. Two independent investigations, hours apart, both attributed an observation to the most recent commit near it. Both were wrong, and in both cases one `git log -S` or `git log -- <path>` would have settled it before any writing began.
+
+| # | observation | attributed to | actual cause |
+|---|---|---|---|
+| 1 | `Monitor` executed in an arm that denied it | `--disallowedTools` being "enforced per name" | `Monitor` was **not on the list** when that round ran; added 16 min later in `e67d419`. The evidence pool straddled the fix. |
+| 2 | `artifact(get)` now reports `headings_truncated` | the peer's `25fe3fb5`, committed 12 min earlier and touching `artifact(get)` headings | the field shipped in `3bccb234` on **2026-07-10**, six weeks earlier |
+
+**Why the pull is strong.** In both cases the recent commit was *genuinely adjacent* — same file, same surface, same day, plausible summary line. Adjacency is what makes the inference feel unnecessary to check: the commit is right there, it touches the thing, and no step in between raises. Case 1 cost two bug reports, one of them filed at `high` against the wrong layer. Case 2 cost nothing only because it was checked.
+
+**The asymmetry that makes this cheap to fix.** Confirming a cause costs one command — `git log -S'<the exact token>'` for a field or string, `git log -- <path>` for a file, and read the *dates*, not just the order. Being wrong costs a retraction plus everything built on top. There is no version of this where the check is not worth running.
+
+**Distinguishing it from `R-118`.** `R-118` is *a refused verification returns an error, not a fact* — a check that was attempted and did not run. This is a check that was never attempted, because the answer looked already known. The failure modes are opposite in origin and identical in output: a confident claim with nothing behind it.
+
+**Proposal:** before writing any sentence of the form "X changed because of Y", where Y is a commit, run `git log -S` on the exact token and read the date. If the token predates the change you are explaining, the explanation is wrong regardless of how well it fits.
+
+**Status:** validated — two datapoints in one session, both with concrete cost.
+
+**Promote-when:** a third instance, or one where a wrong attribution reaches a shipped surface rather than a bug file. At that point it belongs in the seven laws under A, phrased as *"adjacency is not causation — date the token before you credit the commit."*
 
 ## Template for new entries
 

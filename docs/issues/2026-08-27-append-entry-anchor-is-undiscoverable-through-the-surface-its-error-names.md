@@ -87,6 +87,37 @@ recovery:
 Correct for a short artifact. For the long ones, it routes the caller to a surface that
 cannot answer.
 
+
+### Re-verified 2026-08-27 18:44 on a fresh build — and the fix direction narrows
+
+Still live. `artifact(action="get", id="5696563f06b2c222")` returns **20 of 90** headings,
+every one from the front (lines 1–605 of 4002). `## Template for new entries` — the anchor
+this ledger's own augmentation prompt instructs callers to pass — is at the bottom and is
+not among them.
+
+**What the re-check corrected.** The response carries `total_headings: 90` and
+`headings_truncated: true`, so the truncation is **disclosed, not silent**. Those fields are
+not new and were not added by any of today's work: `git log -S` puts them in `3bccb234`
+(2026-07-10, *"signal preview.headings truncation instead of silent cap"*). This bug had
+been loosely grouped with the day's silent-partial-result findings; it is not one of them,
+and saying so matters because it moves the fix.
+
+**So the remedy is not "disclose the truncation".** That shipped six weeks ago and does not
+help: the caller is told the list is incomplete and still has no way to reach the missing
+part. Disclosure and discoverability are different properties, and this surface has the
+first without the second — which is arguably worse than a silent cap, because the caller can
+see that something is being withheld and has no argument that would reveal it.
+
+Candidate fixes, re-ranked by that reading:
+
+1. **Make the tail reachable.** A `headings_offset` / `headings_from="end"` argument, or
+   simply always including the final N headings alongside the first N. The window's fill
+   order is the defect; the flag announcing it is not.
+2. **Change the hint to name a surface that works.** `append_entry`'s error could prescribe
+   the ledger's own augmentation prompt (which states the anchor verbatim) rather than
+   `get`. Cheapest, and correct for every ledger whose prompt already names its anchor.
+3. Have `append_entry` fall back to the last heading when `anchor_heading` is omitted —
+   removing the need to discover it at all for the conventional case.
 ## Evidence
 
 - `total_headings: 85` vs 21 returned, `headings_truncated: true` — from a live call, not
@@ -153,4 +184,3 @@ the test honest if the truncation threshold later moves.
 - `src/librarian/tools/append_entry.rs:23` — the insert-before contract
 - `docs/trackers/reconnaissance-patterns.md` — 85 headings, anchor at line 3681; `R-118`
   was appended during the pass that found this
-
