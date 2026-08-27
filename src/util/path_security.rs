@@ -1163,7 +1163,7 @@ fn stage_trims(stage: &str) -> bool {
 ///
 /// **Note this is stronger than "stop scanning at the collapser"**, which was
 /// the shape originally proposed in
-/// `docs/issues/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md`.
+/// `docs/issues/archive/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md`.
 /// That rule leaves trimmers *upstream* of the collapser counting, and so does
 /// not move the bug's own `git show X | cut -f1 | wc -l` example — a
 /// discrepancy found by running a classifier against the refusal corpus rather
@@ -4061,7 +4061,7 @@ EOF"#;
         // requires recording a patch-id beside a fix SHA; the guard blocked the
         // command and its error text then recommended an @cmd_* buffer, which
         // truncates — yielding a syntactically perfect WRONG hash.
-        // BUG docs/issues/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md
+        // BUG docs/issues/archive/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md
         for cmd in [
             "git show abc123 | git patch-id --stable",
             "git show abc123 | git patch-id --stable | cut -d' ' -f1",

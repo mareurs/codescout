@@ -220,8 +220,8 @@ A and B are independently landable. C is the one that closes the observable.
 ## References
 
 - `src/tools/run_command/output.rs` — `handle_successful_output`, `unfiltered_ref`
-- `docs/issues/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md`
-  — **sibling, same session.** The IL-3 guard's error text tells the caller to "rerun
+- `docs/issues/archive/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md`
+  — **sibling, same session. FIXED 2026-08-27 in `18f8f9d1` (patch-id `16a9abc0`).** The IL-3 guard's error text tells the caller to "rerun
   bare and query the `@cmd_*` buffer"; when that buffer is truncated and fed to
   `git patch-id`, the result is a syntactically perfect **wrong** hash. That is this
   bug's failure mode applied to a hash function, where partial input yields a confident

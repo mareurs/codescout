@@ -1,7 +1,7 @@
 ---
-id: ad4c40a4b7e4eeb0
+id: 5b4679128f978d8b
 kind: bug
-status: open
+status: fixed
 title: IL-3 blocks pipelines that already collapsed to one line, and its prescribed buffer remedy yields a silently wrong patch-id
 tags:
 - run_command
@@ -163,6 +163,79 @@ git rev-parse HEAD | head -1                            # BLOCKED
 - Claude Code 2.1.247, codescout `experiments`, measured 2026-08-27 from
   `/home/marius/work/claude/claude-plugins`.
 
+## Fix
+
+Shipped on `experiments` in **`18f8f9d1`** — patch-id **`16a9abc0d985d8f8ed1886a778e4a84166190115`**
+(the patch-id is the durable pointer; the SHA orphans on the next rebase).
+Probe promoted alongside in `e5ab9e90` as `scripts/probe_il3_refusals.py`.
+
+**Measured before designing anything** (R-117 — a fix that names a population
+asserts it is non-empty). Across **703 IL-3 refusals in 37 `usage.db` files**:
+
+| bucket | n | % |
+|---|---:|---:|
+| correctly blocked | 581 | 82.6% |
+| already retired by earlier fixes | 103 | 14.7% |
+| **fixed here** | **19** | **2.7%** |
+
+The frequency case is modest; the severity case is not, and they are separate
+arguments. 12 of the 19 are the `git patch-id` workflow itself.
+
+### What shipped, per finding
+
+- **Finding 1 — shipped, in a STRONGER form than proposed.** The file's
+  suggestion was *stop scanning once a collapsing stage is seen*. Running a
+  classifier against the corpus showed that rule leaves trimmers **upstream**
+  of the collapser counting — so it does **not** move this file's own row 3
+  (`git show X | cut -f1 | wc -l`), the example it cites as evidence. What
+  shipped instead: *a collapsing stage anywhere downstream bounds the whole
+  pipeline*. That also closes an inconsistency the file did not name —
+  `git log | grep -c fix` was allowed while `git log | grep fix | wc -l`, the
+  identical single number reaching the agent, was refused.
+- **Finding 2 — shipped for `cut` and `tr` only.** Both are 1:1 on records and
+  cannot hide one. **`awk '{print $N}'` was NOT exempted**, contrary to the
+  suggestion: `awk` is a general-purpose language and `awk 'NR<10'` selects
+  records, so exempting it would need the guard to parse an embedded language.
+  Classified on capability, not on typical use. `sed` and `sort` stay for the
+  same reason (`sed -n '1,10p'`, `sort -u`), each pinned by a control test.
+- **Finding 3 — shipped.** `git_subcommand_is_single_line` allowlists
+  `rev-parse`, `patch-id`, `merge-base`, `symbolic-ref`, `describe`,
+  `hash-object`, `config`, checked before the limiter heuristic.
+  `rev-parse --all` and `config --list` are excluded on those flags rather
+  than dropped from the list — both pinned by control tests.
+- **Finding 4 — shipped as a WARNING, not as suppression.** The error now names
+  `unfiltered_truncated`, states plainly that a hash of a truncated buffer is a
+  valid-looking wrong digest, and offers the file-redirect pattern for
+  whole-input work. It does **not** withhold the `@cmd_*` recommendation when
+  the buffer would be truncated, because at block time the command has not run
+  and the guard cannot know. Making the truncation observable at read time is
+  the sibling bug's Option C and is still open there.
+- **Finding 5 — shipped.** The message quotes the offending `;`/`&&` segment
+  rather than the whole command.
+
+### Incidental finding — the mirror hook is dormant
+
+`detect_il3_violation`'s doc comment instructed the reader to keep
+`codescout-companion/hooks/il3-deny-hook.sh` in sync. It has not run for some
+time: no `hooks.json` PreToolUse matcher targets `run_command`, and
+`cargo --version; ls docs | head -3` — which the hook's non-segment-splitting
+logic would refuse — is allowed end to end. Two independent signals, one
+behavioural and one a registration inventory. The doc comment now records the
+measurement; the dead file is tracked separately in
+`docs/issues/2026-08-27-il3-deny-hook-is-dormant-but-documented-as-a-live-mirror.md`.
+
+### Tests
+
+14 added. Each was verified to **fail** with its change reverted — a three-way
+revert produced exactly 8 failures, each attributable to one change — while all
+four `still_blocks_*` controls stayed green under that same revert. That pairing
+is what makes the loosening a measured line rather than a claim. All 54
+pre-existing IL-3 invariants pass unchanged, including
+`il3_blocks_git_pipe_head_still`.
+
+Full gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test` — **4581 passed, 0 failed**. Live-verified after `cargo rb` + `/mcp`.
+
 ## Workarounds (for consumers, today)
 
 - Redirect to a file, then transform the file. This is already the documented pattern in
@@ -177,4 +250,3 @@ git rev-parse HEAD | head -1                            # BLOCKED
   sibling bug; finding 4 is its failure mode applied to a hash function
 - `claude-plugins:roster-audit-session-log:F-14` — the truncated-buffer incident
 - `get_guide("tracker-conventions")` § patch-id — the workflow this breaks
-
