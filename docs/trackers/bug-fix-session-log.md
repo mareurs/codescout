@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 75
-entry_high_water_W: 71
+entry_high_water_W: 72
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -200,6 +200,7 @@ entry_high_water_W: 71
 | W-66 | 2026-08-26 | med | RED-before-GREEN on a bug's own prescribed fix, not just "bare vs. my fix" | Would have shipped a fix that changed nothing and closed a live defect | validated |
 | W-67 | 2026-08-26 | low-med | Measured the 3 live zombie records before picking doc-fix vs. doctor-check | Would have built a staleness detector for a population with no measured neglect | validated |
 | W-71 | 2026-08-26 | high | Replace the question, don't tighten the answer — a predicate needing an exhaustive population fails silently (which processes are stale / which commits are the peer's); one whose subject is self has a population of one, so completeness is not a precondition. Corollary: each session publishes its own list; nobody derives everyone's | Instance 1 would have left the oldest stale server running — the same process that then needed `-9` and is the clearest pre-fix datapoint for `ca2b0226`. Instance 2 would have credited the wrong session for the `EMBED_API_KEY` test repair, the [[F-71]] shape again. Note [[W-70]] described this class 40 min before I repeated it: a lesson requiring you to notice you are guessing is weaker than one removing the guess from the procedure (R-49's temporal-not-attentional argument, from the other side) | validated |
+| W-72 | 2026-08-27 | high | A negative result must name what it examined — AND stay quiet when it is trustworthy. Both halves load-bearing: naming nothing makes a false negative read as a finding; naming an unchecked cause ends the search for the real one | Three bugs fixed this session were one defect (`444d756c` grep glob, `fc1bbf21` sub-project memories, `76e287f8` wrong-tree not-found), and the codebase already held SIX independent instantiations of the rule, none of them named. `unsatisfiable_absolute_glob` states the principle in its own doc comment yet left the relative-glob case unguarded in the SAME function for nine days; `symbols::WalkAudit` carried the `accepted` counter `grep::WalkAudit` needed, one directory away, for months. Unnamed, each new tool re-derives it from its own outage | validated |
 | W-70 | 2026-08-26 | high | Publish the retraction to the peer immediately even when you cannot fix it — two accidental sweeps of the same ledger, four minutes apart in opposite directions, both harmless solely because each session was told within ~3 min | Sweep 2 (`66671bf5`) happened with `git diff -- <file>` honestly run and PASSED; the peer's write landed between the diff and the add, so the guard narrows the race and does not close it. The only thing that prevented rather than repaired was a wire handshake — "file is clear as of `<sha>`, write freely". Absent disclosure, a session whose entry vanished re-runs `append_entry`, allocating a fresh id for content already in HEAD: two ids, divergent bodies, nothing validating for duplication | validated |
 | W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
@@ -6569,6 +6570,55 @@ shape of pre-archive check as "regression test in place".
 **Rests on:** the archive-trigger rule in `get_guide("tracker-conventions")`
 (§ Bug files), which requires gate-green plus a regression test but says nothing
 about the claim in the title.
+
+## W-72 — A negative result that does not name what it examined is indistinguishable from a true absence
+
+**Valid:** dated 2026-08-27
+
+**Observed:** Three bugs fixed in one session (2026-08-27) turned out to be one defect
+wearing three costumes: a tool returned a negative result — `0 matches`, `0 memories`,
+`file not found` — without naming what it had examined. In every case the number was
+true of what was searched and false as the answer the caller took away.
+
+| Bug | The negative | What it never named |
+|---|---|---|
+| grep glob anchoring (`444d756c`) | `0 matches` | that the glob admitted no file at all |
+| sub-project memories (`fc1bbf21`) | `0 memories` | which of two directories it read |
+| workspace clobber, silent form (`76e287f8`) | `file not found` | which tree it searched |
+
+**And the codebase already knew — six times, never once as a named thing.**
+`unsatisfiable_absolute_glob`'s `RecoverableError`; `symbols::WalkAudit.accepted`
+("Zero here is the strongest signal available that `root` is not the tree the caller
+meant"); `grep::WalkAudit::completeness_warning`; `semantic_starved` (`e4569fcc`);
+`check_tool_access`'s read-only hint (`00948381`); and `read_file`'s truncation flag
+(`docs/issues/archive/2026-08-26-read-file-truncation-flag-never-rendered.md`). Each was
+built as a one-off for its own bug.
+
+**Counterfactual — the pattern being unnamed is *why* these were still open.**
+`unsatisfiable_absolute_glob` shipped 2026-08-18 and its own doc comment states the
+general principle ("A false negative that looks like a finding is worse than an error"),
+yet the *relative*-glob case sat unguarded **in the same function** for nine days. And
+`symbols::WalkAudit` carried the `accepted` counter that `grep::WalkAudit` needed, one
+directory away, for months. Six correct instincts, no shared name, so each new tool
+re-derived the lesson from its own outage instead of inheriting it.
+
+**The rule, both halves load-bearing:** a tool that can return a negative result must be
+able to say **what it examined** — and must stay **quiet when the negative is
+trustworthy**. Dropping either half breaks it. `completeness_warning`'s doc states the
+second: `None` is load-bearing "or the warning becomes noise attached to every empty
+result and stops being read at all." `unsatisfiable_absolute_glob`'s note records the
+matching failure in the other direction — a zero that carried the hidden-paths warning
+whose remedy could not have helped, because "naming an unchecked cause ends the search
+for the real one." That is why `grep`'s and `symbols`' plain zeros were deliberately
+left bare by `76e287f8`.
+
+**Status:** validated — promoted 2026-08-27 to
+`docs/adrs/2026-08-27-negative-results-name-their-scope.md`.
+
+**Promote-when:** FIRED. Criterion was 2+ confirmations across work streams. Met at three
+in one session, six prior independent instantiations, and two peer sessions hitting the
+same class the same day (`5b9ebedf` grep/gitignored paths, `020ea69a` memory union — whose
+own argument, "agreement is not correctness", is this rule's sharper edge).
 
 ## Template for new entries
 

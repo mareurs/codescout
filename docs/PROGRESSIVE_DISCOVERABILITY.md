@@ -422,6 +422,14 @@ When adding a tool that returns variable-length data:
 - [ ] Does any hint state a project convention (a heading shape, a path layout, a naming
       rule)? If so: is it **derived** from the artifact, and when it cannot be derived,
       does the hint say the value is a default? (Anti-Pattern 5)
+- [ ] **Can the tool return a negative result** — `0 matches`, an empty list, `not found`?
+      If so, can it name **the scope it examined** when that zero is suspicious, and does
+      it stay **silent** when the zero is trustworthy? Both halves are required, and a
+      warning it cannot prove is worse than none. See
+      [`docs/adrs/2026-08-27-negative-results-name-their-scope.md`](adrs/2026-08-27-negative-results-name-their-scope.md)
+      for the three established mechanisms (pre-flight predicate / audit counter / scope
+      carried on an existing error) — this document owns output *sizing*, that ADR owns
+      output *truthfulness*.
 
 ---
 
