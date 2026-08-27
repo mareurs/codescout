@@ -29,6 +29,22 @@ Every artifact is a markdown file with YAML frontmatter stored under the project
 **Important:** `id` and `rel_path` together are the canonical identifiers.
 Use `id` for stable references (links, events); use `rel_path` for filesystem-oriented lookups.
 
+**Required fields for `action="create"`:**
+```
+artifact(
+  action="create",
+  kind="...",          ← required
+  title="...",         ← required
+  rel_path="...",      ← required — e.g. "docs/plans/my-plan.md"
+  repo="...",          ← optional — workspace root name; if omitted, base path is derived from the active project
+  body="...",          ← markdown body (optional but recommended)
+  tags=[...],          ← optional
+  owners=[...],        ← optional
+  topic="...",         ← optional — used by librarian(action="context") grouping
+)
+```
+The file at `rel_path` must not exist — `artifact(action="find")` first to avoid collisions.
+
 ---
 
 ## docs/trackers/ — Backing Store, Not a Docs Folder
@@ -91,27 +107,6 @@ every entry yields a `filter_warnings.unknown_fields` list in the response — t
 engine has no field allowlist (unlike the SQL side, which errors on unknown columns), so an
 empty result there may be a field-name typo, not a true zero-match. Only augmented trackers that
 declare an `entry_collection` support this; prose trackers need retrofit first.
-
----
-
-## artifact(action="create") — Required Fields
-<!-- serves: artifact.create -->
-
-```
-artifact(
-  action="create",
-  kind="...",          ← required
-  title="...",         ← required
-  rel_path="...",      ← required — e.g. "docs/plans/my-plan.md"
-  repo="...",          ← optional — workspace root name; if omitted, base path is derived from the active project
-  body="...",          ← markdown body (optional but recommended)
-  tags=[...],          ← optional
-  owners=[...],        ← optional
-  topic="...",         ← optional — used by librarian(action="context") grouping
-)
-```
-
-The file at `rel_path` must not exist — `artifact(action="find")` first to avoid collisions.
 
 ---
 
@@ -245,10 +240,10 @@ artifact(update, id=X, patch={body_edits: [{
 }]})
 ```
 
-**The second anti-pattern: `replace` + `include_subsections: true` to add a
-sibling entry.** `replace` always consumes its section's children; the flag only
-decides whether that is refused or permitted. Reconstructing a section from
-memory to append one entry silently drops any child you forgot:
+**Second anti-pattern:** `replace` + `include_subsections: true` to add a
+sibling entry. `replace` always consumes its section's children; the flag
+only decides whether that's refused or permitted — reconstructing a section
+from memory to append one entry silently drops any child you forgot:
 
 ```text
 artifact(update, id=X, patch={body_edits: [{
@@ -269,21 +264,22 @@ with `insert_after` instead of replacing the parent.
 **Body-shrink guard.** Any body write that would reduce the file by more
 than 50% is refused with `RecoverableError("body-shrink guard: ...")`.
 The error hint names both `body_edits[]` and the `force=true` escape.
-Files under 200 bytes are exempt (the percentage is meaningless for shells).
-Artifacts with `append_mode + history_cap` are also exempt — legitimate
-history trimming is expected to shrink the body.
+Files under 200 B are exempt (the percentage is meaningless for shells).
+`append_mode + history_cap` artifacts are also exempt — trimming
+history is expected to shrink the body.
 
 **Body mutations emit `field_patch` events.** Every body write records a
 `field_patch` event with `payload={field: "body", prev_bytes, new_bytes,
-edits_count, mode, forced, replaced_subsections}`. Note that `prev_bytes` /
+edits_count, mode, forced, replaced_subsections}`. `prev_bytes` /
 `new_bytes` are whole-file aggregates: a replace that destroyed a child section
 while growing the file reads as a benign append, so `replaced_subsections` is the
 only field that reveals it. Query forensic history with
 `artifact_event(action="list", artifact_id=X)`.
 
-**`patch` accepts only declared keys.** Unknown keys (e.g.
-`body_prepend_section`) return `RecoverableError` listing the valid fields.
+**`patch` accepts only declared keys.** An unknown key returns
+`RecoverableError` listing the valid fields.
 Accepted keys: `status, title, owners, tags, topic, time_scope, extra, body, body_edits, params`. `extra` is a map of custom frontmatter keys (YAML-only — round-trip-safe, surfaced by `get`, but NOT catalog-indexed / not filterable via `find`; a `null` value deletes a key).
+
 ## librarian(action=...) — Reference
 <!-- serves: librarian.reindex, librarian.link_scan, librarian.doctor, librarian.audit_doc_refs, librarian.context, librarian.tracker_design, librarian.legibility_scan -->
 

@@ -7036,6 +7036,96 @@ mod guide_hint_tests {
         );
         assert_eq!(*guide_shaped[0], expected);
     }
+    #[tokio::test]
+    async fn a_p50_session_stays_under_the_committed_guide_byte_ceiling() {
+        // The p50 session issues 6 distinct artifact/librarian shapes (measured over
+        // 105 main sessions). Today that draws the whole 20,545 B librarian guide on
+        // the first call and nothing after. Section grain must land well under it.
+        //
+        // This ceiling is the mechanism that keeps the win from eroding: guides grow.
+        // `tracker-conventions` gained bytes mid-study, and `iron-laws-detail` gained
+        // 769 B (5d3f8ebe) during the half hour the spec was being written.
+        const CEILING: usize = 12_000;
+
+        let (_dir, server) = make_server().await;
+
+        // A placeholder id="x" for every shape (the brief's literal sketch) does NOT
+        // measure a real session: `call_content` only runs guide injection on the
+        // underlying tool call's SUCCESS path (see `create_tracker`'s doc comment
+        // above), and `get`/`update`/`append_entry`/`move` against a nonexistent id
+        // all fail before that point — verified empirically, only `find` delivered
+        // any bytes with the placeholder. A p50 session issuing these five mutating
+        // shapes has necessarily just created (this session) or already has (a prior
+        // session) a real artifact to target, so build one via a genuinely-succeeding
+        // `create` call and thread its id through `get`/`update`/`append_entry`, with
+        // `move` last since it re-keys the id. `find` needs no fixture.
+        let mut total = 0usize;
+        let mut shape_total = |out: &[rmcp::model::Content]| -> usize {
+            let bytes: usize = guide_blocks(out)
+                .iter()
+                .filter(|b| b.contains("<!-- auto-injected get_guide("))
+                .map(|b| b.len())
+                .sum();
+            total += bytes;
+            bytes
+        };
+
+        let create_out = call_tool(
+            &server,
+            "artifact",
+            json!({
+                "action": "create",
+                "rel_path": "docs/specs/p50-fixture.md",
+                "kind": "tracker",
+                "title": "p50 ceiling fixture",
+                "body": "fixture body",
+                "extra": {"entry_prefix": "T"}
+            }),
+        )
+        .await;
+        shape_total(&create_out);
+        let primary = create_out[0].as_text().expect("primary block is text");
+        let v: Value = serde_json::from_str(&primary.text).expect("primary block is JSON");
+        let id = v["id"]
+            .as_str()
+            .expect("create response carries an id")
+            .to_string();
+
+        shape_total(&call_tool(&server, "artifact", json!({"action": "get", "id": id})).await);
+        shape_total(
+            &call_tool(
+                &server,
+                "artifact",
+                json!({"action": "update", "id": id, "patch": {"status": "active"}}),
+            )
+            .await,
+        );
+        shape_total(
+            &call_tool(
+                &server,
+                "artifact",
+                json!({"action": "append_entry", "id": id, "id_prefix": "T"}),
+            )
+            .await,
+        );
+        shape_total(&call_tool(&server, "artifact", json!({"action": "find"})).await);
+        shape_total(
+            &call_tool(
+                &server,
+                "artifact",
+                json!({"action": "move", "id": id, "new_rel_path": "docs/specs/p50-fixture-moved.md"}),
+            )
+            .await,
+        );
+
+        let whole = crate::prompts::topic_body("librarian").unwrap().len();
+        assert!(
+            total <= CEILING,
+            "p50 session drew {total} B of guide (whole topic is {whole} B, ceiling {CEILING} B). \
+         Either a section grew past the cap or a declaration is too broad."
+        );
+        assert!(total > 0, "the session must still receive guidance");
+    }
 }
 
 // ── ResilientStdin ────────────────────────────────────────────────────
