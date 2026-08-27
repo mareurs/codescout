@@ -1,7 +1,7 @@
 ---
-id: '61b048e6957259ed'
+id: fc92227102f58d9e
 kind: bug
-status: open
+status: fixed
 title: 'BUG: no citation form resolves &quot;entry X in file Y of another repo&quot; — the three-part form is written by hand but the resolver has never supported it, and now reports identically to a redundant same-repo prefix'
 owners:
 - marius
@@ -10,6 +10,7 @@ tags:
 - link-scan
 - citations
 - cross-repo
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 related:
@@ -117,32 +118,74 @@ Evidence, not by a separate hypothesis-test cycle.
 
 ## Fix
 
-*Not yet implemented — filed on notice. Two honest options:*
+**Fixed, Option 2: report legibility only, no new resolver capability.**
 
-1. **Build real repo-name-lookup support.** Give `resolve.rs` a `by_repo_name`-style
-   structure (workspace member / umbrella repo names) so `<repo>:<file-stem>:<TOKEN>`
-   can genuinely resolve when `<repo>` names a real sibling and the citing session's
-   workspace can see it — or report a clean, distinct "cross-repo, file named" finding
-   when it can't (e.g. the repo isn't in this workspace's umbrella). This is Option 1
-   from the sibling bug, declined there specifically because nothing depended on it
-   resolving — but the 7 References-section citations found here are a standing,
-   pre-existing demand for exactly this.
-2. **Accept there is no resolvable form, and say so.** Document in
-   `get_guide("tracker-conventions")` that a cross-repo, file-qualified pointer in a
-   `## References` section is PROSE ONLY — never expected to become a `link_scan` edge
-   — and, if the `malformed_qualifier` bucket's noise is worth reducing, give it a
-   third citation kind/report bucket (e.g. `cross_repo_file_qualified`) so a reader can
-   tell "known-unsupported, intentional" apart from "redundant, should be stripped"
-   without reading each entry's qualifier by hand. This does not make the citation
-   resolve; it only makes the report legible.
+- **SHA:** `dd3f08aa` (`experiments`)
+- **patch-id:** `10e9be57b96c8c05acf87ce7523dcac4c557d314`
 
-No fix is prescribed here — this is a design decision (how much resolver machinery is
-worth building for a documentation-only convenience), not a mechanical one.
+`fix(librarian): split cross-repo file-qualified citations out of malformed_qualifier`
 
+`resolve::Outcome::MalformedQualifier` is unchanged — every 2+-qualifier-segment
+citation is still retracted, still never becomes an edge, regardless of what its
+segments name. What changed is purely in `mod.rs`'s finding-construction pass: a
+new per-row lookup (`citing_repo_name`, via the existing `containing_root` helper
+against `ctx.workspace.roots`) compares each `MalformedQualifier` citation's outer
+qualifier segment against the citing artifact's OWN registered workspace root
+name.
+
+- Outer segment == citing repo's own name → stays in `malformed_qualifier`
+  (redundant, should be stripped — unchanged behavior).
+- Outer segment != citing repo's own name → new `cross_repo_file_qualified`
+  bucket (presumably names a different repo, prose-only, nothing to fix).
+- Citing repo unknown (row outside every registered root) → falls back to
+  `malformed_qualifier`, the conservative default — claiming "genuinely
+  cross-repo" needs positive evidence the code doesn't have in that case.
+
+**Deliberately NOT built:** any validation that the outer segment names a REAL,
+known sibling repo (an umbrella member, say). That would be Option 1. The split
+here only ever answers "is this NOT a self-reference" — it does not, and cannot,
+confirm the citation is genuinely resolvable elsewhere. A typo'd repo name and a
+genuine sibling reference land in the same new bucket; both are equally
+unresolvable today, so the report doesn't need to (and doesn't try to)
+distinguish them.
+
+Also documented the third citation shape in
+`get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified*:
+prose-only, permanently, not a gap waiting to be filled — so a future reader
+doesn't re-discover this as a fresh gap.
+
+**Verified:** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test --lib` → 4416 passed, 0 failed, 8 ignored.
 ## Tests added
 
-None yet — no fix has landed.
+`a_cross_repo_file_qualified_citation_is_reported_separately_from_a_redundant_same_repo_one`
+(`src/librarian/tools/link_scan/mod.rs`), shipped in `dd3f08aa`.
 
+One source file, two citations: `citer:target:F-2` (the registered workspace
+root IS named "citer" — genuinely redundant self-reference) and
+`claude-plugins:target:F-2` (a different name — presumed cross-repo). Both cite
+a target that DOES define `F-2`, so a resolver that ignored the qualifier split
+entirely would silently produce an edge — same sharpest-version-of-the-bug shape
+as the sibling double-qualified-citation test. Asserts:
+
+- `counts.malformed_qualifier == 1`, holding only the `citer:...` citation;
+- `counts.cross_repo_file_qualified == 1`, holding only the `claude-plugins:...`
+  one, in its own top-level array and `_by_source` map;
+- `counts.cross_repo == 0` — must not ALSO land in the plain two-part bucket;
+- `counts.edges_missing == 0` — neither may resolve, even though the inner
+  `target:F-2` form would on its own.
+
+**Verified red before green:** ran before the `mod.rs` split existed — both
+citations landed in `malformed_qualifier` (count 2, not the expected 1/1 split),
+and the new `cross_repo_file_qualified` key read `Null` against an expected `1`.
+
+**Fixed a stale fixture as part of this:** the pre-existing
+`a_double_qualified_citation_is_reported_not_resolved_even_when_the_inner_form_would_resolve`
+test cited `codescout:target:F-2` but registered its workspace root under the
+name `"r"` — internally inconsistent once the split existed (the test's own
+citation text assumes "codescout" is the repo). Renamed the registered root to
+`"codescout"` so the fixture matches what its citation text always claimed;
+assertions unchanged and still pass.
 ## Workarounds
 
 None needed for correctness: a citation of this shape was never an edge before or
@@ -154,15 +197,13 @@ segment against known sibling-repo names by hand to sort "fine as documentation"
 
 ## Resume
 
-Pick option 1 or 2 in § Fix — this is the concrete next action, since both are fully
-scoped above. If 1: start from `resolve.rs`'s `CrossRepoToken` arm and the workspace's
-umbrella/member repo list (see `get_guide("librarian")` § Worktree overlay and
-`.codescout/workspace.toml` `[[project]]` / global umbrella registry for where sibling
-repo names already live). If 2: add the doc note to `get_guide("tracker-conventions")`
-§ *Citing an entry — bare, or qualified*, and decide whether a new report bucket is
-worth the `CitationKind`/`Outcome`/`mod.rs` wiring cost demonstrated in `9a517e54` — it
-is the same shape, so scoping it is quick even if implementing it isn't free.
-
+Fixed and archived. Nothing further planned under Option 2. If Option 1 (real
+cross-repo resolution) is ever wanted, start from `resolve.rs`'s
+`CrossRepoToken` arm and the workspace umbrella/member registry — see
+`get_guide("librarian")` § Worktree overlay and `.codescout/workspace.toml`'s
+global umbrella registry for where sibling repo names actually live (NOT
+`ctx.workspace.roots`, which is this repo's own multi-project roots and is what
+this fix used instead, since it only needed to detect self-reference).
 ## References
 
 - `docs/issues/archive/2026-08-26-link-scan-double-qualified-citation-silently-drops-repo-prefix.md`
@@ -173,4 +214,3 @@ is the same shape, so scoping it is quick even if implementing it isn't free.
   — the archived bug whose `## References` section holds the other 3
 - `get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified* — the
   guide that documents the two forms that DO work; silent on this third need
-

@@ -375,7 +375,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // else). `ctx.workspace.roots` is THIS repo's own multi-project roots (e.g.
     // "codescout" + "codescout-embed"), so a match here is a genuine self-reference,
     // not a claim that the outer segment names a real, known SIBLING repo — Option 2
-    // of docs/issues/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
+    // of docs/issues/archive/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
     // deliberately does not attempt that stronger, unbuilt form of resolution.
     let root_paths: Vec<std::path::PathBuf> =
         ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
@@ -634,7 +634,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // a reader does not have to check each `malformed_qualifier` entry's
             // outer segment by hand to tell "strip this" from "leave it, it's
             // prose pointing at a sibling repo."
-            // docs/issues/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
+            // docs/issues/archive/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
             "cross_repo_file_qualified": cross_repo_file_qualified_total,
             "prefix_conflicts": prefix_conflicts.len(),
             // `len(dangling) == FINDINGS_CAP` reads identically whether the true count is
@@ -1305,7 +1305,7 @@ mod tests {
         );
     }
 
-    /// docs/issues/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
+    /// docs/issues/archive/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
     ///
     /// A 3-part qualified citation (`<repo>:<file-stem>:<TOKEN>`) is retracted by
     /// `MalformedQualifier` regardless of what its two qualifier segments name — it
