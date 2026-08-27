@@ -37,6 +37,7 @@ pub mod lsp;
 pub mod mcp_resources;
 pub mod memory;
 pub mod migrate;
+pub mod operator_rules;
 #[cfg(unix)]
 pub mod peer;
 pub mod perf;
