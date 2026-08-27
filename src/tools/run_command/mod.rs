@@ -260,7 +260,7 @@ impl Tool for RunCommand {
         // injected into stdout, because a count or a hash is a value the caller will
         // parse, and prepending prose to it corrupts the thing they asked for.
         //
-        // BUG docs/issues/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
+        // BUG docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
         let truncation_notices = ctx.output_buffer.truncation_notices_in(command);
         if !truncation_notices.is_empty() {
             if let Ok(ref mut val) = result {

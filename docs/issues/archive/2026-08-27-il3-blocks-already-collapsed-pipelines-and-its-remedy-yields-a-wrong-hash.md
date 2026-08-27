@@ -23,7 +23,7 @@ unverified:
 **Found:** 2026-08-27, from `claude-plugins`, while recording a fix's `patch-id` — the
 exact workflow `get_guide("tracker-conventions")` mandates.
 **Affects:** the IL-3 pipe guard in `run_command`.
-**Related:** `docs/issues/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md`
+**Related:** `docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md`
 — finding 4 below is that bug's failure mode, composed with this one and made worse.
 
 ## Summary
@@ -253,7 +253,7 @@ Full gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 
 ## References
 
-- `docs/issues/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md` —
+- `docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md` —
   sibling bug; finding 4 is its failure mode applied to a hash function
 - `claude-plugins:roster-audit-session-log:F-14` — the truncated-buffer incident
 - `get_guide("tracker-conventions")` § patch-id — the workflow this breaks

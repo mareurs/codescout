@@ -38,7 +38,7 @@ pub struct BufferEntry {
     /// true`, but that lives on the *response*, not on the buffer — so any later
     /// read of the handle, in any tool or any turn, had nothing to consult.
     ///
-    /// BUG docs/issues/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
+    /// BUG docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
     pub truncated: Option<Truncation>,
 }
 

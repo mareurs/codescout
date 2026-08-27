@@ -2962,7 +2962,7 @@ async fn unfiltered_output_line_count_survives_inline_truncation() {
     );
 }
 
-/// Option A of docs/issues/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md:
+/// Option A of docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md:
 /// `unfiltered_output_lines` describes the STREAM, and sat next to a handle serving a
 /// truncated buffer with no field anywhere naming the served count. Learning it cost a
 /// `wc -l` round-trip — the exact blind round-trip the parent fix set out to remove.

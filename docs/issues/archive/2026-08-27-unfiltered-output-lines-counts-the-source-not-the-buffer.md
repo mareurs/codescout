@@ -1,7 +1,7 @@
 ---
-id: a0a02f00feaeecab
+id: 2b2dec92f0996cf3
 kind: bug
-status: open
+status: fixed
 title: unfiltered_output_lines counts the source, not the buffer — and greps over the truncated buffer answer silently-partially
 tags:
 - run_command
@@ -207,6 +207,76 @@ A and B are independently landable. C is the one that closes the observable.
 - For C: a grep against a truncated ref carries the truncation notice. **This is the
   load-bearing one** — the only test that would fail today for the reason the bug was
   actually reported.
+
+## Fix
+
+Shipped on `experiments` in **`c1cb0022`** — patch-id
+**`a7f22eb241771dcb37fba6c92aa8cba2f14b479f`**. **All three options landed**, A and B
+because they are cheap and additive, C because it is the only one that closes the
+observable this bug was reported for.
+
+### The primitive underneath all three
+
+`BufferEntry.truncated: Option<Truncation>`, recording `kept_lines` and `total_lines`
+at **store** time. This is what the fix actually needed and what the file did not name:
+`unfiltered_truncated` lives on the *response*, is minted once, and is gone by the next
+turn — while the handle keeps working for the rest of the session. A caller who greps
+the ref three turns later had nothing to consult. The flag had to move onto the buffer.
+
+Both numbers are stored rather than one derived at read time from the buffer's own
+bytes. Deriving `kept_lines` by counting stored lines and discounting a sentinel would
+make the report a function of the artifact it describes — and the sentinel is written by
+this same mechanism, so an off-by-one would be invisible in exactly the direction that
+matters.
+
+### Per option
+
+- **A — shipped.** `unfiltered_buffered_lines` names what the handle will serve.
+  `unfiltered_output_lines` keeps describing the stream; `c172fe10`'s deliberate choice
+  and its regression test are untouched, as this file asked.
+- **B — shipped.** `truncation_marker()` builds the sentinel, appended as the buffer's
+  final line with a trailing newline. The trailing newline is not cosmetic: without it
+  the sentinel's own line has no terminator, `wc -l` lands back on the content count,
+  and a test asserting the two differ would pass for the wrong reason.
+- **C — shipped, in both read paths.** `run_command` attaches `buffer_truncated` via a
+  new `OutputBuffer::truncation_notices_in`; `read_file` attaches it at its buffer-ref
+  branch. Reported as a JSON field rather than prepended to stdout, because a count or a
+  hash is a value the caller parses and prose in front of it corrupts the answer.
+
+  `truncation_notices_in` is deliberately **not** folded into `resolve_refs`' return
+  tuple, which is destructured at ~20 call sites. Widening it would have spent the diff
+  on churn unrelated to the defect.
+
+### One correction to this file's own § Tests to add
+
+It asked for a test asserting `unfiltered_buffered_lines` **equals** `count_lines` of
+the stored buffer. Landing A and B together makes that false by one — the stored buffer
+also holds the sentinel. The shipped assertion is `stored_lines == served + 1`, which is
+strictly stronger: it pins the relationship between the two options rather than either
+alone, and would fail if a future change dropped the sentinel *or* mis-counted the
+field. (Same shape as the sibling bug's Finding 1, where a prescribed fix did not move
+its own cited example: a plan written before the code is a hypothesis about it.)
+
+### CI — skip-listed on arrival, not after a red run
+
+The four new tests reuse `seq 1 20000 | grep zzz` and `printf 'a\nb\nc\n' | grep zzz`
+verbatim from the two tests this bug is a follow-up to. CI's group 6 records that those
+commands **hang under wine 9.0** and are killed by `run_command`'s own 30s timeout. The
+cause is a property of the COMMAND, not of what the test asserts, so inheriting the
+shape inherits the hang — all four were added to the wine lane's `--skip` list in the
+same commit, with a note tying them to their two predecessors' un-skip protocol.
+
+### Tests
+
+4 added. Each of the three positive tests was verified to **fail** with its option
+reverted — a three-way revert failed exactly those three, each attributable — while
+`a_complete_buffer_carries_no_sentinel_and_no_notice` stayed green, which is what shows
+the warning does not fire unconditionally and that no synthetic content is injected into
+a complete buffer. Each positive test asserts `unfiltered_truncated` **first**, so a
+fixture too small to truncate cannot pass it vacuously.
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` —
+**4589 passed, 0 failed**.
 
 ## Workarounds (for consumers, today)
 
