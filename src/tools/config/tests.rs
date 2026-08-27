@@ -900,7 +900,7 @@ depends_on = ["test"]
     assert_eq!(projects.len(), 2);
 }
 
-/// docs/issues/2026-08-26-list-projects-reports-declared-projects-not-workspace-members.md
+/// docs/issues/archive/2026-08-26-list-projects-reports-declared-projects-not-workspace-members.md
 ///
 /// `status`/`list_projects` used to re-parse `.codescout/workspace.toml` and report
 /// only its declared `[[project]]` array. A sub-project codescout auto-discovers by

@@ -1,13 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- workspace
+- discoverability
+- multi-project
+- memory
+closed: 2026-08-27
 opened: 2026-08-26
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [workspace, discoverability, multi-project, memory]
-unverified: 'Mechanism established and measured; NOT fixed. Which answer is correct is a decision — `list_projects` may be intended to report the declared config, in which case the bug is that it is documented and pointed to as the way to discover valid project ids. No fix, no test.'
-kind: bug
+severity: medium
 ---
 
 # BUG: `workspace(list_projects)` reports DECLARED projects, not workspace members — auto-discovered sub-projects are invisible
@@ -105,25 +108,71 @@ discovery.
 
 ## Fix
 
-Not written. The mechanical change is small — have the status path ask
-`agent.workspace_summary()` like `activate` does — but the choice is not, and this is why
-it is filed rather than patched:
+**Fixed, Option A: `list_projects`/`status` now report live workspace members.**
 
-- If `list_projects` is meant to report **members**, it should use the live workspace, and
-  today's answer is simply wrong.
-- If it is meant to report the **declared config** (a reasonable thing to want — "what did
-  I write down?"), then the bug is that it is named `list_projects`, described as
-  "workspace members", and named in `ActivateProject`'s own error hint as the way to find
-  a valid id. In that reading the fix is to report both, or to rename.
+- **SHA:** `1af0dcde` (`experiments`)
+- **patch-id:** `ddb2f0a7875f4b06f10ecff44394c2b14a9aee38`
 
-Either way the user-visible defect is the same: an agent that follows the hint to discover
-project ids gets an incomplete list, and cannot reach a sub-project by id without already
-knowing it exists.
+`fix(workspace): list_projects/status report live workspace members, not just declared config`
 
+`ProjectStatus::call`'s workspace section (`src/tools/config/mod.rs`) now sources
+its `projects` array from `ctx.agent.discovered_projects()` — the same live,
+manifest-walked `Workspace.projects` that `activate`'s table already reads via
+`Agent::workspace_summary` — instead of re-parsing `.codescout/workspace.toml`'s
+bare `[[project]]` array. `list_projects` inherits this for free: it is a pure
+projection of `ProjectStatus`'s response (`mod.rs:69-72`), not a separate
+handler.
+
+`depends_on` is the one field a manifest walk cannot supply — nothing on disk
+states a dependency edge — so it is still looked up from the declared config,
+by matching the *discovered* id against `ws.projects[].id`, exactly mirroring
+the lookup `Agent::workspace_summary` already does for `activate`'s table.
+`name` and `resources` are unaffected: those are genuinely declared-only
+fields with no discovery equivalent, so they still come straight from the
+parsed TOML.
+
+**A real, deliberate side effect worth naming:** the declared `id` field on a
+`[[project]]` entry was never actually consulted for *labelling* — `discover_projects`
+assigns every project's id from its directory's basename
+(`src/workspace.rs`), and the declared entry is only ever used as a lookup key
+for `depends_on`. That was already true of `activate`'s table before this fix;
+this fix makes `status`/`list_projects` consistent with it rather than
+introducing new behavior. Concretely: a repo whose root directory name differs
+from its declared root `id` will now show the directory-derived id here too,
+where it previously echoed back whatever was written in `workspace.toml`.
+
+Also fixed `ActivateProject`'s own error hint (`mod.rs:160`), which claimed
+`list_projects` "shows the configured ones" — no longer true, and was arguably
+never the right contract for a hint whose whole purpose is pointing an agent at
+valid ids.
+
+**Verified:** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test --lib` → 4415 passed, 0 failed, 8 ignored.
 ## Tests added
 
-None — no fix yet.
+`project_status_reports_a_live_discovered_project_the_declared_config_omits`
+(`src/tools/config/tests.rs`), shipped in `1af0dcde`.
 
+Declares 2 projects (root + `declared-svc`, the latter with `depends_on =
+["test"]`) but writes a 3rd manifest (`extra-service/package.json`) with no
+declaration at all — the same shape as the bug's own reproduction
+(`codescout-embed` was live but undeclared on this repo). Asserts:
+
+- `projects.len() == 3`, not 2 — the live count, not the declared count;
+- the undeclared `extra-service` project appears by its discovered id;
+- the declared `declared-svc` project's `depends_on == ["test"]` still comes
+  through — guards against the id-based lookup silently dropping metadata
+  that used to be echoed verbatim.
+
+**Verified red before green:** ran with the pre-fix disk-read code still in
+place; failed with `left: 2, right: 3` — confirms the assertion actually
+exercises the live-vs-declared gap rather than passing vacuously.
+
+The pre-existing `project_status_shows_workspace_projects` test (2 declared
+projects, both independently discoverable by manifest) still passes unchanged
+— it only asserts `projects.len() == 2`, which holds under either the old or
+new source, so it does not by itself distinguish declared from live. That gap
+is exactly why the new test above declares fewer than are discoverable.
 ## Workarounds
 
 Use `workspace(action="activate")`'s response, whose project table is live, or try the id
@@ -132,13 +181,11 @@ ids when the guess is wrong, which makes it a better enumerator than `list_proje
 
 ## Resume
 
-Decide which contract `list_projects` owes (members vs declared config), then either point
-`src/tools/config/mod.rs:511-534` at `agent.workspace_summary()` or report both lists under
-distinct keys. Whichever is chosen, update the tool description at
-`src/tools/config/mod.rs:21` and the hint at `src/tools/config/mod.rs:160`, which currently
-disagree with each other — the description says "workspace members", the hint says "the
-configured ones", and only the hint is accurate today.
-
+Fixed and archived. Nothing further planned. If a future report claims
+`list_projects` is missing a valid id again, re-check with
+`workspace(action="activate")` first — if `activate`'s table also omits it,
+the defect has moved to `Agent::discovered_projects`/`discover_projects`
+(`src/workspace.rs`) itself, not the surface this bug fixed.
 ## References
 
 - `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —

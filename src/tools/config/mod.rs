@@ -518,7 +518,7 @@ impl Tool for ProjectStatus {
         // `depends_on` is the one field discovery cannot supply (nothing on disk
         // states a dependency edge), so it is still looked up from the declared
         // config by id, same as `Agent::workspace_summary`.
-        // docs/issues/2026-08-26-list-projects-reports-declared-projects-not-workspace-members.md
+        // docs/issues/archive/2026-08-26-list-projects-reports-declared-projects-not-workspace-members.md
         let live_projects = ctx.agent.discovered_projects().await;
         let workspace_toml_path = crate::config::workspace::workspace_config_path(&root);
         let workspace_info = if workspace_toml_path.exists() {
