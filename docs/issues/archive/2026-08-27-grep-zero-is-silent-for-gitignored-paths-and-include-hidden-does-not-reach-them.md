@@ -1,13 +1,13 @@
 ---
-id: '808b56f05218d250'
+id: 0f7105b8bebc600b
 kind: bug
-status: open
+status: fixed
 title: 'BUG: grep''s zero says nothing about gitignored paths, and include_hidden=true — which its own warning recommends — does not reach them, so widening the search removes the warning'
 tags:
 - grep
 - false-negative
 - warning-composition
-closed: null
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 severity: med
@@ -150,14 +150,38 @@ Three properties earn that shape:
 Candidate (2) — a `no_ignore` / `include_ignored` flag — remains the capability the warning
 implies exists, and remains out of scope here.
 
-Fix SHA + `git patch-id --stable`: *not yet fixed.*
+Implemented as described. `WalkAudit::git_ignore_in_effect` walks ancestors for a `.git`,
+and `completeness_warning` gains one clause gated on `include_hidden && git_ignore_in_effect`.
+
+Fix SHA (`experiments`): `ee7d9a3a`
+Patch-id: `2a1565ada1fd0d323a4d220485ca33fc211cc8b0`
 ## Tests added
 
-None — not fixed. A regression test should plant a match inside a gitignored directory and
-assert the zero carries a gitignore clause, both with and without `include_hidden=true`.
-Pinning **both** matters: the flag-set case is the one that regressed to silence, and a
-test covering only the default would stay green through it.
+Four, in `src/tools/grep.rs`:
 
+- **`widening_past_hidden_names_the_gitignore_filter_it_cannot_lift`** — the repro. A hidden
+  `.scratch/` that is **not itself ignored**, holding a nested `.gitignore` of `*` over the
+  match. Asserts the narrow search still names `.scratch/` in the hidden clause, and that the
+  widened one is zero *and* carries the gitignore clause. The shape matters: a root-level
+  gitignored directory would have passed under the wrong fix too, which is why the fixture
+  puts the rule one level down.
+- **`a_gitignore_outside_a_git_repo_is_not_applied`** — pins `WalkBuilder::require_git`'s
+  default, the premise the gate rests on. If a dependency bump flipped it, the gate would go
+  silent exactly where it is needed, and nothing else in the suite would notice.
+- **`a_trustworthy_zero_stays_bare_inside_a_git_repo`** — the default path is unchanged and
+  `None` stays load-bearing. Clears the `.gitignore` that `MemoryStore::ensure_gitignored`
+  writes during agent bootstrap, which is a hidden file at root and would otherwise fire the
+  hidden clause for a reason unrelated to this test's subject.
+- **`widening_outside_a_git_repo_stays_bare`** — the other half of the gate.
+
+`include_hidden_suppresses_the_warning_even_on_a_zero` keeps its name because
+`docs/issues/archive/2026-08-07-grep-zero-match-silent-about-hidden-skip.md` cites it, and
+archived files are historical snapshots this project does not rewrite. It gained a comment
+naming which half of the gate it now pins — without it the test passes for a second reason
+(no `.git` in its fixture) that its name does not state.
+
+Full gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` clean, `cargo test`
+4616 passed / 0 failed.
 ## Workarounds
 
 - Shell `grep`/`git grep --no-index` for anything under a gitignored path.

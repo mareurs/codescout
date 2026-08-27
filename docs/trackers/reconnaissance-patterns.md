@@ -289,7 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
-| R-121 | 2026-08-27 | hit | **A fix justified as "symmetric with the existing X" inherits X's scope without the property that made that scope honest.** `hidden_at_root`'s root-only `read_dir` is honest because its remedy (`include_hidden=true`) is root-agnostic. A gitignore clause copied to that shape names the six gitignored entries at this repo's root and misses `.superpowers/sdd/.gitignore:1:*` at depth 2 — the one rule that caused the reported zero. `completeness_warning`'s own doc already condemns it: *"naming an unchecked cause ends the search for the real one"* | `808b56f05218d250` § Fix, corrected in the same pass; the repro also needed a fresh probe, the bug file's text having come to match its own old one; kin [[R-117]] (a proposed fix that would pass green and move nothing), [[R-118]] (ground truth before the claim) |
+| R-121 | 2026-08-27 | hit | **A fix justified as "symmetric with the existing X" inherits X's scope without the property that made that scope honest.** `hidden_at_root`'s root-only `read_dir` is honest because its remedy (`include_hidden=true`) is root-agnostic. A gitignore clause copied to that shape names the six gitignored entries at this repo's root and misses `.superpowers/sdd/.gitignore:1:*` at depth 2 — the one rule that caused the reported zero. `completeness_warning`'s own doc already condemns it: *"naming an unchecked cause ends the search for the real one"* | `0f7105b8bebc600b` § Fix, corrected in the same pass; the repro also needed a fresh probe, the bug file's text having come to match its own old one; kin [[R-117]] (a proposed fix that would pass green and move nothing), [[R-118]] (ground truth before the claim) |
 | R-120 | 2026-08-27 | hit | **A decision procedure is a seam — reading it far enough to get an ANSWER is not far enough to get its PRECONDITIONS.** A promotion route was picked straight from the routing test, skipping two paragraphs gating the adjacent destination and an entire successor section imposing a promoted-set audit; the target ledger's own required-field contract was missed the same way. Both omissions sit *after* the answer, and neither raises: a malformed entry is invisible to field-presence sweeps, an unaudited PR merges as cleanly as an audited one | `prompt-surface-measurement-session-log:F-43`; kin [[R-49]] (own plan, one turn old), [[R-95]] (a verdict reads as settled, not as a claim), [[R-89]] (19 cached plugin versions checked — the served copy is what has reach) |
 | R-106 | 2026-08-18 | hit (pre-edit) → rule | **A generated surface is ground truth about cost and about nothing else — read the generator before proposing the remedy.** Measured the live `tools/list` payload, found one 225-char `workspace` description repeated verbatim on 24 tools, and proposed a "free mechanical dedup, zero risk". The source holds exactly ONE copy: `inject_workspace_param` injects it into every `pinnable()` tool at list time | `src/server.rs:496-508` + `:1024-1026`; prompt-surface-compaction-session-log:F-2, :W-1; kin R-91, R-100 |
 | R-105 | 2026-08-18 | miss (human review) → rule | **A key derived from runtime state is a claim about that state's lifetime — enumerate the lifecycle events before proposing it.** Proposed parent-PID + parent-start-time as the agent-agnostic session key for the guide ledger and scouted it hard against ONE event (MCP subprocess respawn); never enumerated client *resume*, which restarts the parent while the conversation continues. The falsifying evidence was already in hand and unread | bug-fix-session-log:F-53; session 2c518eb6 spans 12 days / 9630 calls / 67 MCP procs under a 17h-old `claude` process; kin R-91, R-50 |
@@ -3780,7 +3780,7 @@ indistinguishable from a complete one:
 1. `append_entry`'s anchor — `artifact(get)` returns 21 of 85 headings, front-anchored, and
    the anchor is conventionally last (`codescout:c131d83129b81e1b`).
 2. `grep`'s zero under `include_hidden=true` — gitignored paths excluded, no clause says so
-   (`codescout:808b56f05218d250`).
+   (`codescout:0f7105b8bebc600b`).
 3. This — `memory(list)` at 18 of 23, no count, no truncation flag.
 
 None of the three lies. All three answer a narrower question than the one asked and present
@@ -3892,7 +3892,7 @@ outside one memory file).
 
 **Verdict:** hit — recon changed the fix before a line was written.
 
-**Observed:** 2026-08-27, resuming `docs/issues/2026-08-27-grep-zero-is-silent-for-gitignored-paths-and-include-hidden-does-not-reach-them.md` (`808b56f05218d250`) to implement its own Fix candidate (1).
+**Observed:** 2026-08-27, resuming `docs/issues/archive/2026-08-27-grep-zero-is-silent-for-gitignored-paths-and-include-hidden-does-not-reach-them.md` (`0f7105b8bebc600b`, archived on fix) to implement its own Fix candidate (1).
 
 **Expected (the plan, which I wrote myself earlier the same day):** *"Add a gitignore clause to the zero-match warning — 'N path(s) under the search root were skipped as gitignored', ideally naming a few, as the hidden clause does. Fixes the reported defect and is symmetric with what already exists."*
 
