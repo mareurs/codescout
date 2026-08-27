@@ -7,3 +7,4 @@
 //! Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md`.
 
 pub mod rule;
+pub mod validate;
