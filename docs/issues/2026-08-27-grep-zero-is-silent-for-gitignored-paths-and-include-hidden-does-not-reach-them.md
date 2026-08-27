@@ -107,20 +107,50 @@ zero was never mentioned in the first place.
 
 ## Fix
 
-Not implemented. Two candidates:
+**Candidate (1) as first written is wrong. Corrected 2026-08-27 after reconnaissance — see `R-121`.**
 
-1. **Add a gitignore clause to the zero-match warning.** *"N path(s) under the search root
-   were skipped as gitignored"* — ideally naming a few, as the hidden clause does. Fixes
-   the reported defect and is symmetric with what already exists.
-2. **Give the caller a way to include them.** A `no_ignore` / `include_ignored` flag, or
-   widening `include_hidden` to mean "search everything" (a behaviour change, and it would
-   silently pull `target/`, `node_modules/` and `.venv/` into every widened search — so
-   probably a separate flag, not a widening).
+The original text proposed a gitignore clause *"symmetric with what already exists"*, i.e.
+modelled on `WalkAudit::hidden_at_root` (`src/tools/grep.rs:1146-1177`). Scouting that
+function before implementing showed the symmetry does not hold:
 
-(1) is the actual bug. (2) is the capability the warning currently implies exists.
+- `hidden_at_root` inspects only the search root — one `read_dir`, no recursion, and its
+  doc comment says so explicitly. That is honest for dotfiles **because the clause's remedy
+  is root-agnostic**: `include_hidden=true` lifts the dotfile filter at every depth, so a
+  root-level list is a fair sample of what the remedy will reach.
+- Gitignore has no honest root approximation. `git check-ignore` over all 40 entries at
+  this repo's root returns six — `.env`, `.fastembed_cache`, `models`, `target`,
+  `temp-docs`, `.worktrees` — and **`.superpowers/` is not among them.** It is hidden-only.
+  The rule that produces the reported zero is `.superpowers/sdd/.gitignore:1:*`, at depth 2.
+
+So the root-scan version would name six innocent paths and still miss the guilty one —
+precisely the failure mode `completeness_warning`'s own doc comment names: *"naming an
+unchecked cause ends the search for the real one."* Worse, its natural regression test
+plants a match in a **root-level** gitignored directory, so it passes, and the repro in
+this file goes on reproducing behind a green gate.
+
+### The corrected fix
+
+**Emit a mechanism clause, not a path list, and gate it on `include_hidden == true`.**
+
+> Gitignored paths were not searched. `include_hidden=true` lifts the dotfile filter only —
+> `.gitignore` rules at any depth, including nested ones, are a second and independent
+> exclusion that no `grep` argument lifts.
+
+Three properties earn that shape:
+
+- **It claims only what is certain.** No enumeration, so no unchecked cause is named, and
+  nested rules are covered because the sentence is about the mechanism rather than a
+  location.
+- **`None` stays load-bearing.** Gating on the flag leaves the default path byte-identical:
+  a clean walk over a tree with no hidden entries still returns a bare zero. Only the
+  widened search gains a clause — and a widened search that returned nothing is both rare
+  and, by construction, one whose caller has already acted on the first warning.
+- **It fires exactly where the defect is.** The reported regression *is* the widened call.
+
+Candidate (2) — a `no_ignore` / `include_ignored` flag — remains the capability the warning
+implies exists, and remains out of scope here.
 
 Fix SHA + `git patch-id --stable`: *not yet fixed.*
-
 ## Tests added
 
 None — not fixed. A regression test should plant a match inside a gitignored directory and
@@ -141,4 +171,3 @@ test covering only the default would stay green through it.
   the bug `444d756c` fixed; this is the same class through a different filter
 - `docs/trackers/reconnaissance-patterns.md` — `R-118`, from the same pass; law C, and why
   ground truth came first this time
-

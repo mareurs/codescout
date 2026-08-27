@@ -1176,6 +1176,21 @@ impl WalkAudit {
         names
     }
 
+    /// Whether `.gitignore` rules are actually in force for a walk rooted at `root`.
+    ///
+    /// `WalkBuilder::require_git` defaults to true, so the `ignore` crate applies gitignore
+    /// rules only inside a git worktree. Gating on the same condition keeps the clause off
+    /// searches of unversioned directories, where it would be true only vacuously.
+    /// `a_gitignore_outside_a_git_repo_is_not_applied` pins that default rather than trusting
+    /// it, since the whole gate rests on it.
+    ///
+    /// Deliberately does NOT look for `.gitignore` files or count excluded paths. Naming a
+    /// population asserts that population is non-empty, and that is the assertion which fails
+    /// green — so the clause claims a mechanism, and a mechanism needs only this.
+    fn git_ignore_in_effect(root: &std::path::Path) -> bool {
+        root.ancestors().any(|a| a.join(".git").exists())
+    }
+
     /// The warning for a zero-match result, or `None` when the zero can be trusted.
     ///
     /// `None` is load-bearing: a clean walk over a tree with no hidden entries must return a
@@ -1189,6 +1204,16 @@ impl WalkAudit {
     /// the real one. The clause claims only what the counter proves — that nothing under this
     /// root passed the filter — and offers the anchoring mismatch as the thing to check,
     /// since an empty tree produces the same count.
+    ///
+    /// The gitignore clause is the one condition keyed on an argument rather than a counter.
+    /// `include_hidden` lifts the dotfile filter and nothing else, so acting on the hidden
+    /// clause suppresses it while leaving a second, independent exclusion standing — which is
+    /// how a widened search came to be strictly less informative than the narrow one it
+    /// replaced. The clause names the mechanism and never a path: a root-level list of
+    /// gitignored entries would be symmetric with `hidden_at_root` in shape only, because a
+    /// nested `.gitignore` prunes a subtree whose own root is not ignored. On this repo that
+    /// list is six entries, none of them the one that caused the reported zero — an unchecked
+    /// cause, which the paragraph above exists to forbid. See `R-121`.
     fn completeness_warning(
         &self,
         root: &std::path::Path,
@@ -1203,7 +1228,12 @@ impl WalkAudit {
         // Only a glob can starve the walk this way. With no glob set, zero accepted files
         // means an empty tree, which the error and hidden clauses already account for.
         let starved = !globs.is_empty() && self.accepted == 0;
-        if self.errors == 0 && hidden.is_empty() && !starved {
+        // Fires exactly when the caller has lifted the filter they were told about. That is
+        // what keeps a bare `None` meaningful on the default path: an ordinary zero is
+        // unchanged, and only a deliberately widened search that still found nothing is told
+        // a second filter is still standing.
+        let unlifted_gitignore = include_hidden && Self::git_ignore_in_effect(root);
+        if self.errors == 0 && hidden.is_empty() && !starved && !unlifted_gitignore {
             return None;
         }
 
@@ -1244,6 +1274,15 @@ impl WalkAudit {
                     String::new()
                 }
             ));
+        }
+        if unlifted_gitignore {
+            msg.push_str(
+                " include_hidden=true lifts the dotfile filter only. Gitignore rules are a \
+                     second and independent exclusion that no grep argument lifts, and they apply \
+                     at every depth — a nested .gitignore prunes its own subtree, so a match can \
+                     sit under a path that is not itself ignored. Reach one with a shell `grep`, \
+                     or `git grep --no-index`.",
+            );
         }
         Some(msg)
     }
@@ -2098,6 +2137,138 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_gitignore_outside_a_git_repo_is_not_applied() {
+        // Pins `WalkBuilder::require_git`'s default, which is the whole premise of the gate on
+        // the gitignore clause: if gitignore rules applied outside a worktree too, gating the
+        // clause on finding a `.git` would silence it exactly where it was needed. A premise a
+        // fix rests on earns a test that fails when the dependency changes it.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "secret.txt\n").unwrap();
+        std::fs::write(dir.path().join("secret.txt"), "TARGET\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r["total"].as_u64().unwrap(),
+            1,
+            "no .git here, so the .gitignore must not be honoured: {r}"
+        );
+    }
+
+    #[tokio::test]
+    async fn widening_past_hidden_names_the_gitignore_filter_it_cannot_lift() {
+        // The reported defect. The hidden clause names `.scratch/` and prescribes
+        // include_hidden=true; passing it does reach the directory, but a NESTED .gitignore
+        // prunes the contents, and the resulting zero used to be bare — so acting on the
+        // warning made the caller strictly less informed.
+        //
+        // `.scratch/` is deliberately NOT itself ignored, only its subtree is. That is what
+        // makes a root-level list of gitignored entries useless here, and why the clause names
+        // the mechanism instead of a path. See R-121.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let scratch = dir.path().join(".scratch");
+        std::fs::create_dir_all(&scratch).unwrap();
+        std::fs::write(scratch.join(".gitignore"), "*\n").unwrap();
+        std::fs::write(scratch.join("ledger.md"), "TARGET\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+
+        let narrow = Grep
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(narrow["total"].as_u64().unwrap(), 0, "hidden by default");
+        let narrow_w = narrow["completeness_warning"].as_str().unwrap();
+        assert!(
+            narrow_w.contains(".scratch/"),
+            "the hidden clause should still name the directory: {narrow_w}"
+        );
+
+        let widened = Grep
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap(), "include_hidden": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            widened["total"].as_u64().unwrap(),
+            0,
+            "the nested .gitignore still prunes it"
+        );
+        let widened_w = widened["completeness_warning"]
+            .as_str()
+            .expect("a widened search that still found nothing must not go bare");
+        assert!(
+            widened_w.contains("Gitignore rules"),
+            "must name the filter include_hidden did not lift: {widened_w}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_trustworthy_zero_stays_bare_inside_a_git_repo() {
+        // The default path stays byte-identical to before the gitignore clause existed: a
+        // clean walk with nothing hidden returns a bare zero even inside a worktree. `None`
+        // is what stops the warning becoming noise attached to every empty result, and a
+        // condition that fired on every zero would have spent it.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(dir.path().join("code.rs"), "fn present() {}\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        // Bootstrapping the agent inside a worktree registers `.codescout/private-memories/`
+        // via `MemoryStore::ensure_gitignored`, which writes a `.gitignore` at the root. That
+        // is a hidden file, so the hidden clause fires on it — correctly, and for a reason
+        // that has nothing to do with what this test is pinning. Clear it to get the clean
+        // tree the assertion is about. Tolerant of absence: if the bootstrap stops writing
+        // it, this test should keep testing its own subject rather than start failing.
+        let _ = std::fs::remove_file(dir.path().join(".gitignore"));
+        let r = Grep
+            .call(
+                json!({ "pattern": "absent_xyz", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["total"].as_u64().unwrap(), 0);
+        assert!(
+            r.get("completeness_warning").is_none(),
+            "nothing hidden and nothing widened — this zero must stay bare: {r}"
+        );
+    }
+
+    #[tokio::test]
+    async fn widening_outside_a_git_repo_stays_bare() {
+        // The other half of the gate. Outside a worktree the `ignore` crate applies no
+        // gitignore rules at all, so claiming a filter stood in the way would be true only
+        // vacuously — the shape that trains readers to skip warnings.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("code.rs"), "fn present() {}\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "absent_xyz", "path": dir.path().to_str().unwrap(), "include_hidden": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["total"].as_u64().unwrap(), 0);
+        assert!(
+            r.get("completeness_warning").is_none(),
+            "no git worktree, so no gitignore filter to warn about: {r}"
+        );
+    }
+
+    #[tokio::test]
     async fn mode_files_returns_ranked_counts() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("many.rs"), "X\nX\nX\n").unwrap();
@@ -2532,6 +2703,13 @@ mod tests {
 
     #[tokio::test]
     async fn include_hidden_suppresses_the_warning_even_on_a_zero() {
+        // Narrowed 2026-08-27, and the name is kept because an archived bug file cites it.
+        // `include_hidden=true` no longer suppresses the warning unconditionally: inside a
+        // git worktree it now draws the gitignore clause, since that filter is independent of
+        // the dotfile one and the flag never lifted it. What this fixture pins is the other
+        // side of that gate — no `.git` here, so the `ignore` crate applies no gitignore rules
+        // (`require_git` defaults to true), nothing was pruned, and the zero is trustworthy.
+        // The worktree case is `widening_past_hidden_names_the_gitignore_filter_it_cannot_lift`.
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".github")).unwrap();
         std::fs::write(dir.path().join(".github/ci.yml"), "nothing here\n").unwrap();

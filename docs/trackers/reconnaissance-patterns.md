@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 120
+entry_high_water_R: 121
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-121 | 2026-08-27 | hit | **A fix justified as "symmetric with the existing X" inherits X's scope without the property that made that scope honest.** `hidden_at_root`'s root-only `read_dir` is honest because its remedy (`include_hidden=true`) is root-agnostic. A gitignore clause copied to that shape names the six gitignored entries at this repo's root and misses `.superpowers/sdd/.gitignore:1:*` at depth 2 — the one rule that caused the reported zero. `completeness_warning`'s own doc already condemns it: *"naming an unchecked cause ends the search for the real one"* | `808b56f05218d250` § Fix, corrected in the same pass; the repro also needed a fresh probe, the bug file's text having come to match its own old one; kin [[R-117]] (a proposed fix that would pass green and move nothing), [[R-118]] (ground truth before the claim) |
 | R-120 | 2026-08-27 | hit | **A decision procedure is a seam — reading it far enough to get an ANSWER is not far enough to get its PRECONDITIONS.** A promotion route was picked straight from the routing test, skipping two paragraphs gating the adjacent destination and an entire successor section imposing a promoted-set audit; the target ledger's own required-field contract was missed the same way. Both omissions sit *after* the answer, and neither raises: a malformed entry is invisible to field-presence sweeps, an unaudited PR merges as cleanly as an audited one | `prompt-surface-measurement-session-log:F-43`; kin [[R-49]] (own plan, one turn old), [[R-95]] (a verdict reads as settled, not as a claim), [[R-89]] (19 cached plugin versions checked — the served copy is what has reach) |
 | R-106 | 2026-08-18 | hit (pre-edit) → rule | **A generated surface is ground truth about cost and about nothing else — read the generator before proposing the remedy.** Measured the live `tools/list` payload, found one 225-char `workspace` description repeated verbatim on 24 tools, and proposed a "free mechanical dedup, zero risk". The source holds exactly ONE copy: `inject_workspace_param` injects it into every `pinnable()` tool at list time | `src/server.rs:496-508` + `:1024-1026`; prompt-surface-compaction-session-log:F-2, :W-1; kin R-91, R-100 |
 | R-105 | 2026-08-18 | miss (human review) → rule | **A key derived from runtime state is a claim about that state's lifetime — enumerate the lifecycle events before proposing it.** Proposed parent-PID + parent-start-time as the agent-agnostic session key for the guide ledger and scouted it hard against ONE event (MCP subprocess respawn); never enumerated client *resume*, which restarts the parent while the conversation continues. The falsifying evidence was already in hand and unread | bug-fix-session-log:F-53; session 2c518eb6 spans 12 days / 9630 calls / 67 MCP procs under a 17h-old `claude` process; kin R-91, R-50 |
@@ -3882,6 +3883,34 @@ plan was one turn old), R-95 (a rationale reads as a settled decision rather tha
 a routing verdict does the same), R-89 (the served copy is the one that counts — checking
 all 19 cached `codescout-companion` versions is what established the rule had no reach
 outside one memory file).
+
+## R-121 — A symmetric fix inherits the asymmetry it was copied across
+
+**Valid:** dated 2026-08-27
+
+**Law:** C — a search that finds nothing is evidence about the search. Secondarily A.
+
+**Verdict:** hit — recon changed the fix before a line was written.
+
+**Observed:** 2026-08-27, resuming `docs/issues/2026-08-27-grep-zero-is-silent-for-gitignored-paths-and-include-hidden-does-not-reach-them.md` (`808b56f05218d250`) to implement its own Fix candidate (1).
+
+**Expected (the plan, which I wrote myself earlier the same day):** *"Add a gitignore clause to the zero-match warning — 'N path(s) under the search root were skipped as gitignored', ideally naming a few, as the hidden clause does. Fixes the reported defect and is symmetric with what already exists."*
+
+**Got (scouted reality):** the symmetry does not hold, because the two filters have different shapes.
+
+- `WalkAudit::hidden_at_root` (`src/tools/grep.rs:1146-1177`) is root-only **by explicit design** — its doc comment says *"Only the search root is inspected — one `read_dir`, no recursion — so the warning wording claims nothing about deeper hidden directories."* That is honest for dotfiles because the clause's remedy (`include_hidden=true`) is itself root-agnostic.
+- Gitignore has no honest root approximation. `git check-ignore` over all 40 entries at this repo's root returns exactly six: `.env`, `.fastembed_cache`, `models`, `target`, `temp-docs`, `.worktrees`.
+- **`.superpowers/` is not among them.** It is hidden-only. The exclusion that produces the reported zero is `.superpowers/sdd/.gitignore:1:*` — **depth 2**, a nested `.gitignore`, invisible to any root-level scan.
+
+So the "symmetric" fix would emit a warning naming six innocent paths and still miss the guilty one. `completeness_warning`'s own doc comment already condemns exactly this: *"naming an unchecked cause ends the search for the real one."* The plan proposed re-introducing the failure mode the function was written to avoid.
+
+**Counterfactual:** the natural regression test for candidate (1) plants a match inside a **root-level** gitignored directory — because that is what the fix scans. It would have passed. The bug would have been closed, the warning would have grown a clause, and the exact repro in the bug file would still reproduce. The defect ships behind a green test, which is the expensive shape.
+
+**Second-order finding — the repro self-contaminated.** The bug file quotes its own probe string, so `grep(pattern="l3-measures-vocabulary-overlap")` now returns 3 hits in the bug file and no longer demonstrates anything. A fresh probe was needed (`both-with-a-rename-chase`: 0 tracked hits, 1 in the gitignored ledger) before the repro could be re-run. **A probe string written into a searchable bug file stops being a probe.** Use a token that lives only in the excluded path, and record how it was verified unique rather than the token itself.
+
+**Proposal:** when a fix is justified as *"symmetric with the existing X"*, scout what makes X's scope honest before copying its shape. `hidden_at_root`'s root-only scan is honest because its remedy is root-agnostic; copying the scan without the property that licensed it produces a clause that claims more than it can prove. Symmetry is a claim about two mechanisms, and it is checkable.
+
+**Status:** validated — drift caught pre-implementation; the bug file's Fix section was corrected in the same pass.
 
 ## Template for new entries
 
