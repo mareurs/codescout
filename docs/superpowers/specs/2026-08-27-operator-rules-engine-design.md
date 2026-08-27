@@ -208,7 +208,7 @@ Phase 3 backfills the existing corpus into the ledger: one `OP-N` per rule, with
 classified against § 2's vocabulary and `**Evidence:**` set to the measurement if one exists
 or `unmeasured` if not. Expected initial state, from what is already on record:
 
-- `Conclude Last` — `measured: conclude-last/b2 0% → 100% (n=35)`, rests on `A-20` + `A-21`
+- `Conclude Last` — `measured: conclude-last/b2 0% -> 100% (n=35)`, rests on `A-20` + `A-21`
 - the other three — `unmeasured`
 
 Harvesting is **transcription with classification**, not authorship. A rule whose imperative
