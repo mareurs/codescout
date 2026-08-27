@@ -247,6 +247,22 @@ matters.
   tuple, which is destructured at ~20 call sites. Widening it would have spent the diff
   on churn unrelated to the defect.
 
+  **The `read_file` half needed a second commit — `21507a26`, patch-id
+  `1bc96ae356d6741c08dbcd5a30c462a8e87ab06b`.** `c1cb0022` attached the field and
+  stopped; `format_read_file` builds its text from a fixed set of keys and drops every
+  other field, so the notice sat in the JSON and reached no reader. An **inert field**,
+  which is worse than an absent one because the code reads as done.
+
+  It was found by a live probe against the rebuilt server, not by a test, and the reason
+  is worth keeping: `run_command` returns its JSON straight through, so asserting on
+  `.call()`'s `Value` is the whole surface there — `read_file` has a *second*,
+  text-rendering surface on top, and nothing looked at it. The added test asserts on
+  `format_read_file`'s output, and on the notice being the rendered SECOND line rather
+  than merely present, so a later "just append it" refactor cannot silently undo the
+  head placement. The fix is applied at a thin wrapper, not inside the body: the body
+  has five return paths, the probe hit one of them, and threading it through only that
+  one would have been just as invisible on the other four.
+
 ### One correction to this file's own § Tests to add
 
 It asked for a test asserting `unfiltered_buffered_lines` **equals** `count_lines` of
