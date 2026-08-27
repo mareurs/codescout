@@ -5,6 +5,8 @@
 //! 66.7% went unused and 94% of `librarian`'s bytes were never touched. This
 //! module makes the section the unit.
 
+use serde_json::Value;
+
 /// One `##` or `###` section of a guide, before declarations are parsed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawSection {
@@ -159,6 +161,44 @@ pub fn parse_shape(s: &str) -> Result<Shape, String> {
     })
 }
 
+impl Shape {
+    /// Whether this declared shape matches a call.
+    ///
+    /// `sel` is the selector-key `Agent::selector_key` returns for the call —
+    /// `None` means the tool opted out of `selector_key` entirely, so nothing
+    /// should match it. That is deliberate, not a gap: do not turn it into a
+    /// wildcard.
+    ///
+    /// A tool-only shape (`action: None`) matches any action of that tool, and
+    /// also a bare tool key with no action at all — Task 4's `selector_key`
+    /// returns e.g. `Some("artifact_augment")` for a call with no `action`
+    /// field.
+    ///
+    /// The `path~` predicate reads the RESULT, not the selector: a shape
+    /// carrying one must not match on tool+action alone.
+    pub fn matches(&self, sel: Option<&str>, result: &Value) -> bool {
+        let Some(sel) = sel else { return false };
+        let (tool, action) = match sel.split_once('.') {
+            Some((t, a)) => (t, Some(a)),
+            None => (sel, None),
+        };
+        if tool != self.tool {
+            return false;
+        }
+        if let Some(want) = &self.action {
+            if action != Some(want.as_str()) {
+                return false;
+            }
+        }
+        if let Some(needle) = &self.path_contains {
+            if !crate::librarian::adapter::names_path_containing(result, needle) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 /// `tool` and `action` identifiers: non-empty, `[A-Za-z0-9_]+` only.
 ///
 /// Rejecting anything else — rather than trimming stray whitespace or a
@@ -249,6 +289,29 @@ impl TopicEntry {
     }
 }
 
+/// Split and parse one topic's compiled-in body into a `TopicEntry`.
+///
+/// Shared by `GuideIndex::try_build` (the live corpus) and, in tests,
+/// `GuideIndex::from_str_for_test` (a synthetic one-topic corpus) — one code
+/// path, so a test fixture cannot drift from production parsing behaviour.
+fn build_topic_entry(topic: &'static str, src: &'static str) -> Result<TopicEntry, String> {
+    let (preamble, raws) = split_sections(src);
+    let mut sections = Vec::with_capacity(raws.len());
+    for raw in raws {
+        let (serves, requires) =
+            parse_declarations(raw.body).map_err(|e| format!("{topic} § {}: {e}", raw.heading))?;
+        sections.push(GuideSection {
+            topic,
+            heading: raw.heading,
+            level: raw.level,
+            body: raw.body,
+            serves,
+            requires,
+        });
+    }
+    Ok(TopicEntry { preamble, sections })
+}
+
 /// Section index over the whole compiled-in guide corpus.
 #[derive(Debug)]
 pub struct GuideIndex {
@@ -263,21 +326,7 @@ impl GuideIndex {
         for &topic in crate::prompts::GUIDE_TOPICS {
             let src = crate::prompts::topic_body(topic)
                 .ok_or_else(|| format!("topic `{topic}` has no body"))?;
-            let (preamble, raws) = split_sections(src);
-            let mut sections = Vec::with_capacity(raws.len());
-            for raw in raws {
-                let (serves, requires) = parse_declarations(raw.body)
-                    .map_err(|e| format!("{topic} § {}: {e}", raw.heading))?;
-                sections.push(GuideSection {
-                    topic,
-                    heading: raw.heading,
-                    level: raw.level,
-                    body: raw.body,
-                    serves,
-                    requires,
-                });
-            }
-            topics.insert(topic, TopicEntry { preamble, sections });
+            topics.insert(topic, build_topic_entry(topic, src)?);
         }
         Ok(Self { topics })
     }
@@ -290,6 +339,72 @@ impl GuideIndex {
     /// declarations keep the whole-topic path — this is the phase switch.
     pub fn declares(&self, t: &str) -> bool {
         self.topic(t).is_some_and(|e| e.declared().next().is_some())
+    }
+
+    /// Sections serving this call, plus their transitive `requires:` closure,
+    /// in document order with no duplicates.
+    ///
+    /// The closure matters because sections are not independent: e.g.
+    /// `tracker-conventions` § *Entry ids* states entry-id law whose
+    /// precondition lives in § *Declaring a ledger*. Delivered alone it is
+    /// true and misleading.
+    pub fn match_sections(
+        &self,
+        topic: &str,
+        sel: Option<&str>,
+        result: &Value,
+    ) -> Vec<&GuideSection> {
+        let Some(entry) = self.topic(topic) else {
+            return Vec::new();
+        };
+        let mut wanted: std::collections::BTreeSet<&str> = Default::default();
+        for sec in entry.declared() {
+            if sec.serves.iter().any(|s| s.matches(sel, result)) {
+                wanted.insert(sec.heading.as_str());
+            }
+        }
+        // Transitive closure over `requires:`. Bounded by section count, so a
+        // `requires:` cycle (including a section requiring itself) terminates
+        // rather than hanging: each pass either adds at least one new heading
+        // to `wanted` or the loop stops, and `wanted` is capped at
+        // `entry.sections.len()`.
+        loop {
+            let mut added = false;
+            let pending: Vec<&str> = entry
+                .sections
+                .iter()
+                .filter(|s| wanted.contains(s.heading.as_str()))
+                .flat_map(|s| s.requires.iter().map(|r| r.as_str()))
+                .collect();
+            for req in pending {
+                if entry.sections.iter().any(|s| s.heading == req) && wanted.insert(req) {
+                    added = true;
+                }
+            }
+            if !added {
+                break;
+            }
+        }
+        entry
+            .sections
+            .iter()
+            .filter(|s| wanted.contains(s.heading.as_str()))
+            .collect()
+    }
+}
+
+/// Build a one-topic index from a literal guide body, for tests that need
+/// declarations the real corpus does not carry yet (nothing declares before
+/// Task 6).
+#[cfg(test)]
+impl GuideIndex {
+    pub fn from_str_for_test(topic: &'static str, src: &'static str) -> Self {
+        let mut topics = std::collections::BTreeMap::new();
+        topics.insert(
+            topic,
+            build_topic_entry(topic, src).expect("test fixture guide must parse"),
+        );
+        Self { topics }
     }
 }
 
@@ -528,5 +643,93 @@ n body
     fn a_topic_without_declarations_reports_false() {
         let idx = GuideIndex::try_build().unwrap();
         assert!(!idx.declares("progressive-disclosure"));
+    }
+
+    #[test]
+    fn shape_matching_rules() {
+        let empty = serde_json::json!({});
+        let s = parse_shape("artifact.get").unwrap();
+        assert!(s.matches(Some("artifact.get"), &empty));
+        assert!(!s.matches(Some("artifact.find"), &empty));
+        assert!(!s.matches(None, &empty));
+
+        // Tool-only shape matches any action of that tool, and a keyless call.
+        let t = parse_shape("artifact").unwrap();
+        assert!(t.matches(Some("artifact.get"), &empty));
+        assert!(t.matches(Some("artifact"), &empty));
+
+        // Path predicate reads the RESULT.
+        let p = parse_shape("artifact.get(path~docs/issues/)").unwrap();
+        assert!(!p.matches(Some("artifact.get"), &empty));
+        assert!(p.matches(
+            Some("artifact.get"),
+            &serde_json::json!({"abs_path": "docs/issues/x.md"})
+        ));
+    }
+
+    /// A hand-built guide with a real `requires:` chain: A serves the call and
+    /// requires B; B requires C; C is declared by nothing. No guide in the live
+    /// corpus carries any declaration until Task 6 lands, so a closure test must
+    /// build its own fixture rather than assert on `GuideIndex::try_build()` —
+    /// asserting on the live corpus today would pass on an empty vec and keep
+    /// passing even if the closure were completely broken.
+    const CHAIN_GUIDE: &str = "\
+# Synthetic
+
+Preamble.
+
+## Section A
+<!-- serves: artifact.append_entry -->
+<!-- requires: Section B -->
+
+Body A.
+
+## Section B
+<!-- requires: Section C -->
+
+Body B.
+
+## Section C
+
+Body C.
+";
+
+    #[test]
+    fn match_sections_closes_requires_transitively_and_orders_by_document() {
+        let idx = GuideIndex::from_str_for_test("chain-topic", CHAIN_GUIDE);
+        let got = idx.match_sections(
+            "chain-topic",
+            Some("artifact.append_entry"),
+            &serde_json::json!({}),
+        );
+        let headings: Vec<&str> = got.iter().map(|s| s.heading.as_str()).collect();
+        assert_eq!(headings, vec!["Section A", "Section B", "Section C"]);
+        // No duplicates.
+        let mut sorted = headings.clone();
+        sorted.dedup();
+        assert_eq!(headings, sorted);
+    }
+
+    #[test]
+    fn unknown_topic_matches_nothing() {
+        let idx = GuideIndex::try_build().unwrap();
+        assert!(idx
+            .match_sections(
+                "no-such-topic",
+                Some("artifact.get"),
+                &serde_json::json!({})
+            )
+            .is_empty());
+    }
+
+    #[test]
+    fn live_corpus_declares_nothing_until_task_6() {
+        let idx = GuideIndex::try_build().unwrap();
+        let got = idx.match_sections(
+            "librarian",
+            Some("artifact.append_entry"),
+            &serde_json::json!({}),
+        );
+        assert!(got.is_empty());
     }
 }
