@@ -245,6 +245,19 @@ pub fn parse_declarations(body: &str) -> Result<(Vec<Shape>, Vec<String>), Strin
                 return Err("empty heading in `requires:`".to_string());
             }
             requires.push(h.to_string());
+        } else if inner.starts_with("serve") || inner.starts_with("require") {
+            // A near-miss on the declaration keyword (missing `s`, singular
+            // `require:` instead of `requires:`, etc.) must not silently parse
+            // to nothing — that would make the section stop being delivered
+            // with no signal anywhere, exactly the failure Gate 1's "malformed
+            // declarations are loud" contract exists to rule out. Gate 5 was
+            // meant to be the backstop for an orphaned section, but it did not
+            // actually discriminate before the `child_declares` fix, so a
+            // typo here had no gate catching it at all.
+            return Err(format!(
+                "unrecognised declaration comment `{inner}` — did you mean `serves:` \
+                 or `requires:`?"
+            ));
         }
     }
     Ok((serves, requires))
@@ -524,6 +537,28 @@ n body
             );
         }
     }
+    #[test]
+    fn no_topic_has_duplicate_section_headings() {
+        // `guide_blocks_for`'s `if emitted.insert(key)` (types.rs) means a second
+        // section sharing an earlier one's `ledger_key` (heading-derived) is
+        // dropped permanently for the session — silent under-delivery, not the
+        // "fail-safe over-delivery" an earlier ruling assumed. Zero duplicates
+        // in the corpus today; this pins that down.
+        let idx = GuideIndex::try_build().unwrap();
+        for topic in crate::prompts::GUIDE_TOPICS {
+            let Some(entry) = idx.topic(topic) else {
+                continue;
+            };
+            let mut seen = std::collections::HashSet::new();
+            for sec in &entry.sections {
+                assert!(
+                    seen.insert(sec.heading.as_str()),
+                    "{topic} has a duplicate section heading `{}`",
+                    sec.heading
+                );
+            }
+        }
+    }
 
     #[test]
     fn parse_shape_forms() {
@@ -561,6 +596,20 @@ n body
         assert!(parse_shape("artifact.update(").is_err());
         assert!(parse_shape("").is_err());
         assert!(parse_shape("artifact.get(mode~x)").is_err());
+    }
+    #[test]
+    fn a_near_miss_declaration_keyword_is_an_error_not_a_silent_skip() {
+        // Gate 1 extended to the keyword itself, not just a well-formed shape's
+        // internals: `serve:` (missing the `s`) or `require:` (singular) used to
+        // parse to nothing with no error — the section just silently stopped
+        // being delivered, with no gate catching it (fix 1's removal of the
+        // bogus `child_declares` clause is what made Gate 5 able to catch a
+        // resulting orphan at all, but a typo that still leaves the section
+        // reachable some other way would sail through even then).
+        assert!(parse_declarations("\n<!-- serve: artifact.get -->\n").is_err());
+        assert!(parse_declarations("\n<!-- require: Some Heading -->\n").is_err());
+        // A genuinely unrelated comment is not a near miss and must not error.
+        assert!(parse_declarations("\n<!-- some other note -->\n").unwrap() == (vec![], vec![]));
     }
 
     #[test]
@@ -837,19 +886,11 @@ Body Mu.
                 .flat_map(|s| s.requires.iter().map(|r| r.as_str()))
                 .collect();
             for sec in &entry.sections {
-                // A parent whose children carry the declarations is reachable through them.
-                let child_declares = entry
-                    .sections
-                    .iter()
-                    .any(|c| c.level > sec.level && !c.serves.is_empty());
                 let waived = crate::prompts::SECTION_WAIVERS
                     .iter()
                     .any(|(t, h, _)| *t == *topic && *h == sec.heading);
                 assert!(
-                    !sec.serves.is_empty()
-                        || required.contains(sec.heading.as_str())
-                        || child_declares
-                        || waived,
+                    !sec.serves.is_empty() || required.contains(sec.heading.as_str()) || waived,
                     "{topic} § {} is unreachable: declare a `serves:`, have a section \
                  `requires:` it, or add it to prompts::SECTION_WAIVERS with a reason",
                     sec.heading

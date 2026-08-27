@@ -519,6 +519,32 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
          `librarian-runtime`; the guide's own closing line already sends whoever does \
          need it there directly.",
     ),
+    (
+        "librarian",
+        "Tracker Workflow",
+        "Undeliverable under section grain right now: reachability would require a \
+         `requires:` edge from a declaring section, and that edge would push the \
+         6-shape p50 session over the 12,000 B ceiling — the corpus is already at \
+         capacity (margin 54 B against this section's 346 B). This is not an \
+         editorial call that the section doesn't matter; it is blocked purely by the \
+         byte ceiling. The recorded remedy is decomposing § Body Editing Surfaces \
+         (see `docs/superpowers/plans/2026-08-27-get-guide-section-grain.md` § Out of \
+         scope for Phase 1), which would free enough room to make both orphans \
+         reachable without raising the ceiling.",
+    ),
+    (
+        "librarian",
+        "Body Editing Surfaces",
+        "Undeliverable under section grain right now: reachability would require a \
+         `requires:` edge from a declaring section, and that edge would push the \
+         6-shape p50 session over the 12,000 B ceiling — the corpus is already at \
+         capacity (margin 54 B against this section's 1,456 B). This is not an \
+         editorial call that the section doesn't matter; it is blocked purely by the \
+         byte ceiling. The recorded remedy is decomposing this very section (see \
+         `docs/superpowers/plans/2026-08-27-get-guide-section-grain.md` § Out of \
+         scope for Phase 1) into smaller declaring sub-sections, which is the fix \
+         that would make it reachable without raising the ceiling.",
+    ),
 ];
 
 /// The guide that opens a session.
