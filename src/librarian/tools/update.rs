@@ -34,7 +34,7 @@ struct UpdatePatch {
     #[serde(default)]
     body: Option<String>,
     /// Surgical body edits — array of edit-markdown-shaped entries
-    /// `{heading, action, content?, old_string?, new_string?, replace_all?, at?, include_subsections?}`.
+    /// `{heading, action, content?, old_string?, new_string?, replace_all?, at?, occurrence?, include_subsections?}`.
     /// Applied atomically (all-or-nothing). Mirrors edit_markdown's batch-mode `edits` array.
     /// Mutually exclusive with `body`.
     #[serde(default)]
@@ -204,7 +204,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
         let heading = edit["heading"].as_str().ok_or_else(|| {
             super::RecoverableError::with_hint(
                 format!("body_edits[{i}]: missing required 'heading' field"),
-                "Each entry must have shape {heading, action, content?|old_string+new_string?, at?, replace_all?, include_subsections?}.",
+                "Each entry must have shape {heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}.",
             )
         })?;
         let action = edit["action"].as_str().ok_or_else(|| {
@@ -213,6 +213,13 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
                 "Allowed actions: replace, insert_before, insert_after, remove, edit.",
             )
         })?;
+        // 1-indexed selector among identical headings — the only way to reach either of
+        // two byte-identical ones. `body_edits` is a managed artifact's ONLY edit
+        // surface, so without this such a section would be permanently uneditable.
+        let query = crate::tools::file_summary::HeadingQuery::new(
+            heading,
+            edit["occurrence"].as_u64().map(|n| n as usize),
+        );
 
         buf = if action == "edit" {
             let old_string = edit["old_string"].as_str().ok_or_else(|| {
@@ -228,7 +235,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
             let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
             crate::tools::markdown::edit_markdown::perform_scoped_edit(
                 &buf,
-                heading,
+                query,
                 old_string,
                 new_string,
                 replace_all,
@@ -248,7 +255,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
             // calls that do the wiping.
             if action == "replace" {
                 if let Ok(victims) =
-                    crate::tools::markdown::edit_markdown::find_consumed_subsections(&buf, heading)
+                    crate::tools::markdown::edit_markdown::find_consumed_subsections(&buf, query)
                 {
                     if !victims.is_empty() {
                         if edit["include_subsections"].as_bool().unwrap_or(false) {
@@ -269,7 +276,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
             }
             crate::tools::markdown::edit_markdown::perform_section_edit_ext(
                 &buf,
-                heading,
+                query,
                 action,
                 edit["content"].as_str(),
                 edit["at"].as_str(),
@@ -1695,6 +1702,57 @@ text
             body.len(),
             out.len()
         );
+    }
+
+    /// A librarian-managed artifact's ONLY edit surface is `body_edits`, and it shares the
+    /// one heading resolver with `edit_markdown` -- so before `occurrence` existed, two
+    /// byte-identical headings made both sections permanently uneditable through every
+    /// available path. `edit_markdown` refuses managed files, `edit_file` refuses them on
+    /// every path, and the error's own hint named `edit_file` parameters that do not exist.
+    /// See `docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
+    #[test]
+    fn body_edits_occurrence_reaches_the_second_of_two_identical_headings() {
+        let body = "## Fix\n\nthe plan\n\n## Middle\n\nm\n\n## Fix\n\nthe plan\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Fix",
+            "action": "edit",
+            "occurrence": 2,
+            "old_string": "the plan",
+            "new_string": "the shipped record",
+        })];
+        let out = apply_body_edits(body, &edits, &mut Vec::new())
+            .expect("occurrence must disambiguate identical headings");
+
+        // Mutation control: ignoring `occurrence` on this path -- or selecting indices[0]
+        // in the resolver -- rewrites the FIRST section instead, which is precisely the
+        // silent wrong-section edit the loud ambiguity error exists to prevent.
+        let first_section = out.split("## Middle").next().unwrap();
+        assert!(
+            first_section.contains("the plan"),
+            "first '## Fix' must be untouched: {out}"
+        );
+        assert!(
+            out.ends_with("the shipped record\n"),
+            "second '## Fix' must carry the edit: {out}"
+        );
+    }
+
+    /// Without a selector the ambiguity error still fires on the managed path. Silently
+    /// picking one is strictly worse than refusing: it edits the plan while the caller
+    /// believes they edited the shipped record.
+    #[test]
+    fn body_edits_without_occurrence_still_refuses_identical_headings() {
+        let body = "## Fix\n\nthe plan\n\n## Fix\n\nthe plan\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Fix",
+            "action": "edit",
+            "old_string": "the plan",
+            "new_string": "x",
+        })];
+        let msg = apply_body_edits(body, &edits, &mut Vec::new())
+            .expect_err("ambiguous heading must be refused, not guessed")
+            .to_string();
+        assert!(msg.contains("found 2 times"), "{msg}");
     }
 
     /// The refusal is unchanged when the caller has NOT opted in — moving the

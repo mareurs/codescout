@@ -72,10 +72,10 @@ pub fn perform_section_edit(
 /// use this directly to collect edits from multiple `edits[]` entries before
 /// detecting overlaps and applying them together.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn plan_section_edit(
+pub(crate) fn plan_section_edit<'q, Q: Into<crate::tools::file_summary::HeadingQuery<'q>>>(
     content: &str,
     off: &LineOffsets,
-    heading_query: &str,
+    heading_query: Q,
     action: &str,
     new_content: Option<&str>,
     at: Option<&str>,
@@ -85,8 +85,12 @@ pub(crate) fn plan_section_edit(
     use crate::tools::core::types::RecoverableError;
     use crate::tools::file_summary::{heading_level, resolve_section_range};
 
-    let range =
-        resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
+    // Destructure once: `heading_query` stays a `&str` for every downstream error
+    // message, while the occurrence selector rides along to the resolver.
+    let query = heading_query.into();
+    let heading_query = query.text;
+
+    let range = resolve_section_range(content, query).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let lines: Vec<&str> = content.split('\n').collect();
     let heading_idx = range.heading_line - 1;
@@ -296,9 +300,9 @@ pub(crate) fn plan_section_edit(
 /// single edit at `edit_index=0` and applies it immediately, preserving the
 /// historical single-edit string-in-string-out contract for callers that
 /// don't need batch-mode overlap detection.
-pub fn perform_section_edit_ext(
+pub fn perform_section_edit_ext<'q, Q: Into<crate::tools::file_summary::HeadingQuery<'q>>>(
     content: &str,
-    heading_query: &str,
+    heading_query: Q,
     action: &str,
     new_content: Option<&str>,
     at: Option<&str>,
@@ -356,7 +360,10 @@ fn compute_section_end(lines: &[&str], start_idx: usize, level: usize) -> usize 
 /// Returns the headings with their `#` prefix intact so the error message can
 /// echo them verbatim. Empty vec means the section has no children and `replace`
 /// is safe.
-pub fn find_consumed_subsections(content: &str, heading_query: &str) -> Result<Vec<String>> {
+pub fn find_consumed_subsections<'q, Q: Into<crate::tools::file_summary::HeadingQuery<'q>>>(
+    content: &str,
+    heading_query: Q,
+) -> Result<Vec<String>> {
     use crate::tools::file_summary::{heading_level, resolve_section_range};
 
     let range =
@@ -647,6 +654,12 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
         let action = edit["action"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("edits[{}]: missing required 'action' field", i))?;
+        // 1-indexed selector among identical headings. Absent keeps today's contract:
+        // one match resolves, several are an ambiguity error.
+        let query = crate::tools::file_summary::HeadingQuery::new(
+            heading,
+            edit["occurrence"].as_u64().map(|n| n as usize),
+        );
 
         let mut sub = if action == "edit" {
             let old_string = edit["old_string"].as_str().ok_or_else(|| {
@@ -657,7 +670,7 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
             plan_scoped_edit(
                 snapshot,
                 &off,
-                heading,
+                query,
                 old_string,
                 new_string,
                 replace_all,
@@ -672,7 +685,7 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
             })?
         } else {
             if action == "replace" && !edit["include_subsections"].as_bool().unwrap_or(false) {
-                if let Ok(victims) = find_consumed_subsections(snapshot, heading) {
+                if let Ok(victims) = find_consumed_subsections(snapshot, query) {
                     if !victims.is_empty() {
                         return Err(subsection_guard_error(Some(i), heading, &victims).into());
                     }
@@ -681,7 +694,7 @@ pub(crate) fn plan_batch(snapshot: &str, edits: &[Value], force: bool) -> Result
             plan_section_edit(
                 snapshot,
                 &off,
-                heading,
+                query,
                 action,
                 edit["content"].as_str(),
                 edit["at"].as_str(),
@@ -727,16 +740,21 @@ const PREAMBLE_LABEL: &str = "(preamble)";
 /// there is no collision to guard against. A file with no headings at all treats its
 /// entire content as the preamble.
 /// docs/issues/archive/2026-08-19-guarded-artifact-preamble-cannot-be-edited.md
-pub(crate) fn plan_scoped_edit(
+pub(crate) fn plan_scoped_edit<'q, Q: Into<crate::tools::file_summary::HeadingQuery<'q>>>(
     content: &str,
     off: &LineOffsets,
-    heading_query: &str,
+    heading_query: Q,
     old_string: &str,
     new_string: &str,
     replace_all: bool,
     edit_index: usize,
 ) -> Result<Vec<PlannedEdit>> {
     use crate::tools::file_summary::{parse_all_headings, resolve_section_range};
+
+    // Destructure before the sentinel comparison: the PREAMBLE check is on the text,
+    // and every diagnostic below echoes the text, not the selector.
+    let query = heading_query.into();
+    let heading_query = query.text;
 
     let (sec_start, sec_end, diag_label) = if heading_query == PREAMBLE_SENTINEL {
         let sec_end = parse_all_headings(content)
@@ -745,8 +763,7 @@ pub(crate) fn plan_scoped_edit(
             .unwrap_or(content.len());
         (0, sec_end, PREAMBLE_LABEL)
     } else {
-        let range =
-            resolve_section_range(content, heading_query).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let range = resolve_section_range(content, query).map_err(|e| anyhow::anyhow!("{}", e))?;
         let lines: Vec<&str> = content.split('\n').collect();
         let heading_idx = range.heading_line - 1;
         let end_idx = compute_section_end(&lines, heading_idx + 1, range.level);
@@ -859,9 +876,9 @@ pub(crate) fn prefix_scoped_error(
 /// Thin wrapper over `plan_scoped_edit` + `apply_planned_edits`: plans the edit(s) at
 /// `edit_index=0` and applies them immediately, preserving the historical single-edit
 /// string-in-string-out contract for callers that don't need batch-mode overlap detection.
-pub(crate) fn perform_scoped_edit(
+pub(crate) fn perform_scoped_edit<'q, Q: Into<crate::tools::file_summary::HeadingQuery<'q>>>(
     content: &str,
-    heading_query: &str,
+    heading_query: Q,
     old_string: &str,
     new_string: &str,
     replace_all: bool,
@@ -1237,6 +1254,7 @@ impl Tool for EditMarkdown {
                 "path": { "type": "string", "description": "Markdown file path" },
                 "file_path": { "type": "string", "description": "Alias for path" },
                 "heading": { "type": "string", "description": "Target section heading (fuzzy matched). Required unless using edits[] batch mode." },
+                "occurrence": { "type": "integer", "minimum": 1, "description": "1-indexed selector when `heading` matches several sections. Two byte-identical headings admit no distinguishing query, so this is the only way to reach either one; omit it and several exact matches are an ambiguity error naming their line numbers." },
                 "action": {
                     "type": "string",
                     "enum": ["replace", "insert_before", "insert_after", "remove", "edit"],
@@ -1276,6 +1294,7 @@ impl Tool for EditMarkdown {
                         "required": ["heading", "action"],
                         "properties": {
                             "heading": { "type": "string" },
+                            "occurrence": { "type": "integer", "minimum": 1, "description": "1-indexed selector when this entry's `heading` matches several sections." },
                             "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"], "description": "Per-edit operation. 'replace' OVERWRITES the entire body of the named section (see top-level `action` for full semantics) — prefer 'insert_after' for adjacent sections, 'edit' with old_string/new_string for in-section surgical mods." },
                             "content": { "type": "string", "description": "Per-edit content (body only — heading preserved on replace). For 'replace', this REPLACES the entire existing section body." },
                             "at": { "type": "string", "enum": ["end-of-section", "after-heading-line"] },
@@ -1381,6 +1400,12 @@ impl Tool for EditMarkdown {
                 &[],
                 "Name the section to edit, e.g. heading=\"## Section\". For multiple edits use edits=[{heading, action, content}].",
             )?;
+            // 1-indexed selector among identical headings — the only way to reach
+            // either of two byte-identical ones. See `HeadingQuery`.
+            let query = crate::tools::file_summary::HeadingQuery::new(
+                heading,
+                input["occurrence"].as_u64().map(|n| n as usize),
+            );
             let action = crate::tools::require_str_param_or_hint(
                 &input,
                 "action",
@@ -1392,18 +1417,12 @@ impl Tool for EditMarkdown {
                 let old_string = crate::tools::require_str_param(&input, "old_string")?;
                 let new_string = require_new_string(&input, "")?;
                 let replace_all_val = parse_bool_param(&input["replace_all"]);
-                perform_scoped_edit(
-                    &new_content,
-                    heading,
-                    old_string,
-                    new_string,
-                    replace_all_val,
-                )
-                .map_err(|e| prefix_scoped_error(e, "", "Check heading name and old_string."))?
+                perform_scoped_edit(&new_content, query, old_string, new_string, replace_all_val)
+                    .map_err(|e| prefix_scoped_error(e, "", "Check heading name and old_string."))?
             } else {
                 let content = input["content"].as_str();
                 if action == "replace" && !input["include_subsections"].as_bool().unwrap_or(false) {
-                    if let Ok(victims) = find_consumed_subsections(&new_content, heading) {
+                    if let Ok(victims) = find_consumed_subsections(&new_content, query) {
                         if !victims.is_empty() {
                             return Err(subsection_guard_error(None, heading, &victims).into());
                         }
@@ -1411,7 +1430,7 @@ impl Tool for EditMarkdown {
                 }
                 perform_section_edit_ext(
                     &new_content,
-                    heading,
+                    query,
                     action,
                     content,
                     input["at"].as_str(),

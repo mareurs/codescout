@@ -815,6 +815,81 @@ fn resolve_section_range_duplicate_heading_error() {
 }
 
 #[test]
+fn occurrence_selects_among_identical_headings() {
+    // Two byte-identical headings: the exact tiers match both and return before the
+    // fuzzy tiers run, and no query string can separate two equal strings anyway.
+    // The 1-indexed selector is the only way to reach either.
+    // docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md
+    let content = "# Title\n## Fix\nfirst\n## Middle\nm\n## Fix\nsecond";
+
+    let first = resolve_section_range(content, HeadingQuery::new("## Fix", Some(1))).unwrap();
+    let second = resolve_section_range(content, HeadingQuery::new("## Fix", Some(2))).unwrap();
+
+    // Mutation control: selecting `indices[0]` regardless of `n` collapses these two.
+    assert_eq!(first.heading_line, 2, "occurrence=1 is the first '## Fix'");
+    assert_eq!(
+        second.heading_line, 6,
+        "occurrence=2 is the second '## Fix'"
+    );
+}
+
+#[test]
+fn occurrence_past_the_match_count_errors_naming_the_count() {
+    let content = "# Title\n## Fix\nfirst\n## Fix\nsecond";
+    let err = resolve_section_range(content, HeadingQuery::new("## Fix", Some(5))).unwrap_err();
+    let msg = err.to_string();
+    // Mutation control: clamping to the last match would return Ok and edit the
+    // wrong section silently -- the exact failure this whole change exists to avoid.
+    assert!(msg.contains('5'), "should echo what was asked for: {msg}");
+    assert!(msg.contains('2'), "should name how many exist: {msg}");
+}
+
+#[test]
+fn occurrence_zero_is_rejected_rather_than_read_as_the_first() {
+    let content = "# Title\n## Fix\nfirst\n## Fix\nsecond";
+    let err = resolve_section_range(content, HeadingQuery::new("## Fix", Some(0))).unwrap_err();
+    // Mutation control: 0-indexing would resolve this to the first section, so a
+    // caller who counted from zero would edit one section while naming another.
+    assert!(err.to_string().contains("1-indexed"), "{err}");
+}
+
+#[test]
+fn occurrence_on_a_unique_heading_still_resolves() {
+    let content = "# Title\n## Only\nbody";
+    let range = resolve_section_range(content, HeadingQuery::new("## Only", Some(1))).unwrap();
+    assert_eq!(range.heading_line, 2);
+}
+
+#[test]
+fn an_unqualified_duplicate_query_still_refuses_rather_than_guessing() {
+    // Adding `occurrence` must not soften the unqualified case into a silent
+    // first-match-wins: that is how a caller edits the plan believing they edited
+    // the shipped record. The loud refusal is the correct behaviour, not the bug.
+    let content = "# Title\n## Fix\nfirst\n## Fix\nsecond";
+    let err = resolve_section_range(content, "## Fix").unwrap_err();
+    assert!(err.to_string().contains("found 2 times"), "{err}");
+}
+
+#[test]
+fn the_duplicate_hint_names_occurrence_and_not_edit_file() {
+    // The hint used to prescribe `edit_file` with start_line/end_line -- parameters
+    // absent from edit_file's schema, on a tool IL-5 refuses for .md before schema
+    // validation, and that every librarian-managed artifact refuses on every path.
+    // Following it returned "Use edit_markdown for markdown files": a closed loop.
+    let content = "# Title\n## Fix\nfirst\n## Fix\nsecond";
+    let err = resolve_section_range(content, "## Fix").unwrap_err();
+    let rendered = format!("{err:?}");
+    assert!(
+        rendered.contains("occurrence"),
+        "hint must name the remedy that exists: {rendered}"
+    );
+    assert!(
+        !rendered.contains("edit_file"),
+        "hint must not send the caller to a closed door: {rendered}"
+    );
+}
+
+#[test]
 fn resolve_section_range_nested_sections() {
     let content = "# Title\n## Parent\nparent text\n### Child\nchild text\n## Sibling\nsibling";
     let range = resolve_section_range(content, "## Parent").unwrap();
