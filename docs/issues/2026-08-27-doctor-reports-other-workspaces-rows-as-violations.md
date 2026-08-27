@@ -1,19 +1,20 @@
 ---
 id: d6984b7e960f79db
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doctor''s report is 78% other repos'' rows — Ruling 17 applied to the entry-validity family but not to abs_path_outside_managed_roots'
 tags:
 - librarian
 - doctor
 - scope
 - reporting
-closed: null
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 related:
 - docs/issues/archive/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
 severity: medium
+unverified: 'Not live-verified. Committed and green, but this session''s MCP server runs a pre-change binary. Needs `cargo rb` plus `/mcp`; the three-part check is in ## Resume, and the third part (the metric must NOT move) is the one a broken fix would fail silently.'
 ---
 
 # BUG: `doctor`'s report is 78% other repos' rows — Ruling 17 was applied to the entry-validity family but not to `abs_path_outside_managed_roots`
@@ -115,12 +116,43 @@ made the elided rows reachable (stable ordering + `limit`/`offset`). That was th
 right fix for the symptom it addressed and does not overlap this one: it made 401
 rows *paginable*, not *fewer*.
 
+### The measured partition — the discriminator the plan lacked
+
+Against the live catalog (`~/.local/share/librarian/catalog.db`, 4,265 artifacts,
+29 distinct `commits.git_root`), with the session's real managed roots
+reconstructed from `~/.config/librarian/workspace.toml`:
+
+| bucket | rows |
+|---|---|
+| firing total | 402 |
+| under an **umbrella member** of the active project's umbrella | 359 (89%) |
+| under another repo the catalog holds **commits** for | 33 |
+| under **neither** — nothing on this machine claims it | **10** (2.5%) |
+
+This is the distinction `check_outside_managed_roots`'s doc comment had always
+described in prose — *"expected if it belongs to another workspace; a defect if it
+should be under one of ..."* — and never computed.
 ## Hypotheses tried
 1. **Hypothesis:** the 401 rows are genuine catalog drift (stale paths).
    **Test:** read `catalog_health.outside_roots_by_project`; every listed owner is
    a live sibling workspace with files on disk.
    **Verdict:** rejected — they are other repos' healthy rows.
-2. **Hypothesis:** the check predates Ruling 17 and simply has not been revisited.
+3. **Hypothesis:** the 401 rows can be partitioned by which *managed root* they
+   belong to, so the fix is to drop rows under a root other than the active one.
+   **This was this file's own `## Fix` plan.**
+   **Test:** read `managed_roots` (`src/librarian/tools/mod.rs:215`) and
+   `check_outside_managed_roots`.
+   **Verdict:** **rejected — the case does not exist.** `managed_roots` returns the
+   active project's `git_root` and `abs_path` plus the legacy `workspace.roots`
+   entries, and never another repo; the check fires only when `containing_root`
+   matches *nothing*. Every firing row is under NO managed root, so the prescribed
+   partition was over the empty set — it would have shipped, passed a test written
+   from the same wrong model, and changed the report by zero rows. See
+   `bug-fix-session-log:F-74`.
+4. **Hypothesis:** a real discriminator exists in data already on hand.
+   **Test:** partitioned the firing rows against (a) members of the active
+   project's umbrella and (b) distinct `commits.git_root`, over the live catalog.
+   **Verdict:** confirmed — 402 rows split 359 / 33 / 10. See Evidence.
    **Test:** `doctor.rs:229` dates the ruling to the validity-decay family (Tasks
    5-7); `scan_artifact_paths` is older and carries its own "not necessarily
    corrupt" caveat instead.
@@ -128,32 +160,59 @@ rows *paginable*, not *fewer*.
    remedy.
 
 ## Fix
-*Plan.* Apply Ruling 17 to `scan_artifact_paths`, matching the validity family's
-shape exactly:
 
-- Keep counting every foreign row in `catalog_health.outside_roots_by_project`
-  (the metric — unchanged, still cross-repo).
-- Drop rows whose `abs_path` resolves under a *different* managed root from
-  `violations`, and report the count as `outside_roots_scoped_by_project`,
-  mirroring `entry_validity_scoped_by_project`.
-- Keep reporting a row that resolves under **no** managed root at all — that is
-  the genuine drift the check was built for, and it is the case
-  `artifact(move)`/`artifact(delete)` enforce via `containing_root`.
-- Widening `scope` should restore them, so the cross-repo view stays reachable.
+**Shipped in `442d8b7c` on `experiments`**, but NOT as this section originally
+prescribed — see Hypothesis 3. The original plan partitioned an empty set.
 
-The distinction that makes this safe: "belongs to another workspace" and
-"belongs to nowhere" are already distinguishable — `doctor.rs:1116-1118` says the
-detail names the roots that were tried precisely so the two are separable at a
-glance. Only the first should leave the worklist.
+What shipped instead:
 
-Not started. No SHA, no patch-id yet.
+- **`known_workspace_roots(ctx, conn)`** (new, `src/librarian/tools/doctor.rs`) —
+  roots this machine knows about but is not managing this session: members of the
+  active project's umbrella, plus every distinct `commits.git_root` in the
+  catalog.
+- **`scan_artifact_paths`** takes them and returns
+  `(violations, scoped_by_project)`. A firing row under a known root is counted,
+  not reported.
+- **The metric stays global.** `outside_roots_by_project` is now built from the
+  violations *and* the scoped map, so it counts exactly what it counted before —
+  the Ruling 17 requirement, and the one thing a naive "drop them" fix would have
+  broken, since that aggregate is derived from `all_violations`.
+- **`catalog_health.outside_roots_scoped_by_project`** plus a hint naming the
+  drop, mirroring `entry_validity_scoped_by_project`.
 
+Effect: the report goes 516 → ~124 findings, this check 401 → 10, and the 392
+scoped-out rows remain in the unscoped metric.
+
+It deliberately does not consult the filesystem: a row is scoped out for
+belonging somewhere known, not for existing. `check_missing_file` owns
+disappearance, and conflating them would make one defect wear two names — the
+rule `scan_artifact_paths` already applies to the relative-path case.
+
+**Fix commit — record both, they fail differently:**
+
+- SHA `442d8b7cef5263e87eca7b5ea96781d5204b1393` on **`experiments`**
+- patch-id `696dc8e4344e3c21bf60bd6cdbc5a042ef4e9d26`
 ## Tests added
-None yet. A regression test should assert that with two managed roots present,
-a row under root B does not appear in `violations` when root A is active, while
-`catalog_health.outside_roots_by_project["B"]` still counts it — i.e. the metric
-and the worklist disagree on purpose.
 
+Two, both in `src/librarian/tools/doctor.rs`:
+
+- **`a_row_under_a_known_workspace_root_is_scoped_out_but_still_counted`** — the
+  discriminating pair: two rows, both outside every managed root, only one of them
+  anyone's work. Asserts the sibling leaves `violations` **and** lands in the
+  scoped map, so the worklist narrows without the metric doing so.
+  **Mutation-verified, not merely green:** disabling the partition failed it with
+  `got ["/tmp/cs-orphan/docs/c.md", "/tmp/cs-sibling/docs/b.md"]`.
+- **`empty_known_elsewhere_reports_every_outside_row_as_before`** — pins the
+  fallback, so a caller that cannot compute the known-roots set (no umbrella, no
+  commits rows) degrades to the old reporting rather than silently losing the
+  check.
+
+Paths are built from `temp_dir()` so both run platform-native on Windows and
+unix; the path-form normalisation they would otherwise depend on belongs to
+`containing_root` (WIN-30) and is tested there.
+
+Gate at fix time: 4600 passed / 0 failed / 51 ignored (baseline 4598, +2 = exactly
+the tests added); fmt clean; clippy clean.
 ## Workarounds
 Read `summary.by_check` rather than `total`, and treat
 `abs_path_outside_managed_roots` as a separate axis. The genuinely local checks
@@ -162,15 +221,21 @@ attributes every foreign row to its owning project, so triage is possible today 
 it just is not the default reading.
 
 ## Resume
-Edit `scan_artifact_paths` in `src/librarian/tools/doctor.rs:1056`: thread the
-managed-root list through so a row can be attributed to a *non-active* root,
-partition on that, and return `(violations, scoped_count)` like
-`scan_conditional_past_due` (`doctor.rs:234`) does. Then extend the
-`catalog_health` hint at `doctor.rs:401-405` to name the scoped-out count, in the
-same sentence shape as `doctor.rs:413-417`. Re-run
-`librarian(action="doctor", limit=3)` and confirm `total` drops to roughly 115
-with `outside_roots_by_project` unchanged at 401.
 
+One step outstanding, which is why `unverified:` is set: **live-verify**. This
+session's server predates the change. Run `cargo rb`, `/mcp`, then
+`librarian(action="doctor", limit=3)` and confirm three things together — any one
+alone is consistent with a broken fix:
+
+1. `summary.total` near **124** (from 516)
+2. `summary.by_check.abs_path_outside_managed_roots` at **10** (from 401)
+3. `catalog_health.outside_roots_by_project` still summing to **~401** — the
+   metric must NOT have moved. If it dropped alongside the worklist, the Ruling 17
+   requirement was violated and the fold-back at the `outside_by_project` loop is
+   wrong.
+
+Expect `catalog_health.outside_roots_scoped_by_project` to account for the
+difference (~392 across ~20 project roots).
 ## References
 - `src/librarian/tools/doctor.rs:229-232` — Ruling 17, as applied to the validity family
 - `src/librarian/tools/doctor.rs:401-405` — the "EXPECTED" hint on this check
@@ -180,4 +245,3 @@ with `outside_roots_by_project` unchanged at 401.
 - `src/librarian/tools/doctor.rs:1900-1906` — Ruling 17 restated as the tool's principle
 - `docs/issues/archive/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md` — prior, non-overlapping fix to the same check
 - `scripts/probe_librarian_scope.py` — the probe whose `machine_wide` bucket surfaced this
-
