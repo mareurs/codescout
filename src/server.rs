@@ -5114,6 +5114,48 @@ mod guide_hint_tests {
             .filter_map(|c| c.as_text())
             .any(|t| t.text.contains(&marker))
     }
+    /// Call a tool by name against a fresh, warmed context (the session opener
+    /// slot is pre-consumed so the assertion measures the tool's OWN guide
+    /// delivery, not `project-activation-bootstrap`). Used by the section-grain
+    /// tests (Task 8), which call several different tools/shapes against the
+    /// same server and want each call's guide content in isolation.
+    async fn call_tool(
+        server: &CodeScoutServer,
+        name: &str,
+        input: Value,
+    ) -> Vec<rmcp::model::Content> {
+        // `shared_ctx`/`warm_ledger` touch the SAME `Arc<Mutex<GuideLedger>>`
+        // the server itself dispatches with, so warming here pre-consumes the
+        // opener slot for the `call_tool_by_name` call below too.
+        let ctx = shared_ctx(server);
+        warm_ledger(&ctx);
+        // Route through the same dispatch path production traffic uses
+        // (`call_tool_inner`, via `call_tool_by_name`), not a raw
+        // `tool.call_content(...).await.unwrap()` — a call whose underlying
+        // tool returns `RecoverableError` must come back as a graceful
+        // `CallToolResult`, not panic the test harness. `call_content` itself
+        // only runs the guide-injection logic on a call that actually
+        // succeeds (the `?` on `self.call(...)` short-circuits past it on any
+        // error, recoverable or not), so tests that need genuine guide
+        // delivery must use inputs that genuinely succeed.
+        server
+            .call_tool_by_name(name, input)
+            .await
+            .expect("dispatch ok")
+            .content
+    }
+
+    /// Every content block after the primary (index 0) — the auto-injected
+    /// guide blocks `call_content` appends, whether that is the single
+    /// whole-topic block (non-declaring topic) or N section-slice blocks
+    /// (declaring topic).
+    fn guide_blocks(content: &[rmcp::model::Content]) -> Vec<String> {
+        content
+            .iter()
+            .skip(1)
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect()
+    }
 
     #[tokio::test]
     async fn a_refusal_carries_the_gate_condition_once_per_family() {
@@ -5529,10 +5571,19 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
+    /// Updated for Task 8 (`feat(guides): emit section slices for declaring
+    /// topics, preamble on no match`). `librarian` now declares `serves:`
+    /// sections (Phase 1's only declaring topic), so an `artifact.find` call —
+    /// which matches `## Filter Syntax`'s declaration — receives that ONE
+    /// section, not the whole ~20 KB librarian body. This assertion is a
+    /// deliberate behaviour change, not a relaxed regression: the whole-body
+    /// append this test used to check is exactly what section grain replaces.
     async fn first_artifact_call_appends_librarian_guide_body_v2() {
         // V2 hard-injection: first call to a tool whose relevant_guide_topic
-        // returns Some("librarian") gets a SECOND Content block containing
-        // the full guide body wrapped in `<!-- auto-injected ... -->` markers.
+        // returns Some("librarian") gets a SECOND Content block. For a
+        // declaring topic that block is the matching section, wrapped in
+        // `<!-- auto-injected get_guide('librarian') § <heading> ... -->`
+        // markers, not the whole guide body.
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
@@ -5542,28 +5593,35 @@ mod guide_hint_tests {
             .await
             .unwrap();
         assert_eq!(
-            result.len(),
-            2,
-            "expected 2 content blocks on first librarian-topic call (primary + auto-injected guide), got {}",
-            result.len()
-        );
+                result.len(),
+                2,
+                "expected 2 content blocks on first librarian-topic call (primary + auto-injected guide section), got {}",
+                result.len()
+            );
         let second = result[1].as_text().expect("second block must be text");
         assert!(
             second
                 .text
-                .contains("<!-- auto-injected get_guide('librarian')"),
-            "second block missing auto-inject opening marker: {:?}",
+                .contains("<!-- auto-injected get_guide('librarian') § Filter Syntax"),
+            "second block missing the section-scoped auto-inject opening marker: {:?}",
             &second.text[..second.text.len().min(200)]
         );
         assert!(
             second
                 .text
-                .contains("<!-- end auto-injected get_guide('librarian') -->"),
-            "second block missing auto-inject closing marker"
+                .contains("<!-- end auto-injected get_guide('librarian') § Filter Syntax -->"),
+            "second block missing the section-scoped auto-inject closing marker"
         );
         assert!(
-            second.text.contains("artifact"),
-            "second block should contain librarian guide content (mentions 'artifact')"
+            second.text.contains("artifact.find"),
+            "second block should contain the Filter Syntax section (mentions 'artifact.find')"
+        );
+        let whole = crate::prompts::topic_body("librarian").unwrap();
+        assert!(
+            second.text.len() < whole.len() / 4,
+            "delivered {} B of a {} B guide — section grain is not engaged",
+            second.text.len(),
+            whole.len()
         );
     }
 
@@ -5592,6 +5650,17 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
+    /// Pre-Task-8 name retained; behaviour updated deliberately for section-grain
+    /// (Task 8, `feat(guides): emit section slices for declaring topics, preamble
+    /// on no match`). Before that change, `librarian` was delivered as one whole
+    /// topic gated on a bare `"librarian"` ledger key, so ANY second
+    /// librarian-topic tool call in the same session — regardless of shape — hit
+    /// the same key and got nothing. `librarian.md` declares
+    /// `artifact_event.create, artifact_event.list` (a section distinct from
+    /// `artifact.find`'s), so under section grain a genuinely different declared
+    /// shape now legitimately delivers its own section once; only a REPEAT of the
+    /// same shape delivers nothing. The old blanket "no hint" assertion is now
+    /// false by design, not a regression.
     async fn artifact_event_after_artifact_no_hint() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
@@ -5602,18 +5671,30 @@ mod guide_hint_tests {
             .call_content(json!({"action": "find", "kind": "tracker"}), &ctx)
             .await
             .unwrap();
-        let result = event
+        let first = event
             .call_content(
                 json!({"action": "list", "artifact_id": "nonexistent"}),
                 &ctx,
             )
-            .await;
-        if let Ok(content) = result {
-            assert!(
-                extract_hint(&content).is_none(),
-                "subsequent librarian-topic tool must not re-emit hint"
-            );
-        }
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&first).is_some(),
+            "a distinct declared shape (artifact_event.list) must still deliver \
+             its own section, even though a differently-shaped librarian-topic \
+             call already fired this session"
+        );
+        let second = event
+            .call_content(
+                json!({"action": "list", "artifact_id": "nonexistent"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            extract_hint(&second).is_none(),
+            "repeating the SAME shape must not re-emit the hint"
+        );
     }
 
     #[tokio::test]
@@ -6721,6 +6802,162 @@ mod guide_hint_tests {
             "second overflow must not re-emit the hint; got: {}",
             render_content(&second)
         );
+    }
+    // --- Section-grain delivery (Task 8) ---------------------------------
+    //
+    // `GUIDE_INDEX.declares(topic)` is true only for `librarian` in Phase 1.
+    // These tests exercise the section-slice path for that topic and pin the
+    // whole-topic path (byte-identical to pre-Task-8 behaviour) for a
+    // non-declaring topic.
+
+    /// Create a real tracker artifact via the `artifact` tool's `create` action
+    /// and return its id. `append_entry`/`state_at` need a real, existing
+    /// artifact to succeed — `call_content`'s guide-injection logic only
+    /// runs on the underlying tool call's SUCCESS path (the `?` on
+    /// `self.call(...)` short-circuits past it on any error), so an
+    /// unmatched-shape or section-slice test that wants genuine guide
+    /// delivery cannot use a placeholder id.
+    ///
+    /// Declares `entry_prefix: "T"` via `extra` — a prose-ledger
+    /// `append_entry` call (no `entry_collection`) reads its id namespace
+    /// from frontmatter (`allocate_entry_id`) and refuses with a
+    /// `RecoverableError` JSON envelope (`ok: false`) otherwise. That
+    /// envelope is itself a SUCCESSFUL `Tool::call` return (not a Rust
+    /// `Err`), but `call_content`'s guide logic only fires past a genuine
+    /// tool-level success — discovered by adding a temporary `eprintln!` in
+    /// `guide_blocks_for` and seeing zero output for the append_entry call:
+    /// the underlying `append_entry::call` was itself returning
+    /// `Err(RecoverableError)` (`allocate_entry_id: ... does not declare an
+    /// entry_prefix`), which `call_content`'s `?` on `self.call(...)`
+    /// propagates straight past the hint computation.
+    async fn create_tracker(server: &CodeScoutServer, rel_path: &str) -> String {
+        let out = call_tool(
+            server,
+            "artifact",
+            json!({
+                "action": "create",
+                "rel_path": rel_path,
+                "kind": "tracker",
+                "title": "section-grain fixture",
+                "body": "fixture body",
+                "extra": {"entry_prefix": "T"}
+            }),
+        )
+        .await;
+        let primary = out[0].as_text().expect("primary block is text");
+        let v: Value = serde_json::from_str(&primary.text).expect("primary block is JSON");
+        v["id"]
+            .as_str()
+            .expect("create response carries an id")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn append_entry_receives_only_the_entry_sections_not_the_whole_librarian_guide() {
+        let (_dir, server) = make_server().await;
+        // Deliberately NOT under docs/trackers/ or docs/issues/: `names_tracker_path`
+        // (src/librarian/adapter.rs) would route every subsequent call naming this
+        // artifact to the `tracker-conventions` topic instead of `librarian` —
+        // `tracker-conventions` declares no sections in Phase 1, so the
+        // `artifact.append_entry` section this test targets would never fire.
+        let id = create_tracker(&server, "docs/specs/fixture-a.md").await;
+        let out = call_tool(
+            &server,
+            "artifact",
+            json!({"action": "append_entry", "id": id, "id_prefix": "T"}),
+        )
+        .await;
+        let guide = guide_blocks(&out).join("");
+        assert!(
+            guide.contains("don't hand-maintain the table"),
+            "expected the append_entry section, got: {}",
+            guide.chars().take(400).collect::<String>()
+        );
+        let whole = crate::prompts::topic_body("librarian").unwrap();
+        assert!(
+            guide.len() < whole.len() / 2,
+            "delivered {} B of a {} B guide — section grain is not engaged",
+            guide.len(),
+            whole.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_differently_shaped_call_delivers_a_different_section() {
+        let (_dir, server) = make_server().await;
+        // See the rel_path comment in the append_entry test above — a docs/trackers/
+        // path here would route to `tracker-conventions` (no declared sections) and
+        // starve both calls of a section-grain hint.
+        let id = create_tracker(&server, "docs/specs/fixture-b.md").await;
+        let first = guide_blocks(
+            &call_tool(
+                &server,
+                "artifact",
+                json!({"action": "append_entry", "id": id, "id_prefix": "T"}),
+            )
+            .await,
+        )
+        .join("");
+        let second =
+            guide_blocks(&call_tool(&server, "artifact", json!({"action": "find"})).await).join("");
+        assert!(
+            !second.is_empty(),
+            "per-section ledger must allow a second slice"
+        );
+        assert_ne!(first, second);
+    }
+
+    #[tokio::test]
+    async fn the_same_shape_twice_delivers_nothing_the_second_time() {
+        let (_dir, server) = make_server().await;
+        let _ = call_tool(&server, "artifact", json!({"action": "find"})).await;
+        let again =
+            guide_blocks(&call_tool(&server, "artifact", json!({"action": "find"})).await).join("");
+        assert!(again.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unmatched_shape_receives_the_preamble_not_the_whole_topic() {
+        let (_dir, server) = make_server().await;
+        // `state_at` is a real, low-volume action that genuinely succeeds
+        // against a real artifact id; Task 6 declares nothing for it (only
+        // `graft` and `state_at` are undeclared actions on `artifact`, and
+        // `graft` additionally needs a SECOND real artifact to succeed —
+        // `state_at` only needs one, plus a bare timestamp, since a missing
+        // `commit`/`timestamp` short-circuits before the guide logic runs).
+        let id = create_tracker(&server, "docs/trackers/fixture-c.md").await;
+        let out = call_tool(
+            &server,
+            "artifact",
+            json!({"action": "state_at", "artifact_id": id, "timestamp": 1_700_000_000_000i64}),
+        )
+        .await;
+        let guide = guide_blocks(&out).join("");
+        let entry = crate::prompts::guide_index::GUIDE_INDEX
+            .topic("librarian")
+            .unwrap();
+        assert!(guide.contains(entry.preamble.trim()));
+        assert!(
+            guide.len() < 2000,
+            "preamble fallback must be small, got {} B",
+            guide.len()
+        );
+        assert!(
+            guide.contains("get_guide"),
+            "fallback must point at the full topic"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_non_declaring_topic_is_byte_identical_to_today() {
+        let (_dir, server) = make_server().await;
+        // `symbols` routes to `symbol-navigation`, which has no declarations in
+        // Phase 1. `path="."` (not `"src"`, which `make_server`'s fixture
+        // tempdir does not contain) — any existing directory is enough for
+        // the call to succeed, which is all this path needs.
+        let out = call_tool(&server, "symbols", json!({"path": "."})).await;
+        let guide = guide_blocks(&out).join("");
+        assert!(guide.contains(crate::prompts::topic_body("symbol-navigation").unwrap()));
     }
 }
 
