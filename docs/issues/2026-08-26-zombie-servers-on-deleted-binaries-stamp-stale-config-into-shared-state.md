@@ -216,6 +216,68 @@ hypothesis about why, and the two should not be read at the same confidence.
 binaries — the exact population that caveat concerns — were killed at 23:39 and are gone.
 Anything that needed reading out of a live one is no longer available; the window closed.
 
+
+### Measured 2026-08-27 14:11 — a second harm channel, and the reconnect ritual is a race
+
+Everything above concerns what a zombie **writes**. This is what one **answers**, which
+is a separate channel with a separate blast radius — and the first measurement here with
+a consequence attached rather than a process census.
+
+**The consequence, at one instant.** After `5a7eb3e7` was committed and the release binary
+rebuilt, two surfaces on this host disagreed about the same tool, same machine, same
+corpus, same minute:
+
+| surface | `cited_prefix_with_no_definer` | report total |
+|---|---:|---:|
+| `./target/release/codescout doctor --json` | 14 | 94 |
+| `librarian(action="doctor")`, this session's MCP | **48** | **128** |
+
+The CLI runs the freshly built bytes; the MCP server was still holding the inode it
+started with. Nothing errors, nothing warns, and the stale number is the one that looks
+authoritative — it comes from the tool the agent is told to use. A peer reading 48 would
+have reasonably concluded the fix did not land.
+
+**The census at 14:11:20**, `readlink /proc/<pid>/exe` per process:
+
+```
+PID       PPID      AGE         START                      STATE
+3698153   1188076   14:35:43    Wed Aug 26 23:35:36 2026   STALE
+3819561   3536641   14:24:30    Wed Aug 26 23:46:49 2026   STALE
+397575    4149776   13:00:26    Thu Aug 27 01:10:53 2026   STALE
+1753734   669510    05:59:04    Thu Aug 27 08:12:15 2026   STALE
+2114123   2113539   05:24:27    Thu Aug 27 08:46:52 2026   STALE
+2706473   2078094   04:13:39    Thu Aug 27 09:57:40 2026   STALE
+2927980   2288300   03:41:44    Thu Aug 27 10:29:35 2026   STALE
+3231468   3231135   02:51:28    Thu Aug 27 11:19:50 2026   STALE
+3711234   3710909   01:45:19    Thu Aug 27 12:26:00 2026   STALE
+3826646   3288897   01:30:35    Thu Aug 27 12:40:44 2026   STALE
+513804    2684610   00:09:21    Thu Aug 27 14:01:57 2026   STALE
+523970    2583124   00:08:27    Thu Aug 27 14:02:52 2026   STALE   ← this session's
+```
+
+**12 of 12 long-lived servers on deleted inodes.** Distinct `PPID`s, each a separate
+`claude` process — these are per-session servers, not leaked children of one parent, so
+the count tracks concurrent sessions rather than a spawn leak.
+
+**The part that reframes the remedy.** PID `523970` is *this session's own server*. It
+started at **14:02:52**, seconds after a deliberate `/mcp` reconnect performed precisely
+to escape a stale binary. By **14:08:13** the on-disk binary had a new mtime and a new
+inode (`151188549`); no build was run from this session after 14:02:52, so the rebuild
+came from a peer in the same checkout.
+
+**That server was current for 5 minutes 21 seconds.**
+
+So "reconnect after you rebuild" is not a workaround, it is a **race** — it holds only
+until the next peer's build, and in a three-session checkout under active development the
+window is minutes. The operator-discipline framing (*remember to `/mcp`*) cannot close
+this by construction: the event that invalidates your server is one you neither perform
+nor observe.
+
+**Why this is not the same finding as the sidecar one.** The sidecar harm is *write*-side
+and persistent — a wrong value on disk that outlives the process. This is *read*-side and
+transient, but it reaches an agent's reasoning directly, and it is invisible in exactly
+the way the sidecar value was not: there is no artifact left behind to notice later. Both
+directions in `## Fix` address the writer. Neither addresses the responder.
 ## Hypotheses tried
 
 1. **Hypothesis:** a config file somewhere sets `all-minilm`.
@@ -283,6 +345,32 @@ harmless. All three compose; none replaces another.
 **Still do not "fix" this by reaping on connect.** The reasoning above is unchanged and
 the cleanup reinforced it: whichever process last reconnected would win, making the
 symptom intermittent, which defeats exactly the investigation that found it.
+
+### Added 2026-08-27 — a third direction, for the read side
+
+Directions 1 and 2 both govern what a zombie **writes**. The 2026-08-27 measurement in
+`## Evidence` shows a second channel they do not touch: a stale server **answers** with
+stale code, and the answer carries no mark distinguishing it from a fresh one.
+
+3. **Let a response declare the binary it came from.** The server already bakes a build
+   SHA in at compile time — `codescout version` prints it. Surfacing that on a response,
+   or at minimum on `workspace(action="status")`, lets a caller compare what answered
+   against what is on disk. This is direction 1's idea (*make the writer identify
+   itself*) applied to the responder, and it composes with both: additive, no behaviour
+   change, and diagnosable from inside the session rather than requiring a `/proc` walk.
+
+   Not costed yet, and two questions come first. **What is the trigger?** Stamping every
+   response is noise; stamping only when the on-disk binary differs from the running one
+   means a `stat` per response, or a cached check with its own staleness. **And is
+   "differs" even the right predicate** — a peer's rebuild of unrelated code makes every
+   other server "stale" while its answers stay correct, which is precisely the situation
+   measured on 2026-08-27, so a naive warning would cry wolf continuously in the
+   multi-session case it exists to serve.
+
+   What the measurement does establish, independent of the design: **the operator-discipline
+   remedy is not available.** "Reconnect after rebuilding" cannot work when the
+   invalidating build is a peer's — this session's own server went stale 5m21s after a
+   reconnect performed for exactly this reason. Any fix has to be in-band.
 ## Tests added
 
 For the 2026-08-26 `shutdown_with_deadline` fix (`ca2b0226`), two unit tests in
@@ -322,9 +410,12 @@ reading `write_index_state_with_dirty`
 (`src/retrieval/index_state.rs`) — it is the single whole-file writer of this
 state, so it is also the single place a guard would go.
 
-Also worth a separate look, out of scope here: **nine** concurrent `codescout
-start` processes, two of them days old, is itself a leak. Three Claude Code
-profiles on this host each spawn their own, and nothing appears to reap them.
+Also worth a separate look, out of scope here: the concurrent `codescout start` count has
+gone from **nine** (2026-08-26) to **twelve** (2026-08-27 14:11), with the oldest at
+14h35m and **12 of 12 on deleted inodes**. Each has a distinct `claude` parent, so this
+tracks concurrent sessions rather than a spawn leak — but nothing reaps them, and every
+one of them answers tool calls with the code it was built from. See the 2026-08-27
+Evidence subsection: that is now a measured wrong answer, not a hypothetical.
 
 ## References
 
