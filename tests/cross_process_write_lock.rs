@@ -23,7 +23,7 @@ use tokio::process::Command;
 /// `CARGO_TARGET_DIR`, both of which the previous hand-built
 /// `target/debug/codescout` path got wrong.
 ///
-/// docs/issues/2026-08-27-cross-process-write-lock-test-passes-when-it-does-not-run.md
+/// docs/issues/archive/2026-08-27-cross-process-write-lock-test-passes-when-it-does-not-run.md
 fn binary_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_codescout"))
 }

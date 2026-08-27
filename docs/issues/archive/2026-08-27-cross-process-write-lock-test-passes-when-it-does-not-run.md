@@ -1,11 +1,16 @@
 ---
-status: open
-opened: 2026-08-27
-closed:
-severity: medium
-owner: marius
 kind: bug
-tags: ["tests", "silent-skip", "write-lock", "cross-process", "green-proves-nothing"]
+status: fixed
+tags:
+- tests
+- silent-skip
+- write-lock
+- cross-process
+- green-proves-nothing
+closed: 2026-08-27
+opened: 2026-08-27
+owner: marius
+severity: medium
 ---
 
 # BUG: the only end-to-end proof of cross-process write serialization passes green when it does not run
@@ -63,24 +68,52 @@ executed*. Here the un-executed path and the executed path are indistinguishable
 
 ## Fix
 
-Options, cheapest first:
+**`14aa0a086f56d04d6670059d10338c589f6686af`** (`experiments`)
+patch-id **`a8c92416d7bf6e758e7d17d1f5ff8a698e6c21f2`**
 
-1. **Fail instead of skip.** `panic!("build the binary first: cargo build")`. Correct signal, but
-   breaks `cargo test` for anyone who has not built the bin — the exact thing the skip was avoiding.
-2. **Build it, don't look for it.** Use the `CARGO_BIN_EXE_<name>` env var, which Cargo sets for
-   integration tests and which guarantees the binary is built before the test runs. This removes
-   the branch entirely and is almost certainly the right fix — `binary_path()` currently hand-rolls
-   a path that Cargo will hand over correctly.
-3. **Keep the skip, make it loud.** Leave the behaviour but assert a marker so a skipped run is
-   visible in CI (e.g. write a sentinel file the CI step greps). Weakest — it preserves the branch.
+Took option 2 — `CARGO_BIN_EXE_codescout`. It **removes the case rather than handling it**: Cargo sets
+the variable for integration tests and guarantees the binary is built before the test runs, so
+there is no missing-binary branch left to skip through. The `if !bin.exists() { … return; }` block
+is gone.
 
-Option 2 also deletes `binary_path()`'s assumption about profile directory names, which would
-break under `--release` or a custom target dir.
+The failure mode is now loud by construction: `env!` is evaluated at **compile time**, so the
+variable being unset is a build error, not a green pass. There is no runtime path on which this
+test can report success without executing.
 
+Option 2 also fixed the two latent path bugs option 1 would have left in place, both of which were
+*worse* than the skip because they fail silently in the other direction:
+
+- hardcoded `debug` — wrong under `--release`;
+- hardcoded `target/` — wrong under a custom `CARGO_TARGET_DIR`, where `binary_path()` would have
+  resolved to a **stale** binary in the default tree and tested it, rather than skipping.
+
+### Verification
+
+- **Runtime discriminates.** 5.19 s, matching the 5 s `write_lock_timeout_secs` budget. A skip
+  returned in ~0.00 s, so the duration alone now distinguishes execution from the old no-op.
+- **Mutation.** Breaking the expected contention string (`"another codescout instance"` → a string
+  that cannot match) fails the test. The assertion executes.
+- **The mutation's output is the real payoff** — it printed the live response from the spawned
+  second process:
+
+  ```json
+  {"ok": false,
+   "error": "another codescout instance is writing to this project",
+   "hint": "Retry in a moment — the holder should release shortly."}
+  ```
+
+  So the cross-process flock is now confirmed end-to-end by observation, not by reading the code.
+  That upgrades the evidence behind `codescout-usage-frictions:U-36` — the determination that
+  BUG-021's concurrency-corruption mode is closed in code — from an inference to a measurement.
+
+Gate: `cargo fmt` clean, `cargo clippy --workspace --all-targets --features local-embed -- -D
+warnings` clean, `cargo test --test cross_process_write_lock` 1 passed.
 ## Not yet done
 
-- Confirm `CARGO_BIN_EXE_codescout` is populated for this test target (it should be — the crate
-  builds a bin named `codescout`), then take option 2.
+Both items are closed.
+
+- ~~Confirm `CARGO_BIN_EXE_codescout` is populated for this test target, then take option 2.~~ Done
+  — it compiles, and since `env!` is compile-time that compilation *is* the confirmation.
 - ~~Sweep for the same idiom elsewhere.~~ Done 2026-08-27: `grep "SKIP:|eprintln!\("SKIP"` over
-  `tests/**/*.rs` returns **exactly one** match, the instance filed here. The idiom is not
+  `tests/**/*.rs` returns **exactly one** match, the instance fixed here. The idiom is not
   systemic, so the fix is local and no follow-up sweep is owed.
