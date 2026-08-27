@@ -1019,7 +1019,7 @@ impl Agent {
         // private topics from `p.private_memory` on BOTH surfaces, so they already
         // agree, and `.codescout/private-memories/` is gitignored by design.
         //
-        // docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+        // docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
         let memory = MemoryStore::from_dir(ws.memory_dir_for_project(project_id))?;
         let private_memory = MemoryStore::open_private(&abs_root)?;
         let registry_path = abs_root.join(".codescout").join("libraries.json");
