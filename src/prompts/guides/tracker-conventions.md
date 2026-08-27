@@ -423,6 +423,22 @@ workspaces. A qualifier that *does* name a file which lacks that entry is
 **dangling**, not ambiguous — the two need different fixes, so they are reported
 separately.
 
+**A third shape — `<repo>:<file-stem>:<TOKEN>`, naming a file inside a *different*
+repo — has no supported grammar at all.** `link_scan` treats any citation with 2+
+qualifier segments before the token uniformly: it is retracted (never silently
+collapsed to the inner `<file-stem>:<TOKEN>` form) and reported, never resolved —
+same as the two-part cross-repo form above, it can never become an edge, edges
+cannot span workspaces. Write it anyway when you mean it —
+`claude-plugins:roster-audit-session-log:F-5` in a `## References` section is
+understood by a human reader even though the resolver will not chase it — but know
+it is prose only, permanently, not a gap waiting to be filled. To keep the report
+legible, these land in their own `cross_repo_file_qualified` bucket rather than
+the generic `malformed_qualifier` one whenever the outer segment does not match
+the citing artifact's own repo name. A citation whose outer segment *is* the
+citing repo's own name (`codescout:foo:F-2` cited from inside codescout itself)
+is genuinely redundant, not cross-repo — that one stays in `malformed_qualifier`;
+strip the prefix instead of writing it.
+
 Why this matters: measured 2026-08-17, ~400 ambiguous citations were ~12% of the
 project's total, 49 of 50 sampled were F/W, and the citers were the **durable**
 ledgers — R-N alone accounted for 27 of 50. That is the permanent record losing the

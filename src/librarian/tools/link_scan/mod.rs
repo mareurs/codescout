@@ -353,8 +353,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut dangling: Vec<Value> = Vec::new();
     let mut cross_repo: Vec<Value> = Vec::new();
     let mut malformed_qualifier: Vec<Value> = Vec::new();
+    let mut cross_repo_file_qualified: Vec<Value> = Vec::new();
     let (mut ambiguous_total, mut dangling_total, mut cross_repo_total) = (0usize, 0usize, 0usize);
     let mut malformed_qualifier_total = 0usize;
+    let mut cross_repo_file_qualified_total = 0usize;
     // Per-source counts for the same three arms, uncapped (unlike the `ambiguous` /
     // `dangling` / `cross_repo` finding arrays above, which cap at FINDINGS_CAP) —
     // the whole point is to make the TOTAL interpretable, so a source contributing
@@ -364,7 +366,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut dangling_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut cross_repo_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut malformed_qualifier_by_source: BTreeMap<String, usize> = BTreeMap::new();
+    let mut cross_repo_file_qualified_by_source: BTreeMap<String, usize> = BTreeMap::new();
     let mut citations_total = 0usize;
+
+    // Which registered workspace root, if any, contains a given row — used below to
+    // split `MalformedQualifier` into "redundant self-repo prefix" (outer segment ==
+    // the citing artifact's own root name) vs "names a different repo" (everything
+    // else). `ctx.workspace.roots` is THIS repo's own multi-project roots (e.g.
+    // "codescout" + "codescout-embed"), so a match here is a genuine self-reference,
+    // not a claim that the outer segment names a real, known SIBLING repo — Option 2
+    // of docs/issues/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
+    // deliberately does not attempt that stronger, unbuilt form of resolution.
+    let root_paths: Vec<std::path::PathBuf> =
+        ctx.workspace.roots.iter().map(|r| r.path.clone()).collect();
 
     // Entry-grain edges: (src_slug, src_local, dst_ref). A set because one entry citing
     // one target twice is ONE edge, and because a stable order makes the emitted sample
@@ -407,6 +421,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .get(row.id.as_str())
             .cloned()
             .unwrap_or_else(|| row.id.clone());
+        let citing_repo_name: Option<&str> =
+            crate::librarian::tools::containing_root(&root_paths, &row.abs_path).and_then(
+                |matched| {
+                    ctx.workspace
+                        .roots
+                        .iter()
+                        .find(|r| &r.path == matched)
+                        .map(|r| r.name.as_str())
+                },
+            );
         for c in &ex.citations {
             match resolve::resolve(c, &row.id, &rel_dir, &index, &corpus) {
                 Some(resolve::Outcome::Edge { dst_id }) => {
@@ -469,11 +493,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     push_capped(&mut cross_repo, finding(&row.id, c, json!({})));
                 }
                 Some(resolve::Outcome::MalformedQualifier) => {
-                    malformed_qualifier_total += 1;
-                    *malformed_qualifier_by_source
-                        .entry(src_rel.clone())
-                        .or_insert(0) += 1;
-                    push_capped(&mut malformed_qualifier, finding(&row.id, c, json!({})));
+                    let outer = c.raw.split(':').next().unwrap_or("");
+                    // Positive evidence required to call it cross-repo: the citing
+                    // root must be known AND differ from the outer segment. Either
+                    // "root unknown" or "root == outer" falls back to the generic
+                    // bucket — the safe default when we cannot confirm a self-
+                    // reference, since claiming "genuinely cross-repo" is the
+                    // stronger assertion.
+                    if citing_repo_name.is_some_and(|name| name != outer) {
+                        cross_repo_file_qualified_total += 1;
+                        *cross_repo_file_qualified_by_source
+                            .entry(src_rel.clone())
+                            .or_insert(0) += 1;
+                        push_capped(
+                            &mut cross_repo_file_qualified,
+                            finding(&row.id, c, json!({})),
+                        );
+                    } else {
+                        malformed_qualifier_total += 1;
+                        *malformed_qualifier_by_source
+                            .entry(src_rel.clone())
+                            .or_insert(0) += 1;
+                        push_capped(&mut malformed_qualifier, finding(&row.id, c, json!({})));
+                    }
                 }
                 None => {} // suppressed noise / foreign-jurisdiction links
             }
@@ -583,6 +625,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // before its entry token (`<repo>:<file-stem>:<ID>`) is malformed regardless
             // of corpus contents — see `resolve::Outcome::MalformedQualifier`.
             "malformed_qualifier": malformed_qualifier_total,
+            // Same underlying `MalformedQualifier` outcome, split out from the arm
+            // above: the outer segment names something other than the citing
+            // artifact's own workspace root, so it presumably names a different
+            // repo rather than redundantly repeating this one's. Still never an
+            // edge — reported only, same as `cross_repo` above and for the same
+            // reason (edges cannot span workspaces) — this bucket exists purely so
+            // a reader does not have to check each `malformed_qualifier` entry's
+            // outer segment by hand to tell "strip this" from "leave it, it's
+            // prose pointing at a sibling repo."
+            // docs/issues/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
+            "cross_repo_file_qualified": cross_repo_file_qualified_total,
             "prefix_conflicts": prefix_conflicts.len(),
             // `len(dangling) == FINDINGS_CAP` reads identically whether the true count is
             // exactly the cap or 100x it — this states which arrays actually got cut, so a
@@ -592,6 +645,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 "dangling": dangling_total > dangling.len(),
                 "cross_repo": cross_repo_total > cross_repo.len(),
                 "malformed_qualifier": malformed_qualifier_total > malformed_qualifier.len(),
+                "cross_repo_file_qualified": cross_repo_file_qualified_total
+                    > cross_repo_file_qualified.len(),
             },
         },
         "edges_missing": edge_view(&d.to_add),
@@ -600,6 +655,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "dangling": dangling,
         "cross_repo": cross_repo,
         "malformed_qualifier": malformed_qualifier,
+        "cross_repo_file_qualified": cross_repo_file_qualified,
         // Per-source breakdown of the three arms above, uncapped — the "attribute and
         // subtract" reading: a triager checks which keys are guides/conventions docs
         // explaining citation syntax (rather than genuinely broken references) and
@@ -608,6 +664,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "dangling_by_source": dangling_by_source,
         "cross_repo_by_source": cross_repo_by_source,
         "malformed_qualifier_by_source": malformed_qualifier_by_source,
+        "cross_repo_file_qualified_by_source": cross_repo_file_qualified_by_source,
         // Latent rather than broken, so it sits beside the citation arms rather than in
         // one: a declared namespace with a second active definer has no failing citation
         // *yet*, and the arms above only ever report a citation that already resolves
@@ -1208,7 +1265,7 @@ mod tests {
         let root = tmp.path().to_path_buf();
         let ctx = TestToolContextBuilder::new(cat)
             .with_root(Root {
-                name: "r".into(),
+                name: "codescout".into(),
                 path: root.clone(),
             })
             .with_current_project(Arc::new(CurrentProject {
@@ -1245,6 +1302,85 @@ mod tests {
             json!(0),
             "must never silently produce an edge, even though the inner `target:F-2` \
              form would legitimately resolve on its own: {out:#?}"
+        );
+    }
+
+    /// docs/issues/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
+    ///
+    /// A 3-part qualified citation (`<repo>:<file-stem>:<TOKEN>`) is retracted by
+    /// `MalformedQualifier` regardless of what its two qualifier segments name — it
+    /// never becomes an edge either way, and that part is unchanged by this test.
+    /// But the `malformed_qualifier` bucket used to lump two very different causes
+    /// together: a genuinely redundant same-repo prefix (should be stripped) and a
+    /// citation that names a real sibling repo + file (intentional, prose-only,
+    /// nothing to fix). This pins the split: the outer segment is compared against
+    /// the CITING artifact's own registered workspace root name.
+    #[tokio::test]
+    async fn a_cross_repo_file_qualified_citation_is_reported_separately_from_a_redundant_same_repo_one(
+    ) {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let dst = tmp.path().join("target.md");
+        std::fs::write(&dst, "## F-2 — anchor entry\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "dst", &dst, "target");
+
+        let src = tmp.path().join("source.md");
+        std::fs::write(
+            &src,
+            "Redundant: `citer:target:F-2`. Cross-repo: `claude-plugins:target:F-2`.\n",
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "src", &src, "source");
+
+        let root = tmp.path().to_path_buf();
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "citer".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": true })).await.unwrap();
+
+        assert_eq!(
+            out["counts"]["malformed_qualifier"],
+            json!(1),
+            "only the redundant self-repo citation stays here: {out:#?}"
+        );
+        assert_eq!(
+            out["malformed_qualifier"][0]["raw"], "citer:target:F-2",
+            "{out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["cross_repo_file_qualified"],
+            json!(1),
+            "the genuinely-different-repo citation gets its own bucket: {out:#?}"
+        );
+        assert_eq!(
+            out["cross_repo_file_qualified"][0]["raw"], "claude-plugins:target:F-2",
+            "{out:#?}"
+        );
+        assert_eq!(
+            out["cross_repo_file_qualified_by_source"]["source.md"],
+            json!(1),
+            "per-source breakdown must mirror the other three arms: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["cross_repo"],
+            json!(0),
+            "neither must ALSO land in the plain two-part cross_repo bucket: {out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["edges_missing"],
+            json!(0),
+            "neither may silently resolve, even though the inner `target:F-2` form \
+             would on its own: {out:#?}"
         );
     }
 }
