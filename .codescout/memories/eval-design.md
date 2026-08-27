@@ -1001,3 +1001,28 @@ as an explanation and the residue had to be named honestly instead.
 
 Pairs with `prompt-surface-measurement-session-log:W-26` and
 `…:F-38`, and with "Match results by an identifier the runs carry".
+
+### …and capture it in the population the claim is about
+
+Amended the same day, by the rule failing. Having written the above, I captured request
+bodies to test "the harness logs empty reasoning text", found the hypothesised cause
+absent, and closed a hypothesis that was **true**. All six captures were manual `claude -p`
+runs under a rich profile; the claim was about harness runs under a generated, empty one.
+Same prompt, same flags, same model — only `CLAUDE_CONFIG_DIR` differed:
+
+    rich profile    {"type":"adaptive"}                       212-345 chars of thinking
+    empty profile   {"type":"adaptive","display":"omitted"}   0 chars
+
+**A mechanism capture inherits the sampling problem whole.** It names the axis only for the
+population you sampled, and it is *quieter* than a bad comparison: a comparison visibly
+wants a control group, while a capture of "what the client actually sent" reads as
+self-evidently authoritative. So the question is two questions, not one — *can I observe the
+mechanism directly?* and *am I observing it in the thing the claim is about?* The second is
+the one that gets skipped, because the convenient population is usually the one you can run
+in a scratch directory.
+
+**Corollary, which cost the middle of that investigation:** "the evidence for X was
+contaminated" does not mean "X is false". The first framing there was rejected for a bad
+selection (F-38) and I then treated it as refuted rather than unsupported — and spent a
+whole pass proving the opposite of the truth. Unsupported and false need different next
+actions: one wants better evidence, the other wants a new hypothesis.

@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 41
+entry_high_water_F: 42
 entry_high_water_W: 26
 entry_prefix:
 - F
@@ -69,6 +69,7 @@ surfaces, not the definition.
 | F-39 | A profile's settings.json `env` silently overrules an exported ANTHROPIC_BASE_URL — the guard I shipped validates its own input, not the client's | fixed-verified |
 | F-40 | Two sessions added the same routing guard to one file within an hour, and both were wrong the same way | fixed-verified |
 | F-41 | I reported "semantic search doesn't find these" from one filtered query, with no control — the unfiltered control refuted it | fixed-verified |
+| F-42 | I captured the mechanism in the wrong population and refuted a hypothesis that was true | fixed-verified |
 
 ## Wins Index
 
@@ -3657,10 +3658,20 @@ where a mechanism capture was available and cheap. At three datapoints, promote 
 CLAUDE.md as *"Before running another comparison, ask whether the mechanism can be
 observed directly — and if it can, observe it first."*
 
-**Status:** promote-when FIRED 2026-08-27 at three datapoints (F-37, F-38, F-41) — awaiting
-promotion to CLAUDE.md as *"Before running another comparison, ask whether the mechanism can
-be observed directly — and if it can, observe it first. Before believing a filtered query's
-result, re-run it unfiltered."*
+**Status:** promote-when FIRED 2026-08-27 at three datapoints (F-37, F-38, F-41), then
+**amended the same day by F-42**. The rule survives and gains a required clause:
+
+> Before running another comparison, ask whether the mechanism can be observed directly —
+> and if it can, observe it first, **in the population the claim generalises to**. Before
+> believing a filtered query's result, re-run it unfiltered.
+
+F-42 is the counter-example that makes the clause necessary: I *did* capture the mechanism,
+and still refuted a true hypothesis, because I sampled manual runs under a rich profile as
+a stand-in for harness runs under an empty one. A mechanism capture inherits the sampling
+problem whole — and it is quieter than a bad comparison, because a comparison at least
+looks like it needs a control group while a capture looks self-evidently authoritative.
+
+Awaiting promotion to CLAUDE.md in the amended form.
 
 ## F-39 — A profile's settings.json `env` silently overrules an exported ANTHROPIC_BASE_URL
 
@@ -3785,6 +3796,56 @@ semantic query — drop the filter and re-run before believing it.
 
 **Status:** fixed-verified — claim retracted to the user in-session; bug filed with proof
 and a reproduction that was re-run after filing and reproduced byte-identically.
+
+## F-42 — I captured the mechanism in the wrong population, and refuted a hypothesis that was true
+
+**Valid:** invariant
+
+**Observed:** 2026-08-27. Having written W-26 that morning — *capture the mechanism, don't
+run another comparison* — I did exactly that, and reached a confidently wrong conclusion
+anyway.
+
+**What I did.** An open issue said harness runs log empty reasoning text, and named a
+hypothesis: the client sets `thinking.display` explicitly, so the proxy correctly declines
+to override it. I built a recording shim, captured the actual request bodies, and found
+`{"type": "adaptive"}` with **no** `display`. I declared the hypothesis dead, moved the
+issue to `zombie`, and told the user the symptom no longer reproduced.
+
+**What was wrong.** All six captures were **manual `claude -p` runs under a rich profile**.
+The issue is about **harness runs under a generated, empty profile**. Capturing the harness
+directly, hours later:
+
+    ~/.claude-sdd (rich)                      {"type":"adaptive"}                     212-345 chars
+    ~/.prompt-tdd/profiles/... ({} settings)  {"type":"adaptive","display":"omitted"}   0 chars
+
+Same prompt, same flags, same model, same tool count; only `CLAUDE_CONFIG_DIR` differs. The
+original hypothesis was **right**, and I refuted it with evidence that was accurate about
+something else.
+
+**The refinement to W-26.** Capturing the mechanism beats comparing outcomes — that still
+holds, and it is what finally settled this. But a mechanism capture inherits the sampling
+problem whole: **it names the axis only for the population you sampled.** I sampled the
+population that was convenient to run, not the one the claim was about, and nothing in the
+result flagged the substitution. A comparison at least *looks* like it needs a control
+group; a mechanism capture looks self-evidently authoritative, which is exactly what makes
+this failure quieter than F-38's.
+
+**Compounding error.** The first framing of that issue — "harness vs manual probe" — was
+true all along. It had been rejected because its *evidence* was a contaminated selection
+(F-38). I then treated an unsupported claim as a refuted one and spent a second pass
+proving the opposite of the truth. Unsupported and false are different things, and
+conflating them cost the whole middle of the investigation.
+
+**Severity:** high — a true hypothesis was closed, an issue was mis-statused `zombie`, and
+a wrong conclusion reached the user twice (once as "the axis is dead", once as "the symptom
+is gone"). Self-caught only because a paid re-run happened to look at thinking text again.
+
+**Fix:** issue reopened `open` with the confirmed mechanism (`llm-proxy:20f6bfd`); the
+"falsified" section is retained and relabelled as a record of a wrong refutation, since
+deleting it would hide the shape. `eval-design` memory updated with the population rule.
+
+**Status:** fixed-verified — mechanism confirmed by direct capture of the harness's own
+requests, trigger isolated to the profile by a one-variable test.
 
 ## Template for new entries
 
