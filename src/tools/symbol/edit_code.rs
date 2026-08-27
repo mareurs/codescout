@@ -773,6 +773,23 @@ impl EditCode {
                         crate::symbol::edit::split_target_subtree(set, target);
                     (Some(outside), descendants)
                 }
+                // The target has no AST name_path, so the prefix split above has
+                // nothing to key on. That is not a lookup failure: for a Rust `impl`
+                // block the extractor emits no symbol at all, hoisting its methods to
+                // `Type/method`. Fall back to the target's own LSP child list, which
+                // names the same descendants without trusting the suspect range.
+                // docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
+                (Some(set), None) => {
+                    let descendants = crate::symbol::edit::descendant_ast_paths(
+                        pre_ast.as_deref().unwrap_or(&[]),
+                        &sym,
+                    );
+                    let mut outside = set.clone();
+                    for d in &descendants {
+                        outside.remove(d);
+                    }
+                    (Some(outside), descendants)
+                }
                 _ => (pre_set.clone(), Vec::new()),
             };
 

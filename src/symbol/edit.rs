@@ -373,6 +373,51 @@ pub fn split_target_subtree(
     (outside, descendants)
 }
 
+/// Map a target LSP symbol's own children onto their AST `name_path`s.
+///
+/// The name-prefix split in [`split_target_subtree`] needs the target's AST
+/// `name_path`, and for a Rust `impl` block there is none to find: the extractor
+/// deliberately emits **no symbol** for `impl_item`, hoisting each method to
+/// `Type/method` so it reads better (`src/ast/parser.rs`, "Don't create a symbol
+/// for impl blocks"). So `find_ast_name_path` returns `None` for the block itself,
+/// the split never ran, and the block's own methods were reported as dropped
+/// siblings — which rolled every such removal back and made removing an impl block
+/// impossible through the tool. `docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md`
+///
+/// Deliberately keyed on the target's **LSP child list**, not on its span. A span
+/// test looks equivalent and is not: it would have to trust the very range the
+/// guard exists to doubt. When an LSP range overshoots, containment against that
+/// range absorbs the swallowed neighbour into the "descendants" set, and the guard
+/// falls silent exactly when it should fire. A child list cannot grow that way —
+/// an adjacent symbol is not a child no matter how far the range runs — so the
+/// overshoot check survives intact.
+///
+/// Children that do not resolve into the AST namespace are simply absent from the
+/// result, which leaves them in the sibling set: unresolvable means unproven, and
+/// the guard should keep watching a symbol it cannot vouch for.
+pub fn descendant_ast_paths(
+    pre_ast: &[crate::lsp::SymbolInfo],
+    target: &crate::lsp::SymbolInfo,
+) -> Vec<String> {
+    fn walk(
+        pre_ast: &[crate::lsp::SymbolInfo],
+        kids: &[crate::lsp::SymbolInfo],
+        out: &mut Vec<String>,
+    ) {
+        for k in kids {
+            if let Some(np) = find_ast_name_path(pre_ast, &k.name, k.start_line) {
+                out.push(np);
+            }
+            walk(pre_ast, &k.children, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(pre_ast, &target.children, &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Verdict of `edit_code`'s post-edit corruption check.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CorruptionVerdict {

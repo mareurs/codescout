@@ -6757,6 +6757,221 @@ async fn edit_code_remove_deletes_a_non_empty_module_and_names_its_children() {
     );
 }
 
+/// Shared fixture for the impl-block removal tests: a trait, a struct, one impl
+/// block, and a true sibling below it. The trait method and the impl method
+/// share a name deliberately — that is the realistic shape, and it exercises the
+/// start-line disambiguation in `find_ast_name_path`.
+#[cfg(test)]
+fn impl_block_fixture() -> &'static str {
+    // 0: trait Greet {
+    // 1:     fn hello(&self) -> u8;
+    // 2: }
+    // 3:
+    // 4: struct Thing;
+    // 5:
+    // 6: impl Greet for Thing {
+    // 7:     fn hello(&self) -> u8 {
+    // 8:         1
+    // 9:     }
+    // 10: }
+    // 11:
+    // 12: fn keep_me() -> u8 {
+    // 13:     2
+    // 14: }
+    "trait Greet {\n    fn hello(&self) -> u8;\n}\n\nstruct Thing;\n\nimpl Greet for Thing {\n    fn hello(&self) -> u8 {\n        1\n    }\n}\n\nfn keep_me() -> u8 {\n    2\n}\n"
+}
+
+/// docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
+///
+/// `edit_code(remove, symbol="impl Trait for Type")` could never succeed. The AST
+/// extractor emits NO symbol for an impl block (it hoists methods to
+/// `Type/method`), so `find_ast_name_path` had nothing to return, the descendant
+/// split was skipped entirely, and the block's own methods came back as "dropped
+/// sibling symbols … likely a stale LSP range" — a wrong diagnosis that rolled the
+/// removal back every time. Both escapes the hint offered were closed: refreshing
+/// ranges changes nothing (they were already correct) and `edit_file` is refused by
+/// the IL-2 structural gate for exactly this edit.
+#[tokio::test]
+async fn edit_code_remove_deletes_an_impl_block_and_names_its_methods() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let canonical_root = std::fs::canonicalize(dir.path()).unwrap();
+    let file = canonical_root.join("src").join("lib.rs");
+    std::fs::write(&file, impl_block_fixture()).unwrap();
+
+    // rust-analyzer's shape: methods NEST under an `impl Trait for Type` node.
+    let hello = SymbolInfo {
+        name: "hello".to_string(),
+        name_path: "impl Greet for Thing/hello".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 7,
+        end_line: 9,
+        start_col: 7,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let imp = SymbolInfo {
+        name: "impl Greet for Thing".to_string(),
+        name_path: "impl Greet for Thing".to_string(),
+        kind: SymbolKind::Class,
+        file: file.clone(),
+        start_line: 6,
+        end_line: 10,
+        start_col: 0,
+        children: vec![hello],
+        range_start_line: None,
+        detail: None,
+    };
+
+    let mock = MockLspClient::new().with_symbols(&file, vec![imp]);
+    let lsp = MockLspProvider::with_client(mock);
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = EditCode
+        .call(
+            json!({
+                "action": "remove",
+                "symbol": "impl Greet for Thing",
+                "path": "src/lib.rs",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("removing an impl block must not be refused as a sibling drop");
+
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        !content.contains("impl Greet for Thing"),
+        "the impl block must be gone; got:\n{content}"
+    );
+    assert!(
+        content.contains("fn keep_me"),
+        "the true sibling below it must survive; got:\n{content}"
+    );
+    assert!(
+        content.contains("trait Greet"),
+        "the trait above it must survive; got:\n{content}"
+    );
+
+    let descendants = result
+        .get("removed_descendants")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        descendants
+            .iter()
+            .any(|d| d.as_str().unwrap_or_default() == "Thing/hello"),
+        "the method removed with the block must be reported, under its AST name \
+         path; got: {result:?}"
+    );
+}
+
+/// The other half, and the reason the descendant set is keyed on the target's LSP
+/// CHILD LIST rather than on its span.
+///
+/// A span test reads as the obvious fix and is subtly wrong: it must trust the very
+/// range the guard exists to doubt. Here the LSP reports an impl block ending at
+/// line 14 when it really ends at 10 — the classic stale/overshooting range — and
+/// the removal would swallow `keep_me` whole. Under span containment `keep_me` lies
+/// inside the reported target span, so it would be reclassified as a descendant and
+/// the guard would go silent on a genuine over-delete. Under a child list it cannot:
+/// `keep_me` is not a child of the impl block however far the range runs.
+#[tokio::test]
+async fn edit_code_remove_still_refuses_when_an_overshooting_range_swallows_a_sibling() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let canonical_root = std::fs::canonicalize(dir.path()).unwrap();
+    let file = canonical_root.join("src").join("lib.rs");
+    std::fs::write(&file, impl_block_fixture()).unwrap();
+
+    let hello = SymbolInfo {
+        name: "hello".to_string(),
+        name_path: "impl Greet for Thing/hello".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 7,
+        end_line: 9,
+        start_col: 7,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let imp = SymbolInfo {
+        name: "impl Greet for Thing".to_string(),
+        name_path: "impl Greet for Thing".to_string(),
+        kind: SymbolKind::Class,
+        file: file.clone(),
+        // The lie under test: the block really ends at 10.
+        start_line: 6,
+        end_line: 14,
+        start_col: 0,
+        children: vec![hello],
+        range_start_line: None,
+        detail: None,
+    };
+
+    let mock = MockLspClient::new().with_symbols(&file, vec![imp]);
+    let lsp = MockLspProvider::with_client(mock);
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let err = EditCode
+        .call(
+            json!({
+                "action": "remove",
+                "symbol": "impl Greet for Thing",
+                "path": "src/lib.rs",
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("an overshoot that swallows a true sibling must still be refused");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("keep_me"),
+        "the refusal must name the sibling it saved; got: {msg}"
+    );
+
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        content.contains("fn keep_me"),
+        "the file must be rolled back with the sibling intact; got:\n{content}"
+    );
+}
+
 // ── resolve_library_roots ────────────────────────────────────────────────
 
 #[tokio::test]
