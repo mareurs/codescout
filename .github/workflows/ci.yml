@@ -387,17 +387,22 @@ jobs:
       #    offset lands at 95 instead of the asserted 101. Do NOT relax the assertion to
       #    accommodate this — the exact arithmetic is what the test is for on real Windows.
       #
-      # 6. WINE 9.0 HANGS (4) — heredoc_body_pipes_are_not_rewritten_into_the_written_file,
+      # 6. WINE 9.0 HANGS (8) — heredoc_body_pipes_are_not_rewritten_into_the_written_file,
       #    run_command_with_overflow_emits_progressive_hint_once,
-      #    unfiltered_output_carries_a_line_count_and_explicit_empty_stdout and
-      #    unfiltered_output_line_count_survives_inline_truncation. ONE cause, ONE remedy; see
-      #    the block below for the evidence and the un-skip protocol.
+      #    unfiltered_output_carries_a_line_count_and_explicit_empty_stdout,
+      #    unfiltered_output_line_count_survives_inline_truncation, and the four
+      #    buffer-truncation tests added 2026-08-27
+      #    (a_truncated_buffer_reports_the_count_it_will_actually_serve,
+      #    a_truncated_buffer_ends_with_a_sentinel_naming_both_counts,
+      #    a_grep_over_a_truncated_ref_carries_the_truncation_notice,
+      #    a_complete_buffer_carries_no_sentinel_and_no_notice).
+      #    ONE cause, ONE remedy; see the block below for the evidence and the un-skip protocol.
       #
       # Do NOT make any of these self-skip at runtime on a probe (missing bash, missing `py`,
       # missing git). Every one is load-bearing on windows-latest, where the thing being probed
       # for IS present, and a probe-gated early return disarms it there too. (WIN-32, WIN-36)
       #
-      # GROUP 6 IN DETAIL — two tests, one cause, one remedy. Neither is a codescout defect
+      # GROUP 6 IN DETAIL — eight tests, one cause, one remedy. None is a codescout defect
       # and neither is about the shell: on THIS runner's wine the command HANGS and is killed
       # by run_command's own 30s timeout. Both were measured, each from a CI log, and both
       # produced the identical envelope:
@@ -408,6 +413,13 @@ jobs:
       #   run_command_with_overflow_...once   `yes filler | head -2000`         (run 32976889055)
       #   unfiltered_output_carries_a_...     `printf 'a\nb\nc\n' | grep zzz`   (run 32997878934)
       #   unfiltered_output_line_count_...    `seq 1 20000 | grep zzz`          (run 32997878934)
+      #
+      #   The four tests added 2026-08-27 are skip-listed on ARRIVAL, not after a red run:
+      #   they reuse those last two command shapes verbatim (`seq 1 20000 | grep zzz` for the
+      #   three truncation cases, `printf 'a\nb\nc\n' | grep zzz` for the complete-buffer
+      #   control), and the cause above is a property of the COMMAND under wine, not of what
+      #   the test asserts about the result. Un-skip them with the same protocol and in the
+      #   same pass as their two predecessors — they share one root cause and one fix.
       #
       # The last two are worth a warning to whoever reads this next, because they ALSO fail
       # locally under wine 11.16 for a COMPLETELY DIFFERENT and unrelated reason — a
@@ -436,7 +448,7 @@ jobs:
       # wall-clock before failing the same way.
       # docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file --skip run_command_with_overflow_emits_progressive_hint_once --skip unfiltered_output_carries_a_line_count_and_explicit_empty_stdout --skip unfiltered_output_line_count_survives_inline_truncation
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file --skip run_command_with_overflow_emits_progressive_hint_once --skip unfiltered_output_carries_a_line_count_and_explicit_empty_stdout --skip unfiltered_output_line_count_survives_inline_truncation --skip a_truncated_buffer_reports_the_count_it_will_actually_serve --skip a_truncated_buffer_ends_with_a_sentinel_naming_both_counts --skip a_grep_over_a_truncated_ref_carries_the_truncation_notice --skip a_complete_buffer_carries_no_sentinel_and_no_notice
 
   tool-docs-sync:
     name: Tool Docs Sync

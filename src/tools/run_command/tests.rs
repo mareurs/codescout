@@ -2962,6 +2962,174 @@ async fn unfiltered_output_line_count_survives_inline_truncation() {
     );
 }
 
+/// Option A of docs/issues/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md:
+/// `unfiltered_output_lines` describes the STREAM, and sat next to a handle serving a
+/// truncated buffer with no field anywhere naming the served count. Learning it cost a
+/// `wc -l` round-trip — the exact blind round-trip the parent fix set out to remove.
+#[tokio::test]
+async fn a_truncated_buffer_reports_the_count_it_will_actually_serve() {
+    let (_dir, ctx) = project_ctx().await;
+    let line_count = 20_000;
+    let result = RunCommand
+        .call(
+            json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    // Asserted FIRST: on a fixture too small to truncate every assertion below
+    // passes vacuously, which is how a green here would mean nothing.
+    assert!(
+        result.get("unfiltered_truncated").is_some(),
+        "fixture must actually exceed the inline cap: {result}"
+    );
+    let served = result["unfiltered_buffered_lines"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("no unfiltered_buffered_lines: {result}"));
+    assert!(
+        served < line_count,
+        "the served count must be SMALLER than the stream count, or the two fields \
+         describe the same thing and the bug is unfixed: served={served}"
+    );
+
+    // And it must match the buffer, not merely be some smaller number.
+    let handle = result["unfiltered_output"].as_str().expect("handle");
+    let stored = ctx.output_buffer.get(handle).expect("entry").stdout;
+    let stored_lines = stored.lines().count() as u64;
+    assert_eq!(
+        stored_lines,
+        served + 1,
+        "the buffer should hold exactly the served lines plus the one sentinel line"
+    );
+}
+
+/// Option B: the warning travels WITH the data, so a reader who never looks at the
+/// response still meets it. `tail` shows it, `wc -l` counts it, any slice near the end
+/// hits it.
+#[tokio::test]
+async fn a_truncated_buffer_ends_with_a_sentinel_naming_both_counts() {
+    let (_dir, ctx) = project_ctx().await;
+    let line_count = 20_000;
+    let result = RunCommand
+        .call(
+            json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        result.get("unfiltered_truncated").is_some(),
+        "fixture must actually truncate: {result}"
+    );
+    let served = result["unfiltered_buffered_lines"]
+        .as_u64()
+        .expect("served");
+    let handle = result["unfiltered_output"].as_str().expect("handle");
+    let stored = ctx.output_buffer.get(handle).expect("entry").stdout;
+
+    let last = stored.lines().next_back().expect("a last line");
+    assert!(
+        last.starts_with(crate::tools::output_buffer::TRUNCATION_SENTINEL_PREFIX),
+        "the sentinel must be the FINAL line, where tail -1 lands: {last:?}"
+    );
+    assert!(
+        last.contains(&served.to_string()) && last.contains(&line_count.to_string()),
+        "the sentinel must name both counts, so it cannot drift from the fields: {last:?}"
+    );
+}
+
+/// Option C, and the load-bearing test: the only one that would have failed for the
+/// reason the bug was actually reported.
+///
+/// The incident was a `grep` over a truncated buffer returning nothing, read as
+/// "absent". A sentinel does not help there — grep prints matches, and a count of `0`
+/// is byte-identical whether the tail is missing or the value genuinely does not occur.
+/// The notice has to ride on the reading tool's own result.
+#[tokio::test]
+async fn a_grep_over_a_truncated_ref_carries_the_truncation_notice() {
+    let (_dir, ctx) = project_ctx().await;
+    let line_count = 20_000;
+    let first = RunCommand
+        .call(
+            json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        first.get("unfiltered_truncated").is_some(),
+        "fixture must actually truncate: {first}"
+    );
+    let handle = first["unfiltered_output"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+
+    // A value near the END of the capture: present in the stream, absent from the
+    // stored prefix. Without the notice this returns `0` and says nothing else.
+    let second = RunCommand
+        .call(
+            json!({ "command": format!("grep -c '^19999$' {handle}") }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let notices = second["buffer_truncated"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a read of a truncated ref must carry a notice: {second}"));
+    assert_eq!(notices.len(), 1, "one notice per distinct handle: {second}");
+    let text = notices[0].as_str().expect("notice text");
+    assert!(
+        text.contains(&handle),
+        "the notice must name WHICH handle, since a command may read several: {text}"
+    );
+    assert!(
+        text.contains(&line_count.to_string()),
+        "the notice must name the true total: {text}"
+    );
+}
+
+/// Control for all three above. A complete buffer must gain neither a sentinel nor a
+/// notice — a warning that fires unconditionally is one a reader learns to skip, and it
+/// would corrupt the data of every non-truncated buffer besides.
+#[tokio::test]
+async fn a_complete_buffer_carries_no_sentinel_and_no_notice() {
+    let (_dir, ctx) = project_ctx().await;
+    let first = RunCommand
+        .call(
+            json!({ "command": "printf 'a\\nb\\nc\\n' | grep zzz" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        first.get("unfiltered_truncated").is_none(),
+        "fixture must NOT truncate, or this control proves nothing: {first}"
+    );
+    assert!(
+        first.get("unfiltered_buffered_lines").is_none(),
+        "a complete buffer has nothing to distinguish from its stream: {first}"
+    );
+    let handle = first["unfiltered_output"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let stored = ctx.output_buffer.get(&handle).expect("entry").stdout;
+    assert!(
+        !stored.contains(crate::tools::output_buffer::TRUNCATION_SENTINEL_PREFIX),
+        "a complete buffer must not have synthetic content injected: {stored:?}"
+    );
+
+    let second = RunCommand
+        .call(json!({ "command": format!("grep -c a {handle}") }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        second.get("buffer_truncated").is_none(),
+        "no notice may fire for a complete buffer: {second}"
+    );
+}
+
 #[tokio::test]
 async fn il3_blocks_chained_unbounded_pipe() {
     // Chained pipes off an unbounded LHS still block (was originally

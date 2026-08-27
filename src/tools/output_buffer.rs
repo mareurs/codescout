@@ -28,6 +28,58 @@ pub struct BufferEntry {
     /// SHA-256 of `stdout`, set only for `@tool_*` entries (content-dedup key).
     /// `None` for every other store kind — the type encodes the store_tool-only scope.
     pub content_hash: Option<String>,
+    /// `Some(_)` when `stdout` holds only a **prefix** of what was captured;
+    /// `None` when it is complete.
+    ///
+    /// Before this field existed, a truncated buffer was indistinguishable from a
+    /// complete one at every read: `grep -c` over the missing tail returned `0`,
+    /// byte-identical to genuinely absent, and a hash of the prefix was a
+    /// valid-looking wrong digest. The response carried `unfiltered_truncated:
+    /// true`, but that lives on the *response*, not on the buffer — so any later
+    /// read of the handle, in any tool or any turn, had nothing to consult.
+    ///
+    /// BUG docs/issues/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
+    pub truncated: Option<Truncation>,
+}
+
+/// How much of a capture a truncated buffer actually holds.
+///
+/// Both numbers are recorded at store time rather than one being derived at read
+/// time from the buffer's own bytes. Deriving `kept_lines` by counting the stored
+/// lines and discounting a sentinel would make the report a function of the
+/// artifact it describes — and the sentinel is appended by this same mechanism, so
+/// an off-by-one there would be invisible in exactly the direction that matters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Truncation {
+    /// Lines of real content in the buffer, EXCLUDING the appended sentinel.
+    pub kept_lines: usize,
+    /// Lines in the original, untruncated capture.
+    pub total_lines: usize,
+}
+
+/// Leading token of the marker appended as the last line of a truncated buffer.
+///
+/// Distinctive on purpose: it is injected into a data buffer, so it must not
+/// plausibly collide with real output a caller might grep for.
+pub const TRUNCATION_SENTINEL_PREFIX: &str = "--- codescout: BUFFER TRUNCATED";
+
+/// The marker line appended to a truncated buffer, and the text of the notice
+/// attached when one is read.
+///
+/// One function for both so the two can never disagree — the failure this whole
+/// mechanism exists to prevent is *two adjacent numbers describing different
+/// things*, and shipping the sentinel and the notice as separate format strings
+/// would have reproduced it one layer down.
+pub fn truncation_marker(t: Truncation) -> String {
+    format!(
+        "{TRUNCATION_SENTINEL_PREFIX}: {kept} of {total} lines kept, \
+         {omitted} omitted. Every read of this buffer answers about the prefix only \
+         — a search that finds nothing here has NOT shown the tail does not contain it, \
+         and a hash of it is a valid-looking wrong digest. ---",
+        kept = t.kept_lines,
+        total = t.total_lines,
+        omitted = t.total_lines.saturating_sub(t.kept_lines)
+    )
 }
 
 /// A dangerous command held pending agent acknowledgment.
@@ -145,6 +197,23 @@ impl OutputBuffer {
 
     /// Store command output and return an opaque handle (`@cmd_<8hex>`).
     pub fn store(&self, command: String, stdout: String, stderr: String, exit_code: i32) -> String {
+        self.store_truncated(command, stdout, stderr, exit_code, None)
+    }
+
+    /// Store command output that may be a **prefix** of what was captured.
+    ///
+    /// `truncated_from_lines` is `Some(total)` when `stdout` was cut down to fit
+    /// the inline budget, `None` when it is complete. Recording it on the entry —
+    /// rather than only on the response that minted the handle — is what lets a
+    /// later read of the same handle, in any tool and any turn, say so.
+    pub fn store_truncated(
+        &self,
+        command: String,
+        stdout: String,
+        stderr: String,
+        exit_code: i32,
+        truncated: Option<Truncation>,
+    ) -> String {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -164,11 +233,42 @@ impl OutputBuffer {
             timestamp: now,
             source_path: None,
             content_hash: None,
+            truncated,
         };
 
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());
         id
+    }
+
+    /// The truncation notice for one handle, or `None` when its buffer is complete.
+    ///
+    /// Reads the ENTRY, deliberately, not a response field. `unfiltered_truncated`
+    /// is minted once — on the response that created the handle — and is gone by
+    /// the next turn, while the handle keeps working for the rest of the session.
+    /// A caller who greps the ref three turns later has no response to consult.
+    pub fn truncation_notice(&self, id: &str) -> Option<String> {
+        let entry = self.get(id)?;
+        let t = entry.truncated?;
+        Some(format!("⚠ {id} {}", truncation_marker(t)))
+    }
+
+    /// Truncation notices for every buffer handle named in a command string.
+    ///
+    /// Kept separate from [`resolve_refs`](Self::resolve_refs) rather than added to
+    /// its return tuple: that tuple is destructured at ~20 call sites, and widening
+    /// it would spend the whole diff on churn that has nothing to do with the
+    /// defect. The regex is the same one `resolve_refs` uses.
+    pub fn truncation_notices_in(&self, command: &str) -> Vec<String> {
+        static REF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        let re = REF_RE
+            .get_or_init(|| Regex::new(r"@(?:cmd|file|tool|bg)_[0-9a-f]{8}").expect("valid regex"));
+        let mut seen = std::collections::HashSet::new();
+        re.find_iter(command)
+            .map(|m| m.as_str())
+            .filter(|tok| seen.insert(*tok))
+            .filter_map(|tok| self.truncation_notice(tok))
+            .collect()
     }
 
     /// Get an entry by handle, refreshing its LRU position.
@@ -331,6 +431,9 @@ impl OutputBuffer {
             timestamp: now,
             source_path,
             content_hash: None,
+            // A @file_* entry holds the whole file, or an excerpt the caller
+            // explicitly asked for by line range. Neither is a silent prefix.
+            truncated: None,
         };
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());
@@ -372,6 +475,8 @@ impl OutputBuffer {
             timestamp: now,
             source_path: None,
             content_hash: Some(hash.clone()),
+            // A @tool_* entry holds the complete serialized tool result.
+            truncated: None,
         };
         inner.entries.insert(id.clone(), entry);
         inner.order.push(id.clone());

@@ -126,48 +126,70 @@ pub(crate) async fn handle_successful_output(
     };
 
     // --- Step 6.5: Read tee capture and store as unfiltered_output ref ---
-    let unfiltered_ref: Option<(String, bool, usize)> =
-        if let Some(ref tmpfile) = unfiltered_tmpfile {
-            let capture = std::fs::read_to_string(&tmpfile.0).ok();
-            // tmpfile drops at function exit — TmpfileGuard::drop() removes the file.
-            // Skip empty captures: when the terminal filter matched nothing, both
-            // raw_stdout and the tee file are empty — surfacing a handle is misleading.
-            capture.and_then(|content| {
-                if content.is_empty() {
-                    return None;
-                }
-                // Counted on the FULL capture, before any inline-storage truncation below —
-                // the whole point is telling the caller how much is behind the ref, not how
-                // much of it happened to fit inline.
-                let line_count = count_lines(&content);
-                let (stored, truncated) = if crate::tools::exceeds_inline_limit(&content) {
-                    let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
-                    let capped: String = content
-                        .lines()
-                        .take_while(|line| {
-                            if byte_budget == 0 {
-                                return false;
-                            }
-                            byte_budget = byte_budget.saturating_sub(line.len() + 1);
-                            true
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    (capped, true)
-                } else {
-                    (content, false)
+    let unfiltered_ref: Option<(
+        String,
+        Option<crate::tools::output_buffer::Truncation>,
+        usize,
+    )> = if let Some(ref tmpfile) = unfiltered_tmpfile {
+        let capture = std::fs::read_to_string(&tmpfile.0).ok();
+        // tmpfile drops at function exit — TmpfileGuard::drop() removes the file.
+        // Skip empty captures: when the terminal filter matched nothing, both
+        // raw_stdout and the tee file are empty — surfacing a handle is misleading.
+        capture.and_then(|content| {
+            if content.is_empty() {
+                return None;
+            }
+            // Counted on the FULL capture, before any inline-storage truncation below —
+            // the whole point is telling the caller how much is behind the ref, not how
+            // much of it happened to fit inline.
+            let line_count = count_lines(&content);
+            let (stored, truncation) = if crate::tools::exceeds_inline_limit(&content) {
+                let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
+                let capped: String = content
+                    .lines()
+                    .take_while(|line| {
+                        if byte_budget == 0 {
+                            return false;
+                        }
+                        byte_budget = byte_budget.saturating_sub(line.len() + 1);
+                        true
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let t = crate::tools::output_buffer::Truncation {
+                    kept_lines: count_lines(&capped),
+                    total_lines: line_count,
                 };
-                let ref_id = ctx.output_buffer.store(
-                    original_command.to_string(),
-                    stored,
-                    String::new(), // unfiltered capture is stdout-only
-                    exit_code,
+                // The marker travels WITH the data, so every reader trips over it
+                // without having to know the field exists: `tail` shows it, `wc -l`
+                // counts it, any slice near the end hits it, and a grep that returns
+                // nothing at least sits beside something explaining why. The inline
+                // summary path has used this device for a while
+                // (`--- N lines omitted ---`); it just never reached this buffer.
+                //
+                // The trailing newline is deliberate. Without it the sentinel's own
+                // line has no terminator, `wc -l` lands back on the content count,
+                // and a test asserting the two differ would pass for the wrong reason.
+                let marked = format!(
+                    "{capped}\n{}\n",
+                    crate::tools::output_buffer::truncation_marker(t)
                 );
-                Some((ref_id, truncated, line_count))
-            })
-        } else {
-            None
-        };
+                (marked, Some(t))
+            } else {
+                (content, None)
+            };
+            let ref_id = ctx.output_buffer.store_truncated(
+                original_command.to_string(),
+                stored,
+                String::new(), // unfiltered capture is stdout-only
+                exit_code,
+                truncation,
+            );
+            Some((ref_id, truncation, line_count))
+        })
+    } else {
+        None
+    };
 
     // Computed BEFORE the branch below: one arm moves `raw_stderr` into the response, and
     // the diagnostic has to cover every output shape — buffered summary included.
@@ -310,14 +332,18 @@ pub(crate) async fn handle_successful_output(
     // empty filtered `stdout` is exactly the case docs/issues/archive/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md
     // covers: without an explicit `"stdout": ""` and a line count, the response looks
     // identical whether the ref holds 2 lines or 20,000.
-    if let Some((ref ref_id, truncated, line_count)) = unfiltered_ref {
+    if let Some((ref ref_id, truncation, line_count)) = unfiltered_ref {
         if result.get("stdout").is_none() {
             result["stdout"] = json!("");
         }
         result["unfiltered_output"] = json!(ref_id);
         result["unfiltered_output_lines"] = json!(line_count);
-        if truncated {
+        if let Some(t) = truncation {
             result["unfiltered_truncated"] = json!(true);
+            // `unfiltered_output_lines` describes the STREAM; this describes the
+            // HANDLE sitting next to it. Naming only the first left a reader to
+            // assume one number covered both, which is the misread this bug is.
+            result["unfiltered_buffered_lines"] = json!(t.kept_lines);
         }
     }
 

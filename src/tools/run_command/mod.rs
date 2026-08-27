@@ -252,6 +252,22 @@ impl Tool for RunCommand {
             }
         }
 
+        // Attach a truncation notice when the command read a buffer that holds only a
+        // PREFIX of what was captured. This is the half that closes the observable:
+        // the in-buffer sentinel is visible to `tail`/`wc`/a slice, but a `grep -c`
+        // over the missing tail returns `0` and shows the caller nothing at all — and
+        // `0` is byte-identical to genuinely absent. Reported as a field rather than
+        // injected into stdout, because a count or a hash is a value the caller will
+        // parse, and prepending prose to it corrupts the thing they asked for.
+        //
+        // BUG docs/issues/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
+        let truncation_notices = ctx.output_buffer.truncation_notices_in(command);
+        if !truncation_notices.is_empty() {
+            if let Ok(ref mut val) = result {
+                val["buffer_truncated"] = serde_json::json!(truncation_notices);
+            }
+        }
+
         // Attach timeout hint when the timeout parameter was auto-corrected.
         if let Some(ref hint) = timeout_hint {
             if let Ok(ref mut val) = result {

@@ -75,7 +75,18 @@ impl Tool for ReadFile {
 
         // Buffer refs bypass the filesystem entirely.
         if path.starts_with("@file_") || path.starts_with("@cmd_") || path.starts_with("@tool_") {
-            return read_from_buffer(path, &input, ctx);
+            let mut res = read_from_buffer(path, &input, ctx)?;
+            // Same contract as run_command's `buffer_truncated`: a handle whose buffer
+            // holds only a prefix says so at EVERY read, not just on the response that
+            // minted it. Attached here rather than inside `read_from_buffer` because
+            // that function has several return shapes (json_path extraction, a line
+            // slice, a re-parked @file_* handle) and the notice belongs on all of them.
+            if let Some(notice) = ctx.output_buffer.truncation_notice(path) {
+                if let Some(obj) = res.as_object_mut() {
+                    obj.insert("buffer_truncated".into(), json!([notice]));
+                }
+            }
+            return Ok(res);
         }
 
         let project_root = ctx
