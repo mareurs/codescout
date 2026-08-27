@@ -137,6 +137,57 @@ sys.argv = ["cc.py"] + sys.argv[1:]; cc.main()
 **Got:** Skill Step 2 says nothing about (a) expecting overflow on multi-DB loops, or (b) that buffered output must be paged with a single bounded-LHS command (`sed -n`, `cat`, bare `grep @ref`) — never a chained pipe to `sed`/`head`/`tail`, which the companion gate blocks.
 **Fix idea:** Add a note to Step 2: "Multi-DB loop output overflows into a `@cmd_*` buffer. Page it with `sed -n 'N,Mp' @cmd_id` or bare `grep PATTERN @cmd_id` — do NOT chain `| sed`/`| head`/`| tail`, which the codescout IL3 gate blocks. Or scope each query tighter (single DB, `LIMIT`, date filter) so results fit inline." Pairs with the existing buffer guidance in `get_guide("progressive-disclosure")`.
 **Note:** The *cross-project* IL3 pipe-to-`head` recurrence seen in the usage data (deployment / claude-plugins / researcher piping `git log | head`, `find | head`) is a **tool-usage pattern**, not a skill friction — track that as a T-N in `docs/trackers/tool-usage-patterns.md`, not here.
+
+## `superpowers:subagent-driven-development`
+
+### F-012 — the finish step deletes every per-task report
+
+**When:** Completing a ten-task SDD run (`get-guide-section-grain`, 2026-08-27).
+
+**Got:** The skill's Finish step says *"delete this plan's workspace (`rm -rf <workspace>`) —
+the git history is the record now."* That is true of the **code** and false of everything
+else the run produced: ten task reports with their TDD evidence, twelve review reports, and
+a progress ledger holding 31 rulings and 15 deferred minors. None of it is in git. The step
+is unconditional, so following it destroys the run's entire reasoning trail.
+
+The gap is sharpened by the skill's own instruction two paragraphs earlier — collect every
+`Ruling:` line into the final message before deleting. That correctly identifies that the
+ledger holds something git does not, then rescues one of the several things it holds.
+
+**Counterfactual, and it is not hypothetical:** in this run the *final reviewer* flagged that
+evidence kept only in the run ledger would be destroyed at finish, and asked for it to be
+folded into a committed bug file. The controller did exactly that — then ran the deletion
+step ten minutes later and destroyed the same class of evidence one directory over. A
+reviewer identified the failure mode, the controller acted on the instance, and the pattern
+still fired.
+
+**Fix idea:** make the finish step conditional on preservation rather than unconditional.
+Either (a) commit a distilled residue before deleting — rulings, deferred minors, and any
+recommendation a report makes — or (b) move the workspace under a committed path for
+finished runs. codescout now does (a) via `docs/trackers/sdd-ruling-log.md`, seeded from
+this run; the upstream skill still says delete.
+
+**Status:** open — local mitigation in place (`sdd-ruling-log.md` + a CLAUDE.md append
+trigger); upstream skill unchanged.
+
+### F-013 — `review-package` BASE is easy to get silently wrong when anything commits out-of-band
+
+**When:** Same run. A bug file was committed between one task's head and the next task's
+commit.
+
+**Got:** Nothing warns you. Packaging the next review from the recorded BASE would have put
+an unrelated 5 KB documentation commit inside the diff a reviewer was asked to judge —
+spending a review seat partly on prose it has no business reviewing, and diluting the code
+under review. The skill is right to insist on recording BASE explicitly rather than using
+`HEAD~1`, but recording it once at dispatch is not enough: any out-of-band commit
+invalidates it.
+
+**Fix idea:** re-derive BASE at packaging time as "the head the previous review saw" rather
+than trusting the value recorded at dispatch, or have `review-package` warn when the range
+contains commits by an author/subject outside the task.
+
+**Status:** open — worked around by hand this run (BASE moved deliberately, recorded as a
+ruling).
 ## `/onboarding`
 
 ### F-001 — workspace onboarding silently over-reported per-project memory writes

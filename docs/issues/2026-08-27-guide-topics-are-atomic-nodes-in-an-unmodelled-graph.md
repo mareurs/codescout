@@ -251,6 +251,51 @@ sections they need."* Rewriting the directions accordingly:
 - **(b) remains contraindicated**, now for a second independent reason: splitting
   produces edges, and edges are not a delivery mechanism here.
 
+## Phase 1 SHIPPED — 2026-08-27, branch `sdd/get-guide-section-grain`
+
+The proposal this file frames is implemented for one topic. Spec:
+`docs/superpowers/specs/2026-08-27-get-guide-section-grain-design.md`. Plan:
+`docs/superpowers/plans/2026-08-27-get-guide-section-grain.md`. 25 commits, ten tasks, each
+reviewed; final whole-branch review clean.
+
+**What shipped.** The section is now the unit of delivery, selected by declarations the
+guide markdown carries: `<!-- serves: artifact.append_entry -->` under a heading declares
+which call shapes it answers, `<!-- requires: … -->` pulls in a section whose context it
+depends on. `Tool::selector_key(&input)` projects a call shape *before* `call()` consumes
+the input — the plumbing change that makes intent visible at all, and which this file's
+§ *Symptom* could only work around by reading the response. `GuideLedger` dedups at
+`topic#heading`. An unmatched shape gets the topic preamble plus a `get_guide` pointer,
+never the whole topic and never silence. Five build gates keep the corpus honest.
+
+**Result, against the spec's falsifiable prediction:**
+
+| | predicted | measured |
+|---|---|---|
+| `librarian` p50 draw | ~10,000 B | **11,946 B** |
+| direction | down | ✅ down, **42%** from 20,545 B |
+| injection count | up | ✅ up — 6 slices where there was 1 dump |
+
+**The magnitude prediction missed by ~20%** and is recorded as a miss. Direction and count
+landed. A committed 12,000 B ceiling gates it, with a **54 B margin** — the corpus is at
+capacity, and repairing the reachability gate is what revealed that (see below).
+
+**Phase 1 containment held.** Only `librarian` declares; the other nine topics are
+byte-identical, proven by full-`format!`-string equality rather than a `contains()`.
+
+**What this does NOT close.** The 44.4% `contradicted` rate — guidance that arrives and is
+then violated — is untouched, and was declared out of scope in the spec. That is an
+enforcement problem, not a grain problem. Phases 2 (`tracker-conventions`, blocked on
+decomposing a 17,378 B section) and 3 (the remaining eight topics, including the four with
+zero auto-injections) are unstarted. **Status stays `open`.**
+
+**One finding worth carrying forward.** Fixing a reachability gate that could not fail
+exposed two sections no call shape can reach — and making either reachable was
+*arithmetically impossible* at a 54 B margin. The broken gate had been concealing that the
+corpus was already at capacity. Both were waived with reasons naming the byte constraint
+and the remedy rather than narrowing more guide content; the narrowing pass had already
+spent a concrete example out of the guide to buy 385 B. Recorded in
+`docs/trackers/sdd-ruling-log.md`.
+
 ## Measured — USE, 2026-08-27 (the probe `Not yet done` asked for)
 
 This section answers the question the rest of the file could only frame: delivery
