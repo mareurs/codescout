@@ -16,7 +16,7 @@ owner: marius
 related: []
 reopened: 2026-07-18
 severity: medium
-unverified: 'The MECHANISM is confirmed, reproducible on demand, and guarded by two regression tests; the gate is green. What is NOT established, and never can be, is whether the original Mercury BOM report hit this mechanism — that session''s path/workspace_override state was never captured and is unrecoverable. Fix is in the working tree on experiments, NOT yet committed: no fix SHA or patch-id recorded, so this file is not yet archivable. Not yet verified against a live MCP server (cargo rb deferred — two peer sessions were running the binary).'
+unverified: 'The MECHANISM is confirmed, reproducible on demand, and guarded by two regression tests; the gate is green (cargo fmt, clippy -D warnings, cargo test 4600 passed / 0 failed). What is NOT established, and never can be, is whether the original Mercury BOM report hit this mechanism — that session''s path/workspace_override state was never captured and is unrecoverable. Not verified against a live MCP server: cargo rb was deferred because two peer sessions were running the binary (the hazard in the zombie-servers-on-deleted-binaries bug).'
 ---
 
 # BUG: `grep`'s `glob` param reported to miss real matches on literal (non-wildcard) file paths — not reproducible on immediate re-test
@@ -472,7 +472,12 @@ Nothing actionable on the mechanism. Unknowable: whether the Mercury BOM session
 sighting — capture `path`, active project, and `workspace_override` before anything else
 moves.
 
-Not yet done: commit (no fix SHA / patch-id recorded, so this file is not archivable
-yet), and verification against a live MCP server — `cargo rb` was deferred because two
-peer sessions were running the binary, which is the hazard in
+**Fix:** `444d756c` on `experiments` — patch-id
+`71410675cfbaca910d0bc122346b243a66e8d809`. Recorded as a pair at fix time: the SHA is
+positional and is orphaned once `experiments` is rebased, while the patch-id is a content
+hash of the diff and survives both rebase and cherry-pick. There is no promotion path to
+check and nothing owed later.
+
+Still not done: verification against a live MCP server — `cargo rb` was deferred because
+two peer sessions were running the binary, which is the hazard in
 `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`.

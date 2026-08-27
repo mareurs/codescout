@@ -113,8 +113,13 @@ severity: medium
 > retry" — is **not** addressed by this pass. It is intermittent by nature, so a
 > single non-reproduction proves nothing. Kin to
 > `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` (mitigated) and
-> `docs/issues/2026-07-18-grep-glob-literal-path-false-negative-unconfirmed.md`
-> (zombie) — all three are LSP/index staleness-window shapes and may share one root.
+> `docs/issues/archive/2026-07-18-grep-glob-literal-path-false-negative-unconfirmed.md`
+> (fixed 2026-08-27). **Correction 2026-08-27:** that one is now evidence *against* the
+> shared-root reading, not for it. Its cause was confirmed and it is not a staleness
+> window: `OverrideBuilder` anchors globs at the resolved `search_path`, so a
+> project-root-relative glob is unsatisfiable the moment `path` narrows the root. That is
+> deterministic and reproducible on demand — the opposite of intermittent. It presented as
+> a staleness flake only because a silent zero looks the same whatever produced it.
 
 Two distinct frictions hit while using `symbols` against a real project (Mercury MRP
 Automation, a sibling workspace project) during normal reconnaissance work, not a

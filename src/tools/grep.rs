@@ -2366,7 +2366,7 @@ mod tests {
     /// Confirmed live 2026-08-27 against this repo: `glob="src/tools/grep.rs"`
     /// returns 1 match bare and 0 with `path="src"`, same pattern, same file.
     ///
-    /// See `docs/issues/2026-07-18-grep-glob-literal-path-false-negative-unconfirmed.md`.
+    /// See `docs/issues/archive/2026-07-18-grep-glob-literal-path-false-negative-unconfirmed.md`.
     #[tokio::test]
     async fn glob_that_admits_no_file_names_the_glob_instead_of_a_bare_zero() {
         let dir = tempfile::tempdir().unwrap();
