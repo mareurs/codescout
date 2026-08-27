@@ -3035,7 +3035,7 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
 /// Measured 2026-08-27, before this change: **33 of the check's 47 findings were other repos'
 /// rows** — the single largest contributor to a `doctor` report that was 52% foreign after
 /// `442d8b7c` had closed the same class for `abs_path_outside_managed_roots`. See
-/// `docs/issues/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md`.
+/// `docs/issues/archive/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md`.
 ///
 /// A scoped-out prefix is keyed by the group of its first citer **outside** the active project,
 /// not by `files[0]`. The alphabetically-first citer overall may well be the in-project one
@@ -6396,7 +6396,7 @@ mod tests {
     /// regression that scopes nothing and one that scopes everything fail differently.
     ///
     /// Regression for
-    /// docs/issues/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md:
+    /// docs/issues/archive/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md:
     /// this check was 33 of its own 47 findings foreign, the largest single contributor to a
     /// `doctor` report that was 52% other repos' rows.
     #[test]
@@ -7992,7 +7992,7 @@ mod tests {
     /// the outlier rather than its repair.
     ///
     /// Regression for
-    /// docs/issues/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md.
+    /// docs/issues/archive/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md.
     #[tokio::test]
     async fn row_grain_checks_scope_to_the_project_but_worktree_scoped_row_does_not() {
         let (_wt_tmp, _main_root, worktree_root) = make_worktree_fixture();

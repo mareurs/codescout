@@ -6555,7 +6555,7 @@ before/after for the mechanism and never restates the ticket's own number.
 **Counterfactual:** without re-asking the headline question the leak would have read
 as closed — archived, live-verified, "metric intact" — with 56 unactionable rows
 across twelve repos still in every future `doctor` run, and no event scheduled to
-re-check it. Filed as `docs/issues/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md`
+re-check it. Filed as `docs/issues/archive/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md`
 in `d0b3b668`.
 
 **Status:** validated
