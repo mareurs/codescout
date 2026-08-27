@@ -157,7 +157,8 @@ impl Tool for ActivateProject {
             &[],
             "Pass the project directory, e.g. path=\"/home/me/work/myrepo\" — a workspace \
              project id also works. This is a directory, not a file; \
-             workspace(action=\"list_projects\") shows the configured ones.",
+             workspace(action=\"list_projects\") shows valid project ids, including \
+             auto-discovered sub-projects.",
         )?;
         let read_only = optional_bool_param(&input, "read_only");
 
@@ -508,6 +509,17 @@ impl Tool for ProjectStatus {
         }
 
         // --- Workspace section ---
+        // `projects` reports the LIVE, discovered workspace members — same source
+        // `activate`'s workspace table already uses (`Agent::workspace_summary`) —
+        // not just the declared `[[project]]` entries. A sub-project codescout
+        // finds by manifest walk needs no declaration, so the declared array alone
+        // used to under-report: a valid id `memory`/`symbols`/`activate` all accept
+        // could be absent from the one surface documented as how to list them.
+        // `depends_on` is the one field discovery cannot supply (nothing on disk
+        // states a dependency edge), so it is still looked up from the declared
+        // config by id, same as `Agent::workspace_summary`.
+        // docs/issues/2026-08-26-list-projects-reports-declared-projects-not-workspace-members.md
+        let live_projects = ctx.agent.discovered_projects().await;
         let workspace_toml_path = crate::config::workspace::workspace_config_path(&root);
         let workspace_info = if workspace_toml_path.exists() {
             std::fs::read_to_string(&workspace_toml_path)
@@ -516,12 +528,18 @@ impl Tool for ProjectStatus {
                 .map(|ws| {
                     json!({
                         "name": ws.workspace.name,
-                        "projects": ws.projects.iter().map(|p| json!({
-                            "id": p.id,
-                            "root": p.root,
-                            "languages": p.languages,
-                            "depends_on": p.depends_on,
-                        })).collect::<Vec<_>>(),
+                        "projects": live_projects.iter().map(|p| {
+                            let depends_on = ws.projects.iter()
+                                .find(|e| e.id == p.id)
+                                .map(|e| e.depends_on.clone())
+                                .unwrap_or_default();
+                            json!({
+                                "id": p.id,
+                                "root": to_forward_slash(&p.relative_root),
+                                "languages": p.languages,
+                                "depends_on": depends_on,
+                            })
+                        }).collect::<Vec<_>>(),
                         "resources": {
                             "max_lsp_clients": ws.resources.max_lsp_clients,
                             "idle_timeout_secs": ws.resources.idle_timeout_secs,

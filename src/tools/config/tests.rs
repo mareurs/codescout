@@ -900,6 +900,109 @@ depends_on = ["test"]
     assert_eq!(projects.len(), 2);
 }
 
+/// docs/issues/2026-08-26-list-projects-reports-declared-projects-not-workspace-members.md
+///
+/// `status`/`list_projects` used to re-parse `.codescout/workspace.toml` and report
+/// only its declared `[[project]]` array. A sub-project codescout auto-discovers by
+/// manifest walk needs no declaration at all — `activate`'s workspace table and
+/// `memory(project_id=...)` both already know about it — so the one surface
+/// documented as "how to list valid project ids" could omit a valid id. This
+/// declares 2 projects (root + `declared-svc`) but a manifest makes a 3rd,
+/// `extra-service`, live and undeclared.
+#[tokio::test]
+async fn project_status_reports_a_live_discovered_project_the_declared_config_omits() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+
+    let declared_svc = root.join("declared-svc");
+    std::fs::create_dir_all(&declared_svc).unwrap();
+    std::fs::write(
+        declared_svc.join("package.json"),
+        r#"{"scripts":{"build":"tsc"}}"#,
+    )
+    .unwrap();
+
+    let extra_service = root.join("extra-service");
+    std::fs::create_dir_all(&extra_service).unwrap();
+    std::fs::write(
+        extra_service.join("package.json"),
+        r#"{"scripts":{"build":"tsc"}}"#,
+    )
+    .unwrap();
+
+    let codescout = root.join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    // Deliberately omits "extra-service" — exactly like the bug's own
+    // reproduction on this repo (codescout-embed was live but undeclared).
+    std::fs::write(
+        codescout.join("workspace.toml"),
+        r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "declared-svc"
+root = "declared-svc"
+languages = ["typescript"]
+depends_on = ["test"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        codescout.join("project.toml"),
+        "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = ProjectStatus
+        .call(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let projects = result["workspace"]["projects"].as_array().unwrap();
+    assert_eq!(
+        projects.len(),
+        3,
+        "declared config names 2 projects, but a manifest makes 3 live — status \
+         must report the live count, matching what activate() already shows and \
+         what memory(project_id=...) already accepts: {projects:?}"
+    );
+    assert!(
+        projects.iter().any(|p| p["id"] == "extra-service"),
+        "the undeclared-but-discovered sub-project must appear by its live id: {projects:?}"
+    );
+    let declared = projects
+        .iter()
+        .find(|p| p["id"] == "declared-svc")
+        .expect("the declared sub-project must still appear: {projects:?}");
+    assert_eq!(
+        declared["depends_on"],
+        serde_json::json!(["test"]),
+        "depends_on is metadata discovery cannot supply and must still be looked \
+         up from the declared config by id, same as Agent::workspace_summary: {declared:?}"
+    );
+}
+
 /// The load-bearing half of the worktree-divergence fix: the formatter tests
 /// below would pass even if the block were never emitted. This one activates a
 /// real linked-worktree root and asserts the response actually carries it.
