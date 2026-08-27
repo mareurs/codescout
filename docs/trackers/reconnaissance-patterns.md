@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 116
+entry_high_water_R: 117
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -297,6 +297,7 @@ be treated as findings, not as a summary to re-derive.
 | R-101 | 2026-08-17 | miss (self-caught) → rule | **A test that DISTINGUISHES two hypotheses is not confirmation of one — state what the RIVAL hypothesis predicts before recording a verdict.** Ran a discriminating test on `include_str!` ref resolution and recorded it as *"confirmed — the base directory was the whole of it"*; the outcome actually **ruled out** the hypothesis it was read as confirming. The measurement was correct and already in hand, scored against one hypothesis in the direction committed to in prose two paragraphs above. Detector: for every `**Verdict:** confirmed`, complete *"under the rival hypothesis this test would have shown ___"* | `docs/issues/archive/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`; corrected in `da55100a`, which also found the sketched parser-side fix unreachable. The bug's *"inferred, not cited"* label is what made the wrong mechanism cheap. Kin R-102, R-103, R-104 |
 | R-109 | 2026-08-08 | miss | A host-specific symptom accepted as the norm without sweeping the other hosts | 9 of 15 declared roots swept; all nine had zero untracked entries |
 | R-110 | 2026-08-08 | miss | An identifier's shape says nothing about whether the thing exists — check its declared root | caught by an unrelated tool response an hour after the claim was published |
+| R-117 | 2026-08-27 | hit (pre-edit) → **promoted** | **A fix that names a POPULATION asserts it is non-empty — and that assertion is the one that fails green.** A bug file's `## Fix` prescribed dropping "rows under a *different* managed root"; `managed_roots` never returns a foreign repo, so the case was the empty set and the fix would have compiled, passed a test written from the same model, and moved zero rows. Third grammar of the promoted proposed-fix law, so the bullet was WIDENED rather than a fourth added | `bug-fix-session-log:F-74`; measured partition 402 → 359 umbrella / 33 known-repo / 10 orphan; kin [[R-106]] (24 "duplicates" were one source copy) and the 32 KB hook whose trigger population was empty |
 | R-111 | 2026-08-08 | hit | Before fixing a heuristic, grep for other copies of it — `references()` cannot see a duplicated closure | `docs/issues/archive/2026-08-08-buffer-only-gate-misses-tilde-and-home.md` |
 | R-87 | 2026-08-15 | hit | Before designing an abstraction, scout for the dispatch point that already exists | SD-1b |
 | R-88 | 2026-08-15 | hit | The instrument that nominates a refactor group also fixes its axis, and that axis can be orthogonal to the real duplication | SD-3 + SD-10; `legibility_scan` tier-1 group, premise falsified by live A/B |
@@ -3600,6 +3601,82 @@ resolution on this host is `dated 2026-08-26` and changes the moment
 **Rests on:** `VectorBackend::resolve`'s `server-stack` default plus an unset env
 var — together they make a present, plausible, schema-correct sqlite file the
 *wrong* substrate rather than merely a stale one.
+
+## R-117 — A fix that names a POPULATION asserts it is non-empty — and that assertion is the one that fails green
+
+**Observed:** 2026-08-27, implementing the `doctor` outside-roots scoping fix from
+a bug file written earlier the same session. Recon ran before the first edit.
+
+**Scout (reality):** the bug file's `## Fix` prescribed *"drop rows whose
+`abs_path` resolves under a **different** managed root"*. Reading
+`managed_roots` (`src/librarian/tools/mod.rs:215`) and
+`check_outside_managed_roots` showed the case is the **empty set**:
+`managed_roots` returns the active project's `git_root`/`abs_path` plus the
+legacy `workspace.roots` and never another repo, and the check fires only when
+`containing_root` matches *nothing*. Every one of the 401 firing rows is under no
+managed root; there was no "different root" bucket to move anything into.
+
+**Counterfactual (hit value):** the prescribed fix would have compiled, shipped,
+and **passed its own test** — a test written from the same wrong model would have
+constructed two managed roots, a configuration that never occurs — while changing
+the report by **zero rows**. The bug file would then read `fixed`, which is
+precisely the artifact that stops anyone looking again. The working fix needed a
+discriminator that had to be *measured*, not reasoned: partitioning the 402 firing
+rows against umbrella members and `commits.git_root` gave 359 / 33 / **10**, and
+the 10 are the whole actionable population.
+
+**The generalisable form.** Reconnaissance already treats a *proposed fix* and a
+*prohibition* as claims about current state. A fix that names a **POPULATION** is
+the same claim in a third grammar: *"drop the rows that are X"*, *"dedup the 24
+duplicate descriptions"*, *"hook the calls above 32 KB"* each assert that a set
+exists to act on. The count is one query.
+
+**Why this form is the dangerous one: it fails GREEN.** The other two forms fail
+when you look — *"X is already set"* is a visible finding. An empty population
+produces a fix that compiles, a test that passes, a diff that reviews cleanly, and
+a report that is unchanged. Nothing anywhere raises.
+
+**Prior datapoints — three instances, three systems, none of which raised:**
+
+1. **This one.** `managed_roots` never returns a foreign repo → the named case was
+   empty. `bug-fix-session-log:F-74`.
+2. **[[R-106]]** — a "free mechanical dedup, zero risk" of one 225-char
+   description repeated on 24 tools. The source holds exactly **one** copy;
+   `inject_workspace_param` injects it at list time. The 24 duplicates were a
+   rendering, not a population.
+3. **The context-utilisation programme's sole build decision** — a PostToolUse
+   hook on `mcp__.*` at 32 KB, justified by "137 calls carrying 61.1% of
+   information-bearing tokens". After excluding base64 browser payloads, **zero**
+   non-browser MCP calls in the entire corpus reach 32 KB. *"Trigger population
+   empty, not merely smaller."*
+
+**Audit of the promoted set** (required of every promotion; verdicts recorded so
+the next one inherits the check rather than repeating it):
+
+| promoted law | mode checked | verdict |
+|---|---|---|
+| *A proposed fix — and equally a prohibition — is a claim about CURRENT STATE* | **Outgrown** | **Confirmed outgrown.** Its examples cover only the "X is not already done" assertion; the population form recurred under it unnamed. This promotion IS the remedy — widen, do not add a sibling bullet. |
+| *A search that finds nothing is evidence about the search* | False / Obsolete | **Holds, do not cut.** Fired twice today, once inside this very scout: `grep "Trigger population empty, not merely smaller"` returned 0 because the phrase spans a line break. Partially gated now — codescout's `grep` prints *"this zero describes what was searched"* on every empty result — but the gate covers a grep's zero, not a **report's**, which is the costlier half. |
+| *Freshness is a property of the copy that SERVES you* ([[R-89]]) | Unreachable | **Holds and was reached.** Governed both live-verifies this session; each fix was reported as "committed and tested, not live" until `cargo rb` + `/mcp` + one probe. No change needed. |
+
+**Proposal:** widen the existing Phase 1 bullet rather than add a fourth — a
+recurrence of a promoted law is a defect in the promoted text, and this ledger's
+own R-3 → R-113 → R-77 → R-79 chain is the cost of filing recurrences instead of
+re-promoting. Add the population form with its fails-green tell, and update the
+provenance tail.
+
+**Status:** promoted — SKILL.md bullet widened this session.
+
+**Valid:** dated 2026-08-27
+
+The three bucket counts are facts about this machine's catalog on this date; the
+mechanism (a named population may be empty, and that failure is green) is
+invariant.
+
+**Rests on:** `src/librarian/tools/mod.rs:215` and
+`check_outside_managed_roots`'s `containing_root(...).is_some()` early return,
+both read this session; [[R-106]] and the context-utilisation entry for the two
+prior datapoints; `bug-fix-session-log:F-74` for the full narrative.
 
 ## Template for new entries
 
