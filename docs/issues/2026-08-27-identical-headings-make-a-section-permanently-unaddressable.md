@@ -14,7 +14,7 @@ owner: marius
 related:
 - docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
 severity: medium
-unverified: Live-verified only through the test suite; the running MCP binary still predates the fix, so no probe has exercised occurrence over the wire. Fix step 4 (the file-relative vs body-relative line-number frame in the ambiguity error) was deliberately NOT done and remains open.
+unverified: 'Fix step 4 (the file-relative vs body-relative line-number frame in the ambiguity error) was deliberately NOT done and remains open. A second, unrelated defect is left unrepaired by choice: open-issue-work-queue.md defines ### BL-43 twice, and choosing the authoritative copy is a content judgement about another work stream.'
 ---
 
 # BUG: two byte-identical headings make both sections permanently unaddressable
@@ -272,21 +272,56 @@ Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
 
 ## Resume
 
-**Still open — fix step 4 was not done.** The ambiguity error reports **file-relative**
-line numbers while `artifact(action="get")`'s heading map reports **body-relative** ones;
-measured on `2026-08-27-unregistered-memory-tool-structs-read-as-the-live-tool.md` the
-constant difference is 18 lines, exactly that file's frontmatter length (`## Fix` at file
-86/106, heading map 68/88). Both frames are internally consistent and neither is labelled,
-so a caller who reads `get` and then the error sees two different numbers for one heading.
-Decide one frame and state it in the message. Untouched by `164c8bd6`.
+**Live-verified 2026-08-27, 18:11 EEST.** Freshness checked on all three axes before
+trusting any probe: build (`target/release/codescout` @ 18:10:28 carries both new strings,
+old hint count **0**), distribution (`~/.cargo/bin/codescout` is a symlink to exactly that
+path — confirmed by grepping *through* the symlink, since `stat` on a symlink reports the
+link's own June mtime and would have read as stale), process (serving pid 4095217 started
+18:10:59, identified by walking the parent chain `sh → codescout → claude` rather than
+guessing among 18 live codescout processes).
 
-**Also open — the four affected trackers are unrepaired.** `occurrence` now makes them
-editable, but a fresh binary is required first (`cargo rb`, then `/mcp`): the running MCP
-process predates the fix, so no probe has exercised `occurrence` over the wire. Repair
-after a rebuild + live check, not before.
+Probes, all on the wire:
 
-**Not established:** whether the duplicate `### BL-43` definition in
-`docs/trackers/open-issue-work-queue.md` breaks citation resolution — see § Evidence.
+- ambiguous query → hint now reads *"Pass occurrence=N to target one (1-indexed, here
+  1..=2)"* and no longer names `edit_file`. The closed loop is open.
+- `edit_markdown(heading="## Fix", occurrence=2)` → edited the second section, first
+  untouched.
+- control: the same `replace` on a *unique* heading with no `occurrence` produces a
+  byte-identical shape, so the trailing-blank-line consumption is `replace`'s pre-existing
+  semantics and not something `occurrence` introduced.
+- `artifact(update, patch={body_edits: [{heading: "## Fix", occurrence: 1, …}]})` against
+  a real librarian-managed artifact — the branch that had no alternative — succeeded, and
+  was used to repair this project's own duplicate at
+  `docs/issues/archive/2026-08-27-unregistered-memory-tool-structs-read-as-the-live-tool.md`.
+
+**CORRECTION — § this section previously said "the four affected trackers are unrepaired"
+and queued repairing them. That was wrong, and the framing behind it was wrong.** Three of
+the four carry duplicates that are *correct document structure*, not defects: `### Do NOT
+re-do` / `### Still owed` recur under each `## Resume — round N` in
+`release-promotion-session-log.md`; `### Why` / `### Shape` / `### Acceptance` under each
+`## Phase N` in `artifact-augmentation-followups.md`; `### The ask` / `### Open decisions`
+/ `### Resume` under each `## CAP-N` in `capability-proposals.md` (verified by reading the
+heading maps, 2026-08-27). Renaming them to restore addressability would have damaged the
+documents. `occurrence` does not repair these files — it *reaches* them, which is the whole
+point. Read the 52-file measurement the same way: it is mostly legitimate per-entry
+template structure that the tool could not address, not 52 defects.
+
+**Still genuinely open — two items.**
+
+1. **Fix step 4 was not done.** The ambiguity error reports **file-relative** line numbers
+   while `artifact(action="get")`'s heading map reports **body-relative** ones; measured on
+   the memory-tool-structs file the constant difference is 18 lines, exactly that file's
+   frontmatter length. Both frames are internally consistent and neither is labelled, so a
+   caller who reads `get` and then the error sees two different numbers for one heading.
+   Decide one frame and state it in the message. Untouched by `164c8bd6`.
+
+2. **`docs/trackers/open-issue-work-queue.md` defines `### BL-43 — …` twice** (lines 295
+   and 301), verbatim. Unlike the three above this is a real defect — one entry token with
+   two definers in one active ledger — and it is now repairable via `occurrence`. Not done
+   here: deciding which of the two is authoritative is a content judgement about another
+   work stream's ledger, not a mechanical fix. Whether it breaks citation resolution
+   remains **not established** (see § Evidence: `link_scan` truncated both buckets at 50 of
+   539/587).
 ## References
 
 - `src/tools/file_summary/file_summary.rs:229-325` — `resolve_section_range`, the 4-tier cascade
