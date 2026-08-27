@@ -1,19 +1,20 @@
 ---
 id: '9f7de1c3c092095d'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: two byte-identical headings make both sections permanently unaddressable, and the error''s prescribed remedy names parameters that do not exist on the tool it names'
 tags:
 - edit-markdown
 - librarian
 - error-hints
 - closed-loop
-closed: null
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 related:
 - docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
 severity: medium
+unverified: Live-verified only through the test suite; the running MCP binary still predates the fix, so no probe has exercised occurrence over the wire. Fix step 4 (the file-relative vs body-relative line-number frame in the ambiguity error) was deliberately NOT done and remains open.
 ---
 
 # BUG: two byte-identical headings make both sections permanently unaddressable
@@ -183,7 +184,23 @@ heading.
 
 ## Fix
 
-*Plan; not yet implemented.*
+**Shipped 2026-08-27** — `164c8bd6` (`experiments`), patch-id
+`a3681488286644bf7c0a182740d26065a1230d44`. Steps 1–3 below landed; **step 4 did not**
+(see *Still open*).
+
+The threading used `HeadingQuery { text, occurrence }` with a `From<&str>` impl and
+`impl Into<HeadingQuery>` parameters rather than a new positional argument. That choice
+was load-bearing for the size of the diff: every existing `&str` caller compiles
+unchanged, so the 12 test call sites in `src/tools/file_summary/tests.rs`,
+`src/tools/read_file.rs:956`, and `file_summary.rs`'s own consumer needed **zero**
+edits. `plan_section_edit` already carried `#[allow(clippy::too_many_arguments)]`, so a
+ninth argument would have made that worse; changing the query's *type* did not.
+
+One finding the plan did not predict: `src/librarian/tools/update.rs` has its **own**
+`apply_body_edits` loop and does not route through `plan_batch`, so the managed-artifact
+path needed wiring separately from `edit_markdown`'s. That is the branch with no
+alternative, so missing it would have left the actual defect in place behind a passing
+`edit_markdown` test.
 
 Add an **`occurrence`** disambiguator (1-indexed) to the heading-addressed surfaces,
 and correct the hint to name it.
@@ -210,14 +227,38 @@ today's loud refusal.
 
 ## Tests added
 
-None yet — fix not implemented. Regression tests owed:
+Eight regression tests, each with its mutation control named before the run.
 
-- ambiguous heading + `occurrence=2` targets the second section
-- `occurrence` beyond the match count errors, naming the count
-- the `body_edits` path accepts `occurrence` (guards step 2 actually reaching the
-  managed surface, which is the branch with no alternative)
-- the emitted hint does not mention `edit_file` (guards regression of step 3)
+`src/tools/file_summary/tests.rs`:
 
+- `occurrence_selects_among_identical_headings` — occurrence 1 and 2 resolve to
+  different heading lines.
+- `occurrence_past_the_match_count_errors_naming_the_count` — guards against clamping.
+- `occurrence_zero_is_rejected_rather_than_read_as_the_first` — guards against a caller
+  who counts from zero editing one section while naming another.
+- `occurrence_on_a_unique_heading_still_resolves`
+- `an_unqualified_duplicate_query_still_refuses_rather_than_guessing` — guards the
+  deliberately-preserved loud refusal.
+- `the_duplicate_hint_names_occurrence_and_not_edit_file` — asserts the hint names the
+  remedy that exists and no longer names the closed door.
+
+`src/librarian/tools/update.rs`:
+
+- `body_edits_occurrence_reaches_the_second_of_two_identical_headings`
+- `body_edits_without_occurrence_still_refuses_identical_headings`
+
+**Mutation verification — both mutations produced the predicted failure:**
+
+1. Resolver `indices[n - 1]` → `indices[0]`: `occurrence_selects_among_identical_headings`
+   failed `left: 2, right: 6`, **and** the body_edits test failed printing the corrupted
+   document — `the shipped record` had landed in the *first* section while the second
+   still read `the plan`. The silent wrong-section edit, made visible.
+2. `update.rs` passing `heading` instead of `query`: only the managed-path test failed,
+   with the ambiguity error. This is the control that proves that path actually reads the
+   selector rather than inheriting a pass from `edit_markdown`'s wiring.
+
+Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean,
+`cargo test` 4624 passed / 0 failed / 46 ignored.
 ## Workarounds
 
 - **Plain `.md`, unguarded:** `edit_file(..., old_string=<text unique to the intended
@@ -231,17 +272,21 @@ None yet — fix not implemented. Regression tests owed:
 
 ## Resume
 
-Implement step 1 in `src/tools/file_summary/file_summary.rs` — add
-`resolve_section_range_nth` beside `resolve_section_range:229` and have the latter
-delegate with `None`. Anchor behaviour first with the existing suite:
-`cargo test -p codescout resolve_section_range` (12 call sites live in
-`src/tools/file_summary/tests.rs:683-828`, including `:809` which already asserts the
-duplicate-heading error). Then thread `occurrence` outward through
-`src/tools/markdown/edit_markdown.rs:89,363,749`.
+**Still open — fix step 4 was not done.** The ambiguity error reports **file-relative**
+line numbers while `artifact(action="get")`'s heading map reports **body-relative** ones;
+measured on `2026-08-27-unregistered-memory-tool-structs-read-as-the-live-tool.md` the
+constant difference is 18 lines, exactly that file's frontmatter length (`## Fix` at file
+86/106, heading map 68/88). Both frames are internally consistent and neither is labelled,
+so a caller who reads `get` and then the error sees two different numbers for one heading.
+Decide one frame and state it in the message. Untouched by `164c8bd6`.
 
-Repairing the four affected trackers is separate and should wait for the fix — three
-of them need `occurrence` to be editable at all.
+**Also open — the four affected trackers are unrepaired.** `occurrence` now makes them
+editable, but a fresh binary is required first (`cargo rb`, then `/mcp`): the running MCP
+process predates the fix, so no probe has exercised `occurrence` over the wire. Repair
+after a rebuild + live check, not before.
 
+**Not established:** whether the duplicate `### BL-43` definition in
+`docs/trackers/open-issue-work-queue.md` breaks citation resolution — see § Evidence.
 ## References
 
 - `src/tools/file_summary/file_summary.rs:229-325` — `resolve_section_range`, the 4-tier cascade
@@ -250,4 +295,3 @@ of them need `occurrence` to be editable at all.
 - `src/tools/markdown/edit_markdown.rs:89,363,749` — the three consumers; `:749` is `body_edits`
 - `src/tools/read_file.rs:956` — heading-param consumer, unaffected
 - `docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md` — same shape in `edit_code`: an error whose prescribed escape is closed in the context that raises it
-
