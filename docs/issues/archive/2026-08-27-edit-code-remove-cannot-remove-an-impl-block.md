@@ -14,7 +14,6 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-27-unregistered-memory-tool-structs-read-as-the-live-tool.md
 severity: low
-unverified: 'Not live-verified through a running server: needs `cargo rb` + `/mcp`, then one `edit_code(action="remove", symbol="impl Trait for Type")` against a real file. Gate-green and mutation-verified only. The original reproduction was on `src/tools/memory/mod.rs`; a scratch fixture reproduced it identically.'
 ---
 
 ## Summary
@@ -165,6 +164,26 @@ defect rather than a lookalike.
 
 Gate: `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`,
 `cargo test` — **4732 passed, 0 failed**.
+## Live verification (2026-08-27, post-`cargo rb` + `/mcp`)
+
+Freshness green on all three axes first: binary `22:40:44` > last commit `22:26:50`; serving pid
+`2885849` parented to this session, started `22:40:56` > build.
+
+The call that could never succeed, run against the rebuilt server on a scratch fixture with a
+trait, an impl block, and a true sibling below it:
+
+```
+edit_code(action="remove", symbol="impl Greet for Thing", path="recon-impl-live.rs")
+→ {"status": "ok", "removed_lines": "8-15", "line_count": 8,
+   "removed_descendants": ["Thing/bye", "Thing/hello"]}
+```
+
+Reading the file back: the impl block is gone, `trait Greet` above it survives, `fn keep_me()` below
+it survives. The descendants are reported under their **AST** name paths (`Thing/*`), which is the
+naming divergence that caused the bug — now surfaced as information instead of as a false sibling-drop
+refusal.
+
+Before this fix the identical call rolled back every time.
 ## Not established
 
 Answered.

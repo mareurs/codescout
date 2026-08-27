@@ -1,5 +1,5 @@
 ---
-id: 3e8826ccef87c8dd
+id: '3e8826ccef87c8dd'
 kind: bug
 status: fixed
 title: 'BUG: append_entry''s anchor is undiscoverable through the very surface its error tells you to use — get truncates headings from the front, the anchor lives at the bottom'
@@ -12,7 +12,7 @@ closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 severity: med
-unverified: 'Not live-verified through a running server: needs `cargo rb` + `/mcp`, then one `artifact(action="get")` on a long ledger to confirm `last_heading` appears, and one deliberately-bad `append_entry` anchor to read the new hint. Gate-green and mutation-verified only. Separately still open, and deliberately out of scope: whether `grep` reaching a librarian-guarded artifact is intended or a gap in that guard.'
+unverified: 'Still open and deliberately out of scope: whether `grep` reaching a librarian-guarded artifact is intended or a gap in that guard. It is now only a convenience — the anchor is reachable from `artifact(get)`''s `last_heading` and named outright in the failure hint.'
 ---
 
 ## Summary
@@ -206,6 +206,45 @@ test covers the real defect rather than a lookalike.
 
 Gate: `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`,
 `cargo test` — **4737 passed, 0 failed**.
+## Live verification (2026-08-27, post-`cargo rb` + `/mcp`)
+
+Freshness green on all three axes first: binary `22:40:44` > last commit `22:26:50`; `last_heading`
+and the new hint text both present in the symlink-resolved binary against a negative control of 0;
+serving pid `2885849` parented to this session, started `22:40:56` > build.
+
+All three surfaces confirmed on the ledger that motivated the bug —
+`reconnaissance-patterns.md`, 92 headings, 4105 lines.
+
+**Surface 1 — `artifact(action="get")`.** The response now carries, next to the truncation flag:
+
+```json
+"total_headings": 92,
+"headings_truncated": true,
+"last_heading": {"level": 2, "text": "Template for new entries", "line": 4030}
+```
+
+That is the exact anchor that was unreachable, from the exact surface the old hint named.
+
+**Surfaces 2 and 3 — one deliberately bad `append_entry` anchor.** Both fire together:
+
+```
+Available headings: # Reconnaissance patterns, … ### Still open after this pass
+  … (+77 more) …
+  ## R-123 — …, ## R-124 — …, ## Template for new entries
+
+hint: `anchor_heading` must name a heading that exists in the ledger verbatim,
+  including its `#` prefix. Its last top-level headings, closest to the end first,
+  are: `## Template for new entries`, `## R-124 — …`, `## R-123 — …`.
+  A ledger's append anchor is conventionally the final one.
+```
+
+The elision is counted (`+77 more`), both ends are present, and the hint no longer routes the caller
+to a surface that cannot answer. The error also still ends `no id was allocated and nothing was
+written` — the atomicity contract pinned by
+`a_bad_anchor_writes_nothing_at_all_not_even_the_high_water_mark` is intact under the new hint.
+
+A caller hitting this error can now compose the correct retry from the error text alone, without a
+second call to any surface.
 ## Tests added
 
 Five, all in-tree and mutation-verified — see the table in § *Fix*.
