@@ -287,14 +287,23 @@ all shell work through native `Bash`.
 `tool_name` has never contained "bash", while `run_command` is 37% of 47,727
 recorded calls (2026-08-03..08-27). So shell work routed through `Bash` does not
 appear in `/analyze-usage`, `docs/trackers/tool-usage-patterns.md`, or the
-`pika_observations` table. This is a **consequence of a deliberate choice, not a
-defect**: native `Bash` is the intended shell path in this project because eval
-data showed Opus performing better with it than with `run_command`. Do not
-"helpfully" set `shell_command_mode` back to `"warn"` — that reverts a measured
-decision. Native `Bash` also does not get `run_command`'s IL-3 unbounded-pipe
-block (piping `cargo test` to `grep` masked a non-zero exit here, reporting
-success on a failing run) or its dangerous-command `@ack_*` gate; both are
-accepted trade-offs of that choice.
+`pika_observations` table. Native `Bash` also does not get `run_command`'s IL-3
+unbounded-pipe block (piping `cargo test` to `grep` masked a non-zero exit here,
+reporting success on a failing run) or its dangerous-command `@ack_*` gate.
+
+**Which shell path this project should use is UNDER ACTIVE EVALUATION — do not
+"settle" it in either direction as a drive-by.** Eval data showed Opus performing
+better with native `Bash` than with `run_command`, which is why
+`shell_command_mode` was set to `"disabled"` on 2026-08-27; it was returned to
+`"warn"` (i.e. `run_command` ON) the same day, deliberately, while further evals
+run. So the current setting is a **hold, not a verdict**, and the trade-offs above
+are inputs to that evaluation rather than defects to fix. If you find
+`shell_command_mode` set to something surprising, assume it is an eval arm and
+ask before changing it.
+
+The `~/.cargo/config.toml` `[env]` pin stays useful either way: it is inert when
+work goes through `run_command` and load-bearing when it goes through `Bash`, so
+it does not need touching as the setting moves.
 
 Sibling of the section above, and easy to conflate: that one is about the
 symlink's *contents* drifting from the running compose profile; this one is about
