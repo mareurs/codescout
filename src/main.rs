@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 #[cfg(unix)]
@@ -216,6 +216,16 @@ enum Commands {
     /// interactive use. Always exits 0; prints `[]` on any internal error.
     #[cfg(feature = "librarian")]
     ConstitutionCheck(codescout::cli::constitution_check::ConstitutionCheckArgs),
+
+    /// Compile operator rules into each Claude Code profile's CLAUDE.md, or check for drift.
+    OperatorRules {
+        /// `compile` writes; `check` reports drift and exits 1 if any.
+        #[arg(value_parser = ["compile", "check"])]
+        mode: String,
+        /// Ledger path. Defaults to docs/trackers/operator-rules.md.
+        #[arg(long)]
+        ledger: Option<std::path::PathBuf>,
+    },
 }
 
 // `--env` is only parsed by the cfg(unix) `Mux` subcommand; dead on Windows.
@@ -449,6 +459,42 @@ async fn main() -> Result<()> {
         #[cfg(feature = "librarian")]
         Commands::ConstitutionCheck(args) => {
             codescout::cli::constitution_check::run(args).await;
+        }
+        Commands::OperatorRules { mode, ledger } => {
+            use codescout::operator_rules as ops;
+            let path = ledger.unwrap_or_else(|| ops::LEDGER_PATH.into());
+            let doc = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading ledger {}", path.display()))?;
+            let profiles = ops::OperatorProfiles::from_env()?;
+            match mode.as_str() {
+                "compile" => {
+                    let written = ops::compile(&doc, &profiles)?;
+                    if written.is_empty() {
+                        println!(
+                            "operator-rules: already current in all {} profiles",
+                            profiles.paths.len()
+                        );
+                    } else {
+                        for p in &written {
+                            println!("operator-rules: wrote {}", p.display());
+                        }
+                    }
+                }
+                "check" => {
+                    let drift = ops::check(&doc, &profiles)?;
+                    for d in &drift {
+                        eprintln!("operator-rules: DRIFT {} — {}", d.path.display(), d.reason);
+                    }
+                    if drift.is_empty() {
+                        println!(
+                            "operator-rules: all {} profiles current",
+                            profiles.paths.len()
+                        );
+                    }
+                    std::process::exit(ops::exit_code(&drift));
+                }
+                _ => unreachable!("clap value_parser restricts mode"),
+            }
         }
         #[cfg(unix)]
         Commands::Mux {
