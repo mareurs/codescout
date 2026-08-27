@@ -283,6 +283,32 @@ is why that file cannot settle this either way.
 Measured 2026-08-27 at `c37c7c98`, while `shell_command_mode = "disabled"` routed
 all shell work through native `Bash`.
 
+**The symptom is session-scoped, not `Bash`-scoped — measured 2026-08-27 22:1x from
+a concurrent session, `codescout-d3`.** That session's native `Bash` ran the full
+suite at `12f21926` and got **4732 passed / 0 failed**, `write_and_read_roundtrip`
+among them — from native `Bash`, and **before** the `~/.cargo/config.toml` `[env]`
+pin existed (config mtime 21:59:43; the run finished by 21:45). It passed because
+that session's `Bash` already carried `CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081`
+ambiently, and `48081` is the one listening port (`ss -ltn`). Its `run_command`
+carried the identical value, so the two shells did **not** diverge there at all.
+
+Two consequences for the bisection:
+
+- The discriminator is the **environment Claude Code was launched from**, not the
+  Bash-vs-`run_command` boundary. Two concurrent sessions on this machine differ:
+  `CODESCOUT_EMBED_URL` (the short name, `48080`) was present in the failing
+  session's env and is **absent** from `codescout-d3`'s — `env | grep -c
+  '^CODESCOUT_EMBED_URL='` → `0` in both its `Bash` and its `run_command`.
+- One hypothesis is already dead, so nobody need re-run it: *"`env -i … bash -lc`
+  passes only because `-l` re-sources profile files that set the var."* It does not
+  — `env -i HOME=… PATH=… bash -lc 'env | grep -i EMBED'` prints nothing, and so
+  does the non-login form. No profile, `bashrc`, `/etc/profile.d/` or
+  `environment.d/` file on this machine sets any `CODESCOUT_EMBED*` var. The
+  `env -i` row stands as a genuine refutation of the absent-variable story.
+
+Before treating a green suite from native `Bash` as suspect, check the cheap thing
+first: `env | grep -i EMBED` in the shell that ran it.
+
 **Related, separately verified.** `usage.db` records only codescout MCP calls:
 `tool_name` has never contained "bash", while `run_command` is 37% of 47,727
 recorded calls (2026-08-03..08-27). So shell work routed through `Bash` does not
