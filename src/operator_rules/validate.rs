@@ -87,4 +87,13 @@ mod tests {
         ];
         validate(&rules).unwrap();
     }
+
+    #[test]
+    fn a_blank_covers_is_refused() {
+        let mut r = rule("OP-1", Binding::Always, &[]);
+        r.covers = "   ".into();
+        let err = validate(&[r]).unwrap_err().to_string();
+        assert!(err.contains("OP-1"), "names the rule: {err}");
+        assert!(err.contains("Covers"), "names the field: {err}");
+    }
 }
