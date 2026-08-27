@@ -121,7 +121,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "parameter `include_body` was removed; use `full: true` for the full body, or `heading=\"<section>\"` for a targeted section",
         ));
     }
-    let a: Args = serde_json::from_value(args)?;
+    let a: Args = serde_json::from_value(args).map_err(|e| {
+        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"get\") requires 'id': {e}"), "e.g. artifact(action=\"get\", id=\"<16-hex>\"). Get an id from artifact(action=\"find\", ...). Add full=true for the whole body, or heading=\"## Section\" for one section.")
+    })?;
     let body_selectors = [
         a.full.unwrap_or(false),
         a.heading.is_some(),

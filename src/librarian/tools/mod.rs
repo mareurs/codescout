@@ -483,9 +483,9 @@ mod required_param_routing_tests {
     ///
     /// A required-parameter failure must either repair the call and say so, or
     /// refuse WITH A ROUTE — never answer with a bare serde field name. Measured
-    /// 2026-08-27 by probing the live surface: 7 of 13 librarian entry points
+    /// 2026-08-27 by probing the live surface: 9 of 17 librarian entry points
     /// answered `missing field \`x\``, which names neither the tool, nor the
-    /// action, nor a corrected call. The other 6 already routed, so the pattern
+    /// action, nor a corrected call. The other 8 already routed, so the pattern
     /// asserted here is the repo's own, not an invention.
     ///
     /// Table-driven on purpose: the defect is a CLASS, and a per-site test would
@@ -527,6 +527,8 @@ mod required_param_routing_tests {
             ),
             ("graph", graph::call(&c, json!({})).await.unwrap_err()),
             ("refresh", refresh::call(&c, json!({})).await.unwrap_err()),
+            ("get", get::call(&c, json!({})).await.unwrap_err()),
+            ("timeline", timeline::call(&c, json!({})).await.unwrap_err()),
         ];
 
         for (name, e) in cases {
