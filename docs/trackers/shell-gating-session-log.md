@@ -365,7 +365,7 @@ existing `notifications/tools/list_changed` path for free.
 **Confirming data points:**
 1. This session — request premise "we don't have this" was false; the knob had
    shipped, was tested, and worked at two config layers.
-2. `F-1` (this log) is the same law's **miss** in its prohibition form, in the
+2. `shell-gating-session-log:F-1` is the same law's **miss** in its prohibition form, in the
    same session: CLAUDE.md's "native Bash is hard-denied" was also an unverified
    claim about current state, and that one I acted on rather than checking.
 
