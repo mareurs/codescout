@@ -1,5 +1,5 @@
 ---
-id: b010f1812f5a74ed
+id: 97453a9f231a9f9f
 kind: bug
 status: fixed
 title: 'BUG: scope has three different defaults across the librarian surface, and every documentation surface says "project" while find compiles to repo'
@@ -14,7 +14,6 @@ owner: marius
 related:
 - docs/issues/archive/2026-07-05-audit-doc-refs-scope-param-ignored.md
 severity: medium
-unverified: 'Not live-verified. The fix is committed and the suite is green, but this session''s MCP server runs a binary built before the change, so a live artifact(action="find") still reports applied: "repo". Observing the new default needs `cargo rb` plus `/mcp`. Committed and tested is not live — see reconnaissance-patterns:R-89 (freshness is a property of the copy that SERVES you).'
 ---
 
 # BUG: `scope` has three different defaults across the librarian surface, and all four documentation surfaces say "project" — the compiled default for `find` is `repo`
@@ -227,17 +226,31 @@ reports what actually resolved, and that field has been correct throughout.
 
 ## Resume
 
-One step outstanding, and it is the reason `unverified:` is set rather than
-cleared: **live-verify**. Run `cargo rb`, then `/mcp` to reconnect, then
-`artifact(action="find", kind="tracker", limit=1)` and confirm
-`$.scope.applied == "project"`. Until then the honest claim is *committed and
-tested*, not *live* — this session's server still serves the pre-change binary
-and still answers `"repo"`.
+N/A — fixed, live-verified, archived.
 
-A second, optional confirmation once live:
-`python3 scripts/probe_librarian_scope.py --crosstab` should start recording
-`find <omitted> -> project` in its requested→applied table, where the 2026-08-27
-baseline reads `find <omitted> -> repo 822`.
+**Live verification, 2026-08-27**, after `cargo rb` + `/mcp` reconnect:
+`artifact(action="find", kind="tracker", limit=1)` with no `scope` returned
+
+```json
+"scope": {
+  "applied": "project",
+  "abs_path": "/home/marius/work/claude/codescout",
+  "git_root": "/home/marius/work/claude/codescout",
+  "umbrella": "codescout-ecosystem"
+}
+```
+
+where the same call before the fix answered `"repo"`. That is the probe
+`reconnaissance-patterns:R-89` asks for — the copy that actually SERVES the
+caller, not the commit, the build timestamp, or the install record.
+
+One observation worth keeping: the response carried no `more_in_repo` hint. That
+is correct, not a gap. The hint fires for any applied scope other than
+`Repo`/`All`, but its count is `in_repo - here`, and for codescout
+`abs_path == git_root`, so there are zero rows in the repo that the project scope
+did not already return. The ladder rung appears only where it has something to
+report — which is the same `project == repo root` property that made this bug
+invisible for months.
 ## References
 - `src/librarian/tools/scope.rs:24-30` — the `#[default]` on `Repo`
 - `src/librarian/tools/scope.rs:59` — `resolve_scope`'s `unwrap_or_default()`

@@ -28,7 +28,7 @@ use crate::librarian::workspace::WorkspaceConfig;
 /// "project". Removing the derive forces each call site to name its own answer,
 /// the same reason [`UmbrellaPolicy`] exists — see its doc comment. A missing
 /// `#[default]` is a compile error at the call site; a wrong one is a silent
-/// contract violation. See `docs/issues/2026-08-27-scope-default-is-repo-not-project-across-four-doc-surfaces.md`.
+/// contract violation. See `docs/issues/archive/2026-08-27-scope-default-is-repo-not-project-across-four-doc-surfaces.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {

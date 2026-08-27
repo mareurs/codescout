@@ -6367,7 +6367,7 @@ deferral and this tells you why the author will not.
 ## F-73 — A bug file's "four documentation surfaces" included one nothing reads — grep grain cannot distinguish a live `include_str!` from a test-only one
 
 **Observed:** 2026-08-27, pre-implementation scout for option C on bug
-`b010f1812f5a74ed` (librarian `scope` default). About to edit the four
+`docs/issues/archive/2026-08-27-scope-default-is-repo-not-project-across-four-doc-surfaces.md` (librarian `scope` default). About to edit the four
 documentation surfaces the bug file enumerates.
 
 **When:** Reading the seam before the first edit. The bug file was written
@@ -6438,7 +6438,7 @@ both read this session.
 **Fix idea / Pointer:** When a bug file enumerates "surfaces to fix", record for
 each one *who reads it* alongside the `path:line`. A surface list is a
 reachability claim; it currently reads as a location list, and the two are only
-accidentally the same. Bug `b010f1812f5a74ed`, this session.
+accidentally the same. Bug `docs/issues/archive/2026-08-27-scope-default-is-repo-not-project-across-four-doc-surfaces.md`, this session.
 
 ## Template for new entries
 
