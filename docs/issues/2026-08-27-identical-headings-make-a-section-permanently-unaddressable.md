@@ -289,10 +289,9 @@ Probes, all on the wire:
 - control: the same `replace` on a *unique* heading with no `occurrence` produces a
   byte-identical shape, so the trailing-blank-line consumption is `replace`'s pre-existing
   semantics and not something `occurrence` introduced.
-- `artifact(update, patch={body_edits: [{heading: "## Fix", occurrence: 1, …}]})` against
-  a real librarian-managed artifact — the branch that had no alternative — succeeded, and
-  was used to repair this project's own duplicate at
-  `docs/issues/archive/2026-08-27-unregistered-memory-tool-structs-read-as-the-live-tool.md`.
+- `artifact(update, patch={body_edits: [{heading, occurrence, …}]})` against real
+  librarian-managed artifacts — the branch that had no alternative — succeeded twice, and
+  was used to perform both repairs recorded below.
 
 **CORRECTION — § this section previously said "the four affected trackers are unrepaired"
 and queued repairing them. That was wrong, and the framing behind it was wrong.** Three of
@@ -306,22 +305,45 @@ documents. `occurrence` does not repair these files — it *reaches* them, which
 point. Read the 52-file measurement the same way: it is mostly legitimate per-entry
 template structure that the tool could not address, not 52 defects.
 
-**Still genuinely open — two items.**
+**RESOLVED 2026-08-27 — the duplicate `### BL-43` in `docs/trackers/open-issue-work-queue.md`.**
+The two copies were not a copy-paste but two successive *states* of one entry: the copy at
+line 295 carries the current disposition (`dropped — handed off`), the copy at 301 the
+earlier `open` state plus the substantive measurement. Both index tables and the `tasks`
+params row (`status: "dropped"`) agree with the first, so the second was evidence rather
+than a rival claim — deleting it would have destroyed the only place that measurement
+lives. Repaired by demoting the second to a nested `#### Measurement (2026-08-18) —
+recorded while BL-43 was still open`, using `occurrence: 2` to reach it: the fix's first
+use on a document it was written for. Single definer restored, no content lost, and
+`artifact(get, heading="### BL-43 — …")` now returns the section where it previously
+reported the heading **missing**.
+
+**And the "not established" question is now answered — in the negative.** `link_scan`
+before and after the repair reports `ambiguous: 539` / `dangling: 587`, byte-identical, so
+the duplicate definition contributed **zero** to citation ambiguity. The mechanism:
+`link_scan` reports ambiguity when *two artifacts* define one token, because an edge needs
+a single target artifact; two definitions inside **one** artifact both point at that same
+artifact and resolve fine. BL-43 was an addressability and document-structure defect, not a
+link-graph one. (Caveat kept: the corpus grew 1176 → 1177 between runs because this bug
+file was added, so it is not a perfectly controlled A/B — both counts being *exactly*
+unchanged is what carries it.)
+
+**Still genuinely open — two items, both distinct from the above.**
 
 1. **Fix step 4 was not done.** The ambiguity error reports **file-relative** line numbers
    while `artifact(action="get")`'s heading map reports **body-relative** ones; measured on
    the memory-tool-structs file the constant difference is 18 lines, exactly that file's
-   frontmatter length. Both frames are internally consistent and neither is labelled, so a
-   caller who reads `get` and then the error sees two different numbers for one heading.
-   Decide one frame and state it in the message. Untouched by `164c8bd6`.
+   frontmatter length, and on `open-issue-work-queue.md` it is 16. Both frames are
+   internally consistent and neither is labelled, so a caller who reads `get` and then the
+   error sees two different numbers for one heading. Decide one frame and state it in the
+   message. Untouched by `164c8bd6`.
 
-2. **`docs/trackers/open-issue-work-queue.md` defines `### BL-43 — …` twice** (lines 295
-   and 301), verbatim. Unlike the three above this is a real defect — one entry token with
-   two definers in one active ledger — and it is now repairable via `occurrence`. Not done
-   here: deciding which of the two is authoritative is a content judgement about another
-   work stream's ledger, not a mechanical fix. Whether it breaks citation resolution
-   remains **not established** (see § Evidence: `link_scan` truncated both buckets at 50 of
-   539/587).
+2. **`artifact(action="get", heading=X)` reports a doubly-defined heading as `heading_missing:
+   true`** — the opposite diagnosis, sending the caller to look for a heading that is
+   present twice. Found while repairing BL-43 and confirmed with two positive controls
+   (`### BL-44 — …`, unique, resolves; `### BL-1 — …`, unique *and* containing an
+   apostrophe, resolves), so it is duplication and not a character-encoding mismatch. That
+   read surface never received `occurrence`; this fix only reached the write surfaces.
+   Filed separately rather than folded in here.
 ## References
 
 - `src/tools/file_summary/file_summary.rs:229-325` — `resolve_section_range`, the 4-tier cascade
