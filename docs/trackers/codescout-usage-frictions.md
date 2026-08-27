@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 49
+entry_high_water_U: 50
 entry_prefix: U
 expects_augmentation: true
 ---
@@ -2163,3 +2163,36 @@ output, and it is the only thing in the response that cannot be about the wrong 
 **Filed:** `docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md`.
 
 **Status:** mitigated — fix idea 3 (prefix the notice into `stdout`, not just a sibling field) landed in `src/tools/core/types.rs`'s `inject_notice`. Fix idea 2 (guard reads outright) was deliberately rejected: `worktree_read_notice`'s own doc comment already argues against refusing reads mid-orientation, and that reasoning holds. Fix idea 1 (`EnterWorktree` self-activates) remains open and lives in `codescout-companion`, a different repo — not done here.
+
+### U-50 — Nothing surfaces concurrent writers in a shared checkout; a peer's uncommitted refactor appeared in my working tree mid-task
+
+**Valid:** conditional — a concurrent-writer signal ships (session-start or `workspace(action="status")`), or worktree-per-session becomes the default for agent sessions
+
+**Rests on:** `docs/trackers/archive/multi-agent-concurrent-coordination.md` — the fault line, its two prior concretes, and Option C
+
+**When:** 2026-08-27, executing `docs/superpowers/plans/2026-08-27-operator-rules-phase-1.md` under `subagent-driven-development` in `/home/marius/work/claude/codescout`.
+
+**Got:** I ruled against an isolated worktree — `experiments` is the repo's designated experimental branch, and a worktree costs `merge_worktree` catalog reconciliation — and dispatched a Task 1 implementer into the main checkout. Three minutes later `git status` showed two files modified that I had not touched: `src/tools/file_summary/file_summary.rs` (+147/−30) and `src/tools/markdown/edit_markdown.rs` (+12), a `HeadingQuery` occurrence-selector refactor. `ListAgents` showed **two other codescout sessions live and busy**, started 9h and 8h earlier. Nothing in the session-start surface, the activation bootstrap, the companion hooks, or `workspace(action="status")` had mentioned them.
+
+**Cost:** the implementer's `cargo test` would have run against a tree holding a peer's half-finished refactor, so a red suite would have been unattributable — mine or theirs. Any `git add -A` would have swept their work into an operator-rules commit. The tell surfaced only because the operator overrode my ruling and instructed a worktree, which prompted a `git status` I had no other reason to run. Absent that instruction the first signal would have been a confusing test failure inside a subagent.
+
+**Why this is a missing projection, not missing data:** `ListAgents` already reports every live session on the machine. `workspace(action="status")` reports the active project, index state and memories — not peers. `librarian(action="doctor")` reports worktree-scoped catalog rows but nothing about live sessions. The data exists one tool call away, and no surface an agent reads by default carries it.
+
+**This is a third concrete on a fault line already scoped — and then archived while still scoping.** `docs/trackers/archive/multi-agent-concurrent-coordination.md` names the fault line, *"shared resource accessed by ≥2 concurrent agents with no transaction between observation and action"*, records two concretes (a `git reset --soft HEAD~1` race on shared HEAD; an F-N allocator collision), and offers three options — of which **Option C is worktree-per-session**, the only one whose stated scope is the fault line rather than the symptoms. Its Promote-when fires on *"a third concrete instance of the same fault line (whatever the shared resource is)"* and on *"concurrent-session rate exceeds 1 per day, sustained"*. Today supplies both: the shared **working tree** is a third resource its conventions never covered, and three codescout sessions were live at once. Its decision table's bottom row reads *"Daily, multiple collisions / week → Option C"*, against a recorded *"Today's state: 1 concurrent session pair this calendar quarter"* — a figure that is now false.
+
+Its own Stale-when says archive when Option A, B or C ships, or when concurrent work stops for ≥3 months. Neither happened. The criteria that should have fired today stopped being swept the moment the file moved into `archive/`.
+
+**Fix idea (cheap, independent of the structural one):** have `workspace(action="status")` and the session-start surface name other live sessions sharing this `git_root`. One line — *"2 other codescout sessions are active in this checkout"* — turns a silent race into a visible precondition, and it is a projection of data `ListAgents` already returns.
+
+**Fix idea (structural):** restore the coordination tracker to `active` and decide Option C against its own recorded criteria, rather than re-deriving them from scratch next time.
+
+**Leverage claim — recorded as a hypothesis, NOT as a finding.** The operator's reason for filing this is that worktree-per-session would close several partially-done problems at once. A grep for `merge_worktree|worktree-scoped|reseat_worktree|concurrent session|ListAgents` returns 254 matches across 69 files; these are the candidates that look like the same fault line:
+
+- `docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md`
+- `docs/issues/archive/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md`
+- `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md` (open)
+- `append_entry`'s refusal to allocate ids from a worktree, documented in `get_guide("tracker-conventions")` — itself a per-resource mitigation on this line
+
+**Nobody has checked whether these actually collapse into one fix.** Counting and classifying that set is the first task of any promotion, not an assumption to build on: a fix that names a population asserts the population is non-empty and homogeneous, and this one is so far only eyeballed.
+
+**Status:** open
