@@ -467,8 +467,15 @@ async fn compute_source_tag(resolved: &std::path::Path, ctx: &ToolContext) -> St
 fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
     std::fs::read_to_string(resolved).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => RecoverableError::with_hint(
-            format!("file not found: '{}'", path),
-            "Check the path with tree, or use tree with `glob` to locate the file",
+            format!(
+                "file not found: '{}' (searched {})",
+                path,
+                resolved.display()
+            ),
+            "Check the path with tree, or use tree with `glob` to locate the file. If \
+             the root above is not the project you meant, a subagent sharing this \
+             session's process may have changed the active project — call \
+             workspace(action='status') to check.",
         )
         .into(),
         std::io::ErrorKind::InvalidData => RecoverableError::with_hint(
@@ -1339,6 +1346,60 @@ mod tests {
             "pinned read must NOT leak the default workspace B (BETA), got: {result}"
         );
     }
+
+    /// The SILENT half of the workspace-clobber bug. `Agent::activate` clears the
+    /// registry and reassigns `default_workspace_root` for everything sharing the
+    /// session's process, so a subagent activating a foreign project leaves the
+    /// parent pointed there. The parent's next `read_file` on a file tracked in ITS
+    /// project returns "file not found" — true of the tree actually searched, and
+    /// indistinguishable from a genuine absence by a caller who never learned the
+    /// root moved.
+    ///
+    /// Measured 2026-08-26 (occurrence 4): `read_file` / `grep` / `symbols` all
+    /// returned confident negatives for a 131 KB tracked source file, and
+    /// `workspace(action="status")` was the only call that surfaced the real root.
+    /// The read-only form of the same clobber already got a diagnosis hint in
+    /// `check_tool_access`; this form had none, because nothing named the tree.
+    ///
+    /// So the message must name the ROOT it searched, not only the relative path it
+    /// was handed. `resolved` is already in scope at the failure site and was simply
+    /// never used in the text.
+    ///
+    /// docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md
+    #[tokio::test]
+    async fn file_not_found_names_the_root_it_searched() {
+        use tempfile::tempdir;
+
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        std::fs::create_dir_all(dir_a.path().join(".codescout")).unwrap();
+        std::fs::create_dir_all(dir_b.path().join(".codescout")).unwrap();
+        // The file exists ONLY in A. B is the root the session is (wrongly) on.
+        std::fs::write(dir_a.path().join("marker.txt"), "ALPHA-CONTENT").unwrap();
+        let root_b = std::fs::canonicalize(dir_b.path()).unwrap();
+
+        let agent = Agent::new(Some(dir_b.path().to_path_buf())).await.unwrap();
+        let mut ctx = test_ctx().await;
+        ctx.agent = agent;
+
+        let err = ReadFile
+            .call(json!({ "path": "marker.txt" }), &ctx)
+            .await
+            .expect_err("marker.txt does not exist under B");
+        let msg = format!("{err:#}");
+
+        assert!(
+            msg.contains("file not found:"),
+            "usage classification keys on this exact prefix \
+                 (src/usage/db.rs normalize_err_family): {msg}"
+        );
+        assert!(
+            msg.contains(&root_b.display().to_string()),
+            "the error must name the ROOT it searched, so a caller can tell \
+                 'this file is absent' from 'you are pointed at the wrong tree': {msg}"
+        );
+    }
+
     /// Phase 3 regression (regime 3, concurrent form): N tasks share ONE Agent,
     /// each pins a distinct workspace and reads its marker file concurrently on
     /// a multi-thread runtime. Each must read ITS OWN workspace with zero

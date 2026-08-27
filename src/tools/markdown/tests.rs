@@ -3306,3 +3306,43 @@ fn diagnose_causes_produce_pairwise_distinguishable_messages() {
         }
     }
 }
+
+/// Sibling of `read_file`'s `file_not_found_names_the_root_it_searched`. Same
+/// clobber, same silent form, but `resolve_markdown_source` carries its own
+/// not-found arm — fixing one site does not cover the other, so both are pinned.
+///
+/// The path is RELATIVE on purpose: an absolute one would make the assertion
+/// vacuous, since the caller's own argument would already carry the root. What has
+/// to appear is the root the tool resolved it against — the thing that separates
+/// "this file is absent" from "you are pointed at a tree where it never was".
+///
+/// docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md
+#[tokio::test]
+async fn read_markdown_file_not_found_names_the_root_it_searched() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+
+    let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    let mut ctx = test_ctx().await;
+    ctx.agent = agent;
+
+    let err = super::ReadMarkdown
+        .call(json!({ "path": "definitely-absent-doc.md" }), &ctx)
+        .await
+        .expect_err("the file does not exist under this root");
+    let msg = format!("{err:#}");
+
+    assert!(
+        msg.contains("file not found:"),
+        "usage classification keys on this exact prefix \
+         (src/usage/db.rs normalize_err_family): {msg}"
+    );
+    assert!(
+        msg.contains(&root.display().to_string()),
+        "the error must name the ROOT it resolved against, so a caller can tell \
+         'this file is absent' from 'you are pointed at the wrong tree': {msg}"
+    );
+}

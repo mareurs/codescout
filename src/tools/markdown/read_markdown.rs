@@ -64,8 +64,15 @@ async fn resolve_markdown_source(
 
         let text = std::fs::read_to_string(&resolved).map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => RecoverableError::with_hint(
-                format!("file not found: '{}'", path),
-                "Check the path with tree, or use tree with `glob` to locate the file",
+                format!(
+                    "file not found: '{}' (searched {})",
+                    path,
+                    resolved.display()
+                ),
+                "Check the path with tree, or use tree with `glob` to locate the file. \
+                 If the root above is not the project you meant, a subagent sharing \
+                 this session's process may have changed the active project — call \
+                 workspace(action='status') to check.",
             )
             .into(),
             _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),
