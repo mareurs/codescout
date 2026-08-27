@@ -1557,3 +1557,51 @@ the code the spec describes; none changes what Phase 1 delivers.
   over `MAX_DECLARED_SECTION_BYTES = 2500` — the cap's own error message
   recommends decomposing further at `###`, not merging, so the remedy here is
   splitting each child into smaller declaring sections, not consolidating them.
+
+
+### Carried deferred minors (from the SDD review loop, 2026-08-27)
+
+Fifteen findings were consciously deferred across the ten task reviews and the final
+whole-branch review. Each was judged real but non-blocking. Recorded here because the SDD
+workspace that held them is deleted at finish — the same failure mode the final review
+caught in the `edit_code` bug file.
+
+**Structural / testability**
+
+- `guide_blocks_for`, `inject_hint`, `GuideDeliveryShape` and `guide_block` are ~190 lines
+  nested inside a ~408-line trait method, touching neither `self` nor `ctx`. Extracting them
+  to a module-private `guide_emit` would turn three end-to-end tests into unit tests. The
+  final reviewer promoted this but called it *follow-up, not a merge blocker*: the code is
+  correct, only its testability is the problem. **Highest-value item on this list.**
+- `guide_index.rs` is now ~860 lines across three concerns (split → parse → index), of which
+  ~435 is the test module. Re-assess at Phase 2 when `tracker-conventions` decomposes.
+
+**Latent correctness (none live against today's corpus)**
+
+- Duplicate heading text under different parents yields one `ledger_key`; `guide_blocks_for`
+  drops the second **permanently** for the session. Now gated by
+  `no_topic_has_duplicate_section_headings`, so it fails the build rather than shipping.
+- `call_tool_checked` keys only on `body.get("ok")`. `route_tool_error`'s LSP-transient
+  branch returns `is_error: false` with `{"error":…, "hint":…}` and no `ok` key — defeating
+  the predicate the same way. Not live: no p50 shape touches an LSP path.
+- `re_arm`'s `key.len() > t.len() + 1` leaves a degenerate `topic#` empty-heading key
+  unswept — the one place "prefer the duplicate" is not honoured. Such a key would indicate
+  a key-construction bug upstream.
+- `parse_declarations` comma-splits `serves:`, so a `path~` substring containing a literal
+  comma mis-splits. Fails loudly (unterminated predicate → `Err`), never mis-parses.
+- `fence_run` does not enforce CommonMark's rule that a closing fence contain only the
+  delimiter run; a ` ```rust ` line would be accepted as a closer.
+- `#` and `####` are not section boundaries. Worth knowing because Gate 3's failure message
+  prescribes decomposition at `###`, so an over-cap `###` has no legal decomposition.
+- Indented ATX headings are unrecognised (fence detection trims, heading detection does not).
+
+**Cosmetic**
+
+- Doc rationale is duplicated between `names_path_containing` and `names_tracker_path`.
+- `adapter_for_test()` depends on `lib_all_tools()` registration order.
+- `heading.clone()` re-allocates ~15 short strings per guide.
+- `guide_index.rs`'s module doc never mentions the `GuideIndex` build/lookup surface.
+- The `progressive-disclosure` comment now reads as documenting a whole `match` rather than
+  the one arm whose condition it explains.
+- The `whole` baseline in the ceiling's panic message uses the raw compiled-in body length,
+  not the on-the-wire cost.
