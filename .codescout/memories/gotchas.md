@@ -211,40 +211,72 @@ removed) with nothing warning on mismatch. See
 `docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md` and
 `bug-fix-session-log:F-59`.
 
-## Native `Bash` Does Not Inherit the MCP Server's Startup Env — `run_command` Does
+## `cargo test` Fails From Native `Bash` But Passes Via `run_command` — Export `CODESCOUT_EMBEDDER_URL`
 
-`load_startup_env()` (`src/config/global.rs`) runs once at **MCP server startup**, so every
-variable in `~/.config/codescout/.env` lands in the codescout process env and is inherited
-by `run_command`'s children. A native harness `Bash` call is a child of Claude Code, not of
-the MCP server, so it inherits **none** of them. The two shells run the same command in
-different environments and nothing warns on the difference.
+**Symptom, reproducible.** Run `cargo test` from a native harness `Bash` call in
+this repo and `tools::memory::tests::write_and_read_roundtrip` FAILS with
+`semantic anchor creation failed: dense embed connect failed:
+http://127.0.0.1:48080/v1/embeddings`. Nothing listens on 48080; the dense
+embedder is `codescout-dense-amd` on **48081**. The same suite run through
+codescout's `run_command` is 4731 passed / 0 failed. The test asserts strict
+equality against `"ok"`, so an attached warning fails it — which makes this read
+exactly like a code regression when it is an environment difference.
 
-Measured 2026-08-27, with `shell_command_mode = "disabled"` forcing shell work through
-native `Bash`: `cargo test` reported `tools::memory::tests::write_and_read_roundtrip`
-FAILED with `dense embed connect failed: http://127.0.0.1:48080/v1/embeddings`. Nothing
-listens on 48080 — the real embedder is on **48081**, which the test would have used had
-`CODESCOUT_EMBEDDER_URL` been set. The identical test passes under
-`CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081/v1`. So the failure is a red gate that reads
-exactly like a code regression and is not one; the same suite is 4731/0 with the env loaded.
-
-Load it before trusting any gate run from native `Bash`:
+**Remedy, proven.** Export the retrieval-stack URL before any gate run from a
+native shell — either form works, measured twice each:
 
 ```bash
-set -a; . ~/.config/codescout/.env; set +a   # then cargo test / clippy
+export CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081
+# or, equivalently, load the whole startup env:
+set -a; . ~/.config/codescout/.env; set +a
 ```
 
-Two `run_command` rails are also absent from native `Bash`, both confirmed the same day.
-The IL-3 unbounded-pipe block: piping `cargo test` to `grep` masked the non-zero exit, and
-the background job reported `exited with code 0` for a run with a failing test. And the
-dangerous-command `@ack_*` gate — an `rm -rf` that `run_command` held for acknowledgement
-runs unprompted under `Bash`.
+`~/.config/codescout/.env` is a symlink to this repo's `.env.amd` and sets
+`CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081` among others.
 
-`usage.db` also records only codescout MCP calls: `tool_name` has never once contained
-"bash", while `run_command` is 37% of 47,727 recorded calls (2026-08-03..08-27) — the
-heaviest single tool. Shell work routed through `Bash` is therefore invisible to
-`/analyze-usage`, `docs/trackers/tool-usage-patterns.md`, and the `pika_observations`
-table.
+**Mechanism: NOT established. Do not repeat the plausible story.** The obvious
+explanation — "`load_startup_env()` runs at MCP server startup so `run_command`
+children inherit the var and `Bash` children do not" — is the one this entry
+originally asserted, and it does not survive its own measurements:
 
-Sibling of the section above, and easy to conflate: that one is about the symlink's
-*contents* drifting from the running compose profile; this one is about which *consumers*
-see those contents at all.
+| Condition | Result |
+|---|---|
+| Bash tool, nothing set | FAIL (48080) |
+| `CODESCOUT_EMBEDDER_URL=…:48081` | PASS |
+| `LIBRARIAN_EMBED_URL=…:48081` alone | FAIL |
+| `env -u CODESCOUT_EMBED_URL` | FAIL |
+| `env -i HOME=… PATH=… bash -lc 'cargo test …'` | **PASS** |
+| via `run_command` | PASS |
+
+The last row is the refutation: a near-empty environment passes, so the failure is
+caused by something **present** in the harness environment, not by the absent
+var — yet stripping the obvious suspect (ambient
+`CODESCOUT_EMBED_URL=http://127.0.0.1:48080/v1`, set in the desktop session and
+present in *both* the Bash shell and the MCP server's `/proc/*/environ`) does not
+fix it. Also checked and excluded: `XDG_CONFIG_HOME` and `CODESCOUT_ENV_FILE` are
+unset, no shell profile sets `CODESCOUT_EMBEDDER_URL`, and `48080` appears as a
+literal nowhere in `src/`. Note `/proc/<pid>/environ` shows only the exec-time
+environment, so a var set later by `std::env::set_var` is invisible there — which
+is why that file cannot settle this either way.
+
+**So: use the remedy, and if you need the mechanism, bisect the environment**
+(`env -i` passes, full harness env fails — the culprit is in the difference).
+Measured 2026-08-27 at `c37c7c98`, while `shell_command_mode = "disabled"` routed
+all shell work through native `Bash`.
+
+**Related, separately verified.** `usage.db` records only codescout MCP calls:
+`tool_name` has never contained "bash", while `run_command` is 37% of 47,727
+recorded calls (2026-08-03..08-27). So shell work routed through `Bash` does not
+appear in `/analyze-usage`, `docs/trackers/tool-usage-patterns.md`, or the
+`pika_observations` table. This is a **consequence of a deliberate choice, not a
+defect**: native `Bash` is the intended shell path in this project because eval
+data showed Opus performing better with it than with `run_command`. Do not
+"helpfully" set `shell_command_mode` back to `"warn"` — that reverts a measured
+decision. Native `Bash` also does not get `run_command`'s IL-3 unbounded-pipe
+block (piping `cargo test` to `grep` masked a non-zero exit here, reporting
+success on a failing run) or its dangerous-command `@ack_*` gate; both are
+accepted trade-offs of that choice.
+
+Sibling of the section above, and easy to conflate: that one is about the
+symlink's *contents* drifting from the running compose profile; this one is about
+a shell-dependent difference in what reaches the process.
