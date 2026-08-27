@@ -1,3 +1,10 @@
+---
+kind: tracker
+status: active
+tags: ["probes", "measurement", "instruments"]
+title: PROBES — the measurement instruments in this repo
+---
+
 # PROBES — the measurement instruments in this repo
 
 A single-page index of everything that **measures** this project: standalone scripts,
@@ -98,6 +105,8 @@ Read-only by default. These are the probes you already have without leaving the 
 | Probe | Measures | Note |
 |---|---|---|
 | `llm-proxy` · `lf.py mismatches --check` | Requested-vs-served model divergence (silent fallback detection) | Drives a standing systemd `--user` tripwire (`llm-mismatch-watch.timer`); a reroute leaves the oneshot `failed` |
+| `llm-proxy` · `scripts/record_shim.py` | What a Claude Code client actually **sent**: the request's `thinking` object, `stream` flag, `anthropic-beta` header, model and tool count — keyed by session id. Run it on `:8099`, it forwards to the real proxy on `:8082` | The proxy does **not** log any of this (`build_langfuse_input` keeps system/messages/tool_names/tool_count only), so no request-shape question is answerable from past traces — the observation must be made fresh. **An export cannot point a client at it**: Claude Code resolves `ANTHROPIC_BASE_URL` as `CLI --settings > profile settings.json > shell env`, so use `--settings '{"env":{"ANTHROPIC_BASE_URL":"http://localhost:8099"}}'`. Match records to runs by `session_id`, never by prompt text |
+| `llm-proxy` · `scripts/thinking_by_session.py` | How much thinking **text** reached Langfuse per session — blocks, chars, signed count | `0 blocks` (model did not think) and `1 block / 0 chars / signed` (capture failure) are **different results**; do not merge them. `traces=0` right after a run is ingestion **lag** — re-query in ~30 s before concluding absence; both were observed 2026-08-27. Pairs with the shim: separately each is compatible with several causes of `thinking: ""`, together they discriminate |
 
 ---
 
@@ -120,3 +129,8 @@ Read-only by default. These are the probes you already have without leaving the 
    *"Know before you run it"* column, not in a footnote nobody reaches.
 4. If it produces a durable series, point it at a tracker under `docs/trackers/` so the
    numbers accumulate somewhere queryable instead of scrolling past in a terminal.
+5. If it lives in a sibling repo, add it to **Cross-repo** above *and* give that repo a
+   tracker holding the usage and the traps — a probe reachable only by remembering it
+   exists is not indexed. The worked example is
+   `llm-proxy:docs/trackers/observability-instruments.md`, which the codescout umbrella
+   reaches via `artifact(action="find", scope="umbrella", …)`.
