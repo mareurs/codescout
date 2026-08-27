@@ -732,17 +732,66 @@ Body Mu.
     }
 
     #[test]
-    fn live_corpus_declares_nothing_until_task_6() {
+    fn live_corpus_librarian_declares_and_matches() {
         let idx = GuideIndex::try_build().unwrap();
-        let got = idx.match_sections(
-            "librarian",
-            Some("artifact.append_entry"),
-            &serde_json::json!({}),
+        let entry = idx.topic("librarian").expect("librarian in index");
+        assert!(
+            entry.declared().next().is_some(),
+            "librarian has no declared sections"
+        );
+
+        let got = idx.match_sections("librarian", Some("artifact.find"), &serde_json::json!({}));
+        assert!(
+            !got.is_empty(),
+            "expected `artifact.find` to match at least one librarian section"
         );
         assert!(
-            got.is_empty(),
-            "this pin is EXPECTED to trip once Task 6 lands `librarian` declarations — \
-         update it to assert the sections that should now match, or delete it"
+            got.iter().any(|s| s.heading == "Filter Syntax"),
+            "expected § Filter Syntax to serve `artifact.find`, got {:?}",
+            got.iter().map(|s| s.heading.as_str()).collect::<Vec<_>>()
         );
+    }
+    #[test]
+    fn declared_sections_are_within_the_size_cap() {
+        // Gate 3, scoped to topics that have opted in. Widens automatically as
+        // more topics land declarations. `str::len()` is bytes — these guides are
+        // full of multi-byte em-dashes, so a char count would silently under-report.
+        let idx = GuideIndex::try_build().unwrap();
+        for topic in crate::prompts::GUIDE_TOPICS {
+            let Some(entry) = idx.topic(topic) else {
+                continue;
+            };
+            for sec in entry.declared() {
+                assert!(
+                    sec.body.len() <= MAX_DECLARED_SECTION_BYTES,
+                    "{topic} § {} is {} B, over the {MAX_DECLARED_SECTION_BYTES} B cap. \
+                 Decompose it at `###` and move the declaration onto the child \
+                 sections. A slice this large is the failure this feature exists \
+                 to fix.",
+                    sec.heading,
+                    sec.body.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn librarian_declares_the_six_highest_volume_artifact_shapes() {
+        // These six are 9,695 of 10,920 observed artifact/librarian calls (89%).
+        let idx = GuideIndex::try_build().unwrap();
+        let entry = idx.topic("librarian").expect("librarian in index");
+        for shape in [
+            "artifact.update",
+            "artifact.get",
+            "artifact.find",
+            "artifact.append_entry",
+            "artifact.create",
+            "artifact.move",
+        ] {
+            let sel = Some(shape);
+            let hits = idx.match_sections("librarian", sel, &serde_json::json!({}));
+            assert!(!hits.is_empty(), "no librarian section serves `{shape}`");
+        }
+        assert!(entry.declared().next().is_some());
     }
 }

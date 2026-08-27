@@ -8,6 +8,7 @@ get_guide("tracker-conventions").
 ---
 
 ## Artifact Model
+<!-- serves: artifact.get, artifact.create -->
 
 Every artifact is a markdown file with YAML frontmatter stored under the project root.
 
@@ -46,6 +47,7 @@ artifact(action="get", id="<id>", heading="## Foo") ← read one section
 ---
 
 ## Filter Syntax
+<!-- serves: artifact.find -->
 
 Filters are AST nodes. Two shapes:
 
@@ -92,6 +94,7 @@ declare an `entry_collection` support this; prose trackers need retrofit first.
 ---
 
 ## artifact(action="create") — Required Fields
+<!-- serves: artifact.create -->
 
 ```
 artifact(
@@ -119,6 +122,7 @@ day-to-day tracker workflow (creating, querying, archiving), see
 get_guide("tracker-conventions"). This guide covers only the artifact-level
 mechanics that apply to all kinds.
 ### Reach for augmentation — don't hand-maintain the table
+<!-- serves: artifact.append_entry -->
 
 A tracker with repeating structured rows (defect tables, `F-N`/`W-N` logs) is an
 **augmented artifact**: attach a `params` array + `render_template` (+ optional
@@ -138,6 +142,7 @@ hand-written, and a table row defines no citable token: `link_scan` binds `PREFI
 never be cited. Give each entry a heading; keep the table too if it reads well.
 `get_guide("tracker-conventions")` § *One entry format, never two* has the measurements.
 ## Augmentation Lifecycle
+<!-- serves: artifact_augment, artifact_refresh.gather, artifact_refresh.list_stale -->
 
 Augmentation attaches a persistent prompt to any artifact.
 
@@ -167,6 +172,7 @@ buffer caps inline reads, so it can't round-trip. Two server-side paths read it 
 its key — a bare-array patch under `merge` is a silent no-op.
 
 ### Changing ONE entry — don't hand-build the array
+<!-- serves: artifact.update_entry -->
 
 **A params patch replaces an entry collection; it does not merge into it.** Sending
 `{tasks: [one row]}` to flip one row's status deletes every other row, and the catalog is
@@ -217,6 +223,9 @@ index. **Editing the body has three surfaces, with different blast radius:**
 | `edit_markdown` | Refused on managed files | Returns a `librarian_guard` error pointing back at `artifact(update)`. | Never on augmented artifacts. |
 | `edit_file` | Refused on managed files, **on every write path** | Batch `edits[]`, `insert` prepend/append, and single `old_string`/`new_string` all guard. The `.md` gate's `replace_all=true` escape is not a way around it. | Never on augmented artifacts. |
 
+### Choosing a mode — anti-patterns
+<!-- serves: artifact.update -->
+
 **Avoid this anti-pattern** (caused a real ~600-line tracker body loss):
 
 ```text
@@ -253,6 +262,9 @@ response and the `field_patch` payload both carry `replaced_subsections` naming
 what was destroyed; **read it.** To add a sibling, target the last existing child
 with `insert_after` instead of replacing the parent.
 
+### The shrink guard, `force`, and event forensics
+<!-- serves: artifact.update -->
+
 **Body-shrink guard.** Any body write that would reduce the file by more
 than 50% is refused with `RecoverableError("body-shrink guard: ...")`.
 The error hint names both `body_edits[]` and the `force=true` escape.
@@ -272,6 +284,7 @@ only field that reveals it. Query forensic history with
 `body_prepend_section`) return `RecoverableError` listing the valid fields.
 Accepted keys: `status, title, owners, tags, topic, time_scope, extra, body, body_edits, params`. `extra` is a map of custom frontmatter keys (YAML-only — round-trip-safe, surfaced by `get`, but NOT catalog-indexed / not filterable via `find`; a `null` value deletes a key).
 ## librarian(action=...) — Reference
+<!-- serves: librarian.reindex, librarian.link_scan, librarian.doctor, librarian.audit_doc_refs, librarian.context, librarian.tracker_design, librarian.legibility_scan -->
 
 | Action | What it does |
 |--------|-------------|
@@ -293,6 +306,7 @@ librarian(action="context", anchor_id="<id>", max_tokens=N)  ← link-graph neig
 ---
 
 ## artifact_event — Event Log
+<!-- serves: artifact_event.create, artifact_event.list -->
 
 Events are immutable, append-only, anchored to git commits.
 
@@ -307,6 +321,7 @@ Event kinds: `note`, `reviewed`, `status_change`, `field_patch`, `superseded_by`
 ---
 
 ## artifact(action="graph") — Relationship Map
+<!-- serves: artifact.graph, artifact.link -->
 
 ```
 artifact(action="graph", id="...", depth=2, rels=["implements", "supersedes"])
@@ -317,6 +332,7 @@ Returns BFS traversal of linked artifacts up to `depth` (1–3).
 ---
 
 ## Worktree overlay
+<!-- serves: librarian.merge_worktree -->
 
 A session running from a linked git worktree gets a live overlay onto the
 main checkout's catalog instead of a wholesale fork:
@@ -347,6 +363,7 @@ main checkout's catalog instead of a wholesale fork:
   than reseating them.
 
 ## Archiving / Moving Trackers
+<!-- serves: artifact.move, artifact.delete -->
 
 Archive flow (status flip + git mv to docs/trackers/archive/) is covered in
 get_guide("tracker-conventions"). At the artifact layer, `artifact(action="move",
