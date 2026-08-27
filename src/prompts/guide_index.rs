@@ -206,6 +206,102 @@ pub fn parse_declarations(body: &str) -> Result<(Vec<Shape>, Vec<String>), Strin
     Ok((serves, requires))
 }
 
+/// Maximum size of a section carrying a `serves:` declaration.
+///
+/// Bytes, not characters — these guides are dense with multi-byte em-dashes and
+/// arrows, so `chars().count()` would silently under-report. 2,500 B sits just
+/// above `librarian`'s natural p90 section, so most of the corpus already
+/// complies: only 6 of 67 sections corpus-wide exceed it.
+pub const MAX_DECLARED_SECTION_BYTES: usize = 2500;
+
+/// A guide section with its declarations resolved.
+#[derive(Debug, Clone)]
+pub struct GuideSection {
+    pub topic: &'static str,
+    pub heading: String,
+    pub level: u8,
+    pub body: &'static str,
+    pub serves: Vec<Shape>,
+    pub requires: Vec<String>,
+}
+
+impl GuideSection {
+    /// Ledger key. Opaque to `GuideLedger`, which stores `String` keys, so no
+    /// on-disk format change is needed: a stale topic-only key simply fails to
+    /// match, which re-delivers rather than suppresses.
+    pub fn ledger_key(&self) -> String {
+        format!("{}#{}", self.topic, self.heading)
+    }
+}
+
+/// One guide's preamble plus its section index.
+#[derive(Debug)]
+pub struct TopicEntry {
+    pub preamble: &'static str,
+    pub sections: Vec<GuideSection>,
+}
+
+impl TopicEntry {
+    /// Sections with a non-empty `serves` — the ones section-grain delivery can
+    /// route on.
+    pub fn declared(&self) -> impl Iterator<Item = &GuideSection> {
+        self.sections.iter().filter(|s| !s.serves.is_empty())
+    }
+}
+
+/// Section index over the whole compiled-in guide corpus.
+#[derive(Debug)]
+pub struct GuideIndex {
+    topics: std::collections::BTreeMap<&'static str, TopicEntry>,
+}
+
+impl GuideIndex {
+    /// Build the index, or fail loudly if any guide's declarations are
+    /// malformed. Never silently drops a topic or a section.
+    pub fn try_build() -> Result<Self, String> {
+        let mut topics = std::collections::BTreeMap::new();
+        for &topic in crate::prompts::GUIDE_TOPICS {
+            let src = crate::prompts::topic_body(topic)
+                .ok_or_else(|| format!("topic `{topic}` has no body"))?;
+            let (preamble, raws) = split_sections(src);
+            let mut sections = Vec::with_capacity(raws.len());
+            for raw in raws {
+                let (serves, requires) = parse_declarations(raw.body)
+                    .map_err(|e| format!("{topic} § {}: {e}", raw.heading))?;
+                sections.push(GuideSection {
+                    topic,
+                    heading: raw.heading,
+                    level: raw.level,
+                    body: raw.body,
+                    serves,
+                    requires,
+                });
+            }
+            topics.insert(topic, TopicEntry { preamble, sections });
+        }
+        Ok(Self { topics })
+    }
+
+    pub fn topic(&self, t: &str) -> Option<&TopicEntry> {
+        self.topics.get(t)
+    }
+
+    /// Whether this topic has opted into section-grain delivery. Topics with no
+    /// declarations keep the whole-topic path — this is the phase switch.
+    pub fn declares(&self, t: &str) -> bool {
+        self.topic(t).is_some_and(|e| e.declared().next().is_some())
+    }
+}
+
+/// Lazily built, process-wide guide index.
+///
+/// `.expect()`s so a malformed corpus fails loudly at first use;
+/// `index_builds_for_every_registered_topic` turns that into a build-time gate.
+pub static GUIDE_INDEX: std::sync::LazyLock<GuideIndex> = std::sync::LazyLock::new(|| {
+    GuideIndex::try_build()
+        .expect("guide index failed to build; see gate `index_builds_for_every_registered_topic`")
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +493,40 @@ n body
         let (serves, requires) = parse_declarations(body).unwrap();
         assert!(serves.is_empty());
         assert!(requires.is_empty());
+    }
+
+    #[test]
+    fn index_builds_for_every_registered_topic() {
+        // Gate 1 at corpus scale: a malformed declaration anywhere fails the build.
+        let idx = GuideIndex::try_build().expect("guide index must build");
+        for topic in crate::prompts::GUIDE_TOPICS {
+            assert!(
+                idx.topic(topic).is_some(),
+                "topic `{topic}` missing from index"
+            );
+        }
+    }
+
+    #[test]
+    fn section_bodies_partition_the_guide_exactly() {
+        // No byte is lost between sections and none is counted twice; otherwise a
+        // slice can silently omit a rule that lived on a boundary.
+        let idx = GuideIndex::try_build().unwrap();
+        for topic in crate::prompts::GUIDE_TOPICS {
+            let entry = idx.topic(topic).unwrap();
+            let body = crate::prompts::topic_body(topic).unwrap();
+            let all: usize = entry.sections.iter().map(|s| s.body.len()).sum();
+            assert_eq!(
+                entry.preamble.len() + all,
+                body.len(),
+                "sections of `{topic}` do not partition the file"
+            );
+        }
+    }
+
+    #[test]
+    fn a_topic_without_declarations_reports_false() {
+        let idx = GuideIndex::try_build().unwrap();
+        assert!(!idx.declares("progressive-disclosure"));
     }
 }
