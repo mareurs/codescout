@@ -2596,7 +2596,7 @@ languages = ["typescript"]
 /// match this branch. What does move is residency and the response shape, both
 /// pinned by the assertions below.
 ///
-/// docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
+/// docs/issues/archive/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
 #[tokio::test]
 async fn activating_a_sub_project_by_path_lists_the_same_memories() {
     let dir = tempdir().unwrap();
@@ -2783,7 +2783,7 @@ languages = ["typescript"]
 /// construction (`memory_dir_for_project` returns `<ws>/.codescout/memories` for
 /// `relative_root == "."`), so the bug this branch fixes cannot occur for it.
 ///
-/// docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
+/// docs/issues/archive/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
 #[tokio::test]
 async fn activating_the_workspace_root_by_path_still_takes_full_activation() {
     let dir = tempdir().unwrap();

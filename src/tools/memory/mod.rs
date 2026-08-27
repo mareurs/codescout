@@ -540,7 +540,7 @@ async fn create_semantic_anchors(
 ///
 /// See `docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`
 /// for the id-route half, and
-/// `docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md`
+/// `docs/issues/archive/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md`
 /// for the by-path half this union deliberately does NOT close: a by-path
 /// activation builds a STANDALONE workspace rooted at the target, so the parent's
 /// per-project tree is not merely unread, it is not loaded at all — there is no

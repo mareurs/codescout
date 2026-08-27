@@ -1,7 +1,7 @@
 ---
-id: '5b4a1b43dc10b052'
+id: 31c2ed41477b348d
 kind: bug
-status: open
+status: fixed
 title: 'BUG: activate by PATH bypasses workspace memory resolution, so a sub-project reports an empty memory set it does not have'
 tags:
 - memory
@@ -9,13 +9,13 @@ tags:
 - multi-project
 - activate
 - false-negative
-closed: null
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 related:
 - docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
 severity: medium
-unverified: Found by probe while fixing the sibling id-route bug, not from a session report — no evidence any real session has hit it. The mechanism is confirmed and has an executable (ignored) reproduction; what is undecided is the routing semantics, which is a design question with an argument on each side and no owner yet.
+unverified: Not live-verified against a running MCP server — the served binary predates the fix. The by-id sibling route WAS live-verified the same day on a real 12-sub-project workspace; this route was verified only by its (now un-ignored) test.
 ---
 
 ## Summary
@@ -113,9 +113,82 @@ shape as the linked-worktree divergence notice already in `src/tools/config/mod.
 exists for a structurally identical problem: two legitimate memory sets, one silently
 served.
 
+## Fix
+
+**Shipped 2026-08-27** — `d421b6bf` (`experiments`), patch-id
+`a343f55ded1f066b9ff51261aa7b9a24277104b3`.
+
+Option 1 above (focus-switch), scoped narrower than the section that proposed it.
+`ActivateProject`'s early return now fires for a path that resolves to the root of a
+**non-root member** of the currently-loaded workspace, as well as for a bare id. The
+file's `#[ignore]d` reproduction is un-ignored and passing.
+
+### One of the three deferral costs was wrong
+
+§ *Why it was not fixed with its sibling* is left unedited above — it was an accurate
+record of what was believed, and its central claim (the defect is upstream, in which
+workspace gets built) is **confirmed**: `Agent::activate` calls
+`inner.workspaces.clear()` at `src/agent/mod.rs:560`, so the parent workspace is gone
+before any reader runs, and the read-union that fixed the id route (`020ea69a`) can
+never reach this one.
+
+But its closing sentence — *"Whichever is chosen moves `read_only` defaults, focus,
+and the response shape"* — overstated the cost by one third, and the overstatement was
+load-bearing, because three costs read as more than two. **`read_only` does not move.**
+`Agent::activate` (`:177`) and `activate_within_workspace` (`:982`) derive it with a
+byte-identical match:
+
+```rust
+match read_only { Some(false) => false, _ if is_home => false, _ => true }
+```
+
+They differ only in `is_home`'s fallback when `home_root` is `None`
+(`unwrap_or(true)` vs `unwrap_or(false)`) — unreachable here, since a loaded workspace
+implies a home root.
+
+The other argument for the status quo — *"standalone is how a foreign repo is
+browsed"* — is true but does not bear on the branch as scoped. A foreign repo is by
+definition **not a member of the loaded workspace**, so it cannot match, and
+`activating_a_non_member_path_still_builds_a_standalone_workspace` pins that.
+
+What does move: **residency** (the parent workspace stops being cleared) and the
+**response shape** (the `workspace` array appears, which is how you can tell it
+focus-switched). Both are asserted.
+
+### The root project is excluded, and the exclusion has a test because it failed one
+
+The path form deliberately skips the workspace's own root project. Two reasons, and
+only the second is obvious:
+
+1. Nothing to gain — for `relative_root == "."` the two memory layouts coincide by
+   construction, so the defect this branch fixes cannot occur.
+2. Something to lose — "return home by absolute path" is the commonest `activate` call
+   there is, and **full activation is what re-arms the guide ledger**. With no
+   companion rendezvous it clears the ledger outright, because a `/clear` is otherwise
+   invisible to the server. Sending the root through the focus-switch early return
+   would skip that silently: a fresh conversation would never receive guides the
+   previous one had consumed. No error, no wrong number — just guidance that never
+   arrives.
+
+That second reason was invisible until it was tested for. Removing the exclusion left
+**all 4466 lib tests green** — an unfalsifiable guard, which is not a guard.
+`activating_the_workspace_root_by_path_still_takes_full_activation` now fails under
+exactly that mutation and nothing else.
+
+### Verification
+
+Mutation-verified in two passes:
+
+| mutation | fails | holds |
+|---|---|---|
+| disable the path branch | the un-ignored reproduction | both controls |
+| remove the root exclusion | the ledger guard | everything else |
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` —
+**4615 passed, 0 failed**, `ignored` 47 → 46.
+
 ## Not established
 
 Whether any real session has hit this. It was found by probe while fixing the id route,
 not from a report. `codescout-embed` is the only populated sub-project on this repo and
 nothing is known to activate it by absolute path.
-

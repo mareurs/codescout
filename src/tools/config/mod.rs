@@ -190,7 +190,7 @@ impl Tool for ActivateProject {
         //     `activate_within_workspace` derive it with the same
         //     `explicit > home > read-only` match.
         //
-        // docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
+        // docs/issues/archive/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
         let focus_target: Option<String> = {
             let inner = ctx.agent.inner.read().await;
             inner.default_workspace().and_then(|ws| {
