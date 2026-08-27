@@ -229,7 +229,10 @@ time: no `hooks.json` PreToolUse matcher targets `run_command`, and
 logic would refuse — is allowed end to end. Two independent signals, one
 behavioural and one a registration inventory. The doc comment now records the
 measurement; the dead file is tracked separately in
-`docs/issues/2026-08-27-il3-deny-hook-is-dormant-but-documented-as-a-live-mirror.md`.
+`docs/issues/archive/2026-08-27-il3-deny-hook-is-dormant-but-documented-as-a-live-mirror.md`.
+(That file's own framing was later **corrected**: the hook's dormancy is deliberate and
+documented, and the real defect was that this commit changed the server's semantics
+without syncing the parked mirror — fixed in `claude-plugins:88f1e29`.)
 
 ### Tests
 
