@@ -173,44 +173,43 @@ missing, which is precisely why this code path had no coverage. Both are needed
 together — the embed block is gated on `if let (Some(svc), Some(store))`, so a
 test setting only the embedder would have passed while exercising nothing.
 
-**Steps 2 and 3 remain open, and they are the design half:**
+### Progress 2026-08-27 — step 2 shipped, step 3 still open
 
-- **2 — a durable degraded marker.** `embed_note` is an *envelope* field. It is
-  now reachable on the failure path (it wasn't before), but it still does not
-  outlive the call: a later `artifact(action="find")` has no way to know the last
-  refresh was partial. That needs persisted state.
-- **3 — reconcile the status surfaces.** Catalog freshness, embedding freshness
-  and queryability are three distinct facts reported independently by surfaces
-  that can disagree. They should derive from one state model. This is the
-  report's "related status problem", and it overlaps
-  `docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
-  — the two should probably be designed together rather than patched separately.
+- **SHA:** `050ec61a` (`experiments`)
+- **patch-id:** `3676e85cd8937241edf5079cefff20eceb1cd3d1`
+
+`fix(librarian): persist a durable degraded marker for reindex embed failures`.
+
+**Step 2 is done**, using the precedent named in § Resume below
+(`IndexState.last_sync_skipped_count`) applied to a simpler store than that fix
+needed: the catalog already carries a generic key-value table, `catalog_meta`
+(`key TEXT PRIMARY KEY, value TEXT`), with `get_meta`/`set_meta` helpers in
+`src/librarian/catalog/gc.rs` previously used only for `gc_grace_days`. No new
+sidecar, no schema migration.
+
+`reindex.rs`'s `call` now writes `last_reindex_embed_error_count` and
+`last_reindex_embed_errors_sample` (JSON, 20-capped) to `catalog_meta` on every
+run where embeddings were attempted (`want_embeddings`), including a clean 0/[]
+run — the same "clean run clears the marker" invariant used for the sibling fix,
+so a repaired embedder un-degrades the catalog instead of leaving it stuck.
+Gated on `want_embeddings` specifically: a run with no embedder configured has no
+evidence about embed health either way, so it must not overwrite a real marker
+from an earlier run.
+
+`find.rs`'s `build_hints` reads the marker back and, when the count is nonzero,
+adds `catalog_degraded` / `catalog_degraded_hint` to the response — the read
+side of the exact `unindexed_files` / `unindexed_hint` pattern already in that
+function. Unlike `unindexed_files`, it is not scope-gated: the marker is one
+reindex call's aggregate across every target it walked, not a per-artifact
+fact, so it surfaces regardless of the query's `scope`.
+
+**Step 3 remains open** and is unchanged by this: reconciling catalog
+freshness, embedding freshness, and queryability into one state model across
+`index(action="status")` (the code-chunk index) and `artifact(action="find")`
+(the librarian catalog) is still a cross-subsystem design task, not an edit.
 
 **Verified:** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
-`cargo test` → 4474 passed, 0 failed, 46 ignored.
-
-Plan (not yet implemented). Order matters — (1) is small and removes most of the
-harm:
-
-1. **Collect embed errors instead of propagating them.** Mirror the existing
-   `backfill_errors` pattern already in this function (`:198`, `:243-254`): push
-   failures into an `embed_errors: Vec<String>`, keep the loop going, and report
-   `embed_error_count` / `embed_errors` in the envelope. This alone fixes the
-   multi-target abort, the lost report, and the skipped commit backfill.
-2. **Persist a degraded marker** so staleness outlives the call — last failed
-   refresh time and stage, readable by `artifact(action="find")`, which should
-   then expose a machine-readable *and* human-readable stale-catalog warning.
-3. **Reconcile the status surfaces** (the report's "related status problem").
-   Catalog freshness, embedding freshness and queryability are three distinct
-   facts and should derive from one state model rather than being reported
-   independently by surfaces that can disagree.
-4. Give `TestToolContextBuilder` a `with_embedding` setter — without it, none of
-   the above is testable at this layer, and the existing test says so.
-
-Steps 2 and 3 are a design change and should be scoped separately from 1.
-
-No SHA, no patch-id — not yet fixed.
-
+`cargo test --lib` → 4414 passed, 0 failed, 8 ignored.
 ## Tests added
 
 `an_embed_failure_still_walks_every_target_and_reports_it`
@@ -233,8 +232,33 @@ the test's central assertion is that a function returns `Ok`, and a test asserti
 `Ok` is exactly the shape that can pass without the fix if the failure path is
 never actually reached. Confirming red is what rules that out.
 
-**Not yet covered:** steps 2 and 3. There is no test for a durable degraded
-marker or for status-surface agreement, because neither exists yet.
+**Step 2, shipped in `050ec61a`:**
+
+- `an_embed_failure_persists_a_durable_catalog_meta_marker`
+  (`src/librarian/tools/reindex.rs`) — after a run with a failing embedder,
+  `catalog_meta` holds `last_reindex_embed_error_count == "2"` and a
+  2-element JSON error sample, read directly off `ctx.catalog.lock().conn`
+  via `gc::get_meta`.
+- `a_clean_reindex_after_a_failure_clears_the_persisted_marker`
+  (`src/librarian/tools/reindex.rs`) — a `FlakyEmbedder` toggled from
+  failing to succeeding between two `call`s; asserts the marker reads `"1"`
+  after the failing run and `"0"` after the clean one. Same invariant as
+  `sync_project_clears_a_previously_recorded_skip_count_on_a_clean_run` for
+  the sibling bug — a marker that only ever increments would misreport a
+  repaired embedder as permanently degraded.
+- `catalog_degraded_hint_appears_after_a_persisted_embed_failure_then_clears`
+  (`src/librarian/tools/find.rs`) — seeds `catalog_meta` directly, asserts
+  `find`'s `hints.catalog_degraded` / `catalog_degraded_hint` appear on the
+  very next call (not just the call that wrote the marker), then clears the
+  marker and asserts the hint disappears too.
+
+All three verified RED first: the get/set helpers already existed (from
+`gc.rs`), so RED came from the assertions failing against an unwritten key
+(`None` where a value was expected), not a compile error — confirmed by
+reading the actual panic message before writing the implementation.
+
+**Not yet covered:** step 3. There is no test for status-surface agreement,
+because that state model does not exist yet.
 
 ## Workarounds
 
@@ -244,38 +268,8 @@ re-run each explicitly after the embedder is healthy. Treat any reindex that
 returns an error, rather than an envelope, as "catalog state unknown".
 
 ## Resume
-**Update 2026-08-27:** the sibling bug this section names
-(`docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`,
-fixed in `196f1b94`) shipped a durable partial-sync marker for the CODE index
-(`IndexState.last_sync_skipped_count` / `_sample`, written by `sync_project`, read by
-`index(action="status")`). That is a worked precedent for the SHAPE of step 2 here —
-not a fix for this bug, which is a different store (the librarian catalog, not the
-code-chunk index) and a different write path (`librarian(action="reindex")`'s
-`embed_errors`, not `sync.rs`'s `SyncReport.skipped`). Read that fix before designing
-this one: same pattern (a required, no-default parameter threaded from the point of
-failure to the persisted sidecar; the compiler names every caller), applied to a
-different subsystem. Do not assume it already covers this bug — it does not; the two
-stores remain separate and this bug's own catalog/embedding path is untouched.
 
-
-Step 1 shipped in `69e78a2f`; the `src/librarian/tools/reindex.rs` work is done.
-What remains is a **design decision, not an edit**, so do not start by opening
-that file again.
-
-Decide where durable index-health state lives, for catalog freshness and embedding
-freshness jointly. Then read
-`docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`
-§ *Fix* before writing anything: that bug's `(0,0)`-only status discriminator and
-this bug's missing degraded marker are the same missing abstraction seen from two
-tools (`index(action="status")` and `librarian(action="reindex")` /
-`artifact(action="find")`). Designing them separately will produce two
-disagreeing health surfaces, which is the third acceptance criterion this bug
-already asks for.
-
-Concretely: name the state model first (what facts, stored where, written by
-whom), and only then pick the two call sites. `src/retrieval/index_state.rs`
-already persists a sidecar for git-freshness detection and is the closest
-existing precedent — read it before inventing a new store.
+**Update 2026-08-27:** steps 1 and 2 are both shipped (`69e78a2f`, `050ec61a`).\nWhat remains is step 3 only — a **design decision, not an edit** — so do not\nstart by opening `reindex.rs` or `find.rs` again for this bug; both are done.\n\nReconcile catalog freshness, embedding freshness, and queryability into one\nstate model. Right now there are **two** independently-written, independently-\nread degraded markers, not one:\n\n- Code index: `IndexState.last_sync_skipped_count` / `_sample`\n  (`src/retrieval/index_state.rs`, written by `sync_project`, read by\n  `index(action=\"status\")`) — shipped fixing\n  `docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md`.\n- Librarian catalog: `catalog_meta.last_reindex_embed_error_count` / `_sample`\n  (`src/librarian/catalog/gc.rs` get/set, written by `librarian(action=\"reindex\")`,\n  read by `artifact(action=\"find\")`'s `build_hints`) — shipped by step 2 above.\n\nBoth now exist, both work, and both were deliberately built as parallel\nimplementations of the same shape rather than one shared abstraction — that\nwas the right call for shipping each independently (different store, different\nwrite path, no shared code to extract without coupling two subsystems that\ndon't otherwise depend on each other). **Step 3 is deciding whether that\nremains two facts a caller must know to check separately, or becomes one\nqueryable health surface** — and if the latter, where it lives (a shared\ntrait/module both `sync_project` and `reindex.rs`'s `call` write through, vs.\na single aggregating tool that reads both `catalog_meta` and the `IndexState`\nsidecar). Read both shipped implementations before designing this — they are\nnow the two data points step 3 has to unify, not precedents to repeat a third\ntime.\n
 ## References
 
 - GitHub issue #19 — <https://github.com/mareurs/codescout/issues/19>
