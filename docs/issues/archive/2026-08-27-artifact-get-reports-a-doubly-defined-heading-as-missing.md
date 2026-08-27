@@ -1,5 +1,5 @@
 ---
-id: ad610ff996e932fa
+id: d1a83b696e0aaffe
 kind: bug
 status: fixed
 title: 'BUG: artifact(get) reports a doubly-defined heading as `heading_missing`, in a response whose own heading map lists it twice'
@@ -14,7 +14,6 @@ owner: marius
 related:
 - docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md
 severity: medium
-unverified: Gate-verified only. The serving MCP binary predates 25fe3fb5, so heading_ambiguous and artifact(get, occurrence=N) have not been exercised over the wire. Probe named in Resume; archive after it runs.
 ---
 
 # BUG: artifact(get) reports a doubly-defined heading as `heading_missing`, in a response whose own heading map lists it twice
@@ -200,16 +199,33 @@ Gate: `cargo fmt` clean, `cargo clippy --all-targets -- -D warnings` clean, `car
 
 ## Resume
 
-**Not live-probed.** The gate is green but the serving MCP binary predates `25fe3fb5`, so
-nothing has exercised `heading_ambiguous` or `artifact(get, occurrence=N)` over the wire.
-After `cargo rb` + `/mcp`, the reproduction in § Reproduction is the probe: `artifact(get,
-id="01291679a5ee4707", heading="### The ask")` must return `heading_ambiguous: true` with
-the lines of all four CAP-entry occurrences, and `occurrence=2` must return the CAP-8 copy.
-That file is a good permanent fixture — its repeated `### The ask` is correct per-entry
-template structure and will not be "fixed" away.
+**Live-verified 2026-08-27, 18:48 EEST** — nothing outstanding.
 
-Nothing else outstanding; this file is otherwise complete and can be archived once that
-probe runs.
+Freshness on three axes before trusting the probes: build (`target/release/codescout`
+18:47:04, after `60df0d76` at 18:46:02), distribution (`~/.cargo/bin/codescout` is a
+symlink to that path; `heading_ambiguous` present when grepped *through* the link, the
+superseded `edit_file with start_line` hint at **0**), process (serving pid 485246 started
+18:47:41, identified by walking the parent chain rather than guessing among the live
+`codescout` processes).
+
+The probe named above, on the wire:
+
+```
+artifact(get, id="01291679a5ee4707", heading="### The ask")
+→ body_meta: { heading_ambiguous: true,
+               occurrences: [642, 797, 1148, 1214],
+               heading_hint: "Pass occurrence=N to target one (1-indexed, here 1..=4) …" }
+```
+
+Was `heading_missing: true`. Two things beyond the fix as specified:
+
+- It reports **four** occurrences where the response's own `preview.headings` shows only
+  two — that array truncates at 40 of this file's 51 headings (`headings_truncated:
+  true`). The error is now *more* complete than the preview that made the original
+  diagnosis confusing.
+- `occurrence=2` returns CAP-8's section (648 bytes, 13 lines, no ambiguity flag),
+  confirming the selector reaches a specific match rather than merely reporting that
+  several exist.
 ## References
 
 - `src/librarian/tools/get.rs:26-30` — `find_heading_section`, the `.ok()` that erases the distinction

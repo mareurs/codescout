@@ -29,7 +29,7 @@ fn resolve_file_path(
 /// "found N times" and "not found" into the same `None`, and the caller then reported
 /// `heading_missing` for both — naming the false one, in a response whose own
 /// `preview.headings` array listed the heading twice.
-/// docs/issues/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
+/// docs/issues/archive/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
 fn find_heading_section<'q>(
     body: &str,
     query: impl Into<crate::tools::file_summary::HeadingQuery<'q>>,
@@ -876,7 +876,7 @@ mod tests {
     /// A heading present TWICE is not "missing". Reporting it so sends the caller hunting
     /// for a heading that is right there — in a response whose own `preview.headings`
     /// array lists both occurrences.
-    /// docs/issues/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
+    /// docs/issues/archive/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
     #[tokio::test]
     async fn duplicate_heading_reports_ambiguous_not_missing() {
         let cat = Catalog::open_in_memory().unwrap();

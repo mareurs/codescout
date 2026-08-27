@@ -318,7 +318,7 @@ pub fn resolve_section_range<'a>(
     // genuine miss, and a caller that then reports "missing" states the false one and
     // sends the reader hunting for a heading that is present twice. The discriminant has
     // to ride on the error, not be re-derived from its message text.
-    // docs/issues/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
+    // docs/issues/archive/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
     let dup_error = |indices: &[usize]| -> RecoverableError {
         let lines: Vec<String> = indices
             .iter()

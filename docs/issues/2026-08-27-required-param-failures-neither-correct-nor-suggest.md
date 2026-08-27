@@ -202,7 +202,13 @@ The behaviour is understood well enough to be written down for callers. It just 
 ## Fix
 
 **First slice shipped 2026-08-27** — `60df0d76` (`experiments`), patch-id
-`0ed42a3f21585845d1993da053bc19441d816693`. It is the *Suggested first slice* below,
+`0ed42a3f21585845d1993da053bc19441d816693`, **live-verified 18:48 EEST** against a fresh
+binary (18:47:04) and a fresh process (pid 485246, started 18:47:41). All four shapes on
+the wire: `update(id, status="fixed")` → `updated: true` with `corrections: ["lifted
+top-level \`status\` into \`patch.status\` …"]`; `update(id, commit_refresh=true)` →
+`{updated: true, committed: false}` (honest — that artifact has no augmentation);
+`update(id, patch={})` → refused, "was given nothing to change"; `update(id, rel_path=…)`
+→ the `move` route. It is the *Suggested first slice* below,
 restricted to `artifact(action="update")`. **16 of the 17 sites remain untouched and this
 bug stays open.** The rule below is not invented here; it is generalized from three
 mechanisms already shipped in this repo (`lift_top_level_param!`, the `corrections` output

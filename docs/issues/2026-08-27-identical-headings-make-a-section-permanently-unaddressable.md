@@ -329,10 +329,15 @@ unchanged is what carries it.)
 
 **Still genuinely open — two items, both distinct from the above.**
 
-1. **Fix step 4 was not done.** The ambiguity error reports **file-relative** line numbers
-   while `artifact(action="get")`'s heading map reports **body-relative** ones; measured on
-   the memory-tool-structs file the constant difference is 18 lines, exactly that file's
-   frontmatter length, and on `open-issue-work-queue.md` it is 16. Both frames are
+1. **Fix step 4 was not done, and is now measured on two files.** The `body_edits`
+   ambiguity error reports **file-relative** line numbers while `artifact(action="get")`
+   reports **body-relative** ones. Measured on `capability-proposals.md`, 2026-08-27:
+   `get` → `occurrences: [642, 797, 1148, 1214]`; `body_edits` → `lines 660, 815, 1166,
+   1232`. Exactly **18** apart on all four, and the same offset on the memory-tool-structs
+   file — both carry a 17-line frontmatter block plus a blank separator line, so body line
+   1 is file line 19. (An earlier draft of this entry said the offset on
+   `open-issue-work-queue.md` was 16. 16 is that file's frontmatter *length*, not a
+   measured offset — the two were conflated.) Both frames are
    internally consistent and neither is labelled, so a caller who reads `get` and then the
    error sees two different numbers for one heading. Decide one frame and state it in the
    message. Untouched by `164c8bd6`.
