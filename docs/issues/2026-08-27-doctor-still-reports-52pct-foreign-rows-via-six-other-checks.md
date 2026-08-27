@@ -183,34 +183,90 @@ this check rather than justified by a population that does not exist today.
 
 ## Fix
 
-**Not started.** Two peer sessions are committing into `src/librarian/tools/doctor.rs`
-in this shared checkout as of 2026-08-27 12:13; this file is a capture-on-notice
-record, not a claim on the work.
+**Partially fixed.** The largest contributor is closed; **five checks still report
+globally and the bug stays open.**
 
-The shape is already established twice and should be followed rather than reinvented
-— `known_workspace_roots(ctx, conn)` exists and is the third caller's for free:
+### Shipped: `cited_prefix_with_no_definer` (2026-08-27)
 
-- Each leaking check takes the known roots and returns
-  `(violations, scoped_by_project)`, reporting only rows under a managed root.
-- **The metric stays global.** This is the Ruling 17 requirement and the part a
-  naive "drop them" fix breaks silently.
-- `scan_premature_archive_citation` needs the partition keyed per-repo as well as
-  the reported population scoped — see § Evidence. Scoping the report alone leaves
-  the cross-repo false-negative in place.
+Applied in the shape `442d8b7c` established — `known_workspace_roots` was not needed,
+since this check scopes against the active project's own `git_root` the way the
+entry-validity family does rather than against the known-elsewhere set.
 
-An open question worth deciding before writing code, not after: whether
-`worktree_scoped_row` should scope at all. Its repair (`fix=reseat_worktree`)
-operates on catalog rows rather than on files under a root, so it may legitimately
-be machine-wide. Read the repair before scoping the report — the two must agree,
-and *that agreement*, not the row count, is what this bug is about.
+Ruling 17 lands on **both halves, in opposite directions**, and that is the design
+rather than an implementation detail:
 
+- **Definers stay corpus-wide.** Narrowing `known_prefixes` to the active project
+  would make every prefix defined only in a sibling repo — including every cross-repo
+  `<repo>:<TOKEN>` citation, which the resolver already and deliberately declines to
+  turn into an edge — fire here as *"no definer anywhere in the corpus"*. That
+  manufactures false positives out of correct prose: the mirror of the false negatives
+  Ruling 17 names on the exposure side.
+- **The firing decision is global too; only the report is filtered.** In-project
+  citers must clear the same two thresholds, and the remainder is named in the
+  violation's own message rather than hidden.
+- Scoped-out findings are keyed by the first citer **outside** the project, not by
+  `files[0]` — the alphabetically-first citer overall is frequently the in-project one
+  that fell below threshold.
+- Announced via `catalog_health.cited_prefix_scoped_by_project` + a hint, mirroring
+  the two existing scoped families.
+
+**Measured before/after on the SAME corpus** — old binary vs new, both run through the
+`codescout doctor --json` CLI. Deliberately *not* compared against the 47/33 figure in
+§ Symptom, which was taken an hour and five markdown commits earlier and describes a
+different corpus:
+
+| | total | foreign | scoped_out |
+|---|---:|---:|---:|
+| before (old code) | 48 | 34 | — |
+| after (new code) | **14** | **0** | **34** |
+
+48 − 14 = 34, matching `scoped_out` exactly. The whole report goes **128 → 94**.
+
+**Fix commit — record both, they fail differently:**
+
+- SHA `5a7eb3e7596551128c27435a663f3eabce55c71e` on **`experiments`**
+- patch-id `6706c5b65a881c9da49c8e27f02a40e36ebf8bde`
+
+### Still open: the other five
+
+`terminal_status_with_caveat` (13 foreign of 44), `frontmatter_id_is_not_a_catalog_id`
+(3 of 3), `frontmatter_id_mismatch` (3 of 3), `ledger_defines_nothing` (3 of 3),
+`worktree_scoped_row` (2 of 2). `abs_path_outside_managed_roots`' 10 remain its own
+legitimate subject.
+
+The open question named when this was filed still stands and should be answered before
+any of the five is touched: **read each check's repair path before scoping its report.**
+`worktree_scoped_row`'s `fix=reseat_worktree` operates on catalog rows rather than on
+files under a root, so it may legitimately be machine-wide. That agreement between
+report and repair, not the row count, is what this bug is about.
+
+`scan_premature_archive_citation` still needs its `archived`/`live` partition keyed
+per-repo in the same change that scopes it — see § Evidence. Population measured empty
+today, so it is latent; do not let a green reading stand in for the fix.
 ## Tests added
 
-None — nothing is fixed yet. The discriminating test already exists as a model:
-`a_row_under_a_known_workspace_root_is_scoped_out_but_still_counted` in
-`src/librarian/tools/doctor.rs`, which `442d8b7c` mutation-verified rather than
-merely running green.
+Three, all in `src/librarian/tools/doctor.rs`, and **mutation-verified rather than
+merely green** — the standard `442d8b7c` set for this file:
 
+- **`cited_prefix_reports_only_the_active_projects_citers`** — both directions in one
+  test, using two separate prefixes so that "scopes nothing" and "scopes everything"
+  fail differently. Deleting the scoping fails it, printing the leaked sibling-root
+  violation.
+- **`cited_prefix_definers_stay_corpus_wide_across_project_roots`** — the half that
+  must NOT scope, and the reason the fix is not simply "filter by root". Scoping the
+  definer pass fails it with the check asserting *"no `## HY-N — <title>` heading
+  exists anywhere in the corpus"* while that heading sits in the sibling repo. This is
+  the test that guards the design decision rather than the behaviour.
+- **`a_mostly_foreign_prefix_is_scoped_out_and_keyed_outside_the_project`** — paths
+  chosen so the alphabetically-first citer overall IS the in-project one, so the
+  obvious `files[0]` keying shortcut fails it. Mutation 1's failure output independently
+  confirmed this case occurs.
+
+Citations clear both thresholds in every fixture, so none can pass for the unrelated
+reason of sitting under the noise floor.
+
+Gate at fix time: `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings`
+clean; `cargo test` **4584 passed / 0 failed / 46 ignored**.
 ## Workarounds
 
 Filter client-side. The awk pairing in § Reproduction reduces the report to the rows
@@ -222,21 +278,28 @@ awk -F'"' '/"check":/{c=$4} /"path":/{if($4 !~ /^\//) print c, $4}' @tool_<id>
 
 ## Resume
 
-Decide first whether this is worth a commit at all — 56 rows of noise in a manual,
-read-only scan is real but low-severity, and `doctor.rs` currently has two other
-sessions writing to it.
+One check down, five to go — and the next session should **not** start from the
+"drops by exactly 33" line this file used to carry. That prediction was wrong, and
+wrong in an instructive way: re-applying the thresholds to a smaller citer set also
+drops prefixes that were only *partly* local, so the drop is ≥ the foreign count, not
+equal to it. Measured: 48 → 14, a drop of 34 against 34 foreign rows, on a corpus that
+had itself grown by one unowned prefix since § Symptom was written. Compare old and new
+binaries **on the same corpus** — `git stash push -- src/librarian/tools/doctor.rs`,
+`cargo rb`, run `./target/release/codescout doctor --json`, restore — or the corpus
+moves under the measurement.
 
-If yes: start from `known_workspace_roots` (`src/librarian/tools/doctor.rs:1183`) and
-`scan_artifact_paths`' `(violations, scoped_by_project)` return shape, apply it to
-`scan_cited_prefix_with_no_definer` first (33 of the 56 rows, single largest win),
-and re-run the § Reproduction pairing to confirm the count drops by exactly 33 with
-the global metric unchanged.
+Use the CLI rather than the MCP tool for this, and know why: the MCP layer relativizes
+path fields for display, so "absolute path = foreign row" is a valid discriminator on an
+MCP response and **invalid** on CLI output, where every path is absolute. Discriminate
+against the project root explicitly (`index(p, root) != 1`). The tell that the naive
+version is wrong: `entry_dated_stale` and `entry_cited_from_outside_but_undeclared` are
+known-scoped, so if they read anything other than 0 foreign, the discriminator is broken
+rather than the checks. That control is what caught it here.
 
-Do **not** scope `scan_premature_archive_citation` by the reported population alone —
-its `archived`/`live` partition is basename-keyed and must be split per-repo in the
-same change, or the fix leaves a cross-repo false negative behind a check whose doc
-comment promises it is wrong in every world.
-
+Next concrete action: `terminal_status_with_caveat` (13 foreign of 44, the largest
+remainder). Read its repair path first — the four smaller checks are 100% foreign and
+look trivially scopeable, which is exactly the shape that hides a check whose repair is
+legitimately machine-wide.
 ## References
 
 - `docs/issues/archive/2026-08-27-doctor-reports-other-workspaces-rows-as-violations.md`
@@ -248,4 +311,3 @@ comment promises it is wrong in every world.
 - Ruling 17 — `src/librarian/tools/doctor.rs:229`.
 - `reconnaissance-patterns:R-117` — a fix that names a population asserts it is
   non-empty; why the cross-repo hazard here is filed as latent rather than live.
-
