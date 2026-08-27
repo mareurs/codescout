@@ -238,7 +238,7 @@ codescout's conventions and design principles live in memory (auto-listed at ses
 - **`conventions`** — pre-commit gate, error handling (`RecoverableError` vs `anyhow::bail!`), no-echo writes (`json!("ok")`), the `call_content()` MCP entry point, progressive disclosure / two modes, **Agent-Agnostic Design**, testing patterns (three-query sandwich, `EnvGuard`), prompt-surface consistency, commit style.
 - **`architecture`** — module map, key abstractions, data flow, the three prompt surfaces.
 
-Before adding or modifying any tool, read `docs/PROGRESSIVE_DISCOVERABILITY.md`. Full error decision tree: `get_guide("error-handling")`. Test isolation: `docs/conventions/test-env-isolation.md`.
+Before adding or modifying any tool, read `docs/PROGRESSIVE_DISCOVERABILITY.md` — and if the tool can return a **negative result** (`0 matches`, an empty list, `not found`), also `docs/adrs/2026-08-27-negative-results-name-their-scope.md`: name the scope you examined when the zero is suspicious, stay **silent** when it is trustworthy, and claim only what you can prove. Full error decision tree: `get_guide("error-handling")`. Test isolation: `docs/conventions/test-env-isolation.md`.
 ## Prompt Surface Consistency
 
 Three prompt surfaces (`server_instructions` + `onboarding_prompt` slices of `src/prompts/source.md`, and `build_system_prompt_draft()` in `builders.rs`) must stay tool-name-consistent. Which surfaces exist, when to bump `ONBOARDING_VERSION`, the **1900-character** slice cap + shared-branch verify hazard, and the writing style guide → **`src/prompts/README.md`** (short version: memory `conventions`). Stale tool names are gated by `prompt_surfaces_reference_only_real_tools` (3 surfaces) and `claude_md_contains_no_deprecated_tool_names` (this file).
