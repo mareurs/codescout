@@ -374,7 +374,7 @@ mod backend_tests {
     /// disagreed about which direction is good — and Qdrant's default status
     /// would keep that hidden from all but escape-hatch users.
     ///
-    /// BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+    /// BUG docs/issues/archive/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
     #[tokio::test]
     async fn knn_returns_lower_is_closer_distance() {
         let store = InMemoryArtifactStore::default();

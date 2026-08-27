@@ -252,7 +252,7 @@ pub struct SemanticHit {
 /// could not distinguish "here are five close matches" from "here are the five
 /// least-bad rows left after your filter removed everything relevant".
 ///
-/// BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+/// BUG docs/issues/archive/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
 #[derive(Debug, Clone, Default)]
 pub struct SemanticPage {
     pub hits: Vec<SemanticHit>,

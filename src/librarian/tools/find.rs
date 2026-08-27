@@ -888,7 +888,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // the widen-and-retry loop knows it is scraping the barrel and had no way
         // to say so. These two hints are KNN-native and carry no such comparison.
         //
-        // BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+        // BUG docs/issues/archive/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
         let hints = if a.semantic.is_some() {
             let mut h = serde_json::Map::new();
             if let Some((widenings, exhausted)) = starvation {
@@ -1795,7 +1795,7 @@ mod tests {
     /// with the magnitude discarded — ordering survived, magnitude did not — so a
     /// caller could not tell a strong match from the least-bad remainder.
     ///
-    /// BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+    /// BUG docs/issues/archive/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
     #[tokio::test]
     async fn semantic_items_carry_a_distance_that_ascends_with_rank() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -1896,7 +1896,7 @@ mod tests {
     /// The fixture needs MORE than the first `k` (100) candidates for the widen
     /// path to be reachable at all, which is why it seeds 150.
     ///
-    /// BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+    /// BUG docs/issues/archive/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
     #[tokio::test]
     async fn a_filter_that_excludes_the_nearest_matches_reports_starvation() {
         let cat = Catalog::open_in_memory().unwrap();

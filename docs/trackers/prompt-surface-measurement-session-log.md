@@ -3789,8 +3789,11 @@ unverified. Confidence-hedging is not a substitute for a control.
 **Severity:** med — one wrong claim published to the user, self-caught within the same
 session when the user asked for proof. Nothing was built on it.
 
-**Fix:** the real defect is filed as `docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md`
-(`34c415cd19084788`) with a one-call reproduction. The behavioural half is in the
+**Fix:** the real defect is filed as `docs/issues/archive/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md`
+(`4b257f3be10ec322`) with a one-call reproduction. **FIXED 2026-08-27 in `e4569fcc`**
+(patch-id `4008d77b`): responses now carry a per-item `distance` and a `semantic_starved`
+hint, so a starved page is no longer byte-identical to a satisfied one. The behavioural
+half still stands
 workarounds there: never conclude "nothing is indexed about X" from a single *filtered*
 semantic query — drop the filter and re-run before believing it.
 
