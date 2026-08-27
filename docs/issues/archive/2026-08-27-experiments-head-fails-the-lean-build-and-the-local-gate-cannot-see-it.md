@@ -1,7 +1,7 @@
 ---
-id: '89a7942d5e5f9152'
+id: 76ef2915909f94a9
 kind: bug
-status: open
+status: fixed
 title: 'BUG: experiments HEAD fails `cargo check --no-default-features`, and the documented local gate runs only with default features — fourth instance of this class in one day'
 tags:
 - build
@@ -9,6 +9,7 @@ tags:
 - no-default-features
 - pre-commit-gate
 - recurrence
+closed: 2026-08-27
 ---
 
 ## Symptom
@@ -100,9 +101,59 @@ is adjacent — the lean build misreporting rather than failing.
    that no file outside `#[cfg(feature = "librarian")]` names `crate::librarian`. Would have
    caught instances 1, 2 and 4 at author time.
 
+## Fix applied
+
+Fixed on `experiments` — `12f21926`, patch-id `9e75640a0e5e0a5cc131d4c5f35ad6b81996405c`.
+
+**Instance (fix idea 1).** `names_path_containing` moved out of the gated `librarian::adapter`
+into the unconditional `src/util/librarian_response.rs`. The function is pure `serde_json`
+— `&Value` + `&str` -> `bool` — and carried no librarian dependency at all; it lived in
+`adapter.rs` only because that is where the tracker-path check it was generalised from lives.
+
+This file's own instruction — check for an unconditional twin before adding a `cfg` — was
+the right question, and the answer was that no twin existed. But `src/util/librarian_guard.rs`
+had already solved the identical problem structurally, and says so in its doc comment:
+*"Left unset (tests, `--no-default-features`) the guard degrades to its frontmatter check
+rather than failing open loudly."* The established shape is that the half with no librarian
+dependency lives in `util`, and where a genuine dependency exists a runtime-installed oracle
+trait bridges the gate rather than a `#[cfg]`. Only the first half was needed here.
+
+**Gating the call was considered and rejected.** With `#[cfg]` at the call site, a `path~`
+shape in the lean build would match on tool+action alone — the exact silent mismatch the
+predicate exists to prevent, warned about in its own doc comment at `guide_index.rs:177`.
+A compile error beats a build-dependent semantic fork.
+
+**Class (fix idea 2).** `cargo check --no-default-features` added to the documented gate in
+`CLAUDE.md` § Development Commands, with the reasoning recorded inline. ~10s incremental.
+
+**Fix idea 3 not done** — no test asserting that nothing outside a `librarian` cfg names
+`crate::librarian`. Idea 2 subsumes it for anything that reaches a commit; idea 3 would only
+localise the error message. Not carried as open work.
+
+### Verification
+
+- `cargo check --no-default-features` — exit **101** before, exit **0** after.
+- `cargo test --no-default-features --lib librarian_response` — 2 tests, **observed running**
+  in the lean build rather than assumed to. The new module's doc comment claims they do; this
+  is that claim checked rather than asserted.
+- Caller side was already covered: `guide_index.rs:720` exercises `path~` through
+  `Shape::matches` with both a matching and a non-matching result.
+- Full gate: fmt clean; clippy `--workspace --all-targets --features local-embed -D warnings`
+  exit 0; `cargo test` 4732 passed / 0 failed / 46 ignored.
+
 ## Status notes
 
-Not fixed here. Filed from the operator-rules Phase 1 merge session, which verified the
-break is pre-existing on `experiments` and merged anyway on that basis — the branch's own
-lean build was clean and refusing to merge would not have repaired the base.
+Filed from the operator-rules Phase 1 merge session, which verified the break was
+pre-existing on `experiments` and merged anyway on that basis — the branch's own lean build
+was clean, and refusing to merge would not have repaired the base.
 
+Fixed in the following session, from a plain "run the tests" request. The lean build was run
+only because this file said to, and it failed exactly as recorded here — which is the whole
+return on having written it down.
+
+**One correction the reproduction forced.** This file was written believing the repo had no
+lean guard. It has one, but only inside the `test` job's 3-OS matrix; the fast `clippy` job
+runs two passes, **neither** with `--no-default-features`. So the class is caught late and
+expensively rather than not at all — which is precisely why an instance could sit on
+`experiments` long enough for merging sessions to inherit it. The gate addition moves
+detection to author time; it does not replace the CI lane.

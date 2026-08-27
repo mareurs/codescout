@@ -13,7 +13,7 @@
 //! on tool+action alone in the lean build, which is precisely the silent mismatch the
 //! predicate exists to prevent.
 //!
-//! `docs/issues/2026-08-27-experiments-head-fails-the-lean-build-and-the-local-gate-cannot-see-it.md`
+//! `docs/issues/archive/2026-08-27-experiments-head-fails-the-lean-build-and-the-local-gate-cannot-see-it.md`
 
 use serde_json::Value;
 
