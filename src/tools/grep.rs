@@ -170,6 +170,9 @@ impl Tool for Grep {
                 if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                     continue;
                 }
+                // Counted here, before the read: this is the point the override has
+                // admitted the file, which is what a starved glob is the absence of.
+                audit.accepted += 1;
                 let Ok(bytes) = std::fs::read(entry.path()) else {
                     audit.errors += 1;
                     continue;
@@ -196,7 +199,7 @@ impl Tool for Grep {
                 r["skipped_binary"] = json!(skipped_binary);
             }
             if total == 0 {
-                if let Some(w) = audit.completeness_warning(&search_path, include_hidden) {
+                if let Some(w) = audit.completeness_warning(&search_path, include_hidden, &globs) {
                     r["completeness_warning"] = json!(w);
                 }
             }
@@ -214,6 +217,9 @@ impl Tool for Grep {
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
+            // Counted here, before the read: this is the point the override has
+            // admitted the file, which is what a starved glob is the absence of.
+            audit.accepted += 1;
             let Ok(bytes) = std::fs::read(entry.path()) else {
                 audit.errors += 1;
                 continue;
@@ -535,7 +541,7 @@ impl Tool for Grep {
             result["skipped_binary"] = json!(skipped_binary);
         }
         if total_match_count == 0 {
-            if let Some(w) = audit.completeness_warning(&search_path, include_hidden) {
+            if let Some(w) = audit.completeness_warning(&search_path, include_hidden, &globs) {
                 result["completeness_warning"] = json!(w);
             }
         }
@@ -1118,6 +1124,11 @@ fn strip_buffer_ref_quotes(path: &str) -> &str {
 struct WalkAudit {
     /// Walk entries and file reads that failed. Counted rather than dropped.
     errors: usize,
+    /// Files the walk yielded and the override admitted. Zero while a glob is set means
+    /// no file was ever opened, so the zero describes the file filter and not the
+    /// pattern. Mirrors `accepted` on the `WalkAudit` in `src/tools/symbol/symbols.rs`,
+    /// which carries it for the same class of false negative.
+    accepted: usize,
 }
 
 impl WalkAudit {
@@ -1170,22 +1181,50 @@ impl WalkAudit {
     /// `None` is load-bearing: a clean walk over a tree with no hidden entries must return a
     /// bare zero, or the warning becomes noise attached to every empty result and stops being
     /// read at all.
-    fn completeness_warning(&self, root: &std::path::Path, include_hidden: bool) -> Option<String> {
+    ///
+    /// `globs` is taken because a zero also arises when the override admitted no file at all
+    /// (see `accepted`). That cause is named first and on its own terms: the note on
+    /// `unsatisfiable_absolute_glob` records a zero that carried the hidden-paths warning
+    /// whose remedy could not have helped, and naming an unchecked cause ends the search for
+    /// the real one. The clause claims only what the counter proves — that nothing under this
+    /// root passed the filter — and offers the anchoring mismatch as the thing to check,
+    /// since an empty tree produces the same count.
+    fn completeness_warning(
+        &self,
+        root: &std::path::Path,
+        include_hidden: bool,
+        globs: &[String],
+    ) -> Option<String> {
         let hidden = if include_hidden {
             Vec::new()
         } else {
             Self::hidden_at_root(root)
         };
-        if self.errors == 0 && hidden.is_empty() {
+        // Only a glob can starve the walk this way. With no glob set, zero accepted files
+        // means an empty tree, which the error and hidden clauses already account for.
+        let starved = !globs.is_empty() && self.accepted == 0;
+        if self.errors == 0 && hidden.is_empty() && !starved {
             return None;
         }
 
         let mut msg = String::from("this zero describes what was searched, not the pattern.");
+        if starved {
+            msg.push_str(&format!(
+                " No file under '{}' passed the glob filter ({}), so none was opened — this \
+                     zero is about the file filter, not the pattern. Globs are matched against a \
+                     walk rooted there, so they resolve relative to THAT root and not the project \
+                     root: when `path` narrows the search, a project-root-relative glob such as \
+                     `src/foo.rs` cannot match. Drop the leading segments `path` already supplies, \
+                     or omit `path` and let the glob carry the whole route.",
+                root.display(),
+                globs.join(", ")
+            ));
+        }
         if self.errors > 0 {
             msg.push_str(&format!(
                 " The walk could not read {} entr{} — re-run, and if it persists check for \
-                 unreadable directories or file-descriptor exhaustion from many concurrent \
-                 searches.",
+                     unreadable directories or file-descriptor exhaustion from many concurrent \
+                     searches.",
                 self.errors,
                 if self.errors == 1 { "y" } else { "ies" }
             ));
@@ -1195,9 +1234,9 @@ impl WalkAudit {
             let more = hidden.len() - shown.len();
             msg.push_str(&format!(
                 " Hidden paths were not searched, including {}{} at the search root. Pass \
-                 include_hidden=true to search them — a glob cannot re-admit them, because \
-                 overrides are applied inside a walk that has already pruned the parent \
-                 directory. `.git` and `.codescout` are excluded from this list.",
+                     include_hidden=true to search them — a glob cannot re-admit them, because \
+                     overrides are applied inside a walk that has already pruned the parent \
+                     directory. `.git` and `.codescout` are excluded from this list.",
                 shown.join(", "),
                 if more > 0 {
                     format!(" and {more} more")
@@ -2315,6 +2354,108 @@ mod tests {
             "file outside the literal glob must never be included: {s}"
         );
     }
+
+    /// A glob that admits no file at all returns a bare zero, which reads as "the
+    /// pattern is absent" when it means "no file was ever opened".
+    ///
+    /// This is the RELATIVE form of the hole `unsatisfiable_absolute_glob` guards:
+    /// overrides are matched against a walk rooted at the resolved `search_path`,
+    /// which `path` sets — so a glob written relative to the PROJECT root (the form
+    /// this tool's own `glob` doc example uses, `["src/**", "*.md"]`) is
+    /// unsatisfiable the moment `path` narrows the root, and nothing says so.
+    /// Confirmed live 2026-08-27 against this repo: `glob="src/tools/grep.rs"`
+    /// returns 1 match bare and 0 with `path="src"`, same pattern, same file.
+    ///
+    /// See `docs/issues/2026-07-18-grep-glob-literal-path-false-negative-unconfirmed.md`.
+    #[tokio::test]
+    async fn glob_that_admits_no_file_names_the_glob_instead_of_a_bare_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub").join("dir");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("file.rs"), "TARGET\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+
+        // Control: the file is findable, so a zero below is about the filter.
+        let ok = Grep
+            .call(
+                json!({
+                    "pattern": "TARGET",
+                    "path": sub.to_str().unwrap(),
+                    "glob": "file.rs",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            ok["total"].as_u64().unwrap(),
+            1,
+            "control: a root-relative glob under this path matches: {ok:?}"
+        );
+
+        // Same file, same pattern — glob written relative to the project root
+        // while `path` roots the walk at `sub/dir`. Admits nothing.
+        let r = Grep
+            .call(
+                json!({
+                    "pattern": "TARGET",
+                    "path": sub.to_str().unwrap(),
+                    "glob": "sub/dir/file.rs",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r["total"].as_u64().unwrap(),
+            0,
+            "precondition: the glob admits nothing: {r:?}"
+        );
+        let w = r["completeness_warning"].as_str().unwrap_or_default();
+        assert!(
+            w.contains("passed the glob filter"),
+            "a zero from a glob that opened no file must name the glob as the cause — \
+                 otherwise it reads as a finding: {r:?}"
+        );
+    }
+
+    /// `None` is load-bearing (see `completeness_warning`): a glob that DOES admit
+    /// files and simply finds nothing must not be blamed for the zero, or the clause
+    /// attaches to every empty result and stops being read.
+    ///
+    /// Asserted on the glob clause specifically rather than on the absence of any
+    /// warning: `rooted_ctx` writes a `.gitignore` at the root, so the pre-existing
+    /// hidden-paths clause fires here and is correct to. That clause also contains the
+    /// word "glob" ("a glob cannot re-admit them"), which is why this test and its
+    /// sibling both match the full phrase rather than the bare word.
+    #[tokio::test]
+    async fn a_glob_that_admits_files_but_finds_nothing_stays_a_bare_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("file.rs"), "SOMETHING ELSE\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+
+        let r = Grep
+            .call(
+                json!({
+                    "pattern": "TARGET",
+                    "path": dir.path().to_str().unwrap(),
+                    "glob": "*.rs",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r["total"].as_u64().unwrap(), 0);
+        assert!(
+            !r["completeness_warning"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("passed the glob filter"),
+            "the glob admitted a file and the pattern was genuinely absent — this zero \
+                 must not blame the glob for it: {r:?}"
+        );
+    }
+
     #[tokio::test]
     async fn zero_match_over_a_tree_with_a_hidden_dir_says_it_was_not_searched() {
         let dir = tempfile::tempdir().unwrap();

@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: `grep`''s `glob` param reported to miss real matches on literal (non-wildcard) file paths — not reproducible on immediate re-test'
 tags:
 - grep
@@ -8,12 +8,15 @@ tags:
 - override
 - false-negative
 - recurring
+closed: 2026-08-27
 last_observed: 2026-07-18
+last_verified: 2026-08-27
 opened: 2026-07-18
 owner: marius
 related: []
 reopened: 2026-07-18
 severity: medium
+unverified: 'The MECHANISM is confirmed, reproducible on demand, and guarded by two regression tests; the gate is green. What is NOT established, and never can be, is whether the original Mercury BOM report hit this mechanism — that session''s path/workspace_override state was never captured and is unrecoverable. Fix is in the working tree on experiments, NOT yet committed: no fix SHA or patch-id recorded, so this file is not yet archivable. Not yet verified against a live MCP server (cargo rb deferred — two peer sessions were running the binary).'
 ---
 
 # BUG: `grep`'s `glob` param reported to miss real matches on literal (non-wildcard) file paths — not reproducible on immediate re-test
@@ -144,6 +147,10 @@ files) in every re-test performed in this session.
 
 ## Root cause
 
+> **Superseded 2026-08-27 — see the dated section at the end of this file.** The
+> anchor-mismatch reading below is no longer speculation: it is confirmed live,
+> deterministic, and now guarded. The assessment as first written is kept intact.
+
 **Unconfirmed — could not be pinned down because the symptom did not
 reproduce.** Source review of `src/tools/grep.rs` (`Grep::call`,
 `parse_globs`, lines ~78-122) shows:
@@ -246,6 +253,11 @@ reproduce.** Source review of `src/tools/grep.rs` (`Grep::call`,
    prior-call sequence that no re-test session has yet replicated.
 
 ## Fix
+
+> **Superseded 2026-08-27 — a code change was since made; see the dated section at
+> the end of this file.** Recommendation § 2 (regression tests) was carried out
+> 2026-07-19 as recorded below; § 1 was overtaken by reproducing the mechanism
+> directly instead of waiting for a recurrence.
 
 No code change made — the specific reported symptom is unconfirmed and
 could not be reproduced. Recommended next steps for whoever re-opens this:
@@ -380,3 +392,87 @@ file itself already concluded. No new evidence gathered — this is a catalog-vs
 reconciliation, not a re-investigation. The re-open trigger from the original filing
 (capture `path`/`workspace` state and call sequence at the moment of recurrence) is still
 the next useful action if this fires again.
+
+
+## 2026-08-27 — Hypothesis 2 confirmed live, and the relative-glob hole closed
+
+**The mechanism this file called "speculation, not confirmed" is now confirmed,
+reproducible on demand, and guarded.** The original Mercury BOM report remains
+unreproducible and always will be — that session's `ToolContext` is gone. Those are
+two different claims and this section keeps them apart.
+
+### What was run
+
+Three `grep` calls against this repo (Linux, `experiments`), differing only in where
+the glob is anchored:
+
+| Call | Result |
+|---|---|
+| `grep(pattern="fn parse_globs", glob="src/tools/grep.rs")` | 1 match |
+| `grep(pattern="fn parse_globs", path="src", glob="src/tools/grep.rs")` | **0 matches** |
+| `grep(pattern="fn parse_globs", path="src", glob="tools/grep.rs")` | 1 match |
+
+The middle call is the reported symptom class exactly: a literal, wildcard-free glob
+naming a file that demonstrably contains the pattern, returning a bare zero.
+
+### Root cause (confirmed)
+
+`OverrideBuilder::new(&search_path)` anchors glob patterns at the resolved
+`search_path`, which `path` sets. A glob written relative to the **project root** — the
+form this tool's own `glob` doc example uses, `["src/**", "*.md"]` — is therefore
+unsatisfiable the moment `path` narrows the root, and the walk completes normally
+reporting `0 matches`.
+
+This is the **relative** form of the hole `unsatisfiable_absolute_glob` was added to
+guard. That predicate covers absolute globs outside the root and returns a
+`RecoverableError`; relative globs sail through silently. Same defect class, same file,
+half covered.
+
+### What was fixed, and what deliberately was not
+
+**Fixed: the silence.** `WalkAudit` now carries `accepted`, mirroring the `WalkAudit`
+in `src/tools/symbol/symbols.rs` whose own doc comment already said *"Zero here is the
+strongest signal available that `root` is not the tree the caller meant."* When a glob
+is set and `accepted == 0`, `completeness_warning` names the glob filter as the cause
+and explains the anchoring, ahead of the error and hidden-path clauses.
+
+**Deliberately NOT changed: the anchoring itself.** Globs stay relative to
+`search_path`. Re-anchoring at the project root would silently break every caller who
+correctly writes a `path`-relative glob, in order to fix what was only ever a
+legibility problem. The zero was never wrong — it was unexplained.
+
+The clause claims only what the counter proves ("no file under `<root>` passed the glob
+filter"), because an empty tree produces the same count; the anchoring mismatch is
+offered as the thing to check rather than asserted. That restraint is the lesson already
+recorded on `unsatisfiable_absolute_glob`: a zero there carried the hidden-paths warning
+whose remedy could not have helped, and *naming an unchecked cause ends the search for
+the real one.*
+
+### Tests
+
+In `src/tools/grep.rs::tests`:
+
+- `glob_that_admits_no_file_names_the_glob_instead_of_a_bare_zero` — the fix, with a
+  control call proving the file is findable so the zero is unambiguously about the filter.
+- `a_glob_that_admits_files_but_finds_nothing_stays_a_bare_zero` — the noise guard,
+  since `completeness_warning`'s contract makes `None` load-bearing.
+
+Both assert the full phrase `"passed the glob filter"` rather than the bare word `glob`:
+the pre-existing hidden-paths clause also contains that word, so a substring check on it
+passes spuriously. The second test surfaced this — it failed on first run because
+`rooted_ctx` writes a `.gitignore`, so the hidden clause always fires in that fixture.
+
+Gate: `cargo fmt` applied, `cargo clippy --all-targets -- -D warnings` clean, `cargo
+test` 4600 passed / 0 failed / 46 ignored.
+
+### What remains
+
+Nothing actionable on the mechanism. Unknowable: whether the Mercury BOM session hit
+*this* mechanism. The original re-open trigger stands unchanged for a genuinely new
+sighting — capture `path`, active project, and `workspace_override` before anything else
+moves.
+
+Not yet done: commit (no fix SHA / patch-id recorded, so this file is not archivable
+yet), and verification against a live MCP server — `cargo rb` was deferred because two
+peer sessions were running the binary, which is the hazard in
+`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`.
