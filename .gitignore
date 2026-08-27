@@ -112,3 +112,6 @@ tests/fixtures/*/.codescout/
 /.codescout/code-index.db
 /target-release-new/
 /.vscode/
+
+# SDD isolated worktrees
+.worktrees/
