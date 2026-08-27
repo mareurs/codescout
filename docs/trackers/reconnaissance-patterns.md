@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 118
+entry_high_water_R: 119
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -3739,6 +3739,70 @@ Phase 1.
 
 **Rests on:** law C as stated in this ledger, and CLAUDE.md *Conclude Last* — specifically
 its warning that a claim which "sounds right" is when verification matters most.
+
+## R-119 — Miss: two enumerations of my own loaded context disagreed in-session (18 vs 23 memories) and I never compared them
+
+**Verdict:** miss — a rebuild caught it, not recon. Recon had the evidence and did not look.
+
+**Law:** A — *Ground truth is the artifact. Everything else is a claim about it.* Applied
+one level up than usual: not to a symbol, but to the **enumeration of what I had loaded**.
+
+**Context:** 2026-08-27. `codescout:020ea69a` (*"a sub-project's memories are the union of
+both its stores"*) fixed `memory(list)`. Before it: 18 topics. After: 23. The five recovered
+are exactly the namespaced ones — `infra/*`, `research/*`. So for the whole session, Phase 0
+of the activation bootstrap ("load what the project already knows") ran against a surface
+silently returning 78% of what it had.
+
+**The evidence was in my own context and I never compared it.** The SessionStart banner
+listed 18. `workspace(activate)`, called minutes later in the same session, listed 23. Two
+enumerations of one thing, disagreeing, both sitting in the transcript. Nothing flags a
+disagreement between two surfaces; only reading them against each other does, and reading a
+banner as scenery rather than as data is why I did not.
+
+**What it cost, and what it did not.** One recovered memory,
+`infra/friction-measurement`, carries an instrument table with a row on `cc.py`'s profile
+discovery — the same `~/.claude`-hardcoded-vs-`CLAUDE_CONFIG_DIR` defect I filed from
+scratch this morning as `prompt-engineering:1758a24c9f1c648f`. Having it would have let me
+file that as a **second instance of a known class with a proven one-line fix** instead of a
+novel finding, and would have argued for a sweep.
+
+But the row said **BROKEN (filed)** and the code was already **fixed** — verified at
+`cc.py:23` before writing any of this. So "I would have known" is only half true: I would
+have had the class (valuable, and now cross-referenced into the issue) and been wrong about
+the instance. A stale memory recovered is not a fact recovered. Both the memory row and the
+issue have been corrected.
+
+**The pattern this is the third of, today.** A surface reporting a partial result in a shape
+indistinguishable from a complete one:
+
+1. `append_entry`'s anchor — `artifact(get)` returns 21 of 85 headings, front-anchored, and
+   the anchor is conventionally last (`codescout:c131d83129b81e1b`).
+2. `grep`'s zero under `include_hidden=true` — gitignored paths excluded, no clause says so
+   (`codescout:808b56f05218d250`).
+3. This — `memory(list)` at 18 of 23, no count, no truncation flag.
+
+None of the three lies. All three answer a narrower question than the one asked and present
+it as the answer to the broader one.
+
+**Proposal (for SKILL.md, at a second datapoint):** in Phase 0, when two surfaces enumerate
+the same thing, read them against each other before trusting either. Concretely for this
+harness: the SessionStart memory banner and `workspace(activate)`'s `memories` array are
+independent enumerations — a mismatch is a finding, and it is free to check.
+
+**Confirming data points:**
+
+1. This entry.
+2. Pending: the next session where two context-enumerating surfaces disagree.
+
+**Promote-when:** a second occurrence of two enumerations disagreeing unnoticed. At two,
+promote the proposal into Phase 0.
+
+**Status:** validated — single datapoint; the discrepancy is reconstructable from this
+session's own transcript, which is what makes it a miss rather than an anecdote.
+
+**Valid:** invariant
+
+**Rests on:** the activation bootstrap's Phase 0, and law A as stated in this ledger.
 
 ## Template for new entries
 
