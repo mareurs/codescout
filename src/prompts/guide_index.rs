@@ -136,15 +136,39 @@ pub fn parse_shape(s: &str) -> Result<Shape, String> {
         return Err(format!("missing tool name in `{s}`"));
     }
     let (tool, action) = match head.split_once('.') {
-        Some((t, a)) if !t.is_empty() && !a.is_empty() => (t.to_string(), Some(a.to_string())),
-        Some(_) => return Err(format!("malformed tool.action in `{s}`")),
-        None => (head.to_string(), None),
+        Some((t, a)) => {
+            if !is_ident(t) {
+                return Err(format!("malformed tool `{t}` in `{s}`"));
+            }
+            if !is_ident(a) {
+                return Err(format!("malformed action `{a}` in `{s}`"));
+            }
+            (t.to_string(), Some(a.to_string()))
+        }
+        None => {
+            if !is_ident(head) {
+                return Err(format!("malformed tool `{head}` in `{s}`"));
+            }
+            (head.to_string(), None)
+        }
     };
     Ok(Shape {
         tool,
         action,
         path_contains,
     })
+}
+
+/// `tool` and `action` identifiers: non-empty, `[A-Za-z0-9_]+` only.
+///
+/// Rejecting anything else — rather than trimming stray whitespace or a
+/// doubled separator — matters because of how this class of bug fails: a
+/// component like `" append_entry"` or `".append_entry"` parses without
+/// error into a `Shape` that can never match a real call, so the section it
+/// guards silently stops being delivered. That is the exact failure this
+/// feature exists to prevent, so it must not be reintroducible here.
+fn is_ident(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Parse the `serves:` / `requires:` comment block directly under a heading.
@@ -322,6 +346,40 @@ n body
         assert!(parse_shape("artifact.update(").is_err());
         assert!(parse_shape("").is_err());
         assert!(parse_shape("artifact.get(mode~x)").is_err());
+    }
+
+    #[test]
+    fn stray_characters_around_the_separator_are_an_error_not_an_inert_shape() {
+        // Fix round 1: `head.split_once('.')` used to accept anything on
+        // either side as long as it was non-empty, so a stray space or a
+        // doubled `.` parsed into a `Shape` that could never match a real
+        // call — a permanently inert declaration, not a loud error. That is
+        // the exact failure mode this feature exists to prevent, reintroduced
+        // inside the machinery.
+        assert!(parse_shape("artifact. append_entry").is_err()); // space after separator
+        assert!(parse_shape("artifact .append_entry").is_err()); // space before separator
+        assert!(parse_shape("artifact..append_entry").is_err()); // doubled separator
+        assert!(parse_shape("artifact.append entry").is_err()); // space inside action
+        assert!(parse_shape("tool.a.b").is_err()); // dot inside action
+
+        // Underscores and digits remain legal — Task 6's real declarations
+        // depend on this.
+        assert_eq!(
+            parse_shape("artifact_augment").unwrap(),
+            Shape {
+                tool: "artifact_augment".into(),
+                action: None,
+                path_contains: None,
+            }
+        );
+        assert_eq!(
+            parse_shape("artifact.append_entry").unwrap(),
+            Shape {
+                tool: "artifact".into(),
+                action: Some("append_entry".into()),
+                path_contains: None,
+            }
+        );
     }
 
     #[test]
