@@ -5174,8 +5174,16 @@ mod guide_hint_tests {
     /// before returning its content. Guide injection only fires on
     /// `call_content`'s success path, so a silently-failed call produces 0 B
     /// of guide — indistinguishable from legitimate cross-call dedup unless
-    /// the underlying `CallToolResult.is_error` is checked directly. `label`
-    /// identifies the failing shape in the panic message.
+    /// the call is checked for BOTH failure shapes: `is_error: true` (fatal
+    /// `anyhow` errors, e.g. `update`'s unknown-id path at
+    /// `librarian/tools/update.rs:369`) AND a `RecoverableError`, which
+    /// `route_tool_error` (this file) deliberately routes to `is_error: false`
+    /// with an `{"ok": false, "error": ...}` body (e.g. `get`'s unknown-id
+    /// path at `librarian/tools/get.rs:125-134`) — pinned by
+    /// `recoverable_error_routes_to_success_not_is_error`. Checking `is_error`
+    /// alone would silently pass a `RecoverableError`, undercounting the
+    /// session's real guide draw with no test failure to show for it.
+    /// `label` identifies the failing shape in the panic message.
     async fn call_tool_checked(
         server: &CodeScoutServer,
         name: &str,
@@ -5193,6 +5201,16 @@ mod guide_hint_tests {
             "{label} call must succeed for its guide bytes to count — got: {:?}",
             result.content
         );
+        if let Some(primary) = result.content.first().and_then(|c| c.as_text()) {
+            if let Ok(body) = serde_json::from_str::<Value>(&primary.text) {
+                assert_ne!(
+                    body.get("ok"),
+                    Some(&Value::Bool(false)),
+                    "{label} call returned a RecoverableError (isError:false, but \
+                     ok:false) — its guide bytes cannot count: {body}"
+                );
+            }
+        }
         result.content
     }
 
