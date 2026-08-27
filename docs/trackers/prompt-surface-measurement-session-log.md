@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 36
+entry_high_water_F: 38
 entry_high_water_W: 25
 entry_prefix:
 - F
@@ -64,6 +64,8 @@ surfaces, not the definition.
 | F-34 | I wrote a timing verdict that was true by construction — the trigger call is always the first opportunity | fixed-verified |
 | F-35 | I measured that guides grow, then used today's sizes for historical injections — overstating every byte figure 1.17x | fixed-verified |
 | F-36 | Four defects marked fixed were all still live in the sibling eval — including F-1, whose code was still deleting evidence every run | fixed-verified |
+| F-37 | I cleared the proxy as a cause after checking only its response side, then blamed the API for a defect in our own request | fixed-verified |
+| F-38 | I selected traces by content-matching a prompt string my own session contained, and published the table as a between-condition finding | fixed-verified |
 
 ## Wins Index
 
@@ -3434,6 +3436,166 @@ and three more were one sibling away from every fix that had been declared done.
 
 **Rests on:** F-1, F-24, F-31, F-32 — this entry is the observation that all four
 remained live in a sibling after being closed.
+
+## F-37 — I cleared the proxy as a cause after checking only its response side, then blamed the API for a defect in our own request
+
+**Observed:** 2026-08-27, testing whether Langfuse captures thinking text, so the
+guide-injection study's blind spot could be closed.
+
+**When:** After the llm-proxy streaming fix (`b01ee4c`) landed and the service
+restarted. I measured, then concluded, then wrote the conclusion into three durable
+documents.
+
+**Expected:** Either thinking text appears (blind spot closes) or it does not, in
+which case find out why.
+
+**Got (measurement, accurate):** 150 Langfuse observations, 39 `thinking` blocks,
+**0 with non-empty text**, signatures fully populated (524–3,988 chars). Token
+accounting on one `claude-opus-5` session: 1,210 output tokens billed against 252
+characters of returned text — ~95% of billed output never delivered.
+
+**Got (conclusion, WRONG):** *"The API returns the signature, not the reasoning."*
+I declared the blind spot irreducible and wrote that into
+`llm-proxy:docs/issues/archive/2026-08-27-streaming-langfuse-output-drops-thinking-and-tool-use-blocks.md`,
+codescout's `docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md`
+and `docs/evals/2026-08-27-guide-injection-use.md`.
+
+**Reality:** Two request-side causes, either sufficient alone, both in our own
+request construction. Claude Code sends `anthropic-beta:
+redact-thinking-2026-02-12` — a client-side terminal-UI choice, **not** an
+Anthropic restriction — and `thinking: {"type": "adaptive"}` with no `display`
+key, which several current models default to `"omitted"`. Fixed the same hour by a
+concurrent session (`llm-proxy:6f3cb62`, 09:07): strip the beta token, set
+`display=summarized` when the client omitted it. Post-fix, live traces carry
+readable thinking on `claude-opus-5` (mean 1,188 chars) and `claude-sonnet-5` (mean
+316) — and this very session's JSONL began carrying non-empty thinking blocks
+within minutes, so CC's transcript redaction was downstream of the same cause.
+
+**Probable cause — two errors, the first structural:**
+
+1. **I eliminated a component by verifying one half of it.** A proxy has a request
+   side and a response side. I read `BlockAcc::apply_delta`, confirmed it handles
+   `thinking_delta`, confirmed the running binary was the fixed one, and wrote *"so
+   the proxy is excluded as the cause"*. The request path — the headers it forwards,
+   the `thinking` object it passes through — was never opened. Having verified
+   something real and specific made the exclusion feel earned.
+2. **I treated a non-discriminating figure as decisive.** The token accounting
+   (~95% of billed output never returned) was presented as *"the decisive one"*. It
+   proves reasoning happened and was not returned. It is **equally consistent** with
+   *the model omitted the text* and *our own request asked for it to be omitted*. A
+   measurement that cannot separate the hypotheses cannot choose between them, no
+   matter how striking it is.
+
+**Workaround:** All three surfaces corrected, with the superseded conclusion left
+visible rather than deleted — the measurements were sound and the record of what
+was believed is the useful part. The limits now read "unavailable for these
+transcripts, now fixed, so a re-run can measure it" instead of "irreducible".
+
+**Severity:** high — not for the measurement (unchanged: those transcripts genuinely
+lack thinking, so `U0_UNUSED` stays an upper bound) but for the **claim of
+irreducibility**, which is the kind of statement that stops anyone re-running the
+study. It reached three durable documents, one in another repo, inside 40 minutes.
+
+**Status:** fixed-verified — corrections landed in all three surfaces; post-fix
+capture verified independently in Langfuse and in this session's own JSONL.
+
+**Valid:** invariant
+
+The specific cause is dated 2026-08-27; the reasoning error — clearing a
+two-sided component after checking one side — does not decay.
+
+**Rests on:** a proxy mediating both directions of a request, so "the proxy is
+fine" is two claims, not one. Generalises to any middlebox: a gateway, an ORM, a
+serializer, a CI runner.
+
+**Kin:** `F-34` (this log) — also a conclusion true by construction rather than by
+evidence. `W-25` — the third of three controller defects surfaced by someone other
+than the controller, and the only one caught *after* publication.
+`reconnaissance-patterns:R-104` — a negative result is evidence about the
+instrument, not about the world; here the instrument was the request I never read.
+
+## F-38 — I selected traces by content-matching a prompt string my own session contained, and published the resulting table as a between-condition finding
+
+**Observed:** 2026-08-27, investigating why eval runs logged empty `thinking`
+blocks while some other traffic did not.
+
+**What I did:** to find which runs had reasoning text, I queried Langfuse for
+traces in a time window and selected the ones belonging to my probes by
+**searching each trace body for the prompt string** (`'windowless room' in
+json.dumps(trace)`). I then tabulated thinking-chars by that selection and
+published a clean-looking result:
+
+> manual `claude -p` probes — 40+ blocks, 163–2655 chars
+> eval-harness runs — 8 blocks, all empty
+
+I filed an issue on that table, listing seven ruled-out causes.
+
+**The table was entirely wrong.** Re-attributing the same traces by
+`sessionId` showed **every populated block belonged to my own interactive
+session**, and **every** headless probe was empty. The harness-vs-probe axis I
+had "measured" did not exist.
+
+**Root cause — and it generalises past this tool.** I was searching a log that
+records *my own activity alongside the experiment's*. The prompt string was in
+my session because **I had typed it into the shell commands that launched the
+probes.** The act of running the experiment put the experiment's identifying
+marker into the observer's own record. Content-matching then swept both in and
+attributed all of it to the subject.
+
+> **When you search a shared log for evidence of your experiment, you are in
+> that log too.** A content match cannot separate the observer from the
+> observed; only an identifier the runs themselves carry can.
+
+The failure is quiet in the worst way: it does not error, it does not look
+sparse, and it does not look noisy. It produces a **clean table with a large
+effect in the direction you expected** — which reads as strong evidence rather
+than as an artifact. The eight genuinely-empty rows were real, so the table was
+half true, which is what made it convincing.
+
+**What settled it:** an A/B that (a) varies exactly **one** input and (b) matches
+results by `session_id` captured from each run's own output, never by content.
+Same profile, model, `--permission-mode`, `--strict-mcp-config`, deny-list and
+cwd; only `--output-format` differing:
+
+    prompt 1   json -> 0 chars     stream-json -> 538 chars
+    prompt 2   json -> 0 chars     stream-json -> 152 chars
+
+Run twice with different prompts *because* I had already been wrong twice.
+
+**Second error, same session, worth pairing:** before the filter bug I had
+concluded "no capture defect — the `notools` arm just barely reasons." A fully
+tooled 334 s Opus arm was equally empty. Both errors have one shape:
+**concluding from a measurement whose selection step I had not checked.** The
+first mis-selected an arm, the second mis-selected traces.
+
+**Fix:** `llm-proxy:7824e3f` rewrites the issue with the corrected axis and keeps
+the retraction visible rather than editing it away. The bad-filter story is
+recorded *in the issue*, because a reader who only sees the final cause would
+have no reason to distrust a content-matched table next time.
+
+**Severity:** high — a fabricated between-condition table, published to an issue
+tracker, with seven "ruled out" causes resting on it.
+
+**Status:** fixed-verified — corrected axis reproduced twice.
+
+**Valid:** dated 2026-08-27
+
+**Rests on:** F-32 and W-24, same session — the third instance of reading a
+measurement before checking what it selected.
+
+**Kin:** `F-37` (this log, concurrent session) — same investigation from the other
+side, and the two are COMPLEMENTARY rather than contradictory. F-37 found the
+request-side cause (`redact-thinking` beta + absent `thinking.display`) and
+verified the fix on STREAMING traffic: opus mean 1,188 chars, sonnet 316. Those
+figures match what my own interactive session shows. What my A/B adds is the
+residue that verification could not have covered: with `--output-format json` the
+text is still empty after that fix, twice, on two prompts. Read together: the fix
+works, and it works on the path it was tested on.
+
+Both entries are also the same error one level apart — F-37 cleared a component
+after checking one of its two sides; F-38 cleared a hypothesis after checking a
+selection it never validated. Neither measurement was wrong; both selections
+were.
 
 ## Template for new entries
 

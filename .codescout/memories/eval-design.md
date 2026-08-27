@@ -917,3 +917,43 @@ it makes possible that was previously impossible.
 **Rescue evidence before repairing the thing that destroys it.** The script being fixed was
 the script that would have deleted the data on its next run. Copy first, verify the copy
 re-scores, then edit.
+
+## Match results by an identifier the runs carry — never by searching for content
+
+Measured 2026-08-27, the hard way. To find which of my probe runs produced a signal, I
+queried a shared observability log and selected the relevant traces by **searching each
+trace body for the prompt string**. The resulting table showed a clean, large,
+expected-direction effect between two conditions. It was fabricated.
+
+**The prompt string was in my own session's traces, because I had typed it into the
+shell commands that launched the probes.** Running the experiment put the experiment's
+marker into the observer's own record; a content match then swept both in and credited
+all of it to the subject. Re-attributing by `session_id` showed every positive belonged
+to my session and every actual probe was negative.
+
+**When you search a shared log for evidence of your experiment, you are in that log
+too.** Anything that logs your activity alongside the run's — a session transcript, a
+proxy, an APM, a CI log, a shared database — has this property.
+
+Why it is dangerous rather than merely wrong: it fails with **no error, no sparseness,
+and no noise**. It yields a clean table with a large effect in the direction you
+predicted, which reads as strong evidence. Mine was half true — the negative rows were
+genuine — and half-true tables are the convincing kind.
+
+**The remedy is two rules, both cheap:**
+
+- **Capture an identifier from each run's own output** (`session_id`, request id, run
+  id) and match on that. If a run does not emit one, make it emit one before measuring.
+- **Vary exactly one input per comparison**, and hold the rest byte-identical. The A/B
+  that settled this differed only in one CLI flag; everything else — profile, model,
+  permission mode, deny-list, cwd — was the same string.
+
+**And replicate before publishing a between-condition claim**, especially after any
+earlier claim in the same session turned out wrong. Two prompts, same result, is cheap
+insurance against a third retraction.
+
+**Corollary — a striking figure that cannot discriminate is not evidence.** A sibling
+entry the same day rested on "95% of billed output tokens were never returned", which is
+equally consistent with *the model omitted it* and *our own request asked it to*. A
+measurement that cannot separate the hypotheses cannot choose between them, however
+dramatic it looks.
