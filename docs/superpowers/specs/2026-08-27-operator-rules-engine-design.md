@@ -158,11 +158,15 @@ block in each of the three profiles:
 alone). More resident rules is therefore not monotonically better, and an uncapped `always`
 set is the failure mode this engine would otherwise ship.
 
-**Initial cap: the size of the `always` set that Phase 3's classification actually yields — not the size of the corpus.** These are different numbers and conflating them would defeat the cap: the corpus today holds four rules, but on the projected classification in § 4 only **one** of them (`Conclude Last`) is `always`. So the initial cap is projected at **1**, and Phase 3 sets it to whatever it measures.
+**Two separate constraints, and conflating them is an error this spec made once.**
 
-That is deliberately tight. **Adding an `always` rule beyond the cap requires either a base arm showing a deficit, or the eviction of an existing one.** This is the same gate the reconnaissance skill's promotion routing imposes on its session-opening surface (*"a base arm … without it this is an addition with no shown deficit"*), applied to the operator surface for the same reason.
+**(a) Non-overlap — what the dilution measurement actually supports.** No two `always` rules may address the same failure mode. `A-20`'s *"stacking diluted rather than added"* was measured on `a5-both`: `a3` (conclude-last) stacked with `a4` (claim-format), **two arms aimed at the same behaviour**. The result generalises to redundant guidance on one failure mode; it says nothing about unrelated rules, and reading it as a headcount limit is an over-generalisation. Overlap is the thing to gate, and it is a property of a candidate rule against the existing set, not of the set's size.
 
-A rule that cannot earn an `always` slot is not thereby rejected — it becomes `triggered`, which is the cheaper and more common outcome.
+**(b) Size — a token budget, set by judgement.** Start at **3–5**; ceiling **5–10**. Beyond the ceiling, an addition requires either a base arm showing a deficit or the eviction of an existing rule — the same gate the reconnaissance skill's promotion routing imposes on its session-opening surface (*"a base arm … without it this is an addition with no shown deficit"*). Below it, (a) still binds: headroom is not licence to add a second rule about the same failure.
+
+The corpus today holds four rules; § 4 projects one of them as `always`. So Phase 3 begins with real headroom, which makes the classification in § 4 a **decision informed by arms** rather than a forced choice — a rule projected as `triggered` may be promoted to `always` if its arm shows the trigger misses the moment of need.
+
+A rule that does not earn an `always` slot is not rejected — it becomes `triggered`, the cheaper and more common outcome.
 
 ### 4. `triggered` rules route through the section-grain matcher
 
@@ -221,8 +225,10 @@ Falsifiable, each failing loudly:
 2. **`--check` discriminates.** Exits non-zero when a rule is present in one profile's block
    and absent from another; exits **zero** when the only difference outside the block is
    whitespace. This gate is the fix for § *Problem* and must be written before the compiler.
-3. **Budget enforced.** Adding an `always` rule beyond the cap fails unless the entry carries
-   `**Evidence:** measured: …` or another `always` rule moves to `retired`.
+3. **Budget enforced, on both axes.** (a) A candidate `always` rule whose failure mode is
+   already covered by an existing `always` rule fails the gate — this is the constraint the
+   dilution measurement supports. (b) Adding beyond the size ceiling (5–10) fails unless the
+   entry carries `**Evidence:** measured: …` or another `always` rule moves to `retired`.
 4. **Selector validity.** Every `**Serves:**` parses under the § 4 grammar; an unparseable
    selector fails the gate rather than silently never matching. Reuses the section-grain
    parser's rejection tests.
@@ -276,7 +282,11 @@ Every figure below was read this session, from the named artifact.
 
 - **Profile drift** — `wc -c` + `md5sum` over three files, 2026-08-27; `diff` → `22a23 >`.
 - **`prompt-hamsa-audit-log:A-20`** — verify-before-assert prose 93.3% vs **0% bare**;
-  *"Stacking diluted rather than added."*
+  *"Stacking diluted rather than added."* **Scope, because this quote is easy to over-read:**
+  the stacking arm was `a5-both` — `a3` and `a4`, two treatments of the *same* behaviour. It
+  is evidence about redundant guidance on one failure mode, **not** about a headcount of
+  unrelated rules. This spec read it as a headcount in its first draft and set the cap at 1;
+  § 3 records the corrected reading and the two constraints it separates into.
 - **`prompt-hamsa-audit-log:A-21`** — `b2` imperative-only **100.0%**, beating `a2` at 93.3%;
   active ingredient is an unconditional imperative binding at every claim; closed 2026-08-16,
   shipped and re-measured at n=35 (`iron-laws-detail` `43fac6c8`, bootstrap `5917e37e`).
