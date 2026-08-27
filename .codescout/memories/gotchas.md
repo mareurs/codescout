@@ -222,17 +222,36 @@ codescout's `run_command` is 4731 passed / 0 failed. The test asserts strict
 equality against `"ok"`, so an attached warning fails it — which makes this read
 exactly like a code regression when it is an environment difference.
 
-**Remedy, proven.** Export the retrieval-stack URL before any gate run from a
-native shell — either form works, measured twice each:
+**Remedy — already installed on this machine (2026-08-27).** `~/.cargo/config.toml`
+carries an `[env]` block, so every `cargo` invocation gets the var regardless of
+shell and nothing needs remembering:
+
+```toml
+[env]
+CODESCOUT_EMBEDDER_URL = { value = "http://127.0.0.1:48081", force = false }
+```
+
+Verified: the previously-failing test passes bare with the var unset in the shell,
+and `force = false` is a fallback rather than a lock — an explicit
+`CODESCOUT_EMBEDDER_URL=http://127.0.0.1:49999` still overrides it and still
+fails. User-level config, outside every repo, so nothing ships to contributors.
+
+**It is deliberately NOT in the repo's `.cargo/config.toml`.** That file is
+tracked and carries the `cargo rb` alias CLAUDE.md names as the live-MCP build
+command, plus `sccache` and the mold linker, and is referenced by
+`.github/workflows/ci.yml` and `scripts/build-windows.sh`. Gitignoring it would
+require untracking it, which deletes all of that from every other checkout and
+from CI. Cargo's `include = [...]` is not an escape either — **a missing include
+target makes cargo fail hard** (`exit 101`, "could not load Cargo configuration"),
+measured 2026-08-27, so a gitignored sidecar breaks every clone that lacks it.
+
+On a machine without that `[env]` block, do it by hand — either form works:
 
 ```bash
 export CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081
-# or, equivalently, load the whole startup env:
+# or load the whole startup env:
 set -a; . ~/.config/codescout/.env; set +a
 ```
-
-`~/.config/codescout/.env` is a symlink to this repo's `.env.amd` and sets
-`CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081` among others.
 
 **Mechanism: NOT established. Do not repeat the plausible story.** The obvious
 explanation — "`load_startup_env()` runs at MCP server startup so `run_command`
