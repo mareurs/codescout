@@ -1310,6 +1310,175 @@ async fn rooted_ctx(root: &std::path::Path) -> ToolContext {
     }
 }
 
+// ---- `wrote_to`: naming the checkout an unpinned write reached ----
+//
+// docs/issues/2026-08-27-edit-code-writes-to-session-default-not-pinned-workspace.md
+//
+// Measured over 195,126 tool calls: a pin-armed REFUSAL would have blocked
+// 9,914 writes (30.3% of the corpus) to catch at most 18 real misroutes. So
+// this annotation refuses nothing — it only says which tree an ambiguous write
+// actually reached.
+
+/// `EchoTool` is a read, and the annotation is gated on `is_write`. `name` is a
+/// field because the exemption list is keyed on it.
+struct WriteEchoTool {
+    name: &'static str,
+    result: serde_json::Value,
+}
+
+#[async_trait::async_trait]
+impl Tool for WriteEchoTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "test write"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    fn is_write(&self, _input: &serde_json::Value) -> bool {
+        true
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        Ok(self.result.clone())
+    }
+}
+
+/// Drive a write through the real `call_content` path and parse its answer back.
+/// Going through `call_content` rather than calling the helper directly is the
+/// point: it is the wiring — the pin check, the `is_write` capture before
+/// `input` is consumed, the ordering against path-stripping — that can break.
+async fn write_echo(
+    ctx: &ToolContext,
+    name: &'static str,
+    result: serde_json::Value,
+) -> serde_json::Value {
+    let tool = WriteEchoTool { name, result };
+    let content = tool.call_content(serde_json::json!({}), ctx).await.unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    serde_json::from_str(&text).expect("a write result must round-trip as JSON")
+}
+
+/// A worktree-bearing checkout, plus a ctx rooted at it.
+async fn worktree_repo_ctx(tmp: &tempfile::TempDir) -> (std::path::PathBuf, ToolContext) {
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+    (root, ctx)
+}
+
+/// The leak this closes: a write that resolved against the session default
+/// answered with a bare `status: ok`, indistinguishable from the calls that
+/// landed in the tree the caller meant.
+#[tokio::test]
+async fn an_unpinned_write_names_the_checkout_it_reached() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_root, ctx) = worktree_repo_ctx(&tmp).await;
+    let expected = ctx.agent.project_root_for(None).await.unwrap();
+    let expected = expected.display().to_string();
+
+    let val = write_echo(&ctx, "edit_code", serde_json::json!("ok")).await;
+
+    assert_eq!(
+        val.get("wrote_to").and_then(|v| v.as_str()),
+        Some(expected.as_str()),
+        "an unpinned write in a repo with linked worktrees must name the tree it \
+         reached, absolutely; got {val}"
+    );
+    assert_eq!(
+        val.get("status").and_then(|v| v.as_str()),
+        Some("ok"),
+        "promoting the bare `\"ok\"` must preserve it as `status`, not discard \
+         the tool's own answer; got {val}"
+    );
+}
+
+/// The no-echo write convention, guarded. Single-checkout repos — every test
+/// tempdir, and the overwhelmingly common real case — must be byte-identical to
+/// before this change. This is the test that makes the conditional shape change
+/// safe to ship.
+#[tokio::test]
+async fn a_write_without_worktrees_keeps_the_bare_ok() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    let ctx = rooted_ctx(&root).await;
+
+    let val = write_echo(&ctx, "edit_code", serde_json::json!("ok")).await;
+
+    assert_eq!(
+        val,
+        serde_json::json!("ok"),
+        "no worktrees means no ambiguity: the response shape must not change"
+    );
+}
+
+/// A pinned call already named its target in the call. Annotating it would be
+/// noise on exactly the calls that were never at risk.
+#[tokio::test]
+async fn a_pinned_write_is_not_annotated() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (root, mut ctx) = worktree_repo_ctx(&tmp).await;
+    ctx.workspace_override = Some(root);
+
+    let val = write_echo(&ctx, "edit_code", serde_json::json!("ok")).await;
+
+    assert_eq!(
+        val,
+        serde_json::json!("ok"),
+        "a pinned write is unambiguous by construction; got {val}"
+    );
+}
+
+/// The annotation must not cost the tool its own answer.
+#[tokio::test]
+async fn annotating_an_object_result_preserves_its_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_root, ctx) = worktree_repo_ctx(&tmp).await;
+
+    let val = write_echo(
+        &ctx,
+        "edit_code",
+        serde_json::json!({"status": "ok", "inserted_at_line": 4}),
+    )
+    .await;
+
+    assert_eq!(
+        val.get("inserted_at_line").and_then(|v| v.as_u64()),
+        Some(4),
+        "the tool's own fields must survive annotation; got {val}"
+    );
+    assert!(
+        val.get("wrote_to").is_some(),
+        "object results must still be annotated; got {val}"
+    );
+}
+
+/// `approve_write` grants a write scope; it writes no file. Naming a checkout
+/// there would describe something that did not happen.
+#[tokio::test]
+async fn an_exempt_tool_is_not_annotated() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_root, ctx) = worktree_repo_ctx(&tmp).await;
+
+    let val = write_echo(&ctx, "approve_write", serde_json::json!("ok")).await;
+
+    assert_eq!(
+        val,
+        serde_json::json!("ok"),
+        "a tool that writes no project-relative path must not claim a checkout; got {val}"
+    );
+}
+
 /// Like `EchoTool`, but its compact summary is DERIVED from the result it is
 /// handed. `EchoTool::format_compact` ignores its `_result` argument and
 /// returns a stored string, so it cannot detect whether the value was stripped

@@ -1,7 +1,7 @@
 ---
 kind: bug
 status: open
-title: "edit_code writes to the session-default project, not the workspace= pin — a subagent's structural edits silently land in another checkout"
+title: 'An unpinned write is silently routed to the session default in a multi-worktree repo — guard_worktree_write latches open on the session''s first activate'
 tags:
   - edit_code
   - worktree
@@ -13,8 +13,12 @@ closed:
 
 # edit_code writes to the session-default project, not the `workspace=` pin
 
-**Regression of** `docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md`
-(id `875e834b95286445`, archived `fixed`). Same mechanism, observed again 2026-08-27.
+> **Filed as** a regression of `docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md`
+> (id `875e834b95286445`, archived `fixed`). **That framing was refuted by measurement on
+> 2026-08-27** — see § *Reproduction — minimised*. The 2026-07-09 fix holds; `edit_code` honours
+> the `workspace=` pin. The real defect is one layer up, in `guard_worktree_write`, and the title
+> above has been corrected to name it. The original title is kept here for citation continuity:
+> *"edit_code writes to the session-default project, not the `workspace=` pin"*.
 
 ## Symptom
 
@@ -105,6 +109,137 @@ This narrows but does not confirm anything: n = one plan (six further tasks, not
 independent sample), and the original Task 4 leak's own two calls were dispatched *with*
 the pin per instruction, which this evidence does not explain — if the pin were sufficient
 on its own, Task 4's leak should not have happened either. The mechanism is still open.
+## Reproduction — minimised 2026-08-27
+
+Run live against the serving binary (main checkout = session default, linked worktree
+`.worktrees/operator-rules-phase-1` present). Each write was followed by reading the file back
+in **both** trees.
+
+| tool | pinned to worktree | unpinned |
+|---|---|---|
+| `create_file` | lands in worktree ✓ | lands in main |
+| `edit_file` | lands in worktree ✓ | — |
+| `edit_markdown` | lands in worktree ✓ | — |
+| `edit_code` (`replace`) | lands in worktree ✓ | — |
+| `edit_code` (`insert`) | lands in worktree ✓ | **lands in main, returns bare `status: ok`** |
+
+The pinned column was measured in both shapes that could differ: a target existing **only** in
+the worktree, and a target existing in **both** trees under the same relative path (the incident's
+shape). No misroute in either.
+
+**So the filed mechanism is refuted.** `edit_code` does not ignore the pin. All four
+`resolve_write_path_for` call sites still thread `ctx.workspace_override.as_deref()`
+(`edit_code.rs:331, 683, 874, 1166`), and `resolve_write_path_for_honors_workspace_override`
+(`src/fs/mod.rs`) still guards it. The 2026-07-09 fix did **not** regress.
+
+### What actually happened
+
+The leak is the **unpinned** row. An unpinned write resolves against the session default, which
+was the main checkout — correct by design, and silent by design.
+
+The thing that should have caught it is `guard_worktree_write`
+(`src/tools/core/guards.rs:20-47`), whose stated job is refusing a write when "git worktrees exist
+but the agent hasn't explicitly called `activate_project` to confirm which project to write to."
+It opens with an unconditional session-global bypass:
+
+```rust
+if ctx.agent.is_project_chosen_this_session().await {
+    return Ok(());
+}
+```
+
+`project_chosen_this_session` is a **session-wide latch**. Once any `activate` has run — which an
+SDD controller does at the start of essentially every multi-agent run — the guard returns `Ok`
+for every subsequent write in the session, regardless of which root that write resolves to and
+regardless of whether it carries a pin. Measured this session: before `activate`, an unpinned
+`create_file` was refused loudly; after `activate(main)`, an unpinned `edit_code(insert)` landed
+in main with `status: ok` and no mention of the tree it wrote to.
+
+That is the whole incident. A subagent working in the worktree, pinning per call as instructed,
+drops the pin on one or two calls; those calls land in main; nothing in the response distinguishes
+them from the ones that landed correctly.
+
+It also explains the distribution the *Evidence from Tasks 5-10* section could not: pinned calls
+land correctly because the pin works, and Task 5's single **loud** failure was an unpinned call
+issued *before* the session's latch was set.
+
+**Guard granularity is the defect.** Under per-call pinning — which
+`get_guide("workspace-state")` § *Per-call workspace pinning* explicitly recommends over
+`activate` for parallel fan-out — a per-session confirmation is the wrong unit. A pin *is* the
+per-call confirmation; its absence on one call is an unconfirmed write, and the guard cannot see
+that because it stopped looking at the first `activate`.
+
+Same structural shape as open bug `54a70b49f6f26681` (*the rendezvous gate latches open*): a
+session-global boolean standing in for a per-event check.
+## Measured 2026-08-27 — the obvious fix is refuted, and the pressure points the other way
+
+Before building anything, the candidate fix was costed against real transcripts: 2,319 JSONL files,
+195,126 tool-call records, 724 sessions, 2026-03-21 → 2026-08-27, across all three CC profiles.
+Instrument validated on a known-positive session first (this one — pinned writes on all four write
+tools, one unpinned `edit_code`, one live guard fire); it also had to be taught that subagent
+transcripts live in `<session-id>/subagents/agent-*.jsonl`, 1,637 sidecar files against 675
+top-level ones. Omitting those would have hidden the phenomenon entirely, since the leak happens
+*inside* a subagent.
+
+**Candidate rule costed:** refuse an unpinned write when linked worktrees exist AND some earlier
+*write* in the session carried a `workspace=` pin.
+
+**Result: 9,914 refusals — 30.3% of every codescout write in the corpus — against at most 18 true
+positives (0.18%). ~551 false refusals per genuine catch.** One session arms on three pinned writes
+and then refuses 2,663 ordinary ones.
+
+Two structural errors, both the same shape — a repo-level or cross-repo fact misread as a statement
+about the current session:
+
+- **`list_git_worktrees` is a property of the REPO, not the session.** It answers "does this repo have
+  worktrees on disk", not "is this session using one". codescout has `.worktrees/operator-rules-phase-1`
+  on disk, so the rule arms in every codescout session — including shared-checkout fan-outs that never
+  touch a worktree. Session `main|55515bc5`: 44 writing subagents, shared checkout, **302 would-be
+  refusals**.
+- **The arming pin is usually about a DIFFERENT repo.** 63.4% of refusals were armed by a pin at
+  `claude-plugins` / `prompt-engineering` / `researcher`. One cross-repo write arms the guard, and every
+  subsequent home-project write is refused.
+
+False-positive decomposition of all 9,914 (classified mechanically, then 20 stratified + all 214
+residuals hand-read): 63.4% arming pin at an unrelated repo; 18.4% active project *was* the worktree,
+so the relative write lands correctly; 16.0% target was an absolute path or artifact id, nothing to
+resolve ambiguously; 2.2% residual, of which **18** match the true leak shape.
+
+**The true leak shape, now precisely characterised** (from those 18, spanning 4 sessions): shell cwd
+inside a worktree + codescout active project = main + a bare *relative* write target. Even these are an
+upper bound — several targets are cross-cutting docs (`docs/ROADMAP.md`, `.codescout/memories/*`,
+`docs/issues/*`) plausibly meant for main while code work happened in the worktree.
+
+### The harm is real; the current guard is the friction
+
+- **Harm confirmed:** 131 wrong-checkout hits across 18 sessions, e.g. *"the `artifact` tool's writes
+  have repeatedly landed in the wrong checkout this session, undetected by most prior uses."* This is a
+  **lower bound** — it counts only misroutes someone noticed and wrote down, and the failure mode
+  returns a bare `status: ok`. It is currently mitigated by hand-written prompt discipline, not by code.
+- **Current guard fires 122 times across 27 sessions** (21 codescout), ~4.5 refusals per session before
+  the agent works out it needs an `activate` — *including in sessions that never touch a worktree*,
+  purely because a stale worktree exists on disk.
+- **Dominant workflow is shared-checkout:** of 37 sessions with 2+ writing subagents, **24 (65%) use a
+  single shared checkout**, largest fan-outs at 131 and 50 distinct writing subagents. Worktree sessions
+  top out at 89. Only 7.47% of all writes carry a pin at all, and **72% of write-bearing sessions never
+  pin a single write** — so any pin-armed rule is silent exactly where it is not needed and loud
+  where it is.
+
+### What survives
+
+Not a blocking guard. The surviving candidate is **information, not refusal**: when a write resolves
+*unpinned* and the repo has linked worktrees, name the tree in the response (`wrote_to: <root>`). Zero
+false-positive cost — it refuses nothing — and it would have made every one of the 18 visible on the
+first call rather than after a `git status` on another checkout. Pinned writes need no annotation; the
+call already names its target.
+
+A second, independent candidate the measurement surfaced: the **existing** guard's 122 fires are
+largely friction, since it arms on a repo-level fact. Narrowing it is a separate decision from this bug.
+
+**Limits of the measurement:** historical `git worktree list` state is unrecoverable, so 9,914 is a
+*lower* bound on refusals; active project was inferred from the last observed `activate` (CLI-flag and
+hook activations are invisible); no transcript records where a write actually landed, so the 18 are a
+shape match, never a confirmed wrong-tree file; one user, one machine.
 ## Reproduction sketch (not yet minimised)
 
 1. Open a linked worktree of this repo.
@@ -129,8 +264,12 @@ one of them can leak into the main checkout. Mitigations in force:
 
 ## Not yet done
 
-- Minimise the reproduction.
-- Determine whether `edit_file`, `create_file` and `edit_markdown` share the defect, or
-  only `edit_code`'s structural write path.
-- Check whether the 2026-07-09 fix regressed, or only ever covered a narrower path than
-  its title claims.
+All three original items are answered (see § *Reproduction — minimised*), and the obvious fix has been
+costed and refuted (see § *Measured 2026-08-27*). What remains is a decision, not an investigation:
+
+- **Decide between** (a) annotating unpinned writes with the tree they landed in, in repos that have
+  linked worktrees; (b) narrowing the *existing* guard, which the same measurement shows firing 122
+  times mostly as friction; (c) neither — the harm is real but is currently absorbed by prompt
+  discipline, and both code changes carry cost.
+- **Do NOT ship a pin-armed refusal.** Costed at 30.3% of all writes refused for a 0.18% true-positive
+  rate. The number is recorded above so this is not re-proposed.

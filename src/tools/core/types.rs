@@ -148,6 +148,58 @@ async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>)
     ))
 }
 
+/// Tools whose `is_write` is true but whose write does not land at a path
+/// resolved against the project root, so naming a checkout would mislead:
+/// `approve_write` grants a scope rather than writing a file, and the library
+/// registry is global rather than per-project.
+const WRITE_ROOT_ANNOTATION_EXEMPT: &[&str] = &["approve_write", "register_library", "library"];
+
+/// Name the checkout an UNPINNED write landed in, when the repo has linked
+/// worktrees.
+///
+/// The third member of the family with [`guard_worktree_write`] and
+/// [`worktree_read_notice`], and the one covering the case both of those miss.
+/// Each of them gates on `is_project_chosen_this_session`, so both fall silent
+/// the moment a session calls `activate` — which is exactly when the leak this
+/// closes happens. A subagent pinning its writes per call drops the pin on one;
+/// that write resolves against the session default and answers with a bare
+/// `status: ok`, indistinguishable from the calls that landed correctly.
+///
+/// **A notice, not a refusal** — same philosophy as `worktree_read_notice`, and
+/// here the choice is measured rather than argued. Over 195,126 tool calls
+/// (2026-03-21..2026-08-27), a *refusal* armed by prior pin use in the session
+/// would have blocked 9,914 writes — 30.3% of every write in the corpus — to
+/// catch at most 18 genuine misroutes: ~551 false refusals per true catch. Two
+/// reasons it was that bad, both worth not rediscovering: `list_git_worktrees`
+/// is a property of the REPO, not the session, so a stale worktree on disk arms
+/// it in sessions that never touch one; and 63% of the arming pins named an
+/// unrelated repo, after which every ordinary home-project write is refused. An
+/// annotation withholds nothing, so it has no false-positive cost at all.
+/// docs/issues/2026-08-27-edit-code-writes-to-session-default-not-pinned-workspace.md
+///
+/// Silent unless the repo genuinely has linked worktrees, so the overwhelmingly
+/// common single-checkout case is untouched — including every test tempdir,
+/// which is why promoting a bare `"ok"` to an object here disturbs the no-echo
+/// write convention nowhere else.
+fn annotate_write_root(val: &mut Value, root: &std::path::Path) {
+    if crate::util::path_security::list_git_worktrees(root).is_empty() {
+        return;
+    }
+    // No-echo writes answer with a bare `"ok"`. Promote that one shape to an
+    // object so the annotation has somewhere to live. Anything that is neither
+    // a string nor an object (an array, a number) is left alone rather than
+    // reshaped — losing a tool's answer to add a note would be a bad trade.
+    if let Some(status) = val.as_str() {
+        *val = serde_json::json!({ "status": status });
+    }
+    if let Some(obj) = val.as_object_mut() {
+        obj.insert(
+            "wrote_to".to_string(),
+            Value::String(root.display().to_string()),
+        );
+    }
+}
+
 /// MCP client identity resolved from the `initialize` handshake's `clientInfo`.
 /// This is the protocol-proper, agent-agnostic source — every MCP client sends
 /// it. Verified live for Claude Code: name="claude-code", version="2.1.177"
@@ -671,6 +723,12 @@ pub trait Tool: Send + Sync {
         // itself (some tools, e.g. `create_file`/`edit_file`, carry whole
         // file bodies in it).
         let selector = self.selector_key(&input);
+        // Captured BEFORE `self.call` consumes `input`, for the same reason as
+        // `selector` above. Only UNPINNED writes are ambiguous: a pinned call
+        // already named its target, in the call itself.
+        let annotate_root = ctx.workspace_override.is_none()
+            && self.is_write(&input)
+            && !WRITE_ROOT_ANNOTATION_EXEMPT.contains(&self.name());
         let mut val = self.call(input, ctx).await?;
 
         // Field-aware project-root stripping. Runs HERE, on the typed Value,
@@ -692,6 +750,14 @@ pub trait Tool: Send + Sync {
             .unwrap_or_default();
         let workspace_notice = worktree_read_notice(ctx, project_root.as_deref()).await;
         crate::tools::core::path_strip::strip_paths_in_value(&mut val, &root_prefix);
+        // AFTER stripping, deliberately: the annotation's whole job is to name
+        // the checkout absolutely, and the stripper rewrites project-rooted
+        // paths into relative ones.
+        if annotate_root {
+            if let Some(root) = project_root.as_deref() {
+                annotate_write_root(&mut val, root);
+            }
+        }
         let val = val;
         let form = self.output_form();
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
