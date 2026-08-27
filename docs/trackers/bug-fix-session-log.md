@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 73
+entry_high_water_F: 74
 entry_high_water_W: 71
 ---
 
@@ -119,6 +119,7 @@ entry_high_water_W: 71
 | F-67 | 2026-08-26 | med | self-friction | validated | Two tree-wide writes swallowed a peer's in-flight work — `cargo fmt` and `git add <dir>` |
 | F-66 | 2026-08-26 | high | process | open | Quoted the substrate law at the user, then measured a retired sqlite store all session — backend is Qdrant, `codescout.db` untouched since Aug 25; five published figures described a dead world, and a passing positive control validated the instrument against the wrong database |
 | F-69 | 2026-08-26 | med | process | fixed-verified | Bug-file citations written at a future `archive/` path schedule no sweep — the archive flow repairs citations that *were* correct, never one wrong the day it was written |
+| F-74 | 2026-08-27 | high | self-friction | fixed-verified | A bug file's own `## Fix` plan partitioned a case that does not exist — `managed_roots` never contains another repo, so "rows under a different managed root" was empty and the prescribed fix would have changed the report by zero rows while passing its own test. Measuring the real partition (359 umbrella / 33 known-repo / 10 orphan) is what produced a working fix |
 | F-73 | 2026-08-27 | med | self-friction | fixed-verified | A bug file's "four documentation surfaces" included one nothing reads — `companion_hint.md` is `include_str!`'d only by its own test, and grep grain cannot tell that from a live surface. A surface list is a reachability claim wearing a location list's clothes |
 | F-72 | 2026-08-27 | high | self-friction | validated | Writing an honest caveat discharges the obligation to close it — two sessions, forty minutes apart, each named the exact missing check in prose and then stopped. The tell: a caveat that names a specific next action is a work item, not a deliverable. Mechanism behind [[R-95]], seen from inside |
 | F-71 | 2026-08-26 | med | self-friction | fixed-verified | Three claims published from instruments that could not discriminate the hypothesis from its alternative — and the retraction of one lost a race to a peer's committed ledger entry |
@@ -6439,6 +6440,79 @@ both read this session.
 each one *who reads it* alongside the `path:line`. A surface list is a
 reachability claim; it currently reads as a location list, and the two are only
 accidentally the same. Bug `docs/issues/archive/2026-08-27-scope-default-is-repo-not-project-across-four-doc-surfaces.md`, this session.
+
+## F-74 — A bug file's own fix plan partitioned a case that does not exist — `managed_roots` never contains another repo, so "rows under a different managed root" was the empty set
+
+**Observed:** 2026-08-27, implementing the `doctor` scoping fix
+(`docs/issues/2026-08-27-doctor-reports-other-workspaces-rows-as-violations.md`),
+written earlier the same session.
+
+**When:** Scouting `scan_artifact_paths` before the first edit, with the fix plan
+already written and approved.
+
+**Expected (the bug file's own `## Fix`):** *"Drop rows whose `abs_path` resolves
+under a **different** managed root from `violations`."* The plan's whole shape —
+partition the firing rows by which managed root they belong to — rests on that
+case existing.
+
+**Got (scouted reality):** it does not exist. `managed_roots`
+(`src/librarian/tools/mod.rs:215`) returns the active project's `git_root` and
+`abs_path` plus the legacy `workspace.roots` entries — **never another repo**.
+And `check_outside_managed_roots` fires only when `containing_root` matches
+*nothing*. So every one of the 401 firing rows is under NO managed root; there is
+no "different managed root" bucket to move them into. The prescribed fix would
+have partitioned an empty set and changed the report by zero rows.
+
+**Probable cause:** the plan was written from the *hint text* ("Rows outside the
+active project's roots are EXPECTED when the catalog spans several workspaces"),
+which describes the situation correctly in prose, and from `outside_roots_by_project`,
+which really does group rows by project. Both make it sound as though the code
+already knows which workspace a row belongs to. It does not — that grouping is
+inferred from the path string, and nothing was ever compared against another
+repo's root. R-95 class: a proposed fix is a claim about current state, and the
+least-audited kind, because it reads as a settled decision rather than a
+hypothesis.
+
+**Workaround:** measure the partition instead of assuming it. Against the live
+catalog (`~/.local/share/librarian/catalog.db`, 4,265 artifacts, 29 distinct
+`commits.git_root`), with the session's real managed roots reconstructed from
+`~/.config/librarian/workspace.toml`:
+
+| bucket | rows |
+|---|---|
+| firing total | 402 |
+| under an **umbrella member** of the active project's umbrella | 359 (89%) |
+| under another repo the catalog holds **commits** for | 33 |
+| under **neither** — nothing on this machine claims it | **10** |
+
+That is a real discriminator, computable from data already on hand, and it is the
+one the check's own doc comment describes in prose without ever computing. The
+shipped fix uses it; the report goes 516 → ~124 findings and this check 401 → 10.
+
+**Severity:** high — the prescribed fix would have shipped, passed its own test
+(a test written against the same wrong model would have used two managed roots,
+a configuration that never occurs), and left the 78%-noise report exactly as it
+was, with a bug file marked `fixed` to stop anyone looking again.
+
+**Status:** fixed-verified — plan corrected before any code was written; the
+measured discriminator shipped instead.
+
+**Valid:** dated 2026-08-27
+
+The three bucket counts are a fact about this machine's catalog on this date;
+the mechanism (`managed_roots` never contains a foreign repo) is invariant until
+that function changes.
+
+**Rests on:** `src/librarian/tools/mod.rs:215` (`managed_roots`) and
+`check_outside_managed_roots`'s `containing_root(...).is_some()` early return,
+both read this session; the bucket counts on one SQL partition over the live
+catalog.
+
+**Fix idea / Pointer:** When a `## Fix` plan names a CASE ("rows that are X"),
+check the case is non-empty before designing the partition. A count is one query
+and it is the difference between a fix and a no-op that reports success. Pairs
+with [[F-73]] — same session, same bug file, both defects of a worklist written
+from grep and prose rather than from the data.
 
 ## Template for new entries
 

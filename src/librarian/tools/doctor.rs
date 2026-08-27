@@ -196,7 +196,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut all_violations: Vec<Violation> = Vec::new();
 
     all_violations.extend(declared_root_violations);
-    all_violations.extend(scan_artifact_paths(&cat.conn, &roots)?);
+    // Roots that belong to a workspace this machine knows about but is not
+    // managing this session — the discriminator that lets the outside-roots check
+    // separate "another workspace's row" from "orphan". Needs the connection, so
+    // it runs inside the lock.
+    let known_elsewhere = known_workspace_roots(ctx, &cat.conn);
+    let (artifact_path_violations, outside_scoped_by_project) =
+        scan_artifact_paths(&cat.conn, &roots, &known_elsewhere)?;
+    all_violations.extend(artifact_path_violations);
     all_violations.extend(scan_commits_git_root(&cat.conn)?);
     all_violations.extend(scan_worktree_scoped(&cat.conn)?);
     all_violations.extend(scan_snapshot_drift(&cat.conn)?);
@@ -368,6 +375,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .entry(outside_roots_group(&v.path))
             .or_insert(0) += 1;
     }
+    // Ruling 17: fold the SCOPED-OUT rows back into the metric. They never became
+    // `Violation`s, so the loop above cannot see them — and a metric that shrank
+    // when the worklist did would understate real cross-repo exposure, which is
+    // precisely the false negative this aggregate exists to prevent.
+    for (group, n) in &outside_scoped_by_project {
+        *outside_by_project.entry(group.clone()).or_insert(0) += n;
+    }
 
     let mut seen_outside = 0usize;
     let mut shown_outside = 0usize;
@@ -400,9 +414,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              Rows are ordered by abs_path, so the window is stable across calls: \
              librarian(action=\"doctor\", limit={total_outside}) returns all of them, \
              or limit={sample_limit}, offset={next_offset} for the next page. \
-             catalog_health.outside_roots_by_project counts every row, elided ones included. \
-             Rows outside the active project's roots are EXPECTED when the catalog spans several workspaces — \
-             confirm a row should be under a managed root before treating it as drift."
+             catalog_health.outside_roots_by_project counts every row, elided AND scoped-out ones included. \
+             A row here is under NO managed root, NO umbrella sibling, and NO repo the catalog has commits for — \
+             so nothing on this machine claims it and artifact(move)/artifact(delete) have nothing to resolve it against."
+        ));
+    }
+    if !outside_scoped_by_project.is_empty() {
+        let total: usize = outside_scoped_by_project.values().sum();
+        let n_projects = outside_scoped_by_project.len();
+        hint_parts.push(format!(
+            "{total} outside-managed-roots row(s) across {n_projects} project root(s) were scoped OUT of this \
+             report because they belong to a workspace this machine knows about — an umbrella sibling of the \
+             active project, or a repo the catalog holds commits for. See \
+             catalog_health.outside_roots_scoped_by_project. The metric is unscoped: \
+             outside_roots_by_project still counts them, so cross-repo exposure is not understated — only the \
+             worklist is limited to rows nothing on this machine claims."
         ));
     }
     if !entry_validity_scoped_by_project.is_empty() {
@@ -470,6 +496,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         catalog_health.insert(
             "outside_roots_by_project".to_string(),
             json!(outside_by_project),
+        );
+    }
+    if !outside_scoped_by_project.is_empty() {
+        catalog_health.insert(
+            "outside_roots_scoped_by_project".to_string(),
+            json!(outside_scoped_by_project),
         );
     }
     if !entry_validity_scoped_by_project.is_empty() {
@@ -1053,7 +1085,19 @@ fn outside_roots_group(path: &str) -> String {
 /// the caller had no active project and no `[[roots]]`, in which case the
 /// managed-root check is skipped entirely rather than flagging every row —
 /// "no roots configured" is not evidence that any row is misplaced.
-fn scan_artifact_paths(conn: &rusqlite::Connection, roots: &[PathBuf]) -> Result<Vec<Violation>> {
+///
+/// `known_elsewhere` is [`known_workspace_roots`]. An outside-roots row under
+/// one of those is SCOPED OUT of the returned violations and counted into the
+/// returned map instead — Ruling 17: the metric stays global, the worklist is
+/// the active developer's. The caller owes folding that map into
+/// `catalog_health.outside_roots_by_project` so the global count is unchanged.
+/// Pass an empty slice to get the pre-2026-08-27 behaviour of reporting every
+/// firing row.
+fn scan_artifact_paths(
+    conn: &rusqlite::Connection,
+    roots: &[PathBuf],
+    known_elsewhere: &[PathBuf],
+) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     // `ORDER BY abs_path` is load-bearing, not tidiness. The outside-roots
     // findings are sampled downstream, and without an ORDER BY the kept rows
     // are whatever prefix the planner happened to return — a set that can
@@ -1067,6 +1111,7 @@ fn scan_artifact_paths(conn: &rusqlite::Connection, roots: &[PathBuf]) -> Result
         .collect::<rusqlite::Result<_>>()?;
 
     let mut violations = Vec::new();
+    let mut scoped: std::collections::BTreeMap<String, usize> = Default::default();
     for (id, abs_path) in &rows {
         let not_absolute = check_abs_path_must_be_absolute(id, abs_path);
         let is_absolute = not_absolute.is_none();
@@ -1093,11 +1138,83 @@ fn scan_artifact_paths(conn: &rusqlite::Connection, roots: &[PathBuf]) -> Result
         }
         if is_absolute && !roots.is_empty() {
             if let Some(v) = check_outside_managed_roots(id, abs_path, roots) {
-                violations.push(v);
+                // Belongs to a workspace this machine knows about (umbrella
+                // sibling, or a repo the catalog has commits for)? Then it is
+                // real, it is someone's, and it is not this developer's work.
+                // Counted, not reported.
+                if super::containing_root(known_elsewhere, Path::new(abs_path)).is_some() {
+                    *scoped.entry(outside_roots_group(abs_path)).or_insert(0) += 1;
+                } else {
+                    violations.push(v);
+                }
             }
         }
     }
-    Ok(violations)
+    Ok((violations, scoped))
+}
+
+/// Roots that belong to a workspace this machine KNOWS about, but which are not
+/// managed roots of the active session.
+///
+/// This is the discriminator [`check_outside_managed_roots`]'s doc comment has
+/// always described in prose — *"expected if it belongs to another workspace; a
+/// defect if it should be under one of ..."* — and never computed. Without it the
+/// check cannot separate the two, so it reported both and told the reader to sort
+/// it out; measured 2026-08-27 on this machine, that was **401 of 516** findings,
+/// 78% of the report.
+///
+/// Two sources, unioned, both already on hand:
+///
+/// - **Umbrella members.** If the active project declares an umbrella, its sibling
+///   members are workspaces the user has explicitly grouped with this one. They are
+///   the single largest bucket — 359 of 402 firing rows.
+/// - **`commits.git_root`.** Every repo the librarian has ever indexed left rows
+///   here (29 distinct roots at measurement). A path under one of them belongs to a
+///   real, known checkout — 33 further rows.
+///
+/// What is left over is the finding worth a reader's attention: 10 rows under no
+/// umbrella member and no repo the catalog has ever seen. Those are the ones
+/// `artifact(move)` / `artifact(delete)` will refuse with nothing to point at.
+///
+/// Deliberately does NOT consult the filesystem. A row is scoped out for belonging
+/// somewhere known, not for existing — `check_missing_file` already owns
+/// disappearance, and conflating them would make one defect wear two names, which
+/// is the same rule [`scan_artifact_paths`] applies to the relative-path case.
+fn known_workspace_roots(ctx: &ToolContext, conn: &rusqlite::Connection) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+
+    if let Some(name) = ctx
+        .current_project
+        .as_deref()
+        .and_then(|c| c.umbrella.as_deref())
+    {
+        if let Some(u) = ctx.workspace.umbrellas.iter().find(|u| u.name == name) {
+            for m in &u.members {
+                let p = PathBuf::from(m);
+                if !out.contains(&p) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+
+    // Best-effort: a catalog without a `commits` table (or an unreadable one) just
+    // contributes no roots. This check is advisory, and failing the whole doctor
+    // run over a missing aggregate would be worse than reporting a few extra rows.
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT DISTINCT git_root FROM commits WHERE git_root IS NOT NULL AND git_root <> ''",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for gr in rows.flatten() {
+                let p = PathBuf::from(gr);
+                if !out.contains(&p) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+
+    out
 }
 
 /// Every `artifact.abs_path` must resolve under some managed root.
@@ -5319,7 +5436,7 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         seed_artifact(&cat, "anywhere", "/somewhere/entirely/else/a.md");
 
-        let v = scan_artifact_paths(&cat.conn, &[]).unwrap();
+        let (v, _) = scan_artifact_paths(&cat.conn, &[], &[]).unwrap();
         assert!(
             !v.iter()
                 .any(|x| x.check == "abs_path_outside_managed_roots"),
@@ -5340,7 +5457,7 @@ mod tests {
         #[cfg(not(windows))]
         let roots = vec![PathBuf::from("/home/dev/work/codescout")];
 
-        let v = scan_artifact_paths(&cat.conn, &roots).unwrap();
+        let (v, _) = scan_artifact_paths(&cat.conn, &roots, &[]).unwrap();
         assert!(
             v.iter().any(|x| x.check == "abs_path_must_be_absolute"),
             "the gating check must still fire"
@@ -5350,6 +5467,96 @@ mod tests {
                 .any(|x| x.check == "abs_path_outside_managed_roots"),
             "a relative row must be reported once, by the absoluteness check only"
         );
+    }
+
+    /// Ruling 17, at the outside-roots check: the WORKLIST is the active
+    /// developer's, the METRIC stays global.
+    ///
+    /// The discriminating pair — two rows, both outside every managed root, and
+    /// only one of them is anyone's work. Before this split, `doctor` reported
+    /// both: measured 2026-08-27 on a real machine, 401 of 516 findings were rows
+    /// belonging to other workspaces, and the check's own hint called them
+    /// EXPECTED while still emitting them.
+    ///
+    /// Paths are built from `temp_dir()` so they are platform-native on both
+    /// Windows and unix — the point under test is the partition, not the path-form
+    /// normalisation that `containing_root` owns (WIN-30).
+    #[test]
+    fn a_row_under_a_known_workspace_root_is_scoped_out_but_still_counted() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let base = std::env::temp_dir();
+        let active = base.join("cs-active");
+        let sibling = base.join("cs-sibling");
+        let orphan = base.join("cs-orphan");
+
+        let p = |root: &std::path::Path, name: &str| {
+            root.join("docs").join(name).to_string_lossy().into_owned()
+        };
+        seed_artifact(&cat, "mine", &p(&active, "a.md"));
+        seed_artifact(&cat, "sib", &p(&sibling, "b.md"));
+        seed_artifact(&cat, "orph", &p(&orphan, "c.md"));
+
+        let roots = vec![active.clone()];
+        let known = vec![sibling.clone()];
+        let (violations, scoped) = scan_artifact_paths(&cat.conn, &roots, &known).unwrap();
+
+        let outside: Vec<&str> = violations
+            .iter()
+            .filter(|v| v.check == "abs_path_outside_managed_roots")
+            .map(|v| v.path.as_str())
+            .collect();
+
+        // The row under a KNOWN workspace root leaves the worklist...
+        assert_eq!(
+            outside.len(),
+            1,
+            "only the orphan is anyone's work here; got {outside:?}"
+        );
+        assert!(
+            outside[0].contains("cs-orphan"),
+            "the surviving finding must be the orphan, not the sibling; got {outside:?}"
+        );
+
+        // ...and is NOT silently dropped. A metric that shrank with the worklist
+        // would understate real cross-repo exposure, which is the false negative
+        // the aggregate exists to prevent.
+        assert_eq!(
+            scoped.values().sum::<usize>(),
+            1,
+            "the scoped-out row must still be counted; got {scoped:?}"
+        );
+        assert!(
+            scoped.keys().any(|k| k.contains("cs-sibling")),
+            "counted under its own project root; got {scoped:?}"
+        );
+    }
+
+    /// The escape hatch stays open: an empty `known_elsewhere` reproduces the
+    /// pre-split behaviour exactly. Without this, a caller that cannot compute the
+    /// known-roots set (no umbrella, no commits rows) would silently lose the
+    /// check rather than fall back to reporting everything.
+    #[test]
+    fn empty_known_elsewhere_reports_every_outside_row_as_before() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let base = std::env::temp_dir();
+        let active = base.join("cs-active2");
+        let sibling = base.join("cs-sibling2");
+        seed_artifact(
+            &cat,
+            "sib",
+            &sibling.join("docs").join("b.md").to_string_lossy(),
+        );
+
+        let (violations, scoped) = scan_artifact_paths(&cat.conn, &[active], &[]).unwrap();
+        assert_eq!(
+            violations
+                .iter()
+                .filter(|v| v.check == "abs_path_outside_managed_roots")
+                .count(),
+            1,
+            "with no known-elsewhere roots the row is reported, not scoped"
+        );
+        assert!(scoped.is_empty(), "nothing to scope out; got {scoped:?}");
     }
 
     /// The emitted violation list is capped for this check, but `summary.by_check`
@@ -6467,7 +6674,7 @@ mod tests {
 
         // No managed roots: the outside-roots check is skipped entirely, so
         // this existing assertion set is unchanged by its addition.
-        let v = scan_artifact_paths(&cat.conn, &[]).unwrap();
+        let (v, _) = scan_artifact_paths(&cat.conn, &[], &[]).unwrap();
         let mut by_check: std::collections::BTreeMap<&str, usize> = Default::default();
         for x in &v {
             *by_check.entry(x.check.as_str()).or_insert(0) += 1;
