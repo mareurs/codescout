@@ -3157,42 +3157,88 @@ mod tests {
         }
     }
 
-    /// Every registered guide topic must either fire from some tool, or be declared
-    /// pull-only with a reason.
+    /// Every observed call shape that routes to a topic which has opted into
+    /// section-grain delivery must be served by some declared section, or
+    /// waived with a reason. Gate 2. Replaces
+    /// `every_guide_topic_is_triggered_or_declared_pull_only`, whose
+    /// triggered-or-pull-only check is now subsumed: a call shape that reaches
+    /// a declaring topic but no section is the section-grain form of the same
+    /// defect that gate caught at whole-topic grain.
     ///
-    /// Authoring a guide and wiring its trigger are two separate edits, and nothing
-    /// prompted for the second — so `src/prompts/README.md` rule 8's cap remedy ("move it
-    /// into a `get_guide` topic") quietly meant "remove it from the agent's view". Measured
-    /// 2026-08-16: 7 of 10 topics and 47,343 of 75,441 bytes fired for nothing.
+    /// Finite because call shapes are: 88 distinct rows in
+    /// `src/prompts/shape_census.txt`, generated from real transcripts across
+    /// every profile on this machine (script in
+    /// `docs/superpowers/plans/2026-08-27-get-guide-section-grain.md` Task 9).
     ///
-    /// This is the recurrence gate, and it is deliberately the FIRST part of that bug's
-    /// fix: it does not decide which topics deserve triggers — that is a byte-budget
-    /// judgement — it only makes the omission impossible to introduce silently.
-    ///
-    /// Both directions are checked. A topic that is neither triggered nor listed fails;
-    /// so does a stale allowlist entry, whether it names a topic that has since gained a
-    /// trigger or one that no longer exists.
-    ///
-    /// See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
-    ///
-    /// Gated on `librarian` for the same reason as
-    /// `artifact_advertises_the_append_entry_section_writer` above: the invariant is
-    /// "every guide topic has a trigger", and a trigger lives on a TOOL. Under
-    /// `--no-default-features` the `artifact` tool is absent, so the `librarian` topic has
-    /// no trigger *by construction* and the gate reports a wiring defect that is really a
-    /// build config. It still runs in the `default` and `server-stack` lanes, which are the
-    /// ones that compile every tool it is meant to police.
+    /// Scoped to topics that have opted into section grain via
+    /// `GUIDE_INDEX.declares(topic)` — only `librarian` today — so it is
+    /// meaningful in Phase 1 and widens automatically as later phases land
+    /// declarations on other topics.
     #[cfg(feature = "librarian")]
     #[tokio::test]
-    async fn every_guide_topic_is_triggered_or_declared_pull_only() {
+    async fn every_observed_shape_of_a_declaring_topic_has_a_section() {
+        // Gate 2. Finite because call shapes are: 88 distinct across 170,465 observed
+        // calls. Scoped to topics that have opted into section grain, so it is
+        // meaningful in Phase 1 and widens automatically as Phases 2-3 land.
+        use crate::prompts::guide_index::GUIDE_INDEX;
+        let census = include_str!("prompts/shape_census.txt");
+        let (_dir, server) = make_server().await;
+
+        let probes = [
+            serde_json::json!({}),
+            serde_json::json!({"abs_path": "docs/issues/x.md"}),
+            serde_json::json!({"abs_path": "docs/trackers/x.md"}),
+        ];
+
+        for line in census
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        {
+            let shape = line.split_whitespace().next().unwrap();
+            let tool_name = shape.split('.').next().unwrap();
+            let Some(tool) = server.tools.iter().find(|t| t.name() == tool_name) else {
+                continue;
+            };
+            let Some(topic) = probes.iter().find_map(|p| tool.relevant_guide_topic(p)) else {
+                continue;
+            };
+            if !GUIDE_INDEX.declares(topic) {
+                continue;
+            }
+            let covered = probes
+                .iter()
+                .any(|p| !GUIDE_INDEX.match_sections(topic, Some(shape), p).is_empty());
+            let waived = crate::prompts::SECTION_WAIVERS
+                .iter()
+                .any(|(t, _, r)| *t == topic && r.contains(shape));
+            assert!(
+                covered || waived,
+                "call shape `{shape}` routes to declaring topic `{topic}` but no section \
+             serves it. Add a `serves:` declaration, or a SECTION_WAIVERS entry naming \
+             the shape and saying why. An undeclared shape gets only the preamble."
+            );
+        }
+    }
+
+    /// Every registered guide topic must either fire from some tool, or be declared
+    /// pull-only with a reason — and not both. This is the triggered-xor-pull-only half
+    /// of the deleted `every_guide_topic_is_triggered_or_declared_pull_only` (see Gate 2
+    /// above for the section-grain half, and
+    /// `pull_only_guide_topics_are_registered_with_real_reasons` in `src/prompts/mod.rs`
+    /// for the membership/reason-length half). Restored rather than dropped: Gate 2 is
+    /// scoped to declaring topics only (`librarian` today), so it says nothing about
+    /// whether the other nine topics still have a live trigger or a stale pull-only entry
+    /// — that recurrence gate from
+    /// `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`
+    /// still applies to them and needs a running `Server` to probe `relevant_guide_topic`,
+    /// which is why it lives here rather than next to the reason-length checks.
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn every_guide_topic_is_triggered_xor_declared_pull_only() {
         use crate::prompts::{GUIDE_TOPICS, PULL_ONLY_GUIDE_TOPICS};
 
         let (_dir, server) = make_server().await;
 
-        // A trigger may inspect the result, so one tool can reach different topics on
-        // different calls. Probe each tool with representative result shapes and take the
-        // union — a single probe under-reports and would let a wired topic look unwired,
-        // which is the failure this gate exists to prevent, inverted.
         let probes = [
             serde_json::json!({}),
             serde_json::json!({"overflow": {"shown": 1, "total": 2}}),
@@ -3200,14 +3246,6 @@ mod tests {
             serde_json::json!({"abs_path": "docs/issues/x.md"}),
             serde_json::json!({"abs_path": "src/main.rs"}),
         ];
-        // There are TWO delivery paths, and scanning tool impls only sees one. The
-        // session opener fires from the `!emitted.contains(SESSION_OPENING_GUIDE)`
-        // check in `Tool::call_content` (`src/tools/core/types.rs`) on the
-        // first guide-eligible call of any session, whatever tool made it —
-        // so it is triggered by construction and no `relevant_guide_topic()`
-        // needs to name it. Omitting this made the gate fail a guide that is in
-        // fact delivered, which would have been "fixed" by re-adding a
-        // redundant trigger.
         let mut triggered: std::collections::BTreeSet<&str> =
             [crate::prompts::SESSION_OPENING_GUIDE]
                 .into_iter()
@@ -3234,19 +3272,6 @@ mod tests {
                 "guide topic `{topic}` is declared pull-only but IS triggered — remove the \
                  stale entry from prompts::PULL_ONLY_GUIDE_TOPICS, or the list stops \
                  describing reality."
-            );
-        }
-
-        for (topic, reason) in PULL_ONLY_GUIDE_TOPICS {
-            assert!(
-                GUIDE_TOPICS.contains(topic),
-                "prompts::PULL_ONLY_GUIDE_TOPICS names `{topic}`, which is not a registered \
-                 guide topic — a rename or removal left it behind."
-            );
-            assert!(
-                reason.len() > 40,
-                "the reason for `{topic}` must say why it is pull-only; a placeholder \
-                 turns this gate back into the silent default it replaced. Got: {reason:?}"
             );
         }
     }

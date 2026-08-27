@@ -234,13 +234,17 @@ pub fn parse_declarations(body: &str) -> Result<(Vec<Shape>, Vec<String>), Strin
                 serves.push(parse_shape(part)?);
             }
         } else if let Some(rest) = inner.strip_prefix("requires:") {
-            for part in rest.split(',') {
-                let h = part.trim();
-                if h.is_empty() {
-                    return Err("empty heading in `requires:`".to_string());
-                }
-                requires.push(h.to_string());
+            // NOT comma-split: a heading is prose and commonly contains its own
+            // commas (e.g. "docs/trackers/ — Backing Store, Not a Docs Folder"),
+            // so one `requires:` line names exactly one heading. Multiple
+            // requirements are multiple `<!-- requires: ... -->` lines, each
+            // appended by this same loop — `GuideSection::requires` is already a
+            // `Vec` for that reason.
+            let h = rest.trim();
+            if h.is_empty() {
+                return Err("empty heading in `requires:`".to_string());
             }
+            requires.push(h.to_string());
         }
     }
     Ok((serves, requires))
@@ -794,5 +798,63 @@ Body Mu.
             assert!(!hits.is_empty(), "no librarian section serves `{shape}`");
         }
         assert!(entry.declared().next().is_some());
+    }
+
+    #[test]
+    fn no_dangling_requires() {
+        // Gate 4.
+        let idx = GuideIndex::try_build().unwrap();
+        for topic in crate::prompts::GUIDE_TOPICS {
+            let Some(entry) = idx.topic(topic) else {
+                continue;
+            };
+            for sec in &entry.sections {
+                for req in &sec.requires {
+                    assert!(
+                        entry.sections.iter().any(|s| &s.heading == req),
+                        "{topic} § {} requires `{req}`, which no heading in that topic defines",
+                        sec.heading
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_section_of_a_declaring_topic_is_reachable() {
+        // Gate 5, scoped to opted-in topics. A section that is neither declared,
+        // transitively required, nor waived is unreachable — the section-grain form
+        // of "authoring a guide nothing fires is the same as deleting it".
+        let idx = GuideIndex::try_build().unwrap();
+        for topic in crate::prompts::GUIDE_TOPICS {
+            if !idx.declares(topic) {
+                continue;
+            }
+            let entry = idx.topic(topic).unwrap();
+            let required: std::collections::BTreeSet<&str> = entry
+                .sections
+                .iter()
+                .flat_map(|s| s.requires.iter().map(|r| r.as_str()))
+                .collect();
+            for sec in &entry.sections {
+                // A parent whose children carry the declarations is reachable through them.
+                let child_declares = entry
+                    .sections
+                    .iter()
+                    .any(|c| c.level > sec.level && !c.serves.is_empty());
+                let waived = crate::prompts::SECTION_WAIVERS
+                    .iter()
+                    .any(|(t, h, _)| *t == *topic && *h == sec.heading);
+                assert!(
+                    !sec.serves.is_empty()
+                        || required.contains(sec.heading.as_str())
+                        || child_declares
+                        || waived,
+                    "{topic} § {} is unreachable: declare a `serves:`, have a section \
+                 `requires:` it, or add it to prompts::SECTION_WAIVERS with a reason",
+                    sec.heading
+                );
+            }
+        }
     }
 }

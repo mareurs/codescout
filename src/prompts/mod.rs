@@ -477,6 +477,50 @@ pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Sections and shapes deliberately left unserved, each with its reason.
+///
+/// `(topic, heading, reason)`. A row waives one of two things, decided by which
+/// gate consults it:
+///
+/// - **Gate 5** (`every_section_of_a_declaring_topic_is_reachable`,
+///   `src/prompts/guide_index.rs`) matches on `(topic, heading)` — the section
+///   itself is orientation prose that no single call shape owns.
+/// - **Gate 2** (`every_observed_shape_of_a_declaring_topic_has_a_section`,
+///   `src/server.rs`) matches on `topic` plus `reason.contains(shape)` — the
+///   reason must name the shape verbatim for a shape-level waiver to resolve.
+///
+/// Either way the reason must exceed 40 characters — a placeholder turns this
+/// gate back into the silent default it replaced, which is exactly how 7 of 10
+/// topics came to fire for nothing before 2026-08-16 (see
+/// `PULL_ONLY_GUIDE_TOPICS` above, the convention this mirrors).
+pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
+    (
+        "librarian",
+        "Common Mistakes",
+        "Troubleshooting prose spanning nearly every `artifact`/`librarian` shape, not \
+         one shape in particular: a `requires:` edge from a single section would \
+         deliver it to callers who never hit a mistake, and a `serves:` on the bare \
+         `artifact` tool key (no `.action`) is a wildcard that the `Shape` matcher \
+         treats as matching every `artifact.*` call — over-broad by construction, the \
+         exact failure this gate exists to catch. Also resolves the census shapes \
+         `artifact` (a call observed missing the required `action` field — no `Shape` \
+         can match only the no-action form without matching every `artifact.*` call \
+         too) and `librarian.find` (an invalid `librarian` action; the caller most \
+         likely meant `artifact(action=\"find\")`) — both are exactly the class of \
+         mistake this table exists to catch.",
+    ),
+    (
+        "librarian",
+        "Runtime tips",
+        "Pure cross-reference: a two-line pointer to the separate pull-only \
+         `librarian-runtime` topic, not guidance a caller acts on for any one call \
+         shape. A `requires:` edge from any declared section would deliver this \
+         forwarding pointer to every caller of that shape, most of whom never need \
+         `librarian-runtime`; the guide's own closing line already sends whoever does \
+         need it there directly.",
+    ),
+];
+
 /// The guide that opens a session.
 ///
 /// Delivered on the first guide-eligible tool call of a session, whatever that
@@ -1634,6 +1678,52 @@ mod tests {
                 )
             });
             assert!(!body.is_empty(), "topic '{topic}' has an empty body");
+        }
+    }
+
+    /// `PULL_ONLY_GUIDE_TOPICS` membership and reason-quality checks that used to
+    /// live inside the deleted `every_guide_topic_is_triggered_or_declared_pull_only`
+    /// (see `src/server.rs`, replaced by Gate 2 —
+    /// `every_observed_shape_of_a_declaring_topic_has_a_section`). Gate 2 is scoped to
+    /// topics that have opted into section grain (`GUIDE_INDEX.declares(topic)`) — only
+    /// `librarian` today — so it says nothing about the other nine, still-whole-topic
+    /// entries in `PULL_ONLY_GUIDE_TOPICS`. Deleting the old combined test would have
+    /// silently dropped these two checks rather than moved them, so they are restored
+    /// here rather than in `src/server.rs`, since neither needs a running `Server`.
+    #[test]
+    fn pull_only_guide_topics_are_registered_with_real_reasons() {
+        for (topic, reason) in crate::prompts::PULL_ONLY_GUIDE_TOPICS {
+            assert!(
+                crate::prompts::GUIDE_TOPICS.contains(topic),
+                "PULL_ONLY_GUIDE_TOPICS names `{topic}`, which is not a registered \
+                     guide topic — a rename or removal left it behind."
+            );
+            assert!(
+                reason.len() > 40,
+                "the reason for `{topic}` must say why it is pull-only; a placeholder \
+                     turns this check back into the silent default it replaced. Got: {reason:?}"
+            );
+        }
+    }
+
+    /// Mirrors the check above for `SECTION_WAIVERS`: every waiver must name a
+    /// registered guide topic and carry a real, non-placeholder reason. A waiver with
+    /// a placeholder reason is indistinguishable from no waiver at all — it would
+    /// silence Gate 2/5 without saying why, which is the same failure mode the
+    /// `> 40` convention on `PULL_ONLY_GUIDE_TOPICS` exists to catch.
+    #[test]
+    fn section_waivers_are_registered_with_real_reasons() {
+        for (topic, heading, reason) in crate::prompts::SECTION_WAIVERS {
+            assert!(
+                crate::prompts::GUIDE_TOPICS.contains(topic),
+                "SECTION_WAIVERS names topic `{topic}` for heading `{heading}`, which \
+                     is not a registered guide topic — a rename or removal left it behind."
+            );
+            assert!(
+                reason.len() > 40,
+                "the reason for waiving `{topic}` § `{heading}` must say why; a \
+                     placeholder turns this waiver back into a silent gap. Got: {reason:?}"
+            );
         }
     }
 
