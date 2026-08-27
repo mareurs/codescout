@@ -5,7 +5,7 @@ closed:
 severity: medium
 owner: marius
 related: []
-unverified: "Root cause identified and removed from both profile settings.json, but NOT re-verified after a Claude Code restart — the running instance still carries the vars, so the direct-binary test still fails here. No regression test is possible (cause is machine config outside the repo); the brittle strict-equality assertion at src/tools/memory/tests.rs:166 remains unfixed."
+unverified: Root cause (two stale CODESCOUT_EMBED_* vars in ~/.claude-sdd and ~/.claude-kat settings.json) removed but NOT re-verified after a Claude Code restart — the running instance still carries them. The in-repo half (brittle strict-equality assertion) is fixed and mutation-checked. No regression test is possible for the root cause; it is machine config outside the repo.
 tags: ["env", "test-harness", "bash", "run_command", "false-failure", "embedder"]
 kind: bug
 ---
@@ -152,22 +152,46 @@ The machine-wide mitigation from `f2bc544e` remains and is independent of this:
 invocation (`force = false`), which is why `cargo test` passes here right now even
 though the direct binary does not.
 
-**Still open, deliberately not done here** — an in-repo contributor to the
-severity, independent of the env cause: `src/tools/memory/tests.rs:166` asserts
-strict equality against `"ok"`, so ANY attached warning fails the test. Asserting
-on `result["status"]` instead would stop an unreachable optional service from
-presenting as a code regression. Not selected for this pass.
+**Assertion shape fixed 2026-08-27** at `src/tools/memory/tests.rs`. This was the
+in-repo half of the problem, and it is what turned a missing optional service into
+something indistinguishable from a broken build.
+
+`write` answers with a bare `"ok"` (the no-echo write convention) or with
+`{"status": "ok", "warnings": [...]}` when an optional step attached one. The test
+asserted `assert_eq!(result, "ok")`, which fails on the object form. It now reads
+the status out of either shape and asserts on that alone, printing the full result
+on failure:
+
+```rust
+let status = result
+    .as_str()
+    .or_else(|| result["status"].as_str())
+    .unwrap_or_else(|| panic!("write returned neither a bare status string nor a `status` field: {result}"));
+assert_eq!(status, "ok", "write should report ok; full result: {result}");
+```
+
+Verified against the failing condition itself: with both stale vars STILL present
+in the session env, the direct-binary run now passes (it previously failed), so
+the warning path no longer reads as a regression. Both branches are exercised —
+the object form by that direct run, the bare-string form by a cargo run under the
+`[env]` pin. Mutation-checked: swapping the expected status to `"MUTANT"` fails
+with `left: "ok" right: "MUTANT"` and the full result in the message, so the
+assertion genuinely fires rather than passing vacuously.
+
+Gate after the change: clippy 0, `cargo check --no-default-features` 0,
+`cargo test` 4739 passed / 0 failed.
 ## Tests added
 
-None, and the reason is worth stating rather than excusing: the root cause is
-machine config **outside the repo** (`~/.claude*/settings.json`), so there is
-nothing in-tree a regression test could assert on. No test can prevent a user's
-profile from carrying a stale override.
+**`write_and_read_roundtrip` itself is now the guard**, in the sense that matters:
+it no longer conflates an unreachable optional service with a write failure, and
+it is mutation-checked to still catch a genuinely non-`ok` status. That is the
+only in-repo assertion this defect could ever have had.
 
-The available in-repo guard is the assertion-shape change described under Fix
-(assert on `result["status"]` rather than whole-value equality). It would not
-prevent the misconfiguration but would stop it presenting as a code regression —
-which is the part that cost time here. Not done in this pass.
+No test can prevent the root cause — a user profile carrying a stale
+`CODESCOUT_EMBED_*` override is machine config outside the repo. What was fixable
+in-tree was the *diagnosis cost*, and that is what changed: the same
+misconfiguration now produces a passing test with a warning attached rather than a
+red gate that reads as a broken build.
 ## Workarounds
 - Already in place machine-wide via `~/.cargo/config.toml` `[env]`.
 - On a machine without it: `export CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081`,
@@ -175,16 +199,14 @@ which is the part that cost time here. Not done in this pass.
 
 ## Resume
 
-1. Restart Claude Code, then confirm the vars are gone:
-   `env | grep CODESCOUT_EMBED_` → expect empty, and
-   `target/debug/deps/codescout-<hash> tools::memory::tests::write_and_read_roundtrip --exact`
-   → expect ok **without** the cargo `[env]` pin doing the work.
-2. Then decide whether to keep the `~/.cargo/config.toml` `[env]` pin. It becomes
-   belt-and-braces rather than load-bearing; keeping it is harmless and guards
-   against the same drift recurring.
-3. Optionally apply the assertion-shape fix at `src/tools/memory/tests.rs:166`.
-4. Flip this file to `fixed` and drop the `unverified:` line only after step 1
-   passes on a restarted instance.
+1. Restart Claude Code, then confirm the root-cause removal took effect:
+   `env | grep CODESCOUT_EMBED_` → expect empty.
+2. Flip this file to `fixed` and drop `unverified:` once step 1 passes. Both
+   halves are then done: the stale vars are gone from both profiles, and the test
+   no longer misreports the condition.
+3. Optional afterwards: decide whether to keep the `~/.cargo/config.toml` `[env]`
+   pin. With the vars gone AND the assertion fixed it is doubly redundant, but it
+   is harmless and guards against the same profile drift recurring.
 ## References
 - codescout memory `gotchas` § "`cargo test` Fails From Native `Bash` But Passes
   Via `run_command` — Export `CODESCOUT_EMBEDDER_URL`" — the durable note, incl.

@@ -163,7 +163,28 @@ async fn write_and_read_roundtrip() {
         )
         .await
         .unwrap();
-    assert_eq!(result, "ok");
+    // `write` answers with a bare `"ok"` (the no-echo write convention), or with
+    // `{"status": "ok", "warnings": [...]}` when an OPTIONAL step attached one —
+    // semantic anchor creation needs a reachable embedder and warns rather than
+    // failing when it is not.
+    //
+    // Assert on the status alone. This used to be `assert_eq!(result, "ok")`,
+    // which failed on the object form, so an unreachable embedder was
+    // indistinguishable from a code regression: two stale env vars pointing at a
+    // dead port turned this into a red gate that read as a broken build.
+    // A warning from an optional service is not a write failure; the functional
+    // check is the read assertion below.
+    // docs/issues/2026-08-27-cargo-test-fails-from-bash-passes-via-run-command.md
+    let status = result
+        .as_str()
+        .or_else(|| result["status"].as_str())
+        .unwrap_or_else(|| {
+            panic!("write returned neither a bare status string nor a `status` field: {result}")
+        });
+    assert_eq!(
+        status, "ok",
+        "write should report ok; full result: {result}"
+    );
 
     let result = Memory
         .call(json!({ "action": "read", "topic": "test-topic" }), &ctx)
