@@ -751,6 +751,7 @@ Body Mu.
             got.iter().map(|s| s.heading.as_str()).collect::<Vec<_>>()
         );
     }
+
     #[test]
     fn declared_sections_are_within_the_size_cap() {
         // Gate 3, scoped to topics that have opted in. Widens automatically as
