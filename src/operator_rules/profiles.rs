@@ -24,6 +24,7 @@ impl OperatorProfiles {
     /// Read the home directory once, at the edge. The only env access here.
     pub fn from_env() -> Result<Self> {
         let home = crate::platform::home_dir().context("cannot resolve the home directory")?;
+        let home = require_absolute(home)?;
         Ok(Self {
             paths: PROFILE_DIRS
                 .iter()
@@ -38,6 +39,27 @@ pub fn extract_block(doc: &str) -> Option<&str> {
     let start = doc.find(BEGIN)?;
     let end = doc[start..].find(END)? + start + END.len();
     Some(&doc[start..end])
+}
+
+/// Reject a non-absolute home directory rather than silently joining profile
+/// paths onto it.
+///
+/// `crate::platform::home_dir()` (via `std::env::var_os("HOME")` on unix) does
+/// not guarantee an absolute result: an empty `$HOME` resolves to `Some("")`,
+/// which turns every `home.join(d)` into a path resolved against the current
+/// working directory instead of the operator's actual home — a silent
+/// wrong-target write, not an error. This is the boundary check for that case,
+/// factored out so it can be tested without calling
+/// [`OperatorProfiles::from_env`] or reading `$HOME` (see
+/// `docs/conventions/test-env-isolation.md` option A).
+fn require_absolute(home: PathBuf) -> Result<PathBuf> {
+    if !home.is_absolute() {
+        bail!(
+            "$HOME resolved to a non-absolute path ({}); refusing to guess profile locations",
+            home.display()
+        );
+    }
+    Ok(home)
 }
 
 /// Replace the generated block, or append it when absent.
@@ -93,12 +115,18 @@ mod tests {
             .replace("OP-1", "OP-1, OP-2")
             .replace("Verify.", "Verify.\n\nAlso this.");
         let out = splice(&doc, &new_block).unwrap();
-        assert!(
-            out.starts_with("# Head\n\nBefore.\n\n"),
-            "prefix intact: {out}"
+        // Equality, not prefix/suffix: `starts_with`/`ends_with` each leave the
+        // other half of the document unconstrained, so a mutation confined to
+        // the interior of `doc[end..]` (e.g. eating a blank line from the
+        // operator's hand-written prose after the block) can pass both while
+        // still damaging the document. `new_block` ends in exactly one `\n`,
+        // `splice` trims it, and `doc[end..]` restores it — so the expected
+        // value below is byte-exact.
+        assert_eq!(
+            out,
+            format!("# Head\n\nBefore.\n\n{new_block}\nAfter.\n"),
+            "{out}"
         );
-        assert!(out.ends_with("\nAfter.\n"), "suffix intact: {out}");
-        assert!(out.contains("OP-2") && out.contains("Also this."), "{out}");
     }
 
     /// Gate 1 — compile is a fixed point after the first pass.
@@ -115,7 +143,14 @@ mod tests {
         assert!(extract_block("no markers here").is_none());
         let doc = format!("x\n{}y\n", block());
         let got = extract_block(&doc).expect("markers present");
-        assert!(got.contains("<!-- rules: OP-1 -->"), "{got}");
+        // Equality, not `contains`: `contains("<!-- rules: OP-1 -->")` is true
+        // of the block, of the block plus trailing "y\n", and of the entire
+        // document — it doesn't pin the boundary. `+ END.len()` at the END
+        // offset (dropped by an off-by-one mutation) or `&doc[start..]`
+        // (dropping the upper bound entirely) both still contain the marker
+        // string and would pass a `contains` check; only exact equality to
+        // `block()` minus its single trailing newline catches them.
+        assert_eq!(got, block().trim_end_matches('\n'), "{got}");
     }
 
     #[test]
@@ -160,5 +195,22 @@ mod tests {
         let doc = format!("{END}\nstray leftover\n\n{BEGIN}\ndangling\n");
         let err = splice(&doc, &block()).unwrap_err().to_string();
         assert!(err.contains("END"), "{err}");
+    }
+
+    /// Tests the guard, not [`OperatorProfiles::from_env`] — the safety rule
+    /// (no test may call `from_env` or read `$HOME`) takes priority over
+    /// testing the guard in situ, so `require_absolute` is exercised directly
+    /// on a literal `PathBuf` instead.
+    #[test]
+    fn require_absolute_rejects_a_non_absolute_home() {
+        let err = require_absolute(PathBuf::from("")).unwrap_err().to_string();
+        assert!(err.contains("non-absolute"), "{err}");
+    }
+
+    #[test]
+    fn require_absolute_accepts_an_absolute_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = require_absolute(dir.path().to_path_buf()).unwrap();
+        assert_eq!(home, dir.path());
     }
 }
