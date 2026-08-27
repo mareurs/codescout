@@ -3808,7 +3808,8 @@ banner is a **companion-plugin** surface with its own enumeration:
 `detect.mjs:166-175` and `detect.py:175-179` both read `.codescout/memories/`
 non-recursively and then discard directories with an `isFile` / `is_file()` guard, so
 `infra/` and `research/` are skipped whole. Filed as
-`claude-plugins:docs/issues/2026-08-27-cs-memory-names-skips-namespaced-memories.md`.
+`claude-plugins:docs/issues/archive/2026-08-27-cs-memory-names-skips-namespaced-memories.md`
+(fixed same day, `claude-plugins:b305b1b5` / patch-id `8ad092d3`).
 
 That sharpens this entry rather than retiring it. The same `CS_MEMORY_NAMES` feeds
 `subagent-guidance.mjs`, which injects it into a subagent's Phase 0 **in place of** the
