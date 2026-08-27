@@ -230,7 +230,9 @@ fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String>
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let mut a: Args = serde_json::from_value(args)?;
+    let mut a: Args = serde_json::from_value(args).map_err(|e| {
+        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"create\") requires 'rel_path', 'kind', 'title' and 'body': {e}"), "e.g. artifact(action=\"create\", rel_path=\"docs/plans/my-plan.md\", kind=\"plan\", title=\"My plan\", body=\"# My plan\"). rel_path is relative to the repo root and does NOT include the repo name.")
+    })?;
 
     // Resolve base directory: explicit repo arg looks up in workspace.roots
     // (legacy compatibility), otherwise derive from current_project.abs_path.

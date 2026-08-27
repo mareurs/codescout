@@ -49,7 +49,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 .to_string(),
         ));
     }
-    let a: Args = serde_json::from_value(args)?;
+    let a: Args = serde_json::from_value(args).map_err(|e| {
+        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"update_entry\") requires 'id', 'entry_collection' and 'entry_id': {e}"), "e.g. artifact(action=\"update_entry\", id=\"<16-hex>\", entry_collection=\"observations\", entry_id=\"T-17\", fields={\"status\": \"closed\"}). This patches ONE row; patch={params:...} would replace the whole collection.")
+    })?;
     if !a.fields.is_object() {
         return Err(RecoverableError::new(
             "update_entry: `fields` must be a JSON object",

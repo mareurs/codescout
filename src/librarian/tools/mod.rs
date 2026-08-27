@@ -471,3 +471,84 @@ mod containing_root_tests {
         assert_eq!(containing_root(&roots, &stored), Some(&nested));
     }
 }
+
+#[cfg(test)]
+mod required_param_routing_tests {
+    use super::*;
+    use crate::librarian::catalog::Catalog;
+    use crate::tools::RecoverableError;
+    use serde_json::json;
+
+    /// docs/issues/2026-08-27-required-param-failures-neither-correct-nor-suggest.md
+    ///
+    /// A required-parameter failure must either repair the call and say so, or
+    /// refuse WITH A ROUTE — never answer with a bare serde field name. Measured
+    /// 2026-08-27 by probing the live surface: 7 of 13 librarian entry points
+    /// answered `missing field \`x\``, which names neither the tool, nor the
+    /// action, nor a corrected call. The other 6 already routed, so the pattern
+    /// asserted here is the repo's own, not an invention.
+    ///
+    /// Table-driven on purpose: the defect is a CLASS, and a per-site test would
+    /// let the next entry point be added bare without failing anything.
+    #[tokio::test]
+    async fn every_required_param_failure_names_its_action_and_routes() {
+        let c = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build();
+
+        let cases: Vec<(&str, anyhow::Error)> = vec![
+            (
+                "append_entry",
+                append_entry::call(&c, json!({"id": "0000000000000000"}))
+                    .await
+                    .unwrap_err(),
+            ),
+            (
+                "update_entry",
+                update_entry::call(&c, json!({"id": "0000000000000000"}))
+                    .await
+                    .unwrap_err(),
+            ),
+            (
+                "link",
+                link::call(&c, json!({"src_id": "0000000000000000"}))
+                    .await
+                    .unwrap_err(),
+            ),
+            (
+                "create",
+                create::call(&c, json!({"rel_path": "docs/x.md"}))
+                    .await
+                    .unwrap_err(),
+            ),
+            (
+                "event_create",
+                event_create::call(&c, json!({"artifact_id": "0000000000000000"}))
+                    .await
+                    .unwrap_err(),
+            ),
+            ("graph", graph::call(&c, json!({})).await.unwrap_err()),
+            ("refresh", refresh::call(&c, json!({})).await.unwrap_err()),
+        ];
+
+        for (name, e) in cases {
+            let r = e.downcast_ref::<RecoverableError>().unwrap_or_else(|| {
+                panic!("{name}: a required-param miss must be recoverable, not a bare serde error — got: {e}")
+            });
+            let msg = r.to_string();
+            assert!(
+                msg.contains("requires"),
+                "{name}: the refusal must name what wanted the field; got: {msg}"
+            );
+            assert!(
+                msg.contains("artifact"),
+                "{name}: the refusal must name the TOOL and action, since `missing field \
+                 \\`x\\`` names neither; got: {msg}"
+            );
+            let hint = r.hint().unwrap_or_default();
+            assert!(
+                hint.contains("e.g.") || hint.contains("artifact("),
+                "{name}: the refusal must carry a concrete corrected call, not a \
+                 restatement of the field name; got hint: {hint}"
+            );
+        }
+    }
+}

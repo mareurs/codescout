@@ -24,7 +24,9 @@ fn read_body(ctx: &ToolContext, artifact_id: &str) -> Result<Option<String>> {
     }
 }
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args)?;
+    let a: Args = serde_json::from_value(args).map_err(|e| {
+        crate::tools::RecoverableError::with_hint(format!("artifact_refresh(action=\"gather\") requires 'id': {e}"), "e.g. artifact_refresh(action=\"gather\", id=\"<16-hex>\"). To list stale augmented artifacts instead, call artifact_refresh(action=\"list_stale\"), which needs no id.")
+    })?;
 
     let aug_row = {
         let cat = ctx.catalog.lock();

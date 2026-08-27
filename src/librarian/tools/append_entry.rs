@@ -39,7 +39,9 @@ fn default_entry() -> Value {
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args)?;
+    let a: Args = serde_json::from_value(args).map_err(|e| {
+        crate::tools::RecoverableError::with_hint(format!("artifact(action=\"append_entry\") requires 'id' and 'id_prefix': {e}"), "Name the ledger and its id namespace, e.g. artifact(action=\"append_entry\", id=\"<16-hex>\", id_prefix=\"R\"). For a PROSE ledger pass anchor_heading + title + body TOGETHER and the section is written for you; for a params ledger pass entry_collection + entry.")
+    })?;
     if !a.entry.is_object() {
         return Err(RecoverableError::new(
             "append_entry: `entry` must be a JSON object",
