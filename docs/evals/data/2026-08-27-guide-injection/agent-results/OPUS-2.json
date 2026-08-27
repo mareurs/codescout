@@ -1,0 +1,155 @@
+{
+ "agent_id": "OPUS-2",
+ "transcript": "/home/marius/.claude-sdd/projects/-home-marius-work-stefanini-invest-europe-extended-crawler/0a480850-dd3a-4235-b637-ee5195f4c8fb.jsonl",
+ "calibration": "PASS",
+ "calibration_detail": "found 5 injections vs expected 5; per-topic {progressive-disclosure:2, librarian:2, project-activation-bootstrap:1} == EXPECTED_TOPICS exactly. 370 assistant lines == dispatch value.",
+ "model": "claude-opus-5",
+ "project": "-home-marius-work-stefanini-invest-europe-extended-crawler",
+ "assistant_turns": 370,
+ "session_total_chars": 404070,
+ "injections": 5,
+ "per_topic": {
+  "progressive-disclosure": 2,
+  "librarian": 2,
+  "project-activation-bootstrap": 1
+ },
+ "injected_bytes": 55022,
+ "injected_share": 0.13617,
+ "repeat_injections": 2,
+ "discussion_mentions": 0,
+ "per_injection": [
+  {
+   "topic": "progressive-disclosure",
+   "line": 93,
+   "turn_index": 21,
+   "turn_pct": 5.68,
+   "trigger_tool": "mcp__codescout__read_markdown",
+   "trigger_summary": "path=temp/sitemap_survey_2026-08-04/REPORT_sitemap_survey.md; response was an overflow envelope with output_id=@tool_d5c55bed",
+   "topic_bytes": 5669,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 2,
+   "opportunities_after": 29,
+   "use_class": "U2_PRESCRIBED_CALL",
+   "evidence": [
+    {
+     "line": 99,
+     "quote": "read_file {\"path\": \"@tool_d5c55bed\", \"start_line\": 55, \"end_line\": 200}"
+    }
+   ],
+   "sections_touched": [
+    "The @ref buffer"
+   ],
+   "bytes_touched": 1785,
+   "utilisation": 0.3149,
+   "contradicted": true,
+   "contradiction_evidence": {
+    "line": 1410,
+    "quote": "run_command: git push -u origin marius-refactor 2>&1 | tail -12 — blocked, IL3 log-trimmer (denial at L1413)"
+   }
+  },
+  {
+   "topic": "librarian",
+   "line": 322,
+   "turn_index": 76,
+   "turn_pct": 20.54,
+   "trigger_tool": "mcp__codescout__artifact",
+   "trigger_summary": "action=find, kind=tracker, limit=20 (returned count:0, hints:{})",
+   "topic_bytes": 20545,
+   "timing_verdict": "TIMELY",
+   "first_opportunity_turn": 76,
+   "opportunities_after": 1,
+   "use_class": "U2_PRESCRIBED_CALL",
+   "evidence": [
+    {
+     "line": 335,
+     "quote": "artifact {\"action\": \"find\", \"filter\": {\"rel_path\": {\"contains\": \"docs/trackers\"}}, \"limit\": 20}"
+    }
+   ],
+   "sections_touched": [
+    "Filter Syntax"
+   ],
+   "bytes_touched": 1959,
+   "utilisation": 0.0954,
+   "contradicted": true,
+   "contradiction_evidence": {
+    "line": 346,
+    "quote": "read_markdown(path=\"docs/trackers/bot-blocked-status-session-log.md\", mode=\"outline\") — guide: Never read files there directly"
+   }
+  },
+  {
+   "topic": "project-activation-bootstrap",
+   "line": 333,
+   "turn_index": 79,
+   "turn_pct": 21.35,
+   "trigger_tool": "mcp__codescout__workspace",
+   "trigger_summary": "action=activate, path=/home/marius/work/stefanini/invest-europe/extended-crawler (only workspace call in the session)",
+   "topic_bytes": 2594,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 0,
+   "opportunities_after": 0,
+   "use_class": "U0_UNUSED",
+   "evidence": [],
+   "sections_touched": [],
+   "bytes_touched": 0,
+   "utilisation": 0.0,
+   "contradicted": false,
+   "contradiction_evidence": null
+  },
+  {
+   "topic": "librarian",
+   "line": 338,
+   "turn_index": 80,
+   "turn_pct": 21.62,
+   "trigger_tool": "mcp__codescout__artifact",
+   "trigger_summary": "REPEAT. action=find, filter={rel_path:{contains:docs/trackers}}, limit=20 (returned count:0)",
+   "topic_bytes": 20545,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 76,
+   "opportunities_after": 0,
+   "use_class": "U0_UNUSED",
+   "evidence": [],
+   "sections_touched": [],
+   "bytes_touched": 0,
+   "utilisation": 0.0,
+   "contradicted": true,
+   "contradiction_evidence": {
+    "line": 346,
+    "quote": "read_markdown(path=\"docs/trackers/bot-blocked-status-session-log.md\", mode=\"outline\") — guide: Never read files there directly"
+   }
+  },
+  {
+   "topic": "progressive-disclosure",
+   "line": 446,
+   "turn_index": 106,
+   "turn_pct": 28.65,
+   "trigger_tool": "mcp__codescout__symbols",
+   "trigger_summary": "REPEAT. path=crawlers/people/extractor.py; overflow envelope output_id=@tool_d613497f",
+   "topic_bytes": 5669,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 2,
+   "opportunities_after": 25,
+   "use_class": "U2_PRESCRIBED_CALL",
+   "evidence": [
+    {
+     "line": 455,
+     "quote": "read_file {\"path\": \"@tool_d613497f\", \"json_path\": \"$.symbols\"} — json_path= appears nowhere earlier"
+    },
+    {
+     "line": 465,
+     "quote": "run_command {\"command\": \"grep -n \\\"Function\\\\|Constant\\\" @file_d613c1a9\"} — first @cmd/@file buffer query"
+    }
+   ],
+   "sections_touched": [
+    "The @ref buffer"
+   ],
+   "bytes_touched": 1785,
+   "utilisation": 0.3149,
+   "contradicted": true,
+   "contradiction_evidence": {
+    "line": 1410,
+    "quote": "run_command: git push -u origin marius-refactor 2>&1 | tail -12 — blocked, IL3 log-trimmer (denial at L1413)"
+   }
+  }
+ ],
+ "notes": "REPEAT CAUSE (high confidence): a single workspace(action=\"activate\") clears the per-session auto-inject ledger. Timeline: L315/T76 07:30:07 artifact(find,kind=tracker) -> librarian injected (L322, 07:30:07.965, _guide_hint says 'First call this session'). L330/T79 07:30:15 workspace(action=\"activate\") -> project-activation-bootstrap injected (L333, 07:30:17.733; result hint 'Returned to home project'). L335/T80 07:30:20 artifact(find,filter=...) -> librarian injected AGAIN (L338, 07:30:21.341) — 14 seconds and 4 assistant turns after the first, with the identical _guide_hint claiming first-call. Corroboration from the other topic: 11 output_id overflow envelopes occur in the session (turns 21,42,106,228,229,253,253,255,255,302,310); progressive-disclosure injected on exactly two of them — turn 21 (first after session start) and turn 106 (first after the turn-79 activate), and on none of the other nine. Two topics, two ledger-clearing events, no other repeats: the activate is the cause, not an MCP reconnect. sessionId is constant (0a480850-...) across all 1505 lines, cwd never changes, and no /clear or resume is present, so session restart is ruled out. Cost of the repeat: 20545 B (librarian) + 5669 B (pd) = 26214 B, 48% of all guide bytes delivered in this session.\n\nLIBRARIAN M2 (the priority question): the governed class is NOT never-needed, but it is nearly so. The entire 370-turn session contains exactly TWO artifact/librarian calls — L315/T76 and L335/T80 — and both are the triggers of the two injections themselves. Zero artifact/librarian/artifact_* calls occur in the 290 assistant turns after L338. So injection #1 is TIMELY (one governed call follows it) and injection #2 is LATE with opportunities_after = 0: 20545 B delivered onto a class that never recurred. NEVER_NEEDED was not the honest verdict, but 'needed twice, both times as its own trigger' is the substance.\n\nLIBRARIAN U2 IS UNUSUALLY CLEAN. The token 'rel_path' occurs in the whole transcript on exactly three lines: L322 (injected guide body), L335 (the agent's call), L338 (the repeat injection). It appears in no tool schema text, no system prompt, no user message. The guide's Filter Syntax section literally shows {\"rel_path\": {\"prefix\": \"docs/trackers\"}}; the agent emitted {\"rel_path\": {\"contains\": \"docs/trackers\"}} 13 seconds later. The triggering response's own 'hints' field was empty ({}), so there is no in-envelope hint confound. This is the one injection in the file whose use is directly attributable.\n\nPROGRESSIVE-DISCLOSURE U2 IS CONFOUNDED. Both pd U2 hits follow an overflow envelope whose own 'hint'/'next' field already names the same follow-up call, and the codescout tool-denial messages (L19 T2, L62 T15) teach the @cmd_ buffer idiom before any guide arrives. The classification is rubric-correct (the shapes appear nowhere earlier) but should not be read as guide-attributable.\n\nfirst_opportunity_turn CAVEAT for progressive-disclosure: reported as 2 under the brief's literal rule ('any tool response containing output_id/@tool_/@cmd_/@file_'). L19 (T2) and L62 (T15) are codescout HOOK DENIAL messages that merely mention '@cmd_* buffers' and 'grep PATTERN @cmd_id' — no buffer actually existed. Under the narrower reading (a real overflow envelope carrying output_id) the first opportunity is turn 21, which is the injection's own trigger, and injection #1 would be TIMELY rather than LATE. Injection #2 (turn 106) is LATE under both readings. opportunities_after under the narrow reading would be 10 (after L93) and 8 (after L446) instead of 29 / 25.\n\nOFF-RUBRIC EVIDENCE (deliberately NOT counted as U3, reported so the aggregate can decide): at L395/T95 the Agent dispatch prompt — a tool_use input, not an assistant text block — reads 'Guide topics already triggered in the parent session (their content is loaded; if you trigger them you'll get an auto-inject you can ignore): progressive-disclosure, librarian, project-activation-bootstrap, workspace-state. Do not re-call get_guide for those.' It names get_guide and all three injected topics. Two reasons it is not scored U3: (a) the brief restricts U1/U3 to assistant *text* blocks; (b) the same instruction is already in the always-present MCP server_instructions (Iron Law 6), so it is not attributable to the injection. Note also that it lists workspace-state, which was NEVER injected in this transcript — the agent over-listed by one topic. The only engagement with the pab guide in the whole session was telling a subagent it could ignore it.\n\nCONTRADICTIONS. (1) progressive-disclosure, Anti-patterns section: 'Piping unbounded run_command output to log-trimmers ... Server-side enforcement blocks this.' At L1410/T352 (246 turns after the second pd injection) the agent ran 'git push -u origin marius-refactor 2>&1 | tail -12' and was blocked by the IL3 gate at L1413. Softer instances of the same anti-pattern that were not enforced: L879/T221 ('... probe2.py redirects 2>&1 | head -45'), L970/T245 ('| head -60'). Both pd injections precede all of these; the flag is set on both, but it is ONE underlying event class — de-duplicate when aggregating. (2) librarian, section 'docs/trackers/ — Backing Store, Not a Docs Folder': 'Never read files there directly with read_markdown or read_file.' At L346/T83 and L351/T84 — 3 turns after the second librarian injection — the agent did exactly that on docs/trackers/bot-blocked-status-session-log.md. It then created a tracker outside the catalog (L370/T89 create_file docs/trackers/people-page-discovery-session-log.md) and hand-maintained its F-N Index table with edit_markdown old_string/new_string at L1163/T295 and L1282/T324, against 'don't hand-maintain the table'. MITIGATION, recorded honestly: both artifact finds returned count:0, so no catalog rows existed, and the agent said so at L345 ('these session logs aren't indexed as artifacts, so they're plain files'). The guide's rule is stated unconditionally, so the flag stands, but the agent was not acting blindly. (3) Same flag set on both librarian injections for the same single event class — de-duplicate.\n\nU1_ECHO: mechanically checked, zero hits. For each of the 5 injections I built the set of 6-grams of the guide body, subtracted every 6-gram appearing anywhere in the transcript (text, thinking, tool_result, tool inputs) before the injection line, and intersected with post-injection assistant text. All five returned 0 candidates. U3: a scan of all 370 assistant turns for get_guide / topic names / 'the guide' / @tool_ / @cmd_ / @file_ / output_id / overflow / append_entry / entry_filter / 'artifact(' returned 0 hits in assistant text. The nearest miss is L345 'these session logs aren't indexed as artifacts' — correct librarian mechanics but derivable from the count:0 result, and it names neither the topic nor get_guide, so it is not scored.\n\nDENOMINATOR: session_total_chars = 404070 = 178999 chars of `text` blocks + 225071 chars of `tool_result` content, per the brief's definition. Excluded (reported for transparency): 336869 chars of `attachment` payloads, 238917 chars of tool_use inputs, and 0 chars of thinking. Raw file is 2540755 bytes. injected_bytes are themselves inside the tool_result total, so injected_share is self-consistent.\n\nMEASUREMENT LIMIT (partially UNMEASURABLE, not 0): the file contains 94 `type:\"thinking\"` blocks and every one has `thinking: \"\"` — only the `signature` survives, so the model's reasoning is redacted in this transcript. Any citation or echo of an injected guide that happened inside reasoning is therefore invisible to U1/U3, which are scored on visible assistant text only. This biases use_class downward by an unknown amount for all 5 injections; U2 (tool-call shapes) is unaffected.\n\nMISC: no unpaired tool_use_id — all 5 injections paired to their trigger. No duplicate identical tool calls anywhere. discussion_mentions = 0 (no injection marker appears in any assistant text or user message). No {topic}/{} false positives. One incidental observation, not a measurement: at L329 the agent concluded 'The workspace isn't activated — that's why the catalog is empty', reading the path-stripped empty abs_path/git_root fields in the artifact scope block as proof of no active project. That misreading is what produced the activate call, and therefore the ledger reset and the 26 KB of re-injection."
+}

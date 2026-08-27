@@ -1,0 +1,210 @@
+{
+  "agent_id": "SONNET-5",
+  "transcript": "/home/marius/.claude/projects/-home-marius-agents-system/7aa7eeba-3bb6-4465-952b-ee31fc06e5d9.jsonl",
+  "calibration": "PASS",
+  "calibration_detail": "found 8 injections vs expected 8; per_topic {project-activation-bootstrap:4, progressive-disclosure:2, tracker-conventions:2} matches EXPECTED_TOPICS exactly",
+  "model": "claude-sonnet-5",
+  "project": "-home-marius-agents-system",
+  "assistant_turns": 1087,
+  "session_total_chars": 632026,
+  "injections": 8,
+  "per_topic": {
+    "project-activation-bootstrap": 4,
+    "progressive-disclosure": 2,
+    "tracker-conventions": 2
+  },
+  "injected_bytes": 90380,
+  "injected_share": 0.143,
+  "repeat_injections": 5,
+  "discussion_mentions": 0,
+  "per_injection": [
+    {
+      "topic": "project-activation-bootstrap",
+      "line": 33,
+      "turn_index": 6,
+      "turn_pct": 0.00552,
+      "trigger_tool": "read_markdown",
+      "trigger_summary": "read_markdown(path=HOME_ASSISTANT.md) — first codescout call of session",
+      "topic_bytes": 2594,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 0,
+      "opportunities_after": 1,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 2568,
+          "quote": "memory(action=\"read\", topic=\"gotchas\") — prescribed bootstrap memory-read; no memory call anywhere before this injection"
+        }
+      ],
+      "sections_touched": [
+        "Phase 0 — load what the project already knows (do FIRST)"
+      ],
+      "bytes_touched": 819,
+      "utilisation": 0.3157,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "progressive-disclosure",
+      "line": 205,
+      "turn_index": 60,
+      "turn_pct": 0.0552,
+      "trigger_tool": "run_command",
+      "trigger_summary": "run_command(nmap background scan loop, run_in_background) — response buffered as @cmd/@tool ref",
+      "topic_bytes": 5669,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 20,
+      "opportunities_after": 83,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 1621,
+          "quote": "read_file(path=\"@tool_3a501067\") — reading an @ref buffer; no @ref-read or json_path= appears before turn 60"
+        }
+      ],
+      "sections_touched": [
+        "The @ref buffer"
+      ],
+      "bytes_touched": 1785,
+      "utilisation": 0.3149,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "tracker-conventions",
+      "line": 1799,
+      "turn_index": 602,
+      "turn_pct": 0.55382,
+      "trigger_tool": "artifact",
+      "trigger_summary": "artifact(action=get, id=01291679a5ee4707) — retrieving a bug/tracker artifact",
+      "topic_bytes": 34333,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 596,
+      "opportunities_after": 2,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 1808,
+          "quote": "'**Valid:** dated 2026-08-25' written into the bug body via artifact(create) at turn 604; no such field before turn 602"
+        }
+      ],
+      "sections_touched": [
+        "Entry-level standard — the shape INSIDE a tracker"
+      ],
+      "bytes_touched": 16091,
+      "utilisation": 0.4687,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "project-activation-bootstrap",
+      "line": 1815,
+      "turn_index": 606,
+      "turn_pct": 0.5575,
+      "trigger_tool": "workspace",
+      "trigger_summary": "workspace(action=activate, path=/home/marius/work/claude/codescout) — project switch (REPEAT)",
+      "topic_bytes": 2594,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 0,
+      "opportunities_after": 1,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 2568,
+          "quote": "memory(action=\"read\", topic=\"gotchas\") — prescribed bootstrap memory-read; no memory call before this injection"
+        }
+      ],
+      "sections_touched": [
+        "Phase 0 — load what the project already knows (do FIRST)"
+      ],
+      "bytes_touched": 819,
+      "utilisation": 0.3157,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "tracker-conventions",
+      "line": 1825,
+      "turn_index": 608,
+      "turn_pct": 0.55934,
+      "trigger_tool": "artifact",
+      "trigger_summary": "artifact(action=create, kind=bug, rel_path=docs/issues/2026-08-25-...) retry (REPEAT)",
+      "topic_bytes": 34333,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 596,
+      "opportunities_after": 0,
+      "use_class": "U0_UNUSED",
+      "evidence": [],
+      "sections_touched": [],
+      "bytes_touched": 0,
+      "utilisation": 0.0,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "project-activation-bootstrap",
+      "line": 1834,
+      "turn_index": 610,
+      "turn_pct": 0.56118,
+      "trigger_tool": "workspace",
+      "trigger_summary": "workspace(action=activate, path=/home/marius/agents/system) — switch back home (REPEAT)",
+      "topic_bytes": 2594,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 0,
+      "opportunities_after": 1,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 2568,
+          "quote": "memory(action=\"read\", topic=\"gotchas\") — prescribed bootstrap memory-read; no memory call before this injection"
+        }
+      ],
+      "sections_touched": [
+        "Phase 0 — load what the project already knows (do FIRST)"
+      ],
+      "bytes_touched": 819,
+      "utilisation": 0.3157,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "progressive-disclosure",
+      "line": 1930,
+      "turn_index": 640,
+      "turn_pct": 0.58878,
+      "trigger_tool": "read_file",
+      "trigger_summary": "read_file(path=.../scratchpad/live2.log) — response buffered as @file ref (REPEAT)",
+      "topic_bytes": 5669,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 20,
+      "opportunities_after": 24,
+      "use_class": "U0_UNUSED",
+      "evidence": [],
+      "sections_touched": [],
+      "bytes_touched": 0,
+      "utilisation": 0.0,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "project-activation-bootstrap",
+      "line": 3060,
+      "turn_index": 1049,
+      "turn_pct": 0.96504,
+      "trigger_tool": "run_command",
+      "trigger_summary": "run_command(curl Kodi jsonrpc) — first codescout call after compaction (turn 876) (REPEAT)",
+      "topic_bytes": 2594,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 0,
+      "opportunities_after": 0,
+      "use_class": "U0_UNUSED",
+      "evidence": [],
+      "sections_touched": [],
+      "bytes_touched": 0,
+      "utilisation": 0.0,
+      "contradicted": false,
+      "contradiction_evidence": null
+    }
+  ],
+  "notes": "CALIBRATION PASS exact. This is the longest transcript (1087 asst turns, 632026 text+tool_result chars); cwd is /home/marius/agents/system throughout (a home-automation / LAN-debugging task) with codescout MCP used as general file/shell tooling. EVERY injection is LATE: PAB first_opportunity=0 by definition (bootstrap ideal is session start; push path only fires on first codescout call, and the SubagentStart hook already delivers bootstrap separately, so push-PAB is redundant). PD buffer refs first appeared turn 20, before the PD guide arrived turn 60 and 640. TC: the agent was doing artifact/librarian bug-tracker ops from turn 596 (context/tracker_design/find/get) before tracker-conventions arrived turn 602. HEADLINE injected_share=0.143 using MANDATED table bytes (90380/632026) — NOT tiny, driven by tracker-conventions injected twice. IMPORTANT DISCREPANCY: the guide bodies actually delivered in THIS (older) transcript are smaller than the 2026-08-27 table: PAB=2701 chars/inj, PD=5859, TC=28010 (vs table 34333). Actual delivered bytes ~= 4*2701+2*5859+2*28010 = 78542, giving a real injected_share ~= 0.124. The TC guide evidently grew ~6KB after this session; per brief M1 I still report table-based injected_bytes=90380. REPEATS (5): #1 PAB turn606 cause=workspace(activate codescout) project switch reset per-project guide ledger; #2 TC turn608 cause=ledger reset by the turn-606 switch + artifact create re-trigger; #3 PAB turn610 cause=workspace(activate back home) another switch reset; #4 PD turn640 cause=the two switches reset ledger + read_file re-trigger; #5 PAB turn1049 cause=conversation compaction at turn 876 reset ledger, first codescout call after re-triggered. Of the 5 repeats, 3 landed on already-established or unused behavior (U0). USE: 4 injections U2, 4 U0, 0 U3, 0 U1, 0 contradictions. The ONLY causally-tight U2 is TC turn602 (guide arrived turn 602, agent wrote '**Valid:**' tracker-entry field into the bug body 2 turns later at turn 604). CAVEAT on the other 3 U2 (PAB x3): they are MECHANICALLY U2 per brief rule 4 (prescribed shape appears after, nowhere before) but rest on a SINGLE memory(read,gotchas) call at turn 874 that is 264-868 turns after the injections and is task-driven network debugging, not plausibly guide-caused. PAB turn6->874 gap=868 turns; turn606->874=268; turn610->874=264. PD turn60 U2 likewise rests on @ref reads first at turn 530 (gap 470). Reported per the mechanical rule; flagging that only TC-turn602 is causally credible. opportunities_after for PAB uses the prescribed-shape proxy (memory/semantic_search/references/artifact-find-bug) since 'session start' has no post-injection instances; only one such call exists (memory read turn 874). AMBIGUITY: TC first_opportunity=596 uses a broad 'artifact/librarian tracker-catalog op' reading of 'any call touching docs/issues|docs/trackers'; under a strict path-string-only reading first_opp=604 and TC-turn602 would be TIMELY instead of LATE. turn 872 create_file(MEDIA_PI.md) was excluded as a false path-match (home doc that merely mentions the bug path). No get_guide auto-inject of error-handling/iron-laws-detail/untrusted-content/librarian-runtime observed. One explicit pull get_guide(librarian) at turn 593 (not an injection). discussion_mentions=0."
+}

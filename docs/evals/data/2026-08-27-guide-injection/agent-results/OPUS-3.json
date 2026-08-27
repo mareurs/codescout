@@ -1,0 +1,173 @@
+{
+  "agent_id": "OPUS-3",
+  "transcript": "/home/marius/.claude/projects/-home-marius-work-mirela-backend-kotlin/4d30fbb4-f68c-4ae1-b38d-0e037ea28efc.jsonl",
+  "calibration": "PASS",
+  "calibration_detail": "found 5 injections vs expected 5; per-topic {project-activation-bootstrap:2, tracker-conventions:1, symbol-navigation:1, progressive-disclosure:1} matches EXPECTED_TOPICS exactly. 5 opening markers, 5 closing markers, 0 discussion mentions, 0 {topic}/{} false positives. Transcript was LIVE and growing during measurement (2115 lines at calibration -> 2144 lines 12 minutes later); all numbers below are measured against a frozen 2115-line snapshot equal to the calibrated state (scratchpad/OPUS3_frozen.jsonl).",
+  "model": "claude-opus-5",
+  "project": "-home-marius-work-mirela-backend-kotlin",
+  "assistant_turns": 567,
+  "session_total_chars": 614723,
+  "injections": 5,
+  "per_topic": {
+    "project-activation-bootstrap": 2,
+    "tracker-conventions": 1,
+    "symbol-navigation": 1,
+    "progressive-disclosure": 1
+  },
+  "injected_bytes": 48335,
+  "injected_share": 0.07863,
+  "repeat_injections": 1,
+  "discussion_mentions": 0,
+  "per_injection": [
+    {
+      "topic": "project-activation-bootstrap",
+      "line": 29,
+      "turn_index": 2,
+      "turn_pct": 0.35,
+      "trigger_tool": "workspace",
+      "trigger_summary": "action=activate, path=/home/marius/work/mirela/backend-kotlin",
+      "topic_bytes": 2594,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 0,
+      "opportunities_after": 0,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 37,
+          "quote": "artifact(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"investigating\", \"mitigated\"]}})"
+        },
+        {
+          "line": 381,
+          "quote": "artifact update patch status:fixed extra.unverified: \"Closed on live-production evidence, not on a code fix or a regression test.\""
+        }
+      ],
+      "sections_touched": [
+        "Phase 0 — load what the project already knows (do FIRST)"
+      ],
+      "bytes_touched": 819,
+      "utilisation": 0.3157,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "tracker-conventions",
+      "line": 43,
+      "turn_index": 6,
+      "turn_pct": 1.06,
+      "trigger_tool": "artifact",
+      "trigger_summary": "action=find, kind=bug, filter={\"status\":{\"in\":[\"open\",\"investigating\",\"mitigated\"]}}",
+      "topic_bytes": 34333,
+      "timing_verdict": "TIMELY",
+      "first_opportunity_turn": 17,
+      "opportunities_after": 6,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 390,
+          "quote": "artifact(action=\"move\", id=\"83de06116c4b8c80\", new_rel_path=\"docs/issues/archive/2026-08-19-solutions-default-404-non-active-calendar.md\")"
+        },
+        {
+          "line": 406,
+          "quote": "edit_file test_preflight.py: \"docs/issues/...md\" -> \"docs/issues/archive/...md\" — the guide's re-point-the-citations-in-the-same-commit rule"
+        },
+        {
+          "line": 408,
+          "quote": "artifact update body_edits re-pointing both path and id: \"`docs/issues/2026-08-19-...md` (`83de06116c4b8c80`)\""
+        }
+      ],
+      "sections_touched": [
+        "Bug files (docs/issues/)"
+      ],
+      "bytes_touched": 10086,
+      "utilisation": 0.2938,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "symbol-navigation",
+      "line": 132,
+      "turn_index": 30,
+      "turn_pct": 5.29,
+      "trigger_tool": "symbols",
+      "trigger_summary": "name=findByExternalId, project=ktor-server",
+      "topic_bytes": 3145,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 29,
+      "opportunities_after": 21,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 136,
+          "quote": "symbols(name_path=\"StudentGroupRepository/findByExternalId\", include_body=true)"
+        },
+        {
+          "line": 927,
+          "quote": "symbols(name_path=\"InnovaplanHttpClient/parseBody\", include_body=true)"
+        }
+      ],
+      "sections_touched": [
+        "Generic patterns (any language)"
+      ],
+      "bytes_touched": 1032,
+      "utilisation": 0.3281,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "progressive-disclosure",
+      "line": 318,
+      "turn_index": 86,
+      "turn_pct": 15.17,
+      "trigger_tool": "run_command",
+      "trigger_summary": "grep -n '^- \\[ \\]' docs/superpowers/plans/2026-08-19-academic-year-scoping-phase2b-per-year-uniqueness.md",
+      "topic_bytes": 5669,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 9,
+      "opportunities_after": 29,
+      "use_class": "U0_UNUSED",
+      "evidence": [],
+      "sections_touched": [],
+      "bytes_touched": 0,
+      "utilisation": 0.0,
+      "contradicted": true,
+      "contradiction_evidence": [
+        {
+          "line": 584,
+          "quote": "IL3 violation — piped `find docs/kedos -type f | sort; ...` to a log-trimmer. BLOCKED."
+        },
+        {
+          "line": 1723,
+          "quote": "IL3 violation — piped `find . ... -iname '*simulator*' -print 2>/dev/null | head -20` to a log-trimmer. BLOCKED."
+        },
+        {
+          "line": 1908,
+          "quote": "IL3 violation — piped `ls scripts/innovaplan_mock/ && python3 -m pytest scripts/ -q -k innovaplan 2>&1 | tail -15`. BLOCKED."
+        }
+      ]
+    },
+    {
+      "topic": "project-activation-bootstrap",
+      "line": 1515,
+      "turn_index": 417,
+      "turn_pct": 73.54,
+      "trigger_tool": "symbols",
+      "trigger_summary": "path=ktor-server/src/main/kotlin/edu/planner/integration/innovaplan/InnovaplanHttpClient.kt",
+      "topic_bytes": 2594,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 0,
+      "opportunities_after": 0,
+      "use_class": "U0_UNUSED",
+      "evidence": [],
+      "sections_touched": [],
+      "bytes_touched": 0,
+      "utilisation": 0.0,
+      "contradicted": false,
+      "contradiction_evidence": null,
+      "repeat_of_turn": 2,
+      "repeat_gap_assistant_turns": 415,
+      "repeat_cause": "MCP reconnect. Line 1502 carries <local-command-stdout>Reconnected to codescout.</local-command-stdout> after the user ran /mcp (line 1501); line 1503 is the user typing 'codescout reconected'. The next codescout tool call (symbols, line 1514) re-triggered the topic — the per-session guide ledger did not survive the reconnect."
+    }
+  ],
+  "session_utilisation_bytes_weighted": 0.247,
+  "notes": "SIZE/VALUE CONTRAST (the assignment's question). symbol-navigation: 3145 B, utilisation 0.3281 (1032/3145), and the use is causally tight — the guide lands on the turn-29 result and the agent's VERY NEXT symbols call (turn 31, line 136) switches to the guide's verbatim `symbols(name_path=\"Container/member\", include_body=true)` form. Neither `name_path` nor `include_body` appears anywhere in the 30 turns before the injection; afterwards the agent uses that form in 15 of its remaining 21 symbols calls. Unused bytes: 2113. Share of session_total_chars: 0.51%. tracker-conventions: 34333 B (10.9x larger), utilisation 0.2938 (10086/34333) — a statistically similar fraction, but the resemblance is misleading in three ways. (1) Latency: the first prescribed shape appears 101 assistant turns after the injection (turn 6 -> turn 107), versus 1 turn for symbol-navigation. (2) Absolute waste: 24247 unused bytes vs 2113 — 11.5x more, and it is 5.585% of the entire session's text-plus-tool_result characters versus 0.512% for symbol-navigation. Six of the seven ## sections were never touched: 'Entry-level standard' (16091 B), 'Cross-linking' (2124), 'Querying with the librarian' (1978), 'Declaring an augmentation' (1680), 'Tracker artifacts (docs/trackers/)' (1444), preamble (653). (3) Granularity inflation: the M4 rubric credits a whole ## section, and the one credited here is the 10086 B 'Bug files' section, of which the actual evidence touches roughly 15 lines (the archive-through-the-catalog + re-point-the-citations passage at guide lines 112-130). A per-passage measure would put tracker-conventions an order of magnitude below symbol-navigation. Net: for this Kotlin navigation session the 3145 B guide bought a same-turn behaviour change; the 34333 B guide bought one archive workflow that fired 101 turns later, at ~11x the byte cost. CONTRADICTION (only one, and it is the largest by prescribed-rule violation): progressive-disclosure was injected at turn 86 and its 'Anti-patterns' section explicitly forbids 'Piping unbounded run_command output to log-trimmers ... Run bare, then grep FAILED @cmd_id against the buffer.' The agent hit server-side IL3 blocks twice BEFORE the injection (lines 79, 166) and three more times AFTER it (lines 584, 1723, 1908) — the injected text changed nothing. Both of its prescribed shapes (@ref read, json_path=) were already in use at turns 13/15/20/60, so all 5669 B were spent on an agent that had already demonstrated the behaviour: a pure repeat-cost injection, LATE by 77 turns behind 10 prior opportunities. TIMING CAVEATS. project-activation-bootstrap is STRUCTURALLY always LATE: the rubric fixes its first_opportunity_turn at 0, and a push injection cannot land before the first tool call. symbol-navigation's LATE verdict is by exactly one turn and its sole prior opportunity IS the triggering call itself — an artifact of push delivery, not a real timing failure. The same caveat would apply to tracker-conventions if its trigger (the artifact find kind=bug bug-ledger query at turn 5, which reads docs/issues/) were counted as an opportunity; I used the brief's literal test (a path field naming docs/issues/ or docs/trackers/ in the call input), which puts the first opportunity at turn 17 and yields TIMELY. Under the broader reading it becomes LATE-by-trigger. Only progressive-disclosure is LATE in a way that is not a delivery artifact. U3 AND U1 ARE ZERO EVERYWHERE. Across all 567 assistant turns, no assistant text block mentions get_guide, 'guide', or any of the 10 topic names — so U3_CITED is 0 for all five injections. U1_ECHO is also 0 for all five; the n-gram detector was validated by self-match against the injected tool_result (symbol-navigation 399/399 6-grams, progressive-disclosure 820/820, tracker-conventions 4233/5312, project-activation-bootstrap 354/385), and with the before-filter REMOVED it still returns 0 assistant-prose hits — the guides are never paraphrased or quoted, only acted on. Every non-U0 class here rests on tool-call shape, never on prose. NON-USE WORTH RECORDING. references, call_graph, symbol_at, semantic_search and memory were called ZERO times in 567 turns, despite symbol-navigation prescribing references/call_graph ('Who calls X? references(symbol, path) — structured call sites, not grep') and project-activation-bootstrap Phase 0 opening with memory(action=\"list\"). I considered flagging symbol-navigation contradicted for the greps at turns 78/82 on `assertNoCrossYearGroup`, and rejected it: the assistant text at line 316 shows it was hunting COMMENT references to a symbol it had just deleted, which references() structurally cannot see and which the guide's own preamble concedes grep is for. That is non-use, not contradiction. CONFOUND ON U2 ATTRIBUTION. codescout's server_instructions and the project CLAUDE.md restate some prescribed shapes, so a U2 classification is a before/after adjacency argument, not proof of causation. One detail cuts in the guide's favour for injection 1: the surrounding harness text prescribes artifact(find, kind=\"bug\", status=\"open\"), while the guide prescribes filter={\"status\":{\"in\":[...]}} and explains why status=\"open\" alone hides investigating — and the agent used the guide's in-list form, not the harness's. MEASUREMENT LIMITS / UNMEASURABLE. (a) opportunities_after for both project-activation-bootstrap injections is 0 by construction, not by observation: the rubric models its opportunity as a single point ('session start'), so there is nothing to count after. (b) The transcript is a LIVE session, still being written. I froze it at 2115 lines (the calibrated state). In the 29 lines appended during measurement a SIXTH injection landed — a THIRD project-activation-bootstrap at line 2131, triggered after another gap — which is out of snapshot and is NOT included in any number above. If the controller re-measures this file it will see 6, not 5. Two reconnect-driven re-pushes of the same 2594 B guide inside one session, both U0, is the repeat-cost signal this transcript carries. (c) Raw tool_result lengths exceed the guide byte table (5939 + 40091 + 6974 + 10913 + 4979 = 68896 chars vs 48335 table bytes) because each result also carries the triggering tool's own output; per the brief I used the table. (d) Zero tool_use_id pairings failed; no truncated content encountered."
+}

@@ -1,0 +1,258 @@
+[
+ {
+  "agent": "SONNET-1",
+  "path": "/home/marius/.claude-sdd/projects/-home-marius-work-claude-prompt-engineering/9a4e432b-75ef-4ba4-9359-87dafcd72a64.jsonl",
+  "profile": ".claude-sdd",
+  "dom": "claude-sonnet-5",
+  "lines": 2105,
+  "asst": 449,
+  "inj": 9,
+  "topics": {
+   "project-activation-bootstrap": 2,
+   "librarian": 2,
+   "tracker-conventions": 2,
+   "symbol-navigation": 1,
+   "progressive-disclosure": 2
+  },
+  "inj_lines": [
+   38,
+   47,
+   70,
+   491,
+   814,
+   1975,
+   2001,
+   2033,
+   2045
+  ],
+  "mb": 3.25
+ },
+ {
+  "agent": "SONNET-2",
+  "path": "/home/marius/.claude/projects/-home-marius-work-mirela-deployment/17b3f3f9-c448-4d5e-80c3-6833ebc86eb3.jsonl",
+  "profile": ".claude",
+  "dom": "claude-sonnet-5",
+  "lines": 751,
+  "asst": 220,
+  "inj": 3,
+  "topics": {
+   "librarian": 1,
+   "progressive-disclosure": 1,
+   "project-activation-bootstrap": 1
+  },
+  "inj_lines": [
+   55,
+   94,
+   527
+  ],
+  "mb": 1.19
+ },
+ {
+  "agent": "SONNET-3",
+  "path": "/home/marius/.claude-sdd/projects/-home-marius-work-stefanini-southpole-MRV-poc/34b16f91-0ec8-4621-8efa-d3da7d81cf62.jsonl",
+  "profile": ".claude-sdd",
+  "dom": "claude-sonnet-5",
+  "lines": 2817,
+  "asst": 582,
+  "inj": 29,
+  "topics": {
+   "project-activation-bootstrap": 23,
+   "symbol-navigation": 1,
+   "progressive-disclosure": 3,
+   "workspace-state": 2
+  },
+  "inj_lines": [
+   33,
+   71,
+   109,
+   1191,
+   1202,
+   1263,
+   1420,
+   1628,
+   1774,
+   1786,
+   1877,
+   1888,
+   1915,
+   1962,
+   1988,
+   2029,
+   2066,
+   2091,
+   2125,
+   2194,
+   2220,
+   2274,
+   2308,
+   2332,
+   2381,
+   2406,
+   2444,
+   2614,
+   2706
+  ],
+  "mb": 4.76
+ },
+ {
+  "agent": "SONNET-4",
+  "path": "/home/marius/.claude/projects/-home-marius-work-mirela-backend-kotlin/c3f2ceb3-f8ca-47a0-8fbc-c5a00982be3f.jsonl",
+  "profile": ".claude",
+  "dom": "claude-sonnet-5",
+  "lines": 377,
+  "asst": 96,
+  "inj": 4,
+  "topics": {
+   "project-activation-bootstrap": 1,
+   "tracker-conventions": 1,
+   "librarian": 1,
+   "progressive-disclosure": 1
+  },
+  "inj_lines": [
+   133,
+   147,
+   257,
+   364
+  ],
+  "mb": 1.66
+ },
+ {
+  "agent": "SONNET-5",
+  "path": "/home/marius/.claude/projects/-home-marius-agents-system/7aa7eeba-3bb6-4465-952b-ee31fc06e5d9.jsonl",
+  "profile": ".claude",
+  "dom": "claude-sonnet-5",
+  "lines": 3183,
+  "asst": 1087,
+  "inj": 8,
+  "topics": {
+   "project-activation-bootstrap": 4,
+   "progressive-disclosure": 2,
+   "tracker-conventions": 2
+  },
+  "inj_lines": [
+   33,
+   205,
+   1799,
+   1815,
+   1825,
+   1834,
+   1930,
+   3060
+  ],
+  "mb": 5.01
+ },
+ {
+  "agent": "OPUS-1",
+  "path": "/home/marius/.claude/projects/-home-marius-work-claude-codescout/d4bd6ec9-7361-4750-9a74-b86cbec18f8d.jsonl",
+  "profile": ".claude",
+  "dom": "claude-opus-5",
+  "lines": 1407,
+  "asst": 418,
+  "inj": 14,
+  "topics": {
+   "project-activation-bootstrap": 6,
+   "tracker-conventions": 2,
+   "librarian": 2,
+   "progressive-disclosure": 3,
+   "symbol-navigation": 1
+  },
+  "inj_lines": [
+   31,
+   144,
+   162,
+   894,
+   924,
+   941,
+   948,
+   1102,
+   1208,
+   1238,
+   1269,
+   1287,
+   1336,
+   1370
+  ],
+  "mb": 2.93
+ },
+ {
+  "agent": "OPUS-2",
+  "path": "/home/marius/.claude-sdd/projects/-home-marius-work-stefanini-invest-europe-extended-crawler/0a480850-dd3a-4235-b637-ee5195f4c8fb.jsonl",
+  "profile": ".claude-sdd",
+  "dom": "claude-opus-5",
+  "lines": 1505,
+  "asst": 370,
+  "inj": 5,
+  "topics": {
+   "progressive-disclosure": 2,
+   "librarian": 2,
+   "project-activation-bootstrap": 1
+  },
+  "inj_lines": [
+   93,
+   322,
+   333,
+   338,
+   446
+  ],
+  "mb": 2.54
+ },
+ {
+  "agent": "OPUS-3",
+  "path": "/home/marius/.claude/projects/-home-marius-work-mirela-backend-kotlin/4d30fbb4-f68c-4ae1-b38d-0e037ea28efc.jsonl",
+  "profile": ".claude",
+  "dom": "claude-opus-5",
+  "lines": 2115,
+  "asst": 567,
+  "inj": 5,
+  "topics": {
+   "project-activation-bootstrap": 2,
+   "tracker-conventions": 1,
+   "symbol-navigation": 1,
+   "progressive-disclosure": 1
+  },
+  "inj_lines": [
+   29,
+   43,
+   132,
+   318,
+   1515
+  ],
+  "mb": 3.35
+ },
+ {
+  "agent": "OPUS-4",
+  "path": "/home/marius/.claude/projects/-home-marius-Documents-PFA/eb8ca79c-0ae3-4534-8d46-e38781f57653.jsonl",
+  "profile": ".claude",
+  "dom": "claude-opus-5",
+  "lines": 260,
+  "asst": 84,
+  "inj": 2,
+  "topics": {
+   "project-activation-bootstrap": 1,
+   "librarian": 1
+  },
+  "inj_lines": [
+   25,
+   26
+  ],
+  "mb": 0.75
+ },
+ {
+  "agent": "OPUS-5",
+  "path": "/home/marius/.claude-sdd/projects/-home-marius-work-claude-claude-plugins/cee84e67-42c0-40da-84b0-6793ca9510bb.jsonl",
+  "profile": ".claude-sdd",
+  "dom": "claude-opus-5",
+  "lines": 1584,
+  "asst": 401,
+  "inj": 2,
+  "topics": {
+   "project-activation-bootstrap": 1,
+   "librarian": 1
+  },
+  "inj_lines": [
+   28,
+   369
+  ],
+  "mb": 2.76
+ }
+]

@@ -1,0 +1,129 @@
+{
+ "error-handling": {
+  "bytes": 1857,
+  "sections": {
+   "(preamble)": 79,
+   "`RecoverableError` \u2192 `isError: false`": 840,
+   "`anyhow::bail!` \u2192 `isError: true`": 293,
+   "How to tell them apart": 628
+  }
+ },
+ "iron-laws-detail": {
+  "bytes": 11238,
+  "sections": {
+   "(preamble)": 355,
+   "Iron Law 1: source reads \u2192 `symbols`": 1731,
+   "Iron Law 2: structural code edits \u2192 `edit_code`": 1650,
+   "Iron Law 3: `run_command` output \u2192 buffer, not pipe": 2815,
+   "Iron Law 4: markdown reads \u2192 `read_markdown`": 703,
+   "Iron Law 5: markdown edits \u2192 `edit_markdown`": 1303,
+   "Iron Law 6: subagent dispatch \u2014 parent briefs": 2257,
+   "Related": 339
+  }
+ },
+ "librarian-runtime": {
+  "bytes": 9774,
+  "sections": {
+   "(preamble)": 560,
+   "Default scope details": 912,
+   "Limits": 295,
+   "`contains` vs `prefix` SQL semantics": 274,
+   "Writes round-trip": 273,
+   "Augmentation runtime details": 914,
+   "When the index is stale": 338,
+   "Where catalog state lives (and what is *not* in the repo)": 2303,
+   "Per-project classifier overrides": 1509,
+   "Event authorship discipline": 651,
+   "Trackers as cross-session behavior": 1686
+  }
+ },
+ "librarian": {
+  "bytes": 20545,
+  "sections": {
+   "(preamble)": 283,
+   "Artifact Model": 896,
+   "docs/trackers/ \u2014 Backing Store, Not a Docs Folder": 583,
+   "Filter Syntax": 1959,
+   "artifact(action=\"create\") \u2014 Required Fields": 649,
+   "Tracker Workflow": 1634,
+   "Augmentation Lifecycle": 3053,
+   "Body Editing Surfaces": 4068,
+   "librarian(action=...) \u2014 Reference": 1609,
+   "artifact_event \u2014 Event Log": 386,
+   "artifact(action=\"graph\") \u2014 Relationship Map": 205,
+   "Worktree overlay": 1608,
+   "Archiving / Moving Trackers": 1711,
+   "Common Mistakes": 1282,
+   "Runtime tips": 452
+  }
+ },
+ "progressive-disclosure": {
+  "bytes": 5669,
+  "sections": {
+   "(preamble)": 118,
+   "Output budgets": 899,
+   "The @ref buffer": 1785,
+   "Path-relative annotation": 1558,
+   "Anti-patterns": 1199,
+   "Related": 85
+  }
+ },
+ "project-activation-bootstrap": {
+  "bytes": 2594,
+  "sections": {
+   "(preamble)": 195,
+   "Phase 0 \u2014 load what the project already knows (do FIRST)": 819,
+   "Phase 1 \u2014 route each lookup by what you know": 222,
+   "Phase 2 \u2014 verify at the bytes, not from belief": 559,
+   "Before you plan or touch a contract \u2014 run reconnaissance": 529,
+   "When you dispatch subagents \u2014 brief them": 235
+  }
+ },
+ "symbol-navigation": {
+  "bytes": 3145,
+  "sections": {
+   "(preamble)": 341,
+   "Generic patterns (any language)": 1032,
+   "Per-language quick reference": 1477,
+   "Related": 280
+  }
+ },
+ "tracker-conventions": {
+  "bytes": 34333,
+  "sections": {
+   "(preamble)": 653,
+   "Bug files (docs/issues/)": 10086,
+   "Tracker artifacts (docs/trackers/)": 1444,
+   "Declaring an augmentation": 1680,
+   "Entry-level standard \u2014 the shape INSIDE a tracker": 16091,
+   "Querying with the librarian": 1978,
+   "Cross-linking (edges are derived \u2014 cite in prose)": 2124
+  }
+ },
+ "untrusted-content": {
+  "bytes": 5317,
+  "sections": {
+   "(preamble)": 215,
+   "The rule": 831,
+   "Why both halves matter": 831,
+   "Trust rides the channel, not the content": 1120,
+   "Unverifiable is a verdict \u2014 use it": 1824,
+   "Escalation": 455
+  }
+ },
+ "workspace-state": {
+  "bytes": 10355,
+  "sections": {
+   "(preamble)": 237,
+   "What `activate_project` does": 1532,
+   "The home/foreign distinction": 588,
+   "Per-session state reset": 3256,
+   "Path-relative annotation": 763,
+   "Cross-project workflow pattern": 728,
+   "Subagent semantics": 694,
+   "Per-call workspace pinning": 824,
+   "Anti-patterns": 1272,
+   "Related": 395
+  }
+ }
+}

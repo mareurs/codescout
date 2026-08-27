@@ -251,6 +251,147 @@ sections they need."* Rewriting the directions accordingly:
 - **(b) remains contraindicated**, now for a second independent reason: splitting
   produces edges, and edges are not a delivery mechanism here.
 
+## Measured — USE, 2026-08-27 (the probe `Not yet done` asked for)
+
+This section answers the question the rest of the file could only frame: delivery
+was measured, use never was. **n = 81 injections across 10 sessions**, plus a
+corpus-scale delivery census at n = 1,705 unique sessions.
+
+Raw data, rubric and per-session results:
+`docs/evals/data/2026-08-27-guide-injection/` (10 agent result JSONs,
+`corpus-frame.json`, `truebytes.json`, `rubric-BRIEF.md`).
+Reusable instrument: `scripts/probe_guide_injection.py` (PROBES.md row names its
+blind spots).
+
+### Was it used
+
+| class | n | share |
+|---|---|---|
+| `U0_UNUSED` | 54 | **66.7%** |
+| `U2_PRESCRIBED_CALL` | 20 | 24.7% |
+| `U3_CITED` | 7 | 8.6% |
+| `U1_ECHO` | 0 | 0.0% |
+| **`contradicted`** | 36 | **44.4%** |
+
+`contradicted` = the session violated a rule of the guide that had just arrived.
+Specific, not impressionistic: `pytest … | tail -N` ten times after
+`progressive-disclosure`; native `Read("@tool_…")` — that guide's own named
+anti-pattern — seven turns after it landed; hand-written `| F-1 |` row tables 114
+turns after `librarian`'s *"don't hand-maintain the table"* section.
+
+### How much of it was used
+
+**15.5% at section grain, and that is an UPPER BOUND. Median per-injection
+utilisation is 0.0%.**
+
+| topic | injected | in touched sections | **never touched** | util |
+|---|---|---|---|---|
+| `tracker-conventions` | 274,664 B | 80,211 B | **71%** | 29.2% |
+| `librarian` | 205,450 B | 11,429 B | **94%** | 5.6% |
+| `project-activation-bootstrap` | 108,948 B | — | — | 8.3% |
+| `progressive-disclosure` | 85,035 B | — | — | 8.4% |
+| `symbol-navigation` | 12,580 B | 1,032 B | 92% | 8.2% |
+
+Section grain flatters badly. Two agents quantified it independently: a 10 KB
+`Bug files` section credited on ~15 lines of contact with six of seven sections
+never touched; and one clean win scoring 0.469 at section grain and **~0.06 at
+subsection grain**. True utilisation is low single digits.
+
+### Was it at the right time
+
+- **89% genuinely late**, median **320 turns** after the session's first contact
+  with the class that guide governs.
+- **51% `TRIGGER_ONLY`** — the governed class never recurs after the injection.
+  The guide arrives for a call already made.
+- Only **11%** arrived at first contact.
+
+(The literal `LATE` verdict in the raw results is degenerate — the trigger's
+`tool_use` precedes its `tool_result` by one turn, so the inequality is true by
+construction. The figures above use the corrected rule
+`gap = turn_index − first_opportunity_turn`, late iff `gap > 1`.)
+
+### Share of context
+
+Median **14.0%** of a session's readable content is auto-injected guide text
+(range 5.9% – 25.2%).
+
+### Delivery at corpus scale (n = 1,705 unique sessions)
+
+Today's clean figure — post-fix, no `/mcp`, no compaction, n=33:
+**31,899 B per session, median 3 injections, 8% duplicate.**
+
+- Duplication is largely SOLVED: 80% of delivered bytes were repeats pre-fix,
+  **8% post-fix**. The dominant mechanism was the known, fixed
+  `workspace(activate)` ledger clear
+  (`docs/issues/archive/2026-08-19-mcp-reconnect-leaves-rendezvous-inactive-so-activate-clears-the-ledger.md`).
+  Sessions running the `cargo rb` → `/mcp` rebuild loop are 34% of main sessions
+  but carried 81% of all delivered bytes — a development artifact, excluded.
+- **Four topics have 0 auto-injections across 1,705 sessions** —
+  `iron-laws-detail`, `librarian-runtime`, `untrusted-content`, `error-handling`:
+  **28,186 B, 27% of the corpus**, compiled in and never pushed. (Predicate counts
+  auto-injections only, not explicit `get_guide()` fetches — so this agrees with
+  the 91-ledger census's `error-handling` 1/91, which was a fetch.)
+- Largest single trigger pair: `project-activation-bootstrap` ← `workspace`, 1,722.
+
+### Limits — none of these are hedges, all were measured
+
+1. **Thinking text was unavailable for this study's transcripts — but that was a
+   fixable defect, not model behaviour, and it is now fixed.** All 10 sampled
+   transcripts store `thinking` signature-only (1,185 blocks, all zero-length), and
+   Langfuse showed the same at the time (150 observations, 39 thinking blocks, 0
+   non-empty). **Cause, found 2026-08-27 (`llm-proxy:6f3cb62`): two request-side
+   settings, either sufficient alone** — Claude Code sends `anthropic-beta:
+   redact-thinking-2026-02-12` (a client-side terminal-UI choice, not an Anthropic
+   restriction), and `thinking: {"type": "adaptive"}` with no `display` key, which
+   several current models default to `"omitted"`. With the beta stripped and
+   `display=summarized` set, live traces carry readable thinking on both
+   `claude-opus-5` (mean 1,188 chars) and `claude-sonnet-5` (mean 316), **and CC's
+   own JSONL began carrying it within minutes** — so the transcript redaction was
+   downstream of the same cause.
+
+   **For these results:** `U1_ECHO` and `U3_CITED` are floors, so **66.7%
+   `U0_UNUSED` is an UPPER BOUND on non-use**. `U2_PRESCRIBED_CALL` and
+   `contradicted` read tool calls and are unaffected — which is why the two
+   decision-relevant numbers rest entirely on behaviour.
+
+   **For a re-run:** thinking is now visible in both instruments, so a repeat of
+   this study can measure what this one could not. That is the single highest-value
+   change to the method, and it costs nothing but re-running it.
+
+   *(An earlier version of this section concluded the absence was irreducible
+   Anthropic behaviour. That was wrong. The error: a proxy has a request side and a
+   response side; only the response side was verified, and the whole component was
+   then treated as excluded. Recorded as `prompt-surface-measurement-session-log:F-37`.)*
+
+2. Section-grain utilisation overstates. Two independent subsection-grain estimates
+   put the real figure at low single digits.
+
+3. Half the sampled sessions predate the 2026-08-19 ledger fix. Post-fix the
+   contradiction rate falls 76% → 12% and utilisation rises 5.8% → 20.1%.
+
+4. n = 10 sessions, deterministic hash draw from 128 eligible main sessions; the
+   draw's topic mix was checked against the population's before any analysis.
+
+5. One session (OPUS-1) is confounded — it edited `tracker-conventions.md` and
+   rebuilt the binary mid-session, so two of its citations are
+   guide-as-rebuild-evidence rather than guidance.
+### What this decides
+
+- **(b) splitting stays contraindicated, now for a third reason.** 51%
+  `TRIGGER_ONLY` means most injections have no follow-on call in which a caller
+  could request a missing fragment.
+- **More bytes cannot fix compliance.** 44% contradicted is delivery landing and
+  being violated anyway.
+- **`librarian` is the pilot target**: 5.6% utilisation, 94% of bytes never
+  touched, and in normal sessions it arrives ALONE in 35 of 93 versus bundled with
+  `tracker-conventions` in 18 — so it can be addressed without touching the other.
+  (This qualifies § *The bundle (confirmed, exact)* above, whose 38/91 co-occurrence
+  was measured on a ledger population dominated by dev sessions.)
+- **`symbol-navigation` is the existence proof to generalise.** 3,145 B landed on
+  a turn-29 result; the agent's very next symbols call adopted the guide's verbatim
+  `name_path=` form — absent from the prior 30 turns — and held it for 15 of the
+  remaining 21 calls. Small and targeted is adopted immediately; large and general
+  is not.
 ## Root cause
 
 Bodies are `include_str!`'d and dispatched by a hardcoded match on topic name:
@@ -351,7 +492,14 @@ the counterexample above, which supplies a high-utilisation arm under the same
 delivery rule. Together they establish that utilisation *varies by session*, which
 is precisely the case for targeting.
 
-What is still unmeasured is the **distribution**: two sessions is two points, and
+**RESOLVED 2026-08-27** — the probe ran; see § *Measured — USE, 2026-08-27* above.
+The sampling concern below was addressed by a deterministic hash draw from a
+stated eligibility filter, with the draw's topic mix checked against the
+population's before analysis. The "`tracker-conventions` is really six topics"
+premise remains an authoring judgement, but is now bounded by measurement: six of
+its seven sections were never touched in the one session that used it most.
+
+What was still unmeasured when this was written — the **distribution**: two sessions is two points, and
 they were selected by being the two that happened to be talking to each other, not
 by any sampling rule. Neither is evidence about the typical session. The probe
 worth running before (b) or (c) is which sections of `tracker-conventions` are

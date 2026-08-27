@@ -1,0 +1,229 @@
+{
+ "agent_id": "SONNET-1",
+ "transcript": "/home/marius/.claude-sdd/projects/-home-marius-work-claude-prompt-engineering/9a4e432b-75ef-4ba4-9359-87dafcd72a64.jsonl",
+ "calibration": "PASS",
+ "calibration_detail": "found 9 injections vs expected 9; per-topic exact match {project-activation-bootstrap:2, librarian:2, tracker-conventions:2, symbol-navigation:1, progressive-disclosure:2}; 0 discussion mentions; all 9 tool_use_ids paired to a triggering tool_use",
+ "model": "claude-sonnet-5",
+ "project": "-home-marius-work-claude-prompt-engineering",
+ "assistant_turns": 449,
+ "session_total_chars": 525675,
+ "injections": 9,
+ "per_topic": {
+  "project-activation-bootstrap": 2,
+  "librarian": 2,
+  "tracker-conventions": 2,
+  "symbol-navigation": 1,
+  "progressive-disclosure": 2
+ },
+ "injected_bytes": 129427,
+ "injected_share": 0.2462,
+ "repeat_injections": 4,
+ "discussion_mentions": 0,
+ "per_injection": [
+  {
+   "topic": "project-activation-bootstrap",
+   "line": 38,
+   "turn_index": 8,
+   "turn_pct": 0.0178,
+   "trigger_tool": "mcp__codescout__workspace",
+   "trigger_summary": "action=activate, path=/home/marius/work/claude/prompt-engineering",
+   "topic_bytes": 2594,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 0,
+   "opportunities_after": 253,
+   "use_class": "U2_PRESCRIBED_CALL",
+   "evidence": [
+    {
+     "line": 62,
+     "quote": "artifact(action=\"find\", kind=\"bug\", filter={\"status\": {\"in\": [\"open\", \"investigating\"]}}) — verbatim Phase 0 form, absent before line 38"
+    }
+   ],
+   "sections_touched": [
+    "Phase 0 — load what the project already knows (do FIRST)"
+   ],
+   "bytes_touched": 819,
+   "utilisation": 0.3157,
+   "contradicted": true,
+   "contradiction_evidence": {
+    "line": 1192,
+    "quote": "grep(pattern=\"install_hooks\", path=\"tests\") — guide Phase 1: \"who calls X -> references(symbol, path) - never grep for callers\"; references never called in 449 turns"
+   }
+  },
+  {
+   "topic": "librarian",
+   "line": 47,
+   "turn_index": 8,
+   "turn_pct": 0.0178,
+   "trigger_tool": "mcp__codescout__librarian",
+   "trigger_summary": "action=context, topic=\"bugs issues open\"",
+   "topic_bytes": 20545,
+   "timing_verdict": "TIMELY",
+   "first_opportunity_turn": 8,
+   "opportunities_after": 30,
+   "use_class": "U2_PRESCRIBED_CALL",
+   "evidence": [
+    {
+     "line": 62,
+     "quote": "filter={\"status\": {\"in\": [\"open\", \"investigating\"]}} — leaf {field:{op:val}} form; no filter= of any shape before line 47"
+    }
+   ],
+   "sections_touched": [
+    "Filter Syntax"
+   ],
+   "bytes_touched": 1959,
+   "utilisation": 0.0954,
+   "contradicted": false,
+   "contradiction_evidence": null
+  },
+  {
+   "topic": "tracker-conventions",
+   "line": 70,
+   "turn_index": 13,
+   "turn_pct": 0.029,
+   "trigger_tool": "mcp__codescout__artifact",
+   "trigger_summary": "action=find, kind=tracker",
+   "topic_bytes": 34333,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 12,
+   "opportunities_after": 16,
+   "use_class": "U2_PRESCRIBED_CALL",
+   "evidence": [
+    {
+     "line": 321,
+     "quote": "artifact(action=\"create\", kind=\"tracker\", extra={\"entry_prefix\":\"HY\",\"entry_high_water_HY\":1}) — entry_high_water_* exists nowhere in the transcript except this guide"
+    }
+   ],
+   "sections_touched": [
+    "Entry-level standard — the shape INSIDE a tracker"
+   ],
+   "bytes_touched": 16091,
+   "utilisation": 0.4687,
+   "contradicted": false,
+   "contradiction_evidence": null
+  },
+  {
+   "topic": "symbol-navigation",
+   "line": 491,
+   "turn_index": 110,
+   "turn_pct": 0.245,
+   "trigger_tool": "mcp__codescout__symbols",
+   "trigger_summary": "path=tests/prompt_tdd/test_assertions.py, name=billing_trace, include_body=true",
+   "topic_bytes": 3145,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 108,
+   "opportunities_after": 35,
+   "use_class": "U0_UNUSED",
+   "evidence": [],
+   "sections_touched": [],
+   "bytes_touched": 0,
+   "utilisation": 0.0,
+   "contradicted": true,
+   "contradiction_evidence": {
+    "line": 1192,
+    "quote": "grep(pattern=\"install_hooks\", path=\"tests\") — guide: \"Who calls X? references(symbol, path) - structured call sites, not grep\""
+   }
+  },
+  {
+   "topic": "progressive-disclosure",
+   "line": 814,
+   "turn_index": 175,
+   "turn_pct": 0.3898,
+   "trigger_tool": "mcp__codescout__symbols",
+   "trigger_summary": "path=tests/prompt_tdd/test_adapter_anthropic_mcp.py (oversized -> @ref buffer)",
+   "topic_bytes": 5669,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 8,
+   "opportunities_after": 22,
+   "use_class": "U0_UNUSED",
+   "evidence": [],
+   "sections_touched": [],
+   "bytes_touched": 0,
+   "utilisation": 0.0,
+   "contradicted": true,
+   "contradiction_evidence": {
+    "line": 1018,
+    "quote": ".venv/bin/python -m pytest tests/... -v 2>&1 | tail -60 — guide Anti-patterns forbids piping unbounded run_command output to log-trimmers; 10 such calls after injection"
+   }
+  },
+  {
+   "topic": "project-activation-bootstrap",
+   "line": 1975,
+   "turn_index": 421,
+   "turn_pct": 0.9376,
+   "trigger_tool": "mcp__codescout__read_file",
+   "trigger_summary": "output_id=@tool_39b05929, json_path=$.stdout",
+   "topic_bytes": 2594,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 0,
+   "opportunities_after": 13,
+   "use_class": "U0_UNUSED",
+   "evidence": [],
+   "sections_touched": [],
+   "bytes_touched": 0,
+   "utilisation": 0.0,
+   "contradicted": false,
+   "contradiction_evidence": null
+  },
+  {
+   "topic": "progressive-disclosure",
+   "line": 2001,
+   "turn_index": 427,
+   "turn_pct": 0.951,
+   "trigger_tool": "mcp__codescout__read_file",
+   "trigger_summary": "output_id=@file_39b06560, start_line=1, end_line=1",
+   "topic_bytes": 5669,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 8,
+   "opportunities_after": 1,
+   "use_class": "U0_UNUSED",
+   "evidence": [],
+   "sections_touched": [],
+   "bytes_touched": 0,
+   "utilisation": 0.0,
+   "contradicted": false,
+   "contradiction_evidence": null
+  },
+  {
+   "topic": "tracker-conventions",
+   "line": 2033,
+   "turn_index": 434,
+   "turn_pct": 0.9666,
+   "trigger_tool": "mcp__codescout__artifact",
+   "trigger_summary": "action=get, id=341edb9a9f58db0d, heading=\"### G-7 …\"",
+   "topic_bytes": 34333,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 12,
+   "opportunities_after": 2,
+   "use_class": "U0_UNUSED",
+   "evidence": [],
+   "sections_touched": [],
+   "bytes_touched": 0,
+   "utilisation": 0.0,
+   "contradicted": false,
+   "contradiction_evidence": null
+  },
+  {
+   "topic": "librarian",
+   "line": 2045,
+   "turn_index": 436,
+   "turn_pct": 0.971,
+   "trigger_tool": "mcp__codescout__artifact",
+   "trigger_summary": "action=update, id=341edb9a9f58db0d, patch={body_edits:[…]}",
+   "topic_bytes": 20545,
+   "timing_verdict": "LATE",
+   "first_opportunity_turn": 8,
+   "opportunities_after": 1,
+   "use_class": "U0_UNUSED",
+   "evidence": [],
+   "sections_touched": [],
+   "bytes_touched": 0,
+   "utilisation": 0.0,
+   "contradicted": false,
+   "contradiction_evidence": null
+  }
+ ],
+ "actual_injected_bytes": 116644,
+ "actual_injected_share": 0.2219,
+ "contradicted_count": 3,
+ "notes": "TRANSCRIPT SHAPE: every assistant JSONL line carries exactly one content block (257 tool_use / 125 thinking / 67 text), so `assistant_turns`=449 is block-grain, not conversation-grain; the session had only 2 real user turns (2 turn_duration events). session_total_chars counts `text`+`tool_result` blocks under message.content only; the file also has 986 `attachment` lines (system reminders, CLAUDE.md, skill payloads) that the model saw but that carry no message.content — injected_share is therefore an UPPER bound. || GUIDE DRIFT (affects M1/M4): the guides as actually injected on 2026-08-25 are smaller than the brief's 2026-08-27 on-disk table: tracker-conventions 28032 B (not 34333), project-activation-bootstrap 2506 B (not 2594); librarian/symbol-navigation/progressive-disclosure match to 1 B. injected_bytes uses the brief's table for aggregate consistency; actual_injected_bytes=116644 (share 0.2219). The as-injected 'Entry-level standard' section is 14940 B = 53% of the as-injected tracker-conventions. || REPEATS: 4 topics re-fired in a 15-turn window (turns 421-436), each marked 'first call this session'. Cause NOT visible and NOT any of the brief's candidates: no /clear, no compaction, no project switch, 30 min of continuous work with no time gap, and the codescout process did NOT restart (@ref buffer ids increase monotonically 3986e42a -> 39b0c39f across the whole file). The reset immediately follows a nested headless `claude -p` spike at turn 419, but that ran --strict-mcp-config with only a spike-gate server, so it never connected to codescout. One ledger-wide reset re-delivered 63141 B (brief table) / 56154 B (actual) that the session had already received. || M3 CONFOUNDS: (a) librarian@47 and project-activation-bootstrap@38 arrived in the SAME turn and BOTH print the leaf filter form, so the single L62 call is joint evidence — the marginal value of librarian's 20.5 KB over the 2.5 KB bootstrap guide is unresolvable here. (b) tracker-conventions@70: the `entry_prefix`/`anchor_heading`/`append_entry` text in the L321 tracker body is a near-verbatim copy of the tracker-hygiene SKILL template read at L274 (skill itself at L228) — both AFTER the injection, so U2's before-check still passes, but the proximate source is the skill. The unconfounded token is `entry_high_water_HY`, which occurs in the whole 3.25 MB transcript only inside the guide injections (L70, L2033) and in this one call (L321). (c) The SessionStart context (L6/L7) prescribes memory reads but contains no kind=\"bug\" ledger query, so the L62 bug-ledger call is attributable to the guide, not the harness prompt. || M4 GRAIN: tracker-conventions utilisation 0.4687 is section-grain as the brief prescribes, but the evidence touches only the 'Declaring a ledger' + 'Entry ids' subsections (~2 KB) of that 16091 B section — subsection-grain utilisation would be ~0.06. || U1/U3 = ZERO everywhere, checked against the AS-INJECTED bodies (6-gram, first-occurrence indexed over every block in the file) and over BOTH text and thinking blocks. The word 'guide' never appears in any assistant text or thinking block in the session; get_guide is never named; no topic name is ever cited. The two 'librarian' mentions in assistant text (L157, L2099) are `librarian doctor` tool references, not guide attributions — deliberately NOT scored U3. || CONTRADICTIONS (3 of 9): progressive-disclosure@814 (10 x `pytest ... 2>&1 | tail -N` after injection, its Anti-patterns section names this exact anti-pattern; the calls succeeded, exit_code 0 — no server-side block fired in this project); symbol-navigation@491 and project-activation-bootstrap@38 (grep-for-callers at turns 171/251/252/281/282 while `references` and `call_graph` were called ZERO times in 449 turns — those two tokens appear in the transcript only inside the symbol-navigation injection itself). || CHECKED-AND-CLEAN: no `git mv` on any tracker/issue file; every tracker mutation went through artifact(action=\"update\", patch={body_edits}) not edit_markdown; entry_prefix was declared in frontmatter via `extra` (the guide's prescribed mechanism); no artifact_augment(merge) call. tracker-conventions and librarian are genuinely un-contradicted. The session never wrote **Valid:**/**Rests on:** on the HY-1 entry it authored, but the guide states absence is the decay default rather than a violation, so that stays an omission, not a contradiction. || TIMING CAVEAT: project-activation-bootstrap is LATE by construction (first_opportunity_turn=0 per the brief means any injection after turn 0 is LATE). For injection #1 the real gap is 7 block-turns of pure setup (2 ToolSearch calls + the activate itself); for #2 it is 421 turns."
+}

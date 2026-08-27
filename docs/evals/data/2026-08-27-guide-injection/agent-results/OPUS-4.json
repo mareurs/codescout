@@ -1,0 +1,74 @@
+{
+  "agent_id": "OPUS-4",
+  "transcript": "/home/marius/.claude/projects/-home-marius-Documents-PFA/eb8ca79c-0ae3-4534-8d46-e38781f57653.jsonl",
+  "calibration": "PASS",
+  "calibration_detail": "found 2 injections vs expected 2; per-topic {project-activation-bootstrap:1, librarian:1} matches EXPECTED_TOPICS exactly",
+  "model": "claude-opus-5",
+  "project": "-home-marius-Documents-PFA",
+  "assistant_turns": 84,
+  "session_total_chars": 167824,
+  "injections": 2,
+  "per_topic": {
+    "project-activation-bootstrap": 1,
+    "librarian": 1
+  },
+  "injected_bytes": 23139,
+  "injected_share": 0.13788,
+  "repeat_injections": 0,
+  "discussion_mentions": 0,
+  "per_injection": [
+    {
+      "topic": "project-activation-bootstrap",
+      "line": 25,
+      "turn_index": 5,
+      "turn_pct": 5.95,
+      "trigger_tool": "mcp__codescout__workspace",
+      "trigger_summary": "action=activate path=/home/marius/Documents/PFA (tool_use at line 23, assistant turn 3)",
+      "topic_bytes": 2594,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 0,
+      "opportunities_after": 2,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 155,
+          "quote": "mcp__codescout__memory {\"action\": \"list\", \"include_private\": true}"
+        }
+      ],
+      "sections_touched": [
+        "Phase 0 — load what the project already knows (do FIRST)"
+      ],
+      "bytes_touched": 819,
+      "utilisation": 0.31573,
+      "contradicted": false,
+      "contradiction_evidence": null
+    },
+    {
+      "topic": "librarian",
+      "line": 26,
+      "turn_index": 5,
+      "turn_pct": 5.95,
+      "trigger_tool": "mcp__codescout__artifact",
+      "trigger_summary": "action=get id=5ec3308848b98f81 full=true (tool_use at line 24, assistant turn 4)",
+      "topic_bytes": 20545,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 4,
+      "opportunities_after": 7,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {
+          "line": 133,
+          "quote": "mcp__codescout__artifact {\"action\": \"find\", \"scope\": \"project\", \"limit\": 100}"
+        }
+      ],
+      "sections_touched": [
+        "Filter Syntax"
+      ],
+      "bytes_touched": 1959,
+      "utilisation": 0.09535,
+      "contradicted": false,
+      "contradiction_evidence": null
+    }
+  ],
+  "notes": "NEVER_NEEDED HYPOTHESIS: REFUTED for this transcript. The librarian guide (20545 B, 12.2% of the session's entire text+tool_result volume) landed in a session that made 8 artifact calls (L24 get, L33 get, L104 update, L124 get, L133 find, L235/L237/L247 update) — 1 before the injection (its own trigger) and 7 after. The session's entire durable output was 4 librarian body_edits updates to 3 trackers under docs/trackers/. So the guide was delivered into a genuinely librarian-heavy session; the finding is LOW UTILISATION (9.5%), not NEVER_NEEDED. || REASONING CHANNEL UNMEASURABLE: all 32 assistant `thinking` blocks are stored with thinking:\"\" (signature only, encrypted). U1_ECHO and U3_CITED could only be tested against the 6 visible assistant `text` blocks (5015 chars total across 84 turns). A citation or echo inside reasoning is unobservable here. Treat U3=absent as 'not observable in visible text', not proven absent. || U3 NEGATIVE IS STRONG WHERE OBSERVABLE: a regex over all 6 assistant text blocks for get_guide|librarian|bootstrap|guide|artifact\\(|append_entry|entry_filter|scope=|memory\\( returned ZERO hits. The user-facing prose (Romanian, invoicing domain) never names a tool or a guide. || U1 ECHO: 0 distinct 6-grams from either guide body appear in post-injection assistant text and nowhere before. || U2 CAVEAT (librarian): the only rubric-prescribed shape that appears after and not before is `scope=` at L133 — and the value passed is `scope=\"project\"`, which librarian.md:79 documents as THE DEFAULT. Passing a default is weak evidence of guide-driven behaviour; a stricter reading would make this U0_UNUSED and drive librarian utilisation to 0.0. Reported as U2 because the brief's U2 test is purely the shape/before-check. || U2 CAVEAT (project-activation-bootstrap): memory(action=\"list\") fires at turn 50 of 84 — 45 turns after the injection — and reads as an information hunt for the '240 lei' question, not as Phase-0 orientation. Same mechanical-rule reservation. || SHAPES USED BUT NOT IN THE BRIEF'S U2 LIST: the session used artifact(action=\"update\", patch={body_edits:[{action:\"edit\", old_string, new_string}]}) four times (L104, L235, L237, L247), a shape the guide documents at librarian.md:215 (§ 'Body Editing Surfaces', 4068 B) and calls 'the default choice for tracker maintenance'; it appears nowhere before the injection. Excluded from bytes_touched to stay comparable with other agents. Including it would raise librarian utilisation from 0.095 to 0.293. || LATE IS STRUCTURALLY FORCED: for a push injection the triggering call is itself the first governed-class opportunity, so first_opportunity_turn is always < turn_index and the verdict is always LATE unless the trigger tool sits outside the class. librarian: trigger artifact(get) at turn 4, injection at turn 5. Do not read this LATE as evidence of agent error. || opportunities_after FOR project-activation-bootstrap IS A PROXY: the brief's governed class is 'session start', a once-per-session event that had already passed, so the literal value is 0. I report 2 using the prescribed-shape proxy (artifact find L133, memory list L155). Both values given so the aggregator can pick. || CONTRADICTION SWEEP (deliberate, negative): librarian.md's explicit rules were checked one by one — no read_markdown/read_file on docs/trackers/ (zero read_markdown calls in the session; the one read_file is scripts/new_invoice.py at L49); no bare `git mv` on a tracker (the one mv at L91 moves a PDF under facturi/); no patch={rel_path}; no inverted filter leaf; no artifact create; no scope=\"all\". Nearest miss: grep(pattern=\"240\", glob=\"**/*.md\") at L119 and a shell `grep -rIn ... --include=*.md` at L135 sweep the tracker backing store before entering via the catalog — but grep is not one of the two tools the rule names, and L120 returned 0 matches, so no tracker text was read outside the catalog. project-activation-bootstrap: Phase 0 'do FIRST' is arguably strained (memory at turn 50), but the session did front-load project knowledge via artifact(get) at turns 4 and 6, so this is logged as an observation, not scored as contradicted. || DENOMINATOR: session_total_chars=167824 counts only `text` + `tool_result` block content per the brief. A variant including 463 chars of top-level `content` strings on 2 `system` lines gives 168287 (injected_share 0.13750). 54 `attachment` lines (56372 chars of JSON: hook context, skill listing, tool deltas, 35 total_tokens reminders) are excluded per the brief's definition, though they do enter the model's real context — the true share of context is correspondingly lower. || MARKER CROSS-CHECK: raw `grep -o` over the file reports 4 occurrences per topic; 2 of the 4 are the closing marker and the other doubling is Claude Code's duplicate `toolUseResult` field mirroring `message.content[].tool_result`. Counting opening markers inside message tool_result blocks only gives 2 — matches EXPECTED_INJECTIONS. || SESSION SHAPE: 2 user prompts only (L7, L113, 240 chars total), 84 assistant turns, 46 tool calls, no sidechains, transcript ends cleanly. Nothing truncated."
+}

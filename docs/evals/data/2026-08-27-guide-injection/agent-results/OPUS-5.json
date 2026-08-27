@@ -1,0 +1,73 @@
+{
+  "agent_id": "OPUS-5",
+  "transcript": "/home/marius/.claude-sdd/projects/-home-marius-work-claude-claude-plugins/cee84e67-42c0-40da-84b0-6793ca9510bb.jsonl",
+  "calibration": "PASS",
+  "calibration_detail": "found 2 injections {project-activation-bootstrap:1, librarian:1} vs expected 2 {project-activation-bootstrap:1, librarian:1} — exact match. Verified no hidden injections: the raw file holds 8 occurrences of 'auto-injected get_guide(' = 2 injections x (opening+closing) x (message.content + the duplicated toolUseResult field). 0 unparsed lines of 1584.",
+  "model": "claude-opus-5",
+  "project": "-home-marius-work-claude-claude-plugins",
+  "assistant_turns": 401,
+  "session_total_chars": 390187,
+  "injections": 2,
+  "per_topic": {"project-activation-bootstrap": 1, "librarian": 1},
+  "injected_bytes": 23139,
+  "injected_share": 0.05930,
+  "repeat_injections": 0,
+  "discussion_mentions": 0,
+  "per_injection": [
+    {
+      "topic": "project-activation-bootstrap",
+      "line": 28,
+      "turn_index": 5,
+      "turn_pct": 0.01247,
+      "trigger_tool": "mcp__codescout__workspace",
+      "trigger_summary": "action=activate, path=/home/marius/work/claude/claude-plugins (tool_use at line 25, turn 4)",
+      "topic_bytes": 2594,
+      "measured_block_chars_in_transcript": 2321,
+      "timing_verdict": "LATE",
+      "first_opportunity_turn": 0,
+      "opportunities_after": 0,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {"line": 34, "quote": "memory {\"action\": \"read\", \"topic\": \"agent-dispatch-hooks\"} — first and only memory call, 6 lines after the injection"}
+      ],
+      "sections_touched": ["Phase 0 — load what the project already knows (do FIRST)"],
+      "bytes_touched": 819,
+      "utilisation": 0.31573,
+      "contradicted": true,
+      "contradiction_evidence": {
+        "line": 655,
+        "quote": "Agent(SDD Task 1 implementer): 'You are implementing Task 1 of a 4-task plan in the claude-plugins repo' — no guide topics, no memories, no open bugs passed",
+        "rule_violated": "§ 'When you dispatch subagents — brief them': 'Pass what you already loaded: memories read, guide topics triggered, open bugs. A subagent re-discovering what you already knew is a dispatch defect (Iron Law 6)'",
+        "scale": "13 Agent dispatches, all after the injection (turns 167-322). 0/13 mention get_guide or any guide topic; 7/13 mention no memory/artifact context at all. Secondary violation of § Phase 1 ('symbol name → symbols(name=X)'): line 990 grep(pattern=\"function findRoutingConfig\", glob=\"codescout-companion/hooks/detect.mjs\") — a symbol-name lookup routed to grep; the session made 0 symbols / 0 references / 0 semantic_search / 0 call_graph calls in 401 turns."
+      }
+    },
+    {
+      "topic": "librarian",
+      "line": 369,
+      "turn_index": 93,
+      "turn_pct": 0.23192,
+      "trigger_tool": "mcp__codescout__artifact",
+      "trigger_summary": "action=find, kind=tracker (tool_use at line 366, turn 92 — the session's FIRST artifact call)",
+      "topic_bytes": 20545,
+      "measured_block_chars_in_transcript": 16068,
+      "timing_verdict": "TIMELY",
+      "first_opportunity_turn": 92,
+      "opportunities_after": 11,
+      "use_class": "U2_PRESCRIBED_CALL",
+      "evidence": [
+        {"line": 1495, "quote": "artifact {\"action\": \"find\", \"filter\": {\"rel_path\": {\"contains\": \"version-bump-checklist\"}}} — leaf {field:{op:val}} form, absent before the injection"}
+      ],
+      "sections_touched": ["Filter Syntax"],
+      "bytes_touched": 1959,
+      "utilisation": 0.09535,
+      "contradicted": true,
+      "contradiction_evidence": {
+        "line": 818,
+        "quote": "artifact(update, patch={body_edits:[{heading:\"## Index\", action:\"replace\", content:\"| ID | Title | Severity | Status | ... | F-1 | ... |\"}]}) — hand-written F-N rows",
+        "rule_violated": "§ Tracker Workflow → 'Reach for augmentation — don't hand-maintain the table': 'A tracker with repeating structured rows (defect tables, F-N/W-N logs) is an augmented artifact: attach a params array + render_template ... via artifact_augment, then add rows with artifact(action=\"append_entry\")'",
+        "scale": "0 artifact_augment, 0 append_entry, 0 update_entry calls in the whole session. Instead 3 hand-written row-table writes via body_edits: line 807 (## Index, 2x R-N rows, turn 207), line 818 (## Index 5x F-N rows + ## Wins Index 1x W-N row, turn 210) — 114-117 turns after the guide arrived, on two trackers this same session created at lines 383 and 443. Nuance: the guide's follow-up paragraph concedes 'any table in the committed markdown is hand-written' and 'keep the table too if it reads well' — but that presupposes an augmentation exists as the row store, and here none was ever attached. The session DID comply with the other half of that section (each entry got a '## F-N — <title>' heading; see line 918)."
+      }
+    }
+  ],
+  "notes": "1) BYTE-TABLE OVERSTATES THIS SESSION BY 26%. The brief's byte table is on-disk sizes as of 2026-08-27, but this transcript is from 2026-07-28 and received older, shorter guide revisions. Measured between the opening and closing markers in the transcript itself: project-activation-bootstrap = 2321 chars (table says 2594; file mtime 2026-08-26), librarian = 16068 chars (table says 20545; file mtime 2026-08-18). Actual injected total 18389 chars, not 23139. injected_bytes/injected_share above follow the brief's table as instructed; the actual-bytes share is 18389/390187 = 0.04713. This is likely systemic across every transcript older than the guide mtimes and the controller should decide which basis to aggregate on.\n\n2) TIMING-VERDICT RULE IS DEGENERATE FOR PUSH INJECTIONS — I deviated for `librarian` and am flagging it. On the push path the triggering call is BY CONSTRUCTION a governed-class call on the assistant line immediately preceding the tool_result, so `first_opportunity_turn < turn_index` is ALWAYS true and the literal rule would mark every push injection LATE. For librarian both rules fire (92 < 93 → LATE; 11 opportunities at/after 93 → TIMELY). I chose TIMELY because the rule's own gloss — 'the session already did the governed thing before the guide arrived' — is FALSE here: the guide arrived inside the response to the session's very first artifact call, so the agent read the guide before it could act on that call's result. Raw numbers are recorded above so the controller can flip it to LATE if the other nine agents applied the literal inequality. project-activation-bootstrap is unambiguously LATE (first_opportunity_turn := 0 by fiat, turn_index 5, and no session-start opportunity exists at/after turn 5).\n\n3) PAB U2 IS CONFOUNDED — attribution to the guide is NOT established. The SessionStart hook attachment at line 5 (before any guide) already contained: 'codescout MEMORIES: agent-dispatch-hooks architecture conventions ... → Read relevant memories before exploring code (memory(action=\"read\", topic=\"architecture\"), etc.)'. The memory(read) at line 34 satisfies the guide's Phase 0 AND the hook's instruction equally. The brief's U2 test is mechanical (shape absent before as a tool call, present after) so I classified U2, but this specific U2 is worth discounting in the aggregate. The librarian U2 has no equivalent confound in the hook text (though the leaf-filter form is also documented in the tool's own schema).\n\n4) ZERO U3 AND ZERO U1 ACROSS BOTH INJECTIONS. No assistant text anywhere in 401 turns names `get_guide`, names either topic, or attributes a rule to a guide. The only 'guide' strings in assistant text are the agent name `claude-code-guide` (lines 150, 188). U1 echo scan (6+ consecutive normalised words present in the guide body and absent from all pre-injection text): 0 novel hits for project-activation-bootstrap (372 guide 6-grams) and 0 for librarian (2624 guide 6-grams). The `get_guide` mention at line 330 is inside the reconnaissance SKILL body (a user-line skill payload), not assistant text, and is not an injection marker — discussion_mentions correctly 0.\n\n5) NOTABLE IRONY worth surfacing to the controller: this session's entire subject is building a SubagentStart hook that injects the project bootstrap into subagents. It received the `project-activation-bootstrap` guide at turn 5, then violated that guide's own subagent-briefing rule in all 13 of its dispatches while implementing the feature designed to fix exactly that.\n\n6) DENOMINATOR SCOPE. session_total_chars = 390187 counts only `text` + `tool_result` blocks inside message.content, per the brief. The raw .jsonl is 2,752,730 chars; the gap is 644 `attachment` lines (hook stdout, skill listings, deferred-tool deltas), JSON envelope overhead, and the duplicated `toolUseResult` field that mirrors every tool_result. If other agents counted attachments or raw file size, shares are not comparable.\n\n7) NO SIDECHAIN TURNS IN THIS FILE (isSidechain: 1299 False, 285 absent, 0 True). The 13 Agent dispatches ran as separate sessions whose transcripts are elsewhere, so any guide injection those subagents received is invisible here. Because the guide_hints_emitted ledger is per-MCP-session and shared between parent and subagents, they most likely received none. All 401 assistant lines are claude-opus-5.\n\n8) UNMEASURABLE: none. No truncated content, no unpaired tool_use_id (both injections paired to their triggering tool_use), transcript ends cleanly."
+}
