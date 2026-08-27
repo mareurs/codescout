@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 74
+entry_high_water_F: 75
 entry_high_water_W: 71
 ---
 
@@ -119,6 +119,7 @@ entry_high_water_W: 71
 | F-67 | 2026-08-26 | med | self-friction | validated | Two tree-wide writes swallowed a peer's in-flight work — `cargo fmt` and `git add <dir>` |
 | F-66 | 2026-08-26 | high | process | open | Quoted the substrate law at the user, then measured a retired sqlite store all session — backend is Qdrant, `codescout.db` untouched since Aug 25; five published figures described a dead world, and a passing positive control validated the instrument against the wrong database |
 | F-69 | 2026-08-26 | med | process | fixed-verified | Bug-file citations written at a future `archive/` path schedule no sweep — the archive flow repairs citations that *were* correct, never one wrong the day it was written |
+| F-75 | 2026-08-27 | med | process | validated | A fix verified against its mechanism left its own headline aggregate untrue — the bug titled "78% other repos' rows" was fixed, three-part-verified and archived while the report was still **52%** foreign via six other checks. A title names a property of the report; a fix names a property of one check |
 | F-74 | 2026-08-27 | high | self-friction | fixed-verified | A bug file's own `## Fix` plan partitioned a case that does not exist — `managed_roots` never contains another repo, so "rows under a different managed root" was empty and the prescribed fix would have changed the report by zero rows while passing its own test. Measuring the real partition (359 umbrella / 33 known-repo / 10 orphan) is what produced a working fix |
 | F-73 | 2026-08-27 | med | self-friction | fixed-verified | A bug file's "four documentation surfaces" included one nothing reads — `companion_hint.md` is `include_str!`'d only by its own test, and grep grain cannot tell that from a live surface. A surface list is a reachability claim wearing a location list's clothes |
 | F-72 | 2026-08-27 | high | self-friction | validated | Writing an honest caveat discharges the obligation to close it — two sessions, forty minutes apart, each named the exact missing check in prose and then stopped. The tell: a caveat that names a specific next action is a work item, not a deliverable. Mechanism behind [[R-95]], seen from inside |
@@ -6513,6 +6514,61 @@ check the case is non-empty before designing the partition. A count is one query
 and it is the difference between a fix and a no-op that reports success. Pairs
 with [[F-73]] — same session, same bug file, both defects of a worklist written
 from grep and prose rather than from the data.
+
+## F-75 — A fix verified against its mechanism can leave its own headline aggregate untrue — re-measure the number in the title, not the one in the diff
+
+**Valid:** invariant
+
+**Observed:** 2026-08-27. The bug titled *"`doctor`'s report is 78% other repos'
+rows"* (`b176ff103ec56c09`) was fixed, verified, and archived within three hours.
+Its verification was unusually good — three parts, checked structurally rather than
+by eye, including the one a naive fix breaks silently (the global metric survived:
+112 metric keys vs 107 scoped keys, the five-key difference summing to exactly the
+10 remaining violations).
+
+**Got:** every claim it made was true, and its own headline was still false. The
+title asserts a property of **the report** — *what share of it is foreign* — and the
+fix addressed a property of **one check**. Re-measuring the headline question
+immediately after, on the same rebuilt binary: 66 of 126 findings, **52%**, still
+foreign, now arriving through six other checks. The three verified figures
+(516 → 129 total, 401 → 10 for the check, metric unchanged) are all consistent with
+that, and none of them asks it.
+
+**Why nothing caught it:** the verification followed the *fix's* scope, which is the
+natural thing to do and is what makes it invisible. A fix's scope is the mechanism it
+changed; a bug title's scope is the symptom a reader complained about. Those are
+different sets whenever a symptom has more than one cause — which is precisely the
+case where the fix feels most complete, because the one cause you found really did
+account for the largest share.
+
+**The rule:** when a bug's title names an aggregate — a percentage, a share, a rate,
+a total, "N% of X are Y" — **re-run the aggregate, not the mechanism, before
+archiving.** It is one command, it is the number the title promised, and it is the
+only measurement that can distinguish *closed* from *moved*. If the aggregate has
+not moved the way the title implies, the honest archive note is "fixed the largest
+contributor" and the bug stays open, or a successor is filed naming what remains.
+
+**Generalises past this repo.** Any fix whose ticket says "N% of A are B" and whose
+patch touches one producer of B. The tell is a verification section that reports
+before/after for the mechanism and never restates the ticket's own number.
+
+**Counterfactual:** without re-asking the headline question the leak would have read
+as closed — archived, live-verified, "metric intact" — with 56 unactionable rows
+across twelve repos still in every future `doctor` run, and no event scheduled to
+re-check it. Filed as `docs/issues/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md`
+in `d0b3b668`.
+
+**Status:** validated
+
+**Promote-when:** a second instance appears of a fix that closed its mechanism while
+leaving its ticket's own aggregate untrue. At two datapoints this belongs in the
+archive-trigger text of `get_guide("tracker-conventions")`, beside the gate-green
+requirement — "if the title names an aggregate, re-measure the aggregate" is the same
+shape of pre-archive check as "regression test in place".
+
+**Rests on:** the archive-trigger rule in `get_guide("tracker-conventions")`
+(§ Bug files), which requires gate-green plus a regression test but says nothing
+about the claim in the title.
 
 ## Template for new entries
 
