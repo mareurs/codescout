@@ -9,6 +9,7 @@ get_guide("tracker-conventions").
 
 ## Artifact Model
 <!-- serves: artifact.get, artifact.create -->
+<!-- requires: docs/trackers/ — Backing Store, Not a Docs Folder -->
 
 Every artifact is a markdown file with YAML frontmatter stored under the project root.
 
@@ -290,6 +291,7 @@ Accepted keys: `status, title, owners, tags, topic, time_scope, extra, body, bod
 |--------|-------------|
 | `context` | Packs a semantic bundle of relevant artifacts around a `topic` or `anchor_id`. Call first before any artifact task. |
 | `reindex` | Re-scan and classify markdown artifacts in the project. Run after bulk file moves or renames. |
+| `link_scan` | Derive `rel="cites"` edges from prose citations (entry tokens, ids, markdown links). Default reports only; `write=true` materialises and prunes cites edges. |
 | `tracker_design` | Returns teaching prompt + archetype library. Call BEFORE creating a tracker. |
 | `workspace_state_at` | Time-travel snapshot of all artifacts at a commit or timestamp. |
 | `audit_doc_refs` | Lint markdown for stale code refs (paths, symbols, link targets, line refs). Manual — run before doc-heavy merges or when drift is suspected. Emits an `audit_issues` tracker. |
