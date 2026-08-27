@@ -5170,6 +5170,32 @@ mod guide_hint_tests {
             .content
     }
 
+    /// Same dispatch as `call_tool`, but asserts the call actually succeeded
+    /// before returning its content. Guide injection only fires on
+    /// `call_content`'s success path, so a silently-failed call produces 0 B
+    /// of guide — indistinguishable from legitimate cross-call dedup unless
+    /// the underlying `CallToolResult.is_error` is checked directly. `label`
+    /// identifies the failing shape in the panic message.
+    async fn call_tool_checked(
+        server: &CodeScoutServer,
+        name: &str,
+        input: Value,
+        label: &str,
+    ) -> Vec<rmcp::model::Content> {
+        let ctx = shared_ctx(server);
+        warm_ledger(&ctx);
+        let result = server
+            .call_tool_by_name(name, input)
+            .await
+            .expect("dispatch ok");
+        assert!(
+            result.is_error.is_none_or(|e| !e),
+            "{label} call must succeed for its guide bytes to count — got: {:?}",
+            result.content
+        );
+        result.content
+    }
+
     /// Every content block after the primary (index 0) — the auto-injected
     /// guide blocks `call_content` appends, whether that is the single
     /// whole-topic block (non-declaring topic) or N section-slice blocks
@@ -7036,6 +7062,7 @@ mod guide_hint_tests {
         );
         assert_eq!(*guide_shaped[0], expected);
     }
+
     #[tokio::test]
     async fn a_p50_session_stays_under_the_committed_guide_byte_ceiling() {
         // The p50 session issues 6 distinct artifact/librarian shapes (measured over
@@ -7059,6 +7086,13 @@ mod guide_hint_tests {
         // session) a real artifact to target, so build one via a genuinely-succeeding
         // `create` call and thread its id through `get`/`update`/`append_entry`, with
         // `move` last since it re-keys the id. `find` needs no fixture.
+        //
+        // Every call below goes through `call_tool_checked`, not the plain
+        // `call_tool` used elsewhere in this module: guide injection only fires on
+        // `call_content`'s success path, so a silently-failed call reports 0 B —
+        // character-identical to legitimate cross-call dedup. Without asserting
+        // success per call, a broken `id` thread would silently zero out several
+        // shapes and understate the real total.
         let mut total = 0usize;
         let mut shape_total = |out: &[rmcp::model::Content]| -> usize {
             let bytes: usize = guide_blocks(out)
@@ -7070,7 +7104,7 @@ mod guide_hint_tests {
             bytes
         };
 
-        let create_out = call_tool(
+        let create_out = call_tool_checked(
             &server,
             "artifact",
             json!({
@@ -7081,6 +7115,7 @@ mod guide_hint_tests {
                 "body": "fixture body",
                 "extra": {"entry_prefix": "T"}
             }),
+            "create",
         )
         .await;
         shape_total(&create_out);
@@ -7091,38 +7126,56 @@ mod guide_hint_tests {
             .expect("create response carries an id")
             .to_string();
 
-        shape_total(&call_tool(&server, "artifact", json!({"action": "get", "id": id})).await);
+        // `get` is the ONE shape expected to report 0 B here — not because the call
+        // failed (checked below, same as every other shape) but because `create`'s
+        // `Artifact Model` match already delivered the section `get` would draw, and
+        // the guide ledger dedups within a session. Any OTHER shape reporting 0 B is
+        // suspicious, not normal.
         shape_total(
-            &call_tool(
+            &call_tool_checked(
+                &server,
+                "artifact",
+                json!({"action": "get", "id": id}),
+                "get",
+            )
+            .await,
+        );
+        shape_total(
+            &call_tool_checked(
                 &server,
                 "artifact",
                 json!({"action": "update", "id": id, "patch": {"status": "active"}}),
+                "update",
             )
             .await,
         );
         shape_total(
-            &call_tool(
+            &call_tool_checked(
                 &server,
                 "artifact",
                 json!({"action": "append_entry", "id": id, "id_prefix": "T"}),
+                "append_entry",
             )
             .await,
         );
-        shape_total(&call_tool(&server, "artifact", json!({"action": "find"})).await);
         shape_total(
-            &call_tool(
-                &server,
-                "artifact",
-                json!({"action": "move", "id": id, "new_rel_path": "docs/specs/p50-fixture-moved.md"}),
-            )
-            .await,
+            &call_tool_checked(&server, "artifact", json!({"action": "find"}), "find").await,
         );
+        shape_total(
+                &call_tool_checked(
+                    &server,
+                    "artifact",
+                    json!({"action": "move", "id": id, "new_rel_path": "docs/specs/p50-fixture-moved.md"}),
+                    "move",
+                )
+                .await,
+            );
 
         let whole = crate::prompts::topic_body("librarian").unwrap().len();
         assert!(
             total <= CEILING,
             "p50 session drew {total} B of guide (whole topic is {whole} B, ceiling {CEILING} B). \
-         Either a section grew past the cap or a declaration is too broad."
+             Either a section grew past the cap or a declaration is too broad."
         );
         assert!(total > 0, "the session must still receive guidance");
     }

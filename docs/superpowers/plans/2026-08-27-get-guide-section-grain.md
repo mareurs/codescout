@@ -1537,3 +1537,13 @@ the code the spec describes; none changes what Phase 1 delivers.
   auto-injected: `iron-laws-detail`, `librarian-runtime`, `untrusted-content`,
   `error-handling` — 28,955 B, 27% of the corpus.
 - **The 44.4% `contradicted` rate.** Enforcement, not grain; its own design.
+- **Decomposing `librarian` § *Body Editing Surfaces* further.** Task 10's p50 ceiling
+  test measures the current draw at 11,946 B against a 12,000 B ceiling — a 54 B
+  (0.5%) margin. `artifact.update` alone is 3,265 B, the largest single shape,
+  because both `###` children of *Body Editing Surfaces* (`Choosing a mode —
+  anti-patterns` and `The shrink guard, force, and event forensics`) declare
+  `serves: artifact.update` and are delivered as two separate wrapped blocks.
+  Merging them was attempted and reverted: the merged section measured 2,696 B,
+  over `MAX_DECLARED_SECTION_BYTES = 2500` — the cap's own error message
+  recommends decomposing further at `###`, not merging, so the remedy here is
+  splitting each child into smaller declaring sections, not consolidating them.
