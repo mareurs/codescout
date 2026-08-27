@@ -783,7 +783,7 @@ fn list_memories_format_compact() {
 /// carried no information about the one that ships. There is one schema, so
 /// there is one test.
 ///
-/// docs/issues/2026-08-27-unregistered-memory-tool-structs-read-as-the-live-tool.md
+/// docs/issues/archive/2026-08-27-unregistered-memory-tool-structs-read-as-the-live-tool.md
 #[test]
 fn memory_schema_carries_the_private_store_fields() {
     let schema = Memory.input_schema();
