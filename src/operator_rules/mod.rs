@@ -70,6 +70,12 @@ fn manifest_of(block: &str) -> Vec<String> {
 /// Returns the paths actually rewritten — empty on a second run, which is Gate 1's
 /// idempotence observed from outside. Nothing is written if the ledger fails
 /// validation or the budget: `resident_block` runs to completion first.
+///
+/// Writes go through [`crate::util::fs::atomic_write`] (write-to-tmp + rename), not
+/// `std::fs::write`: these targets are the operator's hand-written, ungit-tracked
+/// `CLAUDE.md` profiles, and a crash or disk-full mid-write must not be able to
+/// truncate one with no backup and no regeneration path for the prose outside the
+/// markers.
 pub fn compile(ledger: &str, profiles: &OperatorProfiles) -> Result<Vec<PathBuf>> {
     let block = resident_block(ledger)?;
     let mut written = Vec::new();
@@ -78,7 +84,7 @@ pub fn compile(ledger: &str, profiles: &OperatorProfiles) -> Result<Vec<PathBuf>
             .with_context(|| format!("reading profile {}", path.display()))?;
         let next = profiles::splice(&doc, &block)?;
         if next != doc {
-            std::fs::write(path, &next)
+            crate::util::fs::atomic_write(path, &next)
                 .with_context(|| format!("writing profile {}", path.display()))?;
             written.push(path.clone());
         }
@@ -187,6 +193,16 @@ entry_prefix: OP
         let profiles = profiles_in(dir.path(), 3);
         compile(LEDGER, &profiles).unwrap();
 
+        // Gate 1 observed through the `compile` write path, not just through
+        // `splice` directly: replacing `splice(&doc, &block)` with `block` alone
+        // (obliterating the operator's hand-written file) would still pass every
+        // other assertion in this test unless this line is here.
+        let untouched = std::fs::read_to_string(&profiles.paths[0]).unwrap();
+        assert!(
+            untouched.contains("Hand-written prose."),
+            "compile must preserve prose outside the markers: {untouched}"
+        );
+
         let p = &profiles.paths[1];
         let doc = std::fs::read_to_string(p).unwrap();
         std::fs::write(
@@ -220,6 +236,45 @@ entry_prefix: OP
         assert!(
             drift[0].reason.contains("OP-2"),
             "names the rule: {}",
+            drift[0].reason
+        );
+    }
+    /// Gate 2, the third case — same rule set, different rendered bytes. Neither of
+    /// the two tests above ever reaches this branch: one exits at "no block", the
+    /// other at "id sets differ". Mutating the byte-comparison at the end of `check`
+    /// to `if false` (or deleting it) leaves every other test in this module green;
+    /// this is the one that would catch it.
+    #[test]
+    fn check_fires_when_rendered_text_differs_but_the_rule_set_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles = profiles_in(dir.path(), 3);
+        compile(LEDGER, &profiles).unwrap();
+
+        // Hand-edit the rendered imperative INSIDE the markers on one profile,
+        // leaving the `<!-- rules: … -->` manifest line untouched — so the id
+        // sets still match and only the trailing byte comparison can catch it.
+        let p = &profiles.paths[2];
+        let doc = std::fs::read_to_string(p).unwrap();
+        let mutated = doc.replace(
+            "Do not hypothesise — ALWAYS VERIFY.",
+            "Do not hypothesise — ALWAYS VERIFY, twice.",
+        );
+        assert_ne!(
+            mutated, doc,
+            "the imperative text must actually be present to mutate"
+        );
+        std::fs::write(p, &mutated).unwrap();
+
+        let drift = check(LEDGER, &profiles).unwrap();
+        assert_eq!(
+            drift.len(),
+            1,
+            "only the hand-edited profile is drifted: {drift:#?}"
+        );
+        assert_eq!(drift[0].path, *p);
+        assert!(
+            drift[0].reason.contains("different rendered text"),
+            "names it as a same-ids byte mismatch, not a missing rule: {}",
             drift[0].reason
         );
     }
