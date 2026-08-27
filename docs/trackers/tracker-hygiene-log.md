@@ -7,7 +7,7 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
-entry_high_water_HY: 20
+entry_high_water_HY: 21
 entry_prefix: HY
 expects_augmentation: true
 next-sweep-due: 2026-09-24
@@ -1542,6 +1542,97 @@ edits and out of scope for it.
 
 **HY-4 recurrence** logged above under D4 rather than as a new HY-N — no new information,
 same structural gap.
+## HY-21 — Hit, under-actionable: `prefix_conflicts` names the prefix but not the token, and a nested fence is how the extra definer got there
+
+**Status:** proposal filed below; the instance is fixed (`0e5924f9`).
+
+**Valid:** dated 2026-08-27
+
+**Type:** hit — with a legibility gap that kept it unactioned, plus a detector proposal.
+
+**Observed 2026-08-27**, during a cross-repo state check, not during a sweep.
+`librarian(action="link_scan")` on codescout reported `prefix_conflicts: 1`:
+
+```json
+{"prefix": "R", "declared_by": ["5696563f06b2c222"],
+ "defined_by": ["4032ba3ade48158b", "5696563f06b2c222"]}
+```
+
+The second definer was `docs/superpowers/plans/2026-08-20-statement-validity-layers-1-2.md`
+— a **plan**, not a ledger, and the plan whose Task 1 implements *fenced headings define
+nothing*.
+
+**The mechanism, and it is new here: a fence that was present but nested.** The plan wraps a
+Rust test in a three-backtick fence, and that test's string literal contains its own
+three-backtick fences. The inner backticks **closed the outer fence**, so the fixture heading
+landed at top level and defined `R-99` for real:
+
+```text
+line  62   ```rust                 <- opens
+line 102   ```                     <- CLOSES it (inner, inside the string literal)
+line 103   ## R-99 -- ...          <- top level. Defines R-99.
+line 104   ```                     <- reopens
+line 111   ```                     <- closes
+```
+
+Every earlier instance of this class in the sibling repos was a catalogue of tokens written
+**with no fence at all** (`claude-plugins:R-6`, and three recurrences after it). This one had
+the fence and still lost, which means "did you fence it?" is not a sufficient check —
+**nested fences need a longer outer delimiter**, and a markdown file containing code that
+itself contains markdown is the case that needs it.
+
+**Measured before and after**, whole repo, `write=false` both times:
+
+| | before | after |
+|---|---|---|
+| `prefix_conflicts` | 1 | **0** |
+| `ambiguous` (total) | 545 | **543** |
+| `ambiguous_by_source` — `docs/trackers/capability-proposals.md` | 2 | **1** |
+| `ambiguous_by_source` — `docs/trackers/tracker-hygiene-log.md` | 17 | **16** |
+
+So every cross-file citation of `R-99` had been resolving to nothing — this ledger's own
+`HY-13` line among them. The predicted delta was −3, from the three textual `R-99` mentions
+outside the plan; the actual was −2, because `link_scan` reports **one occurrence per
+(source, token)** and `capability-proposals`' two mentions were always one finding. Worth
+recording: a per-source count is per *citing file*, never per mention.
+
+**Why it sat there.** The finding fired and was ignorable. `{prefix, declared_by,
+defined_by}` says the `R` namespace has two definers; it does not say *which token* they both
+define, whether any citation is affected, or that three of this repo's own trackers had
+already lost their links. Nothing in the payload distinguishes "two ledgers were split on
+purpose" from "one live token now resolves to nothing." A reader who has just been told the
+number is `1` has no reason to spend the next four calls it took to find out which.
+
+This is `HY-9`'s class — entry-level citation breakage invisible to the live detectors —
+reaching the report and still not being read, which is a different failure from not being
+reported at all.
+
+### D12 prefix-conflict token attribution (proposed)
+
+**Fires when** `prefix_conflicts` is non-empty.
+
+**Evidence pair.** Positive: the finding above, where the payload is silent about `R-99` and
+about the two trackers whose citations broke. Negative: a genuine two-ledger split of one
+prefix, where the colliding-token list comes back **empty** and the conflict is correctly
+ignorable — the check must be able to say "no live token is affected."
+
+**Proposed fix.** Have `prefix_conflicts` carry the intersection: the tokens defined by more
+than one artifact, and for each, the cross-file citation count already computed in the same
+pass for `ambiguous_by_source`. A conflict with an empty intersection is noise; a conflict
+naming `R-99` with three citing files is a live break, and the two currently print
+identically.
+
+**Confidence:** high that the payload is the blocker — it took a `doctor` run, an
+`artifact(get)`, a heading map and a fence trace to get from the reported `1` to the actual
+defect, and every one of those was reconstructing information the scan already held.
+
+**Cost:** low. Both inputs exist inside `link_scan`'s own resolution pass.
+
+**Second, cheaper proposal.** A definition extracted from an artifact whose `kind` is not
+`tracker` and which declares no `entry_prefix` is *probably* an accident — a plan, spec or
+bug file quoting an entry heading. Reported as its own class it would have named this file
+directly, with no token intersection needed.
+
 ## Template for new entries
 
 <!-- Insert new sweep entries and HY-N entries above this line.
