@@ -1323,3 +1323,43 @@ base recovers, the tap's problem is not the register at all — it is that the g
 lets a fact survive quarantine never reaches the reader. If base does not recover, an
 obligation delivered inside tool output is unreachable whatever key carries it, and Layer
 5b needs a different channel rather than a stronger word.
+
+
+## A-31 — does the compiler's wrapper preserve the rule? Two confounds removed before the question was askable
+
+**Valid:** conditional — the s2 run completes and this entry's `outcome` is filled in
+
+**Pre-registered 2026-08-28, before any run.** Codescout's operator-rules engine (spec `d2fad9fa5c012291`) now compiles `OP-1` into a delimited block in all three profiles. Its Verification prediction 2 asks whether the **compiled block** reproduces b2's result, reading a shortfall as evidence that section 3's rendering altered the rule's form. Nothing had ever measured that.
+
+**New arm `s2-compiled-block`** — b2's text verbatim inside the compiler's `<!-- BEGIN/END operator-rules -->` markers and `<!-- rules: OP-1 -->` manifest. Built by **extracting the block from a live compiled profile**, not retyping it, so the arm tests the compiler's output rather than my transcription of it. Verified single-variable: stripping the marker lines leaves exactly `b2-imperative-only.md`.
+
+This is the same move `s1-shipped-bootstrap` made and is governed by the same **re-N=0 rule** already written into `gen.py` — *a reworded string must be re-graded as its own arm*. A wrapped string is a new string.
+
+### Two confounds, both found by scouting rather than by running anything
+
+1. **OP-1 shipped a string no arm had scored.** Its `**Imperative:**` read *"Do not hypothesise — ALWAYS VERIFY."* — a condensation into one clause — while carrying `**Evidence:** measured: conclude-last/b2 0% -> 100% (n=35)` unchanged. Under this repo's own re-N=0 rule that string had **n=0**. A sub-100% result could not have been attributed to the wrapper, because the text was already altered upstream of it. Corrected to b2 verbatim: codescout `371bd7f5`.
+
+2. **The eval profile was checked for contamination.** The operator-rules block had been written into `~/.claude-sdd/CLAUDE.md` and `~/.claude-kat/CLAUDE.md` twenty minutes earlier, and the runner sets `CLAUDE_CONFIG_DIR=~/.prompt-tdd/profiles/plugin-free`, whose credentials are a **symlink into `~/.claude-kat`**. If that profile held a user-level `CLAUDE.md`, every arm would silently carry OP-1 — including `a1-bare`, the 0% control. Checked: **absent**. Arms are insulated. Worth stating because this contamination fails **green**: it lifts the control rather than erroring, and the grid would simply have looked compressed.
+
+### Two defects recorded now, independent of the result
+
+- **OP-1's `**Evidence:**` fuses two measurements.** A-21 puts b2's 100% on the **plausibility cells at n=15**; `n=35` is `s1`'s retest scope; b2's own **overall-correct was 97.1%**. A citation should name the cell it means, or it inherits a number from a different denominator.
+- **Gate gap — the budget is blind to the prose it lands next to.** The real profiles still carry the hand-written `### Conclude Last — Never Narrate Mid-Evaluation` section, applied 2026-08-16 per A-21, addressing the **same failure mode** the compiled block now addresses. The shipped state is therefore a **stack**, and A-20 measured that stacking dilutes (`a5-both` t1 2/5 against `a3`-alone 5/5). Spec Gate 3(a) enforces non-overlap among `OP-N` rules only; it never sees unmanaged prose already present in the target file. This is the first thing to look at if `s2` underperforms in the wild rather than in the harness — the harness arm contains the block *alone*, which the real profile does not.
+
+### Design
+
+`b2-imperative-only` and `s2-compiled-block` run **in the same session**, rather than scoring s2 against A-21's twelve-day-old b2 figure — otherwise the wrapper is confounded with any model or harness drift since 2026-08-16. Declared adaptive step, so it is not post-hoc: **if both land at or near ceiling, also run `a1-bare`** to confirm the trap still bites. Two ceilings prove nothing if the scenario has gone stale.
+
+OP-11 guard applied before the run: a spend-limited subscription returns its refusal *as the response*, every checker scores it as a content failure, and the arm reports a clean `0/N` indistinguishable from a real floor. The credentials symlink was verified to resolve to an existing `~/.claude-kat/.credentials.json`; the tells to re-check afterward are wall-clock (seconds rather than ~a minute per run) and `distinct == 1`.
+
+### Predictions
+
+- **P-C1** — `s2` plausibility-verified **>= 90%**: the wrapper is inert.
+- **P-C2** — `s2` within one cell of **concurrent** `b2` on the same metric.
+- **P-C3** — `s2` overall-correct **>= 95%**.
+
+A drop means section 3's rendering is at fault, and the likeliest mechanism is that the `generated … do not edit` framing reads as machine bookkeeping rather than as an instruction addressed to the reader — which would make the **marker text** the thing to redesign, not the rule.
+
+**Confidence:** P-C1 high (s1 showed a rewording into guide prose lost nothing, and a comment wrapper is a smaller perturbation than that rewording); P-C2 medium-high; P-C3 medium — b2's own overall-correct was 97.1%, so a one-cell wobble is inside noise and must not be read as a wrapper effect.
+
+**Outcome:** PENDING.
