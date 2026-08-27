@@ -2888,7 +2888,7 @@ how to re-score. `run_pilot.sh` now defaults `OUT` there
 (`BLAST_PILOT_OUT` / `--out` still override), so the next round does not
 recreate the exposure; the two path *defaults* (`gates_blast.py --logs`,
 `bucket_breakdown.py:P`) and the prose citations were repointed in the same
-commit. `prompt-engineering:7424ab26`.
+commit. `prompt-engineering:7424ab26`, patch-id `23d6cef558e8cb1b`.
 
 **Verified by re-running the gates against the COPY**, not by comparing `du` —
 identical arm means, `TOTAL $11.3378`, exit 0, and `bucket_breakdown.py`
