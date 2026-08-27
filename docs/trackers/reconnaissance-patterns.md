@@ -3800,6 +3800,23 @@ promote the proposal into Phase 0.
 **Status:** validated — single datapoint; the discrepancy is reconstructable from this
 session's own transcript, which is what makes it a miss rather than an anecdote.
 
+**Mechanism found 2026-08-27, after this entry was written, and it is not where the entry
+guessed.** The gap is not `codescout:020ea69a` (which fixed `memory(list)`, 18 → 23, and
+merely made the divergence visible) and not `codescout:76e2d6cd` (which fixed a *fourth*
+server-side reader whose block contradicted activate's array **inside one message**). The
+banner is a **companion-plugin** surface with its own enumeration:
+`detect.mjs:166-175` and `detect.py:175-179` both read `.codescout/memories/`
+non-recursively and then discard directories with an `isFile` / `is_file()` guard, so
+`infra/` and `research/` are skipped whole. Filed as
+`claude-plugins:docs/issues/2026-08-27-cs-memory-names-skips-namespaced-memories.md`.
+
+That sharpens this entry rather than retiring it. The same `CS_MEMORY_NAMES` feeds
+`subagent-guidance.mjs`, which injects it into a subagent's Phase 0 **in place of** the
+`memory(action="list")` call — so a subagent is handed the short list instead of the call
+that would return the full one, and cannot reach a namespaced memory by any route. The
+proposal below is the remedy that works today; the plugin fix is the one that removes the
+need for it.
+
 **Valid:** invariant
 
 **Rests on:** the activation bootstrap's Phase 0, and law A as stated in this ledger.
