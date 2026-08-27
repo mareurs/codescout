@@ -311,12 +311,20 @@ pub fn resolve_section_range<'a>(
         }
     };
 
-    // Helper to build duplicate error
+    // Helper to build duplicate error.
+    //
+    // The `heading_ambiguous` / `occurrences` extras exist because a caller one frame up
+    // may only see `Option` -- `.ok()` collapses this error into the same `None` as a
+    // genuine miss, and a caller that then reports "missing" states the false one and
+    // sends the reader hunting for a heading that is present twice. The discriminant has
+    // to ride on the error, not be re-derived from its message text.
+    // docs/issues/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
     let dup_error = |indices: &[usize]| -> RecoverableError {
         let lines: Vec<String> = indices
             .iter()
             .map(|&i| headings[i].line.to_string())
             .collect();
+        let line_nums: Vec<usize> = indices.iter().map(|&i| headings[i].line).collect();
         RecoverableError::with_hint(
             format!(
                 "heading '{}' found {} times (lines {})",
@@ -329,6 +337,8 @@ pub fn resolve_section_range<'a>(
                 indices.len()
             ),
         )
+        .with_extra("heading_ambiguous", serde_json::json!(true))
+        .with_extra("occurrences", serde_json::json!(line_nums))
     };
 
     // Choose among `indices` (document order), honouring `occurrence`.
@@ -419,9 +429,9 @@ pub fn resolve_section_range<'a>(
     ))
 }
 
-pub fn extract_markdown_section(
+pub fn extract_markdown_section<'q, Q: Into<HeadingQuery<'q>>>(
     content: &str,
-    heading_query: &str,
+    heading_query: Q,
 ) -> Result<SectionResult, RecoverableError> {
     let range = resolve_section_range(content, heading_query)?;
     let all_headings = parse_all_headings(content);

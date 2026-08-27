@@ -23,10 +23,40 @@ fn resolve_file_path(
     Some(row.abs_path.clone())
 }
 
-fn find_heading_section(body: &str, query: &str) -> Option<String> {
-    crate::tools::file_summary::extract_markdown_section(body, query)
-        .ok()
-        .map(|r| r.content)
+/// Resolve one heading to its section text.
+///
+/// Returns the resolver's error rather than an `Option`. `.ok()` here used to collapse
+/// "found N times" and "not found" into the same `None`, and the caller then reported
+/// `heading_missing` for both — naming the false one, in a response whose own
+/// `preview.headings` array listed the heading twice.
+/// docs/issues/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
+fn find_heading_section<'q>(
+    body: &str,
+    query: impl Into<crate::tools::file_summary::HeadingQuery<'q>>,
+) -> Result<String, crate::tools::RecoverableError> {
+    crate::tools::file_summary::extract_markdown_section(body, query).map(|r| r.content)
+}
+
+/// Describe a heading that did not resolve, distinguishing ABSENT from AMBIGUOUS.
+///
+/// `resolve_section_range` already knows which it was and attaches `heading_ambiguous`
+/// plus `occurrences` (the 1-indexed body lines) to the error. This reads those back
+/// rather than re-deriving the state from message text — the message is prose and its
+/// wording is not a contract.
+///
+/// Staying `isError: false` is deliberate and unchanged; see the comment at
+/// `src/usage/db.rs` on why `artifact(get)` reports a heading miss in `body_meta`
+/// instead of raising. Only the *label* was wrong.
+fn heading_miss_meta(name: &str, err: &crate::tools::RecoverableError) -> serde_json::Value {
+    match err.extra.get("occurrences") {
+        Some(occurrences) => json!({
+            "heading": name,
+            "heading_ambiguous": true,
+            "occurrences": occurrences,
+            "heading_hint": err.hint().unwrap_or_default(),
+        }),
+        None => json!({ "heading": name, "heading_missing": true }),
+    }
 }
 
 fn slice_lines(body: &str, start: usize, end: usize) -> String {
@@ -71,6 +101,10 @@ struct Args {
     full: Option<bool>,
     #[serde(default)]
     heading: Option<String>,
+    /// 1-indexed selector when `heading` matches several sections. Two byte-identical
+    /// headings admit no distinguishing query, so this is the only way to reach either.
+    #[serde(default)]
+    occurrence: Option<usize>,
     #[serde(default)]
     headings: Option<Vec<String>>,
     #[serde(default)]
@@ -501,29 +535,39 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
         if body_selected {
             let (final_body, overflow_meta, body_meta_extra) = if let Some(ref name) = a.heading {
-                match find_heading_section(body, name) {
-                    Some(section) => (section, None, json!({ "heading": name })),
-                    None => (
-                        String::new(),
-                        None,
-                        json!({ "heading": name, "heading_missing": true }),
-                    ),
+                let query =
+                    crate::tools::file_summary::HeadingQuery::new(name.as_str(), a.occurrence);
+                match find_heading_section(body, query) {
+                    Ok(section) => (section, None, json!({ "heading": name })),
+                    Err(e) => (String::new(), None, heading_miss_meta(name, &e)),
                 }
             } else if let Some(ref list) = a.headings {
+                // A per-member `occurrence` has no shape here (members are bare strings),
+                // so an ambiguous member is REPORTED distinctly rather than folded in with
+                // the absent ones. Reach it with the singular `heading` + `occurrence`.
                 let mut parts = Vec::new();
                 let mut missing = Vec::new();
+                let mut ambiguous = Vec::new();
                 for name in list {
-                    match find_heading_section(body, name) {
-                        Some(s) => parts.push(s),
-                        None => missing.push(name.clone()),
+                    match find_heading_section(body, name.as_str()) {
+                        Ok(s) => parts.push(s),
+                        Err(e) if e.extra.contains_key("occurrences") => {
+                            ambiguous.push(json!({
+                                "heading": name,
+                                "occurrences": e.extra.get("occurrences"),
+                            }));
+                        }
+                        Err(_) => missing.push(name.clone()),
                     }
                 }
                 let joined = parts.join("\n\n");
-                let extra = if missing.is_empty() {
-                    json!({ "headings": list })
-                } else {
-                    json!({ "headings": list, "headings_missing": missing })
-                };
+                let mut extra = json!({ "headings": list });
+                if !missing.is_empty() {
+                    extra["headings_missing"] = json!(missing);
+                }
+                if !ambiguous.is_empty() {
+                    extra["headings_ambiguous"] = json!(ambiguous);
+                }
                 (joined, None, extra)
             } else if let (Some(s), Some(e)) = (a.start_line, a.end_line) {
                 (
@@ -827,6 +871,127 @@ mod tests {
             .unwrap();
         assert_eq!(v["body"], "");
         assert_eq!(v["body_meta"]["heading_missing"], true);
+    }
+
+    /// A heading present TWICE is not "missing". Reporting it so sends the caller hunting
+    /// for a heading that is right there — in a response whose own `preview.headings`
+    /// array lists both occurrences.
+    /// docs/issues/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
+    #[tokio::test]
+    async fn duplicate_heading_reports_ambiguous_not_missing() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## B\n\nb\n\n## A\n\nsecond\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "## A"}))
+            .await
+            .unwrap();
+
+        // Mutation control: restoring the `.ok()` that collapsed both error states into
+        // `None` fails both of these — the call would report `heading_missing` instead.
+        assert_eq!(v["body_meta"]["heading_ambiguous"], true);
+        assert_eq!(v["body_meta"]["heading_missing"], Value::Null);
+
+        // Both line numbers, in document order, so the caller can pick one without
+        // re-reading the file. Asserted structurally rather than by literal line number:
+        // the frontmatter-stripping frame is exactly what this bug's sibling is about.
+        let occ = v["body_meta"]["occurrences"]
+            .as_array()
+            .expect("occurrences must be an array");
+        assert_eq!(occ.len(), 2, "both matches must be reported: {occ:?}");
+        assert!(
+            occ[0].as_u64().unwrap() < occ[1].as_u64().unwrap(),
+            "document order: {occ:?}"
+        );
+    }
+
+    /// The over-correction guard: a heading that genuinely is not there must still say
+    /// `missing`, not `ambiguous`. Pairs with `heading_missing_sets_meta_flag` above.
+    #[tokio::test]
+    async fn absent_heading_still_reports_missing_not_ambiguous() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## A\n\nsecond\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "## Nowhere"}))
+            .await
+            .unwrap();
+        assert_eq!(v["body_meta"]["heading_missing"], true);
+        assert_eq!(v["body_meta"]["heading_ambiguous"], Value::Null);
+    }
+
+    /// Reporting the ambiguity is only half a remedy — without a selector the caller is
+    /// told the heading is ambiguous and still cannot read either section.
+    #[tokio::test]
+    async fn heading_with_occurrence_returns_the_named_match() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## B\n\nb\n\n## A\n\nsecond\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "## A", "occurrence": 2}))
+            .await
+            .unwrap();
+
+        // Mutation control: dropping `occurrence` on the way to the resolver, or selecting
+        // indices[0], returns "first" here.
+        let body = v["body"].as_str().unwrap();
+        assert!(body.contains("second"), "{body}");
+        assert!(!body.contains("first"), "{body}");
+        assert_eq!(v["body_meta"]["heading_ambiguous"], Value::Null);
+    }
+
+    /// The plural selector takes bare strings, so it has no place to put a per-member
+    /// `occurrence` — but it must still not file an ambiguous member under `missing`.
+    #[tokio::test]
+    async fn multi_heading_selector_separates_ambiguous_from_missing() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## B\n\nb\n\n## A\n\nsecond\n",
+        )
+        .unwrap();
+
+        let v = call(
+            &ctx,
+            json!({"id": "a", "headings": ["## A", "## Nowhere", "## B"]}),
+        )
+        .await
+        .unwrap();
+
+        // "## B" resolves, "## Nowhere" is absent, "## A" is doubly defined.
+        assert_eq!(v["body_meta"]["headings_missing"], json!(["## Nowhere"]));
+        let amb = v["body_meta"]["headings_ambiguous"]
+            .as_array()
+            .expect("an ambiguous member must be reported");
+        assert_eq!(amb.len(), 1);
+        assert_eq!(amb[0]["heading"], "## A");
+
+        // Mutation control: folding ambiguous into missing lands "## A" in
+        // headings_missing, which is the pre-fix behaviour.
+        assert!(
+            !v["body_meta"]["headings_missing"]
+                .to_string()
+                .contains("## A"),
+            "{:?}",
+            v["body_meta"]
+        );
     }
 
     #[tokio::test]
