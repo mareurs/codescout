@@ -16,7 +16,7 @@ owner: marius
 related: []
 reopened: 2026-07-18
 severity: medium
-unverified: 'The MECHANISM is confirmed, reproducible on demand, and guarded by two regression tests; the gate is green (cargo fmt, clippy -D warnings, cargo test 4600 passed / 0 failed). What is NOT established, and never can be, is whether the original Mercury BOM report hit this mechanism — that session''s path/workspace_override state was never captured and is unrecoverable. Not verified against a live MCP server: cargo rb was deferred because two peer sessions were running the binary (the hazard in the zombie-servers-on-deleted-binaries bug).'
+unverified: What is NOT established, and never can be, is whether the original Mercury BOM report hit this mechanism — that session's path/workspace_override state was never captured and is unrecoverable. The mechanism itself is confirmed, fixed, gate-green, and verified live against a rebuilt binary on 2026-08-27; only the attribution of the original sighting stays open.
 ---
 
 # BUG: `grep`'s `glob` param reported to miss real matches on literal (non-wildcard) file paths — not reproducible on immediate re-test
@@ -478,6 +478,18 @@ positional and is orphaned once `experiments` is rebased, while the patch-id is 
 hash of the diff and survives both rebase and cherry-pick. There is no promotion path to
 check and nothing owed later.
 
-Still not done: verification against a live MCP server — `cargo rb` was deferred because
-two peer sessions were running the binary, which is the hazard in
-`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`.
+**Verified live 2026-08-27** against a rebuilt binary (`cargo rb` + `/mcp` reconnect),
+four probes:
+
+| Call | Result |
+|---|---|
+| `glob="src/tools/grep.rs"` | 1 match |
+| `path="src"`, `glob="src/tools/grep.rs"` | 0 — now carries the glob clause |
+| `path="src"`, `glob="tools/grep.rs"` | 1 match |
+| `path="src/tools"`, `glob="*.rs"`, absent pattern | 0 — bare, no warning |
+
+The fourth is the one the unit test cannot establish. `rooted_ctx` writes a `.gitignore`,
+so the hidden-paths clause always fires in that fixture and the test can only assert the
+glob is not blamed. Live, `src/tools` holds no hidden entries, so the zero comes back
+genuinely bare — the `None` path end to end, which is the property `completeness_warning`
+calls load-bearing.
