@@ -168,6 +168,13 @@ git rev-parse HEAD | head -1                            # BLOCKED
 Shipped on `experiments` in **`18f8f9d1`** — patch-id **`16a9abc0d985d8f8ed1886a778e4a84166190115`**
 (the patch-id is the durable pointer; the SHA orphans on the next rebase).
 Probe promoted alongside in `e5ab9e90` as `scripts/probe_il3_refusals.py`.
+Prompt surfaces followed in **`5d3f8ebe`** — patch-id
+**`62f198ccab11c4b76a1ac3cdafe6338263308bed`**: `refusal_predicate` and
+`iron-laws-detail` both stated the pre-fix rule to the agent, and a refused caller
+reads the predicate to predict the next refusal. That commit also corrects a claim
+that was false *before* this fix — the guide listed `| wc` as a log-trimmer and
+called `wc` "forbidden as a trimmer on the RIGHT of a pipe", which
+`il3_allows_cargo_pipe_wc` had been contradicting the whole time. Nothing read both.
 
 **Measured before designing anything** (R-117 — a fix that names a population
 asserts it is non-empty). Across **703 IL-3 refusals in 37 `usage.db` files**:
