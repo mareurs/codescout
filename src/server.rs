@@ -5730,7 +5730,7 @@ mod guide_hint_tests {
     /// shape now legitimately delivers its own section once; only a REPEAT of the
     /// same shape delivers nothing. The old blanket "no hint" assertion is now
     /// false by design, not a regression.
-    async fn artifact_event_after_artifact_no_hint() {
+    async fn a_distinct_declared_shape_delivers_its_own_section_but_a_repeat_does_not() {
         let (_dir, server) = make_server().await;
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
@@ -6959,6 +6959,15 @@ mod guide_hint_tests {
             guide.len(),
             whole.len()
         );
+        // GuideDeliveryShape::Section must produce a hint distinguishable from
+        // Whole — a collapse back to the single pre-fix "Full guide auto-injected"
+        // string would pass every other assertion here while re-introducing a
+        // hint that lies about what shipped (a slice, not the full topic).
+        let hint = extract_hint(&out).unwrap_or_default();
+        assert!(
+            hint.contains("Section(s) of"),
+            "expected a Section-shape hint, got: {hint}"
+        );
     }
 
     #[tokio::test]
@@ -7032,6 +7041,15 @@ mod guide_hint_tests {
             "fallback must point at the full topic with the actual emitted \
              pointer sentence, got: {}",
             guide.chars().take(600).collect::<String>()
+        );
+        // GuideDeliveryShape::Preamble must NOT reuse the old Whole-shape hint
+        // string ("do not re-call get_guide") — that sentence is actively
+        // backwards for the preamble fallback, whose entire point is that the
+        // caller SHOULD re-call get_guide(topic) to get the rest.
+        let hint = extract_hint(&out).unwrap_or_default();
+        assert!(
+            !hint.contains("do not re-call"),
+            "preamble-shape hint must not tell the caller to skip get_guide, got: {hint}"
         );
     }
 
@@ -7192,10 +7210,44 @@ mod guide_hint_tests {
         let whole = crate::prompts::topic_body("librarian").unwrap().len();
         assert!(
             total <= CEILING,
-            "p50 session drew {total} B of guide (whole topic is {whole} B, ceiling {CEILING} B). \
-             Either a section grew past the cap or a declaration is too broad."
+            "p50 session drew {total} B of guide (whole topic is {whole} B, ceiling \
+             {CEILING} B, margin {} B). Raising CEILING is a spec amendment, not a \
+             fix — it is not the remedy for this failure. The standing remedy is \
+             decomposing § Body Editing Surfaces in the librarian guide, already \
+             recorded in \
+             `docs/superpowers/plans/2026-08-27-get-guide-section-grain.md` § Out of \
+             scope for Phase 1. If that is not what happened here, check whether a \
+             section grew past its own per-section cap (a separate gate/test) or a \
+             `serves:` declaration is broader than intended.",
+            CEILING.saturating_sub(total)
         );
         assert!(total > 0, "the session must still receive guidance");
+    }
+    /// The session-opener branch (`types.rs`'s `call_content`) inserts the bare
+    /// `SESSION_OPENING_GUIDE` ledger key and always reports
+    /// `GuideDeliveryShape::Whole`, on the assumption — stated only as a
+    /// comment — that this topic never declares `##`/`###` sections in Phase
+    /// 1. `guide_blocks_for` keys everything else at `topic#heading`; the two
+    /// never collide TODAY only because that assumption holds. The day this
+    /// topic gains a `serves:` declaration (a real Phase 3 plan), the opener
+    /// would deliver the whole topic under the bare key AND `guide_blocks_for`
+    /// would separately deliver its sections under `topic#heading` keys —
+    /// double delivery, silently, because the two paths never meet on a
+    /// shared key. Turn the comment into a gate so that day fails loudly
+    /// here instead of shipping the double-delivery.
+    #[test]
+    fn session_opening_guide_never_declares_sections() {
+        assert!(
+            !crate::prompts::guide_index::GUIDE_INDEX
+                .declares(crate::prompts::SESSION_OPENING_GUIDE),
+            "SESSION_OPENING_GUIDE ('{}') now declares sections, but the opener branch \
+             in `call_content` still keys it as a bare topic and reports \
+             GuideDeliveryShape::Whole unconditionally — it will double-deliver \
+             against `guide_blocks_for`'s `topic#heading` keys. Update the opener \
+             branch to route through `guide_blocks_for` (or an equivalent \
+             section-aware path) before removing this assertion.",
+            crate::prompts::SESSION_OPENING_GUIDE
+        );
     }
 }
 

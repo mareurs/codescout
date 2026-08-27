@@ -960,9 +960,24 @@ pub trait Tool: Send + Sync {
                 // would desync this trigger from what `GuideLedger::re_arm`
                 // actually re-arms.
                 let topic = crate::prompts::SESSION_OPENING_GUIDE;
-                emitted.insert(topic.to_string());
-                let blocks: Vec<Content> = guide_block(topic).into_iter().collect();
-                (Some((topic.to_string(), GuideDeliveryShape::Whole)), blocks)
+                // Only burn the ledger key once the block actually builds —
+                // same fail-safe-inversion fix as the bare-topic branch in
+                // `guide_blocks_for` above: an unregistered/empty topic must
+                // not consume the slot on silence. `SESSION_OPENING_GUIDE`
+                // never declares sections in Phase 1 (see the comment block
+                // above), so this always resolves to `Whole` or nothing —
+                // but that assumption is asserted, not just commented, by
+                // `session_opening_guide_never_declares_sections` below.
+                match guide_block(topic) {
+                    Some(block) => {
+                        emitted.insert(topic.to_string());
+                        (
+                            Some((topic.to_string(), GuideDeliveryShape::Whole)),
+                            vec![block],
+                        )
+                    }
+                    None => (None, Vec::new()),
+                }
             } else if let Some(topic) = self.relevant_guide_topic(&val) {
                 // Either the default-path buffering kicked in (large JSON),
                 // or the tool itself pre-buffered (e.g. run_command storing
