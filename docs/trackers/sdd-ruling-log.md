@@ -157,6 +157,26 @@ process's own cleanup step.
 
 ---
 
+### An instance fixed is not a class enumerated
+
+Four times in one run, a correct fix left its class unenumerated, and nothing afterwards prompted
+a re-check. Feature-gated dependencies three times — `librarian::frontmatter::parse` (caught
+pre-implementation), `dirs::home_dir()` (shipped, broke `--no-default-features` with `E0433`),
+`util::fs` (checked, clean) — and a fourth instance was then found on `experiments`, authored by
+a different session: `crate::librarian::adapter` in `src/prompts/guide_index.rs:194`. Separately,
+an instruction naming "§ 1's Evidence format" fixed § 1 and left the same defect in § "Phase 3
+ backfills" — the one place a future author would copy from.
+
+The tell is that each fix is *correct*. Nothing raises. The one time the class was enumerated on
+purpose — asking a reviewer to list every crate import reachable from `src/operator_rules/` and
+cross-check it against `optional = true` — it came back empty and settled the question for good.
+
+**Ask at fix time: what else is in this set?** One query, and it is the difference between a fix
+and a fix-shaped hole.
+
+The repo-level version of the same gap: `cargo check --no-default-features` is not in the
+documented pre-commit gate (`fmt` + `clippy -D warnings` + `test`, all default-features), so every
+session walks into the same trap and nothing catches it until someone builds lean.
 ## Rulings
 
 Append below. Newest run first.
@@ -199,3 +219,40 @@ final review clean · 5 of 31 rulings turned out wrong.
 | The ceiling constant stays; the failure MESSAGE was the wrong instrument | process | four lines of prose | held |
 | Preserve the run's deferred minors in a committed doc before the workspace is deleted | process | three lines in a doc | held |
 | Delete the run workspace at finish, per the process | process | **destroyed every per-task report ten minutes after a review flagged this exact failure mode** | **WRONG** |
+
+### operator-rules-phase-1 — 2026-08-27
+
+Plan: `docs/superpowers/plans/2026-08-27-operator-rules-phase-1.md` · 15 commits ·
+final review found 1 Critical + 4 Important, all cross-module seams · 3 of 17 rulings wrong.
+
+| ruling | class | cost if wrong | verdict |
+|---|---|---|---|
+| Work on `experiments` directly rather than an isolated worktree | safety | **two other sessions were writing the same checkout; a peer's half-finished refactor appeared in my tree mid-task. I argued the tradeoff and never ran `ListAgents`** | **WRONG** (operator overturned) |
+| Review Task 1 on Opus though the operator budgeted it for Tasks 5-6 — Task 1 defines the types all later tasks pattern-match on | process | one costlier review | held (found 2 Important) |
+| Task 1's orphan-section bleed is a real defect: a prose `**Status:**` rewrote the previous rule under a test asserting only `rules.len() == 2` | correctness | 2 parser lines + 1 assertion | held |
+| Fix both heading-grammar divergences from `def_re`; **keep** the `OP`-prefix filter (single caller, ledger declares `entry_prefix: OP`) | correctness | odd spacing accepted one notch differently from `link_scan` | held |
+| Task 2's untested `covers` branch is Important, not Minor — one mutation direction was guarded only by an unrelated test's incidental dependency | correctness | one test | held |
+| Test whitespace-only `"   "`, not `""` — `""` still trips the branch if `.trim()` is dropped | correctness | none | held (re-reviewer confirmed load-bearing) |
+| `covers`-emptiness stays in `validate` rather than moving to Task 1's `finish` | scope | a future reader wonders why `finish` misses it | held |
+| Task 4's golden-string gap is downstream-inert — both sides of every comparison come from the same generator | correctness | **omits the third consumer: the model reading the file. Spec Verification § 2 makes rendered form load-bearing; with ≥2 rules a `\n\n`→`\n` mutation runs two imperatives together** | **WRONG** (final review overturned) |
+| Re-check a carried deferred finding before passing it to the next task, rather than carrying it forward | process | one grep | held — it was already closed; carrying it would have shipped a guard for an impossible condition, green and inert |
+| Ask the operator before Task 8's verification writes to real `~/.claude*/CLAUDE.md`; verify against a synthetic `$HOME` instead | safety | one question | held |
+| Add a 6th prediction to Task 8 — exercise Gate 2's *firing* half through the binary, not just the library | measurement | one command | held |
+| Fix spec:211's surviving Unicode arrow myself rather than park it — one doc character, zero review surface | process | none, verified by grep both ways | held (deviates from "never fix findings in the controller session"; recorded not hidden) |
+| Park X4's untested partial-write branch — behaviour confirmed correct by live CLI | scope | an untested error-reporting branch | held |
+| Park X4's anyhow context ordering — no second fix wave, and it needs an unreviewed code change | scope | every compile failure opens with `profiles already written before this error: none` | held |
+| Invert the merge direction — pull `experiments` into the branch and gate there, because the shared checkout's peer dirt makes a merged-tree test unattributable | measurement | one extra merge commit | held |
+| Skip `git pull` — `ahead 183, behind 0`, and it is a network op on a branch three sessions share | process | none | held |
+| Merge despite `cargo check --no-default-features` failing — verified pre-existing on `experiments` in an isolated probe, not caused by this branch | correctness | inherits a break it did not cause | held |
+| Remove the worktree at finish, per the process | process | **destroyed 8 task reports + the final-fix report. This log's own last row records the identical failure from the previous run, and I removed the worktree before reading it** | **WRONG** |
+
+**What survived and why:** the 36 KB ledger, because it had been consolidated into the main
+checkout mid-run — for an unrelated reason (a read-only worktree activation was blocking
+controller writes). Accidental, not designed. The briefs survived for the same reason. The
+reports' unique content — TDD evidence, verbatim command output, per-finding mutation traces —
+is gone.
+
+**The fix is not "remember harder."** Two runs in a row lost reports to the same step. Either the
+skill's cleanup step should exempt reports, or the workspace should live in the main checkout by
+default — which is where mine ended up by accident and is the only reason this entry can cite
+anything.
