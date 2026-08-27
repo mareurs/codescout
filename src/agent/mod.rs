@@ -1004,7 +1004,23 @@ impl Agent {
 
         // Load config, memory, library registry for the sub-project
         let config = ProjectConfig::load_or_default(&abs_root)?;
-        let memory = MemoryStore::open(&abs_root)?;
+        // Resolve through the workspace, NOT `MemoryStore::open(&abs_root)`. Every
+        // branch of the live `memory` tool — write included — routes through
+        // `Workspace::memory_dir_for_project`, which places a non-root project's
+        // memories at `<workspace_root>/.codescout/projects/<id>/memories`. Opening
+        // the sub-project root instead reads `<abs_root>/.codescout/memories`, a
+        // directory nothing writes to; and `MemoryStore` creates its directory on
+        // open, so the miss also left an empty one behind corroborating itself. The
+        // two resolve to the same path for the root project (`relative_root == "."`),
+        // which is why this only ever surfaced on sub-projects and why two verify-open
+        // passes against the home project could not clear it.
+        //
+        // `private_memory` deliberately stays project-local: the memory tool reads
+        // private topics from `p.private_memory` on BOTH surfaces, so they already
+        // agree, and `.codescout/private-memories/` is gitignored by design.
+        //
+        // docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+        let memory = MemoryStore::from_dir(ws.memory_dir_for_project(project_id))?;
         let private_memory = MemoryStore::open_private(&abs_root)?;
         let registry_path = abs_root.join(".codescout").join("libraries.json");
         let library_registry = LibraryRegistry::load(&registry_path).unwrap_or_default();

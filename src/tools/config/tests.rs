@@ -2467,3 +2467,194 @@ async fn workspace_activate_injects_bootstrap_guide_body_v2() {
         "second block missing the auto-inject opening marker"
     );
 }
+
+/// `workspace(activate)`'s `memories` array and `memory(action="list", project_id=…)`
+/// must describe the same directory. For a SUB-project they did not.
+///
+/// `activate` read `<sub_root>/.codescout/memories` via `MemoryStore::open(p.root)`,
+/// while every branch of the live `memory` tool routes through
+/// `Workspace::memory_dir_for_project`, which puts a non-root project's memories at
+/// `<workspace_root>/.codescout/projects/<id>/memories`. The two paths coincide only
+/// when `relative_root == "."`, which is why a single-project repo never reproduced it
+/// and why two earlier verify-open passes on the home project could not clear the bug.
+///
+/// The WRITE path settles which location is canonical, and it was never in doubt:
+/// `memory(action="write")` stores through `resolve_memory_dir`, so the per-project
+/// tree is where data actually lands — 53 git-tracked files across 9 directories on
+/// this repo when this was fixed. The reader was the outlier, so the readers move.
+/// No migration.
+///
+/// The last assertion covers the side effect rather than the symptom: `MemoryStore`
+/// creates its directory on open, so the old reader did not merely miss the memories,
+/// it materialised an empty `<sub_root>/.codescout/memories` on the way past — leaving
+/// a directory that looks like an empty memory set for a project that holds topics.
+///
+/// docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+#[tokio::test]
+async fn activating_a_sub_project_lists_the_memories_the_memory_tool_writes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let svc = root.join("svc");
+    std::fs::create_dir_all(&svc).unwrap();
+    std::fs::write(svc.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+    let codescout = root.join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    std::fs::write(
+        codescout.join("workspace.toml"),
+        r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "svc"
+root = "svc"
+languages = ["typescript"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        codescout.join("project.toml"),
+        "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+    )
+    .unwrap();
+
+    // Exactly where memory(action="write", project_id="svc") puts a topic.
+    // Deliberately NOT svc/.codescout/memories — that is the path under test.
+    let per_project = codescout.join("projects").join("svc").join("memories");
+    std::fs::create_dir_all(&per_project).unwrap();
+    std::fs::write(per_project.join("architecture.md"), "# Arch").unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let activated = ActivateProject
+        .call(json!({ "path": "svc" }), &ctx)
+        .await
+        .unwrap();
+    let listed = crate::tools::memory::Memory
+        .call(json!({ "action": "list", "project_id": "svc" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        activated["memories"],
+        json!(["architecture"]),
+        "activate must report the sub-project's real memory set: {activated:?}"
+    );
+    assert_eq!(
+        activated["memories"], listed["topics"],
+        "the two surfaces must describe one directory — a caller told 0 by one and 1 \
+         by the other cannot tell which is lying: activate={:?} memory={:?}",
+        activated["memories"], listed["topics"]
+    );
+    assert!(
+        !svc.join(".codescout").join("memories").exists(),
+        "reading the wrong path also CREATED it — MemoryStore makes its directory on \
+         open, so the miss leaves behind an empty dir that looks like an empty memory set"
+    );
+}
+
+/// KNOWN GAP, and this test is the executable reproduction — `#[ignore]`d because it
+/// FAILS by design until the routing question below is decided. Run with
+/// `cargo test -- --ignored activating_a_sub_project_by_path`.
+///
+/// The sibling test above fixes the reported route: `activate` with a bare project id
+/// returns early into `activate_within_workspace`, which now resolves memories through
+/// the workspace. `ActivateProject` takes that early return only when `path` has no
+/// separator (`config/mod.rs`), so an ABSOLUTE path goes the other way and builds a
+/// standalone workspace rooted at the target — the response carries no `workspace`
+/// array at all. Memories then resolve to `<sub_root>/.codescout/memories`, which for a
+/// sub-project is the directory nothing writes to. Same silent zero, second route.
+///
+/// This is deliberately NOT fixed here. The fix is not a reader change but a dispatch
+/// change — should an absolute path naming a member of the current workspace focus-switch
+/// into it, or open standalone? Both are defensible: standalone is how a foreign repo is
+/// browsed and what the read-only hint text already assumes. Deciding it moves
+/// `read_only` defaults, focus, and the response shape, so it needs an owner.
+///
+/// docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
+#[tokio::test]
+#[ignore = "known gap: by-path activation bypasses workspace memory resolution; see the bug file in the doc comment"]
+async fn activating_a_sub_project_by_path_lists_the_same_memories() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let svc = root.join("svc");
+    std::fs::create_dir_all(&svc).unwrap();
+    std::fs::write(svc.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+    let codescout = root.join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    std::fs::write(
+        codescout.join("workspace.toml"),
+        r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "svc"
+root = "svc"
+languages = ["typescript"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        codescout.join("project.toml"),
+        "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+    )
+    .unwrap();
+
+    let per_project = codescout.join("projects").join("svc").join("memories");
+    std::fs::create_dir_all(&per_project).unwrap();
+    std::fs::write(per_project.join("architecture.md"), "# Arch").unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let activated = ActivateProject
+        .call(json!({ "path": svc.to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        activated["memories"],
+        json!(["architecture"]),
+        "by-path activation must resolve the same memory set as by-id: {activated:?}"
+    );
+}
