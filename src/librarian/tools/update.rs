@@ -34,7 +34,7 @@ struct UpdatePatch {
     #[serde(default)]
     body: Option<String>,
     /// Surgical body edits — array of edit-markdown-shaped entries
-    /// `{heading, action, content?, old_string?, new_string?, replace_all?, at?, include_subsections?}`.
+    /// `{heading, action, content?, old_string?, new_string?, replace_all?, at?, occurrence?, include_subsections?}`.
     /// Applied atomically (all-or-nothing). Mirrors edit_markdown's batch-mode `edits` array.
     /// Mutually exclusive with `body`.
     #[serde(default)]
@@ -45,9 +45,54 @@ struct UpdatePatch {
     params: Option<serde_json::Value>,
 }
 
+impl UpdatePatch {
+    /// True when the patch names no change at all.
+    ///
+    /// `patch={}` and an absent `patch` both land here, and both must be refused for the
+    /// same reason: an update that reports `updated: true` while touching neither the
+    /// file nor the event log. Measured 2026-08-27 — `patch={}` did exactly that.
+    ///
+    /// Destructured rather than read field-by-field off `self`: a struct pattern without
+    /// `..` is exhaustive, so adding a field to `UpdatePatch` without deciding whether it
+    /// counts as a change becomes a COMPILE ERROR here. The alternative fails the other
+    /// way — a silently-wrong `true` that refuses a valid call — which is the same shape
+    /// of defect `lift_top_level_param!` above was written twice to close.
+    fn is_empty(&self) -> bool {
+        let UpdatePatch {
+            status,
+            title,
+            owners,
+            tags,
+            topic,
+            time_scope,
+            extra,
+            body,
+            body_edits,
+            params,
+        } = self;
+        status.is_none()
+            && title.is_none()
+            && owners.is_none()
+            && tags.is_none()
+            && topic.is_none()
+            && time_scope.is_none()
+            && extra.is_none()
+            && body.is_none()
+            && body_edits.is_none()
+            && params.is_none()
+    }
+}
+
 #[derive(Deserialize)]
 struct Args {
     id: String,
+    /// Defaulted so an absent `patch` reaches the lifts below instead of dying at
+    /// deserialization. Serde's bare `missing field \`patch\`` names the field but not
+    /// the action, and — worse — it fires BEFORE `lift_top_level_param!`, which exists
+    /// specifically to repair `artifact(update, id, status=...)`. The repair for a
+    /// mistake was unreachable by the call shape that makes it. An empty patch is
+    /// refused after the lifts run, not before.
+    #[serde(default)]
     patch: UpdatePatch,
     // The tool schema advertises these as top-level params for `create` AND
     // `update`. `create` honors them; `update`'s canonical form is inside
@@ -204,7 +249,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
         let heading = edit["heading"].as_str().ok_or_else(|| {
             super::RecoverableError::with_hint(
                 format!("body_edits[{i}]: missing required 'heading' field"),
-                "Each entry must have shape {heading, action, content?|old_string+new_string?, at?, replace_all?, include_subsections?}.",
+                "Each entry must have shape {heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}.",
             )
         })?;
         let action = edit["action"].as_str().ok_or_else(|| {
@@ -213,6 +258,13 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
                 "Allowed actions: replace, insert_before, insert_after, remove, edit.",
             )
         })?;
+        // 1-indexed selector among identical headings — the only way to reach either of
+        // two byte-identical ones. `body_edits` is a managed artifact's ONLY edit
+        // surface, so without this such a section would be permanently uneditable.
+        let query = crate::tools::file_summary::HeadingQuery::new(
+            heading,
+            edit["occurrence"].as_u64().map(|n| n as usize),
+        );
 
         buf = if action == "edit" {
             let old_string = edit["old_string"].as_str().ok_or_else(|| {
@@ -228,7 +280,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
             let replace_all = edit["replace_all"].as_bool().unwrap_or(false);
             crate::tools::markdown::edit_markdown::perform_scoped_edit(
                 &buf,
-                heading,
+                query,
                 old_string,
                 new_string,
                 replace_all,
@@ -248,7 +300,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
             // calls that do the wiping.
             if action == "replace" {
                 if let Ok(victims) =
-                    crate::tools::markdown::edit_markdown::find_consumed_subsections(&buf, heading)
+                    crate::tools::markdown::edit_markdown::find_consumed_subsections(&buf, query)
                 {
                     if !victims.is_empty() {
                         if edit["include_subsections"].as_bool().unwrap_or(false) {
@@ -269,7 +321,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
             }
             crate::tools::markdown::edit_markdown::perform_section_edit_ext(
                 &buf,
-                heading,
+                query,
                 action,
                 edit["content"].as_str(),
                 edit["at"].as_str(),
@@ -331,7 +383,11 @@ macro_rules! lift_top_level_param {
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    if args.get("patch").and_then(|p| p.get("rel_path")).is_some() {
+    // `rel_path` is owned by `move`, at BOTH nesting levels. Checking only
+    // `patch.rel_path` let a top-level one fall through to the generic empty-patch
+    // guard below, which would answer a specific mistake with a generic route.
+    if args.get("patch").and_then(|p| p.get("rel_path")).is_some() || args.get("rel_path").is_some()
+    {
         return Err(super::RecoverableError::with_hint(
             "artifact(action=\"update\") cannot change `rel_path` — the file location is owned by the `move` action",
             "Use artifact(action=\"move\", id=..., new_rel_path=...) to rename the backing file and update the catalog atomically. `update` only modifies frontmatter fields (status, title, owners, tags, topic, time_scope, extra, body, body_edits, params).",
@@ -358,6 +414,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     lift_top_level_param!(corrections, a.topic, a.patch.topic, "topic");
     lift_top_level_param!(corrections, a.time_scope, a.patch.time_scope, "time_scope");
     lift_top_level_param!(corrections, a.extra, a.patch.extra, "extra");
+
+    // An update that changes nothing must say so rather than report success. Two call
+    // shapes reach here: `patch={}`, which returned `updated: true` while touching
+    // neither the file nor the event log (measured 2026-08-27), and — now that `patch`
+    // defaults — an update with no `patch` at all. Same defect in different clothes.
+    //
+    // AFTER the lifts on purpose: `artifact(update, id, status="fixed")` arrives with an
+    // empty patch and has a populated one by this line, so the guard must not see it.
+    // `commit_refresh` is the one legitimate empty patch — recording that a refresh cycle
+    // ran is a real effect even when the body did not move.
+    if a.patch.is_empty() && !a.commit_refresh {
+        return Err(super::RecoverableError::with_hint(
+            "artifact(action=\"update\") was given nothing to change",
+            "Pass patch={...} naming at least one of status, title, owners, tags, topic, time_scope, extra, body, body_edits, params — e.g. patch={\"status\": \"fixed\"}. A top-level status/title/owners/tags/topic/time_scope/extra is lifted into `patch` for you and reported under `corrections`. To record a refresh cycle without changing the body, pass commit_refresh=true.",
+        ));
+    }
 
     let a = {
         let mut cat = ctx.catalog.lock();
@@ -770,6 +842,121 @@ mod tests {
         assert!(content.contains("title: New"), "file should have new title");
         let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
         assert_eq!(row.title.as_deref(), Some("New"));
+    }
+
+    /// One artifact, created and ready to update. Returns its id.
+    async fn mk_doc(ctx: &ToolContext) -> String {
+        let v = crate::librarian::tools::create::call(
+            ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "doc.md",
+                "kind": "spec", "title": "Old", "body": "content"
+            }),
+        )
+        .await
+        .unwrap();
+        v["id"].as_str().unwrap().to_string()
+    }
+
+    /// `artifact(update, id, status=...)` is the exact call `lift_top_level_param!` was
+    /// written to repair — twice, after the same defect shipped twice. Until `patch`
+    /// gained `#[serde(default)]` the repair was unreachable by the call shape that needs
+    /// it: serde rejected the request for a missing `patch` before any lift could run.
+    /// docs/issues/2026-08-27-required-param-failures-neither-correct-nor-suggest.md
+    #[tokio::test]
+    async fn top_level_status_is_lifted_when_no_patch_is_supplied() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_doc(&ctx).await;
+
+        let v = call(&ctx, serde_json::json!({"id": id, "status": "fixed"}))
+            .await
+            .expect("a liftable top-level param must not require an explicit patch");
+
+        // Mutation control: removing `#[serde(default)]` from `Args::patch` fails here
+        // with a bare `missing field \`patch\`` before any lift runs.
+        assert_eq!(v["updated"], true);
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.status, "fixed", "the lift must actually write");
+
+        // Repaired is not enough — an unreported repair teaches the caller nothing and
+        // makes the next call identical.
+        let corrections = v["corrections"]
+            .as_array()
+            .expect("the lift must be reported under `corrections`");
+        assert!(
+            corrections
+                .iter()
+                .any(|c| c.as_str().unwrap_or_default().contains("status")),
+            "{corrections:?}"
+        );
+    }
+
+    /// `patch={}` returned `updated: true` while touching neither the file nor the event
+    /// log (measured 2026-08-27) — a write whose report did not describe what happened.
+    /// An absent `patch` now reaches the same place and must be refused the same way.
+    #[tokio::test]
+    async fn an_update_that_changes_nothing_is_refused() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_doc(&ctx).await;
+
+        for args in [
+            serde_json::json!({"id": id}),
+            serde_json::json!({"id": id, "patch": {}}),
+        ] {
+            // Mutation control: dropping the guard makes both of these Ok(updated: true).
+            let err = call(&ctx, args.clone())
+                .await
+                .expect_err("an update that changes nothing must not report success")
+                .to_string();
+            assert!(err.contains("nothing to change"), "{args}: {err}");
+            // And it must name the action — the bare serde message named only the field.
+            assert!(err.contains("update"), "{args}: {err}");
+            assert!(
+                !err.contains("missing field"),
+                "bare serde message leaked: {err}"
+            );
+        }
+    }
+
+    /// The one legitimate empty patch: recording that a refresh cycle ran is a real
+    /// effect even when the body did not move. Before this fix the call shape was
+    /// rejected outright at deserialization.
+    #[tokio::test]
+    async fn commit_refresh_alone_is_a_legitimate_empty_patch() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_doc(&ctx).await;
+
+        // Mutation control: dropping `&& !a.commit_refresh` from the guard refuses this.
+        let v = call(&ctx, serde_json::json!({"id": id, "commit_refresh": true}))
+            .await
+            .expect("commit_refresh with no body change must be allowed");
+        assert_eq!(v["updated"], true);
+    }
+
+    /// `rel_path` is owned by `move`, and the route to it already existed — it just could
+    /// not be reached from the top-level spelling, which died on `missing field patch`.
+    #[tokio::test]
+    async fn top_level_rel_path_routes_to_move() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_doc(&ctx).await;
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": id, "rel_path": "docs/moved.md"}),
+        )
+        .await
+        .expect_err("rel_path is not updatable")
+        .to_string();
+
+        // Mutation control: checking only `patch.rel_path` sends this to the generic
+        // "nothing to change" guard, which names no remedy for the mistake actually made.
+        assert!(err.contains("rel_path"), "{err}");
+        assert!(err.contains("move"), "{err}");
+        assert!(!err.contains("nothing to change"), "{err}");
     }
 
     #[tokio::test]
@@ -1695,6 +1882,57 @@ text
             body.len(),
             out.len()
         );
+    }
+
+    /// A librarian-managed artifact's ONLY edit surface is `body_edits`, and it shares the
+    /// one heading resolver with `edit_markdown` -- so before `occurrence` existed, two
+    /// byte-identical headings made both sections permanently uneditable through every
+    /// available path. `edit_markdown` refuses managed files, `edit_file` refuses them on
+    /// every path, and the error's own hint named `edit_file` parameters that do not exist.
+    /// See `docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
+    #[test]
+    fn body_edits_occurrence_reaches_the_second_of_two_identical_headings() {
+        let body = "## Fix\n\nthe plan\n\n## Middle\n\nm\n\n## Fix\n\nthe plan\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Fix",
+            "action": "edit",
+            "occurrence": 2,
+            "old_string": "the plan",
+            "new_string": "the shipped record",
+        })];
+        let out = apply_body_edits(body, &edits, &mut Vec::new())
+            .expect("occurrence must disambiguate identical headings");
+
+        // Mutation control: ignoring `occurrence` on this path -- or selecting indices[0]
+        // in the resolver -- rewrites the FIRST section instead, which is precisely the
+        // silent wrong-section edit the loud ambiguity error exists to prevent.
+        let first_section = out.split("## Middle").next().unwrap();
+        assert!(
+            first_section.contains("the plan"),
+            "first '## Fix' must be untouched: {out}"
+        );
+        assert!(
+            out.ends_with("the shipped record\n"),
+            "second '## Fix' must carry the edit: {out}"
+        );
+    }
+
+    /// Without a selector the ambiguity error still fires on the managed path. Silently
+    /// picking one is strictly worse than refusing: it edits the plan while the caller
+    /// believes they edited the shipped record.
+    #[test]
+    fn body_edits_without_occurrence_still_refuses_identical_headings() {
+        let body = "## Fix\n\nthe plan\n\n## Fix\n\nthe plan\n";
+        let edits = vec![serde_json::json!({
+            "heading": "## Fix",
+            "action": "edit",
+            "old_string": "the plan",
+            "new_string": "x",
+        })];
+        let msg = apply_body_edits(body, &edits, &mut Vec::new())
+            .expect_err("ambiguous heading must be refused, not guessed")
+            .to_string();
+        assert!(msg.contains("found 2 times"), "{msg}");
     }
 
     /// The refusal is unchanged when the caller has NOT opted in — moving the

@@ -179,6 +179,20 @@ impl crate::tools::Tool for LibrarianAdapter {
         }
     }
 
+    /// Projects `{tool}.{action}` before `call()` consumes `input`. When the call
+    /// carries no `action` (e.g. `artifact_augment`, which has no `action` param at
+    /// all), falls back to the bare tool name rather than `None` — a tool-only
+    /// declaration must still be matchable. `Shape::matches` (Task 5) treats `None`
+    /// as "cannot match", so returning `None` here for the no-action case would make
+    /// such declarations permanently unmatchable: a silent-absence failure, not the
+    /// fail-safe-toward-delivery direction this feature requires.
+    fn selector_key(&self, input: &Value) -> Option<String> {
+        match input.get("action").and_then(Value::as_str) {
+            Some(action) => Some(format!("{}.{}", self.name(), action)),
+            None => Some(self.name().to_string()),
+        }
+    }
+
     fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
         // Two guides serve this tool and only one can be delivered per call, so pick by
         // what the call actually touched rather than always sending the bigger one.
@@ -271,6 +285,53 @@ impl LibrarianAdapter {
     }
 }
 
+/// Whether a librarian response names a path containing `needle`.
+///
+/// Generalised from the bug-file/tracker-path check below so a section declaration
+/// (Task 5) can carry an arbitrary `path~<substring>` predicate. The scanned shapes
+/// are unchanged and still deliberately shallow: top-level `abs_path`/`rel_path`,
+/// one level into a `find`-style `items` array, and `path` inside a `doctor`-style
+/// `violations` array. Each is enumerated explicitly because a missing shape fails
+/// as a *wrong guide* rather than an error — see
+/// `docs/issues/archive/2026-08-20-doctor-entry-validity-rows-never-route-to-tracker-conventions.md`
+/// for the case where `doctor` was the missing shape.
+///
+/// Separators are normalized before matching. A backslash-spelled Windows path
+/// matched nothing against the hardcoded forward-slash needle and silently
+/// delivered the *wrong* guide instead of erroring — measured under wine,
+/// 2026-08-26, once Git Bash was available there to separate this from the
+/// no-POSIX-shell failures it had been hiding behind.
+pub fn names_path_containing(result: &Value, needle: &str) -> bool {
+    fn hit(v: Option<&Value>, needle: &str) -> bool {
+        v.and_then(Value::as_str)
+            .is_some_and(|p| p.replace('\\', "/").contains(needle))
+    }
+    fn any_path_field(obj: &Value, needle: &str) -> bool {
+        hit(obj.get("abs_path"), needle) || hit(obj.get("rel_path"), needle)
+    }
+
+    if any_path_field(result, needle) {
+        return true;
+    }
+    if result
+        .get("items")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.iter().any(|i| any_path_field(i, needle)))
+    {
+        return true;
+    }
+    // `doctor` is the one action whose rows carry neither `abs_path`/`rel_path` nor an
+    // `items` array: it returns `violations: [{check, artifact_id, path, detail}]`
+    // (`src/librarian/tools/doctor.rs:466`, field at `:135`). Scanned as its own key
+    // rather than folded into `any_path_field`, which would widen the TOP-LEVEL check
+    // across every response shape to serve one action; `violations` is unique to
+    // `doctor`, so the blast radius is exactly that response.
+    result
+        .get("violations")
+        .and_then(Value::as_array)
+        .is_some_and(|rows| rows.iter().any(|row| hit(row.get("path"), needle)))
+}
+
 /// Whether a librarian response names a path under the bug-file or tracker directories.
 ///
 /// Scans `abs_path`/`rel_path` at the top level and one level into a `find`-style `items`
@@ -292,49 +353,7 @@ impl LibrarianAdapter {
 /// under wine 2026-08-26, once Git Bash was available there to separate this from the eight
 /// no-POSIX-shell failures it had been hiding behind.
 fn names_tracker_path(result: &Value) -> bool {
-    fn is_tracker_path(v: Option<&Value>) -> bool {
-        v.and_then(Value::as_str).is_some_and(|p| {
-            // Normalize separators before matching. This comment used to assert the
-            // opposite — that a forward-slash comparison was safe because `rel_path` is
-            // stored forward-slash and `abs_path` is relativized before the hint is
-            // computed. Neither guarantee survives Windows: a response path can arrive
-            // backslash-spelled, the hardcoded `docs/trackers/` never matches, and the
-            // caller silently receives the GENERAL `librarian` guide instead of the one
-            // about the file they are editing. It fails as a wrong guide, not an error —
-            // the same failure mode this function's own doc warns about for a missing
-            // response shape.
-            let p = p.replace('\\', "/");
-            p.contains("docs/issues/") || p.contains("docs/trackers/")
-        })
-    }
-    fn any_path_field(obj: &Value) -> bool {
-        is_tracker_path(obj.get("abs_path")) || is_tracker_path(obj.get("rel_path"))
-    }
-
-    if any_path_field(result) {
-        return true;
-    }
-    if result
-        .get("items")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(any_path_field))
-    {
-        return true;
-    }
-    // `doctor` is the one action whose rows carry neither `abs_path`/`rel_path` nor an
-    // `items` array: it returns `violations: [{check, artifact_id, path, detail}]`
-    // (`src/librarian/tools/doctor.rs:466`, field at `:135`). Before this branch existed,
-    // an agent holding a worklist of `entry_cited_from_outside_but_undeclared` rows —
-    // the caller with the most concrete need for the entry-field rules — was the one
-    // caller guaranteed to receive `librarian` instead.
-    //
-    // Scanned as its own key rather than by adding `path` to `any_path_field`, which
-    // would widen the TOP-LEVEL check across every response shape to serve one action.
-    // `violations` is unique to `doctor`, so the blast radius is exactly that response.
-    result
-        .get("violations")
-        .and_then(Value::as_array)
-        .is_some_and(|rows| rows.iter().any(|row| is_tracker_path(row.get("path"))))
+    names_path_containing(result, "docs/issues/") || names_path_containing(result, "docs/trackers/")
 }
 
 /// Compact summary shown in place of a buffered librarian response.
@@ -568,6 +587,7 @@ fn bridge_recoverable_error(e: anyhow::Error) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::Tool as _;
     use serde_json::json;
 
     #[test]
@@ -1016,5 +1036,70 @@ mod tests {
             Some("wto-umbrella"),
             "derive_ctx must resolve umbrella membership against main_root for a worktree session"
         );
+    }
+
+    /// Builds the first registered librarian tool (`artifact::Artifact`, per
+    /// `all_tools()`'s ordering) wrapped in a `LibrarianAdapter`, for tests that only
+    /// need `Tool` methods and not real catalog behaviour. There is no
+    /// `LibrarianAdapter::new_for_test` constructor — this mirrors the construction
+    /// the `derive_ctx_*` tests above already use.
+    fn adapter_for_test() -> LibrarianAdapter {
+        let ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .build(),
+        );
+        LibrarianAdapter {
+            inner: lib_all_tools()
+                .into_iter()
+                .next()
+                .expect("at least one librarian tool registered"),
+            ctx,
+        }
+    }
+
+    #[test]
+    fn selector_key_projects_tool_and_action() {
+        let a = adapter_for_test();
+        assert_eq!(
+            a.selector_key(&json!({"action": "append_entry", "id": "x"})),
+            Some("artifact.append_entry".to_string())
+        );
+        // No action ⇒ the bare tool name. Tool-only shapes (e.g. artifact_augment,
+        // which takes no `action` param at all) must still be matchable by a
+        // declaration keyed on the tool name alone — see the CORRECTION in
+        // task-4-brief.md. Falling back to `?` here would make such a declaration
+        // unmatchable forever, which is a silent-absence failure, not the
+        // fail-safe-toward-delivery direction this feature requires.
+        assert_eq!(
+            a.selector_key(&json!({"id": "x"})),
+            Some(a.name().to_string())
+        );
+    }
+
+    #[test]
+    fn names_path_containing_generalises_and_normalises_separators() {
+        let v = json!({"abs_path": "docs\\issues\\x.md"});
+        assert!(names_path_containing(&v, "docs/issues/"));
+        assert!(!names_path_containing(&v, "docs/trackers/"));
+        // find-style items and doctor-style violations keep working.
+        let items = json!({"items": [{"rel_path": "docs/trackers/t.md"}]});
+        assert!(names_path_containing(&items, "docs/trackers/"));
+        let viol = json!({"violations": [{"path": "docs/issues/b.md"}]});
+        assert!(names_path_containing(&viol, "docs/issues/"));
+    }
+
+    #[test]
+    fn names_tracker_path_still_agrees_with_the_generalised_form() {
+        // The existing trigger must not change behaviour in Phase 1.
+        for p in ["docs/issues/x.md", "docs/trackers/y.md", "src/main.rs"] {
+            let v = json!({"abs_path": p});
+            assert_eq!(
+                names_tracker_path(&v),
+                names_path_containing(&v, "docs/issues/")
+                    || names_path_containing(&v, "docs/trackers/")
+            );
+        }
     }
 }

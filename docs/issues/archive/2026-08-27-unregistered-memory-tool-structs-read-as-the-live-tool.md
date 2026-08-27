@@ -83,7 +83,7 @@ compiler is concerned.
 The tests are what make this stable. Dead code with no tests eventually trips a
 lint or a reviewer; dead code with 18 passing tests looks maintained.
 
-## Fix
+## Fix — the two options considered
 
 Two options, and the choice is about what the tests are worth:
 

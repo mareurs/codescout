@@ -6,7 +6,7 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 
 ## Development Commands
 
-**Run `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` before completing any task.** On our stack the live-MCP release build is `cargo rb` (not `cargo build --release`); after it, run `/mcp` to reconnect. Full command reference (every crate + fixture, `cargo rb` vs lean build) → memory `development-commands`; the binary symlink gotcha → memory `gotchas` (MCP Binary Symlink).
+**Run `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test` before completing any task.** The long clippy form is the gate, not garnish: bare `cargo clippy -- -D warnings` lints only the root package's **non-test** targets with default features, so it passes trees CI fails — `.github/workflows/ci.yml` runs both (`:50` and `:61`), and only the second reaches `#[test]` code and `codescout-embed`'s feature-gated `local` module. Measured 2026-08-27: ten task gates, ten task reviews and a whole-branch review all missed a `doc_lazy_continuation` lint sitting in a test's doc comment (`prompt-surface-measurement-session-log:F-45`). On our stack the live-MCP release build is `cargo rb` (not `cargo build --release`); after it, run `/mcp` to reconnect. Full command reference (every crate + fixture, `cargo rb` vs lean build) → memory `development-commands`; the binary symlink gotcha → memory `gotchas` (MCP Binary Symlink).
 ## Bug Tracking
 
 **Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.
@@ -166,6 +166,42 @@ own compiled-in template for one other tracker). What the file holds is prose pl
 `artifact(action="get", id="f2ecdd76a6189efb", entry_filter={"status": {"eq": "open"}})`.
 Prompt improvement candidates are at the bottom —
 these are the direct inputs to `src/prompts/source.md` (the `server_instructions` surface slice) edits.
+
+### SDD Rulings — `docs/trackers/sdd-ruling-log.md`
+
+When a plan runs under `superpowers:subagent-driven-development`, the controller is told to
+**rule rather than stall** — decide conflicts, plan defects and scope calls mid-run instead
+of parking on a question. Those are real delegated judgements, and they live in the run's
+progress ledger, which **the process deletes at finish**. This tracker is where they land
+instead.
+
+**Deliberately not a ledger** — no `entry_prefix`, no ids, nothing to cite. The unit is the
+**ruling line**; the table is for mining across runs. See `docs/TAXONOMY.md` §
+*Trackers that deliberately own no prefix*.
+
+**Claude — append when:** you finish an SDD run, **before** the workspace-deletion step.
+One row per decision a human might reasonably have made differently — the same test the SDD
+skill applies to what must be surfaced at finish. Columns: `ruling` (the line, complete
+enough to judge without the plan open), `class`, `cost if wrong`, `verdict`.
+
+**`verdict` is the point.** `held` teaches little; `WRONG` next to its class and cost is the
+signal. Update it whenever a later run proves one wrong. Promote a repeated pattern into the
+file's *Lessons extracted so far* section, then into CLAUDE.md or a skill once it has
+two or more confirming runs.
+
+**Seeded 2026-08-27** by the `get-guide-section-grain` run: 31 rulings, **5 wrong**. The
+lessons already promoted out of it — worth reading before your next multi-agent run:
+
+- *"Already fails loudly" is a claim about a code path, not about a feature* (3 datapoints
+  in one run — the same reasoning error made twice, plus a third instance found by review).
+- *A plan's reference code is a sketch* — 5 of 10 tasks carried a defect inherited from the
+  plan, none caught by its author. The `plan-mandated` review label is what surfaces them.
+- *Vacuous assertions cluster* — 4 found, the fourth only because the final reviewer was told
+  to hunt for one. Ask "what mutation would make this test fail?", never "does it pass?".
+- *Demand a deliberate break* — an assertion added to close a missing-guard finding was
+  itself unable to fire.
+- *Correct code in the wrong tree defeats every gate* — a leaked write compiled and passed
+  its tests; only `git status` on the other checkout could see it.
 
 ### Ad-Hoc Session Logs — `docs/trackers/<topic>-session-log.md`
 

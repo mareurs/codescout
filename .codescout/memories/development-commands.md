@@ -10,7 +10,11 @@ cargo rb                     # ALIAS (.cargo/config.toml) = build --release --fe
 cargo build --release        # lean release (sqlite-vec lite, no Qdrant) — the daemon-free default repo
                              # cloners get; NOT what we run locally. Used as the crates.io publish-verification build.
 cargo test                   # unit + integration tests (excludes #[ignore])
-cargo clippy -- -D warnings  # lint (must be clean before commit)
+cargo clippy -- -D warnings  # lint, NARROW: root package, non-test targets, default features only
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+                             # lint, WIDE: the only form that reaches #[test] code and codescout-embed's
+                             # feature-gated `local` module. CI runs BOTH (ci.yml:50 and :61) — the narrow
+                             # one passing proves nothing about the wide one. Both must be clean.
 cargo fmt                    # format (run before commit)
 # After `cargo rb`, run /mcp to reconnect. Both `rb` and `build --release` emit the same
 # target/release/codescout (the feature flag doesn't change the output path), and the symlink

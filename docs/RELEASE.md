@@ -34,6 +34,9 @@ Full release checklist — run from `master`, never from `experiments` or featur
 cargo build --release
 cargo test
 cargo clippy -- -D warnings
+# CI runs a SECOND, wider clippy job (ci.yml:61) — the only one that lints #[test]
+# code and codescout-embed's feature-gated `local` module. Run it too:
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 
 # 3. Commit the version bump
 git add Cargo.toml Cargo.lock

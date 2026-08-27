@@ -271,14 +271,26 @@ impl GuideLedger {
     /// switch re-teaches only the project-scoped guide, not the tool-contract
     /// guides the model already holds.
     ///
+    /// Matches a bare topic key AND its `topic#heading` section keys. The `#`
+    /// separator is what keeps `librarian` from sweeping `librarian-runtime`:
+    /// a bare `starts_with(topic)` would, and the failure would be silent
+    /// starvation of an unrelated guide.
+    ///
     /// Persists only when something was actually removed.
     pub fn re_arm(&mut self, topics: &[&str]) {
         let mut changed = false;
-        for topic in topics {
-            if self.emitted.remove(*topic).is_some() {
+        self.emitted.retain(|key, _| {
+            let matches = topics.iter().any(|t| {
+                key == t
+                    || (key.len() > t.len() + 1
+                        && key.starts_with(t)
+                        && key.as_bytes()[t.len()] == b'#')
+            });
+            if matches {
                 changed = true;
             }
-        }
+            !matches
+        });
         if changed {
             self.persist();
         }
@@ -707,6 +719,30 @@ mod tests {
             before, after,
             "re_arm of an absent topic must not rewrite the file"
         );
+    }
+
+    #[test]
+    fn re_arm_removes_section_keys_of_the_named_topic() {
+        let mut l = GuideLedger::anonymous(None);
+        l.insert("librarian#Artifact Model".to_string());
+        l.insert("librarian#Filter AST".to_string());
+        l.insert("tracker-conventions".to_string());
+        l.re_arm(&["librarian"]);
+        assert!(!l.contains("librarian#Artifact Model"));
+        assert!(!l.contains("librarian#Filter AST"));
+        // Unrelated topics survive; and a topic that merely SHARES a prefix must not
+        // be swept — `librarian` must not take `librarian-runtime` with it.
+        assert!(l.contains("tracker-conventions"));
+    }
+
+    #[test]
+    fn re_arm_does_not_sweep_a_topic_that_shares_a_name_prefix() {
+        let mut l = GuideLedger::anonymous(None);
+        l.insert("librarian-runtime".to_string());
+        l.insert("librarian-runtime#Trackers".to_string());
+        l.re_arm(&["librarian"]);
+        assert!(l.contains("librarian-runtime"));
+        assert!(l.contains("librarian-runtime#Trackers"));
     }
 
     #[test]

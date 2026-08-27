@@ -298,7 +298,8 @@ Verify: `doctor` `params_behind_body` 2 → 1.
 **Codescout's half is already done.** `entry_prefix` is declared on all four ledgers backfilled in `c7bdfd22`, and every one of the nine prefixes declared in this repo now has at least one defining heading. Nothing here is affected.
 
 **The finding stands** and lives in the BL-41 bug file: a ledger that declares no `entry_prefix` AND defines nothing is still invisible to the dangling gate, so BL-41's retrospective coverage is incomplete by construction — measured, not predicted. Its prospective value is unaffected: the next ledger created here with `entry_prefix` and row-only entries dangles loudly.
-### BL-43 — complete BL-41's coverage: an undeclared, undefined ledger is still invisible
+#### Measurement (2026-08-18) — recorded while BL-43 was still open
+
 **open** — measured 2026-08-18, and it is the honest counterpart to BL-41's result. BL-41's marginal effect on the current corpus is **zero**: all nine declared prefixes (`GF`, `CAP`, `U`, `H`, `FND`, `T`, `R`, `SD`, `HY`) now have at least one defining heading, and `SD`/`GF`/`FND`/`T` got their declaration and their headings in the *same* commit (`c7bdfd22`), so the widened gate never had a case to fire on.
 
 The surviving hole is concrete rather than hypothetical: `stefanini/…/june-fixes-review-followups.md` holds 8 `CR` entries, defines none of them, and declares no `entry_prefix` — so a wholly-broken namespace is **still** invisible, which is the exact defect BL-41 reports, surviving its own fix. The bug file predicted this limit ("improves coverage without completing it"); it is now instantiated.

@@ -84,6 +84,18 @@ namespaces that correctly do not earn a row. It is recorded so the next reader k
 table is a subset of reality rather than assuming an unlisted prefix is a mistake. Re-derive
 it rather than trusting this table to stay current.
 
+## Trackers that deliberately own no prefix
+
+Not every tracker is a ledger. Measured 2026-08-17: 27 unaugmented trackers under
+`docs/trackers/`, and only **three** owned an id namespace. The rest are design docs,
+research notes and finished logs — they own no ids and stay directly editable.
+
+Listed here so nobody "fixes" them by adding a prefix.
+
+| Tracker | Why no prefix |
+|---|---|
+| [`sdd-ruling-log.md`](trackers/sdd-ruling-log.md) | Records decisions an agent made autonomously during a `subagent-driven-development` run, which the run's own ledger deletes at finish. The unit of value is the **ruling line**, not an index — nothing cites an individual ruling, and the table exists to be mined across runs (`verdict` is the column that matters: which rulings turned out wrong, and what they had in common). Giving it ids would add citation ceremony to rows nobody cites. |
+
 ## How to choose
 
 ```

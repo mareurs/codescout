@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 43
-entry_high_water_W: 27
+entry_high_water_F: 45
+entry_high_water_W: 28
 entry_prefix:
 - F
 - W
@@ -71,6 +71,8 @@ surfaces, not the definition.
 | F-41 | I reported "semantic search doesn't find these" from one filtered query, with no control — the unfiltered control refuted it | fixed-verified |
 | F-42 | I captured the mechanism in the wrong population and refuted a hypothesis that was true | fixed-verified |
 | F-43 | My promotion plan skipped two gates the skill documents — and named the weaker of two destinations for this rule's failure class | open |
+| F-44 | Half the tasks carried a defect inherited from the plan's own reference code | open |
+| F-45 | The documented pre-commit gate cannot see test code; CI's second clippy job can | fixed |
 
 ## Wins Index
 
@@ -103,6 +105,7 @@ surfaces, not the definition.
 | W-16 | Three dilution rounds converged without closing; one measurement of the shared cause moved it further than all three | validated |
 | W-26 | Capturing the mechanism killed an axis that two outcome-comparisons got wrong | validated |
 | W-27 | Clean-tree extraction answered "is this failure mine?" with evidence — and the evidence was a third answer | validated |
+| W-28 | Naming a defect pattern in the review brief found the instance per-task reviews could not | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -3998,6 +4001,110 @@ missing piece: a scenario whose bare arm asks the user (or asserts) a question a
 in one or two tool calls, scored on whether the agent runs the call instead. That is the
 same shape as the verify-before-assert arm the skill cites as precedent (0% bare, 100%
 shipped over 35 runs, codescout `5917e37e`).
+
+## W-28 — Naming a defect pattern in the review brief found the instance per-task reviews could not
+
+**Observed:** Three separate assertions in one branch turned out to be incapable of failing
+— a fixture whose alphabetical order coincided with document order; a
+`contains("get_guide")` guard defeated by the guide's own preamble text; and a success
+check blind to the `RecoverableError` class it was written for. Each was found by a
+different per-task reviewer, each as an isolated finding.
+
+**Got:** The final whole-branch review brief was written with the pattern named explicitly:
+*"This branch had a recurring problem worth checking for residue: three separate assertions
+were found to be incapable of failing. … Look for a fourth."*
+
+It found one — and in the worst place. Gate 5's reachability predicate contained
+`.any(|c| c.level > sec.level && !c.serves.is_empty())`, which never references `sec` except
+for `.level`. Since the splitter emits only levels 2 and 3 and the topic had four declaring
+`###` sections, the clause was unconditionally `true` for **every** `##` section, making the
+assertion `true || …`. The gate whose entire job was catching unreachable sections could not
+fail for the majority of them — and 1,802 B of guide content was consequently unreachable
+with no waiver, while two carefully-written waivers sat decorative, short-circuited before
+they were ever evaluated.
+
+**Counterfactual:** the three prior instances were each reported as a one-off defect and
+fixed as one. Nothing in the per-task review flow escalates "this is the third time" into
+"look for a fourth" — each reviewer sees one diff and one instance. Without the pattern
+named in the brief, a whole-branch reviewer has no reason to weight this failure mode above
+its base rate, and the gate ships green and useless.
+
+**Practice:** once a defect class has **two** instances in a work stream, name it in the
+next review brief and ask explicitly for the next one. The discriminating question is never
+"does this test pass" but **"what mutation of the production code would make this test
+fail?"** — a question a reviewer will not ask unprompted about a test that is already green.
+
+**Valid:** dated 2026-08-27
+
+**Status:** validated
+
+**Promote-when:** a second work stream reproduces it — a named-pattern review brief finding
+an instance that per-task reviews missed. At that point it belongs in
+`requesting-code-review`'s template rather than in an ad-hoc brief.
+
+## F-44 — Half the tasks carried a defect inherited from the plan's own reference code
+
+**Observed:** The `get-guide-section-grain` plan was written with full inline reference code
+for all ten tasks — every test body, every implementation, exact values — on the reasoning
+that an implementer transcribing complete code needs no design judgement.
+
+**Got:** **Five of the ten tasks carried a defect inherited from that reference code**, none
+caught by its author, all caught by task reviews:
+
+| task | plan-mandated defect |
+|---|---|
+| 1 | `fence = !fence` bool toggle — desyncs on nested or mixed fences |
+| 2 | no validation on `tool`/`action` identifiers — a stray space or extra dot yields a permanently inert declaration |
+| 4 | `selector_key` returning `None` when a call has no `action` — makes tool-only shapes unmatchable |
+| 8 | `assert!(guide.contains("get_guide"))` — defeated by the guide's own preamble text |
+| 9 | Gate 5's `child_declares` clause — unconditionally `true`, so the assertion was `true \|\| …` |
+
+A sixth was structural rather than in the code: the brief told the implementer that Gate 2
+"replaces" an existing test that in fact asserted four things, three of them orthogonal.
+The implementer declined to follow it and restored them. It was right.
+
+The plan was *not* bad at what plans are for. Interfaces, ordering, test structure and the
+producer/consumer contract across ten tasks were all correct — the pre-flight scan found
+only two conflicts, both real, both cheap. What it was bad at is **edges**: the code had the
+right shape and under-specified boundaries, and boundaries are exactly where these defects
+live.
+
+**Counterfactual:** the `plan-mandated` label in the task-reviewer rubric is what surfaced
+all five. Without it a reviewer can reasonably reason "the implementer transcribed the brief
+faithfully, so this is not their defect" and pass it — which is true and beside the point.
+The rubric's line *"the plan's authorship does not grade its own work"* is doing real work,
+not ceremony.
+
+**Practice:** write a plan's inline code as **shape**, and expect the review loop to supply
+correctness. Do not treat "the plan contains complete code" as evidence that a task is
+mechanical — it changes who finds the defect, not whether one exists. Budget review
+accordingly rather than downgrading the reviewer model on transcription-shaped tasks.
+
+**Valid:** dated 2026-08-27
+
+**Status:** open
+
+**Promote-when:** a second multi-task plan reports a comparable plan-mandated defect rate.
+Two datapoints would justify a line in `writing-plans` — its "No Placeholders" section
+currently pushes toward complete inline code without noting that complete code is not
+correct code.
+
+## F-45 — The documented pre-commit gate cannot see test code; CI's second clippy job can
+
+**Valid:** dated 2026-08-27
+**Status:** fixed
+
+**Observed:** Merging `sdd/get-guide-section-grain` into `experiments` produced a tree that fails CI. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` (`.github/workflows/ci.yml:61`) reported seven `clippy::doc_lazy_continuation` errors. The narrow form CLAUDE.md documents as the gate — `cargo clippy -- -D warnings` (`ci.yml:50`) — passes on the identical tree.
+
+The defect itself is small: a doc comment on `#[test] fn session_opening_guide_never_declares_sections` wrapped as "…never declares `##`/`###` sections in Phase / 1. `guide_blocks_for` keys everything else…", putting `1. ` at the start of a line. Rustdoc's markdown parser reads that as an ordered list item and the six following lines as lazy continuations of it. One sentence breaking after "Phase" invented a list.
+
+**Got:** The lint was unreachable from every check the run actually performed. Ten per-task gates, ten task reviews, one whole-branch review on the most capable model, and a final green suite — all running the documented narrow form, which does not compile test targets. A defect sitting on a `#[test]` fn is invisible to all of it by construction. It would have failed on the first push.
+
+Worth being precise about where the knowledge already lived: `ci.yml:51-60` carries a comment that states the fact outright — "the bare command above only lints the root package's non-test targets with default features". The repo knew. The gate line in CLAUDE.md, which is what an agent actually reads before declaring a task complete, did not carry it.
+
+The generalisation is the part to keep: **a documented gate narrower than the enforced gate is worse than no documentation.** Everyone runs the documented form and believes they are covered, so the gap cannot surface during review — only at push, after every reviewer has already signed off. The cost is not the lint; it is that a clean review is not evidence of a clean tree.
+
+**Rests on:** `.github/workflows/ci.yml:50` (narrow job) and `:61` (wide job, with its explanatory comment at `:51-60`). Failure and fix: `c30c07a7`, patch-id `c586b0766eacf6c4765c3bb0359ff50839a2e9f1`. CLAUDE.md § Development Commands corrected in the same commit as this entry.
 
 ## Template for new entries
 

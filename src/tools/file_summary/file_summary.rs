@@ -136,6 +136,52 @@ pub struct SectionRange {
     pub level: usize,           // 1-6
 }
 
+/// A heading query, optionally narrowed to one of several equally-good matches.
+///
+/// `occurrence` is 1-indexed and exists because two byte-identical headings admit
+/// **no** distinguishing query string: `resolve_section_range`'s exact-match tiers
+/// return the ambiguity error before the fuzzier prefix/substring tiers ever run, and
+/// even those could not separate two equal strings. Without a positional selector such
+/// a section is unreachable through every heading-addressed surface — including
+/// `artifact(update, patch={body_edits})`, which is the *only* edit path a
+/// librarian-managed artifact has, so the section becomes permanently uneditable.
+/// See `docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
+///
+/// `&str` converts in, so every caller with nothing to disambiguate keeps passing a
+/// bare string and keeps today's behaviour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeadingQuery<'a> {
+    /// The heading text to match, e.g. `"## Fix"`.
+    pub text: &'a str,
+    /// 1-indexed selector among matches. `None` keeps the historical contract:
+    /// a single match resolves, several are an error.
+    pub occurrence: Option<usize>,
+}
+
+impl<'a> HeadingQuery<'a> {
+    pub fn new(text: &'a str, occurrence: Option<usize>) -> Self {
+        Self { text, occurrence }
+    }
+}
+
+impl<'a> From<&'a str> for HeadingQuery<'a> {
+    fn from(text: &'a str) -> Self {
+        Self {
+            text,
+            occurrence: None,
+        }
+    }
+}
+
+impl<'a> From<&'a String> for HeadingQuery<'a> {
+    fn from(text: &'a String) -> Self {
+        Self {
+            text: text.as_str(),
+            occurrence: None,
+        }
+    }
+}
+
 /// Parse all markdown headings with their line ranges. No truncation.
 /// Skips headings inside fenced code blocks.
 pub fn parse_all_headings(content: &str) -> Vec<HeadingInfo> {
@@ -225,11 +271,23 @@ pub fn strip_inline_formatting(s: &str) -> String {
 
 /// Resolve a heading query to a precise line range in a markdown document.
 /// Uses a 4-tier matching cascade: exact raw → exact stripped → prefix stripped → substring stripped.
-/// Errors on duplicate exact matches (ambiguity) or no match.
-pub fn resolve_section_range(
+///
+/// Several matches in an exact tier are an error unless the caller supplies
+/// [`HeadingQuery::occurrence`], which selects among them positionally. That selector is
+/// the only way to reach either of two byte-identical headings: no query string can
+/// separate them, and the fuzzier tiers below never run once an exact tier has matched.
+/// The prefix/substring tiers keep their historical first-match-wins contract for an
+/// unqualified query — they are fuzzy by design and have never treated several hits as
+/// ambiguous.
+pub fn resolve_section_range<'a>(
     content: &str,
-    heading_query: &str,
+    query: impl Into<HeadingQuery<'a>>,
 ) -> Result<SectionRange, RecoverableError> {
+    let HeadingQuery {
+        text: heading_query,
+        occurrence,
+    } = query.into();
+
     let headings = parse_all_headings(content);
 
     if headings.is_empty() {
@@ -253,12 +311,20 @@ pub fn resolve_section_range(
         }
     };
 
-    // Helper to build duplicate error
+    // Helper to build duplicate error.
+    //
+    // The `heading_ambiguous` / `occurrences` extras exist because a caller one frame up
+    // may only see `Option` -- `.ok()` collapses this error into the same `None` as a
+    // genuine miss, and a caller that then reports "missing" states the false one and
+    // sends the reader hunting for a heading that is present twice. The discriminant has
+    // to ride on the error, not be re-derived from its message text.
+    // docs/issues/archive/2026-08-27-artifact-get-reports-a-doubly-defined-heading-as-missing.md
     let dup_error = |indices: &[usize]| -> RecoverableError {
         let lines: Vec<String> = indices
             .iter()
             .map(|&i| headings[i].line.to_string())
             .collect();
+        let line_nums: Vec<usize> = indices.iter().map(|&i| headings[i].line).collect();
         RecoverableError::with_hint(
             format!(
                 "heading '{}' found {} times (lines {})",
@@ -266,8 +332,35 @@ pub fn resolve_section_range(
                 indices.len(),
                 lines.join(", ")
             ),
-            "Provide a more specific heading or use edit_file with start_line/end_line to target a specific occurrence.",
+            format!(
+                "Pass occurrence=N to target one (1-indexed, here 1..={}), or query a heading text unique to the section you mean. Identical headings admit no distinguishing query, so occurrence is the only way to reach either.",
+                indices.len()
+            ),
         )
+        .with_extra("heading_ambiguous", serde_json::json!(true))
+        .with_extra("occurrences", serde_json::json!(line_nums))
+    };
+
+    // Choose among `indices` (document order), honouring `occurrence`.
+    let select = |indices: &[usize]| -> Result<SectionRange, RecoverableError> {
+        match occurrence {
+            None if indices.len() == 1 => Ok(make_range(&headings[indices[0]])),
+            None => Err(dup_error(indices)),
+            Some(0) => Err(RecoverableError::with_hint(
+                "occurrence is 1-indexed, got 0",
+                "Pass occurrence=1 to target the first match.",
+            )),
+            Some(n) if n <= indices.len() => Ok(make_range(&headings[indices[n - 1]])),
+            Some(n) => Err(RecoverableError::with_hint(
+                format!(
+                    "occurrence {} requested but heading '{}' matches {} time(s)",
+                    n,
+                    heading_query,
+                    indices.len()
+                ),
+                format!("Valid occurrence values here are 1..={}.", indices.len()),
+            )),
+        }
     };
 
     // Tier 1: Exact match (raw)
@@ -277,11 +370,8 @@ pub fn resolve_section_range(
         .filter(|(_, h)| h.text == heading_query)
         .map(|(i, _)| i)
         .collect();
-    if exact_raw.len() == 1 {
-        return Ok(make_range(&headings[exact_raw[0]]));
-    }
-    if exact_raw.len() > 1 {
-        return Err(dup_error(&exact_raw));
+    if !exact_raw.is_empty() {
+        return select(&exact_raw);
     }
 
     // Tier 2: Exact match (stripped)
@@ -291,29 +381,44 @@ pub fn resolve_section_range(
         .filter(|(_, h)| strip_inline_formatting(&h.text) == query_stripped)
         .map(|(i, _)| i)
         .collect();
-    if exact_stripped.len() == 1 {
-        return Ok(make_range(&headings[exact_stripped[0]]));
-    }
-    if exact_stripped.len() > 1 {
-        return Err(dup_error(&exact_stripped));
+    if !exact_stripped.is_empty() {
+        return select(&exact_stripped);
     }
 
     // Tier 3: Prefix match (stripped, case-insensitive)
-    if let Some(idx) = headings.iter().position(|h| {
-        strip_inline_formatting(&h.text)
-            .to_lowercase()
-            .starts_with(&query_stripped_lower)
-    }) {
-        return Ok(make_range(&headings[idx]));
+    let prefix_matches: Vec<usize> = headings
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| {
+            strip_inline_formatting(&h.text)
+                .to_lowercase()
+                .starts_with(&query_stripped_lower)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    if !prefix_matches.is_empty() {
+        return match occurrence {
+            None => Ok(make_range(&headings[prefix_matches[0]])),
+            Some(_) => select(&prefix_matches),
+        };
     }
 
     // Tier 4: Substring match (stripped, case-insensitive)
-    if let Some(idx) = headings.iter().position(|h| {
-        strip_inline_formatting(&h.text)
-            .to_lowercase()
-            .contains(&query_stripped_lower)
-    }) {
-        return Ok(make_range(&headings[idx]));
+    let substring_matches: Vec<usize> = headings
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| {
+            strip_inline_formatting(&h.text)
+                .to_lowercase()
+                .contains(&query_stripped_lower)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    if !substring_matches.is_empty() {
+        return match occurrence {
+            None => Ok(make_range(&headings[substring_matches[0]])),
+            Some(_) => select(&substring_matches),
+        };
     }
 
     // No match
@@ -324,9 +429,9 @@ pub fn resolve_section_range(
     ))
 }
 
-pub fn extract_markdown_section(
+pub fn extract_markdown_section<'q, Q: Into<HeadingQuery<'q>>>(
     content: &str,
-    heading_query: &str,
+    heading_query: Q,
 ) -> Result<SectionResult, RecoverableError> {
     let range = resolve_section_range(content, heading_query)?;
     let all_headings = parse_all_headings(content);
