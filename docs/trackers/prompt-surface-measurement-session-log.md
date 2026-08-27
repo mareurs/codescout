@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 33
-entry_high_water_W: 24
+entry_high_water_F: 36
+entry_high_water_W: 25
 entry_prefix:
 - F
 - W
@@ -28,7 +28,7 @@ surfaces, not the definition.
 
 | id | title | status |
 |---|---|---|
-| F-1 | Fixed output path destroyed the evidence for the headline figure | fixed |
+| F-1 | Fixed output path destroyed the evidence for the headline figure | fixed (blast-radius 2026-08-26; the SIBLING eval kept the same code until F-36, 2026-08-27) |
 | F-2 | `json.dumps` defaults inflated every schema measurement by 3.8% | fixed |
 | F-3 | A subagent's `workspace(activate)` mutated the parent's active project | open |
 | F-4 | REFUTED — "every augmentation in the catalog is gone" was a false negative; one tracker was genuinely unaugmented | refuted |
@@ -61,6 +61,9 @@ surfaces, not the definition.
 | F-31 | The evidence behind every published number sat on tmpfs; F-1's fix guarded one of the two mechanisms that delete it | fixed-verified |
 | F-32 | The no-tools floor could run a shell — Monitor left un-denied by a documented ruling resting on an untested inference | fixed-verified |
 | F-33 | Runs were scored against other runs' trees; the fix existed, was documented, and was never wired into the driver | fixed-verified |
+| F-34 | I wrote a timing verdict that was true by construction — the trigger call is always the first opportunity | fixed-verified |
+| F-35 | I measured that guides grow, then used today's sizes for historical injections — overstating every byte figure 1.17x | fixed-verified |
+| F-36 | Four defects marked fixed were all still live in the sibling eval — including F-1, whose code was still deleting evidence every run | fixed-verified |
 
 ## Wins Index
 
@@ -85,6 +88,7 @@ surfaces, not the definition.
 | W-22 | Reading the source artifact's own limits sections before designing overturned my headline and re-pointed the target | validated |
 | W-23 | Re-running the verification after compaction found what re-reading the summary structurally could not | validated |
 | W-24 | The control arm found two instrument defects instead of the effect it measured — it was the only arm whose runs differed | validated |
+| W-25 | Handing each subagent the controller's own measurement, with a loud-fail gate, made three controller defects surface downstream | validated |
 | W-20 | Running the second baseline the spec asked for overturned the headline it was meant to confirm | validated |
 | W-19 | Staging the pilot behind a positive-control gate caught two result-fabricating defects mid-spend, for $1 | validated |
 | W-18 | Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result | validated |
@@ -3176,6 +3180,260 @@ detected by any of them."*
 
 **Rests on:** F-32 and F-33, same session — this win is their shared
 counterfactual, not independent evidence.
+
+## F-34 — I wrote a timing verdict that was true by construction — the trigger call is always the first opportunity
+
+**Observed:** 2026-08-27, guide-injection use study. I authored the measurement
+rubric (`docs/evals/data/2026-08-27-guide-injection/rubric-BRIEF.md`) that ten
+subagents executed verbatim.
+
+**When:** Writing M2 (timing). I defined `timing_verdict: LATE` as
+`first_opportunity_turn < turn_index`, where `first_opportunity_turn` is the first
+assistant turn containing a tool call of the class the guide governs.
+
+**Expected:** A verdict that discriminates well-timed from late injections.
+
+**Got:** A verdict that is **true by construction for every push injection**. The
+triggering `tool_use` sits on assistant turn *N*; the `tool_result` carrying the
+injection lands at *N+1*. So the trigger call is *itself* the first opportunity and
+always precedes the injection by one turn. Every one of the 81 injections scored
+`LATE`, including `symbol-navigation` firing on a session's **first** symbol call —
+the earliest arrival physically possible.
+
+Caught by OPUS-4, unprompted, in its own result: *"`LATE` is structurally forced
+for push injections — the trigger call is itself the first opportunity."* OPUS-5
+independently reported the same and recorded raw numbers so the verdict could be
+flipped downstream.
+
+**Probable cause:** I derived the rule from the *concept* (did the session need
+this before it arrived?) without tracing the mechanism that generates the two
+numbers. The rule reads as a discriminator and is arithmetic on a quantity the
+injection itself produces.
+
+**Workaround:** Recomputed in aggregation from components the agents did record:
+`gap = turn_index − first_opportunity_turn`; **gap ≤ 1** = arrived at first
+contact, **gap > 1** = genuinely late by that many turns. Corrected figures: 11%
+at first contact, 89% genuinely late, median lateness 320 turns. Added
+`TRIGGER_ONLY` (`opportunities_after == 0`, 51%) as the complementary measure —
+proposed by SONNET-2, also unprompted.
+
+**Severity:** med — no wrong number was published (the aggregate was recomputed
+before any report), but the defect was in a rubric ten agents had already
+executed, and it was caught downstream rather than at authoring.
+
+**Status:** fixed-verified — corrected in aggregation; the corrected rule and its
+rationale are recorded in the eval doc and in the bug file's measured section.
+
+**Valid:** dated 2026-08-27
+
+Describes the rubric as authored on that date; the corrected rule is what the
+published figures use.
+
+**Rests on:** the ordering of `tool_use` and `tool_result` in Claude Code
+transcripts — the trigger necessarily precedes the injection it causes.
+
+**Kin:** `reconnaissance-patterns:R-5` — *a check that is computed from the thing
+it judges cannot fail; treat its green as unmeasured.* This is that law applied to
+a metric rather than to a gate, and it fired in the rubric of the person who had
+loaded the law earlier the same session.
+
+## F-35 — I measured that guides grow, then used today's sizes for historical injections — overstating every byte figure 1.17x
+
+**Observed:** 2026-08-27, guide-injection use study, corpus-scale delivery census
+over 1,705 sessions.
+
+**When:** Computing total delivered guide bytes. I looked up each topic's size on
+disk *today* (`wc -c src/prompts/guides/*.md`) and multiplied by its injection
+count.
+
+**Expected:** A faithful byte total.
+
+**Got:** A **1.17× overstatement** — 34.4 MB reported against 29.5 MB actually
+delivered. Per topic the error is worse and uneven: `tracker-conventions` injections
+have a median as-delivered size of **24,836 B against today's 34,333** (ratio 0.72),
+`librarian` 17,146 vs 20,545 (0.83). The minimum observed `tracker-conventions`
+injection is 10,395 B — the pre-growth size.
+
+Caught by OPUS-5 on its own transcript: *"the byte table overstates old transcripts
+~26% … guide mtimes postdate this 2026-07-28 session. Likely systemic."* It was
+systemic. SONNET-1 independently reported the same for its 2026-08-25 session
+(28,032 B as-injected, not 34,333).
+
+**Probable cause:** This is the part worth keeping. **I had measured the growth
+myself, earlier in the same session, and then used current sizes anyway.** The
+growth measurement is `W-22`'s third confirming datapoint —
+`tracker-conventions` 10,377 → 34,333 B in ten days — and I wrote it up as a
+finding roughly an hour before building the byte table. Knowing that a quantity
+varies over time did not stop me treating it as a constant, because the two facts
+were used for different purposes: growth was *a finding about the corpus*, size was
+*a lookup for arithmetic*, and nothing connected them.
+
+**Workaround:** Re-measured the bytes actually present **between the opening and
+closing markers** of each injection (`scripts/probe_guide_injection.py`, and
+`truebytes.json` in the eval's data dir). Every published figure now uses
+as-delivered bytes. The instrument's docstring and its PROBES.md row both name this
+trap explicitly, because the naive lookup is the obvious thing to do.
+
+**Severity:** med — corrected before publication, but it touched every byte figure
+in the study, and the correct method costs no more than the wrong one.
+
+**Status:** fixed-verified — all figures recomputed; the probe measures inter-marker
+bytes by construction, so the mistake is not re-expressible through it.
+
+**Valid:** invariant
+
+The general form — a measurement of a *current* value is not valid for *historical*
+events of the same kind — does not decay. The specific ratios are dated 2026-08-27.
+
+**Rests on:** guide files being edited over time while transcripts record what was
+delivered at the moment of delivery; any append-only log of a mutable artifact has
+this shape.
+
+**Kin:** `W-22` (this log) — whose own evidence supplied the growth figure that
+should have prevented this. `reconnaissance-patterns:R-89` — freshness is a
+property of the copy that served you; this is its retrospective twin, where the
+copy that served the *past* is the one you must reconstruct.
+
+## W-25 — Handing each subagent the controller's own measurement, with a loud-fail gate, made three controller defects surface downstream
+
+**Observed:** 2026-08-27, guide-injection use study. 10 subagents, one transcript
+each, all executing one shared rubric
+(`docs/evals/data/2026-08-27-guide-injection/rubric-BRIEF.md`).
+
+**Pattern:** When fanning out a measurement across N agents, give each agent **the
+controller's own independently-measured value for its slice**, and instruct it to
+**STOP and report `calibration: FAIL`** on any mismatch rather than adjust its
+parser. Pair it with explicit permission to return nothing: *"If your transcript
+shows 0% utilisation across every injection, that IS the finding. Do not hunt for a
+nicer number."*
+
+Two properties, and the second is the one that is easy to miss:
+
+1. It makes the results **addable**. 10 of 10 passed calibration, so the 81
+   injections aggregate into one number instead of ten incomparable ones.
+2. It inverts the error-flow. **Three of this study's four instrument defects were
+   caught by subagents, not by the controller** — the degenerate `LATE` verdict
+   (`F-34`, OPUS-4), today's-bytes-on-historical-injections (`F-35`, OPUS-5 and
+   SONNET-1 independently), and an injection channel the rubric could not see
+   (`queue-operation` lines, SONNET-2). A fourth refinement — that a prescribed
+   shape which is the tool's *default value* is not evidence of use — came from
+   OPUS-4 arguing **against its own positive result**.
+
+**Counterfactual:** Without the calibration gate, a diverging parser produces a
+plausible number and nothing contradicts it — the failure is silent and arrives as
+data. Concretely, three defects would have shipped: every byte figure inflated
+1.17×, a timing verdict reading 100% `LATE` including the earliest arrival
+physically possible, and no route by which any agent could tell me the rubric was
+wrong. The controller would have had ten confirmations and zero contradictions,
+which is exactly the shape of a measurement that cannot fail.
+
+**Confirming data points:**
+1. This study — 10/10 calibration PASS; 3 controller defects surfaced downstream;
+   1 agent argued down its own U2 credit.
+2. Pending: any future fan-out measurement using the same gate.
+
+**Impact:** high — the gate is cheap (one extra line per dispatch prompt, computed
+from work the controller has already done) and it is the only mechanism in the
+design by which a subagent can contradict the controller.
+
+**Promote-when:** A second fan-out measurement where the calibration gate catches a
+controller-side defect. At 2 datapoints, promote to the reconnaissance skill's
+dispatch guidance as: *"When fanning out a measurement, hand each agent your own
+value for its slice and require a loud FAIL on mismatch — a subagent that cannot
+contradict you can only confirm you."* Route as craft-shaped: it needs no codescout
+dialect and holds for any multi-agent measurement.
+
+**Status:** validated — single study, three caught defects, awaiting the promotion
+criterion.
+
+**Valid:** dated 2026-08-27
+
+One study; the promote-when threshold of 2 is not yet reached.
+
+**Rests on:** the controller having an independent measurement of each slice
+*before* dispatch — which is what makes the gate a real check rather than the
+agents' own work reflected back at them.
+
+**Kin:** `F-34`, `F-35` (this log) — the two defects this gate surfaced.
+`reconnaissance-patterns:R-5` — a check computed from the thing it judges cannot
+fail; the calibration value is sourced independently precisely to avoid that.
+
+## F-36 — Four defects marked fixed were all still live in the sibling eval — including F-1, whose code was still deleting evidence on every run
+
+**Observed:** 2026-08-27, on "fix all" — sweeping the sibling eval for the
+deny-list hole F-32 had just found in `blast-radius`.
+
+**Expected:** one defect to port.
+
+**Got: four.** `hidden-info` — which `blast-radius` was modelled on, and which
+several of these fixes were *originally derived from* — still carried every one:
+
+| defect | ledger | state in hidden-info |
+|---|---|---|
+| deny-list missing `Monitor` | F-32 | present, with the false justifying comment verbatim |
+| output on tmpfs | F-31 | `OUT=/tmp/hidden-pilot` |
+| **recursive wipe of a fixed output path** | **F-1** | live, on the normal path, every invocation |
+| arms keyed by log filename stem | F-24 | present in `gates.py` |
+
+F-1 is the one that stings. Its own title is *"Fixed output path destroyed the
+evidence for the headline figure"*, it is marked **`fixed`** in this ledger's
+index, and the code that does exactly that was still running here — not on a
+crash path, on the ordinary one. Every `hidden-info` pilot deleted the evidence
+behind the previous one's published numbers.
+
+**Root cause: every one of these was fixed at the INSTANCE, never at the class.**
+Each was found in one scenario, fixed there, and closed. Nothing asked "where
+else does this pattern live?" — and the answer was always "the sibling, which
+shares most of the code and in one case the comment character-for-character."
+
+**Why no test caught the shared ones.** Both scenarios had green suites. Each
+pinned *its own copy* of the same wrong deny-list, so each suite confirmed the
+scenario matched its own expectation, and neither could see that both
+expectations were wrong. **A per-scenario test cannot detect a defect both
+scenarios share** — the same shape, one level up, as the thing the floor arm
+exists to catch (W-24): a control that agrees with everything around it detects
+nothing.
+
+**One defect I would have CREATED.** F-24's stem-collision was *unreachable* in
+`hidden-info` while the driver kept a single wiped directory — there was never
+more than one round. Fixing F-1 (timestamped rounds, nothing deleted) makes it
+reachable. Porting the driver fix without the scorer guard alongside it would
+have introduced the silent undercount rather than avoided it. Verified after
+the fact against the rescued archive: `gates.py` now REFUSES its root, naming
+`hidden-cs` in **three** logs. Un-guarded it would have kept one and reported a
+full-looking `n=2`.
+
+**Order of operations mattered.** Evidence was rescued to disk *before* touching
+`run_pilot.sh` — the script being repaired was the script that would have
+destroyed it. 184 files, verified readable and run-counted, and the rescued
+round re-scores clean (12 runs, $4.30).
+
+**What was NOT contaminated, checked rather than assumed:** no `notools` log
+exists in any preserved `hidden-info` round — the floor arm appears never to have
+been run, so there was no published floor claim to retract. And no `Monitor` /
+`CronList` call appears anywhere in that evidence, so no tooled arm was affected
+either. The hole was real and prophylactic here.
+
+**Fix:** `prompt-engineering:ee73088` (patch-id `4e36dee3bee56832`) ports all
+four. `prompt-engineering:109f35b` (patch-id `7f71d6ba9a0e36fb`) closes the
+*class*: a cross-scenario parity test that fails when any two floors' deny-lists
+diverge. It lives in `tests/` because `testpaths = ["tests"]`, so a bare
+`pytest` collects it while collecting no scenario tests at all (F-13) —
+divergence now fails the default run. Its scenario list is **derived by glob,
+never enumerated**, since enumerating would reproduce this very bug. Verified by
+mutation, not by being green: removing `Monitor` from one scenario's config
+alone fails 5 tests and names each missing tool.
+
+**Severity:** high — one live defect was actively deleting published evidence,
+and three more were one sibling away from every fix that had been declared done.
+
+**Status:** fixed-verified — 307 (hidden-info) + 379 (blast-radius) + 28
+(parity) passing.
+
+**Valid:** dated 2026-08-27
+
+**Rests on:** F-1, F-24, F-31, F-32 — this entry is the observation that all four
+remained live in a sibling after being closed.
 
 ## Template for new entries
 

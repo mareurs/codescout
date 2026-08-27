@@ -882,3 +882,38 @@ Same session, twice, and the obvious cause was wrong both times:
 Reading it as a result inverts the one thing the control exists for. The check is cheap —
 read the transcript, diff the two versions — and in both cases it changed the published
 cause, not merely its confidence.
+
+## Fix the class, not the instance — and ask where else the pattern lives
+
+Measured 2026-08-27. Sweeping a sibling eval for one known defect turned up **four**, every
+one of them already recorded and marked `fixed` — fixed in the scenario that surfaced it,
+and nowhere else. The sibling shared most of the code and, in one case, the justifying
+comment character-for-character.
+
+The worst was a defect whose own title is *"Fixed output path destroyed the evidence for
+the headline figure"*: the code that does exactly that was still running in the sibling, on
+the ordinary path, deleting the evidence behind published numbers on every invocation.
+
+**A green suite in each place proves nothing about a defect both share.** Each scenario
+pinned *its own copy* of the same wrong constant, so each suite confirmed the scenario
+matched its own expectation and neither could see that both expectations were wrong. The
+only test that can see it is one that compares them — and it has to live where the default
+test run collects it, not in either scenario.
+
+**Derive the comparison set, never enumerate it.** A parity test listing the scenarios by
+name reproduces the bug: the next one added is covered the day someone remembers to extend
+a literal, which is never the day it is added. Glob for the shape instead.
+
+**Verify a new guard by mutation, not by watching it pass.** A parity test is green in
+exactly two situations — everything agrees, or it is comparing nothing. Break one side on
+purpose and confirm it fails, naming what diverged.
+
+**Watch for defects that a fix makes REACHABLE.** One of the four was latent in the sibling
+only because its driver kept a single wiped directory — there was never more than one round
+to collide. Fixing *that* made the collision reachable. Porting a fix without its companion
+guard would have introduced the bug rather than avoided it. Before shipping a fix, ask what
+it makes possible that was previously impossible.
+
+**Rescue evidence before repairing the thing that destroys it.** The script being fixed was
+the script that would have deleted the data on its next run. Copy first, verify the copy
+re-scores, then edit.
