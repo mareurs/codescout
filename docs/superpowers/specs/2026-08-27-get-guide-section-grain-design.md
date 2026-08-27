@@ -88,8 +88,16 @@ A section declares the call shapes it serves, in an HTML comment directly under 
 serves-decl   := "serves:" shape ("," shape)*
 shape         := tool ["." action] ["(" pred ")"]
 pred          := "path~" substring
-requires-decl := "requires:" heading ("," heading)*
+requires-decl := "requires:" heading
 ```
+
+Note: `requires-decl` is deliberately **not** comma-split, unlike `serves-decl` — a
+heading is prose and commonly contains its own commas (e.g. "docs/trackers/ — Backing
+Store, Not a Docs Folder"), so one `requires:` line names exactly one heading. Multiple
+requirements are multiple `<!-- requires: ... -->` lines under the same section. The
+implementation (`parse_declarations`, `src/prompts/guide_index.rs`) enforces this; an
+earlier grammar draft here showed `requires:` as comma-separated like `serves:`, which
+was never implemented and would have been wrong to implement.
 
 - `tool` is the codescout tool name without the `mcp__codescout__` prefix.
 - `action` matches the `action` field of the call's input, via `selector_key`.

@@ -1505,7 +1505,7 @@ probe output.
 
 ## Divergences from the spec, and why
 
-Three places where this plan deliberately departs from
+Four places where this plan deliberately departs from
 `2026-08-27-get-guide-section-grain-design.md`. Each is a simplification found by reading
 the code the spec describes; none changes what Phase 1 delivers.
 
@@ -1526,6 +1526,16 @@ the code the spec describes; none changes what Phase 1 delivers.
 3. **The spec's "stale ledger reads as empty" runtime test is replaced** by Task 7's two
    `re_arm` tests, which cover the only behaviour that actually changes. The stale-read
    path is already covered by `GuideLedger`'s existing tests and is untouched here.
+
+4. **The spec's `requires-decl` grammar was never implemented as comma-separated.**
+   § 1 originally wrote `requires-decl := "requires:" heading ("," heading)*`, mirroring
+   `serves-decl`. `parse_declarations` (`src/prompts/guide_index.rs`) deliberately does
+   NOT comma-split `requires:` — a heading is prose and commonly contains its own commas
+   (e.g. "docs/trackers/ — Backing Store, Not a Docs Folder"), so one `requires:` line
+   names exactly one heading, and multiple requirements are multiple
+   `<!-- requires: ... -->` lines. The spec's grammar line has been corrected to match;
+   this entry records that the divergence was a spec bug, not a Phase-1 simplification
+   like 1-3 above.
 
 ---
 

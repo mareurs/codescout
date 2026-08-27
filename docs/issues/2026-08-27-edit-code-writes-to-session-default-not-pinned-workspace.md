@@ -87,6 +87,24 @@ to read-only mid-task (a foreign activation defaults `read_only=true`), which im
 something re-activated it. If the active project was the **main checkout** at the moment
 those two `edit_code` calls ran, a pin-ignoring write path lands exactly where these landed.
 
+## Evidence from Tasks 5-10
+
+Task 5 reported zero silent no-lands on `workspace=`-pinned `edit_code` calls, plus one
+*loud* failure (an error, not a silent `ok`) on a single call issued **without** the pin.
+Tasks 6, 8, 9 and 10 each reported zero landing failures, silent or loud, across their
+`edit_code` writes — all pinned per their dispatch instructions.
+
+Taken together this partly contradicts the "resolves against the session-default project"
+mechanism above: if that were the whole story, a pinned call landing correctly would be
+lucky rather than expected, and five further tasks' worth of pinned calls landing clean
+every time is not the distribution that predicts. The data instead points toward "the
+defect is confined to unpinned (or pin-dropped-mid-call) `edit_code` calls" — a narrower
+claim.
+
+This narrows but does not confirm anything: n = one plan (six further tasks, not an
+independent sample), and the original Task 4 leak's own two calls were dispatched *with*
+the pin per instruction, which this evidence does not explain — if the pin were sufficient
+on its own, Task 4's leak should not have happened either. The mechanism is still open.
 ## Reproduction sketch (not yet minimised)
 
 1. Open a linked worktree of this repo.
