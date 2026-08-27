@@ -19,11 +19,20 @@ use crate::librarian::current_project::CurrentProject;
 use crate::librarian::filter::FilterNode;
 use crate::librarian::workspace::WorkspaceConfig;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+/// The breadth a librarian query runs at.
+///
+/// **Deliberately has no `Default`.** The default is not a property of the
+/// enum — it is a property of each SURFACE, and the two disagreed silently for
+/// months: `find`/`context` took `Repo` from a `#[default]` attribute while
+/// `link_scan` hardcoded `Project` and every documentation surface said
+/// "project". Removing the derive forces each call site to name its own answer,
+/// the same reason [`UmbrellaPolicy`] exists — see its doc comment. A missing
+/// `#[default]` is a compile error at the call site; a wrong one is a silent
+/// contract violation. See `docs/issues/2026-08-27-scope-default-is-repo-not-project-across-four-doc-surfaces.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     Project,
-    #[default]
     Repo,
     Umbrella,
     All,
@@ -52,16 +61,30 @@ pub enum UmbrellaPolicy {
 /// Resolve the caller's requested scope into the one the query actually runs
 /// under, applying `policy` to an explicit `all`.
 ///
+/// `default` is the scope to use when the caller passed none. It is a REQUIRED
+/// argument rather than a trait-derived default: the answer differs per surface
+/// and, when it lived in a `#[derive(Default)]`, drifted from every documented
+/// claim about it without a single test noticing. Naming it here puts it in the
+/// signature at each call site, where a reviewer reads it — the same argument
+/// [`UmbrellaPolicy`] makes for the `all` policy.
+///
 /// Returns `(effective_scope, scope_fallback)`. `scope_fallback` is set when a
 /// `project`/`repo` request was widened to `all` because no project is active;
 /// callers surface it so a response can explain why the result set came back
 /// broader than what was asked for.
+///
+/// Note the asymmetry preserved from the original: the umbrella GUARD keys off
+/// the RAW `requested` (`Some(All)`), while the ALIAS keys off the DEFAULTED
+/// value. That distinction is why changing `default` cannot change either —
+/// `scope == All` after defaulting still implies the caller asked for `all`,
+/// for any `default` that is not itself `All`.
 pub fn resolve_scope(
     requested: Option<Scope>,
     current: Option<&CurrentProject>,
     policy: UmbrellaPolicy,
+    default: Scope,
 ) -> Result<(Scope, bool)> {
-    let scope = requested.unwrap_or_default();
+    let scope = requested.unwrap_or(default);
     if policy == UmbrellaPolicy::Require && requested == Some(Scope::All) {
         if let Some(cp) = current {
             if cp.umbrella.is_none() {
@@ -415,15 +438,26 @@ mod tests {
     #[test]
     fn require_policy_refuses_all_when_the_project_has_no_umbrella() {
         let c = cp("/w/p", "/w/p", None);
-        let err = resolve_scope(Some(Scope::All), Some(&c), UmbrellaPolicy::Require).unwrap_err();
+        let err = resolve_scope(
+            Some(Scope::All),
+            Some(&c),
+            UmbrellaPolicy::Require,
+            Scope::Project,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("umbrella"), "got: {err}");
     }
 
     #[test]
     fn require_policy_aliases_all_to_umbrella_when_one_is_configured() {
         let c = cp("/w/p", "/w/p", Some("main"));
-        let (scope, fallback) =
-            resolve_scope(Some(Scope::All), Some(&c), UmbrellaPolicy::Require).unwrap();
+        let (scope, fallback) = resolve_scope(
+            Some(Scope::All),
+            Some(&c),
+            UmbrellaPolicy::Require,
+            Scope::Project,
+        )
+        .unwrap();
         assert_eq!(scope, Scope::Umbrella);
         assert!(!fallback);
     }
@@ -435,8 +469,13 @@ mod tests {
         // a live A/B against the running server, then by the owner. See
         // docs/issues/archive/2026-08-15-context-scope-all-crosses-umbrella-boundary.md.
         let c = cp("/w/p", "/w/p", Some("main"));
-        let (scope, fallback) =
-            resolve_scope(Some(Scope::All), Some(&c), UmbrellaPolicy::Literal).unwrap();
+        let (scope, fallback) = resolve_scope(
+            Some(Scope::All),
+            Some(&c),
+            UmbrellaPolicy::Literal,
+            Scope::Project,
+        )
+        .unwrap();
         assert_eq!(scope, Scope::All);
         assert!(!fallback);
     }
@@ -446,9 +485,20 @@ mod tests {
         // The discriminating pair: identical inputs, opposite outcomes, and the
         // only difference is the policy named at the call site.
         let c = cp("/w/p", "/w/p", None);
-        assert!(resolve_scope(Some(Scope::All), Some(&c), UmbrellaPolicy::Require).is_err());
-        let (scope, _) =
-            resolve_scope(Some(Scope::All), Some(&c), UmbrellaPolicy::Literal).unwrap();
+        assert!(resolve_scope(
+            Some(Scope::All),
+            Some(&c),
+            UmbrellaPolicy::Require,
+            Scope::Project
+        )
+        .is_err());
+        let (scope, _) = resolve_scope(
+            Some(Scope::All),
+            Some(&c),
+            UmbrellaPolicy::Literal,
+            Scope::Project,
+        )
+        .unwrap();
         assert_eq!(scope, Scope::All);
     }
 
@@ -456,7 +506,8 @@ mod tests {
     fn project_and_repo_fall_back_to_all_without_a_current_project() {
         for policy in [UmbrellaPolicy::Require, UmbrellaPolicy::Literal] {
             for requested in [Scope::Project, Scope::Repo] {
-                let (scope, fallback) = resolve_scope(Some(requested), None, policy).unwrap();
+                let (scope, fallback) =
+                    resolve_scope(Some(requested), None, policy, Scope::Project).unwrap();
                 assert_eq!(scope, Scope::All, "{requested:?} under {policy:?}");
                 assert!(
                     fallback,
@@ -481,9 +532,9 @@ mod tests {
                 Some(Scope::Repo),
                 Some(Scope::Umbrella),
             ] {
-                let r = resolve_scope(requested, current, UmbrellaPolicy::Require)
+                let r = resolve_scope(requested, current, UmbrellaPolicy::Require, Scope::Project)
                     .expect("Require must succeed when `all` was not requested");
-                let l = resolve_scope(requested, current, UmbrellaPolicy::Literal)
+                let l = resolve_scope(requested, current, UmbrellaPolicy::Literal, Scope::Project)
                     .expect("Literal must succeed when `all` was not requested");
                 assert_eq!(
                     r,
@@ -543,8 +594,93 @@ mod tests {
             hits,
             vec!["librarian/tools/scope.rs (1)".to_string()],
             "the scope fallback arm must live only in resolve_scope; new handlers \
-         should call resolve_scope(requested, current, UmbrellaPolicy::_) rather \
-         than re-inlining the match — found: {hits:?}"
+             should call resolve_scope(requested, current, UmbrellaPolicy::_, Scope::Project) \
+             rather than re-inlining the match — found: {hits:?}"
+        );
+    }
+
+    /// Gate: every `resolve_scope` CALL in the tree names `Scope::Project` as its
+    /// default.
+    ///
+    /// `Scope` deliberately has no `Default` (see its doc comment), so the default
+    /// is chosen per call site — which is what makes it reviewable, and also what
+    /// makes a fourth handler free to pick a different one. Before the derive was
+    /// removed, three surfaces disagreed in exactly this way and nothing failed:
+    /// `find`/`context`/`state_at` took `Repo` from the attribute, `link_scan`
+    /// hardcoded `Project`, `reindex` picked `Project`-or-`All`, and all four
+    /// documentation surfaces said "project".
+    ///
+    /// Scans source text rather than behaviour on purpose: a test that calls
+    /// `resolve_scope(None, .., Scope::Project)` and asserts it returns `Project`
+    /// is computed from the thing it judges and cannot fail.
+    ///
+    /// The needles are assembled character-wise so this test's own source does not
+    /// match them.
+    #[test]
+    fn every_resolve_scope_call_names_project_as_its_default() {
+        let call: String = [
+            'r', 'e', 's', 'o', 'l', 'v', 'e', '_', 's', 'c', 'o', 'p', 'e', '(',
+        ]
+        .into_iter()
+        .collect();
+        let want: String = [
+            'S', 'c', 'o', 'p', 'e', ':', ':', 'P', 'r', 'o', 'j', 'e', 'c', 't',
+        ]
+        .into_iter()
+        .collect();
+        let root = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut offenders: Vec<String> = Vec::new();
+        let mut checked = 0usize;
+        for entry in walkdir::WalkDir::new(&root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            for (idx, _) in content.match_indices(call.as_str()) {
+                let line_start = content[..idx].rfind('\n').map(|i| i + 1).unwrap_or(0);
+                let line_prefix = &content[line_start..idx];
+                // Skip the definition itself, and any mention in a line comment.
+                if line_prefix.contains("fn ") || line_prefix.trim_start().starts_with("//") {
+                    continue;
+                }
+                checked += 1;
+                // Widen past rustfmt's wrapping; clamp to a char boundary because
+                // the surrounding source contains multi-byte punctuation.
+                let mut end = (idx + 240).min(content.len());
+                while !content.is_char_boundary(end) {
+                    end -= 1;
+                }
+                if !content[idx..end].contains(want.as_str()) {
+                    let line_no = content[..idx].matches('\n').count() + 1;
+                    let rel = path.strip_prefix(&root).unwrap_or(path);
+                    offenders.push(format!(
+                        "{}:{line_no}",
+                        rel.display().to_string().replace('\\', "/")
+                    ));
+                }
+            }
+        }
+        // Positive control: a scan that matched nothing must not read as a pass.
+        // There are at least three production call sites (find, context,
+        // workspace_state_at); a lower count means the needle stopped matching,
+        // not that the tree got cleaner.
+        assert!(
+            checked >= 3,
+            "found only {checked} resolve_scope call site(s) — the SCAN is broken, \
+             not the code"
+        );
+        assert!(
+            offenders.is_empty(),
+            "every resolve_scope call must name Scope::Project as its default — the \
+             librarian's documented default on every user-facing surface. A handler \
+             that wants a different breadth should say so in its own doc comment and \
+             this gate should be widened deliberately. Offenders: {offenders:?}"
         );
     }
 

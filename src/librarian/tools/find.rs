@@ -698,10 +698,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let base =
         combine_user_with_archived_hide(user_filter, a.include_archived, user_constrains_status);
 
+    // `Scope::Project` is `find`'s documented default: a search surface answers
+    // about the project you are in, and widening is a `scope` param away — the
+    // response's `more_in_repo` / `more_in_umbrella` hints name the next rung.
     let (effective_scope, scope_fallback) = resolve_scope(
         a.scope,
         ctx.current_project.as_deref(),
         UmbrellaPolicy::Require,
+        Scope::Project,
     )?;
 
     let current = ctx.current_project.as_deref();

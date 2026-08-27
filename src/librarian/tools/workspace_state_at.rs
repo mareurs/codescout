@@ -94,10 +94,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
 
+    // `Scope::Project` matches `find`: `workspace_state_at` is the time-travel
+    // twin of a find, and the two must answer about the same population or a
+    // before/after comparison is measuring two different sets.
     let (effective_scope, scope_fallback) = resolve_scope(
         a.scope,
         ctx.current_project.as_deref(),
         UmbrellaPolicy::Require,
+        Scope::Project,
     )?;
 
     let base_filter = build_base_filter(a.kinds.as_deref(), a.include_archived);

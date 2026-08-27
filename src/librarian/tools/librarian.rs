@@ -58,7 +58,7 @@ impl Tool for Librarian {
                     "type": "string",
                     "enum": ["project", "repo", "umbrella", "all"],
                     "default": "project",
-                    "description": "context/reindex/workspace_state_at/link_scan: scope. audit_doc_refs: project-scoped only in v1 — any other value is rejected. Defaults to active project."
+                    "description": "context/reindex/workspace_state_at/link_scan: scope. audit_doc_refs: project-scoped only in v1 — any other value is rejected. Defaults to the active project on every action; `reindex` alone widens to `all` when no project is active, since there is then no project to re-scan."
                 },
                 "repo": { "type": "string", "description": "reindex: restrict to a specific workspace root" },
                 "force": { "type": "boolean", "description": "reindex: ignore cached file hashes and re-walk every file (re-classification; does NOT by itself force re-embedding — see reembed)" },

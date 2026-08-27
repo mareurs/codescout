@@ -585,8 +585,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let current = ctx.current_project.as_deref();
     // Literal, not Require: `context` is an orientation surface and reaching
     // across every project on an explicit `scope="all"` is the point of it.
+    // `Scope::Project` is the default here too. `context` differs from `find` on
+    // what an explicit `all` MEANS (`Literal`, not `Require` — see the comment
+    // above), not on where an unspecified query starts.
     let (effective_scope, scope_fallback) =
-        resolve_scope(a.scope, current, UmbrellaPolicy::Literal)?;
+        resolve_scope(a.scope, current, UmbrellaPolicy::Literal, Scope::Project)?;
     // Entry-grain anchor (Layer 4). Returns `None` for anything that does not resolve to
     // a Statement, so every file-grain anchor falls through to the path below with its
     // behaviour untouched — the requirement holds by construction, not by regression test.
@@ -2365,7 +2368,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repo_scope_excludes_other_repos() {
+    async fn default_scope_is_project_and_excludes_other_repos() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().to_path_buf();
         let cat = Catalog::open_in_memory().unwrap();
@@ -2384,7 +2387,10 @@ mod tests {
         );
         in_proj.abs_path = proj_dir.join("auth.md");
         let mut out_proj = sample_row("out", "agents", "x/auth.md", "auth elsewhere", Some("auth"));
-        // Place the other repo's row outside the active git_root so scope=Repo excludes it.
+        // Place the other repo's row outside the active project AND outside the
+        // git_root, so it is excluded under either scope — what this test pins is
+        // the DEFAULT, and a fixture that only one scope excluded could not tell
+        // a correct default from a wrong one.
         let other_root = std::path::PathBuf::from("/some/other/repo");
         out_proj.abs_path = other_root.join("x/auth.md");
         artifact::upsert(&cat, &in_proj).unwrap();
@@ -2409,7 +2415,7 @@ mod tests {
         let included = v["included_ids"].as_array().unwrap();
         assert_eq!(included.len(), 1);
         assert_eq!(included[0], "in");
-        assert_eq!(v["scope"]["applied"], "repo");
+        assert_eq!(v["scope"]["applied"], "project");
     }
 
     #[tokio::test]

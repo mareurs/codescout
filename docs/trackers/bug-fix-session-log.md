@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 72
+entry_high_water_F: 73
 entry_high_water_W: 71
 ---
 
@@ -119,6 +119,7 @@ entry_high_water_W: 71
 | F-67 | 2026-08-26 | med | self-friction | validated | Two tree-wide writes swallowed a peer's in-flight work — `cargo fmt` and `git add <dir>` |
 | F-66 | 2026-08-26 | high | process | open | Quoted the substrate law at the user, then measured a retired sqlite store all session — backend is Qdrant, `codescout.db` untouched since Aug 25; five published figures described a dead world, and a passing positive control validated the instrument against the wrong database |
 | F-69 | 2026-08-26 | med | process | fixed-verified | Bug-file citations written at a future `archive/` path schedule no sweep — the archive flow repairs citations that *were* correct, never one wrong the day it was written |
+| F-73 | 2026-08-27 | med | self-friction | fixed-verified | A bug file's "four documentation surfaces" included one nothing reads — `companion_hint.md` is `include_str!`'d only by its own test, and grep grain cannot tell that from a live surface. A surface list is a reachability claim wearing a location list's clothes |
 | F-72 | 2026-08-27 | high | self-friction | validated | Writing an honest caveat discharges the obligation to close it — two sessions, forty minutes apart, each named the exact missing check in prose and then stopped. The tell: a caveat that names a specific next action is a work item, not a deliverable. Mechanism behind [[R-95]], seen from inside |
 | F-71 | 2026-08-26 | med | self-friction | fixed-verified | Three claims published from instruments that could not discriminate the hypothesis from its alternative — and the retraction of one lost a race to a peer's committed ledger entry |
 | F-70 | 2026-08-26 | med | process | fixed-verified | A dead citation that was wrong when written is indistinguishable from one that decayed — 0 of 6 in a 321-citation sweep were decay, and three independent artifacts misread it from the prose; the `--diff-filter=AD` probe is the only discriminator |
@@ -6362,6 +6363,82 @@ Criterion proposed by `claude-plugins-15`, who declined to promote it to the
 reconnaissance skill for exactly this reason. Candidate home is `reconnaissance-patterns` beside R-95, as its
 inside-view; the pairing is what makes both actionable, since R-95 tells you to re-cost a
 deferral and this tells you why the author will not.
+
+## F-73 — A bug file's "four documentation surfaces" included one nothing reads — grep grain cannot distinguish a live `include_str!` from a test-only one
+
+**Observed:** 2026-08-27, pre-implementation scout for option C on bug
+`b010f1812f5a74ed` (librarian `scope` default). About to edit the four
+documentation surfaces the bug file enumerates.
+
+**When:** Reading the seam before the first edit. The bug file was written
+earlier *in the same session*, by me, from a grep.
+
+**Expected (bug file):** four live documentation surfaces state the wrong
+default and all four need correcting —
+`src/librarian/tools/artifact.rs:70`, `src/librarian/tools/librarian.rs:61`,
+`src/prompts/guides/librarian.md:79`, and
+`src/librarian/prompts/companion_hint.md:56`.
+
+**Got (scouted reality):** three are live; the fourth is inert.
+`companion_hint.md` has exactly **one** reference in the entire tree —
+`tests/librarian/companion_hint.rs:7`, which `include_str!`s it solely to assert
+it mentions no unknown tool names (`hint_mentions_only_real_tools`). Nothing
+under `src/` reads it: `grep "companion_hint"` over `src/**/*.rs` returns **0
+matches**, and the only other hits are this session's own bug file, two 2026-05
+plans naming it under its pre-dissolution path `crates/librarian-mcp/src/prompts/`,
+and an archived bug that recorded *"`librarian-runtime.md` and `companion_hint.md`
+have no [test]"*. It is a leftover of the crate dissolved in `d48bf992`, kept
+syntactically honest by one test and served to nobody.
+
+By contrast `guides/librarian.md` is genuinely live and reached two ways —
+`src/prompts/mod.rs:503` (`topic_body`, i.e. `get_guide("librarian")`) and
+`src/server.rs:1486` (`static_doc_sources`).
+
+**Probable cause:** the bug file's surface list was built by grepping for the
+*wrong string* and never by asking who *reads* each hit. A grep answers "where
+does this text appear", which is not the question "which surfaces reach a user" —
+and a file that is `include_str!`'d **by a test** looks identical, at grep grain,
+to one `include_str!`'d by the server. Same class as R-49 (re-entering your own
+artifact is a seam), with a distinct mechanism: not a wrong *claim*, a wrong
+*reachability* assumption baked into a worklist.
+
+**Workaround:** correct the three live surfaces. Fix `companion_hint.md` too —
+it is three words and leaving a false statement in a tracked file is its own rot —
+but do not count it as user-facing, and do not let its edit stand in for the
+prompt-surface verification the live guide needs.
+
+**Severity:** med — an implementer following the list would have edited a dead
+file believing a user-facing surface was fixed, and would have reported four
+surfaces corrected when three were. Costs no build failure, which is exactly why
+nothing downstream would have caught it: there is no gate on "did this edit reach
+anyone", and the file's one test passes either way since the edit touches no tool
+name.
+
+**Related, same scout (no separate entry — the test suite would have caught this
+one loudly and cheaply):** `src/librarian/tools/context.rs:2412` asserts
+`v["scope"]["applied"] == "repo"` for a scope-unspecified `context` call. Option C
+changes that string to `"project"`. Worth noting for its fixture rather than its
+failure: it builds `abs_path != git_root` deliberately (*"Place the other repo's
+row outside the active git_root so scope=Repo excludes it"*), which is the shape
+`scripts/probe_librarian_scope.py` measured at **0 of 923** real recorded scope
+blocks. The suite exercises the case production never hits — so the test suite is
+a better oracle for this change than the usage log is.
+
+**Status:** fixed-verified — surface list corrected before any edit landed.
+
+**Valid:** dated 2026-08-27
+
+True of `companion_hint.md`'s reachability at `4da15749`; re-verify if anything
+under `src/` starts loading it, which would make it live again.
+
+**Rests on:** `grep "companion_hint"` over `src/**/*.rs` returning zero, and
+`tests/librarian/companion_hint.rs:7` being the sole `include_str!` of it —
+both read this session.
+
+**Fix idea / Pointer:** When a bug file enumerates "surfaces to fix", record for
+each one *who reads it* alongside the `path:line`. A surface list is a
+reachability claim; it currently reads as a location list, and the two are only
+accidentally the same. Bug `b010f1812f5a74ed`, this session.
 
 ## Template for new entries
 
