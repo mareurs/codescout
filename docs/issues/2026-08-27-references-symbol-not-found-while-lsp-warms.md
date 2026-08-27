@@ -1,26 +1,28 @@
 ---
-status: open
+status: zombie
 opened: 2026-08-27
 closed:
 severity: low
 owner: marius
 related: []
-unverified: 'Observed once and not reproducible afterward; the warming-LSP mechanism is inferred from call ordering, never instrumented. No git state captured — shell was disabled in this project at observation time.'
-tags: ["references", "lsp", "cold-start", "misleading-error", "unreproduced"]
+unverified: Symptom observed exactly once and never reproduced. The originally-filed mechanism (a warming LSP yielding a resolution error the false-zero guard cannot see) is REFUTED by deliberate cold-start probes, which produce the guarded false-zero instead. No mechanism identified; kept as zombie with a re-open trigger rather than closed.
+tags: ["references", "lsp", "cold-start", "misleading-error", "unreproduced", "refuted-mechanism"]
 kind: bug
+last_observed: 2026-08-27
 ---
 
 # BUG: `references` answers a warming LSP with `symbol not found` — a resolution error, which the false-zero guard cannot see
 
 ## Summary
-`references(symbol, path)` returned a hard `symbol not found` error for a symbol
-that plainly exists, on the first call after `activate_project`. The same call
-later in the same session returned 31 references in 11 files. This is the known
-warming-LSP class, but with a symptom the existing mitigation does not cover:
-`docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` guards the
-case where resolution SUCCEEDS and yields zero external callers, whereas here
-resolution itself fails, so no reference lookup is ever attempted.
 
+`references(symbol, path)` returned a hard `symbol not found` error once, for a
+symbol that plainly exists, then returned 31 references on an identical later
+call. **Filed 2026-08-27 with a root cause that has since been refuted.** The
+entry originally claimed this was the warming-LSP class with a symptom the
+false-zero guard cannot reach; a deliberate cold-start reproduction shows the
+opposite — the cold-start path produces the GUARDED false-zero, and its guard
+fires correctly. The original observation remains unreproduced with no identified
+mechanism.
 ## Symptom (Effect)
 First call, immediately after `workspace(action="activate")` on the home project:
 
@@ -45,13 +47,41 @@ wrong name form, and it points at the trait-impl syntax — neither of which
 applies to a plain top-level struct that `symbols(name=...)` resolves fine.
 
 ## Reproduction
-**Not reproducible on demand** — a timing window, not a deterministic input.
 
-Best lead: call `references` on a top-level type as the *first* LSP-touching
-call after `workspace(action="activate")`, before any `symbol_at` / `symbols`
-traffic has warmed rust-analyzer. In the observed case the file had also just
-been edited and committed, so a `ContentModified`-style race is not excluded.
+**Not reproducible.** Two mechanisms were probed deliberately; both are refuted.
 
+**1. Genuine LSP cold start — produces a DIFFERENT, guarded symptom.**
+
+```
+workspace(action="status", post_compact=true)      # flushes all LSP clients
+references(symbol="ToolCapabilities", path="src/tools/core/types.rs")
+```
+
+Confirmed genuinely cold: `ps -o etime -C rust-analyzer` showed **ELAPSED 00:19**
+immediately after, i.e. the process had just respawned for this call. Result was
+not `symbol not found` but:
+
+```
+0 references
+
+warning: LSP returned 0 references outside the definition file, but
+`ToolCapabilities` appears as a whole word in 5+ other source file(s) (e.g. …) —
+the reference index may still be warming after a reindex. Re-run, or corroborate
+with grep / call_graph(direction='callers') before treating this symbol as unused.
+```
+
+That is the symptom of `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md`,
+and its `corroborate_zero_references` guard fired **correctly** — accurate,
+actionable, naming the corroborating tools.
+
+**2. Stale position after an in-place edit — refuted.** The original failure came
+moments after `types.rs` was edited (a field plus a long doc comment), so a stale
+indexed line number was the leading candidate. Probed by inserting a comment line
+directly above the struct to shift its position, then querying immediately:
+still 31 references. Probe reverted; `types.rs` clean.
+
+A plain `activate` does not reproduce it either — it does not cold-start an
+already-warm rust-analyzer.
 ## Environment
 - Project: codescout (Rust, rust-analyzer), branch `experiments`
 - Transport: MCP stdio, Claude Code
@@ -60,29 +90,28 @@ been edited and committed, so a `ContentModified`-style race is not excluded.
   time — `shell_command_mode = "disabled"` was in effect, so no `git` available)
 
 ## Root cause
-**Unknown — inferred, not measured.** The call ordering is consistent with
-rust-analyzer still loading when the first `references` landed:
 
-- `symbols(name_path=..., include_body=true)` succeeded in the same batch — but
-  that is the AST/tree-sitter index, not LSP.
-- `semantic_search` and `read_file` succeeded in the same batch — neither is
-  LSP-backed.
-- `symbol_at` (LSP-backed, `def` + `hover`) succeeded in the *next* batch, which
-  is the first positive evidence LSP was up.
-- `references` on two other symbols — `check_tool_access` (function) and
-  `Availability` (enum, **same file**) — succeeded after that.
+**Unknown, and the originally-filed cause is REFUTED.**
 
-So no LSP-backed call is known to have succeeded before the failure, and every
-LSP-backed call after it succeeded. That is suggestive, not conclusive: nothing
-instrumented whether project-load was actually in flight.
+This entry first claimed: *"same root-cause class as the archived false-zero bug,
+but a resolution error rather than a successful zero — so
+`corroborate_zero_references`, which fires on `external_refs == 0`, cannot reach
+this symptom."* The reasoning was sound and the premise was wrong. A deliberate
+cold start does **not** produce a resolution error; it produces the guarded
+false-zero, guard firing. So there is no evidence that a warming LSP can yield
+`symbol not found` at all, and the gap this entry was filed to name may not exist.
 
-Why the existing guard misses it —
-`docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` added
-`corroborate_zero_references` in `src/tools/symbol/references.rs`, which fires
-when `external_refs == 0`. That requires the symbol to have resolved. Here
-resolution failed first, so the guard is structurally unreachable for this
-symptom.
+What is established:
 
+- The observation happened (verbatim error quoted under Symptom).
+- `symbols(name="ToolCapabilities")` and `symbol_at(path, 464)` both resolved the
+  same name at the same path at that moment, so the arguments were correct.
+- It has not recurred across many `references` calls since, including two
+  deliberate cold starts and one post-edit probe.
+
+measured 2026-08-27: `workspace(post_compact=true)` → `references` on a fresh
+(19s-old) rust-analyzer → `0 references` + completeness warning, twice; comment
+insert above the struct → 31 references, no failure.
 ## Evidence
 ### Ordering of the four batches, single session
 ```
@@ -111,42 +140,54 @@ line 464 returned a full hover including the struct's fields. So the name and
 path passed to `references` were correct.
 
 ## Hypotheses tried
-1. **Hypothesis:** Wrong symbol name or `name_path` form (what the hint claims).
-   **Test:** `symbols(name="ToolCapabilities")` and `symbol_at(path, 464)`.
+
+1. **Hypothesis:** Wrong symbol name or `name_path` form (what the error's hint
+   suggested). **Test:** `symbols(name="ToolCapabilities")`, `symbol_at(path, 464)`.
    **Verdict:** rejected — both resolve the bare name at that path.
 2. **Hypothesis:** Caused by `shell_command_mode = "disabled"`, set moments
-   earlier. **Test:** `references` on two other symbols in the same session with
-   shell still disabled. **Verdict:** rejected — both succeeded;
-   `shell_command_mode` is read only by `run_command` and
-   `current_capabilities`, and `references` is gated on `RequiresLsp`.
-3. **Hypothesis:** `references` cannot resolve `struct` symbols, only functions
-   and enums. **Test:** re-ran the identical call in batch 4.
-   **Verdict:** rejected — returned 31 references.
-4. **Hypothesis:** rust-analyzer had not finished project-load when the first
-   call landed. **Test:** none — inferred from batch ordering only.
-   **Verdict:** deferred, unmeasured. This is the leading hypothesis.
-
+   earlier. **Test:** `references` on two other symbols with shell still disabled.
+   **Verdict:** rejected — both succeeded; `references` is gated on `RequiresLsp`
+   and reads no shell config.
+3. **Hypothesis:** `references` cannot resolve `struct` symbols. **Test:** re-ran
+   the identical call. **Verdict:** rejected — 31 references.
+4. **Hypothesis:** rust-analyzer had not finished project-load, and a resolution
+   failure in that window surfaces as `symbol not found`. **Test:**
+   `workspace(post_compact=true)` to flush clients, then `references` as the first
+   navigation call, with `ps -o etime -C rust-analyzer` confirming a 19-second-old
+   process. **Verdict:** REFUTED — the cold-start window yields `0 references`
+   plus the completeness warning, i.e. the guarded false-zero path, not a
+   resolution error. This was the leading hypothesis and the entry's filed cause.
+5. **Hypothesis:** a stale indexed position after the in-place edit to `types.rs`
+   that immediately preceded the failure. **Test:** inserted a comment line above
+   the struct to shift its line number, queried immediately. **Verdict:** rejected
+   — 31 references; probe reverted.
 ## Fix
-N/A — not attempted. Two candidate directions, neither implemented:
 
-- **Cheap:** when symbol resolution fails and the language has a live LSP that
-  has not confirmed project-load, say so in the error instead of suggesting the
-  caller mistyped the name. Same shape as the fix in
-  `docs/issues/archive/2026-08-16-audit-doc-refs-calls-a-warming-lsp-offline.md`,
-  which stopped `audit_doc_refs` calling a warming LSP "offline".
-- **Fuller:** retry resolution on the cold-start retry budget. Note the archived
-  false-zero bug found the budget already covers `textDocument/references` but
-  never fires there, because a definition-only response is a *success*. A
-  resolution failure is an error, so it may already be retriable — worth
-  checking before writing anything.
+None, and none is warranted while the mechanism is unknown and the filed cause is
+refuted. Writing a "fix" for a resolution-error path that no probe can produce
+would be the empty-population defect — code that compiles, tests that pass, and
+zero cases acted on.
 
+**A positive finding worth keeping instead:** the mitigation from
+`docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` is now
+**validated in a live cold-start window** rather than only by unit test. Its
+`corroborate_zero_references` text scan fired on a genuinely 19-second-old
+rust-analyzer, correctly identified 5+ other files containing the identifier, and
+named `grep` / `call_graph(direction='callers')` as corroboration. That archived
+entry recorded its guard as a mitigation with the LSP barrier deferred; this is
+the first end-to-end confirmation that the guard does its job.
 ## Tests added
-None. Justified: the trigger is a project-load timing window with no mock-LSP
-fixture in the suite for `References::call` (the archived false-zero bug records
-the same gap and tested its text-scan helper in isolation instead). A test
-asserting the *error text* would be possible without reproducing the race, but
-only after deciding what the message should say.
 
+None. Justified: there is no established defect left to guard. The symptom this
+entry was opened for is unreproduced and its proposed mechanism is refuted; the
+adjacent real behaviour (cold-start false zero) already has a guard, and that
+guard is now confirmed working in production conditions.
+
+If `symbol not found` recurs, the test to write is a `References::call` unit case
+pinning the error TEXT for an unresolvable symbol — the original hint
+(*"Trait impl methods use format …"*) was actively misleading for a plain
+top-level struct, and that is fixable independently of whatever causes the
+resolution to fail.
 ## Workarounds
 - Re-run `references` once. It is a warming window, not a persistent state.
 - Warm LSP first, or corroborate with `grep "\bSYMBOL\b"` /
@@ -156,14 +197,21 @@ only after deciding what the message should say.
   `symbols(name=...)` finds the same symbol.
 
 ## Resume
-Instrument first, then decide. Add a debug log in
-`src/tools/symbol/references.rs` at the resolution-failure branch recording
-whether the language's LSP client has confirmed project-load, then reproduce by
-`workspace(action="activate")` followed immediately by `references` on a
-top-level type in a large file. If project-load is in flight, compare the branch
-against the cold-start retry budget in `src/lsp/client.rs` to see whether a
-resolution error is already retriable and merely not retried here.
 
+**Nothing to do unless it recurs.** Re-open trigger: `references` returns
+`symbol not found` for a symbol that `symbols(name=…)` resolves at the same path.
+If that happens, capture in the same turn, before anything warms:
+
+1. `ps -o pid,etime -C rust-analyzer` — process age, to establish whether it is
+   genuinely a cold-start window (the 2026-08-27 probes were 19s and did NOT
+   reproduce, so a recurrence at similar age argues against cold start entirely).
+2. `symbols(name="<sym>")` and `symbol_at(path, line)` — confirm the arguments
+   resolve by other means, as they did originally.
+3. The exact preceding call sequence in the session, since the one observation
+   followed a `workspace(activate)` and an in-place edit to the same file.
+
+Do NOT re-file the refuted mechanism. Both cold-start and stale-position are
+probed and rejected — see Hypotheses tried, entries 4 and 5.
 ## References
 - `docs/issues/archive/2026-06-09-references-false-zero-stale-graph.md` — same
   root-cause class, different symptom; its `corroborate_zero_references` guard
