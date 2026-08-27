@@ -15,7 +15,7 @@ related:
 - '4574d18db7aacec8'
 - '3be6b587a9c92a7a'
 severity: high
-unverified: MECHANISM confirmed for both symptom forms (read-only refusal AND silent wrong-project reads) at path:line. WHICH specific call triggers each occurrence is still not logged/pinned per-incident — occurrence 4 is the only one with a named trigger (SendMessage resume of a subagent).
+unverified: 'MECHANISM confirmed for both symptom forms at path:line, and BOTH diagnosis gaps are now closed (read-only form: 00948381; silent wrong-project form: 76e287f8). The underlying clobber is NOT fixed — Agent::activate still clears the registry and reassigns default_workspace_root for anything sharing the session''s process, and the two structural remedies remain undecided (option 2 is a policy call; option 3 is blocked on MCP RequestContext carrying no per-caller identity). WHICH specific call triggers each occurrence is still not logged per-incident; occurrence 4 is the only one with a named trigger (SendMessage resume of a subagent).'
 ---
 
 ## Summary
@@ -178,6 +178,55 @@ Committed `experiments` (label: **experiments**) sha `00948381d3ef06448e03552ed0
 patch-id `d7d6bc55f292fb3983613c57f7812dc74d6b880b`. The two structural options (2/3) remain
 undecided and unimplemented — this only closes the diagnosis gap for the read-only form, not
 the underlying clobber. Not archiving this file: root cause is still open.
+
+**IMPLEMENTED 2026-08-27 — the silent form's diagnosis gap is closed too.** The section
+above concluded the wrong-project form could not get the same treatment as the read-only
+form because "nothing errors to hang the hint on." That is true of `grep` and `symbols`
+returning zero. It is **not** true of `read_file` / `read_markdown`: a not-found *is* an
+error, and it was discarding the one fact that separates the two readings.
+
+Both sites built their message from the caller's **relative** argument and threw away
+`resolved` — the absolute path naming the tree — which was in scope at each failure site
+and simply unused:
+
+```
+before:  file not found: 'src/agent/mod.rs'
+         hint: Check the path with tree, or use tree with `glob` to locate the file
+
+after:   file not found: 'src/agent/mod.rs' (searched /home/.../other-repo/src/agent/mod.rs)
+         hint: ... If the root above is not the project you meant, a subagent sharing this
+               session's process may have changed the active project — call
+               workspace(action='status') to check.
+```
+
+The old hint was worse than silent: it routed the caller to `tree`, which runs against the
+same wrong root and **confirms** the absence. Occurrence 4 is exactly this shape —
+`read_file` on a 131 KB tracked file answering "not found," with `workspace(status)` the
+only call that could surface why.
+
+Two independent arms (`read_file_text`, `resolve_markdown_source`), so both are pinned:
+`file_not_found_names_the_root_it_searched` and
+`read_markdown_file_not_found_names_the_root_it_searched`. The second passes a RELATIVE
+path deliberately — an absolute one makes the assertion vacuous, since the caller's own
+argument would already carry the root — and was mutation-checked: reverting only the
+message while leaving the new hint in place fails it on the root assertion specifically.
+Both messages keep the `file not found:` prefix that
+`src/usage/db.rs::normalize_err_family` keys on.
+
+`grep` and `symbols` plain zeros are deliberately unchanged. They carry no error to hold
+the fact, and `completeness_warning`'s contract makes a trustworthy bare zero load-bearing
+— attaching a root to every empty result is the noise that stops it being read. One
+surface naming the root is enough to break the illusion, and this is the surface that
+already errors.
+
+Fix `76e287f8` on `experiments`, patch-id `f328f65909ef74d80768f7657d3d6e86d1bf4268`.
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test` 4612 passed /
+0 failed / 47 ignored.
+
+**Still not archiving.** This closes the second and last *diagnosis* gap; the underlying
+clobber is untouched. Options 2 (declare unpinned-concurrent unsupported) and 3
+(structural guard, blocked on MCP `RequestContext` having no per-caller identity) remain
+undecided and are the open work.
 ## Hypotheses tried
 
 - **"A subagent did it."** Plausible on timing — both occurrences sit next to subagent
