@@ -960,14 +960,19 @@ fn pipeline_segments(command: &str) -> Vec<String> {
 
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
 /// command's output to a **trimmer** that hides a subset of it
-/// (`tail`/`head`/`grep`/`less`/`sed`/`awk`/`cut`/`sort`/`uniq`/`tr`/`fmt`).
+/// (`tail`/`head`/`grep`/`less`/`sed`/`awk`/`sort`/`uniq`/`fmt`).
 ///
 /// IL3 exists because piping destroys the `@cmd_*` buffer: a filtered/truncated
 /// slice reaches the agent, but the full output is gone. Re-running just to grep
 /// wastes a tool call. Server-side enforcement covers all MCP clients (Claude
-/// Code, Copilot, Gemini, …) — companion-plugin hooks are Claude-Code-specific
-/// and miss subagent contexts (see
-/// `docs/issues/archive/2026-05-18-il3-pipe-violation-subagent.md`).
+/// Code, Copilot, Gemini, …).
+///
+/// *(The doc comment here used to name `codescout-companion/hooks/il3-deny-hook.sh`
+/// as a mirror to keep in sync. That file still exists but is no longer wired:
+/// measured 2026-08-27, no `hooks.json` PreToolUse matcher targets `run_command`,
+/// and `cargo --version; ls docs | head -3` — which the hook's non-segment-splitting
+/// logic would refuse — is allowed end to end. This function is the only live
+/// enforcement.)*
 ///
 /// **Pure aggregators on the RHS are allowed** — they collapse output to a
 /// bounded summary you cannot reconstruct from a partial view, so piping to them
@@ -976,8 +981,8 @@ fn pipeline_segments(command: &str) -> Vec<String> {
 ///   - `wc` (any flags) — emits only counts.
 ///   - counting `grep -c` / `--count` — emits a match count, not the matches.
 ///
-/// `git status --porcelain | wc -l` and `git log | grep -c fix` are therefore
-/// fine. A *filtering* `grep` (no `-c`), `head`, `tail`, `sort`, … still trims.
+/// **A pipeline that collapses ANYWHERE is allowed whatever follows it** — see
+/// [`stage_collapses`]. **Field selectors never trim** — see [`stage_trims`].
 ///
 /// **Bounded LHS is allowed.** The original rule blocked any allowlisted LHS
 /// piped to a trimmer; this over-triggered on ad-hoc finite probes
@@ -998,32 +1003,49 @@ fn pipeline_segments(command: &str) -> Vec<String> {
 /// is fine.
 ///
 /// Returns `Some(hint)` when the command violates IL3; `None` otherwise.
-/// Mirrors the regex in `codescout-companion/hooks/il3-deny-hook.sh`.
 pub fn detect_il3_violation(command: &str) -> Option<String> {
     // Analyse shell *structure*, not the raw string: drop heredoc bodies (data, not
     // syntax) and consider each `;`/`&&`/`||`-separated command on its own. Both
     // were real false positives — a commit message describing a pipe, and a
     // `;`-chain whose first word happened to be `git`.
     let stripped = strip_heredoc_bodies(command);
-    let lead = pipeline_segments(&stripped)
-        .iter()
-        .find_map(|seg| il3_offending_lead(seg))?
-        .trim()
-        .to_string();
+
+    // Carry the offending SEGMENT out alongside its lead, and quote the segment
+    // rather than the whole `command`, so a multi-statement script is localized.
+    // Quoting the whole input rendered a five-line script with a `for` loop as
+    // "the thing piped to a log-trimmer" — including a trailing `git branch
+    // --contains` with no pipe in it at all, leaving the reader to find the
+    // offending pipe themselves. The segment comes from the heredoc-stripped
+    // text, so a heredoc's body is elided from the echo; that is the syntax the
+    // decision was actually made on.
+    let (segment, lead) = pipeline_segments(&stripped)
+        .into_iter()
+        .find_map(|seg| il3_offending_lead(&seg).map(|lead| (seg, lead)))?;
+    let segment = segment.trim();
+    let lead = lead.trim();
 
     Some(format!(
-        "IL3 violation — piped `{command}` to a log-trimmer. BLOCKED.\n\n\
+        "IL3 violation — piped `{segment}` to a log-trimmer. BLOCKED.\n\n\
          The @cmd_* buffer system saves context tokens:\n  \
          1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
          2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
                                                     (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
+         ⚠ That buffer is CAPPED. When the response carries `unfiltered_truncated: true`\n\
+         it holds only a PREFIX, and nothing in the buffer marks where it was cut — so a\n\
+         grep over it can report `0` for something present, and a hash of it\n\
+         (`git patch-id`, `sha256sum`) is a valid-looking WRONG digest. For whole-input\n\
+         work, redirect to a file instead:\n  \
+         git show <sha> > /tmp/x.patch && git patch-id --stable < /tmp/x.patch\n\n\
          Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
-         as are pure aggregators on the RHS (wc, grep -c) — they collapse output to a summary.\n\
+         as are pure aggregators on the RHS (wc, grep -c). A pipeline that collapses\n\
+         ANYWHERE (wc, grep -c, sha256sum, git patch-id) is allowed whatever follows it,\n\
+         and field selectors (cut, tr) are 1:1 on records so they never trim.\n\
          Only unbounded LHS (cargo, npm, pytest, rg, fd, grep -r, bare find, ...) piped to a\n\
          trimmer (head, tail, grep, sort, ...) is blocked.\n\
          `git` is unbounded ONLY without an output limiter: `git log -3`,\n\
          `git status --short`, `git show --stat` are bounded and may be piped;\n\
-         `--oneline` is not a limiter (it bounds width, not line count).\n\n\
+         `--oneline` is not a limiter (it bounds width, not line count).\n\
+         Single-line plumbing (rev-parse, patch-id, merge-base, describe) is always bounded.\n\n\
          Rerun the command bare and query the returned @cmd_* buffer."
     ))
 }
@@ -1045,12 +1067,24 @@ fn il3_offending_lead(segment: &str) -> Option<String> {
     // `il3_does_not_treat_the_rhs_of_a_logical_or_as_a_pipe_stage` rather than left as
     // a comment, because it is held by a caller.
     let stages = split_outside_quotes(segment, &["|"]);
-    let mut stages = stages.into_iter();
-    let pre_pipe = stages.next().unwrap_or_default();
+    let (pre_pipe, downstream) = match stages.split_first() {
+        Some((first, rest)) if !rest.is_empty() => (first.clone(), rest),
+        // No pipe at all — nothing to trim.
+        _ => return None,
+    };
 
     // Cheap reject: nothing downstream TRIMS output → never IL3. Pure aggregators
     // (`wc`, counting `grep -c`) collapse output to a summary and do not count.
-    if !stages.any(|s| stage_trims(&s)) {
+    if !downstream.iter().any(|s| stage_trims(s)) {
+        return None;
+    }
+
+    // A collapsing stage anywhere downstream bounds the whole pipeline: the agent
+    // receives a count, a hash or one summary line no matter what follows, so no
+    // hidden subset reaches it and there is nothing for IL3 to protect. See
+    // [`stage_collapses`] for why this is checked over the whole chain rather than
+    // per stage.
+    if downstream.iter().any(|s| stage_collapses(s)) {
         return None;
     }
 
@@ -1066,15 +1100,29 @@ fn il3_offending_lead(segment: &str) -> Option<String> {
     Some(pre_pipe)
 }
 
-/// Does this single pipe stage TRIM output (truncate / filter / transform), as
-/// opposed to collapsing it to a bounded summary?
+/// Does this single pipe stage TRIM output (truncate / filter), as opposed to
+/// collapsing it to a bounded summary or reshaping it 1:1?
 ///
 /// Pure aggregators are NOT trimmers: `wc` (emits only counts) and a counting
 /// `grep -c` / `--count` (emits a match count) reduce output to a summary you
 /// cannot reconstruct from a partial view — piping to them SAVES context, the
-/// opposite of the trim IL3 guards against. Everything that shows a *subset*
-/// (`head`, `tail`, plain `grep`, `less`) or reshapes line-by-line (`sed`,
-/// `awk`, `cut`, `sort`, `uniq`, `tr`, `fmt`) is a trimmer.
+/// opposite of the trim IL3 guards against. See [`stage_collapses`], which
+/// generalises that judgement to the whole pipeline.
+///
+/// **Field selectors are NOT trimmers either.** `cut` and `tr` are 1:1 on
+/// records — `cut` picks fields *within* every line, `tr` maps characters —
+/// so neither can hide a record, which is the information loss IL3 exists to
+/// prevent. They sat in this list until 2026-08-27 purely because they appear
+/// next to `head`/`tail` in the same mental category ("small text utilities"),
+/// and the guard's own name for the class, *log-trimmer*, never described
+/// them. Measured over 703 IL3 refusals in 37 `usage.db` files, 12 were a
+/// field selector and nothing else.
+///
+/// `sed`, `awk` and `sort` deliberately STAY, and the line is drawn at
+/// *capability*, not at typical use: `sed -n '1,10p'` and `awk 'NR<10'` select
+/// records, and `sort -u` drops duplicates. That they are usually called in a
+/// 1:1 shape is not something this function can check without parsing two
+/// embedded languages, so they keep the conservative classification.
 ///
 /// Tokenizes with [`shell_tokens`], so `'head' -50` is recognised as `head`.
 /// This is also the helper that exercises the tokenizer's fallback in normal
@@ -1092,9 +1140,53 @@ fn stage_trims(stage: &str) -> bool {
         "wc" => false,
         // grep filters (hides non-matches) UNLESS counting, which aggregates.
         "grep" => !grep_is_counting(stage),
-        // Truncators / filters / line transforms — hide or reshape a subset.
-        "tail" | "head" | "less" | "sed" | "awk" | "cut" | "sort" | "uniq" | "tr" | "fmt" => true,
-        // Anything else (jq, a custom tool, …) is not a known trimmer.
+        // Truncators / filters — hide a subset of records.
+        "tail" | "head" | "less" | "sed" | "awk" | "sort" | "uniq" | "fmt" => true,
+        // Anything else (`cut`, `tr`, jq, a custom tool, …) is not a known trimmer.
+        _ => false,
+    }
+}
+
+/// Does this stage collapse an arbitrarily large stream to BOUNDED output?
+///
+/// The distinction that matters to IL3 is not "does this stage hide records"
+/// but "can a hidden subset still reach the agent". Once a stage emits a
+/// count, a hash, or a single summary line, nothing downstream of it can
+/// re-expand the stream — so a trimmer after it has nothing left to trim, and
+/// the agent receives bounded output either way.
+///
+/// This closes an inconsistency the guard shipped with. `git log | grep -c fix`
+/// was allowed (counting grep is not a trim) while `git log | grep fix | wc -l`
+/// was blocked — the same single number reaching the agent, one spelling
+/// permitted and the other refused. [`stage_trims`] cannot see that, because it
+/// judges one stage at a time; only the caller knows the whole pipeline.
+///
+/// **Note this is stronger than "stop scanning at the collapser"**, which was
+/// the shape originally proposed in
+/// `docs/issues/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md`.
+/// That rule leaves trimmers *upstream* of the collapser counting, and so does
+/// not move the bug's own `git show X | cut -f1 | wc -l` example — a
+/// discrepancy found by running a classifier against the refusal corpus rather
+/// than by re-reading the bug.
+///
+/// Conservative by construction: an unrecognised stage collapses nothing, so
+/// the pipeline keeps whatever verdict [`stage_trims`] gives it.
+fn stage_collapses(stage: &str) -> bool {
+    let tokens = shell_tokens(stage);
+    let head = match tokens.first() {
+        Some(h) => h.as_str(),
+        None => return false,
+    };
+    match head {
+        // Counts only — never the lines themselves.
+        "wc" => true,
+        "grep" => grep_is_counting(stage),
+        // Whole-input digests: one line regardless of input size.
+        "sha1sum" | "sha224sum" | "sha256sum" | "sha384sum" | "sha512sum" | "md5sum" | "b2sum"
+        | "cksum" | "sum" => true,
+        // `git patch-id` reduces an entire diff to one `<patch-id> <commit>` line.
+        // This is the case that motivated the whole rule: see the bug above.
+        "git" => tokens.get(1).is_some_and(|sub| sub == "patch-id"),
         _ => false,
     }
 }
@@ -1178,6 +1270,50 @@ fn has_recursive_flag(cmd: &str) -> bool {
         .any(|tok| tok == "-r" || tok == "-R" || tok == "--recursive")
 }
 
+/// True if this `git` subcommand emits O(1) lines *by construction*, so no
+/// output-limiter flag exists for it to carry.
+///
+/// [`git_output_is_bounded`] asks whether the command line names a limiter, and
+/// its whole vocabulary — `-n`, `--max-count`, `-3`, `--show-current`,
+/// `--porcelain`, `--stat` — is `git log` / `git status` / `git diff` grammar.
+/// The plumbing subcommands below have no such flag because they have nothing
+/// to limit: `git rev-parse HEAD` prints one object id and stops. Judged purely
+/// on the limiter test they are permanently unbounded, which is how
+/// `git rev-parse HEAD | head -1` — 40 characters piped to a trimmer — came to
+/// be refused as a context-flooding risk.
+///
+/// The two subcommands here that DO have an enumerating mode are excluded on
+/// that flag rather than dropped from the list, since the single-value spelling
+/// is the common one.
+fn git_subcommand_is_single_line(tokens: &[String]) -> bool {
+    let Some(sub) = tokens.get(1) else {
+        return false;
+    };
+    // Flags are searched from index 2: index 0 is `git`, index 1 the subcommand.
+    let has = |names: &[&str]| {
+        tokens.iter().skip(2).any(|tok| {
+            let flag = tok.split_once('=').map_or(tok.as_str(), |(name, _)| name);
+            names.contains(&flag)
+        })
+    };
+    match sub.as_str() {
+        // One line, no enumerating mode at all.
+        "patch-id" | "merge-base" | "symbolic-ref" | "describe" | "hash-object" => true,
+        // `git rev-parse HEAD` is one id; `--all` and friends walk every ref.
+        "rev-parse" => !has(&[
+            "--all",
+            "--branches",
+            "--tags",
+            "--remotes",
+            "--glob",
+            "--exclude",
+        ]),
+        // `git config <name>` reads one value; `--list` dumps the whole file.
+        "config" => !has(&["--list", "-l", "--get-all", "--get-regexp"]),
+        _ => false,
+    }
+}
+
 /// True if a `git` command line carries an explicit output limiter, making its
 /// output bounded for IL3 purposes.
 ///
@@ -1206,6 +1342,11 @@ fn has_recursive_flag(cmd: &str) -> bool {
 /// `docs/issues/archive/2026-05-18-il3-overtriggers-bounded-lhs.md` — that one
 /// split LHS into bounded/unbounded and put `git` wholesale on the wrong side.)
 fn git_output_is_bounded(tokens: &[String]) -> bool {
+    // Checked first: a subcommand that emits one line by construction carries no
+    // limiter flag, so the token scan below can only ever return false for it.
+    if git_subcommand_is_single_line(tokens) {
+        return true;
+    }
     // skip(1): the head is `git` itself; a limiter is always an argument.
     tokens.iter().skip(1).any(|tok| {
         // Compare against the FLAG NAME, not the whole token. git spells a
@@ -3826,6 +3967,156 @@ EOF"#;
         // U-16 case: head truncates — still blocked from an unbounded LHS.
         assert!(detect_il3_violation("git log --oneline master..experiments | head -20").is_some());
     }
+
+    // ── field selectors are not trimmers (2026-08-27) ──────────────────
+    //
+    // `cut` and `tr` are 1:1 on records and cannot hide one. `sed`/`awk`/`sort`
+    // can, and stay blocked — the control tests below are what make that a
+    // measured line rather than a claim.
+
+    #[test]
+    fn il3_allows_a_field_selector_after_an_unbounded_producer() {
+        // `cut` picks fields WITHIN each line; every record still arrives.
+        assert!(detect_il3_violation("git show abc123 | cut -d' ' -f1").is_none());
+    }
+
+    #[test]
+    fn il3_allows_tr_after_an_unbounded_producer() {
+        assert!(detect_il3_violation("git branch -r --contains abc123 | tr -d ' '").is_none());
+    }
+
+    #[test]
+    fn il3_still_blocks_sed_which_can_select_records() {
+        // Control for the pair above: `sed -n '1,10p'` hides records, so the
+        // field-selector exemption must NOT have widened to sed.
+        assert!(detect_il3_violation("git show abc123 | sed -n '1,10p'").is_some());
+    }
+
+    #[test]
+    fn il3_still_blocks_awk_which_can_select_records() {
+        // Control: `awk NR<10` truncates. Classified on capability, not on the
+        // 1:1 `{print $1}` shape it is usually called with.
+        assert!(detect_il3_violation("cargo test | awk 'NR<10'").is_some());
+    }
+
+    // ── a collapsing stage bounds the whole pipeline (2026-08-27) ──────
+
+    #[test]
+    fn il3_allows_a_pipeline_that_trims_then_collapses() {
+        // `git log | grep -c fix` was already allowed; this spelling delivers
+        // the identical single number and was refused. Same information
+        // reaching the agent, so the same verdict.
+        assert!(detect_il3_violation("git log | grep fix | wc -l").is_none());
+    }
+
+    #[test]
+    fn il3_allows_a_trimmer_downstream_of_a_collapsing_stage() {
+        // `git patch-id` reduces an arbitrary diff to one line; `head -1` on one
+        // line hides nothing.
+        assert!(
+            detect_il3_violation("git show abc123 | git patch-id --stable | head -1").is_none()
+        );
+    }
+
+    #[test]
+    fn il3_allows_a_digest_stage_to_bound_the_pipeline() {
+        assert!(detect_il3_violation("git show abc123 | sha256sum | cut -c1-8").is_none());
+    }
+
+    #[test]
+    fn il3_still_blocks_when_nothing_in_the_pipeline_collapses() {
+        // Control for the three above: `sort -u` reduces, but not to a bounded
+        // summary — an arbitrarily large stream can survive it.
+        assert!(detect_il3_violation("cargo test | grep FAILED | sort -u").is_some());
+    }
+
+    // ── single-line git plumbing (2026-08-27) ──────────────────────────
+
+    #[test]
+    fn il3_allows_single_line_git_plumbing_piped_to_a_trimmer() {
+        // 40 characters. There is no limiter flag for `rev-parse` to carry, so
+        // the limiter heuristic classified it unbounded forever.
+        assert!(detect_il3_violation("git rev-parse HEAD | head -1").is_none());
+        assert!(detect_il3_violation("git merge-base master experiments | head -1").is_none());
+        assert!(detect_il3_violation("git describe --tags | head -1").is_none());
+    }
+
+    #[test]
+    fn il3_still_blocks_rev_parse_when_it_enumerates_refs() {
+        // Control: `--all` walks every ref, so rev-parse is only single-line in
+        // its single-value spelling.
+        assert!(detect_il3_violation("git rev-parse --all | head -20").is_some());
+    }
+
+    #[test]
+    fn il3_still_blocks_git_config_listing_the_whole_file() {
+        // Control: `git config --get x` is one value; `--list` dumps the file.
+        assert!(detect_il3_violation("git config --get user.email | head -1").is_none());
+        assert!(detect_il3_violation("git config --list | grep user").is_some());
+    }
+
+    #[test]
+    fn il3_allows_the_patch_id_workflow_tracker_conventions_mandates() {
+        // The reported case, end to end. `get_guide("tracker-conventions")`
+        // requires recording a patch-id beside a fix SHA; the guard blocked the
+        // command and its error text then recommended an @cmd_* buffer, which
+        // truncates — yielding a syntactically perfect WRONG hash.
+        // BUG docs/issues/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md
+        for cmd in [
+            "git show abc123 | git patch-id --stable",
+            "git show abc123 | git patch-id --stable | cut -d' ' -f1",
+            "git show abc123 | cut -d' ' -f1 | wc -l",
+            "git patch-id --stable < /tmp/x.patch | awk '{print $1}'",
+        ] {
+            assert!(
+                detect_il3_violation(cmd).is_none(),
+                "should be allowed but was blocked: {cmd}"
+            );
+        }
+    }
+
+    // ── diagnostics: localize the segment, distrust the buffer (2026-08-27) ──
+
+    #[test]
+    fn il3_error_names_the_offending_segment_not_the_whole_script() {
+        // A multi-statement script used to be echoed back whole as "the thing
+        // piped to a log-trimmer" — including a trailing segment containing no
+        // pipe at all — leaving the reader to locate the real pipe themselves.
+        let hint = detect_il3_violation(
+            "echo start; cargo test | grep FAILED; git branch --contains abc123",
+        )
+        .expect("should block");
+        assert!(
+            hint.contains("piped `cargo test | grep FAILED` to a log-trimmer"),
+            "should quote only the offending segment, got: {hint}"
+        );
+        assert!(
+            !hint.contains("git branch --contains abc123"),
+            "innocent trailing segment must not be echoed as the offender: {hint}"
+        );
+    }
+
+    #[test]
+    fn il3_error_warns_that_the_buffer_it_recommends_is_capped() {
+        // The remedy this error prescribes routes the caller to an @cmd_* buffer
+        // that may hold only a prefix. For a grep that is a partial answer; for a
+        // hash it is a confident wrong one, in the exact workflow
+        // `get_guide("tracker-conventions")` mandates.
+        let hint = detect_il3_violation("cargo test | grep FAILED").expect("should block");
+        assert!(
+            hint.contains("unfiltered_truncated"),
+            "must name the flag: {hint}"
+        );
+        assert!(
+            hint.contains("WRONG"),
+            "must not soften the hash failure: {hint}"
+        );
+        assert!(
+            hint.contains("git show <sha> > /tmp/x.patch"),
+            "must offer the redirect pattern as the whole-input remedy: {hint}"
+        );
+    }
+
     // ── classify_write_path tests ──────────────────────────────────────
 
     #[test]
