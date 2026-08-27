@@ -11,7 +11,7 @@ opened: 2026-08-19
 owner: marius
 related: []
 severity: low
-unverified: 'Impact still UNMEASURED, and § Measured 2026-08-27 now explains why it cannot be measured with current instrumentation: `hook_at` records conversation-start, not hook liveness, so a dead hook and a healthy long session are byte-identical in the only state the server keeps. The MECHANISM is confirmed by reading (`src/tools/config/mod.rs:267-283`) and the gated branch was observed executing live; what remains unmeasured is FREQUENCY. The reproduction recipe has been rewritten — the previous one was un-runnable (its step 3, `/clear`, destroys the observer its step 5 needs). No fix is implemented.'
+unverified: 'MECHANISM confirmed (`src/tools/config/mod.rs:267-283`, and the gated branch observed executing live 2026-08-27). FREQUENCY still unmeasured — but as of `claude-plugins:80ed23f` it is now MEASURABLE, which it was not before: `hook_at` is refreshed on tool calls, so its age finally means time-since-proof-of-life. Re-read the live slots after this has been deployed a while and close on data. The stamp itself is not yet live-verified against a running server — needs `/reload-plugins` (the plugin cache is version-keyed) plus one tool call, then a check that this session''s slot `hook_at` moved forward. No codescout-side fix is implemented, deliberately.'
 ---
 
 # BUG: the rendezvous gate latches open, so a companion hook that goes quiet mid-process leaves `/clear` invisible again
@@ -262,6 +262,62 @@ considered, will not be the one this file used to recommend.
 
 Status stays `open`: the asymmetry is real, one fix shape is now closed off, and a
 viable one is named with its precondition.
+## Instrumentation shipped 2026-08-27 (option 3 — measure, gate nothing)
+
+**`claude-plugins:80ed23f9a2b2790cac1929afdfd12029c0f6d640`** (`main`)
+patch-id **`7149d987e1a78fec21538aa0e4a1e78496e1eb28`**
+
+No codescout change. `cs-liveness.mjs` — already a `PostToolUse` hook whose stated job is
+proof-of-life for the codescout *tool surface* — now also records proof-of-life for the *companion*,
+via `refreshLivenessStamp()` in `lib.mjs`.
+
+This creates the quantity § *Measured 2026-08-27* showed was missing. It does **not** fix the latch,
+and nothing gates on it.
+
+### Two invariants make it behaviour-neutral, both mutation-verified
+
+1. **Never opens the gate.** A slot with `hook_at: null` is skipped. `Rendezvous::poll` sets
+   `active = true` on *any* non-null `hook_at`, so stamping an unstamped slot would flip that session
+   from the blunt-clear path onto the surgical one — a real behaviour change, on a real population
+   (3 of 7 live slots were unstamped when measured). Opening the gate stays SessionStart's job.
+2. **Never writes `session`.** Writing it would make a `/clear` visible without a SessionStart, which
+   would *fix* the latch rather than measure it — and the frequency data that would justify that
+   change is precisely what does not exist yet.
+
+Throttled to one write per minute per slot, because `poll()` skips read+parse on an unchanged mtime;
+an unthrottled stamp would turn a metadata-only check into a parse on every tool call. The extra
+writes are safe because a repeated stamp of the same session is already silent server-side
+(`poll_ignores_a_stamp_repeating_the_session_we_already_have`).
+
+### Tests
+
+Five, in the new `hooks/cs-liveness.test.sh`. Mutation-verified, one failure each:
+
+| mutation | fails, and only |
+|---|---|
+| remove the `if (!e.hook_at) continue` guard | *an unstamped slot stays unstamped* — and the output shows the slot **being stamped**, i.e. the gate opening |
+| remove the throttle | *a fresh stamp is not rewritten* |
+
+The first run of the suite was a useful negative: four cases passed **vacuously** because a
+botched edit had left `refreshLivenessStamp()` behind the `if (!input)` early-exit, so the hook did
+nothing at all. Only the one genuinely-positive case (*a stale stamp is refreshed*) failed, which is
+what exposed it. A suite in which every assertion is a *negative* cannot tell "invariant held" from
+"nothing ran" — the positive case is what makes the other four mean anything.
+
+Version bumped 1.19.4 → **1.19.5**: the plugin cache is keyed on version, so an unbumped edit ships
+to nobody (`prompt-surface-compaction-session-log:F-9`).
+
+### What to do with this, and when
+
+After this has been installed a while, `hook_at` age becomes *time since last proof of life* rather
+than *time since conversation start*. At that point:
+
+- Re-read the live slots. A stamped slot whose `hook_at` is far older than its owner's last tool call
+  is a hook that went quiet — the condition this bug needs, finally observable.
+- If the count is zero over a meaningful window, close `wontfix` **on data** rather than on absence
+  of evidence.
+- If it is non-zero, the staleness bound becomes designable, because there is now a quantity that
+  means what the bound needs it to mean.
 ## Tests added
 
 None — nothing was changed. The behaviour described here is already pinned by three existing tests
