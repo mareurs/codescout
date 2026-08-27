@@ -162,43 +162,86 @@ impl Tool for ActivateProject {
         )?;
         let read_only = optional_bool_param(&input, "read_only");
 
-        // Focus-switch path: bare project ID (no path separator). Returns early —
-        // never reaches root resolution below, so the guide ledger stays untouched.
-        if !path.contains('/') && !path.contains('\\') {
-            let is_project_id = {
-                let inner = ctx.agent.inner.read().await;
-                inner
-                    .default_workspace()
-                    .map(|ws| ws.projects.iter().any(|p| p.discovered.id == path))
-                    .unwrap_or(false)
-            };
-            if is_project_id {
-                ctx.agent.activate_within_workspace(path, read_only).await?;
-                let scenario = if ctx.agent.is_home().await {
-                    HintScenario::ReturnToHome
+        // Focus-switch path: a member of the CURRENT workspace, named either by bare
+        // project id or by a path that resolves to that project's root. Returns
+        // early — never reaches root resolution below, so the guide ledger stays
+        // untouched.
+        //
+        // The path form exists because without it the two spellings of one project
+        // resolved to different memory stores. A path built a STANDALONE workspace
+        // rooted at the target, where the sub-project is its own root, so
+        // `memory_dir_for_project` returned `<sub>/.codescout/memories` — the
+        // directory nothing writes to for a project that is a workspace member. No
+        // reader could repair that downstream: `Agent::activate` calls
+        // `inner.workspaces.clear()`, so the parent workspace and its per-project
+        // tree are gone before any reader runs. The fix has to be here, in which
+        // workspace gets built.
+        //
+        // Scoped deliberately, and each exclusion is load-bearing:
+        //   * The ROOT project is excluded from the PATH form. Its two layouts
+        //     already coincide, so there is no defect to fix — and routing it here
+        //     would change what "return home by path" does to the guide ledger,
+        //     which is a far commoner call than this bug. The bare-id form still
+        //     accepts it, exactly as before.
+        //   * A FOREIGN repo cannot match, being no member of the loaded workspace,
+        //     so the browse-an-excursion semantics the read-only hint assumes are
+        //     untouched.
+        //   * `read_only` does not move: `Agent::activate` and
+        //     `activate_within_workspace` derive it with the same
+        //     `explicit > home > read-only` match.
+        //
+        // docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
+        let focus_target: Option<String> = {
+            let inner = ctx.agent.inner.read().await;
+            inner.default_workspace().and_then(|ws| {
+                let by_id = !path.contains('/') && !path.contains('\\');
+                let target = if by_id {
+                    None
                 } else {
-                    HintScenario::SwitchAway
+                    Some(std::fs::canonicalize(path).ok()?)
                 };
-                let project_root = ctx
-                    .agent
-                    .require_project_root_for(ctx.workspace_override.as_deref())
-                    .await?;
-                let prewarm_langs = ctx
-                    .agent
-                    .with_project_at(ctx.workspace_override.as_deref(), |p| {
-                        Ok(p.config.project.languages.clone())
+                ws.projects
+                    .iter()
+                    .filter(|p| by_id || p.discovered.relative_root != std::path::Path::new("."))
+                    .find(|p| match &target {
+                        None => p.discovered.id == path,
+                        Some(target) => {
+                            std::fs::canonicalize(ws.root.join(&p.discovered.relative_root))
+                                .map(|abs| abs == *target)
+                                .unwrap_or(false)
+                        }
                     })
-                    .await
-                    .unwrap_or_default();
-                crate::lsp::prewarm_lsp_background(
-                    ctx.lsp.clone(),
-                    project_root.clone(),
-                    &prewarm_langs,
-                );
-                let auto_registered =
-                    crate::library::auto_register::auto_register_deps(&project_root, ctx).await;
-                return build_activation_response(ctx, scenario, &auto_registered).await;
-            }
+                    .map(|p| p.discovered.id.clone())
+            })
+        };
+        if let Some(project_id) = focus_target {
+            ctx.agent
+                .activate_within_workspace(&project_id, read_only)
+                .await?;
+            let scenario = if ctx.agent.is_home().await {
+                HintScenario::ReturnToHome
+            } else {
+                HintScenario::SwitchAway
+            };
+            let project_root = ctx
+                .agent
+                .require_project_root_for(ctx.workspace_override.as_deref())
+                .await?;
+            let prewarm_langs = ctx
+                .agent
+                .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                    Ok(p.config.project.languages.clone())
+                })
+                .await
+                .unwrap_or_default();
+            crate::lsp::prewarm_lsp_background(
+                ctx.lsp.clone(),
+                project_root.clone(),
+                &prewarm_langs,
+            );
+            let auto_registered =
+                crate::library::auto_register::auto_register_deps(&project_root, ctx).await;
+            return build_activation_response(ctx, scenario, &auto_registered).await;
         }
 
         // Full-activation path

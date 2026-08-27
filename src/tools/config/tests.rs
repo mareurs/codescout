@@ -2573,27 +2573,31 @@ languages = ["typescript"]
     );
 }
 
-/// KNOWN GAP, and this test is the executable reproduction — `#[ignore]`d because it
-/// FAILS by design until the routing question below is decided. Run with
-/// `cargo test -- --ignored activating_a_sub_project_by_path`.
+/// The sibling test above covers the bare-id route; this one covers the PATH route.
+/// `ActivateProject` takes the focus-switch branch when `path` names a member of the
+/// current workspace — by bare id, or by a path resolving to that project's root.
 ///
-/// The sibling test above fixes the reported route: `activate` with a bare project id
-/// returns early into `activate_within_workspace`, which now resolves memories through
-/// the workspace. `ActivateProject` takes that early return only when `path` has no
-/// separator (`config/mod.rs`), so an ABSOLUTE path goes the other way and builds a
-/// standalone workspace rooted at the target — the response carries no `workspace`
-/// array at all. Memories then resolve to `<sub_root>/.codescout/memories`, which for a
-/// sub-project is the directory nothing writes to. Same silent zero, second route.
+/// Before the fix an absolute path fell through to root resolution and built a
+/// STANDALONE workspace at the target, where the sub-project is its own root, so
+/// memories resolved to `<sub_root>/.codescout/memories` — the directory nothing
+/// writes to for a workspace member. The response carried no `workspace` array at
+/// all, which was the tell.
 ///
-/// This is deliberately NOT fixed here. The fix is not a reader change but a dispatch
-/// change — should an absolute path naming a member of the current workspace focus-switch
-/// into it, or open standalone? Both are defensible: standalone is how a foreign repo is
-/// browsed and what the read-only hint text already assumes. Deciding it moves
-/// `read_only` defaults, focus, and the response shape, so it needs an owner.
+/// No reader could repair it downstream: `Agent::activate` calls
+/// `inner.workspaces.clear()`, so the parent workspace and its per-project tree are
+/// gone before any reader runs. That is why the read-union shipped for the id route
+/// (`020ea69a`) does not reach here, and why this needed a dispatch change.
+///
+/// The costs this fix was deferred on were re-measured before it landed, and one was
+/// wrong: `read_only` does NOT move — `Agent::activate` and
+/// `activate_within_workspace` derive it with the same `explicit > home > read-only`
+/// match. Nor does the "a path is how you browse a foreign repo" argument apply: a
+/// foreign repo is by definition not a member of the loaded workspace and cannot
+/// match this branch. What does move is residency and the response shape, both
+/// pinned by the assertions below.
 ///
 /// docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
 #[tokio::test]
-#[ignore = "known gap: by-path activation bypasses workspace memory resolution; see the bug file in the doc comment"]
 async fn activating_a_sub_project_by_path_lists_the_same_memories() {
     let dir = tempdir().unwrap();
     let root = dir.path();
@@ -2656,6 +2660,202 @@ languages = ["typescript"]
         activated["memories"],
         json!(["architecture"]),
         "by-path activation must resolve the same memory set as by-id: {activated:?}"
+    );
+    // The two things that DO move, pinned so a later change cannot quietly undo the
+    // dispatch while leaving the memory assertion satisfied some other way.
+    assert!(
+        activated["workspace"].is_array(),
+        "the response must now carry the parent topology — its absence was the tell \
+         that a standalone workspace had been built: {activated:?}"
+    );
+    assert_eq!(
+        activated["read_only"],
+        json!(true),
+        "read_only must NOT move: both paths derive it with the same \
+         `explicit > home > read-only` match, and the deferral claimed otherwise. \
+         Got: {activated:?}"
+    );
+}
+
+/// Negative control for the test above: a path that is NOT a member of the current
+/// workspace must still build a standalone workspace.
+///
+/// Without this, a dispatch that routed EVERY path into `activate_within_workspace`
+/// would satisfy the sibling test while destroying the excursion semantics the
+/// read-only hint assumes — "Browsing X (read-only) … remember to activate the parent
+/// when done" reads as a trip out, not a focus switch. It is also the assertion behind
+/// the claim that this fix leaves foreign-repo browsing untouched.
+#[tokio::test]
+async fn activating_a_non_member_path_still_builds_a_standalone_workspace() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let svc = root.join("svc");
+    std::fs::create_dir_all(&svc).unwrap();
+    std::fs::write(svc.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+    let codescout = root.join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    std::fs::write(
+        codescout.join("workspace.toml"),
+        r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "svc"
+root = "svc"
+languages = ["typescript"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        codescout.join("project.toml"),
+        "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+    )
+    .unwrap();
+
+    // A wholly separate repo — no relation to the workspace above.
+    let outside = tempdir().unwrap();
+    std::fs::write(
+        outside.path().join("Cargo.toml"),
+        "[package]\nname = \"x\"\n",
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let activated = ActivateProject
+        .call(json!({ "path": outside.path().to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        activated["project_root"],
+        json!(crate::util::fs::to_forward_slash(
+            &outside.path().canonicalize().unwrap()
+        )),
+        "a non-member path must activate the target itself: {activated:?}"
+    );
+    assert!(
+        activated["hint"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("remember to workspace"),
+        "the excursion hint must survive — this is the browse-a-foreign-repo path: \
+         {activated:?}"
+    );
+}
+
+/// The workspace ROOT addressed by absolute path must keep taking FULL activation,
+/// not the new focus-switch branch.
+///
+/// This pins the one exclusion in that branch's filter, and it exists because the
+/// exclusion was otherwise unfalsifiable: removing it left all 4466 lib tests green.
+/// A guard nothing can fail is not a guard, so here is the thing it protects.
+///
+/// "Return home by absolute path" is the commonest activate call there is, and full
+/// activation is what re-arms the guide ledger (`config/mod.rs`: with no rendezvous
+/// the ledger is cleared outright, because a `/clear` is otherwise invisible to the
+/// server). Routing the root through the focus-switch early return would skip that
+/// silently, starving a fresh conversation of every guide the previous one had
+/// already seen — a failure with no error and no wrong number, just guidance that
+/// never arrives.
+///
+/// There is also nothing to gain: the root project's two memory layouts coincide by
+/// construction (`memory_dir_for_project` returns `<ws>/.codescout/memories` for
+/// `relative_root == "."`), so the bug this branch fixes cannot occur for it.
+///
+/// docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md
+#[tokio::test]
+async fn activating_the_workspace_root_by_path_still_takes_full_activation() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let svc = root.join("svc");
+    std::fs::create_dir_all(&svc).unwrap();
+    std::fs::write(svc.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+    let codescout = root.join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    std::fs::write(
+        codescout.join("workspace.toml"),
+        r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "svc"
+root = "svc"
+languages = ["typescript"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        codescout.join("project.toml"),
+        "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    // Seed the ledger. Only the full-activation path clears it.
+    ctx.guide_hints_emitted
+        .lock()
+        .insert("librarian".to_string());
+    assert!(
+        ctx.guide_hints_emitted.lock().contains("librarian"),
+        "precondition: the ledger is seeded"
+    );
+
+    ActivateProject
+        .call(
+            json!({ "path": root.canonicalize().unwrap().to_str().unwrap() }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        !ctx.guide_hints_emitted.lock().contains("librarian"),
+        "the workspace root by path must take FULL activation, which re-arms the \
+         guide ledger. A surviving entry means it took the focus-switch early \
+         return, which never touches the ledger — so a fresh conversation would \
+         silently never receive guides the previous one had consumed."
     );
 }
 
