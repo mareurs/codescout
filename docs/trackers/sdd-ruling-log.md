@@ -130,10 +130,13 @@ ceiling tuned to whatever the code currently does is a description, not a gate.*
 ### Correct code in the wrong tree defeats every quality gate
 
 *(get-guide-section-grain — the `edit_code` leak,
-`docs/issues/2026-08-27-edit-code-writes-to-session-default-not-pinned-workspace.md`.)*
+`docs/issues/archive/2026-08-27-edit-code-writes-to-session-default-not-pinned-workspace.md`.)*
 
-A structural write landed in a different checkout than the one it was pinned to, returning
-`ok`. The leaked change was *semantically neutral* — an additive trait default plus a
+A structural write landed in a different checkout, returning `ok`. **Corrected 2026-08-27:** the
+write was *unpinned*. Reproduction against the live server showed `edit_code` honours a
+`workspace=` pin across every action and tree shape tested, so this was a dropped pin resolving
+against the session default — not a pin being ignored. The lesson in the heading is unaffected;
+the mechanism under it was wrong. The leaked change was *semantically neutral* — an additive trait default plus a
 behaviour-preserving refactor — so the contaminated tree still compiled and still passed its
 tests. No compiler, lint, test or review can distinguish correct-code-nobody-asked-for from
 intended work.

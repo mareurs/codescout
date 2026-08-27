@@ -175,7 +175,7 @@ const WRITE_ROOT_ANNOTATION_EXEMPT: &[&str] = &["approve_write", "register_libra
 /// it in sessions that never touch one; and 63% of the arming pins named an
 /// unrelated repo, after which every ordinary home-project write is refused. An
 /// annotation withholds nothing, so it has no false-positive cost at all.
-/// docs/issues/2026-08-27-edit-code-writes-to-session-default-not-pinned-workspace.md
+/// docs/issues/archive/2026-08-27-edit-code-writes-to-session-default-not-pinned-workspace.md
 ///
 /// Silent unless the repo genuinely has linked worktrees, so the overwhelmingly
 /// common single-checkout case is untouched — including every test tempdir,

@@ -1312,7 +1312,7 @@ async fn rooted_ctx(root: &std::path::Path) -> ToolContext {
 
 // ---- `wrote_to`: naming the checkout an unpinned write reached ----
 //
-// docs/issues/2026-08-27-edit-code-writes-to-session-default-not-pinned-workspace.md
+// docs/issues/archive/2026-08-27-edit-code-writes-to-session-default-not-pinned-workspace.md
 //
 // Measured over 195,126 tool calls: a pin-armed REFUSAL would have blocked
 // 9,914 writes (30.3% of the corpus) to catch at most 18 real misroutes. So

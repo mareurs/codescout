@@ -1,14 +1,15 @@
 ---
 kind: bug
-status: open
-title: 'An unpinned write is silently routed to the session default in a multi-worktree repo — guard_worktree_write latches open on the session''s first activate'
+status: fixed
+title: An unpinned write is silently routed to the session default in a multi-worktree repo — guard_worktree_write latches open on the session's first activate
 tags:
-  - edit_code
-  - worktree
-  - workspace-pin
-  - silent-corruption
-  - regression
-closed:
+- edit_code
+- worktree
+- workspace-pin
+- silent-corruption
+- regression
+closed: 2026-08-27
+unverified: 'Not live-verified through a running server: needs `cargo rb` + `/mcp` reconnect, then one unpinned write in this repo (which has a linked worktree) to confirm `wrote_to` actually appears in the response. Gate-green and mutation-verified only. Separately and by design, the `guard_worktree_write` session latch is unchanged — an unpinned write still routes to the session default, it now just says so.'
 ---
 
 # edit_code writes to the session-default project, not the `workspace=` pin
@@ -240,6 +241,48 @@ largely friction, since it arms on a repo-level fact. Narrowing it is a separate
 *lower* bound on refusals; active project was inferred from the last observed `activate` (CLI-flag and
 hook activations are invisible); no transcript records where a write actually landed, so the 18 are a
 shape match, never a confirmed wrong-tree file; one user, one machine.
+## Fix
+
+**`22e60ee9724888a806dc89ba4cb50715d765bda1`** (`experiments`)
+patch-id **`1bf09e75f9b07d0703af534a83e636a8e09ede69`**
+
+`annotate_write_root` (`src/tools/core/types.rs`), the third member of the family with
+`guard_worktree_write` and `worktree_read_notice`. Runs in `call_content`, so every write tool is
+covered including `artifact`, whose misroutes this bug's own evidence quotes.
+
+Fires only when the repo genuinely has linked worktrees **and** the call was unpinned — a pinned
+call already named its target. A bare `"ok"` is promoted to `{"status": "ok", "wrote_to": "<root>"}`;
+object results keep their fields and gain `wrote_to`. Single-checkout repos, including every test
+tempdir, are byte-identical to before, which is what makes the promotion safe against the no-echo
+write convention.
+
+Exempt: `approve_write`, `register_library`, `library` — `is_write` is true for them but their write
+does not land at a project-relative path, so naming a checkout would describe something that did not
+happen.
+
+**Deliberately NOT fixed: the latch.** `guard_worktree_write` still bypasses on
+`is_project_chosen_this_session`, and an unpinned write still resolves against the session default.
+That is the measured decision, not an oversight — see § *Measured 2026-08-27*. The silence is what
+was closed.
+
+### Tests
+
+Five, in `src/tools/core/tests.rs`, all driven through the real `call_content` path so the **wiring**
+is under test rather than the helper in isolation:
+
+| test | mutation that breaks it, and only it |
+|---|---|
+| `an_unpinned_write_names_the_checkout_it_reached` | disable the `annotate_root` block |
+| `annotating_an_object_result_preserves_its_fields` | disable the `annotate_root` block |
+| `a_write_without_worktrees_keeps_the_bare_ok` | drop the `list_git_worktrees().is_empty()` return |
+| `a_pinned_write_is_not_annotated` | drop the `workspace_override.is_none()` clause |
+| `an_exempt_tool_is_not_annotated` | drop the `WRITE_ROOT_ANNOTATION_EXEMPT` clause |
+
+All four mutations were run with the blast radius predicted in advance; each matched exactly (1, 1,
+1, and 2 failures respectively). No test passes in a world where its clause is gone.
+
+Gate: `cargo fmt` clean, `cargo clippy --workspace --all-targets --features local-embed -- -D
+warnings` clean, `cargo test` 4676 passed / 0 failed / 46 ignored.
 ## Reproduction sketch (not yet minimised)
 
 1. Open a linked worktree of this repo.
