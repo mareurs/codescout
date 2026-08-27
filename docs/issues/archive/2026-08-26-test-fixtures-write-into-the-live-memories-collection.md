@@ -177,13 +177,30 @@ the leak was falsified before anything was removed:
 
 | | |
 |---|---|
-| isolation fix landed | `9cfca8e8` / `a4ee4aa7`, **2026-08-26 23:06–23:07 UTC** |
-| newest tmp-keyed point | **2026-08-26 16:22 UTC** — 6.7 h *before* the fix |
+| isolation fix landed | `9cfca8e8` / `a4ee4aa7`, **2026-08-26 20:06:56–20:07:03 UTC** |
+| newest tmp-keyed point | **2026-08-26 16:22 UTC** — 3.7 h *before* the fix |
 | full `cargo test` runs since (2026-08-27) | several, 4600+ tests each |
 | new tmp points from them | **0** |
 
 The suite runs are the positive control rather than an argument: had the fix not held,
 today's runs would have written points dated today. None exists.
+
+> **Corrected 2026-08-27.** This table first read *"23:06–23:07 UTC"* and *"6.7 h"*. Both
+> were wrong, by one hour of timezone and by the arithmetic that followed. The figures
+> came from `TZ=UTC git log --date=format:'%Y-%m-%d %H:%M UTC'`, and **`--date=format:`
+> renders a commit in its OWN zone regardless of `TZ`** — the literal `UTC` in the format
+> string was mine, not git's, so the output labelled a local time as UTC and nothing
+> disagreed. `--date=format-local:` is the form that honours `TZ`; `--date=iso-strict`
+> carries the offset so the error cannot hide.
+>
+> Caught while re-checking build freshness after a rebuild, where the same mistake made a
+> one-minute-old binary look 2h43m older than the commit it contained — a claim absurd
+> enough to check. At three hours it was not absurd, so it stood. The commit that applied
+> this cleanup (`b1df0948`) carries the wrong figures in its message and cannot be
+> amended; this note is the correction.
+>
+> **The conclusion is unchanged.** The newest leaked point still precedes the fix, and
+> the delete was still safe. Only the size of the gap moved.
 
 Note the population had grown since this file was written — 1959 → 2004 points, 1909 →
 1948 tmpdirs — all of it from before the fix. The figure in § *Symptom* is a measurement
