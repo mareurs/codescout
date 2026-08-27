@@ -59,7 +59,7 @@ pub fn parse(body: &str) -> Vec<Heading> {
 /// anchor position are exact opposites, so on a long ledger the cap dropped the one
 /// heading the caller needed, **every time**, while `headings_truncated` cheerfully
 /// announced that something was being withheld and offered no way to reach it.
-/// `docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md`
+/// `docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md`
 pub fn cap(
     mut headings: Vec<Heading>,
     max: usize,

@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn a_truncated_preview_still_names_its_final_heading() {
-        // docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+        // docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
         //
         // The window fills from the top; `append_entry` inserts BEFORE its anchor,
         // so a ledger's append point is conventionally its LAST heading. Fill order

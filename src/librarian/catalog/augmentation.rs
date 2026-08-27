@@ -1108,7 +1108,7 @@ pub fn allocate_entry_id(
                 // final stanza and `artifact(action="get")`'s heading window fills from
                 // the top — which is exactly why the surface this hint used to name
                 // could not answer on a long ledger.
-                // docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+                // docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
                 let tail: Vec<String> = crate::librarian::preview::headings::parse(&updated)
                     .into_iter()
                     .filter(|h| h.level <= 2)
@@ -3049,7 +3049,7 @@ mod tests {
         );
     }
 
-    /// docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+    /// docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
     ///
     /// The old hint sent the caller to `artifact(action="get")` to discover the
     /// anchor. On the artifact class this feature exists for, that surface cannot

@@ -1,17 +1,18 @@
 ---
-id: c131d83129b81e1b
+id: 3e8826ccef87c8dd
 kind: bug
-status: open
+status: fixed
 title: 'BUG: append_entry''s anchor is undiscoverable through the very surface its error tells you to use — get truncates headings from the front, the anchor lives at the bottom'
 tags:
 - librarian
 - trackers
 - progressive-disclosure
 - error-hint
-closed: null
+closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 severity: med
+unverified: 'Not live-verified through a running server: needs `cargo rb` + `/mcp`, then one `artifact(action="get")` on a long ledger to confirm `last_heading` appears, and one deliberately-bad `append_entry` anchor to read the new hint. Gate-green and mutation-verified only. Separately still open, and deliberately out of scope: whether `grep` reaching a librarian-guarded artifact is intended or a gap in that guard.'
 ---
 
 ## Summary
@@ -133,42 +134,93 @@ Candidate fixes, re-ranked by that reading:
 ## Hypotheses tried
 
 1. **A parameter widens the window** — none found. `headings=[…]` selects sections to
-   *read*, `full=true` returns the whole body. Neither lists headings cheaply.
+   *read*, `full=true` returns the whole body. Neither lists headings cheaply. **Still true after
+   the fix**: no parameter was added. The tail is now returned unconditionally when the cap bites,
+   which needs no argument the caller has to know about.
 2. **`read_markdown` on the file** — refused: `librarian_guard` blocks direct reads of a
    managed artifact and redirects to `artifact(get)`, the surface that truncates.
 3. **`grep` on the file** — this is what worked, and it is the reason for filing rather
    than shrugging. `grep(path=…, pattern="^## ")` returns the anchor immediately. Whether
-   `grep` reaching a guard-refused artifact is intended or a gap in the guard is **not
-   established here** and is a question for whoever picks this up — the workaround may be
-   the thing that gets closed.
-
+   `grep` reaching a guard-refused artifact is intended or a gap in the guard is **still not
+   established** — it was not needed for this fix and is left as an open question. Note it is now
+   only a *convenience*, not the sole route: the anchor is reachable from `artifact(get)`'s
+   `last_heading` and named outright in the failure hint.
 ## Fix
 
-Not implemented. Three candidates, cheapest first:
+**`ca8c550b4abb6c9b247e12e931b53d28c6c59b5d`** (`experiments`)
+patch-id **`8235e4ae498d65364acf23b5972fd3cf85080f1f`**
 
-1. **Enumerate the anchors in the error.** The document is already in memory at
-   `augmentation.rs:1105`; listing the `##`-level headings (or the last N) turns a dead end
-   into a one-shot recovery. Smallest change, fixes the reported defect, leaves discovery
-   before the first call unsolved.
-2. **Surface the append anchor in `get`.** For an artifact with `entry_prefix`, return the
-   last top-level heading (or a `suggested_anchor`) alongside `headings_truncated`, so the
-   caller never has to guess. Fixes discovery too.
-3. **Make the window aware of what it is for.** When `headings_truncated` fires on a
-   ledger, include the tail as well as the head. Broadest, and the one most likely to
-   disturb other consumers of `preview`.
+Shipped candidates (1) and (2) from the list below, **plus a third surface the list did not
+contain** — found only by enumerating the class after fixing (2), and it is the one the caller
+actually sees first.
 
-(1) and (2) are complementary and neither blocks the other. Recommend both; (3) only if a
-second use for tail headings shows up.
+### Three surfaces, one defect class
 
-Fix SHA + `git patch-id --stable`: *not yet fixed.*
+All three windowed headings from the **front**, and a ledger's append anchor is its **last**
+heading. Fill order and anchor position are exact opposites, so the needed heading was dropped
+every single time.
 
+| # | surface | was | now |
+|---|---|---|---|
+| 1 | `preview::headings::cap` (`artifact(get)`) | cap 20, head-only | returns the final heading; stamped as `last_heading` |
+| 2 | `allocate_entry_id`'s anchor error | prescribed `artifact(action="get")` — the surface that cannot answer | names the last top-level headings directly |
+| 3 | `resolve_section_range`'s *Available headings* | `take(15)`, head-only | keeps both ends, elision counted |
+
+**`last_heading` is a separate field, not an extra element in `headings`.** That array is ordered
+by line and a consumer may reasonably read it as a contiguous window; splicing a tail entry into
+it would quietly falsify that reading.
+
+### Surface 3 is the one this bug nearly missed
+
+It surfaced from a mutation's own failure output. Reverting the hint (mutation C) showed the
+**inner** error already enumerating — *"Available headings: # Ledger, ## R-7 — an entry, ## Template
+for new entries"* — which meant the anchor was already discoverable on a **short** ledger and the
+hint fix looked redundant. Reading that enumeration found `take(15)`: head-only, same direction,
+same defect. On the real 92-heading ledger it lists `## H0 … ## H14` and drops the anchor.
+
+So the recovery path had the defect twice over, and every heading-addressed tool routes through
+surface 3 — not just `append_entry`. A caller mistyping a heading on any long document got the
+first fifteen and no tail.
+
+### Rejected
+
+**"Have `append_entry` fall back to the last heading when `anchor_heading` is omitted"** (candidate
+3 in § *Re-verified*). Omitting `anchor_heading` is an **established contract** meaning *reserve the
+id, write nothing* — documented in `get_guide("tracker-conventions")` and in this repo's own ledger
+prompts. A fallback would silently convert every reserve-only call into a write.
+
+### Tests
+
+Five, each mutation-verified with the blast radius predicted in advance and matched exactly:
+
+| test | mutation that breaks it, and only it |
+|---|---|
+| `cap_reports_total_when_truncated` | drop the tail capture in `cap` |
+| `a_truncated_preview_still_names_its_final_heading` | drop the tail capture in `cap` |
+| `a_bad_anchor_names_the_anchors_that_do_exist` | revert the anchor hint to the `get` referral |
+| `a_missing_heading_lists_both_ends_not_just_the_first_fifteen` | restore `take(15)` |
+| `a_short_document_lists_every_heading_with_no_elision` | — guards against announcing an elision that did not happen |
+
+Mutation E reproduced the old output verbatim (`## H0 … ## H14`, anchor absent), confirming the
+test covers the real defect rather than a lookalike.
+
+Gate: `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`,
+`cargo test` — **4737 passed, 0 failed**.
 ## Tests added
 
-None — not fixed. A regression test should build a ledger long enough to truncate,
-assert the anchor is absent from `get`'s window, then assert the chosen fix surfaces it
-(the error enumerates it, or `get` names it). Pinning the *absence* first is what keeps
-the test honest if the truncation threshold later moves.
+Five, all in-tree and mutation-verified — see the table in § *Fix*.
 
+- `src/librarian/preview/headings.rs` — `cap_reports_total_when_truncated`,
+  `cap_no_report_when_within_limit`
+- `src/librarian/preview/default.rs` — `a_truncated_preview_still_names_its_final_heading`,
+  `an_untruncated_preview_carries_no_last_heading`
+- `src/librarian/catalog/augmentation.rs` — `a_bad_anchor_names_the_anchors_that_do_exist`
+- `src/tools/file_summary/tests.rs` — `a_missing_heading_lists_both_ends_not_just_the_first_fifteen`,
+  `a_short_document_lists_every_heading_with_no_elision`
+
+The negative tests matter as much as the positive ones: an untruncated preview must grow no
+`last_heading`, and a short document must not announce an elision that did not happen. Without
+them the fix would be free to add noise to every small response.
 ## Workarounds
 
 - `grep(path="<ledger>", pattern="^## ")` — reliable today; see Hypotheses (3) for why it

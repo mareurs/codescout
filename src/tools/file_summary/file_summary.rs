@@ -430,7 +430,7 @@ pub fn resolve_section_range<'a>(
     // Measured on `reconnaissance-patterns.md`: 92 headings, anchor at line 4038 of
     // 4100. Keep both ends, and say how many were elided so the gap is legible
     // rather than merely absent.
-    // docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+    // docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
     const HEAD: usize = 12;
     const TAIL: usize = 3;
     let names: Vec<&str> = headings.iter().map(|h| h.text.as_str()).collect();

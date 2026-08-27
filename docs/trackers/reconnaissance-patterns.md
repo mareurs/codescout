@@ -3781,7 +3781,7 @@ issue have been corrected.
 indistinguishable from a complete one:
 
 1. `append_entry`'s anchor — `artifact(get)` returns 21 of 85 headings, front-anchored, and
-   the anchor is conventionally last (`codescout:c131d83129b81e1b`).
+   the anchor is conventionally last (`codescout:3e8826ccef87c8dd`).
 2. `grep`'s zero under `include_hidden=true` — gitignored paths excluded, no clause says so
    (`codescout:0f7105b8bebc600b`).
 3. This — `memory(list)` at 18 of 23, no count, no truncation flag.

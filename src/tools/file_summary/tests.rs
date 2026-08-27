@@ -262,7 +262,7 @@ fn markdown_summary_no_truncation_flag_when_under_cap() {
     assert!(s.get("total_headings").is_none());
 }
 
-/// docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+/// docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
 ///
 /// Third instance of one defect class, and the one every heading-addressed tool
 /// routes through. The window was `take(15)` — head-only — while a
