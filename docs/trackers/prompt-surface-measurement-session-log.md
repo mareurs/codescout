@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 42
+entry_high_water_F: 43
 entry_high_water_W: 27
 entry_prefix:
 - F
@@ -70,6 +70,7 @@ surfaces, not the definition.
 | F-40 | Two sessions added the same routing guard to one file within an hour, and both were wrong the same way | fixed-verified |
 | F-41 | I reported "semantic search doesn't find these" from one filtered query, with no control — the unfiltered control refuted it | fixed-verified |
 | F-42 | I captured the mechanism in the wrong population and refuted a hypothesis that was true | fixed-verified |
+| F-43 | My promotion plan skipped two gates the skill documents — and named the weaker of two destinations for this rule's failure class | open |
 
 ## Wins Index
 
@@ -3917,6 +3918,86 @@ reproduction.
 **Rests on:** the principle that a claim about causation owes evidence rather than a
 plausible mechanism (CLAUDE.md, *Conclude Last*), and the project's rule that any bug
 noticed during work gets a file.
+
+## F-43 — My promotion plan skipped two gates the skill documents — and named the weaker of two destinations for this rule's failure class
+
+**Valid:** dated 2026-08-27
+
+**Observed:** 2026-08-27, scouting the promotion route for the importance×cost
+explore-vs-ask rule before writing anything. The rule was found living in exactly one
+place — codescout memory `reconnaissance`, final bullet — with no `R-N` entry in any repo
+and no copy in any of the 19 cached `codescout-companion` versions.
+
+**When:** Immediately after recommending a two-step promotion to the user (backfill the
+`R-N` entry, then PR the served `SKILL.md`), and before either write landed.
+
+**Expected (my plan):** two steps. Step 1 writes an `R-N` entry shaped like a session-log
+win — `**Rests on:**` pointing at `F-20`, `**Status:** validated`. Step 2 syncs to
+`SKILL.md` with a `plugin.json` bump across three profiles.
+
+**Got (scouted reality):** three divergences, none of which would have failed loudly.
+
+1. **Wrong entry shape.** The `R-N` ledger's own augmentation prompt (artifact
+   `5696563f06b2c222`) pins its required fields as **Verdict, Observed, Seam, narrative,
+   Promote-when, Status, Kin**. `**Rests on:**` and `**Status:** validated` are the
+   session-log / statement-validity vocabulary; `validated` is not this ledger's
+   disposition value, which pairs a `Verdict` of `hit | miss | proposal` with a separate
+   `Status` line. I was importing one ledger's template into another ledger that has its
+   own.
+
+2. **A mandated third step, omitted entirely.** `SKILL.md` § *Every promotion audits the
+   promoted set* makes promoting a law the trigger to re-verify the already-promoted ones
+   against four staleness classes — False / Outgrown / Unreachable / Obsolete — **and to
+   record which class each was checked against, in the ledger entry**, "so the next
+   promotion inherits the check rather than repeating it". My plan had two steps; the
+   skill requires three, and the third is the one that keeps the promoted set from
+   becoming the ledger it was extracted from.
+
+3. **The destination I recommended is not the one the skill prescribes for this rule's
+   failure class — and the prescribed one is gated shut.** The rule's problem is not its
+   wording; it is that it sits behind a deliberate memory read and governs a decision made
+   in the first thirty seconds of a task. That is staleness class 3, **Unreachable**,
+   whose stated remedy is *"placement, not rewording … if a law keeps recurring in sessions
+   that never invoke this skill, the fix is the session-opening surface, not a better
+   sentence here."* That is destination 2 (`project-activation-bootstrap`), which requires
+   **a measured base arm** — evidence an unaided agent does not already do this. No such
+   arm exists. `prompt-engineering:scenarios/exploration-protocol` is the nearest
+   candidate and is **not** it: read at `protocol.md` + `find-bug/scenario.yaml`, it
+   measures Phase-0 bug-ledger consult and the `"Ledger checked:"` receipt — a different
+   rule. Destination 1 (`SKILL.md`) needs no base arm, so my recommendation was
+   *available*, but I reached it without noticing it is the weaker remedy for this
+   particular failure.
+
+**Probable cause:** I applied the routing test — *"would this rule mislead a different
+project?"* — took the destination it selects, and stopped. The two paragraphs that gate
+that destination, and the entire section that follows it, went unread. Reading a decision
+procedure far enough to get an answer is not the same as reading it far enough to get its
+preconditions, and the first feels complete.
+
+**Workaround:** None needed — nothing had been written. Plan revised to three steps, with
+the base-arm gap surfaced as an explicit precondition on destination 2 rather than
+discovered after a PR.
+
+**Severity:** med — would have produced an `R-N` entry missing 3 of 7 required fields
+(invisible to every field-presence sweep, which is the exact defect the ledger's own
+prompt says left 39 of 57 entries unharvestable for three months), plus a `SKILL.md` PR
+that skipped the mandated promoted-set audit. Both recoverable; neither raises.
+
+**Status:** open — routing surfaced, no write landed, destination-2 gate unmet.
+
+**Rests on:** `codescout-companion:skills/reconnaissance/SKILL.md` §§ *Promotion routing*
+and *Every promotion audits the promoted set* (routing section landed
+`claude-plugins:42254d8`, 2026-06-11 — so it predates the 2026-08-26 promotion); the
+augmentation prompt on artifact `5696563f06b2c222`; and
+`prompt-engineering:scenarios/exploration-protocol/{protocol.md,find-bug/scenario.yaml}`
+for the base-arm absence.
+
+**Fix idea / Pointer:** Kin to [[F-20]] — the rule under promotion is F-20's own remedy,
+so leaving it unreachable leaves F-20 open by construction. The base arm is the tractable
+missing piece: a scenario whose bare arm asks the user (or asserts) a question answerable
+in one or two tool calls, scored on whether the agent runs the call instead. That is the
+same shape as the verify-before-assert arm the skill cites as precedent (0% bare, 100%
+shipped over 35 runs, codescout `5917e37e`).
 
 ## Template for new entries
 

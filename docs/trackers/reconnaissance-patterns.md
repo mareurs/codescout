@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 119
+entry_high_water_R: 120
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-120 | 2026-08-27 | hit | **A decision procedure is a seam — reading it far enough to get an ANSWER is not far enough to get its PRECONDITIONS.** A promotion route was picked straight from the routing test, skipping two paragraphs gating the adjacent destination and an entire successor section imposing a promoted-set audit; the target ledger's own required-field contract was missed the same way. Both omissions sit *after* the answer, and neither raises: a malformed entry is invisible to field-presence sweeps, an unaudited PR merges as cleanly as an audited one | `prompt-surface-measurement-session-log:F-43`; kin [[R-49]] (own plan, one turn old), [[R-95]] (a verdict reads as settled, not as a claim), [[R-89]] (19 cached plugin versions checked — the served copy is what has reach) |
 | R-106 | 2026-08-18 | hit (pre-edit) → rule | **A generated surface is ground truth about cost and about nothing else — read the generator before proposing the remedy.** Measured the live `tools/list` payload, found one 225-char `workspace` description repeated verbatim on 24 tools, and proposed a "free mechanical dedup, zero risk". The source holds exactly ONE copy: `inject_workspace_param` injects it into every `pinnable()` tool at list time | `src/server.rs:496-508` + `:1024-1026`; prompt-surface-compaction-session-log:F-2, :W-1; kin R-91, R-100 |
 | R-105 | 2026-08-18 | miss (human review) → rule | **A key derived from runtime state is a claim about that state's lifetime — enumerate the lifecycle events before proposing it.** Proposed parent-PID + parent-start-time as the agent-agnostic session key for the guide ledger and scouted it hard against ONE event (MCP subprocess respawn); never enumerated client *resume*, which restarts the parent while the conversation continues. The falsifying evidence was already in hand and unread | bug-fix-session-log:F-53; session 2c518eb6 spans 12 days / 9630 calls / 67 MCP procs under a 17h-old `claude` process; kin R-91, R-50 |
 | R-104 | 2026-08-17 · 2026-08-21 | miss ×8 (self-caught) → **promoted** | **A zero from a report is a claim about your query, not about the world — and it lies in three independent ways.** Five wrong conclusions in one session, from a wrong key name (searched `"token"` while the `dangling` array calls the field `raw` — half the population never searched), a wrong value vocabulary (filtered on `verdict != "ok"` against a five-value domain, printing *resolved* refs as problems), and cap truncation (ref absent from `findings[]`, but `n_refs_found` was 64 against a 50-entry window). Structural anchoring is necessary and insufficient: it protects the technique while the **domain** is guessed. **Widened 2026-08-21:** not about zeros and not about reports — about **who supplied the predicate**. A hand-built instrument (path, pattern, sort key, field name) answers in its own terms without complaint, and can return a full, plausible, WRONG answer with no zero involved. Remedy is a positive control, not care | 5 instances incl. `grep -c 'Status:'` counting prose about Status, and a `status: mitigated` "what's open" query 2.5× inflated by already-archived rows. Substrate moving to retire it: `f908e883` (`severity_legend`), `7c218338` (link_scan field unification) — and that prediction **held**: `counts.entry_edges` read cleanly on sight 2026-08-21. Three further instances that day were all hand-rolled shell, where no publisher can add a legend: a version-keyed cache path guessed flat (empty output, not even `0`), a backtick eaten by `grep -c "$s"`, and `sort` on `ps lstart` ordering by weekday name. Kin R-101, R-103 |
@@ -3821,6 +3822,66 @@ need for it.
 **Valid:** invariant
 
 **Rests on:** the activation bootstrap's Phase 0, and law A as stated in this ledger.
+
+## R-120 — A decision procedure is a seam — I read the routing far enough to get an answer, not far enough to get its preconditions
+
+**Valid:** dated 2026-08-27
+
+**Verdict:** hit — a scout of a *procedural* seam caught three skipped gates before any
+write landed · **Observed:** 2026-08-27, user-invoked recon immediately after I had
+recommended a promotion route for the importance×cost explore-vs-ask rule.
+
+**Seam:** the promotion procedure itself — `SKILL.md` § *Promotion routing* and the
+section that follows it, plus the target ledger's own required-field contract. Every seam
+in this ledger up to now has been code, a tool response, or an artifact. This one was a
+**decision procedure**, and it has the same property that makes a seam a seam: my next
+action depended on its current shape, and I had read it only far enough to select an
+option.
+
+Three divergences, none of which would have failed loudly. (1) I planned to write the
+`R-N` entry in the *session-log* vocabulary — `**Rests on:**`, `**Status:** validated` —
+where this ledger's augmentation prompt pins **Verdict, Observed, Seam, narrative,
+Promote-when, Status, Kin** and a `Verdict` of `hit | miss | proposal`. (2) I omitted §
+*Every promotion audits the promoted set* entirely: promoting a law obliges re-verifying
+the already-promoted ones against False / Outgrown / Unreachable / Obsolete **and
+recording the verdict**, which is a third step my two-step plan had no slot for. (3) I
+named destination 1 (`SKILL.md`) when the rule's failure class is **Unreachable** — it
+lives behind a deliberate memory read while governing a decision made in a task's first
+thirty seconds — and class 3's stated remedy is *"placement, not rewording … the fix is
+the session-opening surface"*. That is destination 2, gated on a measured base arm that
+does not exist; `prompt-engineering:scenarios/exploration-protocol` is the nearest
+candidate and measures Phase-0 ledger consult, a different rule.
+
+The generalisable part is the failure mode, not the three findings: **reading a decision
+procedure far enough to get an answer feels identical to reading it far enough to get its
+preconditions.** A routing test that yields a destination is satisfying in a way that
+stops the read — the question was answered — and both of the things I missed sat *after*
+the answer: two paragraphs of gating on the adjacent option, and an entire successor
+section imposing an obligation. Neither would have raised. A malformed `R-N` entry is
+invisible to every field-presence sweep, which is the same defect this ledger's own prompt
+records as having left 39 of 57 entries unharvestable for three months; a `SKILL.md` PR
+with no audit merges exactly as cleanly as one with.
+
+**Counterfactual:** without the scout, two artifacts land wrong. The `R-N` entry ships
+missing 3 of 7 required fields into the ledger whose prompt names that as its historical
+defect, and the promoted set goes un-audited on the one occasion the skill designates for
+auditing it — an omission with no later trigger, since the next promotion would inherit
+the same gap and the section exists precisely to stop that compounding.
+
+**Promote-when:** A second scout of a procedural seam — a documented decision procedure,
+routing table, or checklist rather than code — catches a precondition or successor
+obligation skipped because the procedure had already yielded an answer. At 2 datapoints,
+add a Phase 1 bullet: *a decision procedure is a seam; read its preconditions and the
+section after it, not just far enough to select an option.*
+
+**Status:** open — 1 datapoint. Evidence in
+`prompt-surface-measurement-session-log:F-43`.
+
+**Kin:** R-49 (re-entering your own plan is a seam; authorship is no exemption — here the
+plan was one turn old), R-95 (a rationale reads as a settled decision rather than a claim;
+a routing verdict does the same), R-89 (the served copy is the one that counts — checking
+all 19 cached `codescout-companion` versions is what established the rule had no reach
+outside one memory file).
 
 ## Template for new entries
 
