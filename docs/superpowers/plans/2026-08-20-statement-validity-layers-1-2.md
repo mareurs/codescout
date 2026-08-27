@@ -59,7 +59,7 @@ Copied verbatim from the spec. Every task's requirements implicitly include this
 
 Add to the existing `mod tests` in `src/librarian/tools/link_scan/extract.rs`:
 
-```rust
+````rust
 #[test]
 fn entry_section_ends_at_next_same_or_higher_heading() {
     let md = "\
@@ -108,7 +108,7 @@ tail
     assert_eq!(s.len(), 1, "the fenced heading defines nothing");
     assert_eq!(s[0].id, "R-1");
 }
-```
+````
 
 - [ ] **Step 2: Run test to verify it fails**
 
