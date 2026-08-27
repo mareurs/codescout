@@ -10,7 +10,7 @@ tags:
 - librarian
 topic: prompt surface budget measurement eval harness compaction
 entry_high_water_F: 42
-entry_high_water_W: 26
+entry_high_water_W: 27
 entry_prefix:
 - F
 - W
@@ -101,6 +101,7 @@ surfaces, not the definition.
 | W-17 | A pre-dispatch scout caught a forward dependency I had stated in a form the harness cannot express | validated |
 | W-16 | Three dilution rounds converged without closing; one measurement of the shared cause moved it further than all three | validated |
 | W-26 | Capturing the mechanism killed an axis that two outcome-comparisons got wrong | validated |
+| W-27 | Clean-tree extraction answered "is this failure mine?" with evidence — and the evidence was a third answer | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -3849,6 +3850,73 @@ deleting it would hide the shape. `eval-design` memory updated with the populati
 
 **Status:** fixed-verified — mechanism confirmed by direct capture of the harness's own
 requests, trigger isolated to the profile by a one-variable test.
+
+## W-27 — Clean-tree extraction answered "is this failure mine?" with evidence — and the evidence was a third answer
+
+**Observed:** 2026-08-27, closing the two runner orphan paths. After landing the
+`PROMPT_TDD_RUN_ID` change, `tests/prompt_tdd` reported `1 failed, 400 passed` —
+`test_integration.py::test_sdk_pipeline_with_v2_scenarios`.
+
+**Pattern:** When a suite fails in a working tree you have modified, do not reason from
+the diff about whether the failure is yours. Extract the tree at HEAD and re-run the one
+test:
+
+```bash
+git archive HEAD | tar -x -C <scratch>
+cd <scratch> && PYTHONPATH=<scratch>/src <venv>/bin/python -m pytest <the one test> -q
+```
+
+`git archive` over `git worktree add` on a shared checkout: it writes nothing into
+`.git`, registers nothing, and needs no cleanup beyond `rm -rf`. Works whenever the
+package is installed as a plain-path editable `.pth`, because `PYTHONPATH` is searched
+before `site-packages` — check the `.pth` first, since a PEP 660 import-hook editable
+install would win over `PYTHONPATH` and silently give you the modified code back.
+
+**Counterfactual:** My reasoning was sound and reached the right verdict —
+"`No trace available` and `0 tool call(s)` are a mock/trace concern, nowhere near an env
+var or a queue path" — and I had already half-written it as the conclusion. What the
+reasoning could not have reached is the actual finding: the failure is not
+mine-vs-pre-existing at all, it is **environment-dependent**. It fails under
+`CLAUDE_CONFIG_DIR=~/.claude-sdd` and passes with the variable unset, on an unchanged
+tree, because the mock plants its transcript at a hardcoded `~/.claude` while
+`find_transcript` honours the ambient variable. Filed as
+`prompt-engineering:docs/issues/2026-08-27-integration-test-plants-transcript-in-the-wrong-claude-home.md`.
+
+Three minutes of isolation bought a filed bug with a one-line reproduction. The
+alternative was a commit message asserting "pre-existing" on the strength of a plausible
+story — true, as it happens, and still the wrong thing to have written, because it would
+have closed the question instead of opening it.
+
+The narrower cost avoided: the failure message itself blames the wrong thing
+(`check_guard_denied.py` concludes "this is a scenario-design failure" from zero tool
+calls). Three hypotheses it suggests — prompt-text drift, missing `mode: trace`, encoding
+divergence — are all refutable in a minute each, and all three are wrong. A diff-reasoning
+approach would never have tested them, because it never gets as far as asking what the
+failure IS.
+
+**Confirming data points:**
+
+1. This entry — clean-tree extraction turned an assumption into a filed bug, and the bug
+   was a different category than either candidate answer.
+2. Pending: the next time a suite fails in a dirty tree.
+
+**Impact:** med — one filed bug per occurrence, and it removes a whole class of
+commit-message claims made on plausibility. The suite in question is one a developer here
+runs constantly, and it is red for all of them.
+
+**Promote-when:** A second occurrence where clean-tree isolation contradicts, or
+re-categorises, what diff-reasoning concluded. At two datapoints, promote to `CLAUDE.md`
+as: *"A test failing in a tree you have modified is a question for `git archive HEAD`,
+not for reading your own diff."*
+
+**Status:** validated — single datapoint, bug filed with a verified one-variable
+reproduction.
+
+**Valid:** invariant
+
+**Rests on:** the principle that a claim about causation owes evidence rather than a
+plausible mechanism (CLAUDE.md, *Conclude Last*), and the project's rule that any bug
+noticed during work gets a file.
 
 ## Template for new entries
 
