@@ -667,6 +667,10 @@ pub trait Tool: Send + Sync {
     /// `docs/trackers/prompt-guide-refactor-session-log.md`); V2 closes that
     /// gap by delivering the content directly.
     async fn call_content(&self, input: Value, ctx: &ToolContext) -> Result<Vec<Content>> {
+        // Captured BEFORE `self.call` consumes `input` — never clone `input`
+        // itself (some tools, e.g. `create_file`/`edit_file`, carry whole
+        // file bodies in it).
+        let selector = self.selector_key(&input);
         let mut val = self.call(input, ctx).await?;
 
         // Field-aware project-root stripping. Runs HERE, on the typed Value,
@@ -692,8 +696,222 @@ pub trait Tool: Send + Sync {
         let form = self.output_form();
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
 
-        // Compute potential hint topic + whether it should fire on this call.
-        let hint_topic: Option<String> = {
+        fn inject_notice(val: &mut Value, notice: &str) {
+            if let Some(obj) = val.as_object_mut() {
+                // `run_command`'s answer IS the primary content the caller reads —
+                // a sibling `_workspace_notice` field next to a plausible `stdout`
+                // reads as metadata, and the plausible answer wins attention (see
+                // docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md).
+                // Prepend into `stdout` too, when present, so the warning sits in
+                // the channel that is actually read. No other tool's response
+                // shape carries a top-level `stdout` string.
+                if let Some(stdout) = obj.get("stdout").and_then(|v| v.as_str()) {
+                    let prefixed = format!("⚠ {notice}\n\n{stdout}");
+                    obj.insert("stdout".to_string(), Value::String(prefixed));
+                }
+                obj.insert(
+                    "_workspace_notice".to_string(),
+                    Value::String(notice.to_string()),
+                );
+            }
+        }
+
+        /// Which shape of guide content actually shipped in the second (or
+        /// later) content block, so the legacy `_guide_hint` JSON field can
+        /// describe THAT, not a fixed sentence written for the whole-topic
+        /// world. Before this existed, `inject_hint` always emitted "Full
+        /// guide auto-injected ... do not re-call get_guide" regardless of
+        /// what shipped — true for `Whole`, but false for `Section` (a
+        /// slice, not "the full guide") and actively backwards for
+        /// `Preamble` (the whole point of the preamble fallback is that the
+        /// model SHOULD re-call `get_guide(topic)`; telling it not to
+        /// neutered the fallback into a ~700-byte no-op).
+        #[derive(Clone, Copy)]
+        enum GuideDeliveryShape {
+            /// Non-declaring topic: the entire topic body shipped, once.
+            Whole,
+            /// Declaring topic, at least one section matched: only the
+            /// matched slice(s) shipped — other sections may still arrive
+            /// on later, differently-shaped calls this session.
+            Section,
+            /// Declaring topic, no section matched this call's shape: the
+            /// topic's preamble shipped, with an explicit pointer to call
+            /// `get_guide(topic)` for the full body.
+            Preamble,
+        }
+
+        fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShape) {
+            let text = match shape {
+                GuideDeliveryShape::Whole => format!(
+                    "First call this session for topic '{topic}'. \
+                     Full guide auto-injected as a separate content \
+                     block below; do not re-call get_guide(\"{topic}\")."
+                ),
+                GuideDeliveryShape::Section => format!(
+                    "Section(s) of '{topic}' auto-injected below, selected for \
+                     this call. Other sections may arrive on later calls; \
+                     `get_guide(\"{topic}\")` returns the full topic."
+                ),
+                GuideDeliveryShape::Preamble => format!(
+                    "No section of '{topic}' declares this call shape; its \
+                     preamble is below. Call `get_guide(\"{topic}\")` for the \
+                     full topic."
+                ),
+            };
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("_guide_hint".to_string(), Value::String(text));
+            }
+        }
+
+        /// Build the second-block content for V2 hard-injection of a
+        /// non-declaring (whole-topic) guide. Returns `None` when the
+        /// topic's body is not registered. The caller (`guide_blocks_for`)
+        /// treats `None` as "nothing shipped": it does NOT burn the topic's
+        /// ledger key and does NOT set the `_guide_hint` field for it, so a
+        /// misregistered/renamed topic degrades to silence rather than a
+        /// false promise of content that never arrives, and a later call
+        /// against the same topic still gets a chance to succeed once the
+        /// registration is fixed. This should not happen for any topic
+        /// actually reachable via `relevant_guide_topic` in production; it
+        /// exists as a defensive guard against drift between that side and
+        /// the registered-topics table, not as a supported delivery path.
+        fn guide_block(topic: &str) -> Option<Content> {
+            let body = crate::prompts::topic_body(topic)?;
+            let wrapped = format!(
+                "<!-- auto-injected get_guide('{topic}') — first call this session \
+                 that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\
+                 \n\
+                 {body}\n\
+                 \n\
+                 <!-- end auto-injected get_guide('{topic}') -->"
+            );
+            Some(Content::text(wrapped))
+        }
+
+        /// Blocks to emit for a resolved topic, and the ledger bookkeeping for
+        /// them. A topic that does not declare any `serves:` sections
+        /// (`GUIDE_INDEX.declares`) keeps the exact pre-Task-8 whole-topic
+        /// behaviour: one block, bare-topic ledger key, byte-identical output
+        /// — this is the Phase 1 containment property, and every topic but
+        /// `librarian` takes this branch today.
+        ///
+        /// A declaring topic instead resolves the call's shape
+        /// (`selector` + the typed result) against the topic's declared
+        /// sections. Sections already delivered this session (per
+        /// `GuideSection::ledger_key`, `"{topic}#{heading}"`) are skipped —
+        /// silently, not as a fallback trigger. Only when NO section
+        /// declares this shape at all does the preamble fallback fire
+        /// (`"{topic}#<preamble>"` key): a small preamble plus a
+        /// `get_guide(topic)` pointer, never the whole topic, never silence.
+        /// Falling back to the preamble is safe because a fixed shape
+        /// census bounds the number of distinct call shapes, and starvation
+        /// degrades to "delivered late" (a later matching call still fires
+        /// the section), never "never delivered".
+        ///
+        /// A ledger key is inserted ONLY when its block is actually pushed —
+        /// never merely computed. Marking a key emitted before knowing
+        /// whether anything would be sent is the bug this replaces: a call
+        /// whose shape matched nothing used to burn the whole topic on
+        /// silence, and a declaring topic's bare name is never used as a key
+        /// at all (only `topic#heading` / `topic#<preamble>` are), so the
+        /// old "already emitted the bare topic" shortcut cannot be reused
+        /// here — each branch below does its own `emitted.insert` check at
+        /// the granularity it actually delivers.
+        fn guide_blocks_for(
+            topic: &str,
+            selector: Option<&str>,
+            result: &Value,
+            emitted: &mut crate::tools::guide_ledger::GuideLedger,
+        ) -> (Vec<Content>, Option<GuideDeliveryShape>) {
+            use crate::prompts::guide_index::GUIDE_INDEX;
+
+            if !GUIDE_INDEX.declares(topic) {
+                if emitted.contains(topic) {
+                    return (Vec::new(), None);
+                }
+                // Only burn the ledger key once the block actually builds —
+                // `guide_block` returning `None` (topic not registered) must
+                // not consume the slot on silence (fix for the fail-safe
+                // inversion flagged in Task 8 review: an unregistered topic
+                // used to burn its key with nothing shipped at all, which is
+                // ambiguity resolving toward suppression).
+                return match guide_block(topic) {
+                    Some(block) => {
+                        emitted.insert(topic.to_string());
+                        (vec![block], Some(GuideDeliveryShape::Whole))
+                    }
+                    None => (Vec::new(), None),
+                };
+            }
+
+            let matched = GUIDE_INDEX.match_sections(topic, selector, result);
+
+            // No section declares this call's shape at all: preamble + a
+            // pointer to the full topic, once per session.
+            if matched.is_empty() {
+                let key = format!("{topic}#<preamble>");
+                if !emitted.insert(key) {
+                    return (Vec::new(), None);
+                }
+                return match GUIDE_INDEX.topic(topic) {
+                    Some(entry) => (
+                        vec![Content::text(format!(
+                            "<!-- auto-injected get_guide('{topic}') preamble — no section \
+                             declares this call's shape. -->\n\
+                             \n\
+                             {}\n\
+                             \n\
+                             Call `get_guide(\"{topic}\")` for the full topic.\n\
+                             \n\
+                             <!-- end auto-injected get_guide('{topic}') preamble -->",
+                            entry.preamble.trim()
+                        ))],
+                        Some(GuideDeliveryShape::Preamble),
+                    ),
+                    None => (Vec::new(), None),
+                };
+            }
+
+            // At least one section declares this shape: deliver whichever of
+            // those (plus their `requires:` closure, from `match_sections`)
+            // have not already been sent this session. All-already-sent is
+            // NOT "nothing declared" — it must return empty, never fall back
+            // to the preamble (that would re-litigate an already-satisfied
+            // shape as if it were unmatched).
+            let mut out = Vec::new();
+            for sec in matched {
+                let key = sec.ledger_key();
+                if emitted.insert(key) {
+                    out.push(Content::text(format!(
+                        "<!-- auto-injected get_guide('{topic}') § {} — first call this \
+                         session that serves this section. Do NOT re-call get_guide for \
+                         it. -->\n\
+                         \n\
+                         {}\n\
+                         \n\
+                         <!-- end auto-injected get_guide('{topic}') § {} -->",
+                        sec.heading, sec.body, sec.heading
+                    )));
+                }
+            }
+            let shape = if out.is_empty() {
+                None
+            } else {
+                Some(GuideDeliveryShape::Section)
+            };
+            (out, shape)
+        }
+
+        // Compute the hint (topic + delivery shape, driving the legacy
+        // `_guide_hint` field) and the guide content blocks together, in one
+        // pass, under one lock — `hint` is `Some((topic, shape))` exactly
+        // when `guide_content` is non-empty, so the two never drift apart (a
+        // stale `_guide_hint` field with no matching content block, or vice
+        // versa, is what a two-pass version would risk). Carrying `shape`
+        // alongside `topic` (rather than just `topic`) is what lets
+        // `inject_hint` say something true about what actually shipped —
+        // see `GuideDeliveryShape`.
+        let (guide_hint, guide_content): (Option<(String, GuideDeliveryShape)>, Vec<Content>) = {
             let mut emitted = ctx.guide_hints_emitted.lock();
             // Anonymous tier only (a no-op when no TTL is configured): re-arm
             // topics the model plausibly no longer holds. Must run BEFORE the
@@ -734,90 +952,67 @@ pub trait Tool: Send + Sync {
                 // session forfeits its guide — an acceptable trade against
                 // 18 KB of librarian guide landing on a one-shot `artifact`
                 // call. See `prompts::SESSION_OPENING_GUIDE`.
+                //
+                // Kept keyed on the bare topic name — deliberately: this
+                // topic never declares sections (Phase 1), so it is not
+                // eligible for the finer `topic#heading` keys
+                // `guide_blocks_for` uses below, and mixing the two here
+                // would desync this trigger from what `GuideLedger::re_arm`
+                // actually re-arms.
                 let topic = crate::prompts::SESSION_OPENING_GUIDE;
-                emitted.insert(topic.to_string());
-                Some(topic.to_string())
-            } else if let Some(topic) = self.relevant_guide_topic(&val) {
-                if emitted.contains(topic) {
-                    None
-                } else {
-                    let should = match topic {
-                        "progressive-disclosure" => {
-                            // Either the default-path buffering kicked in (large JSON),
-                            // or the tool itself pre-buffered (e.g. run_command storing
-                            // a `@cmd_*` ref and returning a small envelope with
-                            // `output_id`). Both signal the agent should learn the
-                            // progressive-disclosure pattern.
-                            exceeds_inline_limit(&json)
-                                || val
-                                    .as_object()
-                                    .and_then(|o| o.get("output_id"))
-                                    .and_then(|v| v.as_str())
-                                    .is_some()
-                        }
-                        _ => true,
-                    };
-                    if should {
+                // Only burn the ledger key once the block actually builds —
+                // same fail-safe-inversion fix as the bare-topic branch in
+                // `guide_blocks_for` above: an unregistered/empty topic must
+                // not consume the slot on silence. `SESSION_OPENING_GUIDE`
+                // never declares sections in Phase 1 (see the comment block
+                // above), so this always resolves to `Whole` or nothing —
+                // but that assumption is asserted, not just commented, by
+                // `session_opening_guide_never_declares_sections` below.
+                match guide_block(topic) {
+                    Some(block) => {
                         emitted.insert(topic.to_string());
-                        Some(topic.to_string())
-                    } else {
-                        None
+                        (
+                            Some((topic.to_string(), GuideDeliveryShape::Whole)),
+                            vec![block],
+                        )
                     }
+                    None => (None, Vec::new()),
+                }
+            } else if let Some(topic) = self.relevant_guide_topic(&val) {
+                // Either the default-path buffering kicked in (large JSON),
+                // or the tool itself pre-buffered (e.g. run_command storing
+                // a `@cmd_*` ref and returning a small envelope with
+                // `output_id`). Both signal the agent should learn the
+                // progressive-disclosure pattern.
+                let should = match topic {
+                    "progressive-disclosure" => {
+                        exceeds_inline_limit(&json)
+                            || val
+                                .as_object()
+                                .and_then(|o| o.get("output_id"))
+                                .and_then(|v| v.as_str())
+                                .is_some()
+                    }
+                    _ => true,
+                };
+                if should {
+                    let (blocks, shape) =
+                        guide_blocks_for(topic, selector.as_deref(), &val, &mut emitted);
+                    // `shape.is_none()` iff `blocks.is_empty()` — every return
+                    // path in `guide_blocks_for` keeps the two in lockstep —
+                    // so branching on `shape` alone is sufficient and avoids
+                    // restating the emptiness check.
+                    match shape {
+                        Some(shape) => (Some((topic.to_string(), shape)), blocks),
+                        None => (None, Vec::new()),
+                    }
+                } else {
+                    (None, Vec::new())
                 }
             } else {
-                None
+                (None, Vec::new())
             }
         };
-
-        fn inject_notice(val: &mut Value, notice: &str) {
-            if let Some(obj) = val.as_object_mut() {
-                // `run_command`'s answer IS the primary content the caller reads —
-                // a sibling `_workspace_notice` field next to a plausible `stdout`
-                // reads as metadata, and the plausible answer wins attention (see
-                // docs/issues/archive/2026-08-17-worktree-reads-resolve-against-the-old-project.md).
-                // Prepend into `stdout` too, when present, so the warning sits in
-                // the channel that is actually read. No other tool's response
-                // shape carries a top-level `stdout` string.
-                if let Some(stdout) = obj.get("stdout").and_then(|v| v.as_str()) {
-                    let prefixed = format!("⚠ {notice}\n\n{stdout}");
-                    obj.insert("stdout".to_string(), Value::String(prefixed));
-                }
-                obj.insert(
-                    "_workspace_notice".to_string(),
-                    Value::String(notice.to_string()),
-                );
-            }
-        }
-
-        fn inject_hint(val: &mut Value, topic: &str) {
-            if let Some(obj) = val.as_object_mut() {
-                obj.insert(
-                    "_guide_hint".to_string(),
-                    Value::String(format!(
-                        "First call this session for topic '{topic}'. \
-                         Full guide auto-injected as a separate content \
-                         block below; do not re-call get_guide(\"{topic}\")."
-                    )),
-                );
-            }
-        }
-
-        /// Build the second-block content for V2 hard-injection. Returns
-        /// `None` when the topic's body is not registered (defensive — the
-        /// `_guide_hint` field still ships in that case so the model knows
-        /// to call `get_guide(topic)` manually).
-        fn guide_block(topic: &str) -> Option<Content> {
-            let body = crate::prompts::topic_body(topic)?;
-            let wrapped = format!(
-                "<!-- auto-injected get_guide('{topic}') — first call this session \
-                 that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\
-                 \n\
-                 {body}\n\
-                 \n\
-                 <!-- end auto-injected get_guide('{topic}') -->"
-            );
-            Some(Content::text(wrapped))
-        }
 
         // Build the primary response block (the tool's actual output).
         // `force_inline` tools (e.g. get_guide) opt out of overflow buffering:
@@ -854,8 +1049,8 @@ pub trait Tool: Send + Sync {
                 "hint": hint,
                 "buffered_bytes": json_len,
             });
-            if let Some(topic) = &hint_topic {
-                inject_hint(&mut buffered, topic);
+            if let Some((topic, shape)) = &guide_hint {
+                inject_hint(&mut buffered, topic, *shape);
             }
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut buffered, notice);
@@ -867,8 +1062,8 @@ pub trait Tool: Send + Sync {
         } else {
             // Small output path.
             let mut val = val;
-            if let Some(topic) = &hint_topic {
-                inject_hint(&mut val, topic);
+            if let Some((topic, shape)) = &guide_hint {
+                inject_hint(&mut val, topic, *shape);
             }
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut val, notice);
@@ -888,17 +1083,22 @@ pub trait Tool: Send + Sync {
             }
         };
 
-        // V2 hard-injection: append the full guide body as a second block
-        // when a hint fired. Topic body lookup may return None (unregistered
-        // topic) — in that case we ship only the primary block with the
-        // soft `_guide_hint` pointer.
+        // V2 hard-injection: append the guide content blocks computed above —
+        // either the single whole-topic block (non-declaring topic) or the
+        // per-section slices / preamble fallback (declaring topic).
         let mut blocks = vec![primary];
-        if let Some(topic) = &hint_topic {
-            if let Some(block) = guide_block(topic) {
-                blocks.push(block);
-            }
-        }
+        blocks.extend(guide_content);
         Ok(blocks)
+    }
+
+    /// A cheap projection of this call's shape, taken BEFORE `call()` consumes
+    /// `input`. Default `None` ⇒ the tool opts out at zero cost.
+    ///
+    /// Deliberately not a clone of `input`: `create_file` and `edit_file` inputs
+    /// carry whole file bodies, and a clone would be paid on 100% of tool calls
+    /// to benefit the ~3% that inject a guide.
+    fn selector_key(&self, _input: &Value) -> Option<String> {
+        None
     }
 
     /// Topic name this tool's discipline depends on, for the first-call
