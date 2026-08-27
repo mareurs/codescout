@@ -68,7 +68,7 @@ entry_high_water_W: 1
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
-| F-1 | 2026-08-27 | med | companion-hooks | open | CLAUDE.md asserts native `Bash` is hard-denied; a positive control shows it is not |
+| F-1 | 2026-08-27 | med | companion-hooks | fixed-verified | CLAUDE.md asserts native `Bash` is hard-denied; a positive control shows it is not |
 
 ## Wins Index
 
@@ -301,8 +301,24 @@ unrunnable. The user corrected it in one message; had they believed it, the
 plausible cost is abandoning a config change they wanted, or hand-running a
 4700-test gate that I could run myself.
 
-**Status:** open — reality established, but the CLAUDE.md sentence is unedited
-and the reason the deny does not fire is unknown.
+**Status:** fixed-verified — the CLAUDE.md sentence was rewritten 2026-08-27 (see
+Fix idea below; landed same day). The replacement states what was measured, dates
+it, names the profile, and tells the reader to call the tool rather than infer
+availability from the file. Gate green after the edit:
+`claude_md_contains_no_deprecated_tool_names` + all three `prompt_surfaces`
+snapshots + `prompt_surfaces_reference_only_real_tools` = 5 passed / 0 failed,
+and `audit_doc_refs` on CLAUDE.md exits 0.
+
+**Residual, deliberately not folded into this entry's status:** *why* the
+PreToolUse deny does not fire is still unestablished. That is a separate question
+from the friction filed here — the friction was a doc asserting a falsehood, and
+the doc no longer asserts it. The scope of the correction also widened on
+re-probing: native `Read` and `Edit` reach source files unblocked too (the `Edit`
+probe used a deliberately non-matching `old_string`, so it returned "String to
+replace not found" rather than a deny, and modified nothing), and `Grep`/`Glob`
+turn out to be absent from the tool list entirely rather than denied — a third
+mechanism the original sentence collapsed into "hard-denied" along with the other
+two.
 
 **Valid:** dated 2026-08-27
 

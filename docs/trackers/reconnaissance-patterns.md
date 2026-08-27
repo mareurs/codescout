@@ -4018,9 +4018,14 @@ doc-asserted prohibition before acting on it. Until that measurement exists this
 stays an audit row. If a third instance lands with the skill uninvoked, that is
 the base-arm signal.
 
-**Status:** open — reality established and both entries filed in
-`shell-gating-session-log`; the CLAUDE.md sentence
-is still unedited, and no base arm has been run.
+**Status:** open — the CLAUDE.md sentence was rewritten 2026-08-27 and
+`shell-gating-session-log:F-1` is now `fixed-verified`, so the *instance* is
+closed. This entry stays open on the part that is not: no base arm has been run,
+so the mode-3 Unreachable verdict has no measurement behind its remedy.
+Re-probing for the fix also widened the instance — native `Read` and `Edit` reach
+source files unblocked too, and `Grep`/`Glob` are absent from the tool list
+rather than denied, so the one sentence had collapsed three different mechanisms
+into a single false absolute.
 
 **Kin:** `R-19` (assert-a-checkable-fact form of the same law, quoted in
 SKILL.md), `R-89` (freshness/placement — the other law that recurred because it
