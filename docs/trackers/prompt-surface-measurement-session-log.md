@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 44
+entry_high_water_F: 45
 entry_high_water_W: 28
 entry_prefix:
 - F
@@ -72,6 +72,7 @@ surfaces, not the definition.
 | F-42 | I captured the mechanism in the wrong population and refuted a hypothesis that was true | fixed-verified |
 | F-43 | My promotion plan skipped two gates the skill documents — and named the weaker of two destinations for this rule's failure class | open |
 | F-44 | Half the tasks carried a defect inherited from the plan's own reference code | open |
+| F-45 | The documented pre-commit gate cannot see test code; CI's second clippy job can | fixed |
 
 ## Wins Index
 
@@ -4087,6 +4088,23 @@ accordingly rather than downgrading the reviewer model on transcription-shaped t
 Two datapoints would justify a line in `writing-plans` — its "No Placeholders" section
 currently pushes toward complete inline code without noting that complete code is not
 correct code.
+
+## F-45 — The documented pre-commit gate cannot see test code; CI's second clippy job can
+
+**Valid:** dated 2026-08-27
+**Status:** fixed
+
+**Observed:** Merging `sdd/get-guide-section-grain` into `experiments` produced a tree that fails CI. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` (`.github/workflows/ci.yml:61`) reported seven `clippy::doc_lazy_continuation` errors. The narrow form CLAUDE.md documents as the gate — `cargo clippy -- -D warnings` (`ci.yml:50`) — passes on the identical tree.
+
+The defect itself is small: a doc comment on `#[test] fn session_opening_guide_never_declares_sections` wrapped as "…never declares `##`/`###` sections in Phase / 1. `guide_blocks_for` keys everything else…", putting `1. ` at the start of a line. Rustdoc's markdown parser reads that as an ordered list item and the six following lines as lazy continuations of it. One sentence breaking after "Phase" invented a list.
+
+**Got:** The lint was unreachable from every check the run actually performed. Ten per-task gates, ten task reviews, one whole-branch review on the most capable model, and a final green suite — all running the documented narrow form, which does not compile test targets. A defect sitting on a `#[test]` fn is invisible to all of it by construction. It would have failed on the first push.
+
+Worth being precise about where the knowledge already lived: `ci.yml:51-60` carries a comment that states the fact outright — "the bare command above only lints the root package's non-test targets with default features". The repo knew. The gate line in CLAUDE.md, which is what an agent actually reads before declaring a task complete, did not carry it.
+
+The generalisation is the part to keep: **a documented gate narrower than the enforced gate is worse than no documentation.** Everyone runs the documented form and believes they are covered, so the gap cannot surface during review — only at push, after every reviewer has already signed off. The cost is not the lint; it is that a clean review is not evidence of a clean tree.
+
+**Rests on:** `.github/workflows/ci.yml:50` (narrow job) and `:61` (wide job, with its explanatory comment at `:51-60`). Failure and fix: `c30c07a7`, patch-id `c586b0766eacf6c4765c3bb0359ff50839a2e9f1`. CLAUDE.md § Development Commands corrected in the same commit as this entry.
 
 ## Template for new entries
 

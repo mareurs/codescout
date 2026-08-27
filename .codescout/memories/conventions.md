@@ -4,8 +4,9 @@
 
 1. `cargo fmt`
 2. `cargo clippy -- -D warnings`
-3. `cargo test`
-All three must pass. No exceptions.
+3. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` — the only form that lints `#[test]` code and `codescout-embed`'s feature-gated `local` module. CI runs both (`ci.yml:50`, `:61`); the narrow one passing proves nothing about this one.
+4. `cargo test`
+All four must pass. No exceptions.
 
 ## Error Handling
 

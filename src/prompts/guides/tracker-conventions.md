@@ -69,7 +69,7 @@ the caveat. Write it where a query can read it.
 don't wait until task end.
 
 **Archive trigger:** move the file into `docs/issues/archive/` once the fix is
-verified on `experiments` — gate green (`cargo fmt`, `cargo clippy -- -D warnings`,
+verified on `experiments` — gate green (`cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 `cargo test`) and a regression test in place. Reaching `master` is **not** required:
 `experiments` is never deleted, so an unmerged fix is not at risk of being lost, and
 holding the file back only grows a pile of `fixed`-but-unarchived bugs that no query

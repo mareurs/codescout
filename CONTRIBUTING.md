@@ -99,11 +99,17 @@ LTO-time issues that debug skips.
 ## Before Submitting a PR
 
 Run the same checks CI will run — and since the toolchain is pinned, "the same" is literal
-rather than approximate. A clippy lint you do not see locally is not a lint CI will find:
+rather than approximate. A clippy lint you do not see locally is not a lint CI will find,
+which is why **both** clippy invocations are listed: the bare one lints only the root
+package's non-test targets with default features, and the second is the only one that
+reaches `#[test]` code and `codescout-embed`'s feature-gated `local` module. CI runs both
+(`.github/workflows/ci.yml:50` and `:61`), so the first passing proves nothing about the
+second.
 
 ```bash
 cargo fmt
 cargo clippy -- -D warnings
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 cargo test
 ```
 
