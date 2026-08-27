@@ -150,3 +150,39 @@ Fixed on `experiments` (server-side commits `5bdb7f45`..`feb845aa`; companion ho
   late instead of immediately. This is the Agent-Agnostic Design contract in practice:
   Claude-Code-specific enforcement is additive, and its absence degrades gracefully rather
   than breaking other harnesses.
+
+## `settings.json` `env` overrides the inherited environment (measured 2026-08-27)
+
+Claude Code resolves environment variables it cares about — `ANTHROPIC_BASE_URL`
+among them — with this precedence:
+
+    CLI --settings env  >  profile settings.json env  >  inherited shell env
+
+**A profile's `env` block silently wins over an export.** No warning, no log line;
+the run succeeds and goes wherever settings said.
+
+Measured: two `claude -p` runs launched with
+`ANTHROPIC_BASE_URL=http://localhost:8099` exported reached `:8082` instead — a
+recording shim on 8099 logged zero requests while both runs exited 0. Adding
+`--settings '{"env":{"ANTHROPIC_BASE_URL":"http://localhost:8099"}}'` routed on the
+first try. Both `~/.claude/settings.json` and `~/.claude-sdd/settings.json` pin the
+variable, so this fires for every profile on this machine.
+
+**Consequences worth remembering:**
+
+- **`export VAR=… claude …` is not a routing mechanism** for any variable a profile
+  pins. Use `--settings '{"env":{…}}'` — the only surface above profile settings.
+- **A health check on the exported value validates a URL the client never reads.**
+  To check what the child will use, read
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json` → `.env.ANTHROPIC_BASE_URL`
+  and fall back to the environment. `CLAUDE_CONFIG_DIR` is what selects the profile,
+  so resolve through it rather than hardcoding `~/.claude`.
+- This is the *opposite* failure from ambient inheritance: it overrules a caller who
+  set the variable explicitly and correctly.
+
+Cost when missed: `prompt-engineering:6d7c664` shipped a guard whose whole purpose
+was to stop eval runs bypassing Langfuse capture, and it could not fail in that
+direction — it curled the value it had just exported. Fixed in
+`prompt-engineering:8ac0d63`. See
+`prompt-surface-measurement-session-log:F-39` and
+`llm-proxy:docs/issues/2026-08-27-no-detection-when-traffic-bypasses-the-proxy.md`.

@@ -957,3 +957,47 @@ entry the same day rested on "95% of billed output tokens were never returned", 
 equally consistent with *the model omitted it* and *our own request asked it to*. A
 measurement that cannot separate the hypotheses cannot choose between them, however
 dramatic it looks.
+
+## When you have an axis but no mechanism, capture the mechanism first
+
+An investigation that compares outcomes produces an **axis**: "runs of type A came
+out different from runs of type B." The axis names a knob, and the knob is supplied
+by *you* — from whatever varied most visibly between the groups you happened to
+select. The data never names it. This is why a wrong axis feels earned: it arrives
+attached to a real difference.
+
+Measured 2026-08-27 on the empty-thinking investigation. The axis was wrong twice:
+
+    round 1  "harness runs vs manual probes"    wrong -- selection never validated (F-38)
+    round 2  "--output-format json vs stream-json"  wrong -- refuted by request capture
+
+Round 2 was filed with a controlled A/B, session-id matching, two prompts, both
+replicates consistent — every methodological box round 1 had missed. It was still
+wrong, because a better comparison is still a comparison.
+
+What settled it was ~90 lines of recording proxy, run once: capture the actual
+request bodies. Both arms send `thinking: {"type": "adaptive"}` with no `display`
+and `stream: true`. That single observation killed the hypothesis (the client never
+sets `display`) *and* the axis (`--output-format` never reaches the wire) — two
+claims, no statistics, no n.
+
+**The test:** before designing another comparison, ask *"can I observe the mechanism
+directly, and what would it cost?"* If the answer is "an afternoon", the comparison
+is the expensive option, not the cheap one. Comparisons are cheap to *run* and
+expensive to *interpret*; a mechanism capture inverts that.
+
+**What the wrong axis was about to buy.** The issue's preferred fix was a config flag
+forcing `display: "summarized"` even when a client set it explicitly — a behaviour
+change to a shared observability proxy that would have overridden nothing, shipped
+green, and left a permanent flag documenting a client behaviour that does not exist.
+
+**Corollary — capture the mechanism and the effect may go too.** The same six runs
+that killed the axis also failed to reproduce the *symptom*: json and stream-json
+both logged 212–345 chars of thinking, across shim/no-shim and sonnet/opus. Check
+before assuming the phenomenon is still there; an issue can be stale in the effect
+as well as in the cause. Rule out "a fix landed in between" by the clock, not by
+plausibility — here the running binary predated both fixes, so it was not available
+as an explanation and the residue had to be named honestly instead.
+
+Pairs with `prompt-surface-measurement-session-log:W-26` and
+`…:F-38`, and with "Match results by an identifier the runs carry".

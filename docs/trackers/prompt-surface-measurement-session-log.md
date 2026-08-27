@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 38
-entry_high_water_W: 25
+entry_high_water_F: 40
+entry_high_water_W: 26
 entry_prefix:
 - F
 - W
@@ -66,6 +66,8 @@ surfaces, not the definition.
 | F-36 | Four defects marked fixed were all still live in the sibling eval — including F-1, whose code was still deleting evidence every run | fixed-verified |
 | F-37 | I cleared the proxy as a cause after checking only its response side, then blamed the API for a defect in our own request | fixed-verified |
 | F-38 | I selected traces by content-matching a prompt string my own session contained, and published the table as a between-condition finding | fixed-verified |
+| F-39 | A profile's settings.json `env` silently overrules an exported ANTHROPIC_BASE_URL — the guard I shipped validates its own input, not the client's | fixed-verified |
+| F-40 | Two sessions added the same routing guard to one file within an hour, and both were wrong the same way | fixed-verified |
 
 ## Wins Index
 
@@ -96,6 +98,7 @@ surfaces, not the definition.
 | W-18 | Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result | validated |
 | W-17 | A pre-dispatch scout caught a forward dependency I had stated in a form the harness cannot express | validated |
 | W-16 | Three dilution rounds converged without closing; one measurement of the shared cause moved it further than all three | validated |
+| W-26 | Capturing the mechanism killed an axis that two outcome-comparisons got wrong | validated |
 
 ## F-1 — Fixed output path destroyed the evidence for the headline figure
 
@@ -3596,6 +3599,142 @@ Both entries are also the same error one level apart — F-37 cleared a componen
 after checking one of its two sides; F-38 cleared a hypothesis after checking a
 selection it never validated. Neither measurement was wrong; both selections
 were.
+
+## W-26 — Capturing the mechanism killed an axis that two outcome-comparisons got wrong
+
+**Valid:** invariant
+
+**Observed:** 2026-08-27, resuming the thinking-token investigation. The filed issue
+had already named its own next step — *"log the forwarded `thinking` object … for one
+`json` and one `stream-json` request. That single observation confirms or kills it."*
+It was the right instruction and it had not been followed, because two rounds of
+outcome-comparison had each produced a confident axis instead.
+
+**Pattern:** When an investigation has produced an **axis** ("A differs from B") but
+no **mechanism**, capture the mechanism before designing another comparison. A
+comparison establishes that two groups differ. It never establishes which knob names
+the group — the knob is supplied by the investigator, from whatever varied most
+visibly between the groups they happened to select.
+
+**What the capture cost and what it returned:** a ~90-line recording shim in front of
+the proxy, ~20 minutes. It showed both arms send `thinking: {"type": "adaptive"}` with
+no `display` and `stream: true` — so the client never sets `display` (killing the
+hypothesis), and `--output-format` never reaches the wire at all (killing the axis).
+Two claims, one observation, no statistics.
+
+**Counterfactual:** The issue's preferred fix was *"force `display: \"summarized\"`
+even when the client set it explicitly, behind a config flag."* Implemented, it would
+have been a behaviour change to a shared observability proxy — one all three CC
+profiles route through — that **overrides nothing**, because no client on this machine
+sets `display`. It would have shipped green, changed no measurement, and left a
+permanent flag documenting a client behaviour that does not exist. The alternative fix
+was re-shaping the harness adapter to `stream-json`, changing an eval condition to
+correct a wire difference that is not there.
+
+**Second-order:** the capture also falsified the *symptom*. Six session-id-matched
+runs across shim/no-shim and sonnet/opus all logged non-empty thinking (212–345
+chars). Neither the mechanism nor the effect survived contact with direct
+measurement — and only the mechanism check could have told me which.
+
+**Confirming data points:**
+1. This session — hypothesis and axis both killed by one request capture, after two
+   comparison rounds each produced a wrong axis (`bug-fix-session-log` peer entry
+   F-37; this log's F-38).
+2. F-38 itself — an axis ("harness vs manual probe") produced by a selection the
+   investigator never validated.
+
+**Impact:** high — prevented a no-op behaviour change to shared infrastructure, and
+converted an open bug into a `zombie` with its residue named.
+
+**Promote-when:** a third investigation reaches a wrong axis by outcome-comparison
+where a mechanism capture was available and cheap. At three datapoints, promote to
+CLAUDE.md as *"Before running another comparison, ask whether the mechanism can be
+observed directly — and if it can, observe it first."*
+
+**Status:** validated — two datapoints, both this work stream.
+
+## F-39 — A profile's settings.json `env` silently overrules an exported ANTHROPIC_BASE_URL
+
+**Valid:** conditional — Claude Code changes its settings/env precedence
+
+**Observed:** 2026-08-27, trying to route one `claude -p` run through a recording
+shim by exporting `ANTHROPIC_BASE_URL=http://localhost:8099`.
+
+**Expected:** the exported variable routes the child process, the way it does for
+every other program.
+
+**Got:** both runs exited 0, produced correct output, and reached `:8082` — the shim
+logged **zero** requests. Claude Code's precedence is:
+
+    CLI --settings env  >  profile settings.json env  >  inherited shell env
+
+`~/.claude/settings.json` and `~/.claude-sdd/settings.json` both pin
+`env.ANTHROPIC_BASE_URL`, so the export was overruled without a word. Adding
+`--settings '{"env":{"ANTHROPIC_BASE_URL":"http://localhost:8099"}}'` routed on the
+first try.
+
+**Why it is worse than the ambient-inheritance bug it neighbours:** that one fails
+when *nobody* sets the variable. This one fails when somebody sets it **explicitly
+and correctly**, and is silently overruled. Nothing in the run reports the
+disagreement — there is no warning, and the run succeeds.
+
+**What it cost here:** the routing guard I shipped in `prompt-engineering:6d7c664`
+the previous session — added specifically to stop eval runs bypassing capture — is
+**decorative as a router**. It exports the variable and then health-checks *the value
+it just exported*, which the client never reads. It has agreed with reality this whole
+time only because `settings.json` happens to name the same URL. A guard that validates
+its own input rather than the client's behaviour cannot fail in the direction it was
+built to catch.
+
+**Same shape as F-32 and F-37:** verify one side of a two-sided thing, report it as
+the whole. Here the export side was verified and the consumption side assumed.
+
+**Fix:** `prompt-engineering:8ac0d63` resolves `env.ANTHROPIC_BASE_URL` from
+`$CLAUDE_CONFIG_DIR/settings.json` — the file the child will actually read — falls
+back to the exported value, and health-checks that. Recorded in
+`llm-proxy:docs/issues/2026-08-27-no-detection-when-traffic-bypasses-the-proxy.md`
+§ *Settings `env` overrides the environment*.
+
+**Severity:** high — it silently defeats explicit routing, and the caller-side fix an
+open issue prescribed was implemented and did nothing.
+
+**Status:** fixed-verified — `bash -n` clean, resolution returns
+`http://localhost:8082` from `~/.claude-sdd/settings.json`, 379 tests pass.
+
+## F-40 — Two sessions added the same routing guard to one file within an hour
+
+**Valid:** dated 2026-08-27
+
+**Observed:** 2026-08-27, editing `prompt-engineering:scenarios/blast-radius/run_pilot.sh`
+to fix the guard described in F-39. Grepping for `ANTHROPIC_BASE_URL` returned **two**
+routing guards in the committed file — one at lines 42-66, another at 113-128.
+
+**Got:** `git blame` + `git merge-base --is-ancestor` show `5508336a` (09:26) added the
+first and `6d7c664` (an hour later, mine) added the second, above it. Same author
+identity, different sessions, same shared checkout. Neither grepped the file for an
+existing check before adding one. Both did the same thing — export the variable, curl
+it, exit 2 — differing only in cosmetics (`localhost` vs `127.0.0.1`, base path vs
+`/v1/messages`, an `LLM_PROXY_OPTIONAL` escape hatch in one).
+
+**And both were wrong the same way**, per F-39: an export cannot route Claude Code
+past a profile that pins the variable. So the duplication was not merely redundant —
+it doubled a check that could not fail in the direction it was built to catch, and the
+second copy read as independent corroboration of the first.
+
+**Probable cause:** the shared-checkout concurrency this project runs on. Peer sessions
+commit to the same working tree, so "is this already handled?" is a question about a
+file that changed since my last read — exactly the seam the reconnaissance skill
+covers. I scouted the *proxy's* code carefully this session and did not scout the file
+I was about to add a guard to.
+
+**Severity:** med — no wrong behaviour shipped (both guards passed), but it cost a
+duplicated maintenance surface and would have cost a confusing double-failure message
+the first time the proxy was genuinely down.
+
+**Fix:** collapsed into one guard in `prompt-engineering:8ac0d63`, with a comment at
+the removed site recording why there were two.
+
+**Status:** fixed-verified — one guard remains, `bash -n` clean, 379 tests pass.
 
 ## Template for new entries
 
