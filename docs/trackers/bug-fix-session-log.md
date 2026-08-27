@@ -1967,7 +1967,7 @@ live-LSP class I initially misattributed to).
 > bug).** The blocker is gone: `memory(action="list")` returns 21 topics (= the 21
 > `.md` files on disk), and the content this entry could not reach is readable at
 > `.codescout/memories/gotchas.md:25` (`## MCP Binary Symlink`). The underlying bug
-> `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`
+> `docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`
 > is now `zombie` — symptom gone, root cause never confirmed, no attributable fix
 > commit.
 >
@@ -1988,7 +1988,7 @@ live-LSP class I initially misattributed to).
 
 **Expected:** CLAUDE.md explicitly documents this exact scenario: "the binary symlink gotcha → memory `gotchas` (MCP Binary Symlink)" — a one-line memory read should have surfaced the known, established workaround immediately.
 
-**Got:** `memory(action="read", topic="gotchas")` (and every other project-scoped topic except `language-patterns`/`onboarding`) failed with "topic not found" — a separate bug this same session had already found and filed (`docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`): `workspace(activate)` reports 16 memory topics for the `codescout` project, but `memory(list/read)` only sees 2, even with `project_id` passed explicitly. With the documented fix unreadable, the `CARGO_TARGET_DIR=target-release-new` + `Stop-Process -Force` + copy-into-place workaround had to be re-derived from first principles (inspecting `git status` for a pre-existing `target-release-new/` directory as a clue, then confirming the pattern via `Get-Process`).
+**Got:** `memory(action="read", topic="gotchas")` (and every other project-scoped topic except `language-patterns`/`onboarding`) failed with "topic not found" — a separate bug this same session had already found and filed (`docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`): `workspace(activate)` reports 16 memory topics for the `codescout` project, but `memory(list/read)` only sees 2, even with `project_id` passed explicitly. With the documented fix unreadable, the `CARGO_TARGET_DIR=target-release-new` + `Stop-Process -Force` + copy-into-place workaround had to be re-derived from first principles (inspecting `git status` for a pre-existing `target-release-new/` directory as a clue, then confirming the pattern via `Get-Process`).
 
 **Probable cause:** The memory-tool project-scoping bug (F-cited above) made the documented institutional knowledge for this EXACT situation completely inaccessible mid-task, at the worst possible time (blocked on a build).
 
@@ -2010,13 +2010,13 @@ fixed and live-verified this session
 (`docs/issues/archive/2026-07-28-memory-sections-filter-matches-h3-only.md`).
 
 The root bug this entry blamed —
-`docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
+`docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
 is now `zombie`, i.e. not reproducible on retest, so "filed but not yet fixed" was stale
 in both of its clauses. Two independent things had to be re-checked to retire one entry,
 which is the usual shape: a friction's stated cause and its observed cost decay on
 different clocks.
 
-**Fix idea / Pointer:** Fix `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`, then re-verify this specific recovery path against the (currently unreadable) `gotchas` memory's actual documented procedure to confirm today's improvised workaround matches or diverges from it.
+**Fix idea / Pointer:** Fix `docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`, then re-verify this specific recovery path against the (currently unreadable) `gotchas` memory's actual documented procedure to confirm today's improvised workaround matches or diverges from it.
 
 ---
 

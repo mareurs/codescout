@@ -2489,7 +2489,7 @@ async fn workspace_activate_injects_bootstrap_guide_body_v2() {
 /// it materialised an empty `<sub_root>/.codescout/memories` on the way past — leaving
 /// a directory that looks like an empty memory set for a project that holds topics.
 ///
-/// docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+/// docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
 #[tokio::test]
 async fn activating_a_sub_project_lists_the_memories_the_memory_tool_writes() {
     let dir = tempdir().unwrap();

@@ -13,7 +13,7 @@ opened: 2026-08-26
 owner: marius
 related:
 - docs/issues/archive/2026-07-10-memory-cross-embed-ignores-workspace-pin.md
-- docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+- docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
 severity: medium
 unverified: 'Only ONE of the three missing prompt-engineering points is traced to the pin defect: prompt-tdd-skill-eval-confounds, by created_at (~2026-07-04) falling inside the 2026-07-04..2026-07-13 window and by its point being the matching codescout orphan. Why `language-patterns` and `onboarding` have no point anywhere is NOT established -- cross_embed_memory is explicitly best-effort and non-fatal (it warns and the write still reports success), so a silent embed failure is a plausible cause but is inferred, not measured. Whether other umbrella projects hold mis-keyed points from the same window is NOT established: two projects were checked. `codescout migrate-memories --in-place` is quoted from index(action="verify")''s own hint and has NOT been run or verified this session.'
 ---
@@ -152,7 +152,7 @@ directory and is unaffected — it is only `recall` that cannot see it.
 
 - `docs/issues/archive/2026-07-10-memory-cross-embed-ignores-workspace-pin.md` — the fixed
   code defect this is the data residue of
-- `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
+- `docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
   same family, different axis: that one is disk-vs-disk (two surfaces reading two
   *directories*); this one is disk-vs-store
 - `docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md` — the

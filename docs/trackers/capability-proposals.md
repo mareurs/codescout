@@ -1324,7 +1324,7 @@ the reconnaissance skill's substrate rule.
 
 1. **Which projects to enumerate.** Resolving an arbitrary store `project_id` back to a
    root is exactly the undecided fork in
-   `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
+   `docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md` —
    two surfaces read two different directories and the fix is a decision about which owns
    a sub-project's memories. **Proposed sidestep:** scan the *resident* workspace projects,
    whose roots are known, and report unresolvable store `project_id`s as a separate

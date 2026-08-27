@@ -117,7 +117,7 @@ a docs/FEATURES.md retirement audit (named bare, not code-spanned: the file was 
   — correctly open. Its own body states that Bug A shipped (`0f6815f8`) and that
   *"Bug B — search-mode intermittent 0-matches — remains open and unconfirmed. It is
   the only reason this file is still open."* Nothing to reconcile.
-- `docs/issues/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`
+- `docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`
   — could not be cleared. Home-project counts agree (21 = 21), but the bug's scenario is
   a *foreign* project after `activate`, which the pass did not exercise. Recorded as a
   dated datapoint, status left `open`. Also warned off a false lead: this cohort's

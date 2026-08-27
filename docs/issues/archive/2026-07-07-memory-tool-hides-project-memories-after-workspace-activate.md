@@ -1,18 +1,19 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - memory
 - workspace
 - multi-project
-closed: null
+closed: 2026-08-27
 last_observed: 2026-08-26
+last_verified: 2026-08-27
 opened: 2026-07-07
 owner: marius
 related: []
 reopened: 2026-08-26
 severity: medium
-unverified: 'Mechanism now ESTABLISHED and measured (see Root cause) — two surfaces read two different directories, coinciding only for the root project. What remains open is a DECISION, not a diagnosis: which location owns the memories of a sub-project. Both layouts are load-bearing somewhere, so either choice needs a migration for the other layout existing data (this repo has 9 directories under .codescout/projects/). No fix, no regression test yet.'
+unverified: 'Fixes ONLY the bare-project-id activation route, which is the one this file reports. Activating the same sub-project by absolute PATH still returns the empty set — same mechanism, different dispatch branch — and is filed separately at docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md with an #[ignore]d executable reproduction. Not verified against a live MCP server (no rebuild since the fix).'
 ---
 
 # BUG: `memory(list/read)` only sees 2 topics for a project that `workspace(activate)` reports has 16
@@ -226,6 +227,14 @@ materialise an empty directory and report `0 memories` for a project holding fiv
 
 ### Why this is a design fork, not a typo
 
+> **Superseded 2026-08-27 — see the dated section at the end of this file.** The fork
+> is resolved, and this section names the reason it looked unresolvable: it treats the
+> two layouts as symmetric. They are not. The git-tracking property invoked below for
+> the project-local tree holds for the workspace-level tree too — `.gitignore` exempts
+> `/.codescout/projects/` precisely because *"that tree holds 53 tracked"* files — so
+> it never discriminated between the branches at all. The WRITE path did, and it had
+> already chosen. The analysis below is kept as written.
+
 Both layouts are deliberate somewhere. `memory_dir_for_project`'s per-project tree is
 what `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md` hardened
 (and this repo has nine such directories under `.codescout/projects/`). `MemoryStore::open`'s
@@ -290,3 +299,70 @@ with a minimal 2-project nested workspace fixture if possible.
   that should be available for codescout (`architecture`, `conventions`,
   `development-commands`, `language-patterns`, `gotchas`, `domain-glossary`,
   `project-overview`, `system-prompt`, `onboarding`).
+
+
+## 2026-08-27 — fixed: the readers move, because the writer had already decided
+
+**Fix:** `fc1bbf21` on `experiments` — patch-id
+`f1a072d9ad760b5e57a1c867df1cc89f9bf390e4`.
+
+### What resolved the fork
+
+This file called the choice a design decision needing a migration either way, resting on
+one property: the project-local tree makes memories git-tracked with the project they
+describe. That property is real but **not discriminating** — `.gitignore` deliberately
+exempts `/.codescout/projects/`, commenting that *"that tree holds 53 tracked"* files.
+Both layouts are tracked. The argument could not pick a winner because it applied equally
+to both.
+
+The write path picks the winner, and was never ambiguous. `src/server.rs` registers
+exactly one memory tool, `Arc::new(Memory)`, and every branch of it — `write`, `read`,
+`list`, `delete` — resolves through `resolve_memory_dir` → `Workspace::memory_dir_for_project`.
+The four legacy structs beside it in `src/tools/memory/mod.rs` (`WriteMemory`,
+`ReadMemory`, `ListMemories`, `DeleteMemory`) are referenced from nothing but their own
+tests, so they are not a second live surface.
+
+So the per-project tree is simply where memories *are*. Nothing had to move; the readers
+were the outlier, and the readers moved. **No migration.**
+
+### The change
+
+One construction site, because every divergent reader reads the same field, `p.memory`:
+`activate` (`config/mod.rs`), `onboarding.rs` ×4, `semantic/index.rs`, `server.rs`'s MCP
+resource dir, and `agent`'s workspace summary. `Agent::activate_within_workspace` now
+builds it with `MemoryStore::from_dir(ws.memory_dir_for_project(project_id))`.
+
+The other two construction sites build ROOT projects, where `memory_dir_for_project`
+already returns the identical path (`relative_root == "."`), so they are correct
+unchanged — which is also the reason the 2026-08-06 and 2026-07-28 verify-open passes
+could not clear this: both ran on the home project, where the bug cannot appear.
+
+`private_memory` deliberately stays project-local. The memory tool reads private topics
+from `p.private_memory` on both surfaces, so those already agreed, and
+`.codescout/private-memories/` is gitignored by design.
+
+### Tests
+
+`src/tools/config/tests.rs::activating_a_sub_project_lists_the_memories_the_memory_tool_writes`
+asserts the two surfaces return the **same list**, not that either equals a particular
+path — "they disagree" is the defect, so that is what the test pins. A third assertion
+covers the side effect rather than the symptom: `MemoryStore` creates its directory on
+open, so the old reader did not merely miss the memories, it left an empty
+`<sub_root>/.codescout/memories` behind corroborating its own zero.
+
+No existing test changed. That is its own datapoint — nothing had pinned the old
+behaviour as a contract.
+
+Gate: `cargo fmt`, `cargo clippy --all-targets -- -D warnings` clean, `cargo test` 4601
+passed / 0 failed / 47 ignored.
+
+### What is NOT fixed, and is filed
+
+`ActivateProject` returns early into `activate_within_workspace` **only** when `path`
+contains no separator. An absolute path takes the other route, builds a standalone
+workspace rooted at the target, and still reports the empty set. Same silent zero, second
+route — filed with an `#[ignore]`d executable reproduction, because closing it is a
+dispatch decision (should an absolute path naming a workspace member focus-switch, or open
+standalone?) that moves `read_only` defaults, focus, and the response shape:
+
+`docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md`
