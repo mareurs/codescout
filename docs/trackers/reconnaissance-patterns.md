@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 123
+entry_high_water_R: 124
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-124 | 2026-08-27 | miss (paired hit) | **One law, hit where the skill was invoked and never fetched where it was not.** The prohibition form of *"a fix — and equally a prohibition — is a claim about CURRENT STATE"* went unchecked: CLAUDE.md's "all native `Bash` are hard-denied" was acted on unverified and used to tell the user the mandated gate was unrunnable. The same law's request form had fired correctly hours earlier, stopping a deliberately-deleted `shell_enabled` switch from being re-added. Reading the hook SOURCE would have confirmed the wrong answer — `pre-tool-guard.mjs:177` is `enforce("This call is blocked...")` — and one positive control refuted it | `shell-gating-session-log:F-1` (miss) + `W-1` (hit); `cat src/main.rs` matched the guard's own block branch at `:165` and executed anyway, PostToolUse hint only; `BREAKER_THRESHOLD = 3` stands the guard down by design, so "hard" is wrong even as intent; audit verdict mode 3 **Unreachable** (placement, not wording) — no law added, base arm owed; kin [[R-19]] (same law, assert-a-checkable-fact form, already quoted in SKILL.md § When NOT to Use), [[R-89]] (recurred for the same placement reason) |
 | R-123 | 2026-08-27 | miss (x2) | **Adjacency is not causation — the nearest recent commit is a suspect, not a cause.** Twice in one session an observation was attributed to the most recent commit touching that surface, and both times the real cause predated it: `Monitor` executing in a deny-list arm was a list that lacked it (fixed 16 min earlier in `e67d419`), and `artifact(get)`'s `headings_truncated` was six weeks old (`3bccb234`), not the peer commit 12 min prior. Adjacency is what makes the check feel unnecessary — same file, same day, plausible subject line | cost: two bug reports, one filed `high` against the wrong layer, then retracted; sibling of [[R-118]] (a check that was refused) with the opposite origin and the same output |
 | R-122 | 2026-08-27 | miss | **Writing the lesson down was the act that broke the instrument.** `R-121` prescribed *"record how it was verified unique rather than the token itself"* and named its probe token inline in the same sentence; the token now returns a hit from the tracker, so the recorded repro would tell the next session the fix regressed — or worse, that the bug never existed. Structural, not careless: a probe for an EXCLUSION mechanism must live only in the excluded region, and any ledger recording it sits in the searched region by construction, so the write *is* the contamination | verified live on the rebuilt binary at `ee7d9a3a`; `R-121` repaired in the same pass to carry the two-command derivation; kin [[R-118]] (a refused verification returns an error, not a fact) |
 | R-121 | 2026-08-27 | hit | **A fix justified as "symmetric with the existing X" inherits X's scope without the property that made that scope honest.** `hidden_at_root`'s root-only `read_dir` is honest because its remedy (`include_hidden=true`) is root-agnostic. A gitignore clause copied to that shape names the six gitignored entries at this repo's root and misses `.superpowers/sdd/.gitignore:1:*` at depth 2 — the one rule that caused the reported zero. `completeness_warning`'s own doc already condemns it: *"naming an unchecked cause ends the search for the real one"* | `0f7105b8bebc600b` § Fix, corrected in the same pass; the repro also needed a fresh probe, the bug file's text having come to match its own old one; kin [[R-117]] (a proposed fix that would pass green and move nothing), [[R-118]] (ground truth before the claim) |
@@ -3964,6 +3965,74 @@ So the "symmetric" fix would emit a warning naming six innocent paths and still 
 **Status:** validated — two datapoints in one session, both with concrete cost.
 
 **Promote-when:** a third instance, or one where a wrong attribution reaches a shipped surface rather than a bug file. At that point it belongs in the seven laws under A, phrased as *"adjacency is not causation — date the token before you credit the commit."*
+
+## R-124 — Same law hit and missed in one session — a doc-asserted prohibition taken at face value
+
+**Verdict:** miss — with a paired hit of the same law hours earlier, which is the
+point of the entry.
+
+**Observed:** 2026-08-27, session that shipped `6058dad6` (hide `run_command`
+when `shell_command_mode = "disabled"`).
+
+**Seam:** whether a capability named as unavailable in a doc is actually
+unavailable at runtime.
+
+**The pair.** One law — Phase 1's *"A proposed fix — and equally a prohibition —
+is a claim about CURRENT STATE"* — fired correctly in one direction and was never
+fetched in the other, in one session:
+
+- **Hit** (`shell-gating-session-log:W-1`): the request "lets add a configuration
+  where we can disable run_command entirely" asserted the feature was absent. The
+  scout ran, found `shell_command_mode = "disabled"` already shipped and tested,
+  and prevented re-adding the `shell_enabled` switch this repo had deleted as
+  redundant. The recon skill was invoked on this one.
+- **Miss** (`shell-gating-session-log:F-1`): CLAUDE.md's "all native `Bash` are
+  hard-denied" asserted a capability was absent. I took it at face value and
+  reported to the user that the project's mandated gate could no longer be run.
+  The user corrected it in one message. The recon skill was NOT invoked — the
+  claim arose mid-report, not at an implementation seam.
+
+**Evidence.** A positive control settled it in one call: `cat src/main.rs` matches
+`pre-tool-guard.mjs:165`'s own most-specific block branch
+(`/^cat .*\.(rs|ts|...)/`) and executed anyway, returning file contents with only
+a PostToolUse `[cs-hint]`. Reading the hook source would have concluded the
+opposite — line 177 is `enforce("This call is blocked...")`. Two further facts
+falsify "hard" even as design: `BREAKER_THRESHOLD = 3` stands the guard down after
+3 unanswered redirects ("advisory context, NOT an auto-approval"), and
+`~/.claude-sdd/settings.json` carries eight `Bash(...)` `permissions.allow`
+entries CLAUDE.md never mentions.
+
+**Classification against *Every promotion audits the promoted set*:** failure mode
+**3, Unreachable** — the promoted text is correct and was not fetched at the
+moment of need. Not mode 1 (not false), not mode 2 (wording already covers the
+prohibition form explicitly), not mode 4 (the failure plainly still happens). The
+remedy is placement, not rewording. Note `R-19` is the same law in its
+assert-a-checkable-fact form and is *already* quoted in SKILL.md § When NOT to
+Use — so the text was not merely unfetched, it was unfetched despite sitting in
+the section that governs exactly this situation (a claim made during read-only
+reporting).
+
+**Promote-when:** do NOT add a law. Per the routing rules, a session-opening
+promotion needs a base arm showing an unaided agent does not already verify a
+doc-asserted prohibition before acting on it. Until that measurement exists this
+stays an audit row. If a third instance lands with the skill uninvoked, that is
+the base-arm signal.
+
+**Status:** open — reality established and F-1/W-1 filed; the CLAUDE.md sentence
+is still unedited, and no base arm has been run.
+
+**Kin:** `R-19` (assert-a-checkable-fact form of the same law, quoted in
+SKILL.md), `R-89` (freshness/placement — the other law that recurred because it
+was never fetched), Law A in `## The seven laws`.
+
+**Valid:** dated 2026-08-27
+
+The classification rests on the promoted SKILL.md text as of codescout-companion
+at this checkout; re-read Phase 1's prohibition bullet before reusing the
+mode-3 verdict.
+
+**Rests on:** the positive control, not the hook source — the two disagree, and
+that disagreement is the entry's whole content.
 
 ## Template for new entries
 
