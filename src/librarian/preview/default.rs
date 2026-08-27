@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 const MAX_HEADINGS: usize = 20;
 
 pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
-    let (headings, dropped) = headings::cap(headings::parse(body), MAX_HEADINGS);
+    let (headings, dropped, last_heading) = headings::cap(headings::parse(body), MAX_HEADINGS);
     let line_count = if body.is_empty() {
         0
     } else {
@@ -19,7 +19,7 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
         "summary": summary::extract(body),
         "line_count": line_count,
     });
-    headings::stamp_truncation(&mut v, dropped);
+    headings::stamp_truncation(&mut v, dropped, last_heading);
     v
 }
 
@@ -64,6 +64,51 @@ mod tests {
         assert_eq!(v["headings"].as_array().unwrap().len(), 20);
         assert_eq!(v["headings_truncated"], true, "cut must be signaled");
         assert_eq!(v["total_headings"], 25, "total reflects pre-cut count");
+    }
+
+    #[test]
+    fn a_truncated_preview_still_names_its_final_heading() {
+        // docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+        //
+        // The window fills from the top; `append_entry` inserts BEFORE its anchor,
+        // so a ledger's append point is conventionally its LAST heading. Fill order
+        // and anchor position are exact opposites, so on a long ledger the cap
+        // dropped the one heading the caller needed every time — while
+        // `headings_truncated` announced that something was withheld and offered no
+        // way to reach it. Disclosure without discoverability.
+        let mut body = String::new();
+        for i in 0..25 {
+            body.push_str(&format!("## H{i}\n"));
+        }
+        body.push_str("## Template for new entries\n");
+        let v = extract(&mk_row(), &body);
+
+        assert_eq!(
+            v["headings_truncated"], true,
+            "the cap must still be signaled"
+        );
+        assert_eq!(
+            v["last_heading"]["text"], "Template for new entries",
+            "the append anchor must be reachable from a truncated preview; got: {v}"
+        );
+        assert_eq!(v["last_heading"]["line"], 26);
+
+        // The window itself is untouched: still the first N, still contiguous, so a
+        // consumer reading `headings` as a head-window is not quietly falsified.
+        assert_eq!(v["headings"].as_array().unwrap().len(), 20);
+        assert_eq!(v["headings"][0]["text"], "H0");
+        assert_eq!(v["headings"][19]["text"], "H19");
+    }
+
+    #[test]
+    fn an_untruncated_preview_carries_no_last_heading() {
+        // The tail is a recovery aid for a withheld list. When nothing is withheld
+        // it would be noise on every small preview.
+        let v = extract(&mk_row(), "## A\n## B\n");
+        assert!(
+            v.get("last_heading").is_none(),
+            "no cut means no tail field; got: {v}"
+        );
     }
 
     #[test]

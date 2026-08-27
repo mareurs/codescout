@@ -45,28 +45,57 @@ pub fn parse(body: &str) -> Vec<Heading> {
 }
 
 /// Cap a heading list, returning `Some(total)` when entries were dropped
-/// (pre-truncation length exceeded `max`), else `None`.
+/// (pre-truncation length exceeded `max`), else `None`. The third element is the
+/// list's **final** heading, returned only when the cap actually bit.
 ///
 /// Pair with [`stamp_truncation`] so a preview signals the cut instead of
 /// silently disagreeing with `line_count` — see
 /// `docs/issues/archive/2026-07-10-preview-headings-silent-cap-20.md`.
-pub fn cap(mut headings: Vec<Heading>, max: usize) -> (Vec<Heading>, Option<usize>) {
+///
+/// The tail is returned because disclosure and **discoverability** are different
+/// properties, and this surface had the first without the second. The window fills
+/// from the top; `append_entry` inserts *before* its anchor, so a ledger's append
+/// point is conventionally its LAST heading — the template stanza. Fill order and
+/// anchor position are exact opposites, so on a long ledger the cap dropped the one
+/// heading the caller needed, **every time**, while `headings_truncated` cheerfully
+/// announced that something was being withheld and offered no way to reach it.
+/// `docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md`
+pub fn cap(
+    mut headings: Vec<Heading>,
+    max: usize,
+) -> (Vec<Heading>, Option<usize>, Option<Heading>) {
     let total = headings.len();
     if total > max {
+        // Cloned before the truncate, which is the only moment it is still reachable.
+        let last = headings.last().cloned();
         headings.truncate(max);
-        (headings, Some(total))
+        (headings, Some(total), last)
     } else {
-        (headings, None)
+        (headings, None, None)
     }
 }
 
 /// Stamp `total_headings` + `headings_truncated: true` onto a preview object
-/// when [`cap`] reported dropped entries. No-op when `dropped` is `None`, so
-/// small previews stay lean.
-pub fn stamp_truncation(preview: &mut serde_json::Value, dropped: Option<usize>) {
+/// when [`cap`] reported dropped entries, plus `last_heading` naming the final
+/// heading in the full list. No-op when `dropped` is `None`, so small previews
+/// stay lean.
+///
+/// `last_heading` is a separate field rather than an extra element appended to
+/// `headings`: that array is ordered by line and consumers may reasonably read it
+/// as a contiguous window, which a spliced-in tail entry would quietly falsify.
+pub fn stamp_truncation(
+    preview: &mut serde_json::Value,
+    dropped: Option<usize>,
+    last: Option<Heading>,
+) {
     if let Some(total) = dropped {
         preview["total_headings"] = serde_json::json!(total);
         preview["headings_truncated"] = serde_json::json!(true);
+        if let Some(h) = last {
+            if let Ok(v) = serde_json::to_value(h) {
+                preview["last_heading"] = v;
+            }
+        }
     }
 }
 
@@ -198,9 +227,15 @@ Then prose after the outer fence closes.
                 line: i + 1,
             })
             .collect();
-        let (capped, dropped) = cap(hs, 20);
+        let (capped, dropped, last) = cap(hs, 20);
         assert_eq!(capped.len(), 20);
         assert_eq!(dropped, Some(25), "dropped reports pre-truncation total");
+        // The whole point: the entry the cap removed is still reachable.
+        assert_eq!(
+            last.map(|h| h.text),
+            Some("H24".to_string()),
+            "the FINAL heading must survive the cap, not the 20th"
+        );
     }
 
     #[test]
@@ -212,20 +247,24 @@ Then prose after the outer fence closes.
                 line: i + 1,
             })
             .collect();
-        let (capped, dropped) = cap(hs, 20);
+        let (capped, dropped, last) = cap(hs, 20);
         assert_eq!(capped.len(), 5);
         assert_eq!(dropped, None);
+        assert_eq!(
+            last, None,
+            "nothing was withheld, so there is no tail to disclose"
+        );
     }
 
     #[test]
     fn stamp_truncation_adds_fields_only_when_dropped() {
         let mut v = serde_json::json!({ "headings": [] });
-        stamp_truncation(&mut v, Some(42));
+        stamp_truncation(&mut v, Some(42), None);
         assert_eq!(v["headings_truncated"], true);
         assert_eq!(v["total_headings"], 42);
 
         let mut v2 = serde_json::json!({ "headings": [] });
-        stamp_truncation(&mut v2, None);
+        stamp_truncation(&mut v2, None, None);
         assert!(v2.get("headings_truncated").is_none());
         assert!(v2.get("total_headings").is_none());
     }

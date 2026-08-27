@@ -1102,16 +1102,41 @@ pub fn allocate_entry_id(
                 false,
             )
             .map_err(|e| {
+                // The document is in memory right here, so the recovery can be
+                // CONCRETE instead of a referral. Naming the last top-level headings
+                // specifically, because a ledger's append anchor is conventionally its
+                // final stanza and `artifact(action="get")`'s heading window fills from
+                // the top — which is exactly why the surface this hint used to name
+                // could not answer on a long ledger.
+                // docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+                let tail: Vec<String> = crate::librarian::preview::headings::parse(&updated)
+                    .into_iter()
+                    .filter(|h| h.level <= 2)
+                    .rev()
+                    .take(3)
+                    .map(|h| format!("`{} {}`", "#".repeat(h.level as usize), h.text))
+                    .collect();
+                let tail_hint = if tail.is_empty() {
+                    "This ledger has no top-level heading to anchor against, so the \
+                     section must be added by hand."
+                        .to_string()
+                } else {
+                    format!(
+                        "Its last top-level headings, closest to the end first, are: {}. \
+                         A ledger's append anchor is conventionally the final one.",
+                        tail.join(", ")
+                    )
+                };
                 RecoverableError::with_hint(
                     format!(
                         "allocate_entry_id: cannot place {id} before `{}`: {e} — no id was \
                          allocated and nothing was written",
                         s.anchor_heading
                     ),
-                    "`anchor_heading` must name a heading that exists in the ledger verbatim. \
-                     Read the current headings with artifact(action=\"get\", id=…) and pass one \
-                     of them."
-                        .to_string(),
+                    format!(
+                        "`anchor_heading` must name a heading that exists in the ledger \
+                         verbatim, including its `#` prefix. {tail_hint}"
+                    ),
                 )
             })?
         }
@@ -3021,6 +3046,52 @@ mod tests {
         assert_eq!(
             ok.id, "R-8",
             "a refused placement must not burn the id it would have used"
+        );
+    }
+
+    /// docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+    ///
+    /// The old hint sent the caller to `artifact(action="get")` to discover the
+    /// anchor. On the artifact class this feature exists for, that surface cannot
+    /// answer: its heading window fills from the TOP, and a ledger's append anchor
+    /// is its LAST heading (`append_entry` inserts *before* it), so on a long ledger
+    /// the needed heading was dropped every single time. Measured on
+    /// `reconnaissance-patterns.md`: 20 of 92 headings returned, all from lines
+    /// 1–607, with the anchor at line 4038 of 4100.
+    ///
+    /// The document is already in memory at the failure, so the recovery belongs
+    /// here rather than in a referral to a surface that truncates.
+    #[test]
+    fn a_bad_anchor_names_the_anchors_that_do_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: R\n---\n\n# Ledger\n\n## R-7 — an entry\n\n## Template for new entries\n",
+        )
+        .unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = md.clone();
+        art_upsert(&cat, &art).unwrap();
+
+        let section = PendingSection {
+            title: "never lands".to_string(),
+            body: "x".to_string(),
+            anchor_heading: "## No Such Heading".to_string(),
+        };
+        let err = allocate_entry_id(&mut cat, "art1", "R", Some(&section)).unwrap_err();
+        let text = err.to_string();
+
+        assert!(
+            text.contains("## Template for new entries"),
+            "the hint must name the anchor that actually exists, with its `#` prefix, \
+             so the retry can be composed from the error alone: {text}"
+        );
+        assert!(
+            !text.contains("artifact(action=\"get\""),
+            "the hint must NOT prescribe the surface that cannot answer — that \
+             referral is the defect this closes: {text}"
         );
     }
 

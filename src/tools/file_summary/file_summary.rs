@@ -421,11 +421,32 @@ pub fn resolve_section_range<'a>(
         };
     }
 
-    // No match
-    let available: Vec<&str> = headings.iter().map(|h| h.text.as_str()).take(15).collect();
+    // No match.
+    //
+    // The list is windowed, and the window used to be `take(15)` — head-only. That
+    // direction is not neutral: a heading-addressed append targets the document's
+    // LAST stanza (`append_entry` inserts *before* its anchor), so on a long ledger
+    // the one heading the caller needed was the one this list dropped, every time.
+    // Measured on `reconnaissance-patterns.md`: 92 headings, anchor at line 4038 of
+    // 4100. Keep both ends, and say how many were elided so the gap is legible
+    // rather than merely absent.
+    // docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+    const HEAD: usize = 12;
+    const TAIL: usize = 3;
+    let names: Vec<&str> = headings.iter().map(|h| h.text.as_str()).collect();
+    let available = if names.len() > HEAD + TAIL {
+        format!(
+            "{} … (+{} more) … {}",
+            names[..HEAD].join(", "),
+            names.len() - HEAD - TAIL,
+            names[names.len() - TAIL..].join(", "),
+        )
+    } else {
+        names.join(", ")
+    };
     Err(RecoverableError::with_hint(
         format!("heading '{}' not found", heading_query),
-        format!("Available headings: {}", available.join(", ")),
+        format!("Available headings: {available}"),
     ))
 }
 

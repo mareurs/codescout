@@ -9,7 +9,7 @@ const OPEN_NEXT_LIMIT: usize = 3;
 const TASK_TEXT_MAX: usize = 100;
 
 pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
-    let (hs, dropped) = headings::cap(headings::parse(body), MAX_HEADINGS);
+    let (hs, dropped, last_heading) = headings::cap(headings::parse(body), MAX_HEADINGS);
 
     let mut total = 0u64;
     let mut done = 0u64;
@@ -63,7 +63,7 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
         },
         "line_count": line_count,
     });
-    headings::stamp_truncation(&mut v, dropped);
+    headings::stamp_truncation(&mut v, dropped, last_heading);
     v
 }
 

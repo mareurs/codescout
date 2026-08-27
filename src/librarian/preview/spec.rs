@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 const MAX_HEADINGS: usize = 20;
 
 pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
-    let (hs, dropped) = headings::cap(headings::parse(body), MAX_HEADINGS);
+    let (hs, dropped, last_heading) = headings::cap(headings::parse(body), MAX_HEADINGS);
     let line_count = if body.is_empty() {
         0
     } else {
@@ -19,7 +19,7 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
         "summary": summary::extract(body),
         "line_count": line_count,
     });
-    headings::stamp_truncation(&mut v, dropped);
+    headings::stamp_truncation(&mut v, dropped, last_heading);
     v
 }
 

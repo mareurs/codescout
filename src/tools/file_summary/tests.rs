@@ -262,6 +262,54 @@ fn markdown_summary_no_truncation_flag_when_under_cap() {
     assert!(s.get("total_headings").is_none());
 }
 
+/// docs/issues/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
+///
+/// Third instance of one defect class, and the one every heading-addressed tool
+/// routes through. The window was `take(15)` — head-only — while a
+/// heading-addressed append targets the document's LAST stanza, so on a long
+/// document the needed heading was exactly the one the list dropped.
+#[test]
+fn a_missing_heading_lists_both_ends_not_just_the_first_fifteen() {
+    let mut body = String::new();
+    for i in 0..40 {
+        body.push_str(&format!("## H{i}\n\ntext\n\n"));
+    }
+    body.push_str("## Template for new entries\n\ntext\n");
+
+    let err = resolve_section_range(&body, "## No Such Heading").unwrap_err();
+    let hint = err.hint().unwrap_or_default();
+
+    assert!(
+        hint.contains("## Template for new entries"),
+        "the final heading — the conventional append anchor — must be listed: {hint}"
+    );
+    assert!(
+        hint.contains("## H0"),
+        "the head of the document must still be listed: {hint}"
+    );
+    assert!(
+        hint.contains("more"),
+        "the elision must be counted, so the gap is legible rather than merely \
+             absent: {hint}"
+    );
+}
+
+/// A short document has no gap, so it must not grow an elision marker.
+#[test]
+fn a_short_document_lists_every_heading_with_no_elision() {
+    let body = "## A\n\nx\n\n## B\n\ny\n";
+    let err = resolve_section_range(body, "## Nope").unwrap_err();
+    let hint = err.hint().unwrap_or_default();
+    assert!(
+        hint.contains("## A") && hint.contains("## B"),
+        "got: {hint}"
+    );
+    assert!(
+        !hint.contains("more"),
+        "nothing was elided, so nothing should be announced: {hint}"
+    );
+}
+
 #[test]
 fn json_summary_signals_truncated_keys() {
     let mut obj = serde_json::Map::new();
