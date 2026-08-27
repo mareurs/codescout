@@ -9,8 +9,8 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 29
-entry_high_water_W: 21
+entry_high_water_F: 31
+entry_high_water_W: 23
 entry_prefix:
 - F
 - W
@@ -57,6 +57,8 @@ surfaces, not the definition.
 | F-27 | `native-tool-used` cannot tell "used a native tool" from "attempted one and was denied" — and it is counted, not excluded | fixed-verified |
 | F-28 | The "native" arm is in practice a SHELL arm — it does almost everything through Bash | fixed-verified |
 | F-29 | I published between-arm claims at n=2; thickening to n=6 killed all three of them | fixed-verified |
+| F-30 | I led a surface report with a session anecdote the artifact under review had already measured and labelled unrepresentative | fixed-verified |
+| F-31 | The evidence behind every published number sat on tmpfs; F-1's fix guarded one of the two mechanisms that delete it | fixed-verified |
 
 ## Wins Index
 
@@ -78,6 +80,8 @@ surfaces, not the definition.
 | W-14 | Reading the real dependency chain before writing the spec turned an unbuildable trap into a buildable one | validated |
 | W-15 | Reading the generator instead of the plan's description of it caught three defects, one with no downstream gate at all | validated |
 | W-21 | Thickening n turned a dead claim into a better one — the mechanism came back stronger than it died | validated |
+| W-22 | Reading the source artifact's own limits sections before designing overturned my headline and re-pointed the target | validated |
+| W-23 | Re-running the verification after compaction found what re-reading the summary structurally could not | validated |
 | W-20 | Running the second baseline the spec asked for overturned the headline it was meant to confirm | validated |
 | W-19 | Staging the pilot behind a positive-control gate caught two result-fabricating defects mid-spend, for $1 | validated |
 | W-18 | Adversarial review before the first spend caught three defects that would each have produced a fabricated pilot result | validated |
@@ -2704,6 +2708,267 @@ replaced it — the crude claim usually dies into a truer one."*
 
 **Status:** validated — the replacement claims are committed (`prompt-engineering:42c55fe`) and
 the method change is in the probe.
+
+## F-30 — I led a surface report with a session anecdote the artifact under review had already measured and labelled unrepresentative
+
+**Observed:** 2026-08-27, breadth-first sweep of the `get_guide` prompt surface,
+before any design work. Task was "understand the surface", prompted by the buddy
+specialist-graph refactor shipping in `claude-plugins`.
+
+**When:** Writing the summary report of the surface, after reading only
+`## Root cause` and `## Proposal` of
+`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md`
+(`7579b32b1cd2362f`).
+
+**Expected:** That my live measurement was fresh corroborating evidence worth
+leading with — five guide topics auto-injected across five routine tool calls,
+66,286 bytes, 63.2% of the 104,827-byte corpus.
+
+**Got (scouted reality):** Two things, both already in the file I was reporting on.
+
+1. Its `## Symptom` section carries the **identical** figure — same five topics
+   (`project-activation-bootstrap`, `tracker-conventions`, `librarian`,
+   `symbol-navigation`, `progressive-disclosure`), same 66,286 bytes, same 63% —
+   measured on a `claude-plugins` session (`f6ae2d77`, 2026-08-26/27). Mine was a
+   reproduction presented as a discovery.
+2. Its `### Three findings the anecdotes could not reach` ¶3 names the defect
+   outright: *"The 63% headline was itself unrepresentative."* A census of 91
+   session ledgers under `~/.local/state/codescout/guide_hints/` puts the median
+   at **2 topics per session** (38 of 91 received exactly two); five topics is the
+   top 24%. My session is an unremarkable draw from a distribution the file had
+   already published, not a smoking gun.
+
+The file also states the generalised form: *"anyone quoting the 1/91 as proof of
+that is doing what the 63% headline did."*
+
+**Probable cause:** Section-targeted reads. I fetched the heading list **twice**,
+and it literally contained *"The delivery census exists — 91 sessions, and it
+corrects both anecdotes"* and *"Three findings the anecdotes could not reach"*. I
+then read `## Root cause` and `## Proposal` because those are the sections a design
+task wants, skipping the two whose headings advertised that they invalidate the
+lead I was about to write. Cheap targeted reads made it cheaper to skip the
+correction than to find it — which is the same all-or-nothing-addressing tension
+this very bug is about.
+
+**Workaround:** Re-anchored the report on the census: the target is the
+`tracker-conventions` + `librarian` bundle (54,878 B, co-occurring in 38 of 91
+sessions, 74.4% of all guide bytes ever auto-delivered), plus three topics that
+have never delivered at all (26,329 B, 25% of the corpus).
+
+**Severity:** med — no code written and nothing shipped, but the design was one
+step from being motivated by a tail observation, and the correcting text was
+already in context as a heading.
+
+**Status:** fixed-verified — caught by the `/reconnaissance` pass before any design
+work; the report was corrected in the same turn.
+
+**Valid:** dated 2026-08-27
+
+True of the bug file at `9eb0dd628b791e3cd07abf145f2d4f3b08055be9`; the census is a
+floor, not a history — its own `### What this census is NOT` names five ledger
+deletion paths, so 91 is "sessions whose ledger survived".
+
+**Rests on:** the principle that a source artifact's stated limits bind anyone
+quoting its subject matter, not only anyone quoting its numbers.
+
+**Kin:** F-5 (a stale recon finding relayed as current), F-23 (a subagent's
+unverified bug find relayed to the user), F-29 (between-arm claims published at
+n=2) — same family: a figure promoted to headline ahead of its power.
+
+## W-22 — Reading the source artifact's own limits sections before designing overturned my headline and re-pointed the target
+
+**Observed:** 2026-08-27, `/reconnaissance` invoked after a breadth-first sweep of
+the `get_guide` surface and before any design work on it.
+
+**Pattern:** When a report is *about* an artifact, read that artifact's own
+evidence-and-limits sections before leading with your own measurement — in
+particular any section whose **heading** claims to correct, contextualise, or bound
+the class of measurement you are about to present. Heading text is a near-free
+filter: *"…and it corrects both anecdotes"* and *"What this census is NOT"* are
+direct warnings, readable without fetching the body.
+
+**Counterfactual:** Without this pass, the design would have opened on *"63% of the
+corpus delivered per session"* as its motivating number. Concretely:
+
+- That figure is a **top-24% tail draw** (median is 2 topics/session, n=91), and
+  the source artifact pre-labels the move as the error its own headline made.
+- It points at the wrong target. "The corpus" is not the cost centre; the
+  **bundle** is — `tracker-conventions` + `librarian` = 54,878 B, co-occurring in
+  38 of 91 sessions, **74.4%** of every guide byte ever auto-delivered here, and
+  they arrive by *different* calls, so targeting either alone leaves the other
+  arriving whole.
+- It hides the inverse finding entirely: **three topics have never auto-injected
+  in 91 sessions** — `iron-laws-detail`, `librarian-runtime`, `untrusted-content`,
+  26,329 B, 25% of the corpus. A corpus-wide framing cannot see a quarter of the
+  corpus that costs nothing because it is never delivered.
+- It would have left direction (b) looking viable. The census supplies the
+  already-run experiment: `librarian-runtime` was hand-split out of `librarian.md`
+  *specifically to keep the parent lean*, and in 91 sessions **nothing has ever
+  followed that edge** — the parent's 20 KB is intact and 9,774 B became
+  unreachable.
+
+**Confirming data points:**
+1. F-30 (this session) — the anecdote-as-headline miss this scout caught.
+2. Three code claims the scout **confirmed**, which would otherwise have shipped
+   on inference: `GetGuide::force_inline() → true` (`src/tools/guide.rs:119-124`,
+   read — so a 34 KB guide is never buffered); the injection path has **no byte
+   budget** (positive control: the same grep finds five budget constants in
+   `src/tools/core/types.rs`, and `guide_block` at 805-820 calls none of them);
+   and `Symbols::relevant_guide_topic` branches `overflow`/`output_id` →
+   `progressive-disclosure`, else → `symbol-navigation`.
+3. One measurement the scout produced that is **absent** from the bug file and
+   survives its correction: the corpus is growing fast behind the largest trigger.
+   `tracker-conventions` went **10,377 → 34,333 B in ten days** (`git show
+   'experiments@{2026-08-17}:…'`, corroborated independently by
+   `src/librarian/adapter.rs:197`'s contemporaneous *"10.4 KB + 19.9 KB"*
+   comment); corpus-wide 75,441 → 104,827 B, **+39%** since the BL-25 measurement
+   of 2026-08-16. The census makes this sharper rather than softer: the file that
+   tripled is 46.5% of all bytes ever delivered.
+
+**Impact:** med — prevented a design anchored on a tail statistic, and re-pointed
+it from "the corpus" to a two-file bundle plus a growth rate.
+
+**Promote-when:** A second instance of a report leading with a measurement its own
+source artifact had already classified as unrepresentative. At 2 datapoints,
+promote to the reconnaissance skill's Phase 1 as: *"When the seam is a document,
+read its limits-and-corrections sections before quoting your own figure on its
+subject — headings advertise them."* Route as craft-shaped: it holds in any repo
+and needs no codescout dialect.
+
+**Status:** validated — single datapoint, caught before any design work. Awaiting
+promotion criterion.
+
+**Valid:** dated 2026-08-27
+
+Claims 2 and 3 re-verify at the bytes; claim 1 is this session's own record.
+
+**Rests on:** F-30, same session — this win is F-30's counterfactual, not
+independent evidence of the pattern.
+
+## F-31 — The evidence behind every published number was sitting on tmpfs, and the fix that was supposed to protect it only ever guarded one of two mechanisms
+
+**Observed:** 2026-08-27, resuming the blast-radius stream after a compaction.
+Rather than quote the compaction summary's numbers, I re-ran
+`gates_blast.py --logs /tmp/blast-pilot/POOLED-n`. It reproduced the published
+table exactly. Then I looked at the filesystem it had just read.
+
+**When:** First action of a resumed session, re-verifying a finished result
+before reporting state. No task depended on the answer.
+
+**Expected:** `run_pilot.sh`'s header says round dirs are never deleted — that
+is F-1's remedy, written after *"a fixed output path destroyed the evidence
+behind a headline figure"*. Every round since has had its own timestamped
+directory and nothing has ever been removed. So: evidence safe.
+
+**Got:** `findmnt /tmp` → **tmpfs**, RAM-backed, 63 G. `/tmp/blast-pilot` held
+5.2 MB — 36 scored runs, 32 `.log` files, 16 preserved Claude Code session
+transcript dirs, the two deliberately-excluded rounds, and `POOLED-n` — all of
+it one reboot from gone. **$11.34 of paid, unrepeatable runs**, and the sole
+evidence base for `RESULTS.md`.
+
+Nothing in either repo would have reported the loss. `RESULTS.md` cites
+*numbers*, never the logs behind them, so it stays readable and confident with
+its evidence deleted; `gates_blast.py` on an empty root fails with "no logs",
+which reads as a path typo, not as data loss. The first symptom would have been
+a future session unable to reproduce a published figure and unable to tell
+whether the number or the evidence was wrong.
+
+**Probable cause — and this is the transferable part.** F-1's remedy was named
+after its **mechanism** (a fixed output path, fixed by timestamping and never
+deleting) rather than after its **failure class** (*the evidence disappears*).
+Two mechanisms produce that class here: the script deleting it, and the
+substrate deleting it. The remedy addressed the first and never prompted anyone
+to look for the second, because a mitigation named after its mechanism reads as
+complete the moment that mechanism is closed. Six rounds ran under a rule
+everybody believed was protecting them.
+
+**Fix:** archived to `~/.local/share/prompt-tdd-evidence/blast-pilot` (btrfs,
+230 G free) with a `PROVENANCE.md` recording what may and may not be pooled and
+how to re-score. `run_pilot.sh` now defaults `OUT` there
+(`BLAST_PILOT_OUT` / `--out` still override), so the next round does not
+recreate the exposure; the two path *defaults* (`gates_blast.py --logs`,
+`bucket_breakdown.py:P`) and the prose citations were repointed in the same
+commit. `prompt-engineering:7424ab26`.
+
+**Verified by re-running the gates against the COPY**, not by comparing `du` —
+identical arm means, `TOTAL $11.3378`, exit 0, and `bucket_breakdown.py`
+reproduces the published per-bucket table. A copy that scores the same is the
+only check that means anything; matching byte counts would have passed even if
+the copy were unreadable by the scorer.
+
+One defect in the rescue, worth naming because it is funny and it is a class:
+`cp -a` faithfully preserved `latest` as an **absolute symlink back into
+`/tmp`** — the archive's own pointer led straight to the volatile directory it
+had just been rescued from. Repointed relative. *A copy made for durability can
+carry a pointer that defeats it, and `du` cannot see that either.*
+
+**Severity:** high — silent, total, unrecoverable loss of the evidence base for
+a published result, with no surface anywhere that would have announced it.
+
+**Status:** fixed-verified — the exposure is closed for this round (archived)
+and for future rounds (`OUT` default). What remains open is the general lesson,
+which is why W-23 is written separately.
+
+**Valid:** dated 2026-08-27
+
+**Rests on:** F-1, same ledger — this is that entry's unguarded second
+mechanism, not an independent finding.
+
+## W-23 — Re-running the verification after compaction found what re-reading the summary structurally could not
+
+**Observed:** 2026-08-27, first action of a session resumed from compaction on
+the blast-radius stream.
+
+**Pattern:** On resuming a finished work stream, **re-run the verification
+rather than quoting its recorded result** — even when the record is detailed,
+recent, and correct.
+
+**Why it is not merely belt-and-braces.** A record carries *claims* and their
+*verification status*. It cannot carry properties of the **substrate the
+verification ran on**, because those were never the subject of any claim. So
+there is a class of defect no amount of summary fidelity preserves, and
+re-execution is the only thing that surfaces it.
+
+That is exactly what happened. The compaction summary said: *gates exit 0, 36
+runs pooled, $12.34, both repos clean.* Every word true, and all of it
+reproduced on demand. None of it could have revealed that the entire evidence
+base was sitting on **tmpfs** and would not survive a reboot (F-31). The fact
+was not omitted from the summary — it was not the kind of thing a summary has a
+slot for.
+
+**Counterfactual, and it is concrete.** Resuming by quoting the summary is the
+*intended* use of a compaction summary, and it would have reported a correct,
+green, fully-consistent state. The evidence would have stayed on tmpfs until the
+next reboot took 36 paid runs and 16 preserved transcripts. The first symptom
+would have arrived in some later session as an unreproducible published figure,
+with no way left to tell whether the number or the evidence had been wrong —
+and by then the arm-level supports, the transcripts behind the `symbols`-usage
+finding, and the excluded-round provenance would all be gone. I only looked at
+the filesystem because re-running `gates_blast.py` put me on the path it reads.
+
+**Cheap, too.** The re-verification was `$0` — a local scorer over logs already
+on disk — against a loss that was unrecoverable at any price. That asymmetry is
+the whole argument: re-execution is nearly free exactly when the record is
+about finished work, which is when the temptation to quote it is highest.
+
+**Confirming data points:**
+1. F-31, this session — tmpfs exposure found by re-running rather than
+   re-reading.
+2. Pending: a second resume where re-execution surfaces something the record
+   had no slot for.
+
+**Impact:** high — the defect it caught was silent, total and unrecoverable.
+
+**Promote-when:** a second datapoint. At two, promote to the `eval-design`
+memory as *"resuming a finished stream: re-run the verification, never quote
+it — a record cannot carry properties of the substrate it ran on."*
+
+**Status:** validated — single datapoint, defect caught and closed.
+
+**Valid:** dated 2026-08-27
+
+**Rests on:** F-31, same session — this win is that entry's counterfactual,
+not independent evidence of the pattern.
 
 ## Template for new entries
 
