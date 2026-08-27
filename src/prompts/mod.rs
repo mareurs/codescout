@@ -5,6 +5,7 @@
 //! on project state.
 
 pub mod builders;
+pub mod guide_index;
 pub mod source;
 
 /// Static server instructions — tool reference, workflow patterns, steering rules.
