@@ -13,7 +13,7 @@ owner: marius
 related: []
 reopened: 2026-08-26
 severity: medium
-unverified: 'Fixes ONLY the bare-project-id activation route, which is the one this file reports. Activating the same sub-project by absolute PATH still returns the empty set — same mechanism, different dispatch branch — and is filed separately at docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md with an #[ignore]d executable reproduction. Not verified against a live MCP server (no rebuild since the fix).'
+unverified: 'Fixes ONLY the bare-project-id activation route, which is the one this file reports. Activating the same sub-project by absolute PATH still returns the empty set — same mechanism, different dispatch branch — and is filed separately at docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md with an #[ignore]d executable reproduction.'
 ---
 
 # BUG: `memory(list/read)` only sees 2 topics for a project that `workspace(activate)` reports has 16
@@ -302,6 +302,26 @@ with a minimal 2-project nested workspace fixture if possible.
 
 
 ## 2026-08-27 — fixed: the readers move, because the writer had already decided
+
+**Verified live 2026-08-27** against a rebuilt binary, on this repo's own
+`codescout-embed` sub-project — the case this file measured as broken:
+
+```
+BEFORE (measured while filing): crates/codescout-embed/.codescout/memories does not
+  exist; .codescout/projects/codescout-embed/memories holds 5 topics; activating the
+  sub-project would report 0 and create the empty directory.
+
+AFTER:
+  workspace(activate, path="codescout-embed")  -> 5 memories
+  memory(action="list")                        -> 5 topics, identical set
+  crates/codescout-embed/.codescout/           -> libraries.json, private-memories,
+                                                  usage.db, write.lock — still NO
+                                                  memories/ directory
+```
+
+Both halves hold: the two surfaces agree, and the create-on-read side effect is gone.
+`private-memories/` is still created at the project root, which is correct — it is the
+one store deliberately left project-local.
 
 **Fix:** `fc1bbf21` on `experiments` — patch-id
 `f1a072d9ad760b5e57a1c867df1cc89f9bf390e4`.
