@@ -33,7 +33,7 @@ they do not compile into any profile until Phase 2 builds the routing that reads
 
 ## OP-1 — Always verify before asserting
 
-**Imperative:** Do not hypothesise — ALWAYS VERIFY.
+**Imperative:** Do not hypothesise but ALWAYS VERIFY. Do not go over code or issues found quickly and assume, but ALWAYS VERIFY!
 **Binding:** always
 **Shape:** imperative
 **Covers:** unverified-assertion
@@ -44,6 +44,14 @@ they do not compile into any profile until Phase 2 builds the routing that reads
 **Valid:** invariant
 
 The active ingredient is an unconditional imperative that binds at every claim. A-21 measured 11 arms: b2 imperative-only scored 100.0%, beating the full paragraph at 93.3%, against 0% bare. Conditional guards gate on the doubt a planted belief suppresses, which is why the guard-shaped variants lost.
+
+**The imperative is `b2-imperative-only.md` verbatim, and that is deliberate — corrected 2026-08-28.** It previously read *"Do not hypothesise — ALWAYS VERIFY."*: a condensation of b2 into one clause, carrying b2's `**Evidence:**` line unchanged. That is a measured number attached to a string no arm has ever scored, which is the exact failure `**Evidence:**` exists to prevent — *a law and a hunch must not read alike*. It also confounded the spec's Verification prediction 2: a sub-100% result could not have distinguished "compilation altered the rule's form" from "the condensation did".
+
+So the rule that ships is now the rule that was measured, and the arm varies only the compiler's wrapper.
+
+**One deviation, recorded rather than hidden.** `b2-imperative-only.md` wraps its text across two source lines; `**Imperative:**` is a single-line field, so the rendered block joins them with a space instead of a newline. In markdown both are a soft break inside one paragraph, but the bytes differ and the arm therefore tests wrapper-plus-rewrap, not wrapper alone.
+
+**Related but distinct: `s1-shipped-bootstrap`.** codescout's own `project-activation-bootstrap` guide ships a *third* wording (*"…Do not state what a doc, a memory, or a prior belief says the code does — open the artifact or run the command…"*). It is not this entry's text and its arm is scored separately; do not read `s1`'s number as evidence for `OP-1` or the reverse.
 
 ## OP-2 — Sonnet is the subagent-dispatch floor
 
