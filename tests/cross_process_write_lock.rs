@@ -14,10 +14,18 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-/// Absolute path to the debug binary built by `cargo build`.
+/// Absolute path to the `codescout` binary for this test run.
+///
+/// `CARGO_BIN_EXE_<name>` is set by Cargo for integration tests and, crucially,
+/// **guarantees the binary is built before the test runs** — so there is no
+/// missing-binary case, and therefore no skip branch that could report green
+/// without executing. It also tracks the active profile and any custom
+/// `CARGO_TARGET_DIR`, both of which the previous hand-built
+/// `target/debug/codescout` path got wrong.
+///
+/// docs/issues/2026-08-27-cross-process-write-lock-test-passes-when-it-does-not-run.md
 fn binary_path() -> std::path::PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    std::path::PathBuf::from(manifest_dir).join("target/debug/codescout")
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_codescout"))
 }
 
 /// Write one newline-delimited JSON-RPC message to stdin.
@@ -85,13 +93,6 @@ async fn mcp_handshake(
 #[tokio::test]
 async fn write_lock_contention_produces_recoverable_error() {
     let bin = binary_path();
-    if !bin.exists() {
-        eprintln!(
-            "SKIP: binary not found at {} — run `cargo build` first",
-            bin.display()
-        );
-        return;
-    }
 
     // Create a temp project.
     let dir = tempfile::tempdir().unwrap();
