@@ -1,5 +1,5 @@
 ---
-id: d6984b7e960f79db
+id: b176ff103ec56c09
 kind: bug
 status: fixed
 title: 'BUG: doctor''s report is 78% other repos'' rows — Ruling 17 applied to the entry-validity family but not to abs_path_outside_managed_roots'
@@ -14,7 +14,6 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md
 severity: medium
-unverified: 'Not live-verified. Committed and green, but this session''s MCP server runs a pre-change binary. Needs `cargo rb` plus `/mcp`; the three-part check is in ## Resume, and the third part (the metric must NOT move) is the one a broken fix would fail silently.'
 ---
 
 # BUG: `doctor`'s report is 78% other repos' rows — Ruling 17 was applied to the entry-validity family but not to `abs_path_outside_managed_roots`
@@ -222,20 +221,33 @@ it just is not the default reading.
 
 ## Resume
 
-One step outstanding, which is why `unverified:` is set: **live-verify**. This
-session's server predates the change. Run `cargo rb`, `/mcp`, then
-`librarian(action="doctor", limit=3)` and confirm three things together — any one
-alone is consistent with a broken fix:
+N/A — fixed, live-verified, archived.
 
-1. `summary.total` near **124** (from 516)
-2. `summary.by_check.abs_path_outside_managed_roots` at **10** (from 401)
-3. `catalog_health.outside_roots_by_project` still summing to **~401** — the
-   metric must NOT have moved. If it dropped alongside the worklist, the Ruling 17
-   requirement was violated and the fold-back at the `outside_by_project` loop is
-   wrong.
+**Live verification, 2026-08-27**, after `cargo rb` + `/mcp`. All three parts, because any one alone is consistent with a broken fix:
 
-Expect `catalog_health.outside_roots_scoped_by_project` to account for the
-difference (~392 across ~20 project roots).
+| check | before | after |
+|---|---|---|
+| `summary.total` | 516 | **129** |
+| `by_check.abs_path_outside_managed_roots` | 401 | **10** |
+| `catalog_health.outside_roots_by_project` | 401 rows | **unchanged** |
+
+Part 3 is the one a naive fix fails silently, so it was checked structurally
+rather than by eye. `outside_roots_by_project` enumerates **112** project roots;
+`outside_roots_scoped_by_project` enumerates **107**. The five keys present only
+in the metric — `/home/marius/Documents/PFA` (3), `/home/marius/work/claude/pi`
+(1), the `whatsapp` worktree (2), `.../personal/home/terasa` (2),
+`.../personal/misc/avatar` (2) — sum to **exactly 10**, which is the violation
+count. Every shared key carries an identical value in both maps
+(`claude-plugins` 98, `prompt-engineering` 45, `researcher` 19,
+`agents/llm-proxy` 15), so the fold-back preserved the metric rather than
+recomputing it.
+
+One artefact worth not misreading: `grep -c abs_path_outside_managed_roots` over
+the response returns **5**, not 10. That is `limit=3` capping the EMITTED sample
+(3 violation rows + the `summary.by_check` line + the hint line). The
+authoritative count is `summary.by_check`, which reports the true total — the
+cap-but-count behaviour established by
+`docs/issues/archive/2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md`.
 ## References
 - `src/librarian/tools/doctor.rs:229-232` — Ruling 17, as applied to the validity family
 - `src/librarian/tools/doctor.rs:401-405` — the "EXPECTED" hint on this check

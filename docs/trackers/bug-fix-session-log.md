@@ -6444,7 +6444,7 @@ accidentally the same. Bug `docs/issues/archive/2026-08-27-scope-default-is-repo
 ## F-74 — A bug file's own fix plan partitioned a case that does not exist — `managed_roots` never contains another repo, so "rows under a different managed root" was the empty set
 
 **Observed:** 2026-08-27, implementing the `doctor` scoping fix
-(`docs/issues/2026-08-27-doctor-reports-other-workspaces-rows-as-violations.md`),
+(`docs/issues/archive/2026-08-27-doctor-reports-other-workspaces-rows-as-violations.md`),
 written earlier the same session.
 
 **When:** Scouting `scan_artifact_paths` before the first edit, with the fix plan
