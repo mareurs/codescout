@@ -213,8 +213,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     all_violations.extend(scan_undefined_entries(&cat.conn)?);
     // Starts from the citation graph rather than a known ledger's claimed entries — the
     // gap neither scan_undefined_entries nor link_scan's own report reaches. See
-    // `scan_cited_prefix_with_no_definer`.
-    all_violations.extend(scan_cited_prefix_with_no_definer(&cat.conn)?);
+    // `scan_cited_prefix_with_no_definer`. Scoped like the entry-validity family (Ruling
+    // 17): the corpus decides whether a prefix is unowned, the active project decides
+    // whether this reader is handed it.
+    let (cited_prefix_violations, cited_prefix_scoped) =
+        scan_cited_prefix_with_no_definer(ctx, &cat.conn)?;
+    all_violations.extend(cited_prefix_violations);
     // The one check here that needs no threshold: a citation naming an archive path that
     // holds nothing, for a bug still sitting un-archived, is wrong in every world. See
     // `scan_premature_archive_citation`.
@@ -443,6 +447,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              repos' work."
         ));
     }
+    if !cited_prefix_scoped.is_empty() {
+        let total_scoped: usize = cited_prefix_scoped.values().sum();
+        let n_projects = cited_prefix_scoped.len();
+        hint_parts.push(format!(
+            "{total_scoped} cited_prefix_with_no_definer finding(s) across {n_projects} other project \
+             root(s) were scoped OUT of this report — the prefix is genuinely unowned, but its citations \
+             are not in the active project. See catalog_health.cited_prefix_scoped_by_project. \
+             Definers stay corpus-wide: narrowing them would make every prefix defined only in a sibling \
+             repo fire here as unowned, so the metric is not scoped — only the worklist is."
+        ));
+    }
     if hidden_rows > 0 {
         hint_parts.push(format!(
             "{hidden_rows} row(s) hidden as missing (>{grace}d). Run librarian(action=\"doctor\", fix=\"prune_missing\") to remove, or doctor(fix=\"rehome\", old_root, new_root) to migrate a moved repo."
@@ -508,6 +523,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         catalog_health.insert(
             "entry_validity_scoped_by_project".to_string(),
             json!(entry_validity_scoped_by_project),
+        );
+    }
+    if !cited_prefix_scoped.is_empty() {
+        catalog_health.insert(
+            "cited_prefix_scoped_by_project".to_string(),
+            json!(cited_prefix_scoped),
         );
     }
     // Always present, even when nothing fired: its `note` is how a SKIP (linked worktree,
@@ -2921,7 +2942,35 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
 /// [`corpus_cited_tokens`] and [`crate::librarian::catalog::augmentation::body_defined_indices`]
 /// use for the citation and definition halves respectively, so this check cannot disagree with
 /// either about what counts as one.
-fn scan_cited_prefix_with_no_definer(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+///
+/// **Ruling 17 applies to both halves, in opposite directions.**
+///
+/// - **Definers stay corpus-wide, and that is load-bearing rather than ceremonial.** Narrowing
+///   `known_prefixes` to the active project would make every prefix defined only in a sibling
+///   repo fire here as "no definer anywhere" — including every cross-repo `<repo>:<TOKEN>`
+///   citation, which the resolver already, deliberately, declines to turn into an edge. That
+///   manufactures false positives out of correct prose: the mirror of the false negatives
+///   Ruling 17 names on the exposure side.
+/// - **The firing decision is global too; only the REPORT is filtered.** A prefix is a real,
+///   unowned namespace or it is not, and that is a property of the corpus rather than of where
+///   the reader happens to be standing. What scoping changes is whether they are handed it. A
+///   prefix whose in-project citers clear the same two thresholds is reported — listing those
+///   citers, and naming the remainder rather than hiding it. One that does not is counted into
+///   `scoped_out` and surfaced via `catalog_health.cited_prefix_scoped_by_project`.
+///
+/// Measured 2026-08-27, before this change: **33 of the check's 47 findings were other repos'
+/// rows** — the single largest contributor to a `doctor` report that was 52% foreign after
+/// `442d8b7c` had closed the same class for `abs_path_outside_managed_roots`. See
+/// `docs/issues/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md`.
+///
+/// A scoped-out prefix is keyed by the group of its first citer **outside** the active project,
+/// not by `files[0]`. The alphabetically-first citer overall may well be the in-project one
+/// that fell below threshold, and filing the drop under the reader's own project root would
+/// read as though their own repo had been excluded from their own report.
+fn scan_cited_prefix_with_no_definer(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+) -> Result<(Vec<Violation>, std::collections::BTreeMap<String, usize>)> {
     use crate::librarian::tools::link_scan::extract::{extract, CitationKind};
 
     // Below this, a prefix reads as incidental prose rather than an abandoned namespace —
@@ -2935,12 +2984,18 @@ fn scan_cited_prefix_with_no_definer(conn: &rusqlite::Connection) -> Result<Vec<
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
 
+    // No active project means no scoping — a config-only caller must not silently receive an
+    // empty worklist. Same degradation shape the entry-validity family already uses.
+    let cp = ctx.current_project.as_deref();
+
     let mut known_prefixes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    // prefix -> (citing path -> count in that file)
+    // prefix -> (citing path -> count in that file). Corpus-wide: this is the metric.
     let mut citations: std::collections::BTreeMap<
         String,
         std::collections::BTreeMap<String, usize>,
     > = std::collections::BTreeMap::new();
+    // The citers under the active project's git root — the reported population.
+    let mut in_project: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
     for path in &paths {
         let Ok(text) = std::fs::read_to_string(path) else {
@@ -2954,6 +3009,15 @@ fn scan_cited_prefix_with_no_definer(conn: &rusqlite::Connection) -> Result<Vec<
             }
         }
         known_prefixes.extend(ex.declared_prefixes.iter().cloned());
+
+        let path_in_project = match cp {
+            None => true,
+            Some(cp) => super::containing_root(std::slice::from_ref(&cp.git_root), Path::new(path))
+                .is_some(),
+        };
+        if path_in_project {
+            in_project.insert(path.clone());
+        }
 
         for c in &ex.citations {
             let token = match c.kind {
@@ -2973,29 +3037,73 @@ fn scan_cited_prefix_with_no_definer(conn: &rusqlite::Connection) -> Result<Vec<
     }
 
     let mut out = Vec::new();
+    let mut scoped_out: std::collections::BTreeMap<String, usize> = Default::default();
     for (prefix, by_file) in citations {
         if known_prefixes.contains(&prefix) {
             continue;
         }
+        // The METRIC: is this a real, unowned namespace anywhere this catalog can see?
         let total: usize = by_file.values().sum();
         if total < MIN_CITATIONS || by_file.len() < MIN_FILES {
             continue;
         }
-        let mut files: Vec<&String> = by_file.keys().collect();
+
+        // The WORKLIST: the same two thresholds, re-applied to this project's own citers.
+        let mut files: Vec<&String> = by_file
+            .keys()
+            .filter(|f| in_project.contains(f.as_str()))
+            .collect();
         files.sort();
+        let scoped_total: usize = by_file
+            .iter()
+            .filter(|(f, _)| in_project.contains(f.as_str()))
+            .map(|(_, n)| *n)
+            .sum();
+
+        if scoped_total < MIN_CITATIONS || files.len() < MIN_FILES {
+            // At least one citer is necessarily outside the project here: were they all
+            // inside, the scoped counts would equal the global ones and the metric gate
+            // above would have let this through.
+            let mut outside: Vec<&String> = by_file
+                .keys()
+                .filter(|f| !in_project.contains(f.as_str()))
+                .collect();
+            outside.sort();
+            if let Some(first) = outside.first() {
+                *scoped_out
+                    .entry(outside_roots_group(first.as_str()))
+                    .or_insert(0) += 1;
+            }
+            continue;
+        }
+
+        // Carry the corpus-wide figures into the message rather than dropping them. The
+        // reader is being handed a subset and should be able to see that it is one —
+        // otherwise scoping trades one silent distortion for another.
+        let elsewhere_files = by_file.len() - files.len();
+        let elsewhere = if elsewhere_files > 0 {
+            format!(
+                " A further {} citation(s) across {elsewhere_files} file(s) outside this project \
+                 are not listed — the namespace is unowned machine-wide, not only here.",
+                total - scoped_total
+            )
+        } else {
+            String::new()
+        };
+
         out.push(Violation::new(
             "cited_prefix_with_no_definer",
             None,
             files[0].clone(),
             format!(
-                "`{prefix}-N` is cited {total} times across {} files, but no `## {prefix}-N — \
+                "`{prefix}-N` is cited {scoped_total} times across {} files, but no `## {prefix}-N — \
                  <title>` heading exists anywhere in the corpus and no artifact declares \
                  `entry_prefix: {prefix}`. These citations are neither resolved nor reported \
                  dangling — link_scan's resolver treats a wholly-unknown prefix as prose noise \
                  (the same gate that keeps `UTF-8`/`SHA-256` silent), so this state is reported \
-                 nowhere else. Citing files: {}. Either define the namespace (a heading per \
+                 nowhere else. Citing files: {}.{elsewhere} Either define the namespace (a heading per \
                  entry) or declare it empty via `entry_prefix` if entries are coming later.",
-                by_file.len(),
+                files.len(),
                 files
                     .iter()
                     .map(|f| f.as_str())
@@ -3004,7 +3112,7 @@ fn scan_cited_prefix_with_no_definer(conn: &rusqlite::Connection) -> Result<Vec<
             ),
         ));
     }
-    Ok(out)
+    Ok((out, scoped_out))
 }
 
 /// Every `docs/issues/archive/<name>.md` a document names, ignoring shapes that cannot be a
@@ -6111,7 +6219,7 @@ mod tests {
             "T-1 is still open; so is T-3.\n",
         );
 
-        let v = scan_cited_prefix_with_no_definer(&cat.conn).unwrap();
+        let (v, _) = scan_cited_prefix_with_no_definer(&unscoped_ctx(), &cat.conn).unwrap();
         assert_eq!(v.len(), 1, "{v:?}");
         assert_eq!(v[0].check, "cited_prefix_with_no_definer");
         assert!(
@@ -6141,8 +6249,9 @@ mod tests {
         );
 
         assert!(
-            scan_cited_prefix_with_no_definer(&cat.conn)
+            scan_cited_prefix_with_no_definer(&unscoped_ctx(), &cat.conn)
                 .unwrap()
+                .0
                 .is_empty(),
             "a single incidental citation must not fire"
         );
@@ -6168,8 +6277,9 @@ mod tests {
         );
 
         assert!(
-            scan_cited_prefix_with_no_definer(&cat.conn)
+            scan_cited_prefix_with_no_definer(&unscoped_ctx(), &cat.conn)
                 .unwrap()
+                .0
                 .is_empty(),
             "T is a known prefix (T-1 is defined), so T-99/T-100 dangle -- link_scan's job, \
              not this check's"
@@ -6197,11 +6307,175 @@ mod tests {
         );
 
         assert!(
-            scan_cited_prefix_with_no_definer(&cat.conn)
+            scan_cited_prefix_with_no_definer(&unscoped_ctx(), &cat.conn)
                 .unwrap()
+                .0
                 .is_empty(),
             "T is declared, so it's a known-but-empty namespace -- ledger_defines_nothing's \
              territory"
+        );
+    }
+
+    /// The scoping guard, pinned in BOTH directions in one test: an unowned prefix cited
+    /// inside the active project is reported, and one cited only under a sibling root is
+    /// COUNTED as scoped out rather than silently dropped. Two separate prefixes, so a
+    /// regression that scopes nothing and one that scopes everything fail differently.
+    ///
+    /// Regression for
+    /// docs/issues/2026-08-27-doctor-still-reports-52pct-foreign-rows-via-six-other-checks.md:
+    /// this check was 33 of its own 47 findings foreign, the largest single contributor to a
+    /// `doctor` report that was 52% other repos' rows.
+    #[test]
+    fn cited_prefix_reports_only_the_active_projects_citers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        let cat = Catalog::open_in_memory().unwrap();
+
+        seed_ledger(
+            &cat,
+            "in-a",
+            &active_root.join("a.md"),
+            "ZZ-1 and ZZ-2 here.\n",
+        );
+        seed_ledger(&cat, "in-b", &active_root.join("b.md"), "ZZ-3 as well.\n");
+        seed_ledger(
+            &cat,
+            "out-c",
+            &sibling_root.join("c.md"),
+            "QQ-1 and QQ-2 over here.\n",
+        );
+        seed_ledger(&cat, "out-d", &sibling_root.join("d.md"), "QQ-3 too.\n");
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let (v, scoped_out) = {
+            let cat = ctx.catalog.lock();
+            scan_cited_prefix_with_no_definer(&ctx, &cat.conn).unwrap()
+        };
+
+        assert_eq!(
+            v.len(),
+            1,
+            "only the prefix cited under the ACTIVE project may be reported: {v:#?}"
+        );
+        assert!(
+            v[0].detail.contains("`ZZ-N`") && !v[0].detail.contains("QQ"),
+            "the reported finding must be ZZ, the in-project one: {}",
+            v[0].detail
+        );
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "QQ must be COUNTED as scoped out, not silently dropped: {scoped_out:?}"
+        );
+        let key = scoped_out.keys().next().unwrap();
+        assert!(
+            key.contains("sibling-project"),
+            "the drop is attributed to the project that actually cites it: {key}"
+        );
+    }
+
+    /// The half that must NOT scope, and the reason the fix is not simply "filter by root".
+    ///
+    /// A prefix defined only in a SIBLING repo is still defined. Narrowing `known_prefixes`
+    /// to the active project would make every such prefix — and every cross-repo
+    /// `<repo>:<TOKEN>` citation, which the resolver deliberately declines to turn into an
+    /// edge — fire as "no definer anywhere in the corpus", manufacturing false positives out
+    /// of correct prose.
+    ///
+    /// The citations here clear both thresholds (3 across 2 files), so a regression fails
+    /// loudly rather than passing for the unrelated reason of sitting under the noise floor.
+    #[test]
+    fn cited_prefix_definers_stay_corpus_wide_across_project_roots() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // The ONLY definer of HY lives outside the active project.
+        seed_ledger(
+            &cat,
+            "sibling-ledger",
+            &sibling_root.join("ledger.md"),
+            "## HY-1 — the only definer, and it is in another repo\n",
+        );
+        seed_ledger(
+            &cat,
+            "in-a",
+            &active_root.join("a.md"),
+            "HY-1 and HY-2 are referenced here.\n",
+        );
+        seed_ledger(&cat, "in-b", &active_root.join("b.md"), "So is HY-3.\n");
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let (v, scoped_out) = {
+            let cat = ctx.catalog.lock();
+            scan_cited_prefix_with_no_definer(&ctx, &cat.conn).unwrap()
+        };
+
+        assert!(
+            v.is_empty(),
+            "HY IS defined in the corpus — scoping the definer pass to the active project \
+             would turn a legitimate cross-repo citation into a false 'unowned namespace': {v:#?}"
+        );
+        assert!(
+            scoped_out.is_empty(),
+            "a known prefix is not a scoped-out finding either — it is simply not a finding: \
+             {scoped_out:?}"
+        );
+    }
+
+    /// A prefix real enough to fire corpus-wide, whose in-project citations fall below the
+    /// same thresholds, is scoped out — and keyed by its first citer OUTSIDE the project.
+    ///
+    /// The paths are chosen so the alphabetically-first citer overall is the IN-project one
+    /// (`active-project/` sorts before `sibling-project/`). Keying the drop by `files[0]`,
+    /// the obvious shortcut, would file it under the reader's own project root and read as
+    /// though their own repo had been excluded from their own report.
+    #[test]
+    fn a_mostly_foreign_prefix_is_scoped_out_and_keyed_outside_the_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // One in-project citation: below MIN_CITATIONS and MIN_FILES on its own.
+        seed_ledger(
+            &cat,
+            "in-a",
+            &active_root.join("a.md"),
+            "A single passing mention of MM-1.\n",
+        );
+        // Three more elsewhere, which is what carries the prefix over the corpus-wide bar.
+        seed_ledger(
+            &cat,
+            "out-b",
+            &sibling_root.join("b.md"),
+            "MM-2 and MM-3 are tracked here.\n",
+        );
+        seed_ledger(&cat, "out-c", &sibling_root.join("c.md"), "As is MM-4.\n");
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let (v, scoped_out) = {
+            let cat = ctx.catalog.lock();
+            scan_cited_prefix_with_no_definer(&ctx, &cat.conn).unwrap()
+        };
+
+        assert!(
+            v.is_empty(),
+            "one in-project citation is below the same floor that keeps UTF-8/SHA-256 quiet: \
+             {v:#?}"
+        );
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the prefix IS unowned corpus-wide — the metric must still count it: {scoped_out:?}"
+        );
+        let key = scoped_out.keys().next().unwrap();
+        assert!(
+            key.contains("sibling-project") && !key.contains("active-project"),
+            "keyed by the first citer OUTSIDE the project, not by files[0] — which here is \
+             the in-project file: {key}"
         );
     }
 
