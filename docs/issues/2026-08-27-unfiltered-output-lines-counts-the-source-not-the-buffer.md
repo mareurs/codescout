@@ -106,6 +106,44 @@ The inline path already solves the analogous problem: an over-budget `stdout` su
 embeds a literal `--- 970 lines omitted ---` marker mid-output. The mechanism exists in
 this codebase; it just does not extend to the unfiltered buffer.
 
+## Why the IL-3 guard did not stop this — and why that makes the reporting fix load-bearing
+
+The obvious objection to this bug is "IL-3 already forbids that pipe; fix the caller."
+Measured 2026-08-27, the guard **cannot** catch the shape that produced the incident.
+
+The gate reads the LEFT side of the pipe against a **name list**. Its own block message
+enumerates it: `cargo/npm/pnpm/yarn/python/pytest/go/mvn/gradle/rg/fd`, recursive `grep`,
+`find` without `-maxdepth`, and `git` without an output limiter.
+
+A **local script or executable is on no list**, so it is classified bounded and allowed:
+
+| command | verdict |
+|---|---|
+| `git log --oneline \| head -5` | **BLOCKED** (IL3 violation) |
+| `./scripts/check-versions.sh \| tail -3` | **allowed**, tee attached |
+| `./tests/run-all.sh 2>&1 \| tail -30` | **allowed** — 624 lines, truncated buffer, the incident |
+
+So the guard blocks `git log --oneline` — roughly a screen of output — while waving
+through a script that runs 39 test suites. That is not a bug in the name list; a
+name list cannot know what `./tests/run-all.sh` does. It is the inherent limit of
+classifying by producer name.
+
+Two consequences for this bug:
+
+1. **"The caller should have obeyed IL-3" is not a mitigation here.** The caller who
+   writes `./my-script | tail` receives no block, no warning, and no indication they
+   are on the tee path at all. The first sign is a field named
+   `unfiltered_output_lines` — which reports a count the buffer does not have.
+2. **Truncation is the only remaining signal, so it must be trustworthy.** For an
+   unrecognized LHS, the guard has already declined to judge; `unfiltered_truncated`
+   is then the *sole* evidence that the producer was unbounded after all. That moves
+   Option C from a nicety to the actual fix — the one place the system can still tell
+   the truth about a partial read.
+
+A fail-closed guard (treat an unrecognized executable as unbounded) is the alternative,
+but it would block a large amount of legitimate `./script | head` use for a class of
+command that is usually small. Fixing the reporting is the cheaper and more honest
+correction: let the pipe through, and make the resulting buffer say what it is.
 ## Evidence — the wrong conclusion this produced downstream
 
 In `claude-plugins`, a session ran `./tests/run-all.sh 2>&1 | tail -30` and grepped the
@@ -182,9 +220,14 @@ A and B are independently landable. C is the one that closes the observable.
 ## References
 
 - `src/tools/run_command/output.rs` — `handle_successful_output`, `unfiltered_ref`
+- `docs/issues/2026-08-27-il3-blocks-already-collapsed-pipelines-and-its-remedy-yields-a-wrong-hash.md`
+  — **sibling, same session.** The IL-3 guard's error text tells the caller to "rerun
+  bare and query the `@cmd_*` buffer"; when that buffer is truncated and fed to
+  `git patch-id`, the result is a syntactically perfect **wrong** hash. That is this
+  bug's failure mode applied to a hash function, where partial input yields a confident
+  wrong output rather than a partial one — and it is the strongest argument for Option C.
 - `docs/issues/archive/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md` —
   parent bug; its § Fix item 2 is the deliberate decision this one qualifies
 - `docs/superpowers/plans/2026-03-04-unfiltered-output-capture.md` — original design,
   §5 "look wider"
 - `claude-plugins:roster-audit-session-log:F-14` — the downstream incident
-
