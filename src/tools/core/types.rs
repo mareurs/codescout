@@ -466,6 +466,22 @@ pub struct ToolCapabilities {
     pub has_embeddings: bool,
     pub has_git_remote: bool,
     pub has_libraries: bool,
+    /// False when `security.shell_command_mode = "disabled"`, which hides
+    /// `run_command` from the advertised surface entirely.
+    ///
+    /// Derived as `mode != "disabled"`, deliberately NOT
+    /// `mode == "warn" || mode == "unrestricted"`: a typo'd mode must keep the
+    /// tool LISTED so the call reaches `run_command_inner`'s
+    /// `unknown shell_command_mode: '<x>'` error. Whitelisting the two good
+    /// values instead would make a misconfiguration present as a silently
+    /// missing tool — the one symptom that gives the caller nothing to fix.
+    ///
+    /// Unlike the other four, this one is a policy read rather than a
+    /// capability probe, and it is only ever an OPTIMISATION: it trims the
+    /// description + schema an agent would otherwise pay for and reach for.
+    /// Enforcement stays in `run_command_inner`, which is load-bearing rather
+    /// than redundant — see `Availability::RequiresShell`.
+    pub shell_enabled: bool,
 }
 
 /// Conditional-exposure constraint for a `Tool`.
@@ -476,6 +492,28 @@ pub enum Availability {
     RequiresEmbeddings,
     RequiresGitRemote,
     RequiresLibraries,
+    /// Shell is not `"disabled"` in the SESSION-DEFAULT project's security
+    /// config.
+    ///
+    /// **This gate cannot replace the refusal in `run_command_inner`, and the
+    /// reason is structural rather than defensive.** `current_capabilities()`
+    /// probes the session-default project (`Agent::with_project`), whereas
+    /// `run_command` reads `security_config_for(ctx.workspace_override)` — the
+    /// PINNED config. A `workspace`-pinned call into a shell-disabled project
+    /// is therefore invisible to `list_tools` filtering by construction, since
+    /// the pin lives in the request and the tool list predates it. Deleting the
+    /// `inner.rs` check because "the tool is hidden now" would reopen exactly
+    /// that path. (An MCP client is also free to call a tool it was never
+    /// advertised.)
+    ///
+    /// The converse asymmetry is a real limitation, not an oversight: an MCP
+    /// tool list is per-session, not per-request, so a session whose DEFAULT
+    /// project disables shell loses `run_command` from its list even while
+    /// pinning calls at a project that allows it. The refusal would permit such
+    /// a call; the list is simply computed before the pin exists. Anyone who
+    /// needs both in one session wants the default project to be the permissive
+    /// one.
+    RequiresShell,
 }
 
 /// Wire-format preference for `Tool::call_content`.
@@ -502,6 +540,7 @@ impl Availability {
             Availability::RequiresEmbeddings => c.has_embeddings,
             Availability::RequiresGitRemote => c.has_git_remote,
             Availability::RequiresLibraries => c.has_libraries,
+            Availability::RequiresShell => c.shell_enabled,
         }
     }
 }

@@ -1260,12 +1260,14 @@ mod availability_tests {
             has_embeddings: false,
             has_git_remote: false,
             has_libraries: false,
+            shell_enabled: false,
         };
         assert!(t.availability(&caps).is_available(&ToolCapabilities {
             has_lsp: false,
             has_embeddings: false,
             has_git_remote: false,
-            has_libraries: false
+            has_libraries: false,
+            shell_enabled: false
         }));
         assert!(matches!(t.availability(&caps), Availability::Always));
     }
@@ -1277,16 +1279,20 @@ mod availability_tests {
             has_embeddings: false,
             has_git_remote: false,
             has_libraries: false,
+            shell_enabled: false,
         };
         let on = ToolCapabilities {
             has_lsp: true,
             has_embeddings: true,
             has_git_remote: true,
             has_libraries: true,
+            shell_enabled: true,
         };
         assert!(!Availability::RequiresLsp.is_available(&off));
         assert!(Availability::RequiresLsp.is_available(&on));
         assert!(Availability::Always.is_available(&off));
+        assert!(!Availability::RequiresShell.is_available(&off));
+        assert!(Availability::RequiresShell.is_available(&on));
     }
 }
 

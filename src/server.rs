@@ -881,11 +881,34 @@ impl CodeScoutServer {
             .map(|reg| !reg.all().is_empty())
             .unwrap_or(false);
 
+        // shell_enabled: false only when this project sets
+        // security.shell_command_mode = "disabled". Read through `with_project`
+        // rather than `agent.security_config()` for the same reason
+        // `has_git_remote` reads a cached field: `security_config()` also
+        // populates `library_paths` from the library registry, and list_tools
+        // fires frequently enough that a second registry read for one string is
+        // not worth it.
+        //
+        // `!= "disabled"` and not `== "warn" || == "unrestricted"`: an
+        // unrecognised mode must leave the tool VISIBLE, so the call lands on
+        // `run_command_inner`'s `unknown shell_command_mode: '<x>'` error.
+        // Whitelisting the good values would turn a config typo into a silently
+        // absent tool, which tells the caller nothing.
+        //
+        // Defaults to `true` with no active project, matching
+        // `PathSecurityConfig::default()`'s "warn".
+        let shell_enabled = self
+            .agent
+            .with_project(|p| Ok(p.config.security.shell_command_mode != "disabled"))
+            .await
+            .unwrap_or(true);
+
         crate::tools::ToolCapabilities {
             has_lsp,
             has_embeddings,
             has_git_remote,
             has_libraries,
+            shell_enabled,
         }
     }
 
@@ -2140,11 +2163,27 @@ mod tests {
     }
 
     async fn make_server() -> (tempfile::TempDir, CodeScoutServer) {
+        make_server_with_project_toml(None).await
+    }
+
+    /// `make_server`, plus an optional `.codescout/project.toml`.
+    ///
+    /// The file must be written BEFORE `Agent::new`, which is the only window in
+    /// which it is read: `ProjectConfig::load_or_default` runs during agent
+    /// construction, so a config written afterwards is invisible to the session.
+    /// That ordering is the whole reason this helper exists rather than callers
+    /// writing the file themselves after `make_server()`.
+    async fn make_server_with_project_toml(
+        project_toml: Option<&str>,
+    ) -> (tempfile::TempDir, CodeScoutServer) {
         let dir = tempdir().unwrap();
         let codescout_dir = dir.path().join(".codescout");
         std::fs::create_dir_all(&codescout_dir).unwrap();
         let ws_path = codescout_dir.join("librarian-workspace.toml");
         std::fs::write(&ws_path, "").unwrap();
+        if let Some(project_toml) = project_toml {
+            std::fs::write(codescout_dir.join("project.toml"), project_toml).unwrap();
+        }
 
         // `ServerEnv::librarian` only exists with the `librarian` feature on;
         // without the gate this helper fails to compile under
@@ -2476,6 +2515,7 @@ mod tests {
             has_embeddings: true,
             has_git_remote: true,
             has_libraries: true,
+            shell_enabled: true,
         };
         server
             .tools
@@ -4650,12 +4690,14 @@ mod tests {
             has_embeddings: true,
             has_git_remote: false,
             has_libraries: false,
+            shell_enabled: true,
         };
         let caps_with_lsp = ToolCapabilities {
             has_lsp: true,
             has_embeddings: true,
             has_git_remote: false,
             has_libraries: false,
+            shell_enabled: true,
         };
 
         assert!(
@@ -4708,6 +4750,7 @@ mod tests {
             has_embeddings: true,
             has_git_remote: false,
             has_libraries: false,
+            shell_enabled: true,
         };
 
         let (_dir, server) = make_server().await;
@@ -4725,6 +4768,117 @@ mod tests {
                 lsp_tool
             );
         }
+    }
+
+    /// The tool names `list_tools` would advertise for `server`'s CURRENT
+    /// capabilities, applying the same filter `ServerHandler::list_tools` does
+    /// (`src/server.rs`, `.filter(|t| t.availability(&caps).is_available(&caps))`).
+    async fn advertised_tool_names(server: &CodeScoutServer) -> Vec<&str> {
+        let caps = server.current_capabilities().await;
+        server
+            .tools
+            .iter()
+            .filter(|t| t.availability(&caps).is_available(&caps))
+            .map(|t| t.name())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn run_command_hidden_when_shell_command_mode_is_disabled() {
+        let (_dir, server) = make_server_with_project_toml(Some(
+            "[project]\nname = \"t\"\n\n[security]\nshell_command_mode = \"disabled\"\n",
+        ))
+        .await;
+
+        let caps = server.current_capabilities().await;
+        assert!(
+            !caps.shell_enabled,
+            "shell_command_mode = \"disabled\" must clear shell_enabled"
+        );
+
+        let visible = advertised_tool_names(&server).await;
+        assert!(
+            !visible.contains(&"run_command"),
+            "run_command must not be advertised when shell is disabled, got: {visible:?}"
+        );
+        // Hiding must be surgical: prove we removed one tool rather than
+        // emptying the surface, which would make the assertion above vacuous.
+        for still_there in &["read_file", "tree", "grep", "memory", "workspace"] {
+            assert!(
+                visible.contains(still_there),
+                "'{still_there}' must stay advertised when only shell is disabled"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn run_command_advertised_when_shell_command_mode_is_warn() {
+        // Pinned explicitly rather than relying on the default, so the test is
+        // hermetic against a global ~/.config/codescout/config.toml that sets
+        // shell_command_mode — project.toml overlays the global layer.
+        let (_dir, server) = make_server_with_project_toml(Some(
+            "[project]\nname = \"t\"\n\n[security]\nshell_command_mode = \"warn\"\n",
+        ))
+        .await;
+
+        let caps = server.current_capabilities().await;
+        assert!(caps.shell_enabled, "\"warn\" must leave shell_enabled set");
+        assert!(
+            advertised_tool_names(&server)
+                .await
+                .contains(&"run_command"),
+            "run_command must be advertised under the default \"warn\" mode"
+        );
+    }
+
+    /// An unrecognised mode must leave `run_command` VISIBLE.
+    ///
+    /// This is the interesting case, and it is why `shell_enabled` is derived as
+    /// `mode != "disabled"` rather than by whitelisting the two good values.
+    /// Whitelisting would turn a config typo into a silently absent tool — the
+    /// one symptom that gives the caller nothing to act on. Left visible, the
+    /// call instead reaches `run_command_inner`'s
+    /// `unknown shell_command_mode: '<x>'` error, which names the bad value.
+    #[tokio::test]
+    async fn run_command_advertised_when_shell_command_mode_is_unrecognised() {
+        let (_dir, server) = make_server_with_project_toml(Some(
+            "[project]\nname = \"t\"\n\n[security]\nshell_command_mode = \"disabledd\"\n",
+        ))
+        .await;
+
+        let caps = server.current_capabilities().await;
+        assert!(
+            caps.shell_enabled,
+            "a typo'd mode must NOT be read as \"disabled\""
+        );
+        assert!(
+            advertised_tool_names(&server)
+                .await
+                .contains(&"run_command"),
+            "a typo'd mode must leave run_command visible so its call can report the bad value"
+        );
+    }
+
+    /// `RunCommand` must actually be wired to the shell gate.
+    ///
+    /// Asserted on the variant rather than only through a filtered list: a
+    /// regression that reverted `availability()` to the `Always` default would
+    /// still pass the two positive tests above, since `Always` is also visible.
+    #[tokio::test]
+    async fn run_command_declares_the_shell_availability_gate() {
+        use crate::tools::{Availability, Tool};
+
+        let caps = crate::tools::ToolCapabilities {
+            has_lsp: true,
+            has_embeddings: true,
+            has_git_remote: true,
+            has_libraries: true,
+            shell_enabled: false,
+        };
+        assert!(matches!(
+            crate::tools::RunCommand.availability(&caps),
+            Availability::RequiresShell
+        ));
     }
 
     #[cfg(any(

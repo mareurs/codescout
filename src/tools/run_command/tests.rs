@@ -1671,6 +1671,15 @@ async fn run_in_background_rejects_buffer_only() {
 async fn shell_command_mode_disabled_blocks_run_command() {
     // shell_command_mode = "disabled" is the sole mechanism for turning shell
     // off — the former shell_enabled master switch was removed as redundant.
+    //
+    // This refusal is NOT made redundant by `RunCommand::availability()` hiding
+    // the tool from `list_tools` under the same setting. `current_capabilities()`
+    // reads the SESSION-DEFAULT project, while `call` reads
+    // `security_config_for(ctx.workspace_override)` — the PINNED one. A
+    // `workspace`-pinned call into a shell-disabled project therefore never
+    // passes the availability filter at all, and this check is the only thing
+    // standing in front of it. (An MCP client may also call a tool it was never
+    // advertised.) Do not delete it on the grounds that the tool is hidden now.
     let (dir, ctx) = project_ctx().await;
     let root = dir.path().to_path_buf();
     let security = crate::util::path_security::PathSecurityConfig {

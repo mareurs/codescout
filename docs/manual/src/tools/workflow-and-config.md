@@ -184,7 +184,7 @@ shell_command_mode = "disabled"
 |-------|-----------|
 | `"warn"` | Commands execute normally. This is the default. |
 | `"unrestricted"` | Commands execute normally (alias for `warn`, no functional difference). |
-| `"disabled"` | All calls return an error. |
+| `"disabled"` | `run_command` is hidden from `list_tools`; any call that still arrives returns an error. |
 
 Commands run under a POSIX shell on every platform: `sh -c` on Unix, Git Bash
 `bash -c` on Windows. That is what makes the buffer-query tips below (`grep`,

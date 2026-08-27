@@ -364,9 +364,11 @@ File write tools are restricted to the project root by default.
 extra_write_roots = ["/path/to/other/directory"]
 ```
 
-### Shell commands return "shell execution is disabled"
+### Shell commands return "shell commands are disabled"
 
-`shell_command_mode` is set to `"disabled"`, which blocks every `run_command` call.
+`shell_command_mode` is set to `"disabled"`. This does two things: `run_command` is hidden
+from the tool list, so the agent may report the tool as unavailable rather than quoting an
+error at all; and any call that does arrive is refused with `shell commands are disabled`.
 
 **Fix:** Set the mode to `"warn"` (the default) or `"unrestricted"` in `project.toml`:
 
@@ -376,7 +378,21 @@ shell_command_mode = "warn"   # or "unrestricted"
 ```
 
 `shell_command_mode` controls `run_command`: `"warn"` (the default) and `"unrestricted"`
-both run commands normally; `"disabled"` blocks all shell calls.
+both run commands normally; `"disabled"` hides the tool and blocks all shell calls.
+
+Remember the setting can come from the global layer as well as the project one
+(`~/.config/codescout/config.toml` `[security]`, with `project.toml` overlaid on top) — so
+check both if a project you did not configure has shell off.
+
+### `run_command` is missing from the tool list
+
+Almost always `shell_command_mode = "disabled"` — see above. `"disabled"` filters the tool
+out of `list_tools` entirely, so the symptom is an absent tool rather than an error message.
+
+A **misspelled** mode does not do this. An unrecognised value leaves `run_command` visible
+and fails the call with `unknown shell_command_mode: '<value>'`, naming the bad value —
+deliberately, so a config typo cannot present as a silently missing tool. If the tool is
+gone, the mode really is `"disabled"` somewhere in the config chain.
 
 ---
 

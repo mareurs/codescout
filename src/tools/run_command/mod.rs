@@ -281,6 +281,24 @@ impl Tool for RunCommand {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_run_command(result))
     }
+
+    /// Hidden from `list_tools` when `security.shell_command_mode = "disabled"`.
+    ///
+    /// Purely an exposure trim — it saves the agent this tool's description and
+    /// schema, and stops it reaching for a door that is bolted. The refusal in
+    /// `run_command_inner` (step 3) is the enforcement, and it stays: this gate
+    /// reads the SESSION-DEFAULT project, while `call` reads the
+    /// `workspace`-pinned one, so a pinned call into a shell-disabled project
+    /// never passes through here at all. See `Availability::RequiresShell`.
+    ///
+    /// Note the side effect of hiding rather than merely refusing: `run_command`
+    /// is the only door to `@cmd_*` buffers, so an agent that cannot see the
+    /// tool also cannot query one. That falls out of the choice to hide rather
+    /// than from the `buffer_only` bypass inside `call`, which still exempts
+    /// buffer queries from the refusal itself.
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::RequiresShell
+    }
 }
 
 #[cfg(test)]

@@ -136,7 +136,7 @@ indexing_enabled = true
 |---|---|---|---|
 | `profile` | string | `"default"` | `"default"` enforces the built-in read deny-list; `"root"` skips it entirely for absolute-path reads (see [Security & Permissions](../concepts/security.md)). Not a stronger sandbox — a bypass. |
 | `extra_write_roots` | array of strings | `[]` | Additional directories where file write tools are allowed. By default writes are restricted to the project root. |
-| `shell_command_mode` | string | `"warn"` | Controls `run_command` behaviour. One of `"unrestricted"`, `"warn"`, or `"disabled"`. |
+| `shell_command_mode` | string | `"warn"` | Controls `run_command` behaviour. One of `"unrestricted"`, `"warn"`, or `"disabled"`. `"disabled"` also hides the tool from `list_tools`. An unrecognised value leaves the tool visible and fails the call with an error naming the bad value. |
 | `file_write_enabled` | bool | `true` | Enables file write tools: `create_file` and the symbol write tools. Set to `false` for a read-only session. |
 | `indexing_enabled` | bool | `true` | Enables `index(action: build)` and `workspace(action: status)`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
 
@@ -171,7 +171,7 @@ The `shell_command_mode` field fine-tunes what happens when `run_command` is cal
 |---|---|
 | `"warn"` | Commands execute normally. This is the default. |
 | `"unrestricted"` | Commands execute normally. Currently identical to `"warn"`. |
-| `"disabled"` | All shell calls return an error immediately. |
+| `"disabled"` | `run_command` is hidden from the tool list; any call that still arrives returns an error immediately. |
 
 ### Controlling Shell Execution
 
@@ -183,8 +183,16 @@ entirely, set the mode to `"disabled"`:
 shell_command_mode = "disabled"
 ```
 
-With `"disabled"`, every `run_command` call returns an error immediately. `"warn"` (the
-default) and `"unrestricted"` currently behave the same — both run the command.
+With `"disabled"`, `run_command` is filtered out of `list_tools` entirely — the agent never
+sees its description or schema — and any call that arrives anyway returns an error. Both
+halves matter: the tool list is computed for the *session-default* project, whereas the
+refusal reads the `workspace`-pinned project, so a pinned call into a shell-disabled project
+is caught only by the refusal.
+
+Because `run_command` is also the only way to read an `@cmd_*` output buffer, hiding it
+means buffer queries are unavailable too.
+
+`"warn"` (the default) and `"unrestricted"` currently behave the same — both run the command.
 
 ---
 

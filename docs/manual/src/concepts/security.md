@@ -13,7 +13,7 @@ The permission model is asymmetric by design:
 |---|---|---|
 | **Read** | Permissive — anywhere on disk | Deny-list of sensitive locations |
 | **Write** | Restricted — project root only | Hard boundary; opt-in escapes via config |
-| **Shell** | Enabled by default | Disable via `shell_command_mode = "disabled"`; cwd sandboxed to project root |
+| **Shell** | Enabled by default | Disable via `shell_command_mode = "disabled"`, which also hides `run_command`; cwd sandboxed to project root |
 | **Git** | Enabled | Can disable per-project |
 
 This asymmetry is intentional. An agent doing code intelligence work legitimately
@@ -132,11 +132,21 @@ shell_command_mode = "disabled"
 `"warn"` is the default; `"unrestricted"` currently behaves identically — only `"disabled"`
 changes `run_command` behaviour today.
 
+With `"disabled"`, `run_command` is **not advertised at all** — it is filtered out of
+`list_tools`, so the agent never sees its description or schema and does not reach for it.
+A call that arrives anyway is still refused. Both halves are load-bearing: the tool list is
+built from the *session-default* project, while the refusal reads the `workspace`-pinned
+one, so a pinned call into a shell-disabled project is caught only by the refusal.
+
+Note one consequence of hiding rather than merely refusing: `run_command` is the only way to
+query an `@cmd_*` output buffer, so an agent that cannot see the tool cannot read buffers
+either.
+
 | `shell_command_mode` | Behaviour |
 |---|---|
 | `"warn"` | Commands run normally. The default. |
 | `"unrestricted"` | Commands run normally. Currently identical to `"warn"`. |
-| `"disabled"` | All calls return an error. |
+| `"disabled"` | `run_command` is hidden from the tool list; any call that still arrives returns an error. |
 
 ### Shell Sandbox
 
@@ -168,7 +178,8 @@ intervention.
 
 - **Reads**: anywhere except the built-in credential deny list
 - **Writes**: project root only, by default — hard boundary, not a warning
-- **Shell**: on by default; disable via `shell_command_mode = "disabled"`; cwd sandboxed to project
+- **Shell**: on by default; `shell_command_mode = "disabled"` hides `run_command` from the
+  tool list and refuses any call that still arrives; cwd sandboxed to project
 - **Violations**: `RecoverableError` → agent gets a hint, no user interruption, no
   sibling call cancellation
 

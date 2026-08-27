@@ -4786,6 +4786,7 @@ fn symbol_at_requires_lsp() {
         has_embeddings: false,
         has_git_remote: false,
         has_libraries: false,
+        shell_enabled: false,
     };
     let on = crate::tools::ToolCapabilities {
         has_lsp: true,
