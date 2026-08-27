@@ -35,6 +35,26 @@ impl MemoryStore {
         Ok(Self { memories_dir })
     }
 
+    /// Open a store for READING, without creating the directory.
+    ///
+    /// [`Self::from_dir`] calls `create_dir_all`, which is correct for a write
+    /// target and wrong for a read: it makes every read that merely *asks* about
+    /// a directory materialise it. `Workspace::memory_dir_for_project`'s doc
+    /// comment has named this ("`MemoryStore::from_dir` then creates it on read
+    /// as well as on write") since the litter bug archived at
+    /// `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
+    ///
+    /// Nothing is lost by not creating. [`Self::list`] walks with `walkdir` and
+    /// yields nothing for a missing root; [`Self::read`] gates on
+    /// `path.exists()`. Both already return the empty answer for an absent
+    /// directory — the only thing `create_dir_all` contributed was the directory.
+    ///
+    /// Infallible by construction, unlike `from_dir`: the creation this omits
+    /// was the only fallible step.
+    pub fn from_dir_readonly(memories_dir: PathBuf) -> Self {
+        Self { memories_dir }
+    }
+
     /// Return the directory this store writes into.
     pub fn dir(&self) -> &Path {
         &self.memories_dir

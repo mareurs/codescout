@@ -2658,3 +2658,107 @@ languages = ["typescript"]
         "by-path activation must resolve the same memory set as by-id: {activated:?}"
     );
 }
+
+/// `workspace(activate)`'s `memories` array reports the UNION of a sub-project's
+/// two memory layouts, and `memory(action="list")` returns the same set.
+///
+/// The sibling fix above moved `activate`'s reader onto the write path, which made
+/// the two surfaces agree. But for a project whose memories live project-local it
+/// made them agree at ZERO — and the pre-fix contradiction had at least been a
+/// signal that memories existed on disk. Measured 2026-08-27 across two real
+/// workspaces on one machine: one held 53 memories project-local and 0 in the
+/// workspace tree, the other 42 in the workspace tree and none project-local.
+/// Neither layout is debris, so reads union both and writes are left untouched —
+/// no file moves, none is untracked, no write lands anywhere new.
+///
+/// The last assertion is the one that keeps this honest: agreement is cheap to
+/// fake by making both surfaces equally blind, so the test pins the COUNT too.
+///
+/// docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+#[tokio::test]
+async fn activating_a_sub_project_reports_the_union_of_both_memory_layouts() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let svc = root.join("svc");
+    std::fs::create_dir_all(&svc).unwrap();
+    std::fs::write(svc.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+    let codescout = root.join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    std::fs::write(
+        codescout.join("workspace.toml"),
+        r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "svc"
+root = "svc"
+languages = ["typescript"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        codescout.join("project.toml"),
+        "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+    )
+    .unwrap();
+
+    // One topic in each layout. Before the union, `activate` and `memory(list)`
+    // agreed on the workspace-tree one alone and reported the project-local one
+    // as not existing.
+    let per_project = codescout.join("projects").join("svc").join("memories");
+    std::fs::create_dir_all(&per_project).unwrap();
+    std::fs::write(per_project.join("architecture.md"), "# Arch").unwrap();
+    let project_local = svc.join(".codescout").join("memories");
+    std::fs::create_dir_all(&project_local).unwrap();
+    std::fs::write(project_local.join("conventions.md"), "# Conv").unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let activated = ActivateProject
+        .call(json!({ "path": "svc" }), &ctx)
+        .await
+        .unwrap();
+    let listed = crate::tools::memory::Memory
+        .call(json!({ "action": "list", "project_id": "svc" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        activated["memories"],
+        json!(["architecture", "conventions"]),
+        "activate must report both layouts, not whichever one its reader happens \
+         to resolve: {activated:?}"
+    );
+    assert_eq!(
+        activated["memories"], listed["topics"],
+        "the two surfaces must describe the same set: activate={:?} memory={:?}",
+        activated["memories"], listed["topics"]
+    );
+    assert_eq!(
+        activated["memories"].as_array().map(Vec::len),
+        Some(2),
+        "agreement at the wrong count is the failure this replaced — both surfaces \
+         blind in the same direction still agree: {activated:?}"
+    );
+}

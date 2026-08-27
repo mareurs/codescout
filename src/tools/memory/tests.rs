@@ -1896,3 +1896,278 @@ async fn memory_read_sections_filter_private_integration() {
     assert!(text.contains("### Rust"), "should contain Rust");
     assert!(!text.contains("### Python"), "should not contain Python");
 }
+
+// ─── read-union across a sub-project's two memory layouts ────────────────────
+//
+// A sub-project has two memory directories and always has had:
+//   `<ws>/.codescout/projects/<id>/memories`  — `Workspace::memory_dir_for_project`
+//   `<ws>/<rel>/.codescout/memories`          — `MemoryStore::open(project.root)`
+// Reads now union both; writes still target the first alone.
+//
+// docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+
+/// Two-project workspace (`test` at the root, `svc` beneath it), with the
+/// semantic store and embedder isolated exactly as `test_ctx_with_project` does —
+/// a workspace fixture must not become the ambient-resolution hole that
+/// `docs/issues/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md`
+/// closed.
+async fn workspace_ctx_with_sub_project() -> (tempfile::TempDir, ToolContext) {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::Arc;
+
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let svc = root.join("svc");
+    std::fs::create_dir_all(&svc).unwrap();
+    std::fs::write(svc.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+    let codescout = root.join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    std::fs::write(
+        codescout.join("workspace.toml"),
+        r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "svc"
+root = "svc"
+languages = ["typescript"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        codescout.join("project.toml"),
+        "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+    )
+    .unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    ctx.agent
+        .set_semantic_memory_store_for_test(
+            Arc::new(InMemorySemanticMemoryStore::new()) as Arc<dyn SemanticMemoryStore>
+        )
+        .map_err(|_| ())
+        .expect("set store");
+    (dir, ctx)
+}
+
+/// The write target for sub-project `svc`.
+fn ws_layout_dir(root: &std::path::Path) -> std::path::PathBuf {
+    root.join(".codescout")
+        .join("projects")
+        .join("svc")
+        .join("memories")
+}
+
+/// The project-local layout for sub-project `svc`.
+fn local_layout_dir(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("svc").join(".codescout").join("memories")
+}
+
+fn seed(dir: &std::path::Path, topic: &str, body: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(format!("{topic}.md")), body).unwrap();
+}
+
+/// `memory(action="list")` reports BOTH of a sub-project's memory layouts.
+///
+/// Before the union each surface saw one directory, so a project holding topics
+/// in the other one was reported as empty — measured on a real 12-sub-project
+/// workspace where 53 memories sat project-local and the workspace tree held 0.
+#[tokio::test]
+async fn memory_list_unions_both_layouts_for_a_sub_project() {
+    let (dir, ctx) = workspace_ctx_with_sub_project().await;
+    seed(&ws_layout_dir(dir.path()), "from-workspace-tree", "# W");
+    seed(&local_layout_dir(dir.path()), "from-project-local", "# L");
+
+    let listed = Memory
+        .call(json!({ "action": "list", "project_id": "svc" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        listed["topics"],
+        json!(["from-project-local", "from-workspace-tree"]),
+        "list must union both layouts, sorted and deduped: {listed:?}"
+    );
+}
+
+/// A topic living ONLY in the project-local layout is now readable — and the
+/// response says where it came from, because a later `memory(write)` on that
+/// topic targets the workspace tree and would leave this file shadowed.
+#[tokio::test]
+async fn memory_read_falls_back_to_the_other_layout_and_names_the_write_target() {
+    let (dir, ctx) = workspace_ctx_with_sub_project().await;
+    seed(&local_layout_dir(dir.path()), "only-local", "# Local only");
+
+    let read = Memory
+        .call(
+            json!({ "action": "read", "topic": "only-local", "project_id": "svc" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(read["content"], json!("# Local only"), "got: {read:?}");
+    let from = read["resolved_from"].as_str().unwrap_or_default();
+    let target = read["write_target"].as_str().unwrap_or_default();
+    assert!(
+        from.ends_with("svc/.codescout/memories"),
+        "resolved_from must name the layout it actually read: {read:?}"
+    );
+    assert!(
+        target.ends_with("projects/svc/memories"),
+        "write_target must name where a write would land instead: {read:?}"
+    );
+}
+
+/// Negative control for the test above: a topic served FROM the write target
+/// carries no provenance fields at all. Without this, a formatter that always
+/// stamped them would pass the fallback test unchanged.
+#[tokio::test]
+async fn memory_read_from_the_write_target_carries_no_provenance_fields() {
+    let (dir, ctx) = workspace_ctx_with_sub_project().await;
+    seed(&ws_layout_dir(dir.path()), "in-write-target", "# W");
+
+    let read = Memory
+        .call(
+            json!({ "action": "read", "topic": "in-write-target", "project_id": "svc" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(read["content"], json!("# W"), "got: {read:?}");
+    assert!(
+        read.get("resolved_from").is_none() && read.get("write_target").is_none(),
+        "a read served by the write target is the normal case and must stay quiet: {read:?}"
+    );
+}
+
+/// The union must not CREATE the directory it looks into.
+///
+/// `MemoryStore::from_dir` calls `create_dir_all`, so routing a read through it
+/// would have made every list materialise the other layout — the same litter
+/// class as
+/// `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md`,
+/// re-introduced by the fix for a different bug. `from_dir_readonly` exists for
+/// exactly this, and this test is what holds it in place.
+#[tokio::test]
+async fn a_union_read_does_not_materialise_the_other_layouts_directory() {
+    let (dir, ctx) = workspace_ctx_with_sub_project().await;
+    seed(&ws_layout_dir(dir.path()), "only-in-tree", "# W");
+    let local = local_layout_dir(dir.path());
+    assert!(!local.exists(), "precondition: the local layout is absent");
+
+    Memory
+        .call(json!({ "action": "list", "project_id": "svc" }), &ctx)
+        .await
+        .unwrap();
+    Memory
+        .call(
+            json!({ "action": "read", "topic": "only-in-tree", "project_id": "svc" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        !local.exists(),
+        "a read created {} — an empty directory that reads as an empty memory set",
+        local.display()
+    );
+}
+
+/// The ROOT project has one directory, not two, so every read path here reduces
+/// to its previous single-directory behaviour. This is why a single-project repo
+/// never reproduced the bug and sees no change from the fix.
+#[tokio::test]
+async fn the_root_project_resolves_a_single_directory() {
+    let (dir, ctx) = workspace_ctx_with_sub_project().await;
+
+    // No `project_id`: focus defaults to the root project (`Workspace::new`), and
+    // this is the path that must stay byte-identical to its pre-union behaviour.
+    let dirs = resolve_memory_dirs(&json!({}), &ctx).await.unwrap();
+
+    assert_eq!(dirs.primary, dir.path().join(".codescout").join("memories"));
+    assert!(
+        dirs.secondary.is_none(),
+        "the root project's two layouts are the same path, so there is nothing to \
+         union — got {:?}",
+        dirs.secondary
+    );
+}
+
+/// A sub-project resolves two distinct directories — the precondition every test
+/// above rests on, asserted directly so a change that collapsed them would fail
+/// here rather than silently making the union a no-op everywhere.
+#[tokio::test]
+async fn a_sub_project_resolves_two_distinct_directories() {
+    let (dir, ctx) = workspace_ctx_with_sub_project().await;
+
+    let dirs = resolve_memory_dirs(&json!({ "project_id": "svc" }), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(dirs.primary, ws_layout_dir(dir.path()));
+    assert_eq!(dirs.secondary, Some(local_layout_dir(dir.path())));
+}
+
+/// The provenance fields must be RENDERED, not merely carried.
+///
+/// `format_read_memory` returns `$.content` alone, so a field added to the JSON
+/// and left out of the formatter reaches nobody — the exact failure shipped and
+/// fixed the same day in
+/// `docs/issues/archive/2026-08-26-read-file-truncation-flag-never-rendered.md`.
+/// The note is head-placed because this function's output IS the memory body: a
+/// trailing note is what truncation cuts, and what a caller pasting the result
+/// would carry into the memory.
+#[test]
+fn format_read_memory_renders_the_shadow_warning_at_the_head() {
+    let plain = format_read_memory(&json!({ "content": "# Arch" }));
+    assert_eq!(plain, "# Arch", "the normal case stays verbatim");
+
+    let shadowed = format_read_memory(&json!({
+        "content": "# Arch",
+        "resolved_from": "/ws/svc/.codescout/memories",
+        "write_target": "/ws/.codescout/projects/svc/memories",
+    }));
+    assert!(
+        shadowed.starts_with('⚠'),
+        "the note must lead, not trail: {shadowed}"
+    );
+    assert!(
+        shadowed.contains("/ws/svc/.codescout/memories")
+            && shadowed.contains("/ws/.codescout/projects/svc/memories"),
+        "both paths must survive into the rendered text: {shadowed}"
+    );
+    assert!(
+        shadowed.ends_with("# Arch"),
+        "the memory body must still be there, and last: {shadowed}"
+    );
+}

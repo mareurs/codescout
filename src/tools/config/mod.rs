@@ -795,6 +795,19 @@ async fn build_activation_response(
         })
         .await?;
 
+    // `p.memory`'s directory depends on which activation path ran: the bare-id
+    // focus-switch resolves it through `Workspace::memory_dir_for_project`
+    // (`agent/mod.rs`), while `Agent::new` and `load_project_resources` open it
+    // project-local via `MemoryStore::open(root)`. Reporting whichever one that
+    // happened to be advertised a count the `memory` tool could not always serve —
+    // activate said 12, `memory(action="list")` said 0, same project, same instant.
+    //
+    // Report the union of both layouts, which is the same set
+    // `memory(action="list")` now returns, so the two surfaces agree by
+    // construction rather than by both paths happening to pick the same directory.
+    // docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+    let memories = crate::tools::memory::union_with_workspace_memories(ctx, memories).await;
+
     timer.lap("project_snapshot");
 
     // has_index probe via Qdrant — best-effort. When the retrieval stack is

@@ -1458,8 +1458,13 @@ impl Agent {
             .iter()
             .filter_map(|p| {
                 let dir = ws.memory_dir_for_project(&p.discovered.id);
-                let topics = crate::memory::MemoryStore::from_dir(dir)
-                    .ok()?
+                // Read-only by construction: this function is documented as
+                // "Returns per-project memory topic lists", but `from_dir`'s
+                // `create_dir_all` made merely ASKING what each project holds
+                // materialise `projects/<id>/memories` for every project in the
+                // workspace. `list` yields nothing for a missing directory, so
+                // nothing is lost by not creating it.
+                let topics = crate::memory::MemoryStore::from_dir_readonly(dir)
                     .list()
                     .unwrap_or_default();
                 if topics.is_empty() {

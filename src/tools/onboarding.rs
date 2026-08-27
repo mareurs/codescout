@@ -861,10 +861,13 @@ async fn gather_per_project_protected(
                 .join("memories")
         };
         let project_root = root.join(&project.relative_root);
-        if let Ok(store) = crate::memory::MemoryStore::from_dir(mem_dir.clone()) {
-            let state = gather_protected_memory_state(&store, &mem_dir, &project_root, &protected);
-            map.insert(project.id.clone(), state);
-        }
+        // Read-only: `gather_protected_memory_state` only calls `read` and
+        // `exists`. `from_dir`'s `create_dir_all` made this loop materialise
+        // `projects/<id>/memories` for every project in the workspace as a
+        // side effect of reporting staleness.
+        let store = crate::memory::MemoryStore::from_dir_readonly(mem_dir.clone());
+        let state = gather_protected_memory_state(&store, &mem_dir, &project_root, &protected);
+        map.insert(project.id.clone(), state);
     }
     (true, Some(Value::Object(map)))
 }

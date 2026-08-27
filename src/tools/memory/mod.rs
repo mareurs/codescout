@@ -146,8 +146,32 @@ impl Tool for ListMemories {
     }
 }
 
+/// Render a `memory(action="read")` result.
+///
+/// Normally the memory text verbatim. When the topic resolved from the project's
+/// OTHER memory store rather than the write target, the note goes FIRST: this
+/// function's output is the memory body, so a trailing note is what any
+/// downstream truncation cuts, and a caller pasting the result would carry it
+/// into the memory itself.
+///
+/// These fields exist only in the split-store case, so this branch is the only
+/// thing that renders them — a field the formatter drops reaches nobody, which is
+/// how `docs/issues/archive/2026-08-26-read-file-truncation-flag-never-rendered.md`
+/// shipped inert.
 fn format_read_memory(result: &Value) -> String {
-    result["content"].as_str().unwrap_or("").to_string()
+    let content = result["content"].as_str().unwrap_or("");
+    match (
+        result["resolved_from"].as_str(),
+        result["write_target"].as_str(),
+    ) {
+        (Some(from), Some(target)) => format!(
+            "⚠ read from {from} — this project's other memory store. \
+             memory(action='write') on this topic targets {target} instead, which \
+             would leave the text below untouched and shadowed by a second copy.\n\n\
+             {content}"
+        ),
+        _ => content.to_string(),
+    }
 }
 
 fn format_list_memories(result: &Value) -> String {
@@ -488,15 +512,93 @@ async fn create_semantic_anchors(
     Ok(())
 }
 
-/// Resolve the memory directory for a `memory` tool call.
+/// The directories a `memory` READ should consult, in precedence order.
 ///
-/// If `project_id` (or its `project` alias) is provided, route to the per-project directory via
-/// `Workspace::memory_dir_for_project`. Otherwise use the focused project's memory dir.
-/// Falls back gracefully when no workspace is loaded.
-async fn resolve_memory_dir(
-    input: &Value,
-    ctx: &ToolContext,
-) -> anyhow::Result<std::path::PathBuf> {
+/// A sub-project has two memory stores and always has had, because the two
+/// layouts are keyed on different things:
+///
+/// | resolved by | rooted at | reached when |
+/// |---|---|---|
+/// | `Workspace::memory_dir_for_project` | `<ws>/.codescout/projects/<id>/memories` | the project is addressed as a member of a workspace |
+/// | `MemoryStore::open(project.root)` | `<project>/.codescout/memories` | the project is addressed by absolute path, so it IS the root project |
+///
+/// The first is a function of the WORKSPACE, the second of the PROJECT — so the
+/// same project reached two ways gets two different stores, and each surface saw
+/// only one of them. Measured on this machine 2026-08-27: one workspace held 53
+/// memories in the project-local layout and none in the workspace layout, another
+/// held 42 in the workspace layout and none project-local. Neither is debris, so
+/// neither can simply be declared the loser.
+///
+/// Reads therefore union both; **writes are unchanged** and still target
+/// [`Self::primary`] alone. That keeps this a pure read-visibility fix with no
+/// migration: no file moves, none is untracked, and no write lands anywhere it
+/// would not have landed before.
+///
+/// For the ROOT project the two paths coincide, `secondary` is `None`, and every
+/// method here reduces to the single-directory behaviour byte for byte. That is
+/// why a single-project repo never saw this bug and never changes behaviour now.
+///
+/// See `docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md`
+/// for the id-route half, and
+/// `docs/issues/2026-08-27-activate-by-path-bypasses-workspace-memory-resolution.md`
+/// for the by-path half this union deliberately does NOT close: a by-path
+/// activation builds a STANDALONE workspace rooted at the target, so the parent's
+/// per-project tree is not merely unread, it is not loaded at all — there is no
+/// second layout there to union.
+pub(crate) struct MemoryReadDirs {
+    /// The write target — exactly what `resolve_memory_dir` returns.
+    pub(crate) primary: std::path::PathBuf,
+    /// The other layout's directory for the same project, when it differs.
+    pub(crate) secondary: Option<std::path::PathBuf>,
+}
+
+impl MemoryReadDirs {
+    /// Every directory a read consults, write target first.
+    pub(crate) fn all(&self) -> impl Iterator<Item = &std::path::PathBuf> {
+        std::iter::once(&self.primary).chain(self.secondary.iter())
+    }
+
+    /// Union of topics across both layouts, deduped and sorted.
+    ///
+    /// Uses `from_dir_readonly` deliberately: `from_dir` would create the
+    /// secondary directory on every list, which is the litter this fix must not
+    /// introduce while removing an invisibility.
+    pub(crate) fn list_union(&self) -> anyhow::Result<Vec<String>> {
+        let mut topics = Vec::new();
+        for dir in self.all() {
+            topics.extend(crate::memory::MemoryStore::from_dir_readonly(dir.clone()).list()?);
+        }
+        topics.sort();
+        topics.dedup();
+        Ok(topics)
+    }
+
+    /// Read `topic`, write target first. Returns the content and the directory it
+    /// came from, so the caller can say so when it was not the write target.
+    pub(crate) fn read_first(
+        &self,
+        topic: &str,
+    ) -> anyhow::Result<Option<(String, std::path::PathBuf)>> {
+        for dir in self.all() {
+            if let Some(content) =
+                crate::memory::MemoryStore::from_dir_readonly(dir.clone()).read(topic)?
+            {
+                return Ok(Some((content, dir.clone())));
+            }
+        }
+        Ok(None)
+    }
+}
+
+/// Resolve the directories a `memory` tool call reads from.
+///
+/// If `project_id` (or its `project` alias) is provided, route to the per-project
+/// directory via `Workspace::memory_dir_for_project`. Otherwise use the focused
+/// project's memory dir. Falls back gracefully when no workspace is loaded.
+///
+/// `.primary` is the write target; `.secondary` is the other layout's directory
+/// for the same project when the two differ. See [`MemoryReadDirs`].
+async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result<MemoryReadDirs> {
     let project_param = input
         .get("project_id")
         .or_else(|| input.get("project")) // "project" accepted as an alias for project_id (2026-06-09 onboarding-prompt bug)
@@ -549,17 +651,76 @@ async fn resolve_memory_dir(
         let project_id = project_param
             .or_else(|| ws.focused.clone())
             .unwrap_or_else(|| crate::workspace::ROOT_PROJECT_ID.to_string());
-        Ok(ws.memory_dir_for_project(&project_id))
+        let primary = ws.memory_dir_for_project(&project_id);
+        // The SAME project's other store. `project_root_by_id` is the existing
+        // by-id resolver used by `resolve_root`; joining `.codescout/memories`
+        // onto it reproduces `MemoryStore::open`'s layout without opening (and
+        // therefore without creating) anything.
+        //
+        // The `filter` is what makes the root project a no-op: its
+        // `project_root_by_id` IS `ws.root`, so the computed path equals
+        // `primary` and drops out.
+        let secondary = ws
+            .project_root_by_id(&project_id)
+            .ok()
+            .map(|root| root.join(".codescout").join("memories"))
+            .filter(|dir| dir != &primary);
+        Ok(MemoryReadDirs { primary, secondary })
     } else {
-        // No workspace — fall back to the active project's memory dir.
+        // No workspace — fall back to the active project's memory dir. That store
+        // is already `MemoryStore::open(p.root)`, i.e. the project-local layout,
+        // so there is no second directory to union in.
         let p = inner.active_project().ok_or_else(|| {
             super::RecoverableError::with_hint(
                 "No active project.",
                 "Call workspace(action='activate') first.",
             )
         })?;
-        Ok(p.memory.dir().to_path_buf())
+        Ok(MemoryReadDirs {
+            primary: p.memory.dir().to_path_buf(),
+            secondary: None,
+        })
     }
+}
+
+/// The single directory a `memory` WRITE targets.
+///
+/// Thin wrapper over [`resolve_memory_dirs`] — `.primary` is byte-identical to
+/// what this function returned before the read-union fix, so every write, delete
+/// and anchor call site keeps its exact previous behaviour.
+async fn resolve_memory_dir(
+    input: &Value,
+    ctx: &ToolContext,
+) -> anyhow::Result<std::path::PathBuf> {
+    Ok(resolve_memory_dirs(input, ctx).await?.primary)
+}
+
+/// Union `project_local` with the workspace-layout memory topics for the focused
+/// project, for `workspace(action="activate")`'s `memories` array.
+///
+/// `build_activation_response` reports `p.memory.list()` — the PROJECT-local
+/// layout — while `memory(action="list")` resolves through [`MemoryReadDirs`].
+/// For a sub-project those are different directories, so the activation response
+/// advertised memories that `memory(action="read")` then answered "not found"
+/// for, and the caller's next move was to write a second copy. Reporting the
+/// union makes the two surfaces agree by construction — it is the same set
+/// [`MemoryReadDirs::list_union`] returns for the same project.
+///
+/// Falls back to `project_local` unchanged when no workspace resolves, so a
+/// single-project activation is untouched.
+pub(crate) async fn union_with_workspace_memories(
+    ctx: &ToolContext,
+    project_local: Vec<String>,
+) -> Vec<String> {
+    let mut topics = project_local;
+    // No `project_id`: resolves through `ws.focused`, which activation has
+    // already pointed at the project being activated.
+    if let Ok(dirs) = resolve_memory_dirs(&json!({}), ctx).await {
+        topics.extend(dirs.list_union().unwrap_or_default());
+    }
+    topics.sort();
+    topics.dedup();
+    topics
 }
 
 /// Apply `sections` filtering to memory content and produce the JSON response value.
@@ -832,32 +993,51 @@ impl Tool for Memory {
                         })
                         .await
                 } else {
-                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
-                    let store = crate::memory::MemoryStore::from_dir(memories_dir)?;
-                    match store.read(topic)? {
-                        Some(content) => {
-                            apply_sections_filter(content, topic, &sections, &ctx.output_buffer)
+                    let dirs = resolve_memory_dirs(&input, ctx).await?;
+                    match dirs.read_first(topic)? {
+                        Some((content, from)) => {
+                            let mut value =
+                                apply_sections_filter(content, topic, &sections, &ctx.output_buffer)?;
+                            // Resolved from the OTHER layout, not the write target.
+                            // Say so: a later `memory(write)` on this topic goes to
+                            // `primary`, leaving the file just read untouched and
+                            // shadowed by a second copy. That is the one foot-gun
+                            // the read-union introduces, so it is reported every
+                            // time it is live — and rendered by `format_read_memory`,
+                            // which returns `$.content` alone and would otherwise
+                            // drop these fields silently.
+                            if from != dirs.primary {
+                                if let Some(obj) = value.as_object_mut() {
+                                    obj.insert(
+                                        "resolved_from".to_string(),
+                                        json!(crate::util::fs::to_forward_slash(&from)),
+                                    );
+                                    obj.insert(
+                                        "write_target".to_string(),
+                                        json!(crate::util::fs::to_forward_slash(&dirs.primary)),
+                                    );
+                                }
+                            }
+                            Ok(value)
                         }
-                        None => {
-                            Err(topic_not_found_error(topic, store.list().unwrap_or_default())
-                                .into())
-                        }
+                        None => Err(topic_not_found_error(
+                            topic,
+                            dirs.list_union().unwrap_or_default(),
+                        )
+                        .into()),
                     }
                 }
             }
             "list" => {
                 let include_private = parse_bool_param(&input["include_private"]);
+                let dirs = resolve_memory_dirs(&input, ctx).await?;
+                let shared = dirs.list_union()?;
                 if include_private {
                     // include_private needs the private store from ActiveProject — use with_project.
-                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
-                    let shared_store = crate::memory::MemoryStore::from_dir(memories_dir)?;
-                    let shared = shared_store.list()?;
                     let private = ctx.agent.with_project_at(ctx.workspace_override.as_deref(), |p| p.private_memory.list()).await?;
                     Ok(json!({ "shared": shared, "private": private }))
                 } else {
-                    let memories_dir = resolve_memory_dir(&input, ctx).await?;
-                    let topics = crate::memory::MemoryStore::from_dir(memories_dir)?.list()?;
-                    Ok(json!({ "topics": topics }))
+                    Ok(json!({ "topics": shared }))
                 }
             }
             "delete" => {
