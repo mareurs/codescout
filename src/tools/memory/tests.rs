@@ -152,9 +152,10 @@ async fn test_ctx_no_project() -> ToolContext {
 #[tokio::test]
 async fn write_and_read_roundtrip() {
     let (_dir, ctx) = test_ctx_with_project().await;
-    let result = WriteMemory
+    let result = Memory
         .call(
             json!({
+                "action": "write",
                 "topic": "test-topic",
                 "content": "hello memory"
             }),
@@ -164,8 +165,8 @@ async fn write_and_read_roundtrip() {
         .unwrap();
     assert_eq!(result, "ok");
 
-    let result = ReadMemory
-        .call(json!({ "topic": "test-topic" }), &ctx)
+    let result = Memory
+        .call(json!({ "action": "read", "topic": "test-topic" }), &ctx)
         .await
         .unwrap();
     assert_eq!(result["content"], "hello memory");
@@ -174,8 +175,8 @@ async fn write_and_read_roundtrip() {
 #[tokio::test]
 async fn read_missing_returns_null() {
     let (_dir, ctx) = test_ctx_with_project().await;
-    let err = ReadMemory
-        .call(json!({ "topic": "nonexistent" }), &ctx)
+    let err = Memory
+        .call(json!({ "action": "read", "topic": "nonexistent" }), &ctx)
         .await;
     assert!(err.is_err());
     let msg = err.unwrap_err().to_string();
@@ -185,16 +186,25 @@ async fn read_missing_returns_null() {
 #[tokio::test]
 async fn list_after_writes() {
     let (_dir, ctx) = test_ctx_with_project().await;
-    WriteMemory
-        .call(json!({ "topic": "b-topic", "content": "b" }), &ctx)
+    Memory
+        .call(
+            json!({ "action": "write", "topic": "b-topic", "content": "b" }),
+            &ctx,
+        )
         .await
         .unwrap();
-    WriteMemory
-        .call(json!({ "topic": "a-topic", "content": "a" }), &ctx)
+    Memory
+        .call(
+            json!({ "action": "write", "topic": "a-topic", "content": "a" }),
+            &ctx,
+        )
         .await
         .unwrap();
 
-    let result = ListMemories.call(json!({}), &ctx).await.unwrap();
+    let result = Memory
+        .call(json!({ "action": "list" }), &ctx)
+        .await
+        .unwrap();
     let topics: Vec<&str> = result["topics"]
         .as_array()
         .unwrap()
@@ -207,16 +217,21 @@ async fn list_after_writes() {
 #[tokio::test]
 async fn delete_removes_entry() {
     let (_dir, ctx) = test_ctx_with_project().await;
-    WriteMemory
-        .call(json!({ "topic": "to-delete", "content": "bye" }), &ctx)
+    Memory
+        .call(
+            json!({ "action": "write", "topic": "to-delete", "content": "bye" }),
+            &ctx,
+        )
         .await
         .unwrap();
-    DeleteMemory
-        .call(json!({ "topic": "to-delete" }), &ctx)
+    Memory
+        .call(json!({ "action": "delete", "topic": "to-delete" }), &ctx)
         .await
         .unwrap();
 
-    let err = ReadMemory.call(json!({ "topic": "to-delete" }), &ctx).await;
+    let err = Memory
+        .call(json!({ "action": "read", "topic": "to-delete" }), &ctx)
+        .await;
     assert!(err.is_err());
 }
 
@@ -704,17 +719,23 @@ async fn memory_recall_signals_has_more_when_capped() {
 #[tokio::test]
 async fn tools_error_without_active_project() {
     let ctx = test_ctx_no_project().await;
-    assert!(WriteMemory
-        .call(json!({ "topic": "x", "content": "y" }), &ctx)
+    assert!(Memory
+        .call(
+            json!({ "action": "write", "topic": "x", "content": "y" }),
+            &ctx
+        )
         .await
         .is_err());
-    assert!(ReadMemory
-        .call(json!({ "topic": "x" }), &ctx)
+    assert!(Memory
+        .call(json!({ "action": "read", "topic": "x" }), &ctx)
         .await
         .is_err());
-    assert!(ListMemories.call(json!({}), &ctx).await.is_err());
-    assert!(DeleteMemory
-        .call(json!({ "topic": "x" }), &ctx)
+    assert!(Memory
+        .call(json!({ "action": "list" }), &ctx)
+        .await
+        .is_err());
+    assert!(Memory
+        .call(json!({ "action": "delete", "topic": "x" }), &ctx)
         .await
         .is_err());
 }
@@ -722,9 +743,10 @@ async fn tools_error_without_active_project() {
 #[tokio::test]
 async fn nested_topic_works() {
     let (_dir, ctx) = test_ctx_with_project().await;
-    WriteMemory
+    Memory
         .call(
             json!({
+                "action": "write",
                 "topic": "debugging/async-patterns",
                 "content": "avoid blocking the runtime"
             }),
@@ -733,8 +755,11 @@ async fn nested_topic_works() {
         .await
         .unwrap();
 
-    let result = ReadMemory
-        .call(json!({ "topic": "debugging/async-patterns" }), &ctx)
+    let result = Memory
+        .call(
+            json!({ "action": "read", "topic": "debugging/async-patterns" }),
+            &ctx,
+        )
         .await
         .unwrap();
     assert_eq!(result["content"], "avoid blocking the runtime");
@@ -743,36 +768,27 @@ async fn nested_topic_works() {
 #[test]
 fn list_memories_format_compact() {
     use serde_json::json;
-    let tool = ListMemories;
+    let tool = Memory;
     let r = json!({ "topics": ["a", "b", "c"] });
     let t = tool.format_compact(&r).unwrap();
     assert!(t.contains("3"), "got: {t}");
 }
 
+/// The live `memory` tool's schema carries the private-store fields.
+///
+/// This replaces four near-identical tests that asserted the same two properties
+/// on `WriteMemory` / `ReadMemory` / `DeleteMemory` / `ListMemories` — four
+/// `impl Tool` blocks `src/server.rs` never registered, so no client was ever
+/// served those schemas. Four green assertions about a schema nobody receives
+/// carried no information about the one that ships. There is one schema, so
+/// there is one test.
+///
+/// docs/issues/2026-08-27-unregistered-memory-tool-structs-read-as-the-live-tool.md
 #[test]
-fn write_memory_schema_has_private_field() {
-    let schema = WriteMemory.input_schema();
+fn memory_schema_carries_the_private_store_fields() {
+    let schema = Memory.input_schema();
     assert!(schema["properties"]["private"].is_object());
     assert_eq!(schema["properties"]["private"]["type"], "boolean");
-}
-
-#[test]
-fn read_memory_schema_has_private_field() {
-    let schema = ReadMemory.input_schema();
-    assert!(schema["properties"]["private"].is_object());
-    assert_eq!(schema["properties"]["private"]["type"], "boolean");
-}
-
-#[test]
-fn delete_memory_schema_has_private_field() {
-    let schema = DeleteMemory.input_schema();
-    assert!(schema["properties"]["private"].is_object());
-    assert_eq!(schema["properties"]["private"]["type"], "boolean");
-}
-
-#[test]
-fn list_memories_schema_has_include_private_field() {
-    let schema = ListMemories.input_schema();
     assert!(schema["properties"]["include_private"].is_object());
     assert_eq!(schema["properties"]["include_private"]["type"], "boolean");
 }
@@ -780,9 +796,9 @@ fn list_memories_schema_has_include_private_field() {
 #[tokio::test]
 async fn write_private_goes_to_private_store() {
     let (_dir, ctx) = test_ctx_with_project().await;
-    WriteMemory
+    Memory
         .call(
-            json!({"topic": "prefs", "content": "verbose", "private": true}),
+            json!({"action": "write", "topic": "prefs", "content": "verbose", "private": true}),
             &ctx,
         )
         .await
@@ -810,8 +826,11 @@ async fn read_private_reads_from_private_store() {
         .with_project(|p| p.private_memory.write("wip", "issue-42"))
         .await
         .unwrap();
-    let result = ReadMemory
-        .call(json!({"topic": "wip", "private": true}), &ctx)
+    let result = Memory
+        .call(
+            json!({"action": "read", "topic": "wip", "private": true}),
+            &ctx,
+        )
         .await
         .unwrap();
     assert_eq!(result["content"], "issue-42");
@@ -825,8 +844,11 @@ async fn read_private_does_not_see_shared() {
         .await
         .unwrap();
     // private store doesn't have the topic → should error, not return shared data
-    let err = ReadMemory
-        .call(json!({"topic": "shared-topic", "private": true}), &ctx)
+    let err = Memory
+        .call(
+            json!({"action": "read", "topic": "shared-topic", "private": true}),
+            &ctx,
+        )
         .await;
     assert!(err.is_err());
 }
@@ -838,8 +860,11 @@ async fn delete_private_removes_from_private_store() {
         .with_project(|p| p.private_memory.write("tmp", "gone"))
         .await
         .unwrap();
-    DeleteMemory
-        .call(json!({"topic": "tmp", "private": true}), &ctx)
+    Memory
+        .call(
+            json!({"action": "delete", "topic": "tmp", "private": true}),
+            &ctx,
+        )
         .await
         .unwrap();
     let result = ctx
@@ -857,8 +882,11 @@ async fn delete_private_does_not_affect_shared_store() {
         .with_project(|p| p.memory.write("tmp", "keep"))
         .await
         .unwrap();
-    DeleteMemory
-        .call(json!({"topic": "tmp", "private": true}), &ctx)
+    Memory
+        .call(
+            json!({"action": "delete", "topic": "tmp", "private": true}),
+            &ctx,
+        )
         .await
         .unwrap();
     let result = ctx
@@ -876,7 +904,10 @@ async fn list_memories_default_returns_topics_key() {
         .with_project(|p| p.memory.write("arch", "..."))
         .await
         .unwrap();
-    let result = ListMemories.call(json!({}), &ctx).await.unwrap();
+    let result = Memory
+        .call(json!({ "action": "list" }), &ctx)
+        .await
+        .unwrap();
     assert!(result["topics"].is_array());
     assert!(result["shared"].is_null()); // old shape preserved by default
 }
@@ -892,8 +923,8 @@ async fn list_memories_include_private_returns_shared_and_private_keys() {
         })
         .await
         .unwrap();
-    let result = ListMemories
-        .call(json!({"include_private": true}), &ctx)
+    let result = Memory
+        .call(json!({"action": "list", "include_private": true}), &ctx)
         .await
         .unwrap();
     assert!(result["shared"].is_array());
@@ -922,8 +953,8 @@ async fn list_memories_include_private_empty_private_store() {
         .with_project(|p| p.memory.write("arch", "..."))
         .await
         .unwrap();
-    let result = ListMemories
-        .call(json!({"include_private": true}), &ctx)
+    let result = Memory
+        .call(json!({"action": "list", "include_private": true}), &ctx)
         .await
         .unwrap();
     let private = result["private"].as_array().unwrap();
