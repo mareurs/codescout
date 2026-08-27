@@ -1545,8 +1545,52 @@ serialized; batch reads freely"* — would resolve it before the call is compose
 reasoning as U-33's promote-when. If BUG-021 is genuinely a correctness hazard, the hook
 should be `PreToolUse` and deny, not `PostToolUse` and hint.
 
-**Status:** open — needs a decision on whether BUG-021 is a live hazard or a stale
-precaution before choosing between documenting the carve-out and enforcing it.
+**Status:** RESOLVED 2026-08-27 — BUG-021 is a **stale precaution as stated**. The decision this
+entry was waiting on, with evidence:
+
+BUG-021 bundles three modes. Two are dead; the third is alive but is not what the hook names.
+
+1. **Crash mode** (rmcp cancellation race). Fixed upstream in rmcp 1.2.0; this repo is on **rmcp
+   1.3** (`Cargo.toml:53`). `panic = "abort"` (`Cargo.toml:237`) was added during the same
+   2026-03-03 investigation. Dead.
+2. **Concurrency corruption** (torn writes, lost updates). **Prevented in code, not by rule.**
+   `WriteGuard` (`src/agent/write_guard.rs`) takes an in-process async mutex *and* a cross-process
+   `flock` on `<root>/.codescout/write.lock`, on a shared total timeout budget. It is wired at
+   `server.rs:1077` → `acquire_write_guard_if_writing`, which fires for every `is_write_call` — so
+   it covers `edit_file`, `edit_code`, `edit_markdown`, `create_file`, `artifact`, `memory`. It is
+   also pinned to the `workspace=` target rather than the session default, explicitly so "a
+   concurrent subagent's activate() [cannot] steal the lock target" (`server.rs:652-655`). The
+   lock files exist on disk in both this checkout and its worktree. Dead as a hazard.
+3. **Partial state on permission denial.** Batch N writes, deny one: the approved ones apply and
+   nothing rolls back. **Still live, by design, `wontfix`** —
+   `docs/issues/archive/2026-03-21-parallel-edit-file-partial-state.md`. Serialization does not
+   address it, because it is approval asymmetry, not a race.
+
+And a fourth cost nobody had named: **lock contention**. Batched writes serialize on the guard
+with a **5 s** default (`write_lock_timeout_secs`, `src/config/project.rs:180`); a slow write can
+push its siblings into a `RecoverableError` timeout. That is a live, current reason to prefer
+sequencing — unrelated to corruption.
+
+**So this entry's diagnosis was right and its framing was too generous to the hook.** The hook is
+not merely mistimed, it names a mechanism that codescout closed in April. `PostToolUse` is the
+correct timing for what survives, because neither surviving cost is prevented by refusing the
+batch — denial asymmetry needs the human, and contention resolves itself in 5 s.
+
+**Recommended action, unblocked:** correct the hook's *text* rather than its timing or severity.
+It should stop citing BUG-021 and stop claiming inconsistent state; the honest line is that writes
+are serialized automatically and batching them buys nothing while risking a 5 s timeout and
+partial application under denial. That hook lives in the **companion plugin repo**
+(`claude-plugins:codescout-companion`), not here, so it is a cross-repo edit and is left as a
+decision rather than made silently.
+
+The seventh-Iron-Law idea in *Fix idea* above should be narrowed if taken: not "write tools are
+serialized" as a caution, but as a *permission* — the server serializes them for you, so the
+harness's batching rule is safe to follow for writes to **different** files.
+
+**Caveat found while verifying, filed separately:** the sole end-to-end proof of mode 2,
+`write_lock_contention_produces_recoverable_error` (`tests/cross_process_write_lock.rs`), `return`s
+green when `target/debug/codescout` is absent. It did run in this session's `cargo test`, so the
+evidence above stands — but the guarantee is one missing binary away from being unverified.
 
 ### U-37 — `edit_file(replace_all=true)` right after an insert rewrote the line inside the helper being introduced, making it call itself
 
