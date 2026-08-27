@@ -77,7 +77,7 @@ imports.
 ## Iron Law 3: `run_command` output → buffer, not pipe
 
 **Rule:** never pipe `run_command` to a log-trimmer (`| grep`,
-`| head`, `| tail`, `| wc`). Run the command bare; query the
+`| head`, `| tail`, `| sort`). Run the command bare; query the
 returned `@cmd_*` buffer in a follow-up call.
 
 **Gate fires when** the command's right-hand side contains an
@@ -89,14 +89,28 @@ unbounded pipe (`cargo`, `npm`, `pytest`, `git`, `rg`, `fd`,
 
 **Bounded LHS is allowed.** `ls`, `cat`, `stat`, `du`, `diff`,
 `awk`, `sed`, non-recursive `grep` — the output is naturally
-bounded, so a downstream pipe is fine.
+bounded, so a downstream pipe is fine. So is single-line `git`
+plumbing — `rev-parse`, `patch-id`, `merge-base`, `symbolic-ref`,
+`describe`, `hash-object` — which emits O(1) lines by construction
+and therefore carries no limiter flag for the `git` heuristic to
+find.
+
+**Three things on the RIGHT do not trim.** `wc` and a counting
+`grep -c` emit only a summary. `cut` and `tr` are 1:1 on records
+and cannot hide one. And a stage that COLLAPSES anywhere in the
+chain — `wc`, `grep -c`, `sha256sum`, `git patch-id` — bounds the
+whole pipeline, so a trimmer after it has nothing left to trim:
+`git show X | git patch-id --stable | cut -d' ' -f1` is allowed.
+`sed`, `awk` and `sort` still trim, because `sed -n 1,10p`,
+`awk NR<10` and `sort -u` each drop records.
 
 **Two gates, same words — read both before concluding.** Everything
 above is the PIPE gate. `cat`, `awk`, `sed` and `grep` are bounded
 LHS here and still refused on a *source file* by the read-mode gate
-below. `wc` is the sharpest case: forbidden as a trimmer on the
-RIGHT of a pipe, allowed as a command on the left, and allowed on a
-source path. A sentence about one gate says nothing about the other.
+below. `grep` is the sharpest case: a filtering `grep` trims on the
+RIGHT of a pipe, a counting `grep -c` does not, it is bounded LHS on
+the left, and it is refused on a source path. A sentence about one
+gate says nothing about the other.
 
 **Windows note:** prefer codescout-native discovery
 (`tree(glob=...)`, `grep(pattern=...)`) over shell `find`. On

@@ -564,11 +564,14 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
         }
         "il3_pipe_to_trimmer" => {
             "IL-3 gate condition: the check reads the LEFT side of the pipe. Unbounded producers \
-             are cargo/npm/pnpm/yarn/python/pytest/go/mvn/gradle/rg/fd, recursive grep, and \
-             `find` without -maxdepth. `git` is unbounded ONLY without an output limiter \
-             (-n, --max-count, -3, --show-current, --porcelain/--short, --stat) — `--oneline` is \
-             NOT a limiter, it bounds width rather than line count. On the RIGHT, aggregators \
-             (wc, grep -c) are allowed; trimmers (head, tail, grep, sort) are not."
+                 are cargo/npm/pnpm/yarn/python/pytest/go/mvn/gradle/rg/fd, recursive grep, and \
+                 `find` without -maxdepth. `git` is unbounded ONLY without an output limiter \
+                 (-n, --max-count, -3, --show-current, --porcelain/--short, --stat) — `--oneline` is \
+                 NOT a limiter, it bounds width rather than line count; single-line plumbing \
+                 (rev-parse, patch-id, merge-base, describe) is always bounded. On the RIGHT, \
+                 trimmers (head, tail, grep, sed, awk, sort) block — but `cut`/`tr` are 1:1 on \
+                 records and never do, and a stage that COLLAPSES anywhere in the chain (wc, \
+                 grep -c, sha256sum, git patch-id) allows the whole pipeline whatever follows it."
         }
         "il3_shell_on_source" => {
             "IL-3 source condition: refused when a CONTENT reader \
