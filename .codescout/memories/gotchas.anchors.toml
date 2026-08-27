@@ -7,11 +7,11 @@ hash = "b1814030247b69cb39bcea375dbccc4865f717af98fdd8c66809a6822b245550"
 
 [[anchors]]
 path = "src/librarian/tools/context.rs"
-hash = "248e7787653e8b764fb8548d0d125d62fa4aa39427b43c596cd650c482a05463"
+hash = "4848f37e41d56e529e3ec3ba0b4679eeefe9c263740cbd3d19b73d3a9f4a4a63"
 
 [[anchors]]
 path = "docs/trackers/artifact-augmentation-followups.md"
-hash = "41af278e94ce303547f0963d711a985c2b5adf4c29651cf182c6bbd1d60e606c"
+hash = "eb575fc8922c4c1ece0d6239d970e4a1d3427a0d8e18b51f8df5d742542a8f4d"
 
 [[anchors]]
 path = "src/ast/parser.rs"
@@ -19,11 +19,11 @@ hash = "e1a5e2e88ddcc86db82927265a8fbeef80a7e8529c41c21e470307183abe1cdd"
 
 [[anchors]]
 path = "src/config/global.rs"
-hash = "6c959f05ef0d37a70d217a45644db3596d4edb9ea1d65ac2b1da115f33a37c86"
+hash = "b7a9dacbea3f7b1b73cce841bd281d04dc3aec30b3af680331354c7124531a83"
 
 [[anchors]]
 path = "docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md"
-hash = "a3a3fd451efdcbdafb5ffc107a92d44af82a1fd43e846802abe2e2b8225aedb8"
+hash = "e33a0fce73534bf1c03e088bc1c2f54312a2d2d8436b8ccfbee51efa2bf88e2f"
 
 [[anchors]]
 path = ".codescout/embeddings/project.db"
@@ -35,11 +35,11 @@ hash = "4ebd75a0368ed5caf79461702af7d69dc37976f6e34626e2129b7fc74b4c18d0"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "1690fbe4d2e717d40685357939cab6e510c75c24bf01fc6438a586bd274a1c16"
+hash = "071368de06acccb428cba30ed69c1315a44468fc8c8d6b22f71c3aa792e888f0"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "cc318c6d0c916b4f49599f11cbae4af6d72b2f873c44211a6e75d0637a42825b"
+hash = "d08708710bd73648674a47e102d3af624e3eab1a58418cb649299dea21d9dde5"
 
 [[anchors]]
 path = "src/memory/anchors.rs"

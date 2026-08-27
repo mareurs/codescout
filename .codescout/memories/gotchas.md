@@ -210,3 +210,41 @@ drift stale silently (e.g. left pointing at a profile whose compose services wer
 removed) with nothing warning on mismatch. See
 `docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send.md` and
 `bug-fix-session-log:F-59`.
+
+## Native `Bash` Does Not Inherit the MCP Server's Startup Env — `run_command` Does
+
+`load_startup_env()` (`src/config/global.rs`) runs once at **MCP server startup**, so every
+variable in `~/.config/codescout/.env` lands in the codescout process env and is inherited
+by `run_command`'s children. A native harness `Bash` call is a child of Claude Code, not of
+the MCP server, so it inherits **none** of them. The two shells run the same command in
+different environments and nothing warns on the difference.
+
+Measured 2026-08-27, with `shell_command_mode = "disabled"` forcing shell work through
+native `Bash`: `cargo test` reported `tools::memory::tests::write_and_read_roundtrip`
+FAILED with `dense embed connect failed: http://127.0.0.1:48080/v1/embeddings`. Nothing
+listens on 48080 — the real embedder is on **48081**, which the test would have used had
+`CODESCOUT_EMBEDDER_URL` been set. The identical test passes under
+`CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081/v1`. So the failure is a red gate that reads
+exactly like a code regression and is not one; the same suite is 4731/0 with the env loaded.
+
+Load it before trusting any gate run from native `Bash`:
+
+```bash
+set -a; . ~/.config/codescout/.env; set +a   # then cargo test / clippy
+```
+
+Two `run_command` rails are also absent from native `Bash`, both confirmed the same day.
+The IL-3 unbounded-pipe block: piping `cargo test` to `grep` masked the non-zero exit, and
+the background job reported `exited with code 0` for a run with a failing test. And the
+dangerous-command `@ack_*` gate — an `rm -rf` that `run_command` held for acknowledgement
+runs unprompted under `Bash`.
+
+`usage.db` also records only codescout MCP calls: `tool_name` has never once contained
+"bash", while `run_command` is 37% of 47,727 recorded calls (2026-08-03..08-27) — the
+heaviest single tool. Shell work routed through `Bash` is therefore invisible to
+`/analyze-usage`, `docs/trackers/tool-usage-patterns.md`, and the `pika_observations`
+table.
+
+Sibling of the section above, and easy to conflate: that one is about the symlink's
+*contents* drifting from the running compose profile; this one is about which *consumers*
+see those contents at all.
