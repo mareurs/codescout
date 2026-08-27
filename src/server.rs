@@ -7226,15 +7226,15 @@ mod guide_hint_tests {
     /// The session-opener branch (`types.rs`'s `call_content`) inserts the bare
     /// `SESSION_OPENING_GUIDE` ledger key and always reports
     /// `GuideDeliveryShape::Whole`, on the assumption — stated only as a
-    /// comment — that this topic never declares `##`/`###` sections in Phase
-    /// 1. `guide_blocks_for` keys everything else at `topic#heading`; the two
-    /// never collide TODAY only because that assumption holds. The day this
-    /// topic gains a `serves:` declaration (a real Phase 3 plan), the opener
-    /// would deliver the whole topic under the bare key AND `guide_blocks_for`
-    /// would separately deliver its sections under `topic#heading` keys —
-    /// double delivery, silently, because the two paths never meet on a
-    /// shared key. Turn the comment into a gate so that day fails loudly
-    /// here instead of shipping the double-delivery.
+    /// comment — that this topic never declares `##`/`###` sections in
+    /// Phase 1. `guide_blocks_for` keys everything else at `topic#heading`;
+    /// the two never collide TODAY only because that assumption holds. The
+    /// day this topic gains a `serves:` declaration (a real Phase 3 plan),
+    /// the opener would deliver the whole topic under the bare key AND
+    /// `guide_blocks_for` would separately deliver its sections under
+    /// `topic#heading` keys — double delivery, silently, because the two
+    /// paths never meet on a shared key. Turn the comment into a gate so
+    /// that day fails loudly here instead of shipping the double-delivery.
     #[test]
     fn session_opening_guide_never_declares_sections() {
         assert!(
