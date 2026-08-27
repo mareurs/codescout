@@ -6781,7 +6781,7 @@ fn impl_block_fixture() -> &'static str {
     "trait Greet {\n    fn hello(&self) -> u8;\n}\n\nstruct Thing;\n\nimpl Greet for Thing {\n    fn hello(&self) -> u8 {\n        1\n    }\n}\n\nfn keep_me() -> u8 {\n    2\n}\n"
 }
 
-/// docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
+/// docs/issues/archive/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
 ///
 /// `edit_code(remove, symbol="impl Trait for Type")` could never succeed. The AST
 /// extractor emits NO symbol for an impl block (it hoists methods to

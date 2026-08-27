@@ -12,7 +12,7 @@ closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
 related:
-- docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
+- docs/issues/archive/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
 severity: medium
 unverified: 'Fix step 4 (the file-relative vs body-relative line-number frame in the ambiguity error) was deliberately NOT done and remains open. A second, unrelated defect is left unrepaired by choice: open-issue-work-queue.md defines ### BL-43 twice, and choosing the authoritative copy is a content judgement about another work stream.'
 ---
@@ -356,4 +356,4 @@ unchanged is what carries it.)
 - `src/tools/edit_file/mod.rs:377-403` — `EditFile::input_schema`, no line-range params
 - `src/tools/markdown/edit_markdown.rs:89,363,749` — the three consumers; `:749` is `body_edits`
 - `src/tools/read_file.rs:956` — heading-param consumer, unaffected
-- `docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md` — same shape in `edit_code`: an error whose prescribed escape is closed in the context that raises it
+- `docs/issues/archive/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md` — same shape in `edit_code`: an error whose prescribed escape is closed in the context that raises it

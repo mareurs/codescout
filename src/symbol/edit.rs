@@ -382,7 +382,7 @@ pub fn split_target_subtree(
 /// for impl blocks"). So `find_ast_name_path` returns `None` for the block itself,
 /// the split never ran, and the block's own methods were reported as dropped
 /// siblings — which rolled every such removal back and made removing an impl block
-/// impossible through the tool. `docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md`
+/// impossible through the tool. `docs/issues/archive/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md`
 ///
 /// Deliberately keyed on the target's **LSP child list**, not on its span. A span
 /// test looks equivalent and is not: it would have to trust the very range the

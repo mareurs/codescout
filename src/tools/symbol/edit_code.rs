@@ -778,7 +778,7 @@ impl EditCode {
                 // block the extractor emits no symbol at all, hoisting its methods to
                 // `Type/method`. Fall back to the target's own LSP child list, which
                 // names the same descendants without trusting the suspect range.
-                // docs/issues/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
+                // docs/issues/archive/2026-08-27-edit-code-remove-cannot-remove-an-impl-block.md
                 (Some(set), None) => {
                     let descendants = crate::symbol::edit::descendant_ast_paths(
                         pre_ast.as_deref().unwrap_or(&[]),
