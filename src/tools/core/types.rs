@@ -901,6 +901,16 @@ pub trait Tool: Send + Sync {
         Ok(blocks)
     }
 
+    /// A cheap projection of this call's shape, taken BEFORE `call()` consumes
+    /// `input`. Default `None` ⇒ the tool opts out at zero cost.
+    ///
+    /// Deliberately not a clone of `input`: `create_file` and `edit_file` inputs
+    /// carry whole file bodies, and a clone would be paid on 100% of tool calls
+    /// to benefit the ~3% that inject a guide.
+    fn selector_key(&self, _input: &Value) -> Option<String> {
+        None
+    }
+
     /// Topic name this tool's discipline depends on, for the first-call
     /// hint mechanism. When the model first calls a tool with
     /// Some("librarian"), Tool::call_content injects a one-shot
