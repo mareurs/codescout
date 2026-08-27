@@ -23,7 +23,7 @@ pub struct OperatorProfiles {
 impl OperatorProfiles {
     /// Read the home directory once, at the edge. The only env access here.
     pub fn from_env() -> Result<Self> {
-        let home = dirs::home_dir().context("cannot resolve the home directory")?;
+        let home = crate::platform::home_dir().context("cannot resolve the home directory")?;
         Ok(Self {
             paths: PROFILE_DIRS
                 .iter()
@@ -132,5 +132,33 @@ mod tests {
             paths: vec![dir.path().join("CLAUDE.md")],
         };
         assert_eq!(p.paths.len(), 1);
+    }
+
+    #[test]
+    fn splice_appends_a_separating_newline_when_the_document_has_none() {
+        // Append branch: `doc` has no trailing newline at all. `splice` must
+        // terminate `doc` with one newline, then add a blank-line separator
+        // before the block, rather than gluing the block onto the same line
+        // or dropping/duplicating a newline.
+        let doc = "# Head\n\nBefore.";
+        let out = splice(doc, &block()).unwrap();
+        assert_eq!(out, format!("{doc}\n\n{}", block()), "{out}");
+    }
+
+    /// Pins current behaviour for a malformed document where a stray `END`
+    /// appears *before* the (unterminated) `BEGIN`. `splice` only searches for
+    /// `END` within `doc[start..]` — i.e. after the `BEGIN` it found — so an
+    /// earlier, unrelated `END` is invisible to that search and this collapses
+    /// into the same "unterminated BEGIN" error as
+    /// `splice_refuses_a_document_with_an_unterminated_begin_marker`. This is
+    /// not asserted to be the *correct* behaviour, only the *actual* one: no
+    /// silent corruption occurs (it errors, it does not fabricate an END), but
+    /// whether END-before-BEGIN should be flagged as its own distinct error is
+    /// an open call.
+    #[test]
+    fn splice_with_a_stray_end_before_an_unterminated_begin_still_errors() {
+        let doc = format!("{END}\nstray leftover\n\n{BEGIN}\ndangling\n");
+        let err = splice(&doc, &block()).unwrap_err().to_string();
+        assert!(err.contains("END"), "{err}");
     }
 }
