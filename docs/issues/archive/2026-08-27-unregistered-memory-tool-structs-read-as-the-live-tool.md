@@ -1,7 +1,7 @@
 ---
 id: 2cdc5815808a6634
 kind: bug
-status: open
+status: fixed
 title: 'BUG: four unregistered `impl Tool` blocks in the memory module read as the live tool, and a bug investigation stated a false root cause from them'
 tags:
 - memory
