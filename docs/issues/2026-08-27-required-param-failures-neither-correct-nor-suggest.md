@@ -201,10 +201,37 @@ The behaviour is understood well enough to be written down for callers. It just 
 
 ## Fix
 
-**Not yet implemented — this file records the rule and the scope.** The rule is not
-invented here; it is generalized from three mechanisms already shipped in this repo
-(`lift_top_level_param!`, the `corrections` output channel, and
-`require_str_param_or_hint`).
+**First slice shipped 2026-08-27** — `60df0d76` (`experiments`), patch-id
+`0ed42a3f21585845d1993da053bc19441d816693`. It is the *Suggested first slice* below,
+restricted to `artifact(action="update")`. **16 of the 17 sites remain untouched and this
+bug stays open.** The rule below is not invented here; it is generalized from three
+mechanisms already shipped in this repo (`lift_top_level_param!`, the `corrections` output
+channel, and `require_str_param_or_hint`).
+
+**Running the reproduction first changed the slice in three ways**, two of them
+unpredicted — the plan was a hypothesis about the reproduction, and this is what the
+reproduction said back:
+
+1. **Two more call shapes were dying on the same gate.**
+   `artifact(update, id, commit_refresh=true)` — a legitimate refresh-cycle call with no
+   body change — was rejected outright. And `artifact(update, id, rel_path=…)` got
+   `missing field patch` rather than the `rel_path`→`move` route sitting six lines above
+   the gate, because that guard read only `patch.rel_path`. It now checks both nesting
+   levels, so a specific mistake gets the specific route.
+
+2. **The risk this file attributed to the slice was already realised.** *Suggested first
+   slice* warns that defaulting `patch` "converts a loud failure into a silent no-op that
+   returns `updated: true`". Measured 2026-08-27: `artifact(update, id, patch={})`
+   **already returned `updated: true`**, touching neither the file nor the event log
+   (`git status` clean, no `field_patch` event emitted). The hole was open through a
+   different door. The guard is therefore not the price of the slice — it closes a
+   pre-existing false success on a write, and both shapes now hit one check. Severity of
+   that pre-existing defect is *reporting*, not data loss: nothing was written.
+
+3. **The guard's placement is load-bearing.** It runs **after** the seven lifts, because
+   `artifact(update, id, status="fixed")` arrives with an empty patch and has a populated
+   one by that line. Placed before them it would refuse the very call the slice exists to
+   repair.
 
 ### The rule
 
@@ -233,7 +260,8 @@ frame the caller cannot see, reported as a fact.
 
 ### Scope — why this is a big task
 
-- **17 call sites** to convert, listed under *Root cause*.
+- **17 call sites**, of which `artifact(action="update")` is now done (`60df0d76`).
+  **16 remain**, listed under *Root cause*.
 - **A per-tool policy decision at each one**: which fields are alias-repairable, which are
   nesting-repairable, which genuinely must error. That judgement cannot be mechanized —
   it is why this is not a sed.
@@ -261,7 +289,8 @@ still error — otherwise the change converts a loud failure into a silent no-op
 returns `updated: true`, which is precisely the defect `update.rs:298-302` was written to
 close. That guard is the whole risk of the slice, and it needs its own test.
 
-SHA: not yet fixed. patch-id: not yet fixed.
+SHA `60df0d76` (`experiments`), patch-id `0ed42a3f21585845d1993da053bc19441d816693` —
+**first slice only**, covering 1 of 17 sites.
 
 ## Tests added
 
@@ -317,4 +346,3 @@ err_family='missing_required_param' GROUP BY 1,2 ORDER BY 3 DESC;"`
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — the same principle applied
   to results rather than errors
 - `docs/PROGRESSIVE_DISCOVERABILITY.md` — output sizing and agent-guidance patterns
-
