@@ -2762,3 +2762,97 @@ languages = ["typescript"]
          blind in the same direction still agree: {activated:?}"
     );
 }
+
+/// The `## Project Status` block appended to tool responses must report the same
+/// memory set as the activation JSON it rides beside.
+///
+/// `Agent::project_status` is a FOURTH reader of a project's memories, after
+/// `activate`'s array, `memory(action="list")` and `p.memory` itself — and it was
+/// the one left behind. Caught live rather than by test: activating
+/// `eduplanner-ui` returned a JSON `memories` array of twelve with
+/// "**Memories:** None yet — run `onboarding` to create project memories"
+/// rendered directly underneath it, in the same message. The unit tests could not
+/// see it because they assert on `.call()`'s `Value`, and this block is appended
+/// by the server around it.
+///
+/// docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+#[tokio::test]
+async fn the_project_status_block_reports_the_same_memories_as_activation() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    std::fs::write(root.join("build.gradle.kts"), "").unwrap();
+    let svc = root.join("svc");
+    std::fs::create_dir_all(&svc).unwrap();
+    std::fs::write(svc.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
+
+    let codescout = root.join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    std::fs::write(
+        codescout.join("workspace.toml"),
+        r#"
+[workspace]
+name = "test"
+
+[[project]]
+id = "test"
+root = "."
+languages = ["kotlin"]
+
+[[project]]
+id = "svc"
+root = "svc"
+languages = ["typescript"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        codescout.join("project.toml"),
+        "[project]\nname = \"test\"\nlanguages = [\"kotlin\"]\n",
+    )
+    .unwrap();
+
+    // Only the project-local layout is populated — the live shape that produced
+    // "None yet": `p.memory` is workspace-resolved on the focus-switch path, and
+    // the workspace tree is empty.
+    let project_local = svc.join(".codescout").join("memories");
+    std::fs::create_dir_all(&project_local).unwrap();
+    std::fs::write(project_local.join("architecture.md"), "# Arch").unwrap();
+    std::fs::write(project_local.join("gotchas.md"), "# Got").unwrap();
+
+    let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let activated = ActivateProject
+        .call(json!({ "path": "svc" }), &ctx)
+        .await
+        .unwrap();
+    let status = ctx.agent.project_status().await.expect("project status");
+
+    assert_eq!(
+        status.memories,
+        vec!["architecture".to_string(), "gotchas".to_string()],
+        "the status block must see the project-local layout too: {:?}",
+        status.memories
+    );
+    assert_eq!(
+        activated["memories"],
+        json!(status.memories),
+        "the status block and the activation JSON ride in the SAME message — a \
+         caller reading one and then the other cannot tell which is lying: \
+         activate={:?} status={:?}",
+        activated["memories"],
+        status.memories
+    );
+}

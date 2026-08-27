@@ -1167,6 +1167,7 @@ impl Agent {
             project_root,
             languages,
             memory_store,
+            alt_memories_dir,
             db_path,
             prompt_file,
             default_prompt,
@@ -1179,12 +1180,39 @@ impl Agent {
             // has not yet migrated to the retrieval stack; activate_project
             // surfaces a separate `legacy_semantic_index` hint when present.
             let db_path = project.root.join(".codescout/embeddings/project.db");
+            // The project's OTHER memory layout, when one exists.
+            //
+            // A sub-project has two, and `project.memory` is whichever the activation
+            // path happened to open — workspace-resolved on the bare-id focus switch,
+            // project-local on `Agent::new` / `load_project_resources`. So this cannot
+            // name a fixed layout; it takes both candidates and keeps the one that is
+            // not already `project.memory`'s. For the ROOT project every candidate
+            // equals it and this is `None`.
+            //
+            // Without it the `## Project Status` block reported "None yet" for a
+            // sub-project whose memories the activation response, in the same message,
+            // listed twelve of.
+            // docs/issues/archive/2026-07-07-memory-tool-hides-project-memories-after-workspace-activate.md
+            let alt_memories_dir = {
+                let primary = project.memory.dir().to_path_buf();
+                let project_local = project.root.join(".codescout").join("memories");
+                let workspace_layout = inner.default_workspace().and_then(|ws| {
+                    ws.focused
+                        .as_deref()
+                        .map(|id| ws.memory_dir_for_project(id))
+                });
+                [Some(project_local), workspace_layout]
+                    .into_iter()
+                    .flatten()
+                    .find(|dir| dir != &primary)
+            };
             Some((
                 project.config.project.name.clone(),
                 to_forward_slash(&project.root),
                 project.root.clone(),
                 project.config.project.languages.clone(),
                 project.memory.clone(),
+                alt_memories_dir,
                 db_path,
                 prompt_file,
                 project.config.project.system_prompt.clone(),
@@ -1194,7 +1222,18 @@ impl Agent {
         // Phase 2: blocking filesystem reads off the executor
         let (memories, has_index, system_prompt, worktree) =
             tokio::task::spawn_blocking(move || {
-                let memories = memory_store.list().unwrap_or_default();
+                let mut memories = memory_store.list().unwrap_or_default();
+                if let Some(alt) = alt_memories_dir {
+                    // `from_dir_readonly`, not `from_dir`: this is a status read and
+                    // must not materialise the directory it inspects.
+                    memories.extend(
+                        crate::memory::MemoryStore::from_dir_readonly(alt)
+                            .list()
+                            .unwrap_or_default(),
+                    );
+                    memories.sort();
+                    memories.dedup();
+                }
                 let has_index = db_path.exists();
                 let system_prompt = if prompt_file.exists() {
                     std::fs::read_to_string(&prompt_file).ok()
