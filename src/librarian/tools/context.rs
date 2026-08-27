@@ -676,7 +676,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             } else {
                 None
             };
-            let mut rows = crate::librarian::catalog::find::semantic_find(
+            let page = crate::librarian::catalog::find::semantic_find(
                 store.as_ref(),
                 &ctx.catalog,
                 project_id.as_deref(),
@@ -687,9 +687,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 cutoff_ms,
             )
             .await?;
+            // context() ranks by the link graph after this point and only needs the
+            // candidate ids, so the distances are dropped here deliberately rather
+            // than plumbed through a second consumer that has no use for them.
+            let mut rows = page.hits;
             candidates_capped = rows.len() > 50;
             rows.truncate(50);
-            Some(rows.into_iter().map(|r| r.id).collect())
+            Some(rows.into_iter().map(|h| h.row.id).collect())
         } else {
             None
         }

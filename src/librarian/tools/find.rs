@@ -729,7 +729,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     // Semantic path runs the async store-backed coordinator (it manages its own
     // catalog locking); the sync `find` below handles the non-semantic case.
-    let semantic_rows = if let Some(vec) = semantic_vec {
+    let semantic_page = if let Some(vec) = semantic_vec {
         let store = ctx.artifact_store.as_ref().ok_or_else(|| {
             RecoverableError::new(
                 "artifact semantic search backend unavailable — the configured Qdrant is \
@@ -782,6 +782,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             }))
         } else {
             None
+        };
+
+        // Split the page: `rows` feeds the existing overlay/augmentation pipeline
+        // unchanged, while the distances ride alongside in a map. Keeping
+        // `ArtifactRow` free of a score is deliberate — it is the row type every
+        // non-semantic read path shares, and a query-relative number does not
+        // belong on a record that outlives the query.
+        let (semantic_rows, distance_by_id, starvation) = match semantic_page {
+            Some(page) => {
+                let starvation = (page.widenings, page.exhausted);
+                let mut d = std::collections::HashMap::new();
+                let mut r = Vec::with_capacity(page.hits.len());
+                for hit in page.hits {
+                    d.insert(hit.row.id.clone(), hit.distance);
+                    r.push(hit.row);
+                }
+                (Some(r), d, Some(starvation))
+            }
+            None => (None, std::collections::HashMap::new(), None),
         };
 
         let rows = if no_augmentations_anywhere {
@@ -850,14 +869,54 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 if let Some(aug) = augmentation_by_id.get(&r.id) {
                     item["entry_collection"] = json!(aug.entry_collection);
                 }
+                // Lower is closer, backend-scaled. Present only on the semantic
+                // path, and only as a WITHIN-response comparison: it is what lets a
+                // reader tell the top hit from the least-bad remainder, which the
+                // response could not express at all before.
+                if let Some(d) = distance_by_id.get(&r.id) {
+                    if d.is_finite() {
+                        item["distance"] = json!((*d * 1000.0).round() / 1000.0);
+                    }
+                }
                 item
             })
             .collect();
 
-        // Hints only meaningful for non-semantic queries — semantic results are
-        // KNN-bounded and a count comparison would be misleading.
+        // Count-based hints stay off the semantic path: `more_in_repo` and friends
+        // compare against a total the KNN never computed, so they would mislead.
+        // But emptying the whole channel is what left starvation unreportable --
+        // the widen-and-retry loop knows it is scraping the barrel and had no way
+        // to say so. These two hints are KNN-native and carry no such comparison.
+        //
+        // BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
         let hints = if a.semantic.is_some() {
-            json!({})
+            let mut h = serde_json::Map::new();
+            if let Some((widenings, exhausted)) = starvation {
+                if widenings > 0 {
+                    h.insert("semantic_starved".into(), json!(widenings));
+                    h.insert(
+                        "semantic_starved_hint".into(),
+                        json!(format!(
+                            "the filter excluded the nearest matches, so the KNN was widened \
+                             {widenings}x to fill this page -- these are the best REMAINING \
+                             rows, not necessarily close ones. Compare `distance` across items, \
+                             and re-run without the filter before concluding the corpus does \
+                             not cover the query."
+                        )),
+                    );
+                }
+                if exhausted {
+                    h.insert("semantic_exhausted".into(), json!(true));
+                    h.insert(
+                        "semantic_exhausted_hint".into(),
+                        json!(
+                            "the KNN cap was reached before the page filled -- this is every \
+                               matching row that exists, not a truncated page."
+                        ),
+                    );
+                }
+            }
+            Value::Object(h)
         } else {
             build_hints(
                 &cat,
@@ -1651,6 +1710,21 @@ mod tests {
 
     struct MockEmbedder;
 
+    /// Park a unit vector for `id` on axis `axis` in the sqlite-vec table.
+    /// `MockEmbedder` puts an "auth" query on axis 0 and everything else on axis
+    /// 1, so `axis` selects whether a fixture is near or far from an auth query.
+    fn seed_vec(cat: &Catalog, id: &str, axis: usize) {
+        let mut v = vec![0.0f32; 768];
+        v[axis] = 1.0;
+        let blob: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+        cat.conn
+            .execute(
+                "INSERT OR REPLACE INTO artifact_vec (id, embedding) VALUES (?1, ?2)",
+                rusqlite::params![id, blob],
+            )
+            .unwrap();
+    }
+
     #[async_trait::async_trait]
     impl codescout_embed::Embedder for MockEmbedder {
         fn dimensions(&self) -> usize {
@@ -1714,6 +1788,164 @@ mod tests {
         let items = v["items"].as_array().unwrap();
         assert_eq!(items.len(), 2, "both artifacts should be returned");
         assert_eq!(items[0]["id"], "auth-doc");
+    }
+
+    /// The distance must reach the caller, per item. Before this, `semantic_find`
+    /// widened `k` until it could fill the page and returned rows in KNN order
+    /// with the magnitude discarded — ordering survived, magnitude did not — so a
+    /// caller could not tell a strong match from the least-bad remainder.
+    ///
+    /// BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+    #[tokio::test]
+    async fn semantic_items_carry_a_distance_that_ascends_with_rank() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("auth-doc", "Authentication Guide")).unwrap();
+        artifact::upsert(&cat, &sample_row("deploy-doc", "Deployment Runbook")).unwrap();
+        seed_vec(&cat, "auth-doc", 0);
+        seed_vec(&cat, "deploy-doc", 1);
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 10, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        let items = v["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        let d0 = items[0]["distance"]
+            .as_f64()
+            .unwrap_or_else(|| panic!("no distance on the top item: {}", items[0]));
+        let d1 = items[1]["distance"]
+            .as_f64()
+            .unwrap_or_else(|| panic!("no distance on the second item: {}", items[1]));
+        assert!(
+            d0 < d1,
+            "distance must ascend with rank (lower is closer): {d0} then {d1}"
+        );
+    }
+
+    /// A non-semantic query must NOT grow a `distance` field. It has no query
+    /// vector, so any number here would be fabricated.
+    #[tokio::test]
+    async fn a_plain_filter_query_carries_no_distance() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("auth-doc", "Authentication Guide")).unwrap();
+        let ctx = mk_ctx(cat);
+        let v = call(&ctx, json!({"filter": {"id": {"eq": "auth-doc"}}}))
+            .await
+            .unwrap();
+        let items = v["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(
+            items[0].get("distance").is_none(),
+            "no query vector exists, so no distance may be reported: {}",
+            items[0]
+        );
+    }
+
+    /// A small corpus is EXHAUSTED, not filter-starved, and the two must not be
+    /// conflated: `semantic_starved` claims the filter removed the nearest
+    /// matches, which is false here and would send a reader hunting a filter that
+    /// is not the problem.
+    ///
+    /// This is also the control for the starvation hint — it is the case where the
+    /// hint must stay silent, and without it a hint that fired unconditionally
+    /// would look correct in every other test.
+    #[tokio::test]
+    async fn a_short_page_from_a_small_corpus_reports_exhausted_not_starved() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("auth-doc", "Authentication Guide")).unwrap();
+        artifact::upsert(&cat, &sample_row("deploy-doc", "Deployment Runbook")).unwrap();
+        seed_vec(&cat, "auth-doc", 0);
+        seed_vec(&cat, "deploy-doc", 1);
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 10, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(v["items"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            v["hints"]["semantic_exhausted"], true,
+            "a page short of its limit must say the search ran out: {}",
+            v["hints"]
+        );
+        assert!(
+            v["hints"].get("semantic_starved").is_none(),
+            "a 2-row corpus is not filter starvation: {}",
+            v["hints"]
+        );
+    }
+
+    /// **The load-bearing test.** A filter that excludes the nearest matches must
+    /// say so, rather than silently backfilling the page with the least-bad
+    /// remainder and presenting it in the same shape as a satisfied query.
+    ///
+    /// This is the reported symptom: a query whose true best matches are `kind:
+    /// bug`, filtered to `kind: tracker`, returned a full page of unrelated
+    /// trackers with `hints: {}` — and read as "nothing indexed covers this."
+    /// Only the unfiltered control revealed the corpus answered it at #1.
+    ///
+    /// The fixture needs MORE than the first `k` (100) candidates for the widen
+    /// path to be reachable at all, which is why it seeds 150.
+    ///
+    /// BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+    #[tokio::test]
+    async fn a_filter_that_excludes_the_nearest_matches_reports_starvation() {
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // 150 "note" artifacts sitting ON the auth axis — these are the nearest
+        // neighbours of an auth query, and the filter below removes every one.
+        for i in 0..150 {
+            let id = format!("note-{i}");
+            let mut row = sample_row(&id, "Auth Note");
+            row.kind = "note".into();
+            artifact::upsert(&cat, &row).unwrap();
+            seed_vec(&cat, &id, 0);
+        }
+        // Two trackers far away on the other axis — the least-bad remainder.
+        for i in 0..2 {
+            let id = format!("tracker-{i}");
+            let mut row = sample_row(&id, "Unrelated Tracker");
+            row.kind = "tracker".into();
+            artifact::upsert(&cat, &row).unwrap();
+            seed_vec(&cat, &id, 1);
+        }
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "kind": "tracker", "limit": 2, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        // The rows themselves are still the right answer — returning the nearest
+        // survivors is defensible. Returning them UNLABELLED was the bug.
+        assert_eq!(v["items"].as_array().unwrap().len(), 2);
+        let starved = v["hints"]["semantic_starved"].as_u64().unwrap_or_else(|| {
+            panic!(
+                "a filter that removed all 150 nearest rows must report starvation: {}",
+                v["hints"]
+            )
+        });
+        assert!(starved >= 1, "widening count must be reported: {starved}");
+        assert!(
+            v["hints"]["semantic_starved_hint"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("without the filter"),
+            "the hint must name the recovery action, not just the condition: {}",
+            v["hints"]
+        );
     }
 
     #[tokio::test]

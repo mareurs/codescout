@@ -95,10 +95,28 @@ pub trait ArtifactVectorStore: Send + Sync {
     /// no-op.
     async fn delete(&self, id: &str) -> Result<()>;
 
-    /// Dense KNN → ranked artifact ids (closest first). `project_id = Some`
-    /// narrows to one project (single-project scope); `None` searches all (the
-    /// catalog's scoped filter narrows after hydration either way).
-    async fn knn(&self, project_id: Option<&str>, query: &[f32], k: usize) -> Result<Vec<String>>;
+    /// Dense KNN → ranked `(artifact_id, distance)` pairs, closest first.
+    /// `project_id = Some` narrows to one project (single-project scope); `None`
+    /// searches all (the catalog's scoped filter narrows after hydration either
+    /// way).
+    ///
+    /// **`distance` is LOWER-IS-CLOSER on every backend, by contract.** The two
+    /// implementations disagree natively — Qdrant's cosine `score` is a similarity
+    /// (higher is better), sqlite-vec's `distance` column is L2 (lower is better)
+    /// — so each converts to this polarity before returning. Returning the raw
+    /// value would make the number's meaning depend on which backend answered,
+    /// with Qdrant's default status hiding it from almost everyone.
+    ///
+    /// The SCALE remains backend-defined (cosine distance vs L2). Values are
+    /// comparable **within one response**, which is what ranking and
+    /// starvation-detection need; they are NOT comparable across backends, so no
+    /// caller may threshold on an absolute number.
+    async fn knn(
+        &self,
+        project_id: Option<&str>,
+        query: &[f32],
+        k: usize,
+    ) -> Result<Vec<(String, f32)>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,12 +175,19 @@ impl ArtifactVectorStore for QdrantArtifactStore {
         self.qdrant.artifact_delete(&self.collection, id).await
     }
 
-    async fn knn(&self, project_id: Option<&str>, query: &[f32], k: usize) -> Result<Vec<String>> {
+    async fn knn(
+        &self,
+        project_id: Option<&str>,
+        query: &[f32],
+        k: usize,
+    ) -> Result<Vec<(String, f32)>> {
         if !self.qdrant.collection_exists(&self.collection).await? {
             return Ok(vec![]);
         }
+        // `artifact_knn_scored` performs the similarity→distance flip; see its doc
+        // comment for why that conversion lives there and not here.
         self.qdrant
-            .artifact_knn_ids(&self.collection, project_id, query.to_vec(), k)
+            .artifact_knn_scored(&self.collection, project_id, query.to_vec(), k)
             .await
     }
 }
@@ -200,20 +225,30 @@ impl ArtifactVectorStore for SqliteVecArtifactStore {
         Ok(())
     }
 
-    async fn knn(&self, _project_id: Option<&str>, query: &[f32], k: usize) -> Result<Vec<String>> {
+    async fn knn(
+        &self,
+        _project_id: Option<&str>,
+        query: &[f32],
+        k: usize,
+    ) -> Result<Vec<(String, f32)>> {
         // sqlite-vec has no project_id column; the catalog's scoped filter does
         // the project narrowing after hydration (results match the Qdrant path).
+        //
+        // `artifact_vec` is declared `vec0(id, embedding FLOAT[768])` in schema.sql
+        // with no distance metric, so sqlite-vec's default L2 applies and the
+        // `distance` column is already lower-is-closer — the polarity the trait
+        // requires. No conversion here, unlike the Qdrant path.
         let blob: Vec<u8> = query.iter().flat_map(|f| f.to_le_bytes()).collect();
         let cat = self.catalog.lock();
         let mut stmt = cat.conn.prepare(
-            "SELECT id FROM artifact_vec WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT ?2",
+            "SELECT id, distance FROM artifact_vec WHERE embedding MATCH vec_f32(?1) ORDER BY distance LIMIT ?2",
         )?;
-        let ids = stmt
+        let hits = stmt
             .query_map(rusqlite::params![blob, k as i64], |row| {
-                row.get::<_, String>(0)
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)? as f32))
             })?
-            .collect::<rusqlite::Result<Vec<String>>>()?;
-        Ok(ids)
+            .collect::<rusqlite::Result<Vec<(String, f32)>>>()?;
+        Ok(hits)
     }
 }
 
@@ -261,15 +296,19 @@ pub mod test_support {
             project_id: Option<&str>,
             query: &[f32],
             k: usize,
-        ) -> Result<Vec<String>> {
+        ) -> Result<Vec<(String, f32)>> {
             let pts = self.points.lock();
+            // Cosine SIMILARITY internally, converted to the trait's
+            // lower-is-closer distance on the way out — the same flip the
+            // Qdrant backend does, so a test fixture cannot accidentally
+            // encode the opposite polarity from production.
             let mut scored: Vec<(String, f32)> = pts
                 .iter()
                 .filter(|(_, (pid, _))| project_id.is_none_or(|p| p == pid))
-                .map(|(id, (_, v))| (id.clone(), cosine(query, v)))
+                .map(|(id, (_, v))| (id.clone(), 1.0 - cosine(query, v)))
                 .collect();
-            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            Ok(scored.into_iter().take(k).map(|(id, _)| id).collect())
+            scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            Ok(scored.into_iter().take(k).collect())
         }
     }
 }
@@ -306,14 +345,54 @@ mod backend_tests {
         store.upsert("p2", "b", &[1.0, 0.0]).await.unwrap();
 
         // Scoped to p1 → only "a".
-        assert_eq!(
-            store.knn(Some("p1"), &[1.0, 0.0], 10).await.unwrap(),
-            vec!["a".to_string()]
-        );
+        let scoped: Vec<String> = store
+            .knn(Some("p1"), &[1.0, 0.0], 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(scoped, vec!["a".to_string()]);
         // Unscoped → both.
-        let mut all = store.knn(None, &[1.0, 0.0], 10).await.unwrap();
+        let mut all: Vec<String> = store
+            .knn(None, &[1.0, 0.0], 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
         all.sort();
         assert_eq!(all, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    /// The trait's polarity contract: `knn` returns a DISTANCE, lower-is-closer,
+    /// on every backend. The in-memory store computes cosine similarity natively
+    /// and must flip it, exactly as the Qdrant backend flips `ScoredPoint.score`.
+    ///
+    /// Without this, a fixture encoding the OPPOSITE polarity from production
+    /// would let every downstream ranking test pass while the two real backends
+    /// disagreed about which direction is good — and Qdrant's default status
+    /// would keep that hidden from all but escape-hatch users.
+    ///
+    /// BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+    #[tokio::test]
+    async fn knn_returns_lower_is_closer_distance() {
+        let store = InMemoryArtifactStore::default();
+        store.upsert("p", "near", &[1.0, 0.0]).await.unwrap();
+        store.upsert("p", "far", &[0.0, 1.0]).await.unwrap();
+
+        let hits = store.knn(Some("p"), &[1.0, 0.0], 10).await.unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].0, "near", "closest must sort first");
+        assert!(
+            hits[0].1 < hits[1].1,
+            "distance must ASCEND with dissimilarity, got {hits:?}"
+        );
+        assert!(
+            hits[0].1.abs() < 1e-6,
+            "an identical vector is distance ~0, got {}",
+            hits[0].1
+        );
     }
 
     #[tokio::test]

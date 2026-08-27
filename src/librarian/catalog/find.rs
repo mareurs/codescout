@@ -233,6 +233,37 @@ pub fn find_by_ids_filtered(
     Ok(rows)
 }
 
+/// One semantic hit: the hydrated row plus how far it sat from the query.
+///
+/// `distance` is lower-is-closer and backend-scaled — see
+/// [`ArtifactVectorStore::knn`](crate::librarian::artifact_store::ArtifactVectorStore::knn).
+/// Comparable within one response; never across backends or across queries.
+#[derive(Debug, Clone)]
+pub struct SemanticHit {
+    pub row: ArtifactRow,
+    pub distance: f32,
+}
+
+/// A page of semantic hits, plus whether the filter starved it.
+///
+/// The starvation fields exist because the widen-and-retry loop already KNOWS it
+/// is scraping the barrel — `find.rs` even calls the branch "Selective filter
+/// starved the page" — and used to return the same shape either way. A caller
+/// could not distinguish "here are five close matches" from "here are the five
+/// least-bad rows left after your filter removed everything relevant".
+///
+/// BUG docs/issues/2026-08-27-semantic-find-fills-the-page-past-relevance-with-no-score.md
+#[derive(Debug, Clone, Default)]
+pub struct SemanticPage {
+    pub hits: Vec<SemanticHit>,
+    /// How many times the loop had to widen `k` to fill the page. `0` means the
+    /// first KNN pass already had enough survivors.
+    pub widenings: usize,
+    /// The loop hit `K_CAP` and returned a SHORT page — the corpus, or the
+    /// filter, genuinely ran out.
+    pub exhausted: bool,
+}
+
 /// Project-scoped semantic artifact search: iterative-K backfill over a vector
 /// store, hydrated + filtered through the catalog. `project_id = Some` narrows
 /// the KNN to one project (the Qdrant backend filters on it; sqlite-vec ignores
@@ -241,6 +272,13 @@ pub fn find_by_ids_filtered(
 ///
 /// The catalog lock is held only for the synchronous hydrate/filter step and
 /// released before each `store.knn` await — never across an await.
+///
+/// **The loop's exit condition is page fullness, not relevance.** That is correct
+/// for pagination and was invisible to callers: a selective filter does not shrink
+/// the result set, it makes this function reach further down the KNN list until it
+/// has `target` survivors. [`SemanticPage`] now reports both the reaching and the
+/// distances, so "backfilled past the point of relevance" is a readable state
+/// rather than an indistinguishable one.
 #[allow(clippy::too_many_arguments)]
 pub async fn semantic_find(
     store: &dyn crate::librarian::artifact_store::ArtifactVectorStore,
@@ -251,29 +289,70 @@ pub async fn semantic_find(
     limit: usize,
     offset: usize,
     cutoff_ms: i64,
-) -> Result<Vec<ArtifactRow>> {
+) -> Result<SemanticPage> {
     let target = limit + offset;
     let mut k = (target * 5).max(100);
     const K_CAP: usize = 2000;
+    let mut widenings = 0usize;
 
     loop {
-        let candidate_ids = store.knn(project_id, query, k).await?;
-        if candidate_ids.is_empty() {
-            return Ok(vec![]);
+        let candidates = store.knn(project_id, query, k).await?;
+        if candidates.is_empty() {
+            return Ok(SemanticPage::default());
         }
+
+        // The distance rides in a side map keyed by id rather than through
+        // `find_by_ids_filtered`, which already preserves KNN order and needs no
+        // change: the SQL hydrate has no column to carry a score in, and widening
+        // `ArtifactRow` — a row type shared with every non-semantic read path —
+        // to hold one would put a query-relative number on a record that outlives
+        // the query.
+        let by_id: std::collections::HashMap<&str, f32> =
+            candidates.iter().map(|(id, d)| (id.as_str(), *d)).collect();
+        let candidate_ids: Vec<String> = candidates.iter().map(|(id, _)| id.clone()).collect();
 
         let all_rows = {
             let cat = catalog.lock();
             find_by_ids_filtered(&cat, &candidate_ids, filter, cutoff_ms)?
         };
 
-        // Enough results, or KNN exhausted → return the requested page.
-        if all_rows.len() >= target || k >= K_CAP {
-            return Ok(all_rows.into_iter().skip(offset).take(limit).collect());
+        let enough = all_rows.len() >= target;
+        // The vector store returned fewer candidates than asked for, so it holds
+        // nothing further and widening `k` cannot find more. Without this the loop
+        // re-queried a 2-row corpus five more times on its way to K_CAP, and —
+        // worse — every small-corpus query came out looking filter-starved when
+        // the truth was simply that the corpus is small. A signal that fires when
+        // it is not true is worse than no signal.
+        let store_exhausted = candidates.len() < k;
+        let capped = k >= K_CAP;
+
+        // Enough results, or nothing left to find → return the requested page.
+        if enough || store_exhausted || capped {
+            let hits = all_rows
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .map(|row| {
+                    let distance = by_id.get(row.id.as_str()).copied().unwrap_or(f32::NAN);
+                    SemanticHit { row, distance }
+                })
+                .collect();
+            return Ok(SemanticPage {
+                hits,
+                widenings,
+                // A SHORT page means the search ran out — of corpus, or of budget.
+                // A full page at K_CAP is the ordinary large-corpus case and is not
+                // exhaustion.
+                exhausted: !enough,
+            });
         }
 
-        // Selective filter starved the page — widen K and retry.
+        // Selective filter starved the page — the store had at least `k` candidates
+        // and the filter removed enough of them to leave the page short. Widen and
+        // retry. `widenings > 0` is therefore the genuine filter-starvation signal:
+        // corpus exhaustion exits above without ever incrementing it.
         k = (k * 2).min(K_CAP);
+        widenings += 1;
     }
 }
 
@@ -357,7 +436,7 @@ mod tests {
         let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0, 0)
             .await
             .unwrap();
-        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        let ids: Vec<&str> = rows.hits.iter().map(|h| h.row.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "b", "c"], "KNN distance order");
     }
 
@@ -379,7 +458,7 @@ mod tests {
         let rows = semantic_find(&store, &cat, None, &[1.0, 0.0], Some(&filter), 10, 0, 0)
             .await
             .unwrap();
-        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        let ids: Vec<&str> = rows.hits.iter().map(|h| h.row.id.as_str()).collect();
         assert_eq!(ids, vec!["a"], "the plan artifact is filtered out");
     }
 
@@ -736,7 +815,7 @@ mod tests {
         let rows = semantic_find(&store, &cat, Some("proj"), &[1.0, 0.0], None, 10, 0, cutoff)
             .await
             .unwrap();
-        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        let ids: Vec<&str> = rows.hits.iter().map(|h| h.row.id.as_str()).collect();
         assert_eq!(
             ids,
             vec!["live"],

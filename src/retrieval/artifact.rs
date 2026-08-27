@@ -112,16 +112,31 @@ impl QdrantWrap {
         Ok(())
     }
 
-    /// Dense KNN → ranked `artifact_id`s (closest first). `project_id` filters
-    /// to a single project when the query is project-scoped; `None` searches
-    /// all projects (the catalog's scoped filter still narrows after).
-    pub async fn artifact_knn_ids(
+    /// Dense KNN → ranked `(artifact_id, distance)` pairs, closest first.
+    /// `project_id` filters to a single project when the query is project-scoped;
+    /// `None` searches all projects (the catalog's scoped filter still narrows
+    /// after).
+    ///
+    /// **Returns a DISTANCE — lower is closer — not Qdrant's raw score.** The
+    /// artifacts collection is built with `Distance::Cosine`
+    /// ([`Self::ensure_artifacts_collection`]), so `ScoredPoint.score` is cosine
+    /// *similarity*: higher is better, the opposite polarity from the sqlite-vec
+    /// backend's L2 `distance` column. Two implementations of one trait returning
+    /// numbers that disagree about which direction is good is a silent,
+    /// backend-dependent wrong answer — and Qdrant being the default would have
+    /// kept it hidden until someone used the escape hatch. `1 - similarity` is the
+    /// standard cosine-distance identity and puts both backends on one polarity.
+    ///
+    /// The SCALE is still backend-defined (cosine distance here, L2 there), so
+    /// these values are comparable **within** one response and not across
+    /// backends. Callers must not threshold on an absolute number.
+    pub async fn artifact_knn_scored(
         &self,
         collection: &str,
         project_id: Option<&str>,
         dense: Vec<f32>,
         top_n: usize,
-    ) -> Result<Vec<String>> {
+    ) -> Result<Vec<(String, f32)>> {
         let mut req = QueryPointsBuilder::new(collection)
             .query(Query::new_nearest(VectorInput::new_dense(dense)))
             .using("dense")
@@ -138,15 +153,16 @@ impl QdrantWrap {
             .client
             .query(req.build())
             .await
-            .context("artifact_knn_ids")?;
+            .context("artifact_knn_scored")?;
 
         Ok(resp
             .result
             .into_iter()
             .filter_map(|pt| {
+                let distance = 1.0 - pt.score;
                 pt.payload
                     .get("artifact_id")
-                    .and_then(|v| v.as_str().map(|s| s.as_str().to_owned()))
+                    .and_then(|v| v.as_str().map(|s| (s.as_str().to_owned(), distance)))
             })
             .collect())
     }
