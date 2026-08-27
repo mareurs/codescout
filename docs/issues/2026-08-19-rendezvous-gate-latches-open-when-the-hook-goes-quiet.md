@@ -11,7 +11,7 @@ opened: 2026-08-19
 owner: marius
 related: []
 severity: low
-unverified: 'Impact still UNMEASURED — no session has been observed losing guides this way; the reproduction sketch has not been run end-to-end. NEWLY measured 2026-08-26: the staleness bound this file sketches as the fix shape is refuted in that form (hook_at is not a liveness signal), and its precondition is cheaper than the file assumed. No fix is implemented.'
+unverified: 'Impact still UNMEASURED, and § Measured 2026-08-27 now explains why it cannot be measured with current instrumentation: `hook_at` records conversation-start, not hook liveness, so a dead hook and a healthy long session are byte-identical in the only state the server keeps. The MECHANISM is confirmed by reading (`src/tools/config/mod.rs:267-283`) and the gated branch was observed executing live; what remains unmeasured is FREQUENCY. The reproduction recipe has been rewritten — the previous one was un-runnable (its step 3, `/clear`, destroys the observer its step 5 needs). No fix is implemented.'
 ---
 
 # BUG: the rendezvous gate latches open, so a companion hook that goes quiet mid-process leaves `/clear` invisible again
@@ -158,6 +158,62 @@ slot. Repeated stamps of the same session are already silent by construction
 tolerates a heartbeat today. The residual cost is real but small: a per-prompt slot
 write, and `poll()` doing one read+parse per prompt instead of a metadata-only check
 on the unchanged-mtime path.
+### Measured 2026-08-27 — the 08-26 finding replicates, and the recipe itself is why this stayed unmeasured
+
+Seven live server slots read under `~/.local/state/codescout/servers`, all seven processes confirmed
+alive.
+
+**1. `hook_at` still cannot detect a dead hook — replicated on a fresh sample.** All **four** stamped
+slots carry a `hook_at` that *predates their own `started_at`*:
+
+| pid | `hook_at` (local) | `started_at` (local) | gap |
+|---|---|---|---|
+| 2078775 | 12:37 | 21:12 | −8.6 h |
+| 2081534 | 14:20 | 21:12 | −6.9 h |
+| 2673924 | 16:17 | 22:14 | −5.9 h |
+| 2885849 (this session) | 12:39 | 22:40 | −10.0 h |
+
+Every one is healthy. "No stamp since this process started" is the **normal** post-`/mcp` state,
+because `publish` inherits the predecessor's stamp (`4800c297`) and the companion stamps only on
+`SessionStart`. A dead hook and a long healthy conversation are therefore **byte-identical** in the
+only state the server keeps. That is the 2026-08-26 conclusion reproduced on a second, larger sample.
+
+**2. The safe path is common, not exotic.** Three of the seven slots carry `hook_at: null` — gate
+CLOSED, so `activate` takes the blunt `clear()` and starvation is structurally impossible there. Two
+of those three are sessions in repos where the companion is active. An unstamped slot is an ordinary
+state, not a broken one.
+
+**3. No live stranding observable.** This session's own slot carries `session` equal to its real
+conversation id, so the server is correctly keyed. Other sessions' true conversation ids are not
+knowable from here, so this is a check of one, not a survey.
+
+**4. The gated branch is confirmed live.** Earlier in this same session, `workspace(action="activate")`
+re-injected `project-activation-bootstrap` alone while leaving `librarian` and `tracker-conventions`
+suppressed — `re_arm(PROJECT_SCOPED)` executing exactly as designed. The branch works; only its
+*precondition* is unobservable.
+
+### Why this sat unmeasured for eight days: the recipe cannot be run
+
+§ *Resume* instructs running the five-step sketch. **Step 3 is `/clear`, which destroys the very
+conversation that step 5 must observe.** A single session cannot both trigger the condition and
+assert on the result, and nothing in the file says so — so each attempt to "just run it" ends at the
+same wall. That is a defect in the recipe, not in anyone's follow-through, and it is the most likely
+explanation for an 8-day-old bug whose impact section still reads *"a hypothesis wearing a
+conclusion's clothes"*.
+
+A runnable form exists in two shapes, both recorded in the rewritten § *Resume*.
+
+### What the measurement changes about the decision
+
+The bug is **not** "a latch that should close". It is **a gate keyed on a fact nobody measures**.
+`hook_at` answers *"when did this conversation last start or resume?"*; liveness is *"is the hook
+still answering?"*. No threshold on the first can yield the second — which is why the staleness bound
+was refuted, and why it could not have been rescued by tuning.
+
+So any real fix must **create the signal before it can gate on it**: an already-registered recurring
+hook (`UserPromptSubmit`, `PreToolUse`, `Stop`, …) also stamping the slot. That is a cross-repo
+change in `../claude-plugins/codescout-companion/` with a per-prompt write cost — a design decision,
+not a defect repair, and still gated on an impact number nobody has.
 ## Hypotheses tried
 
 1. **Hypothesis:** an idle TTL would eventually close the gate on a stale keyed ledger.
@@ -238,13 +294,38 @@ shape to consider is the staleness bound already sketched in § Fix — now with
 reason to want one.
 ## Resume
 
-Run the five-step reproduction sketch in § Reproduction against `experiments` at `7ca4e8c1` or later,
-with the companion plugin's `hooks/session-start.mjs` made to exit non-zero after its first
-successful stamp. Confirm whether step 5 takes the gated path by asserting on which guide bodies ride
-the `activate` response. If it does not reproduce, flip status to `wontfix` and record why. If it
-does, quantify the waste before designing the staleness bound — the fix costs a clock and the phase
-avoided one on purpose.
+**The recipe below replaces the previous one, which could not be run.** The old text said: `/clear`
+in Claude Code (step 3), then assert on the `activate` response (step 5). `/clear` destroys the
+conversation that step 5 needs, so one session can never do both. Use one of these instead.
 
+**Shape A — two sessions, real end-to-end.** Session 1 opens against `experiments`, lets one
+`SessionStart` stamp land, then breaks `hooks/session-start.mjs` so it exits non-zero. Session 2 is a
+SEPARATE terminal attached to the SAME MCP server process — it must be, or the server restarts and
+resets the flag. Trigger the conversation change in one and read the `activate` response in the
+other. Fiddly, and it perturbs the live environment the concurrent session shares.
+
+**Shape B — in-process, deterministic, recommended.** The whole claim reduces to six lines at
+`src/tools/config/mod.rs:267-283`. Build a `GuideLedger` with `set_rendezvous_active(true)` and a
+topic already emitted; do **not** rekey it (that is what a dead hook means); drive `activate`; assert
+the topic is still suppressed. Then flip the flag to `false` and assert the same call clears it. That
+is the asymmetry, isolated from `/clear`, from the plugin, and from any other session. It cannot
+measure real-world *frequency* — nothing in-process can — but frequency is not what is disputed; the
+mechanism was, and this settles it in one test.
+
+**Then, and only then, the decision — which is a judgement, not a measurement.** Confirming the
+mechanism does not tell anyone how often a companion hook dies mid-process, and § *Measured
+2026-08-27* shows the server keeps no state that could answer it. So the live options are:
+
+1. **`wontfix`** — record that the mechanism is real, the precondition is unobservable with current
+   instrumentation, and no occurrence has been seen in the 8 days since filing. Cheapest, and honest
+   as long as the reasoning is kept.
+2. **Ship the liveness stamp** — the cross-repo change named in § *Fix*. Creates the missing signal,
+   after which a staleness bound becomes possible. Costs a per-prompt slot write.
+3. **Instrument first** — stamp liveness but gate nothing on it, then look again in a month with data
+   that can actually answer the frequency question.
+
+Option 3 is the one the evidence most directly supports: it buys the missing measurement without
+spending the behaviour change, and it is reversible.
 ## References
 
 - `src/tools/rendezvous.rs:109`, `:138` — `is_active()` and the single writer.
