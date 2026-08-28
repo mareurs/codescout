@@ -1,7 +1,7 @@
 ---
 id: '0e0316e9036d7f16'
 kind: spec
-status: draft
+status: active
 title: Tool Surface Budget — bounding the per-request prompt payload
 tags:
 - prompt-surfaces

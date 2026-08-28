@@ -18,14 +18,18 @@ follow the links for the controlling convention.
 
 A **declared ledger** carries `entry_prefix: <PREFIX>` in its frontmatter (committed,
 so it survives a fresh clone) and gets server-assigned ids from
-`artifact(action="append_entry", id=…, id_prefix=…)`. **Fifteen are declared today** (re-measured 2026-08-26 by
-reading `entry_prefix:` out of every frontmatter block): AA, CAP, CTX, DC, F, FND, FT, GF,
-H, HY, R, S, SD, U, W.
+`artifact(action="append_entry", id=…, id_prefix=…)`. **Twenty-one are declared today** (re-measured 2026-08-28 by
+reading `entry_prefix:` out of every frontmatter block): AA, CAP, CTX, DC, ET, F, FND, FT,
+GF, GG, H, HY, OP, R, S, SD, SV, TB, U, W, WP.
 
-*(This sentence read "Thirteen" until 2026-08-26 and was **exact when measured** on
-2026-08-19 — `CTX` was declared on 2026-08-21 by `711a25cf`, two days later, and nothing
-re-counted. Recorded as `claim-decay:DC-3`; a count written into prose owns no repair
-trigger, so re-measure it whenever you add a prefix.)*
+*(This sentence read "Thirteen" until 2026-08-26 and "Fifteen" until 2026-08-28, and was
+**exact when measured** each time — `CTX` was declared on 2026-08-21 by `711a25cf`, two
+days after the first count, and nothing re-counted. Recorded as `claim-decay:DC-3`; a
+count written into prose owns no repair trigger, so re-measure it whenever you add a
+prefix. **The 2026-08-28 re-measure confirms the pattern a third time:** five resume-queue
+prefixes were added that day, which would make fifteen-plus-five = twenty — but the real
+count is twenty-one, because `OP` had been declared by the operator-rules stream in the
+interim and, once again, nothing re-counted. Do not increment this number; re-derive it.)*
 
 > ⚠️ **F and W now appear among the declared prefixes, which contradicts the F/W row
 > below.** One session log declared `entry_prefix: [F, W]`. That is a real, unresolved
@@ -61,6 +65,30 @@ in its own header; they don't need slots here.
   stream wraps. Example: `docs/trackers/archive/2026-05-07-retrieval-session-residuals.md`.
 - **D-NN** — Design decisions inside a spec. Example: a multi-decision
   spec uses D-1 through D-N for the decisions enumerated in that document.
+
+**Resume queues (opened 2026-08-28).** Five declared ledgers, one per
+partially-implemented work stream, each pickable by a fresh session. Filename
+class marker is `docs/trackers/resume-*.md`; all five are **prose ledgers** —
+`entry_prefix` + `entry_high_water_<PREFIX>` in committed frontmatter, entries as
+`## PREFIX-N — <title>` body sections, **no augmentation** (rationale:
+`docs/conventions/cross-machine-catalog-resume.md` — a queue meant for another
+session or machine cannot keep its state in a git-ignored catalog).
+
+| Prefix | Tracker | Stream |
+|---|---|---|
+| **SV-N** | `resume-statement-validity-layers-3-5.md` | Statements: Layers 3c/5b — `asserted_at`, attestation storage, the decay default |
+| **GG-N** | `resume-get-guide-section-grain-phases-2-3.md` | `get_guide` section grain: Phase 2 (`tracker-conventions`) and Phase 3 (8 topics) |
+| **WP-N** | `resume-workspace-pinning-phase-4b-5.md` | Per-request workspace pinning: Phase 4b (per-`Workspace` locking, eviction) + Phase 5 |
+| **ET-N** | `resume-embedding-transport-stages-1-3.md` | Embedding transport consolidation: Stages 1–3 |
+| **TB-N** | `resume-tool-surface-budget.md` | Tool Surface Budget — **archived same day**: the stream had shipped in full on 2026-08-18 and the queue was opened on a false-negative grep. Kept as the only documentation of the live `TOOL_SURFACE_CHAR_BUDGET` gate |
+
+**Four of the five are live queues; `TB-N` is a closed record.** It is listed here
+because its prefix is declared and its entries are citable, not because there is work in
+it.
+
+Append to any of them with
+`artifact(action="append_entry", id=…, id_prefix="<PREFIX>", anchor_heading="## Template for new entries", title=…, body=…)`
+— one call, from the main checkout. No `entry_collection`.
 
 If you find yourself wanting to introduce a new project-wide prefix, ask first
 whether it really earns a slot or whether it's a variant of one of the **eleven**
