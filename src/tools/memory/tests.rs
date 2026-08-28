@@ -174,7 +174,7 @@ async fn write_and_read_roundtrip() {
     // dead port turned this into a red gate that read as a broken build.
     // A warning from an optional service is not a write failure; the functional
     // check is the read assertion below.
-    // docs/issues/2026-08-27-cargo-test-fails-from-bash-passes-via-run-command.md
+    // docs/issues/archive/2026-08-27-cargo-test-fails-from-bash-passes-via-run-command.md
     let status = result
         .as_str()
         .or_else(|| result["status"].as_str())

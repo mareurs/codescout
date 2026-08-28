@@ -315,8 +315,8 @@ Verified after a Claude Code restart: **zero** `CODESCOUT_*` and zero
 the test binary is invoked **directly** — which bypasses the
 `~/.cargo/config.toml` pin, so the pass is not the pin propping it up. Full
 write-up, including the retracted evidence line:
-`docs/issues/2026-08-27-cargo-test-fails-from-bash-passes-via-run-command.md`
-(`fixed`).
+`docs/issues/archive/2026-08-27-cargo-test-fails-from-bash-passes-via-run-command.md`
+(`fixed`, archived 2026-08-28).
 
 **Two transferable debugging lessons.**
 

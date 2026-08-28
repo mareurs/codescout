@@ -280,9 +280,19 @@ redundant, but it is inert when work routes through `run_command`, load-bearing
 again the moment profile drift recurs, and lives outside every repo — so it costs
 nothing and guards a failure mode that has now happened once.
 
-Ready to archive to `docs/issues/archive/`. The fix pointer — SHA and patch-id for
-both in-repo commits — is already recorded in § References, so the move owes
-nothing further beyond re-pointing citations of this path.
+**Archived 2026-08-28** to `docs/issues/archive/`. The move re-keyed the artifact
+(`2a93e3ac8c9fd351` → `6bdf738564037849`, 3 events grafted, 0 links) and both
+citations of the old path were re-pointed in the same commit:
+`.codescout/memories/gotchas.md` and a doc comment in `src/tools/memory/tests.rs`.
+
+Worth noting which one nearly got missed: the second is a **`.rs`** citation, and
+the extension histogram for this path was exactly `1 rs, 1 md`. A sweep run with
+the narrower `--include='*.md'` habit would have reported a clean single hit and
+left a dangling reference in source. The grep that found it was run with **no
+filters at all** — which is what `get_guide("tracker-conventions")` recommends when
+unsure, and this is a second datapoint for it.
+
+Fix pointer (SHA + patch-id, both halves) is in § References. Nothing outstanding.
 ## References
 - codescout memory `gotchas` § "`cargo test` Fails From Native `Bash` But Passes
   Via `run_command` — Export `CODESCOUT_EMBEDDER_URL`" — the durable note, incl.
