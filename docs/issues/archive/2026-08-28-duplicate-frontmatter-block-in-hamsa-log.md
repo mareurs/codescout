@@ -1,7 +1,7 @@
 ---
-id: a843bfdefaf6347b
+id: 5c4f87e68cdad584
 kind: bug
-status: open
+status: fixed
 title: 'BUG: prompt-hamsa-audit-log.md carries two frontmatter blocks — the second is inert body text, and every catalog-facing field in it is a lie nothing reads'
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - librarian
 - frontmatter
 - tracker
+closed: 2026-08-28
 ---
 
 # BUG: prompt-hamsa-audit-log.md carries two frontmatter blocks
@@ -102,6 +103,20 @@ without detecting the hand-authored one already present — but this is
 so the writer that did it may no longer exist. Do not treat the inference as the
 diagnosis; reproduce before fixing.
 
+
+### Tested 2026-08-28 — the inference above holds, within a stated scope
+
+The file said *"the writer that did it may no longer exist"* and told the reader not
+to treat that as the diagnosis. It is now tested, because the fix itself is the test:
+removing the orphan required a **write** through `artifact update --body`, and the
+canonical block **did not come back**. A writer that re-serialises without detecting
+an existing block would have re-emitted it in that same call.
+
+**Scope the claim honestly.** That exercises ONE writer path — full-body replace.
+It does not exercise `append_entry` or `update_entry`, which are the paths this
+tracker actually takes in normal use. If the orphan ever returns, the mechanism is
+live on a path this test did not reach; that is the re-open trigger, not a repeat
+of the original inference.
 ## Evidence
 
 Only the **first** block is parsed as frontmatter — the catalog agrees with it,
@@ -128,13 +143,34 @@ failure mode is a **reader** believing them, not a broken query.
 
 ## Fix
 
-Not started. Deleting lines 12–25 is almost certainly right, but per CLAUDE.md
-(*run the reproduction before reading the fix plan*) confirm first that no
-consumer reads the second block — `expects_augmentation: true` appears only in
-the first, and this tracker is one of the 22 currently reporting
-`augmentation_declared_but_absent` on this machine, so the two are worth
-checking together rather than in sequence.
+**Fixed 2026-08-28.** The orphan block is gone; the file now opens with exactly one
+frontmatter block — the hand-authored one, which is also the only one carrying
+`expects_augmentation: true`.
 
+**How, and why not by hand.** The orphan is *body* to the catalog (`artifact(get)`'s
+`$.body` begins with it), so it was removable by a body write rather than a
+frontmatter edit. The new body was constructed as a pure line-drop **from the file
+itself** — `awk 'NR>=27'` — and passed server-side via
+`codescout artifact update <id> --body @/tmp/hamsa-newbody.md`. Nothing was
+re-typed, so nothing in 1,573 lines could be silently lost in transcription. A
+heading-scoped `body_edits` could not reach it: the orphan sits *before* the first
+heading, in no section.
+
+**Verified, not assumed:**
+
+| check | result |
+|---|---|
+| `git diff` | exactly 14 deletions + 1 trailing-newline insertion. Nothing else moved |
+| size | 1573 → 1560 lines, 244040 → 243868 bytes |
+| content | 44 `A-N` headings and 30 index rows, both **unchanged** |
+| identity | `id` / `kind` / `status` unchanged, per this file's own *Resume* |
+| augmentation | survived — `entry_collection: "audits"` still reported, and `entry_filter` still returns rows |
+
+**One claim in this file was wrong and is corrected here.** *Fix* previously said
+this tracker "is one of the 22 currently reporting `augmentation_declared_but_absent`",
+and suggested checking the two together. It is not among them — a live `doctor` run
+lists 13 and hamsa is not one, because its augmentation is present and working. The
+two issues were never coupled.
 ## Tests added
 
 None yet. A `doctor` check (`duplicate_frontmatter_block`) is the natural home:
@@ -150,12 +186,14 @@ None needed. Nothing is broken at runtime; the risk is a human reading
 
 ## Resume
 
-Delete the second block (lines 12–25 of
-`docs/trackers/prompt-hamsa-audit-log.md`), then `librarian(action="reindex")`
-and re-run `artifact(action="find", filter={"rel_path": {"contains": "prompt-hamsa"}})`
-to confirm `kind`/`status`/`id` are unchanged. Consider the `doctor` check in the
-same pass.
+**Done — nothing outstanding.** The prescribed verification ran: `reindex`, then
+`artifact(find, filter={"rel_path": {"contains": "prompt-hamsa"}})` returning
+unchanged `id` / `kind` / `status`.
 
+Re-open trigger, per the scope stated under *Root cause*: **the orphan block
+reappears after an `append_entry` or `update_entry` write.** Those are the paths
+this fix did not exercise, and a recurrence there means the re-serialising writer is
+still live rather than that the original inference was wrong.
 ## References
 
 - Introduced: `fec17cd8` (2026-06-14)
@@ -163,4 +201,3 @@ same pass.
 - `docs/issues/archive/2026-08-16-artifact-update-reserializes-frontmatter-on-a-field-patch.md`
 - Found during the 2026-08-28 cross-machine catalog repair pass; see
   `docs/trackers/bug-ledger-resume-2026-08-28.md`
-

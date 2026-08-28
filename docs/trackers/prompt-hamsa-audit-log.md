@@ -10,20 +10,6 @@ tags:
 expects_augmentation: true
 ---
 
----
-id: '59ebeebb6ed05c89'
-kind: tracker
-status: active
-title: Prompt Hamsa — Audit Log
-owners: []
-tags:
-- prompt-hamsa
-- prompt
-- audit
-topic: null
-time_scope: null
----
-
 # Prompt Hamsa — Audit Log
 
 One row per audit the Hamsa produces (spoken or written). Each row records the
@@ -1571,3 +1557,4 @@ Deleting or shortening `### Memory` and `### Subagent Dispatch` in the three pro
 ### Contamination guard — clean
 
 `path_security.rs` last moved 08:45:38, **before** this run's 09:07:08 start; `read_file.rs`, `grep.rs` and `file_group.rs` unchanged across the window. The primary metric is uncontaminated.
+

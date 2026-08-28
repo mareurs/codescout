@@ -252,18 +252,36 @@ reading it yields stdout or an envelope. Do not fix before reproducing.
 
 ## CM-8 — duplicate frontmatter in the hamsa log
 
-**Status:** open
+**Status:** fixed 2026-08-28 — body edit only, no code. Verified: `git diff` is
+exactly 14 deletions plus a trailing newline; 44 `A-N` headings and 30 index rows
+both unchanged; `id`/`kind`/`status` unchanged; augmentation survived.
 **Valid:** dated 2026-08-28
 
 **Observed.** Filed as
-`docs/issues/2026-08-28-duplicate-frontmatter-block-in-hamsa-log.md`. Two
+`docs/issues/archive/2026-08-28-duplicate-frontmatter-block-in-hamsa-log.md`
+(archived 2026-08-28; the move re-keyed it `a843bfdefaf6347b` → `5c4f87e68cdad584`). Two
 frontmatter blocks since `fec17cd8` (2026-06-14); only the first parses. One file
 of 54 — a `kind:`-counting sweep is the correct detector; counting bare `---`
 reports 22 and all are false.
 
-**Next:** reproduce before deleting lines 12–25 — the second block's shape points at
-two *already-fixed* writer defects, so the obvious diagnosis may name a mechanism
-that no longer exists.
+**Done, and the caution paid off.** The orphan is *body* to the catalog —
+`artifact(get)`'s `$.body` starts with it — so it came out via a body write, not a
+frontmatter edit. A heading-scoped `body_edits` could not have reached it: it sits
+*before* the first heading, in no section. The new body was a pure line-drop taken
+**from the file itself** (`awk 'NR>=27'`) and passed server-side via
+`codescout artifact update --body @file`, so nothing in 1,573 lines was re-typed.
+
+**The mechanism question is now tested rather than inferred — the fix was the
+test.** Removing the block required a write, and the canonical block **did not come
+back**. A writer that re-serialises without detecting an existing block would have
+re-emitted it in that same call. Scope it honestly: that exercises full-body replace
+only, not `append_entry` / `update_entry`, which are the paths this tracker actually
+takes in use. Re-open trigger is a recurrence after one of those.
+
+One claim in the bug file was wrong and is corrected there: hamsa is **not** among
+the `augmentation_declared_but_absent` set. A live `doctor` lists 13 and it is not
+one of them — its augmentation is present and working. The two issues were never
+coupled.
 
 ## CM-9 — CM is the ninth declared ledger with no TAXONOMY row — left for the session that owns the file
 
