@@ -7,6 +7,7 @@
 //! Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md`.
 
 pub mod budget;
+pub mod corpus;
 pub mod profiles;
 pub mod render;
 pub mod rule;
