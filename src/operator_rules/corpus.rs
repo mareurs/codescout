@@ -40,8 +40,8 @@ mod tests {
         super::super::budget::check_budget(&rules).expect("shipped ledger must fit the budget");
         assert!(
             rules.iter().any(|r| r.id == "OP-1"),
-            "the ledger lost OP-1 — either the file moved or include_str! is pointing \
-             at the wrong path; got ids {:?}",
+            "the ledger lost OP-1 — either the file moved, include_str! is pointing \
+             at the wrong path, or OP-1 was retired; got ids {:?}",
             rules.iter().map(|r| &r.id).collect::<Vec<_>>()
         );
     }
@@ -51,6 +51,9 @@ mod tests {
     #[test]
     fn the_lazy_corpus_matches_a_fresh_parse() {
         let fresh = parse_ledger(LEDGER_SRC).unwrap();
-        assert_eq!(OPERATOR_RULES.len(), fresh.len());
+        assert_eq!(
+            OPERATOR_RULES.iter().map(|r| &r.id).collect::<Vec<_>>(),
+            fresh.iter().map(|r| &r.id).collect::<Vec<_>>()
+        );
     }
 }
