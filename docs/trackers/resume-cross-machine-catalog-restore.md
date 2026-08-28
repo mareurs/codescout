@@ -12,7 +12,7 @@ tags:
 - augmentation
 - cross-machine
 topic: cross-machine catalog restore
-entry_high_water_CM: 9
+entry_high_water_CM: 10
 entry_prefix: CM
 ---
 
@@ -213,7 +213,9 @@ that no longer exists.
 
 **Valid:** dated 2026-08-28
 
-**Status:** open — a one-row edit, deliberately not made in the session that found it.
+**Status:** closed 2026-08-28 — landed by the *other* session about five minutes after this
+entry was written. **The prescription below is wrong about which table**; it is kept verbatim
+rather than corrected in place, because the error is the instructive part. See § *Resolution*.
 
 **Observed 2026-08-28, after compaction.** This ledger declares `entry_prefix: CM` and
 `entry_high_water_CM: 8` in committed frontmatter, and `docs/TAXONOMY.md` carries **zero**
@@ -231,8 +233,8 @@ update in the direction that leaves no trace: their write lands last and this ro
 with no conflict, no error, and nothing to notice. The row is cheap; re-finding it after it
 silently disappears is not.
 
-**What to do.** Add one row to the § *Other declared ledgers scoped to one work stream*
-table the peer sweep introduced:
+**What to do — WRONG, see § *Resolution*.** Add one row to the § *Other declared ledgers
+scoped to one work stream* table the peer sweep introduced:
 
 | Prefix | Ledger | Captures | Entries | Append |
 |---|---|---|---:|---|
@@ -254,9 +256,86 @@ Prose ledger: no `entry_collection`; append with `anchor_heading` + `title` + `b
    holds one name. Pre-existing, by design, and documented — cite qualified
    (`bug-fix-session-log:F-33`), never bare.
 
+### Resolution — 2026-08-28, by the other session
+
+**Where it actually went.** `docs/TAXONOMY.md` § *Resume queues*, **not** the *Other
+declared ledgers* table prescribed above. That is the correct home and this entry had it
+wrong: `resume-cross-machine-catalog-restore.md` matches the `docs/trackers/resume-*.md`
+filename class that section is defined by, so it is the **sixth resume queue**, not a ninth
+miscellaneous ledger. "Five declared ledgers" in that paragraph became six.
+
+**And they caught the half this entry missed.** `CM` was simultaneously sitting in the
+drift table's *"one-off spec- or session-local namespaces — and none of them is a defect"*
+row. A row there and a row in the queue table are contradictory claims. They removed it,
+re-derived *"The twelve without a row"* → *"The eleven"*, and left the note: *"`CM` was in
+this list for five minutes."*
+
+**The one-off classification was falsifiable, and false.** Of the eight prefixes in that
+row — `AB B CM DF I L TMR TU` — exactly one declares `entry_prefix` in committed
+frontmatter:
+
+```
+AB->0  B->0  CM->1  DF->0  I->0  L->0  TMR->0  TU->0   (declaring files)
+```
+
+The column the row sorts on is *files defining the prefix*, and that is **1 each** for all
+eight — so the table's own evidence cannot separate a declared ledger from an undeclared
+spec-local namespace. The declaration can. That distinction is what `HY-22` § *Class 1* is
+about, which is why the miss landed inside the sweep that was hunting the class.
+
+**What the deferral bought — the reason to keep this entry.** Two sessions reached the same
+defect from opposite ends inside five minutes, and *not* editing their open file was still
+the right call. The row landed once, in the right table, written by the session that held
+the whole registry in context — which is precisely why it also caught the drift-table half.
+Had this session raced it in, the outcome would have been a row in the **wrong** table
+needing later removal, plus a live lost-update window. Deferring cost nothing and bought
+correctness. The generalisation: when a peer holds the file, hand them the finding, not the
+edit — they have context you do not.
+
 **Rests on:** the registry being prose with no binding to frontmatter — the condition
 `HY-22` names. If a `doctor` check ever derives the table from declarations, this entry and
 its eight siblings close together.
+
+## CM-10 — The operator-rules cross-machine revisit trigger fired — two hosts now run the profiles, nothing checks either
+
+**Status:** open
+**Valid:** dated 2026-08-28
+**Rests on:** `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md` § *Not in scope* → *Cross-machine*
+
+**Observed.** The operator-rules spec deferred cross-machine sync behind a named
+trigger: *"a second machine would need a sync design that does not exist and is not
+needed to validate the core. Revisit when a second machine runs these profiles."*
+
+That trigger fired 2026-08-28. This host's three profiles were compiled for the first
+time (`codescout operator-rules compile` → wrote all three), so two machines now run
+them.
+
+Before that compile, all three profiles here were byte-identical to the baseline the
+spec's § *Problem* records as *"Measured 2026-08-27, this machine"* — 4639/`b583ffaa`,
+4640/`d52fc86c` twice. That identity is the proof this host had never been onboarded:
+it still sat at the pre-engine baseline. They are now uniform at 3845/`9b554ef6`, the
+retired OP-5 prose is gone from all three, and `operator-rules check` reports all three
+current.
+
+**The gap this exposes is asymmetric and silent.** The ledger
+(`docs/trackers/operator-rules.md`) is git-tracked, so `OP-N` edits travel between
+hosts. The compiled block lives in `~/.claude*/CLAUDE.md`, which are untracked and
+machine-local, so it does not. And **nothing runs `operator-rules check` on either
+host** — verified across the codescout repo (`*.yml`, `*.yaml`, `*.sh`, `*.toml`,
+`*.json`, `*.mjs`, `*.js`, `*.py`, `include_hidden=true`) and the whole
+`claude-plugins` tree, each zero paired with a positive control that hit
+(`cargo clippy` → `.github/workflows/ci.yml`; `cs-hint` → `buddy/scripts/hook_helpers.py`).
+
+Consequence: the next `OP-N` change pushed from one host leaves the other's profiles
+stale, and the engine cannot see across hosts the drift it was built to detect. Same
+shape as the catalog problem this queue exists for — nothing fails, you quietly get
+less.
+
+**Next:** take the smaller half first. A per-host trigger that runs `operator-rules
+check` (SessionStart hook, or a CI job that checks the *ledger* parses and leaves
+profiles to the hook) is independently useful and needs no sync design. Full
+cross-machine profile sync is spec-sized and belongs in its own plan — do not fold the
+two together.
 
 ## Template for new entries
 
