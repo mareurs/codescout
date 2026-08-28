@@ -18,9 +18,9 @@ follow the links for the controlling convention.
 
 A **declared ledger** carries `entry_prefix: <PREFIX>` in its frontmatter (committed,
 so it survives a fresh clone) and gets server-assigned ids from
-`artifact(action="append_entry", id=…, id_prefix=…)`. **Twenty-one are declared today** (re-measured 2026-08-28 by
-reading `entry_prefix:` out of every frontmatter block): AA, CAP, CTX, DC, ET, F, FND, FT,
-GF, GG, H, HY, OP, R, S, SD, SV, TB, U, W, WP.
+`artifact(action="append_entry", id=…, id_prefix=…)`. **Twenty-two are declared today** (re-measured 2026-08-28 13:25 by
+reading `entry_prefix:` out of every frontmatter block): AA, CAP, CM, CTX, DC, ET, F, FND,
+FT, GF, GG, H, HY, OP, R, S, SD, SV, TB, U, W, WP.
 
 *(This sentence read "Thirteen" until 2026-08-26 and "Fifteen" until 2026-08-28, and was
 **exact when measured** each time — `CTX` was declared on 2026-08-21 by `711a25cf`, two
@@ -29,7 +29,16 @@ count written into prose owns no repair trigger, so re-measure it whenever you a
 prefix. **The 2026-08-28 re-measure confirms the pattern a third time:** five resume-queue
 prefixes were added that day, which would make fifteen-plus-five = twenty — but the real
 count is twenty-one, because `OP` had been declared by the operator-rules stream in the
-interim and, once again, nothing re-counted. Do not increment this number; re-derive it.)*
+interim and, once again, nothing re-counted. Do not increment this number; re-derive it.
+**Fourth firing, and it is the one to remember: seven minutes.** The corrected value
+`twenty-one` was committed at 13:20 on 2026-08-28 in `068281af`. It was already false —
+a concurrent session in the same checkout had declared `CM`
+(`docs/trackers/resume-cross-machine-catalog-restore.md`) at **13:13**, seven minutes
+earlier, and the measurement behind `068281af` was taken just before it. Corrected to
+twenty-two at 13:25. No amount of care at write time fixes this: the number was true when
+measured, false when committed, and nothing in between could have known. That is the
+whole argument for re-deriving on read rather than trusting the figure — and for keeping
+the count next to the command that produces it.)*
 
 > ⚠️ **F and W now appear among the declared prefixes, which contradicts the F/W row
 > below.** One session log declared `entry_prefix: [F, W]`. That is a real, unresolved
@@ -68,7 +77,7 @@ in its own header; they don't need slots here.
 - **D-NN** — Design decisions inside a spec. Example: a multi-decision
   spec uses D-1 through D-N for the decisions enumerated in that document.
 
-**Resume queues (opened 2026-08-28).** Five declared ledgers, one per
+**Resume queues (opened 2026-08-28).** Six declared ledgers, one per
 partially-implemented work stream, each pickable by a fresh session. Filename
 class marker is `docs/trackers/resume-*.md`; all five are **prose ledgers** —
 `entry_prefix` + `entry_high_water_<PREFIX>` in committed frontmatter, entries as
@@ -82,9 +91,10 @@ session or machine cannot keep its state in a git-ignored catalog).
 | **GG-N** | `resume-get-guide-section-grain-phases-2-3.md` | `get_guide` section grain: Phase 2 (`tracker-conventions`) and Phase 3 (8 topics) |
 | **WP-N** | `resume-workspace-pinning-phase-4b-5.md` | Per-request workspace pinning: Phase 4b (per-`Workspace` locking, eviction) + Phase 5 |
 | **ET-N** | `resume-embedding-transport-stages-1-3.md` | Embedding transport consolidation: Stages 1–3 |
+| **CM-N** | `resume-cross-machine-catalog-restore.md` (`f4923e5e894de62f`) | Work left after a cross-machine catalog resume — what was restored, what was decided against, what is permanently lost. 9 entries, prose. Opened by a concurrent session the same day; row added here per its own `CM-9`, which specified it rather than editing this file while a peer held it |
 | **TB-N** | `resume-tool-surface-budget.md` | Tool Surface Budget — **archived same day**: the stream had shipped in full on 2026-08-18 and the queue was opened on a false-negative grep. Kept as the only documentation of the live `TOOL_SURFACE_CHAR_BUDGET` gate |
 
-**Four of the five are live queues; `TB-N` is a closed record.** It is listed here
+**Five of the six are live queues; `TB-N` is a closed record.** It is listed here
 because its prefix is declared and its entries are citable, not because there is work in
 it.
 
@@ -95,7 +105,10 @@ Append to any of them with
 **Other declared ledgers scoped to one work stream** (registered 2026-08-28 — all eight
 were declared and defining entries while this document listed none of them, which is what
 `tracker-hygiene-log:HY-22` records). `HY` and `OP` earned main-table rows instead; the
-rest are here:
+rest are here. **`CM` is the ninth of that set** and sits in the resume-queue table above
+instead, because it is literally a `resume-*.md` queue; see
+`resume-cross-machine-catalog-restore:CM-9`, which found it independently and counted it
+as the ninth.
 
 | Prefix | Ledger | Captures | Entries | Append |
 |---|---|---|---:|---|
@@ -122,15 +135,15 @@ describe is still right and the movement between them is the point.
 | | 2026-08-19 | 2026-08-28 |
 |---|---:|---:|
 | prefixes defining entries | 29 | **38** |
-| defining `## PREFIX-N — title` headings | not counted | **1,331** |
-| defining prefixes with **no** row here | 17 | **12** |
+| defining `## PREFIX-N — title` headings | not counted | **1,332** |
+| defining prefixes with **no** row here | 17 | **11** (the scan says 12 — `BUG` is documented, see below) |
 
 The count went *down* while the population went *up*, because this pass registered eight
 declared-but-undocumented ledgers (`AA` `CTX` `FND` `FT` `GF` `SD` in the work-stream table
 above, `HY` and `OP` in the main one) plus five resume queues. See
 `tracker-hygiene-log:HY-22` for how the gap was found and why no detector reports it.
 
-The twelve without a row, with the number of files defining each — **and none of them is a
+The eleven without a row, with the number of files defining each — **and none of them is a
 defect**:
 
 | Prefix | Files | Why no row |
@@ -139,7 +152,12 @@ defect**:
 | `ADR` | 4 | The ADR numbering convention, not a ledger |
 | `E` | 2 | Spec-local |
 | `BL` | 1 | Self-documented in `open-issue-work-queue.md`'s own header, which explicitly says work-stream-scoped, *"not a project-wide namespace"* |
-| `AB` `B` `CM` `DF` `I` `L` `TMR` `TU` | 1 each | One-off spec- or session-local namespaces |
+| `AB` `B` `DF` `I` `L` `TMR` `TU` | 1 each | One-off spec- or session-local namespaces |
+
+`CM` was in this list for five minutes. It was a one-off when the row was written and a
+declared resume-queue ledger with 9 entries by the time it was committed — see the
+seven-minute note under § *Main taxonomy*. Re-derive; a characterisation decays exactly
+like a count.
 
 `BUG` defines 41 headings and **is** documented — as the `BUG (slug)` row in the main
 table, whose format a `**PREFIX-N**` scan does not match. Do not "fix" it.
