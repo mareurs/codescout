@@ -105,9 +105,16 @@ pub fn compile(ledger: &str, profiles: &OperatorProfiles) -> Result<Vec<PathBuf>
                     .collect::<Vec<_>>()
                     .join(", ")
             };
-            return Err(e.context(format!(
-                "profiles already written before this error: {already}"
-            )));
+            // The partial-write fact is worth keeping — it is what makes a failed
+            // compile recoverable — but as anyhow CONTEXT it printed outermost,
+            // so every compile failure opened with "profiles already written
+            // before this error: none" and buried the only line naming what to
+            // repair two levels down. Rendered inline instead, so the diagnosis
+            // leads and the partial-apply note trails.
+            // docs/issues/2026-08-27-operator-rules-check-discards-healthy-profiles-on-one-unreadable-file.md
+            return Err(anyhow::anyhow!(
+                "{e:#}\n\nprofiles already written before this error: {already}"
+            ));
         }
     }
     Ok(written)
@@ -125,8 +132,27 @@ pub fn check(ledger: &str, profiles: &OperatorProfiles) -> Result<Vec<Drift>> {
     let mut drift = Vec::new();
 
     for path in &profiles.paths {
-        let doc = std::fs::read_to_string(path)
-            .with_context(|| format!("reading profile {}", path.display()))?;
+        // A profile that cannot be READ is a state of that profile, not a failure
+        // of the run. Propagating it with `?` discarded every Drift already
+        // collected for the healthy profiles, so deleting one profile directory
+        // made the two real, actionable drifts in the other two invisible and
+        // reported only the one the operator may not care about.
+        //
+        // Same collect-and-continue shape the `BlockScan::Absent` arm below
+        // already uses, and it lands in the same `Drift` list, so the CLI prints
+        // it as one more DRIFT line and `exit_code` still returns 1 — no gate
+        // semantics change.
+        // docs/issues/2026-08-27-operator-rules-check-discards-healthy-profiles-on-one-unreadable-file.md
+        let doc = match std::fs::read_to_string(path) {
+            Ok(doc) => doc,
+            Err(e) => {
+                drift.push(Drift {
+                    path: path.clone(),
+                    reason: format!("could not be read: {e}"),
+                });
+                continue;
+            }
+        };
         let found = match profiles::extract_block(&doc) {
             profiles::BlockScan::Absent => {
                 drift.push(Drift {
@@ -231,6 +257,86 @@ entry_prefix: OP
         assert!(
             check(LEDGER, &profiles).unwrap().is_empty(),
             "clean after compile"
+        );
+    }
+
+    /// One unreadable profile must not erase the findings for the healthy ones.
+    ///
+    /// The suite could not express this before: every other test here drives
+    /// `check` over in-memory documents or freshly-written temp files, where a
+    /// file that cannot be read does not occur. So the abort path had no
+    /// coverage at all, and the defect was found by an end-to-end CLI probe
+    /// rather than by any test.
+    ///
+    /// Shaped like the real incident: two profiles carry genuine, actionable
+    /// drift, and it was exactly those two that vanished from the report when
+    /// the third was deleted.
+    #[test]
+    fn check_reports_every_profile_even_when_one_cannot_be_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles = profiles_in(dir.path(), 3);
+        std::fs::remove_file(&profiles.paths[2]).unwrap();
+
+        let drift = check(LEDGER, &profiles).expect("one missing file must not abort the run");
+
+        assert_eq!(drift.len(), 3, "every profile gets a line: {drift:#?}");
+        for p in &profiles.paths[..2] {
+            assert!(
+                drift
+                    .iter()
+                    .any(|d| &d.path == p && d.reason.contains("no generated block")),
+                "the readable profiles must keep their OWN reason, not be replaced by \
+                 the neighbour's failure: {drift:#?}"
+            );
+        }
+        assert!(
+            drift
+                .iter()
+                .any(|d| d.path == profiles.paths[2] && d.reason.contains("could not be read")),
+            "and the missing one is reported as a state of that profile: {drift:#?}"
+        );
+        assert_eq!(
+            exit_code(&drift),
+            1,
+            "gate semantics unchanged — this still fails"
+        );
+    }
+
+    /// The rendered error must LEAD with the cause.
+    ///
+    /// Asserts on the formatted string, deliberately. Every other test here
+    /// asserts on `Drift` values and error *types*, so anyhow's context ORDER
+    /// had no assertion surface anywhere — which is why a message whose first
+    /// line was `profiles already written before this error: none` survived
+    /// review. Ordering is the whole defect, so the test pins positions rather
+    /// than mere presence: both facts were present before, in the wrong order.
+    #[test]
+    fn a_compile_failure_leads_with_the_cause_not_the_partial_write_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles = profiles_in(dir.path(), 1);
+        let dup = format!(
+            "prose\n{b}\nstale\n{e}\nmore\n{b}\nalso stale\n{e}\n",
+            b = render::BEGIN,
+            e = render::END
+        );
+        std::fs::write(&profiles.paths[0], dup).unwrap();
+
+        let err = compile(LEDGER, &profiles).expect_err("a duplicate block must refuse to write");
+        let text = format!("{err:#}");
+
+        let cause = text
+            .find("second BEGIN")
+            .unwrap_or_else(|| panic!("the diagnosis must be present at all: {text}"));
+        let note = text
+            .find("profiles already written")
+            .unwrap_or_else(|| panic!("the partial-write fact must be RETAINED: {text}"));
+        assert!(
+            cause < note,
+            "the line naming what to repair must come before the partial-write note: {text}"
+        );
+        assert!(
+            text.starts_with("splicing profile"),
+            "and the first line must be the actionable one: {text}"
         );
     }
 
