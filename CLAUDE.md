@@ -300,6 +300,7 @@ Files:
 - `docs/ROADMAP.md` — Quick status overview
 - `CONTRIBUTING.md` — Contributor-facing setup + PR checklist
 - `docs/RELEASE.md` — Release cycle, ship sequence, git-workflow safety
+- **[`docs/conventions/cross-machine-catalog-resume.md`](docs/conventions/cross-machine-catalog-resume.md)** — **Run this after pulling onto a machine that has not been building codescout.** The catalog (`~/.local/share/librarian/catalog.db`) is machine-local and gitignored, so a clone always arrives missing three layers — semantic index, `cites` edges, and artifact augmentations — and **each is silent in a different way**: `reindex` preserves augmentation rather than regenerating it, so it reports healthy and repairs nothing; `artifact(get)` returns `augmentation: null` without comment; a missing edge is indistinguishable from an artifact that cites nothing. Nothing fails — you quietly get less. Measured 2026-08-28 on a 437-commit pull: 21 of 23 memories invisible to `recall`, 697 of 1117 `cites` edges absent, 22 trackers' augmentations gone (including the three CLAUDE.md gives append/query recipes for). The page also carries the two measurement traps that pass produced, both of which return a plausible **number** rather than an error.
 - `docs/architecture/companion-plugin.md` — codescout-companion hook inventory + cross-repo flow
 - `src/prompts/README.md` — prompt-surface rules: surfaces, `ONBOARDING_VERSION`, 1900-**character** cap, style guide
 
