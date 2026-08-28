@@ -107,11 +107,36 @@ does not exist anywhere.
 `docs/issues/archive/2026-07-02-tool-usage-patterns-augmentation-lost.md` restored
 this same artifact on 2026-07-05 by rebuilding params from body prose, and records
 the schema it used (`{id, tool, verdict, session, summary, prompt_gap}`,
-`entry_collection: "observations"`). **That bug file is currently the only on-disk
-record of any tracker's augmentation shape, and it exists by accident** — it was
-written to document an incident, not to serve as a schema store. The other 21
-trackers have no equivalent.
+`entry_collection: "observations"`).
 
+**CORRECTION (2026-08-28, same day) — my own claim here was too strong.** This
+section originally read: *"That bug file is currently the only on-disk record of any
+tracker's augmentation shape, and it exists by accident."* The second clause holds;
+the first is **refuted**. Restoring `open-issue-work-queue` the same afternoon
+recovered shape from two *further* archived bug files, neither of which is about
+augmentation loss:
+
+- `docs/issues/archive/2026-08-16-update-entry-drops-entry-silently-when-fields-is-also-present.md:41`
+  quotes a live call pinning `entry_collection="tasks"` — a name body prose would
+  not have yielded.
+- `docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md:209-210`
+  echoes `changed_fields: ["status","bug","next"]`, revealing a sixth row field
+  (`next`) that the body never mentions.
+
+So the archive is a **partial, incidental shape store**: bug files quote the calls
+that produced them, and those quotes survive in git. That is better than the original
+claim allowed — and worse than it sounds, in a way that matters more:
+
+- Coverage is **accidental**, not systematic. A tracker gets a shape record only if
+  it happened to be involved in a bug worth filing. Nothing guarantees any given
+  tracker has one, and nothing tells you whether the one you found is complete.
+- It recovers **shape, never values**. `next` was recovered as a field name and is
+  permanently unrecoverable as data — the body states its values "live only in the
+  catalog, which is machine-local and git-ignored."
+
+This strengthens rather than weakens the case under **Fix**: a declared, travelling
+`params_schema` would make the shape *reliably* present instead of contingent on a
+tracker having once had a bug filed against it.
 ### 3. The bodies survive, so this is shape-loss, not content-loss
 
 `### T-N` × 30, `BL-N` × 44, `A-N` × 44 headings are all present in git. What is
@@ -187,4 +212,3 @@ mechanical once it is made.
 - `docs/issues/archive/2026-07-05-v6-migration-cascade-deletes-child-rows.md` — the destruction variant, fixed
 - `get_guide("tracker-conventions")` § *Declaring an augmentation*
 - `docs/trackers/bug-ledger-resume-2026-08-28.md` — the cross-machine handoff
-

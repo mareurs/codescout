@@ -151,6 +151,50 @@ Precedent: `docs/issues/archive/2026-07-02-tool-usage-patterns-augmentation-lost
 restored this same class by reconstructing from body prose, and states plainly that
 the restore is per-machine and must be re-run elsewhere.
 
+#### First: mine the archive for quoted live calls
+
+**Do this before deriving anything from body prose.** Bug files quote the original
+calls verbatim — argument names, collection names, response echoes — so the archive
+is the repo's *de facto* augmentation-shape store. It was never designed as one,
+which is exactly why nobody thinks to look:
+
+```
+grep -rn '<artifact-id>' docs/issues/archive/ docs/superpowers/ docs/trackers/ --include='*.md'
+```
+
+then read every hit showing an `artifact_augment` / `append_entry` / `update_entry` /
+`entry_filter` call, or a response echo like `changed_fields: [...]`.
+
+**A field name recovered from a quoted call beats one derived from body prose.**
+Measured 2026-08-28 restoring `open-issue-work-queue`, where it changed the result twice:
+
+- `entry_collection` is **`tasks`** — pinned by a quoted call in
+  `docs/issues/archive/2026-08-16-update-entry-drops-entry-silently-when-fields-is-also-present.md:41`.
+  A body-prose derivation would have invented a different, plausible, wrong name, and
+  every documented `update_entry` call against the tracker would have kept failing.
+- The original rows carried a **sixth field, `next`**, recoverable only from a
+  `changed_fields: ["status","bug","next"]` echo in
+  `docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md:209-210`.
+  Nothing in the body mentions it.
+
+**When a field is recoverable but its values are not, say so in three places** —
+declare it in `params_schema` so future appends carry it, leave every restored row
+without it, and record the loss in the augmentation `prompt`. Do not fabricate values
+to fill a column. `next`'s values are gone permanently; the body itself says they
+"live only in the catalog, which is machine-local and git-ignored."
+
+#### Then: check your transcription
+
+Re-render the reconstructed rows and diff them against the body's own table. This is
+what makes *recovered* a claim rather than a hope — and it is not hypothetical:
+BL-44 was specifically about params rows whose content had drifted from their body
+counterparts. The 2026-08-28 `open-issue-work-queue` restore diffed 44 rows against
+the snapshot table at lines 45-88 and got **0 mismatches**.
+
+Watch for decoy tables: that same file has `| BL-` rows at six other line ranges,
+all inside `## History` sections. Diff against the *live* snapshot, not the first
+table that matches.
+
 **Do not restore every tracker to full params.** Since 2026-08-18
 `get_guide("tracker-conventions")` has withdrawn the params-rendered-index pattern:
 no `render_template` writes a body, and a table row defines no citable token. Restore
