@@ -776,6 +776,73 @@ mod selection_tests {
         assert!(!RetrievalClient::dense_only(&c, /* lite */ false));
     }
 
+    /// The lean build's load-bearing invariant, first half:
+    /// `!cfg(server-stack)` ⟹ every constructible client has `lite == true`.
+    ///
+    /// Two constructors exist. `from_config_only` is itself
+    /// `#[cfg(feature = "server-stack")]`, so in a lean build it does not exist at
+    /// all — a fact this file's compilation asserts more strongly than any runtime
+    /// check could. That leaves `from_env`, which derives `lite` from the resolved
+    /// backend and reaches `qdrant_code_store` for the only non-lite one. This test
+    /// pins that call refusing, which is what closes the last door.
+    ///
+    /// Why it matters beyond tidiness: the consolidation in
+    /// `docs/plans/2026-07-25-embedding-transport-consolidation.md` gates the sparse
+    /// leg and the reranker behind `server-stack`, and argues the gate is a runtime
+    /// no-op *because* a lean build can never take either path. That argument IS this
+    /// invariant. Until now three files had to agree for it to hold and nothing made
+    /// them fail together. See `resume-embedding-transport-stages-1-3:ET-1`.
+    #[cfg(not(feature = "server-stack"))]
+    #[tokio::test]
+    async fn a_lean_build_cannot_construct_a_non_lite_client() {
+        let c = cfg_with(Some("http://127.0.0.1:8081"), "text-embedding-3-small");
+        // `map(|_| ())` discards the Ok side purely so `expect_err` has a `Debug`
+        // bound to satisfy — `Arc<dyn CodeVectorStore>` has none. The panic message
+        // is the point; the value never survives to be read.
+        let err = RetrievalClient::qdrant_code_store(&c)
+            .await
+            .map(|_| ())
+            .expect_err("a lean build must refuse the qdrant backend, not build one");
+        assert!(
+            err.to_string().contains("server-stack"),
+            "the refusal has to name the missing feature for an operator to act on it; got: {err}"
+        );
+    }
+
+    /// The same invariant's second half: given `lite`, the sparse leg and the
+    /// reranker are both unreachable regardless of configuration.
+    ///
+    /// Asserted against a config that is otherwise fully hybrid — explicit HTTP
+    /// embedder url, sparse enabled, reranking wanted by caller *and* operator — and
+    /// each half is preceded by its own negative guard. Without those guards the test
+    /// would pass just as happily against a config that was never hybrid to begin
+    /// with, which is the vacuous shape this repo keeps finding.
+    #[test]
+    fn lite_alone_forces_dense_only_and_vetoes_the_reranker() {
+        use crate::retrieval::search::should_rerank;
+
+        let mut c = cfg_with(Some("http://127.0.0.1:8081"), "text-embedding-3-small");
+        c.disable_sparse = false;
+
+        assert!(
+            !RetrievalClient::dense_only(&c, /* lite */ false),
+            "guard: without lite this config must be hybrid, or the next assertion proves nothing"
+        );
+        assert!(
+            RetrievalClient::dense_only(&c, /* lite */ true),
+            "lite alone must force dense-only"
+        );
+
+        assert!(
+            should_rerank(true, true, /* lite */ false, 10),
+            "guard: without lite this call must rerank, or the next assertion proves nothing"
+        );
+        assert!(
+            !should_rerank(true, true, /* lite */ true, 10),
+            "lite alone must veto the reranker even when caller and operator both want it"
+        );
+    }
+
     #[test]
     fn guarded_api_key_sends_the_key_over_https() {
         assert_eq!(
