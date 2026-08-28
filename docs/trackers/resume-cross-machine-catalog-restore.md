@@ -114,7 +114,9 @@ path. Otherwise this is closed as permanent loss.
 
 ## CM-3 — four PV rows have no defining heading
 
-**Status:** open
+**Status:** fixed 2026-08-28 — body edit only, no code. Verified live: `doctor`'s
+`entry_without_definition` went from 1 to **absent from `by_check` entirely**, and
+`provenance-subsystem` now returns zero findings.
 **Valid:** dated 2026-08-28
 
 **Observed.** `doctor` reports `entry_without_definition: 1` against
@@ -125,8 +127,23 @@ resolve to nothing.
 Not a regression — those citations were already dangling; adding the rows let
 `doctor` attribute them. The ledger ran at 42-of-68 undefined by design.
 
-**Next:** add four `#### PV-N — <title>` headings under its § *Defining sections for
-cited entries*. A body edit, which a restore deliberately does not do.
+**Done.** Four `#### PV-N — <title>` sections added under § *Defining sections for
+cited entries*, in the block's existing ascending order (… 8, **9**, **11**, 25 … 38,
+**40**, 44, **46**, 53 …). Shape matches its neighbours: heading, then
+`` `type` · **status** `` and any qualifier.
+
+**The provenance distinction is carried into the body, deliberately.** Each row's
+`note` field records how its fields were recovered, and they are not equal:
+PV-40 and PV-46 have titles **VERBATIM** from § *The four transferable rules*, while
+PV-9 and PV-11 have titles **AUTHORED** on 2026-08-28 from the round-2 table's
+question/answer cells because no canonical title survived the catalog loss. Every
+`type`/`status` on all four is **DERIVED** by parallel with a sibling in the same
+table. A reader who takes an authored title as recovered would be citing an
+invention, so each heading's metadata line says which it is and points at the row's
+`note` for the full argument.
+
+Note this closes a citation break, not a cosmetic gap: those four ids were cited
+from outside and resolved to **nothing**.
 
 ## CM-4 — body_keeps_snapshot: one predicate, both errors
 

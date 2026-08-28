@@ -1039,6 +1039,12 @@ Full detail for every entry stays in params: `artifact(action="get", id="e12cd7e
 #### PV-8 — large-context regime reconstructed from Langfuse
 `gap` · **settled** (DONE) · resolves PV-2 · evidence `round2_langfuse.json`
 
+
+
+#### PV-9 — M6 stale-drift: specs rarely change after code derives from them, at any horizon that matters
+`gap` · **settled** · repo-gated weak NO · heading added 2026-08-28; title AUTHORED from the round-2 table, not recovered — see the row's `note`
+#### PV-11 — `unrecorded` dominates only at whole-repo scope, not at working-diff scope
+`gap` · **settled** · resolves to PV-17 · heading added 2026-08-28; title AUTHORED from the round-2 table, not recovered — see the row's `note`
 #### PV-25 — Metric granularity is a free parameter, so pre-register the unit with the threshold
 `hazard` · **settled**
 
@@ -1060,9 +1066,15 @@ Full detail for every entry stays in params: `artifact(action="get", id="e12cd7e
 #### PV-38 — The atomic residual carries a convergent-naming signature, rarer in-repo than in English
 `finding` · **settled**
 
+
+#### PV-40 — When every result is a ceiling, build the population from evidence of belonging and accept undercounting
+`hazard` · **settled** · heading added 2026-08-28; title VERBATIM from § The four transferable rules
 #### PV-44 — A classifier's DEFAULT return value masquerading as a category
 `hazard` · **settled** · the fourth eligibility failure found in this programme
 
+
+#### PV-46 — A per-event budget in a system with an unbounded event count is statically detectable — ask what bounds the events
+`hazard` · **settled** · the fourth instance, and the first outside codescout · heading added 2026-08-28; title VERBATIM from § The four transferable rules
 #### PV-53 — THE CHECK: what would be invisible to this metric even if it were happening constantly?
 `hazard` · **settled**
 
