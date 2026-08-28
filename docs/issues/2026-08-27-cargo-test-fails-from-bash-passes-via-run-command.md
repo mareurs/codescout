@@ -280,8 +280,9 @@ redundant, but it is inert when work routes through `run_command`, load-bearing
 again the moment profile drift recurs, and lives outside every repo — so it costs
 nothing and guards a failure mode that has now happened once.
 
-Ready to archive to `docs/issues/archive/`. Record the fix SHA **and** its
-`git show <sha> | git patch-id --stable` at that time.
+Ready to archive to `docs/issues/archive/`. The fix pointer — SHA and patch-id for
+both in-repo commits — is already recorded in § References, so the move owes
+nothing further beyond re-pointing citations of this path.
 ## References
 - codescout memory `gotchas` § "`cargo test` Fails From Native `Bash` But Passes
   Via `run_command` — Export `CODESCOUT_EMBEDDER_URL`" — the durable note, incl.
@@ -299,3 +300,12 @@ Ready to archive to `docs/issues/archive/`. Record the fix SHA **and** its
   `CODESCOUT_EMBED_URL`, 4 do not). Not re-filed; recorded here as a datapoint. It
   is also the most likely source of the § Environment reading this file now
   retracts.
+
+**Fix pointer** — SHA *and* patch-id, recorded at fix time so neither promotion
+path owes a reconciliation later:
+
+| Half | Pointer |
+|---|---|
+| In-repo (assertion reshape, `src/tools/memory/tests.rs`) | `ee81b7e7` on `experiments` — patch-id `d358e38077534db47773dcf2cc20d9530271781e` |
+| Resolution write-up (this file + memory `gotchas`) | `3805b08e` on `experiments` — patch-id `7fffb50004ad383166b3bf2e3f74c30d5f5876e6` |
+| Root cause (two deletions from profile `settings.json`) | **no SHA by nature** — machine-local config outside every repo; backups `*.bak-20260827` |
