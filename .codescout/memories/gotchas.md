@@ -389,3 +389,70 @@ it does not need touching as the setting moves.
 Sibling of the section above, and easy to conflate: that one is about the
 symlink's *contents* drifting from the running compose profile; this one is about
 a shell-dependent difference in what reaches the process.
+
+## A Fresh Machine Loses Three Catalog Layers, Each Silent Differently
+
+`~/.local/share/librarian/catalog.db` is machine-local, git-ignored, and **machine-global**
+(one DB spanning every repo on the host). A checkout never indexed here arrives missing its
+semantic index, its `cites` edges, and every artifact augmentation — while markdown bodies
+look perfect, because those are the half that travels. Nothing errors; you quietly get less.
+Each layer is silent in a *different* way: `reindex` preserves augmentation keyed by id
+rather than regenerating it, so it reports healthy and repairs nothing; `artifact(get)`
+returns `augmentation: null` without comment; a missing edge is indistinguishable from an
+artifact that cites nothing.
+
+Full ordered process, with the measured numbers from the 2026-08-28 pull of 437 commits →
+**`docs/conventions/cross-machine-catalog-resume.md`** (linked from CLAUDE.md § Docs). Do not
+re-derive it. Load-bearing bits: a second `link_scan` reaching `edges_missing[0]` is what
+proves the write landed (the write's own success is not); partition `doctor` output three
+ways (machine drift / content debt that travels in git / other repos' rows) before touching
+anything; never `fix=prune_missing` during a resume.
+
+**`append_entry` does NOT need an augmentation.** `allocate_entry_id` keys on frontmatter —
+`entry_prefix` plus `entry_high_water_<PREFIX>`, both committed — so prose ledgers keep
+working on a fresh clone. `entry_collection` in `append_entry`'s signature is a CALLER
+argument, not a lookup of stored augmentation. Measured: 10 unaugmented ledgers, all
+functional. What augmentation loss actually costs a prose ledger is the `[LIVE]` prompt.
+
+**Restore only what a documented query proves you need.** Extract each tracker's documented
+`entry_filter` prescriptions and RUN them; the ones returning `entry_filter set but this
+artifact is not augmented` are the whole worklist. 2026-08-28: 18 unaugmented trackers, **4**
+with a failing documented query. Filling the other 14 would mean authoring standing
+instructions (the `[LIVE]` block is seen by every agent meeting the tracker cold) purely to
+clear a check — and `expects_augmentation` firing is a precise signal that reconstruction
+converts into a false all-clear.
+
+**Check for a code-owned augmentation first — it restores byte-for-byte.** A tracker written
+by a codescout action carries its augmentation via `include_str!`, so it is in the repo:
+`legibility-backlog` ← `src/librarian/tools/legibility_scan/render_prompt.md` +
+`render_template.j2`, `entry_collection: "candidates"`. The owning action does NOT self-heal —
+`legibility_scan(write=true)` on an existing-but-unaugmented tracker returns `ok: true` WITH
+`tracker_error: "no augmentation … call artifact_augment first"`, because create-and-augment
+only fires when the tracker does not exist. Attach the exact bytes, then re-run the action.
+
+**Shape survives in prose; the prompt does not.** Archived bug files quote the original calls
+verbatim, so `entry_collection`, field names and even whole forgotten fields are recoverable
+by grepping the artifact id across `docs/issues/archive/`. Nothing routinely quotes a
+`prompt`, so that half is always reconstruction — label it as such in a PROVENANCE paragraph
+inside the prompt itself.
+
+## Co-Occurrence Is Not Usage — Run The Query
+
+Three separate greps misled during one 2026-08-28 pass, each returning a plausible **number**
+rather than an error, which is what makes this class dangerous:
+
+- Counting bare `---` to find duplicate frontmatter reported **22** affected trackers; all
+  false, because session logs use `---` as an entry separator. Counting a frontmatter-only
+  key (`kind:`) gives the true answer, **1**.
+- Filtering `doctor` output by an absolute project path matched **nothing**, reading exactly
+  like "this project is clean" — response paths are relativized, so project-internal ones are
+  relative and only foreign repos stay absolute. Filter on the leading `/`.
+- Ranking trackers by "documented query count" gave **opposite** answers on the same tracker:
+  line-scoped grep said 0 (multi-line prescriptions split id and `entry_filter` across lines),
+  file-scoped said 5 (the file's `entry_filter` mentions documented a bug against a *different*
+  tracker's id). Executing the query was the only method that separated "queries this" from
+  "mentions both".
+
+Generalisation: when a proxy and the real call disagree, the proxy is measuring co-occurrence.
+Prefer running the thing. Anchor detection on structure (line-start, key prefix), never on a
+keyword, since prose and field share a vocabulary by construction.
