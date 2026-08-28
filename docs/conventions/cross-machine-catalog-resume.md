@@ -286,6 +286,42 @@ mechanics. Two constraints bite every time:
 recovered.** It is reconstruction from the body, not restoration of the original,
 and the distinction is not visible in the result.
 
+
+#### And know that recovery may be PARTIAL — say how partial
+
+Not every ledger comes back whole. `provenance-subsystem` recovered **30 of 68**
+rows on 2026-08-28: 26 from defining headings, 4 more anchored only as a table's
+first cell, and **38 permanently lost** because nothing on disk records them.
+
+Two things make that an acceptable outcome rather than a silent one:
+
+- **Enumerate the losses by id.** The restore listed all 38 (PV-1, PV-3, PV-6,
+  PV-10, PV-12..PV-24, …) in the augmentation `prompt`, with an instruction not to
+  fabricate them from the prose that cites them. Several ARE cited from the body's
+  own state block, so a reader will meet references resolving to no row — better
+  that they meet a documented gap than an invented answer.
+- **Commit messages are a fourth provenance source.** The original count came from
+  `f5f602e6` ("doctor now honestly reports 42 of 68") and `a20b492c` ("64 of 68
+  PV-N") — nowhere else on disk states it. Add `git log -S '<artifact-id>' --all`
+  and a read of the touching commits' *messages* to the archive sweep.
+
+**A partial restore can CREATE a violation that no restore would not.** The first
+pass here wrote 26 rows and tripped `doctor`'s `params_behind_body` — a defect the
+restore itself introduced, because the body defines entries the params then lacked.
+Adding the 4 table-anchored rows cleared it. So: **re-run `doctor` after attaching,
+and treat a new violation naming your artifact as yours to fix**, not as
+pre-existing.
+
+The end state here is `entry_without_definition: 1` against the artifact (4 of 30
+entries have no heading). That one is *faithful* — those citations were already
+dangling, and adding the rows merely let `doctor` attribute them. The ledger ran at
+42-of-68 undefined by design. Fixing it is a body edit, which a restore does not do.
+
+**Preserve a value that violates the tracker's own vocabulary; do not remap it.**
+PV-29's status is `killed`, which is absent from that tracker's documented
+`settled | open | blocked | descoped | carried`. It was kept verbatim and admitted
+to the `params_schema` enum, flagged in the prompt. Remapping it to the nearest
+legal value would have made the data agree with the doc by falsifying the data.
 ## Verify the resume
 
 Do not trust the steps; check the outcomes.
