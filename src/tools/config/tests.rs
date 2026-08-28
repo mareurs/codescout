@@ -218,6 +218,61 @@ async fn project_status_returns_all_sections() {
     );
 }
 
+/// `status` must declare the binary that answered, through the real call.
+///
+/// The comparison this exists for is `status.server.git_sha` against the
+/// sidecar's `written_by.git_sha` — "did the process answering me also write my
+/// index state, and was either of them running code that no longer exists?" —
+/// so the two must come from the same constructor. Asserting against
+/// `current_writer()` rather than against a literal is what pins that: a copy
+/// that drifted to its own snapshot would still look plausible in the JSON.
+///
+/// Unconditional by design. A field that appeared only when something was wrong
+/// could not answer the question on a healthy day, and the failure it reports is
+/// one where the operator's own belief about which build is serving them is the
+/// thing in doubt.
+#[tokio::test]
+async fn project_status_declares_the_binary_that_answered() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    let result = ProjectStatus.call(json!({}), &ctx).await.unwrap();
+
+    let server = result
+        .get("server")
+        .unwrap_or_else(|| panic!("status must declare the serving binary: {result:#}"));
+    let want = crate::retrieval::index_state::current_writer();
+
+    assert_eq!(
+        server["git_sha"], want.git_sha,
+        "must be the SAME identity the sidecar writer stamps, so the two are \
+         comparable: {result:#}"
+    );
+    assert_eq!(server["pid"], want.pid, "{result:#}");
+    assert_eq!(
+        server["git_dirty"], want.git_dirty,
+        "a dirty build does not fully identify its code, and a reader comparing \
+         shas needs to know that: {result:#}"
+    );
+    assert!(
+        server.get("exe_deleted").is_some(),
+        "the key must be present even where the answer is None — absence of the \
+         KEY would read as 'not deleted' rather than 'could not tell': {result:#}"
+    );
+}
+
 #[tokio::test]
 async fn project_status_compact_shape() {
     let dir = tempdir().unwrap();

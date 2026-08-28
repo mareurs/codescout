@@ -400,6 +400,39 @@ impl Tool for ProjectStatus {
             "libraries": { "count": lib_count, "indexed": lib_indexed },
         });
 
+        // --- Serving-binary identity ---
+        // Direction 3 of the zombie-server bug, at the only grain that is not
+        // noise. The direction wanted a response to declare the build it came
+        // from, and stalled on two design questions: what triggers it, and
+        // whether "differs from the on-disk binary" is even the right predicate
+        // — because a peer's rebuild makes every OTHER server stale while its
+        // answers stay correct, so a per-response warning would cry wolf
+        // continuously in exactly the multi-session case it exists to serve.
+        // Measured on this host 2026-08-28: six of eight servers were running
+        // unlinked binaries and answering fine.
+        //
+        // Reporting it on `status` dodges both questions rather than answering
+        // them. There is no trigger to choose — the caller explicitly asked what
+        // state it is in — and nothing cries wolf, because this is reported
+        // state, not a warning. Unconditional, for the same reason: a field that
+        // appears only when something is wrong cannot be used to confirm that
+        // things are right, and "which build answered me?" is a question worth
+        // being able to ask on a healthy day.
+        //
+        // Same four facts `write_index_state_with_dirty` stamps into the
+        // sidecar, from the same constructor, so what ANSWERED and what WROTE
+        // are directly comparable without a /proc walk on either side.
+        // docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
+        {
+            let w = crate::retrieval::index_state::current_writer();
+            result["server"] = json!({
+                "git_sha": w.git_sha,
+                "git_dirty": w.git_dirty,
+                "pid": w.pid,
+                "exe_deleted": w.exe_deleted,
+            });
+        }
+
         // --- Embedding backend section ---
         // Names the backend the *effective* config would resolve to right
         // now, plus which backends this binary was actually compiled with —
