@@ -858,6 +858,66 @@ full source") carries no caveat that the returned indentation is a display rende
 verified byte-identical to disk — the same class the reconnaissance skill already names
 generically ("a rendered read is evidence about content, not about bytes"), but `symbols`'
 own surface doesn't point a reader there for this specific case.
+### T-31 — `memory(write)` used to ADD to a topic, which replaces it wholesale
+
+**Session:** cross-machine catalog restore, 2026-08-28  
+**Tool:** `memory`  
+**Verdict:** wrong-tool
+
+Called `memory(action="write", topic="gotchas", content=<two new sections>)` intending
+to append. It replaces the topic: **391 lines / 17 sections became 66 / 2** — an 83%
+loss — and returned a bare `{"status": "ok"}`. Fifteen sections including
+`MCP Binary Symlink`, `Cherry-Pick SHA Discipline` and `Kotlin LSP Circuit-Breaker`
+were destroyed.
+
+The correct tool was `edit_markdown` on `.codescout/memories/<topic>.md`, which is
+exactly what the recovery used. Recovered only because the file is git-tracked —
+timing, not a defence — and the `.anchors.toml` sidecar churns alongside, so a
+restore must take both files.
+
+**Prompt gap.** `write` is listed beside `read` with no note that it is destructive,
+and there is **no `append` action** to reach for instead. A caller who has just READ a
+topic and wants to add to it has exactly one verb, and it silently means replace. The
+artifact side already solved this: `artifact(update, patch={body})` carries a 50%
+shrink guard needing `force=true` and emits a `field_patch` event with
+`prev_bytes`/`new_bytes`. `src/tools/memory/mod.rs` has no equivalent — a grep for
+`shrink|prev_bytes|guard|truncat` finds only output-side hits.
+
+Filed: `docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md`.
+
+### T-32 — grep used as a proxy for a tool call it cannot stand in for
+
+**Session:** cross-machine catalog restore, 2026-08-28  
+**Tool:** `grep`  
+**Verdict:** wrong-tool
+
+Three times in one session, grep answered a *different question* than the one asked,
+and each time returned a plausible **number** rather than an error — which is what
+makes the class dangerous.
+
+1. **Counting bare `---` to find duplicate frontmatter** → 22 affected trackers, **all
+   false**. Session logs use `---` as an entry separator: same string, different
+   position. Counting a frontmatter-only key (`kind:`) gives the true answer, **1**.
+2. **Filtering `doctor` output by an absolute project path** → matched **nothing**,
+   reading exactly like "this project is clean". Response paths are relativized, so
+   project-internal ones are relative and only foreign repos stay absolute. The filter
+   tested a string form the data never uses.
+3. **Ranking trackers by documented-query count** → line-scoped grep said **0** and
+   file-scoped said **5** for the *same* tracker. Neither is closer to the truth; both
+   measure co-occurrence. Executing the `entry_filter` query was the only method that
+   separated "queries this" from "mentions both", and it changed the worklist from 18
+   trackers to 4.
+
+**Prompt gap.** Iron Law 3 and the Search/Edit quickref route *between* grep,
+`semantic_search` and `references`, but nothing warns that grep standing in for a tool
+call measures **co-occurrence, not usage**. Candidate line: *"when a proxy and the real
+call disagree, the proxy is measuring co-occurrence — run the thing."* Paired rule,
+already in `get_guide("tracker-conventions")` for field detection and generalisable:
+anchor detection on **structure** (line-start, a key prefix), never on a keyword, since
+prose and field share a vocabulary by construction.
+
+Recorded in memory `gotchas` § *Co-Occurrence Is Not Usage — Run The Query*.
+
 ## Prompt improvement candidates
 
 ### Input-shape frictions are repair candidates, not prompt candidates (2026-07-10)
