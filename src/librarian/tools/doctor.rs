@@ -2778,7 +2778,14 @@ fn scan_validity_unparseable(
 fn scan_snapshot_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
     let mut out = Vec::new();
     for ledger in params_backed_ledgers(conn)? {
-        let in_body = crate::librarian::catalog::augmentation::body_claimed_indices(
+        // ROW anchors only, in both the gate and the subtraction below. A
+        // heading is not a snapshot row, and counting it as one broke this check
+        // in both directions at once: a headings-only body was told its
+        // non-existent table lagged, and a body whose headings covered every id
+        // masked a table that genuinely lagged — `claimed.difference(in_body)`
+        // came out empty and the check `continue`d on a real finding.
+        // See `body_snapshot_row_indices`.
+        let in_body = crate::librarian::catalog::augmentation::body_snapshot_row_indices(
             &ledger.body,
             &ledger.prefix,
         );
@@ -6770,6 +6777,93 @@ mod tests {
         assert!(v[0].detail.contains("BL-7"), "{}", v[0].detail);
     }
 
+    /// A body with entry HEADINGS and no index table keeps no snapshot, so
+    /// there is nothing to be behind. Measured on `tool-usage-patterns`
+    /// 2026-08-28: 32 defining headings, **0** table rows — and the hint
+    /// fired anyway, telling a maintainer to fix a table that does not exist.
+    ///
+    /// `body_claimed_indices` reads headings and rows into one set, so heading
+    /// coverage alone satisfied the majority gate. See
+    /// `docs/issues/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
+    #[test]
+    fn snapshot_drift_is_silent_when_the_body_has_only_headings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "headings_only",
+            tmp.path(),
+            // BL-3 is in params but has no heading and no row. With the bug,
+            // heading coverage (2 of 3) still clears the majority gate and
+            // BL-3 is reported as a missing snapshot ROW — in a document that
+            // has no table at all.
+            //
+            // Deliberately NOT the all-covered shape: that one passes today
+            // for an incidental reason (`missing` comes out empty, so the
+            // check `continue`s before the table question is ever asked) and
+            // would keep passing with the bug present. It asserts nothing.
+            "# Notes\n\n## BL-1 — a\n\nbody\n\n## BL-2 — b\n\nbody\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+
+        assert!(
+            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            "a body with no table cannot have a table that lags"
+        );
+    }
+
+    /// The other half of the same defect, and the more dangerous one: headings
+    /// **mask** a genuinely lagging table. `claimed.difference(in_body)` comes
+    /// out empty because the headings fill the holes the rows left, so the
+    /// check hits `missing.is_empty()` and goes silent — after its gate passed.
+    ///
+    /// Shape measured on `prompt-hamsa-audit-log` 2026-08-28: every params id
+    /// has a heading, the table has fewer rows than that, and `doctor` said
+    /// nothing. Here BL-3 has a heading but no row.
+    #[test]
+    fn snapshot_drift_fires_when_headings_mask_a_lagging_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "headings_mask_table",
+            tmp.path(),
+            "# Notes\n\n| ID | x |\n|---|---|\n| BL-1 | a |\n| BL-2 | b |\n\n\
+                 ## BL-1 — a\n\n## BL-2 — b\n\n## BL-3 — c\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+
+        let v = scan_snapshot_drift(&cat.conn).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "the table is one row behind and must be reported: {v:?}"
+        );
+        assert!(
+            v[0].detail.contains("BL-3"),
+            "must name the row the table is missing; got: {}",
+            v[0].detail
+        );
+    }
+
+    /// Guard against over-correcting: a body whose snapshot really is a table,
+    /// and really is complete, must stay silent. Without this, "gate on rows"
+    /// could be implemented as "always fire when a table exists".
+    #[test]
+    fn snapshot_drift_is_silent_when_the_table_is_complete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "table_complete",
+            tmp.path(),
+            "# Notes\n\n| ID | x |\n|---|---|\n| BL-1 | a |\n| BL-2 | b |\n",
+            &["BL-1", "BL-2"],
+        );
+
+        assert!(scan_snapshot_drift(&cat.conn).unwrap().is_empty());
+    }
+
     /// The named remedy must be one that can actually perform the repair, and the two
     /// obvious candidates cannot.
     ///
@@ -6977,6 +7071,13 @@ mod tests {
     /// The three anchored rows keep this above the majority gate, so the test
     /// isolates the prose-vs-anchored distinction rather than re-testing
     /// `body_keeps_snapshot`.
+    ///
+    /// **Fixture changed 2026-08-28: the three anchors were `## BL-N —`
+    /// headings and are now index rows.** The name, the assertion and the
+    /// intent are untouched — prose must not count as anchored — but this scan
+    /// now reads ROW anchors only, so a headings-only fixture no longer
+    /// exercises it. The headings shape is not thereby unguarded; it is
+    /// asserted one test down, where it belongs.
     #[test]
     fn snapshot_drift_does_not_accept_a_prose_mention_as_a_snapshot_row() {
         let tmp = tempfile::tempdir().unwrap();
@@ -6985,13 +7086,58 @@ mod tests {
             &cat,
             "prosey",
             tmp.path(),
-            "# Queue\n\n## BL-1 — a\n\n## BL-2 — b\n\n## BL-3 — c\n\n\
-             We should also look at BL-4 sometime.\n",
+            "# Queue\n\n| ID | T |\n|----|---|\n| BL-1 | a |\n| BL-2 | b |\n| BL-3 | c |\n\n\
+                 We should also look at BL-4 sometime.\n",
             &["BL-1", "BL-2", "BL-3", "BL-4"],
         );
         let v = scan_snapshot_drift(&cat.conn).unwrap();
         assert_eq!(v.len(), 1, "BL-4 is mentioned, not rendered: {v:?}");
         assert!(v[0].detail.contains("BL-4"), "{}", v[0].detail);
+    }
+
+    /// The coverage question the fixture change above raises, asserted rather
+    /// than assumed: when `snapshot_drift` goes quiet on a headings-only body,
+    /// does anything still report the entry that body is missing?
+    ///
+    /// It does — and it is the check that was always right for this shape.
+    /// `snapshot_drift`'s remedy is "re-render the table", and there is no
+    /// table here. `undefined_entries`' remedy is "add the `## BL-4 — title`
+    /// heading", which is the action a maintainer of a headings-only tracker
+    /// actually needs to take. Silencing the first loses nothing.
+    ///
+    /// Same argument and same shape as
+    /// `undefined_entries_fires_where_snapshot_drift_is_deliberately_silent`:
+    /// the two scans ask different questions of one body and are allowed to
+    /// disagree. This is one more place where the disagreement is the design.
+    #[test]
+    fn undefined_entries_covers_the_headings_only_body_snapshot_drift_now_ignores() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "headings_only_coverage",
+            tmp.path(),
+            "# Queue\n\n## BL-1 — a\n\n## BL-2 — b\n\n## BL-3 — c\n\n\
+                 We should also look at BL-4 sometime.\n",
+            &["BL-1", "BL-2", "BL-3", "BL-4"],
+        );
+
+        assert!(
+            scan_snapshot_drift(&cat.conn).unwrap().is_empty(),
+            "no table exists here, so no table can be behind"
+        );
+
+        let v = scan_undefined_entries(&cat.conn).unwrap();
+        assert_eq!(
+            v.len(),
+            1,
+            "BL-4 has no heading, so nothing can cite it — that must still be said: {v:?}"
+        );
+        assert!(
+            v[0].detail.contains("BL-4"),
+            "must name the entry: {}",
+            v[0].detail
+        );
     }
 
     #[tokio::test]

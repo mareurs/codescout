@@ -461,7 +461,10 @@ fn snapshot_stale_note(
         .ok()
         .flatten()?;
     let body = std::fs::read_to_string(&abs_path).ok()?;
-    let in_body = body_claimed_indices(&body, prefix);
+    // ROW anchors only. Every message below speaks of "the row" and "the
+    // committed table", so a body whose ids live in section headings has no
+    // snapshot for this note to be about. See `body_snapshot_row_indices`.
+    let in_body = body_snapshot_row_indices(&body, prefix);
     // Majority coverage, not mere presence: a params-canonical tracker mentions
     // a few ids in unrelated tables without maintaining a snapshot, and telling
     // it that its rows are missing on every write is noise, not a signal.
@@ -633,6 +636,15 @@ pub fn append_entry(
         .map(|b| body_claimed_indices(b, id_prefix))
         .unwrap_or_default();
     let body_max = body_claimed.iter().next_back().copied();
+    // A THIRD question, and it needs a narrower set than the other two: whether
+    // the body renders a snapshot table. Headings must keep counting for
+    // allocation above — a heading claiming F-33 has to block reissuing F-33 —
+    // but they are not a snapshot, and folding them in here is what told
+    // `tool-usage-patterns` (0 table rows) to update a table it does not have.
+    let body_rows = body_text
+        .as_deref()
+        .map(|b| body_snapshot_row_indices(b, id_prefix))
+        .unwrap_or_default();
 
     let params_next = next_index(&existing_ids, id_prefix);
     let next = params_next.max(body_max.map_or(0, |m| m + 1));
@@ -678,10 +690,10 @@ pub fn append_entry(
         claimed.insert(next);
         // Majority coverage, not mere presence — a params-canonical tracker can
         // line-anchor a few ids incidentally without maintaining a snapshot.
-        if body_keeps_snapshot(&claimed, &body_claimed) {
+        if body_keeps_snapshot(&claimed, &body_rows) {
             claimed
                 .into_iter()
-                .filter(|n| !body_claimed.contains(n))
+                .filter(|n| !body_rows.contains(n))
                 .map(|n| format!("{id_prefix}-{n}"))
                 .collect()
         } else {
@@ -1270,6 +1282,45 @@ pub(crate) fn body_claimed_indices(body: &str, id_prefix: &str) -> std::collecti
         .collect()
 }
 
+/// The subset of [`body_claimed_indices`] anchored in an **index-table row**
+/// (`| F-12 | … |`), excluding headings.
+///
+/// This is the set that answers *"does this body render a snapshot of `params`?"*.
+/// [`body_claimed_indices`] deliberately answers a different question — *"which
+/// ids does the body claim?"* — for which a heading counts every bit as much as a
+/// row, because it is what stops [`append_entry`] reissuing an id the body already
+/// uses. Merging the two is what made [`body_keeps_snapshot`] unable to tell a
+/// table from a set of section headings.
+///
+/// The distinction matters in both directions, and it is asymmetric:
+///
+/// - **Headings-only body** (`tool-usage-patterns`: 32 defining headings, 0 rows)
+///   — heading coverage cleared the majority gate, and the caller was told to add
+///   a row to a table that does not exist. There is no snapshot to be behind.
+/// - **Headings masking a lagging table** (`prompt-hamsa-audit-log`: every params
+///   id has a heading, the table has fewer rows) — the gate passed, but
+///   `claimed.difference(in_body)` came out *empty* because the headings filled
+///   the holes the rows left, so the check went silent on a genuine lag. This is
+///   the worse half: a false negative that looks like health.
+///
+/// Nothing is lost by excluding headings here. Whether an entry has a citable
+/// `## <ID> — <title>` heading is `undefined_in_body_note`'s question, it is not
+/// gated on [`body_keeps_snapshot`], and it fires independently.
+pub(crate) fn body_snapshot_row_indices(
+    body: &str,
+    id_prefix: &str,
+) -> std::collections::BTreeSet<u64> {
+    let esc = regex::escape(id_prefix);
+    // Same anchors and same wrapper tolerance as `body_claimed_indices`, minus
+    // the `#{1,6}` heading alternation. Keep the two regexes in step.
+    let Ok(re) = regex::Regex::new(&format!(r"(?m)^\|[ \t]*[`*\[]*{esc}-(\d+)\b")) else {
+        return Default::default();
+    };
+    re.captures_iter(body)
+        .filter_map(|c| c[1].parse::<u64>().ok())
+        .collect()
+}
+
 /// Every `<id_prefix>-N` index an artifact's markdown body **defines as a citable
 /// token** — a heading of the shape `## <ID> — <title>`, and nothing else.
 ///
@@ -1402,6 +1453,30 @@ pub(crate) fn body_entry_heading_level(body: &str, id_prefix: &str) -> Option<us
 /// Fails safe: a genuinely maintained snapshot that has fallen more than half
 /// behind goes unreported, which is a smaller harm than telling every
 /// params-canonical tracker it is broken on every write.
+///
+/// # The input narrowed on 2026-08-28 — read the table above as history
+///
+/// Those three coverage figures were measured against [`body_claimed_indices`],
+/// which counts **headings and index rows alike**. Every caller now passes
+/// [`body_snapshot_row_indices`] instead, so the percentages a live run produces
+/// are not the ones tabulated above. The row is kept because it is what justifies
+/// the majority threshold, and that reasoning still holds — but do not re-derive
+/// today's numbers from it.
+///
+/// The threshold was never the defect. Coverage counted from the wide set is
+/// simply the wrong *question*, and it failed in both directions at once:
+///
+/// - **False positive** — `tool-usage-patterns`, 32 defining headings and **0**
+///   table rows, scored 100% and was told on every append that its rendered
+///   table had fallen behind. It has no table.
+/// - **False negative, the worse one** — `prompt-hamsa-audit-log`, where every
+///   params id has a heading and the table has fewer rows. Coverage was 100%, the
+///   gate passed, and then `claimed.difference(in_body)` came out *empty* because
+///   the headings filled the holes the rows left. A real lag reported as health.
+///
+/// Note that those two sit on **opposite sides of every threshold**, which is the
+/// evidence that no tuning could have separated them.
+/// See `docs/issues/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
 pub(crate) fn body_keeps_snapshot(
     claimed: &std::collections::BTreeSet<u64>,
     in_body: &std::collections::BTreeSet<u64>,
@@ -2142,6 +2217,86 @@ mod tests {
         assert_eq!(id, "F-34");
     }
 
+    /// A tracker whose entries are `## F-N — title` SECTIONS and nothing else
+    /// keeps no rendered snapshot, so `snapshot_missing` must stay empty. The
+    /// heading question is `undefined_in_body`'s, and it is not gated — so
+    /// nothing is lost by declining to answer it here twice, in the wrong words.
+    ///
+    /// Live false positive, 2026-08-28: appending to `tool-usage-patterns`
+    /// (32 defining headings, **0** table rows) returned a hint saying *"This
+    /// tracker keeps a rendered snapshot in its body"* and telling the caller to
+    /// add a row to a table that does not exist. `body_claimed_indices` reads
+    /// headings and index rows into one set, so heading coverage alone cleared
+    /// `body_keeps_snapshot`.
+    ///
+    /// See `docs/issues/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
+    #[test]
+    fn append_entry_does_not_claim_a_snapshot_when_the_body_is_headings_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tracker.md");
+        std::fs::write(
+            &path,
+            "# Tracker\n\n## F-1 — one\nprose\n\n## F-2 — two\nprose\n\n## F-3 — three\nprose\n",
+        )
+        .unwrap();
+
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = path.clone();
+        art_upsert(&cat, &art).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[{"id":"F-1"},{"id":"F-2"},{"id":"F-3"}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let out = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[]).unwrap();
+
+        assert_eq!(out.id, "F-4");
+        assert!(
+            out.snapshot_missing.is_empty(),
+            "no table exists, so no row can be missing from one; got {:?}",
+            out.snapshot_missing
+        );
+        // The heading advisory is the correct one for this shape, and it must
+        // still fire — otherwise this fix trades a wrong signal for no signal.
+        assert!(
+            out.undefined_in_body.is_some(),
+            "F-4 has no `## F-4 — title` heading yet; that is the real advisory"
+        );
+    }
+
+    /// The guard against over-correcting: a body that really does render a table
+    /// must still be told when the table is behind. Same params as the test
+    /// above, but the body carries index ROWS, so the snapshot is real.
+    #[test]
+    fn append_entry_still_reports_a_missing_row_when_the_body_renders_a_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tracker.md");
+        std::fs::write(
+            &path,
+            "# Tracker\n\n| ID | T |\n|----|---|\n| F-1 | a |\n| F-2 | b |\n| F-3 | c |\n",
+        )
+        .unwrap();
+
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = path.clone();
+        art_upsert(&cat, &art).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[{"id":"F-1"},{"id":"F-2"},{"id":"F-3"}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+
+        let out = append_entry(&mut cat, "art1", "failures", "F", json!({}), &[]).unwrap();
+
+        assert_eq!(out.id, "F-4");
+        assert_eq!(
+            out.snapshot_missing,
+            vec!["F-4".to_string()],
+            "this body DOES render a table, and it is now one row behind"
+        );
+    }
+
     #[test]
     fn body_claimed_indices_reads_headings_and_index_rows() {
         let body =
@@ -2152,6 +2307,38 @@ mod tests {
         assert_eq!(
             body_claimed_indices(body, "F"),
             [3, 4, 5, 7].into_iter().collect()
+        );
+    }
+
+    /// The split that `body_claimed_indices` above deliberately does not make.
+    /// Same body, same wrapper tolerance, but headings drop out — because a
+    /// heading is an entry, not a row in a rendered snapshot.
+    #[test]
+    fn body_snapshot_row_indices_reads_rows_and_ignores_headings() {
+        let body =
+            "## F-3 — a\n\n| ID | x |\n| `F-7` | y |\n###### **F-5** z\n| [F-4](#f-4) | w |\n";
+        assert_eq!(
+            body_claimed_indices(body, "F"),
+            [3, 4, 5, 7].into_iter().collect(),
+            "precondition: the wide reading still sees all four"
+        );
+        assert_eq!(
+            body_snapshot_row_indices(body, "F"),
+            [4, 7].into_iter().collect(),
+            "only the two `|`-anchored rows are snapshot rows"
+        );
+    }
+
+    /// A body of nothing but entry sections renders no snapshot at all, and
+    /// the empty set is what makes `body_keeps_snapshot` return false for it.
+    /// This is the `tool-usage-patterns` shape: 32 headings, 0 rows.
+    #[test]
+    fn body_snapshot_row_indices_is_empty_for_a_headings_only_body() {
+        let body = "# T\n\n## F-1 — a\nprose\n\n### F-2 — b\nprose\n\n#### F-3 — c\nprose\n";
+        assert!(!body_claimed_indices(body, "F").is_empty());
+        assert!(
+            body_snapshot_row_indices(body, "F").is_empty(),
+            "no `|` row anchors, so there is no table to fall behind"
         );
     }
 
