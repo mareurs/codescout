@@ -55,6 +55,14 @@ Two consequences, both live:
 - **Cross-machine.** This machine's three profiles only. The store is a single git-tracked
   ledger in this repo; a second machine would need a sync design that does not exist and is
   not needed to validate the core. Revisit when a second machine runs these profiles.
+
+  > **Trigger fired 2026-08-28.** A second machine now runs these profiles: this host was
+  > compiled for the first time that day, its three profiles having still been byte-identical
+  > to the § *Problem* baseline above — which is the proof it had never been onboarded.
+  > Cross-machine is therefore in scope and undesigned. The asymmetry to design against: the
+  > ledger is git-tracked and travels between hosts, the compiled block lives in untracked
+  > `~/.claude*/CLAUDE.md` and does not, and nothing runs `--check` on either host. Recorded
+  > as `CM-10` in `docs/trackers/resume-cross-machine-catalog-restore.md`.
 - **The other five engines** (§ *Where this sits*). Each is a key type plus a corpus and
   ships separately.
 - **The 44.4% `contradicted` rate** measured in `docs/evals/2026-08-27-guide-injection-use.md`.
@@ -252,10 +260,26 @@ independently valuable.
 start before that merge; a parallel implementation of the matcher is the thing this phase
 exists to avoid.
 
+> **UNBLOCKED 2026-08-28.** That merge has landed on `experiments`. Both borrowed pieces are
+> present and pinned: `Tool::selector_key` at `src/tools/core/types.rs:1205` (default `None`,
+> so a tool opts in at zero cost) with `LibrarianAdapter`'s implementation at
+> `src/librarian/adapter.rs:190`; and `GuideLedger::re_arm` at `src/tools/guide_ledger.rs:280`,
+> whose prefix-awareness is pinned by `re_arm_does_not_sweep_a_topic_that_shares_a_name_prefix`
+> (`:739`). Phase 2 may start.
+
 **Phase 3 — harvest and backfill evidence.** Transcribe the four existing rules, then
 commission arms for the three `unmeasured` ones. Each arm is a separate, small piece of work
 and the results are what decide whether those rules keep their `always`/`triggered` binding
 at all.
+
+> **Sequencing overturned 2026-08-28 by `A-34`.** Phase 2 was to be sequenced after Phase 3
+> on the grounds that `triggered` routing had an empty population. The population is not
+> empty — it is **resident**. `OP-2` and `OP-3` are `triggered` rules whose text sits
+> unconditionally in the profile today, and removing just those two sections recovers the
+> whole 3-of-7 (~43%) loss in `OP-1`'s measured effect. Phase 2 is therefore the *measured*
+> fix and goes first. The interim alternative — retiring `OP-2`/`OP-3` now — carries an
+> honest cost worth stating: unlike the `Conclude Last` deletion, neither has a measured
+> replacement, so they would go undelivered until routing exists.
 
 ---
 
@@ -274,6 +298,28 @@ The spec is falsifiable on two predictions:
 
 Prediction 2 is the one that would embarrass this design, and it is cheap: the scenario, its
 arms, and its checker already exist.
+
+> **Both predictions resolved 2026-08-28. The design survives; the cost is elsewhere.**
+>
+> **Prediction 1 — confirmed in full.** `--check` reported DRIFT on all three profiles before
+> the first compile, `all 3 profiles current` after, and kept passing across a hand-edit
+> outside the markers. Gate 1 held alongside it: a second `compile` wrote nothing.
+>
+> **Prediction 2 — confirmed; the wrapper is INERT.** `A-31`, n=35/arm, 0 errored:
+> `b2-imperative-only` and `s2-compiled-block` are per-cell identical on 6 of 7 cells, the
+> sole difference being one run on a control; excluding the stale `t2-cat-gate` trap, 30/30
+> vs 29/30. Compilation does not alter the rule's effective form — § 3's rendering and the
+> `generated … do not edit` marker framing both stand.
+>
+> **What the same chain found instead is a cost this spec did not predict.** `A-32`: the
+> block stacked beside the hand-written `Conclude Last` prose collapsed 7/10 → 2/10, so Gate
+> 3(a)'s blindness to *unmanaged prose already resident in the target file* is not merely
+> theoretical. `A-33`: deleting that prose helped and did not hurt, but left a residual (`s5`
+> 4/10 against `s2`'s 7/10). `A-34` decomposed it: the mechanism is **instruction
+> competition, not position** — `s7`, with `OP-2`/`OP-3`'s sections removed and the block
+> still at the END, lands exactly on `s2`'s 7/10, while moving the block to the top (`s6`)
+> buys one run and makes `wrong+unchecked` worse. **The remedy is not available to the
+> compiler**, which is why it changes the phase order rather than the renderer.
 
 ---
 

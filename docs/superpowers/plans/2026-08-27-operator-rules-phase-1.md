@@ -1699,6 +1699,11 @@ Not tasks — the handoff.
 - **Phase 2** is blocked on `sdd/get-guide-section-grain` merging to `experiments`. It adds
   `Tool::selector_key` and the prefix-aware `re_arm` that `triggered` routing reuses.
   Starting earlier means writing a second matcher, which is what that phase exists to avoid.
+
+  **UNBLOCKED 2026-08-28** — that merge has landed on `experiments`. `Tool::selector_key` is
+  at `src/tools/core/types.rs:1205` (impl at `src/librarian/adapter.rs:190`), and
+  `GuideLedger::re_arm` at `src/tools/guide_ledger.rs:280`, its prefix-awareness pinned by
+  `re_arm_does_not_sweep_a_topic_that_shares_a_name_prefix` (`:739`). Phase 2 may start.
 - **Phase 3** harvests the remaining three rules and commissions arms for them. Two are
   projected `triggered` and cannot be delivered until Phase 2 lands; the third
   (`three-profile config sync`) becomes largely redundant once `check` exists, and Phase 3
@@ -1707,3 +1712,23 @@ Not tasks — the handoff.
   100%/100% at n=35 — is not a Phase 1 task because it runs in the `prompt-engineering`
   repo. Run it once Task 8 lands; a drop means compilation altered the rule's effective
   form and `render_block` is at fault.
+
+  **2026-08-28 — the precondition is met, and prediction 1 is confirmed in full.** The first
+  compile on this host ran that day. `check` reported DRIFT on all three profiles before it
+  and `all 3 profiles current` after, and kept passing across a hand-edit outside the markers
+  on `~/.claude-kat` — all three clauses of prediction 1, observed. Gate 1 held too: a second
+  `compile` wrote nothing. The retired OP-5 prose was deleted from all three profiles first,
+  so this host now reproduces, byte-for-byte, the deprosed state `A-33` measured as
+  `s5-real-profile-deprosed` — 3845 B / md5 `9b554ef6`, the exact figures `A-33` records
+  from the other host. Two hosts, one ledger, one compiler, identical bytes: the compile
+  is reproducible across machines. Cross-machine consequences: `CM-10` in
+  `docs/trackers/resume-cross-machine-catalog-restore.md`.
+
+  **Prediction 2 is ALREADY ANSWERED — do not re-run it.** `A-31` ran it 2026-08-28 at
+  n=35/arm, 0 errored: the compiler's wrapper is **inert**. `b2-imperative-only` and
+  `s2-compiled-block` are per-cell identical on 6 of 7 cells, the sole difference being one
+  run on a control; excluding the stale `t2-cat-gate` trap, 30/30 vs 29/30. `render_block`
+  is not at fault and the `generated … do not edit` marker framing needs no redesign. The
+  arm's absolute thresholds failed only because the suite broke: codescout `be4a679b`
+  inverted `t2`'s expected answer, so that trap now penalises the very verification
+  behaviour the suite exists to reward.
