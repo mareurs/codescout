@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
 severity: high
-unverified: 'Directions 2 (refuse to write from a deleted binary) and 3 (let a response declare its build) remain unimplemented. Direction 1 (74dfbfca) is live-verified on all four branches - see the 2026-08-28 08:18 subsection - with one stated gap: the differs-branch input was a hand-edited sidecar, so a second physical build writing that value is still unobserved. WHICH pid wrote any pre-2026-08-28 sidecar stays unprovable; the field fixes that going forward, not retroactively.'
+unverified: 'AWAITING A DECISION, not work. Every direction buildable without one is shipped: 0'' (ca2b0226), 1 (74dfbfca, live-verified), 3 (fbd7f348). Direction 2 must NOT be built as drafted - it is inverted at the main sync path, where the sidecar write FOLLOWS the vector write, so refusing it destroys the evidence and keeps the damage. The corrected shape - refuse before the embed pass, i.e. decline to re-index from an unlinked binary - would stop 6 of 8 servers on this host from indexing, so it needs the operator''s call. Status stays open rather than mitigated precisely so the canonical triage query keeps surfacing that decision.'
 ---
 
 # BUG: server processes on deleted binaries write their stale config into the live project sidecar
@@ -585,6 +585,50 @@ timing-test convention (real-clock sleeps flake under CI/wine — see
 None yet for the still-open directions 1/2. The tractable unit there is a
 `should_write_shared_state()` predicate over a `/proc/self/exe`-deleted signal, testable by
 injecting the signal rather than by staging a real zombie.
+### Done 2026-08-28 — direction 3, at the only grain that is not noise
+
+**SHA:** `fbd7f348` (`experiments`). **patch-id:**
+`3b7974495dc3db1edf6c08a4a8ac3f0cfbb4b919`.
+
+Direction 3 stalled on two questions it raised against itself — what triggers the stamp, and
+whether "differs from the on-disk binary" is the right predicate at all, since a peer's
+rebuild makes every other server "stale" while its answers stay correct. That objection is
+sound, and this host proves it: six of eight servers were on unlinked binaries and answering
+fine, so a per-response warning would fire continuously in the exact multi-session case the
+feature exists to serve.
+
+So it ships on `workspace(action="status")` — the direction's own stated minimum — which
+**dodges both questions rather than answering them.** No trigger to choose, because the
+caller explicitly asked what state it is in. Nothing cries wolf, because this is reported
+state rather than a warning:
+
+```json
+"server": { "git_sha": "fbd7f348", "git_dirty": false, "pid": 851714, "exe_deleted": false }
+```
+
+Unconditional, deliberately: a field that appears only when something is wrong cannot be
+used to confirm that things are right, and *"which build answered me?"* is worth asking on a
+healthy day. It reuses `current_writer()`, so **what answered and what wrote are directly
+comparable** — `status.server.git_sha` against the sidecar's `written_by.git_sha` — with no
+`/proc` walk on either side. The test asserts against `current_writer()` rather than a
+literal for that reason: a copy that drifted to its own snapshot would still look plausible
+in the JSON.
+
+### Where the four directions now stand
+
+| # | direction | state |
+|---|---|---|
+| 0' | bound the LSP shutdown so `SIGTERM` is honoured | **done** — `ca2b0226` |
+| 1 | record WHO wrote the sidecar | **done, live-verified** — `74dfbfca` |
+| 2 | refuse to write from a deleted binary | **do not build as drafted** — inverted at the main sync path; the corrected shape is a policy call |
+| 3 | let a response declare its build | **done** — `fbd7f348` |
+
+Everything buildable without a decision is built. A zombie's influence on shared state is now
+*visible* at both ends and *survivable*; it is still not *prevented*, and preventing it means
+deciding whether a process on an unlinked binary may re-index at all — which on this host
+would stop six of eight servers. **That is the only thing left, and it is the operator's
+call, not a task.**
+
 ## Workarounds
 
 Kill the stale servers and re-index:
