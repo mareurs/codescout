@@ -1542,4 +1542,33 @@ Stated as a table so that no outcome can be narrated afterwards as the one expec
 
 Ground-truth mtimes for the primary-metric cells, captured **before** launch: `read_file.rs` 2026-08-27 15:32, `grep.rs` 2026-08-27 17:10, `file_group.rs` 2026-05-24 21:07. To be re-checked after the run — a peer modified `path_security.rs` two minutes into the previous one.
 
-**Outcome:** PENDING.
+**Outcome — RUN 2026-08-28, n=35/arm, 0 errored. P-P2 held: the mechanism is INSTRUCTION COMPETITION, not position. P-P5 held, so the decomposition is supported.**
+
+| arm | excl-t2 (n=10) | all plausibility (n=15) | all-class (n=35) | wrong&unchecked |
+|---|---|---|---|---|
+| `s2` block alone | **7/10** | 12/15 | 28/35 | 0/35 |
+| `s5` real profile | 4/10 | 6/15 | 21/35 | 1/35 |
+| `s6` block at top | **5/10** | 7/15 | 22/35 | **3/35** |
+| `s7` competing rules removed | **7/10** | 11/15 | 26/35 | 1/35 |
+
+`s7` lands **exactly on `s2`'s ceiling** — with the block still at the **end**, and ~900 bytes of factual prose retained. `s6` gains one run over `s5`, inside noise, and made `wrong&unchecked` **worse**.
+
+Three independent cuts agree on the ordering, which is materially better powered than A-33's two-run result.
+
+### The remedy is not available to the compiler
+
+Splicing the block at the top buys ~1 run. Removing the two competing imperative sections buys all 3.
+
+**And the two sections removed are `### Memory` and `### Subagent Dispatch` — `OP-3` and `OP-2` in the ledger, both already classified `triggered`.** The section *retained*, `## Three Claude Code Instances`, is `OP-4`, also `triggered`, and cost nothing.
+
+So the effect is **not bulk** and **not triggered-ness**. It is specifically **competing imperatives resident in the same file**.
+
+Phase 2 routing moves exactly those two out of the resident profile and delivers them on their selectors. **Phase 2 is therefore the measured fix for a 3-of-7 loss in the deployed rule's effect** — overturning the earlier recommendation to sequence Phase 3 ahead of it because routing had "an empty population". The population is not empty. It is resident, and it is costing `OP-1` roughly 43% of its effect.
+
+### Interim remedy, and its honest cost
+
+Deleting or shortening `### Memory` and `### Subagent Dispatch` in the three profiles would recover the effect today, without Phase 2. But unlike the Conclude Last deletion, **those rules have no measured replacement**: retiring them into the ledger (where `OP-2`/`OP-3` already sit) means they go undelivered until routing exists. That is a real trade, not a free win — `OP-1`'s reliability against two operator rules being silent.
+
+### Contamination guard — clean
+
+`path_security.rs` last moved 08:45:38, **before** this run's 09:07:08 start; `read_file.rs`, `grep.rs` and `file_group.rs` unchanged across the window. The primary metric is uncontaminated.
