@@ -111,7 +111,7 @@ pub fn compile(ledger: &str, profiles: &OperatorProfiles) -> Result<Vec<PathBuf>
             // before this error: none" and buried the only line naming what to
             // repair two levels down. Rendered inline instead, so the diagnosis
             // leads and the partial-apply note trails.
-            // docs/issues/2026-08-27-operator-rules-check-discards-healthy-profiles-on-one-unreadable-file.md
+            // docs/issues/archive/2026-08-27-operator-rules-check-discards-healthy-profiles-on-one-unreadable-file.md
             return Err(anyhow::anyhow!(
                 "{e:#}\n\nprofiles already written before this error: {already}"
             ));
@@ -142,7 +142,7 @@ pub fn check(ledger: &str, profiles: &OperatorProfiles) -> Result<Vec<Drift>> {
         // already uses, and it lands in the same `Drift` list, so the CLI prints
         // it as one more DRIFT line and `exit_code` still returns 1 — no gate
         // semantics change.
-        // docs/issues/2026-08-27-operator-rules-check-discards-healthy-profiles-on-one-unreadable-file.md
+        // docs/issues/archive/2026-08-27-operator-rules-check-discards-healthy-profiles-on-one-unreadable-file.md
         let doc = match std::fs::read_to_string(path) {
             Ok(doc) => doc,
             Err(e) => {

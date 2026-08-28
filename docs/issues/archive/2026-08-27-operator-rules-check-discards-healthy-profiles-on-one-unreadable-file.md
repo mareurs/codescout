@@ -1,12 +1,19 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- operator-rules
+- error-reporting
+- anyhow
+- cli
+closed: 2026-08-28
+fix_patch_id: 246a099f73c586e0a6a7ac0882aac069cb16cba2
+fix_sha: fae6492b (experiments)
 opened: 2026-08-27
-closed:
-severity: low
 owner: marius
 related: []
-tags: [operator-rules, error-reporting, anyhow, cli]
-kind: bug
+severity: low
+unverified: 'Not live-verified through the MCP server, and deliberately so: both defects are on the CLI surface (`codescout operator-rules check|compile`), which the reproduction exercises directly against a synthetic $HOME. The success path was already correct and is untouched.'
 ---
 
 # BUG: `operator-rules check` reports nothing about the healthy profiles when any one profile file is missing, and its compile errors lead with the least useful line
@@ -161,7 +168,8 @@ Not fixed here. Two independent changes, neither blocking:
    from the anyhow chain and print it as a separate trailing line. The information is
    worth keeping — it just must not lead.
 
-Fix SHA + patch-id: N/A, not fixed.
+**Fixed 2026-08-28** — see § *Closed* below. SHA `fae6492b` (`experiments`), patch-id
+`246a099f73c586e0a6a7ac0882aac069cb16cba2`.
 
 ## Tests added
 
@@ -171,6 +179,60 @@ in-memory documents, where a file that cannot be read is not expressible, and it
 on `Drift` values rather than on rendered CLI output, so the anyhow ordering has no
 assertion surface at all. A regression test for (1) needs a temp-dir profile set with one
 path absent; for (2) it needs the formatted error string, not the error value.
+
+## Closed 2026-08-28 — both defects, both reproduced before and after
+
+**SHA:** `fae6492b` (`experiments`). **patch-id:**
+`246a099f73c586e0a6a7ac0882aac069cb16cba2`.
+
+The reproduction in this file ran unchanged against a synthetic `$HOME` on both sides of
+the fix — the whole point of the bug is what the CLI *prints*, so a function-level check
+would not have been evidence.
+
+**(1)** Fixed as option 1 of the Fix section: a `Drift` reason rather than a new variant,
+using the collect-and-continue shape the `BlockScan::Absent` arm already used one branch
+away. Same batch now yields three lines instead of one error:
+
+```
+operator-rules: DRIFT …/.claude/CLAUDE.md — a second BEGIN operator-rules marker was found…
+operator-rules: DRIFT …/.claude-sdd/CLAUDE.md — a BEGIN operator-rules marker has no matching END…
+operator-rules: DRIFT …/.claude-kat/CLAUDE.md — could not be read: No such file or directory (os error 2)
+```
+
+The two actionable drifts are back, and `exit_code` still returns 1 — gate semantics
+unchanged, as the Fix predicted.
+
+**(2)** Fixed as the second half of option 2 — dropped from the anyhow chain and rendered
+inline, so the diagnosis leads and the partial-apply note trails:
+
+```
+Error: splicing profile …/.claude/CLAUDE.md: document has a second BEGIN operator-rules
+marker after the first block ends; refusing to guess which block is authoritative
+
+profiles already written before this error: none
+```
+
+Both facts are still present. Only the order changed, which was the entire defect.
+
+### Tests — shaped by this file's own account of why none existed
+
+The *Tests added* section named the two structural reasons the suite could not see either
+defect, and both new tests are built directly against them:
+
+- `check` is driven over in-memory or freshly-written documents, **where a file that cannot
+  be read does not occur** → the new test deletes a real file from a tempdir profile set,
+  and shapes it like the incident: two profiles carrying genuine drift plus one missing, so
+  a regression loses exactly what the operator cared about.
+- the suite asserts on `Drift` values, **so anyhow's context order has no assertion surface
+  anywhere** → the new test asserts on the formatted string, and pins **positions** rather
+  than presence. Presence would have passed before the fix: both lines were already there,
+  in the wrong order.
+
+Each was mutation-verified by reverting its own fix, with the blast radius predicted first;
+each breaks only its own test.
+
+Gate: `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -D
+warnings`, `cargo check --no-default-features`, `cargo test` — **4603 passed, 0 failed**.
 
 ## Workarounds
 
