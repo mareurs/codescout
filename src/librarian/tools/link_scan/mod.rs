@@ -421,16 +421,49 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .get(row.id.as_str())
             .cloned()
             .unwrap_or_else(|| row.id.clone());
-        let citing_repo_name: Option<&str> =
-            crate::librarian::tools::containing_root(&root_paths, &row.abs_path).and_then(
-                |matched| {
-                    ctx.workspace
-                        .roots
-                        .iter()
-                        .find(|r| &r.path == matched)
-                        .map(|r| r.name.as_str())
-                },
-            );
+        // Names under which this row's own repo may legitimately be cited. Two
+        // independent sources, UNIONED rather than ranked: either match is positive
+        // evidence of a self-reference, and the policy at the use site only claims
+        // "genuinely cross-repo" on positive evidence.
+        //
+        // The registry name alone was the original source, and it is `None` for most
+        // repos. `ctx.workspace.roots` is the user's optional `[[roots]]` registry in
+        // ~/.config/librarian/workspace.toml, which a repo has to be hand-added to;
+        // codescout is not in its own, appearing there only as an umbrella MEMBER. So
+        // `containing_root` returned None for all 1183 rows, `is_some_and` folded that
+        // into the self-reference branch, and the cross-repo bucket was unreachable in
+        // every real repo while its unit test passed on a hand-built absolute root.
+        // docs/issues/archive/2026-08-27-cross-repo-file-qualified-bucket-never-fires.md
+        let mut self_names: Vec<&str> = Vec::new();
+        if let Some(name) = crate::librarian::tools::containing_root(&root_paths, &row.abs_path)
+            .and_then(|matched| {
+                ctx.workspace
+                    .roots
+                    .iter()
+                    .find(|r| &r.path == matched)
+                    .map(|r| r.name.as_str())
+            })
+        {
+            self_names.push(name);
+        }
+        // Git-root basename — the same convention `artifact(action="create")`'s `repo`
+        // field documents ("workspace root name (git repo basename)"), and the one a
+        // citation author is actually spelling. Gated on the row living under that git
+        // root so a scope="umbrella"/"all" scan cannot stamp this repo's name onto
+        // another repo's rows; `containing_root` is reused for the comparison rather
+        // than a bare `starts_with` so the component-boundary and Windows-verbatim
+        // handling stay in one place.
+        if let Some(name) = git_root
+            .as_ref()
+            .filter(|root| {
+                crate::librarian::tools::containing_root(std::slice::from_ref(root), &row.abs_path)
+                    .is_some()
+            })
+            .and_then(|root| root.file_name())
+            .and_then(|n| n.to_str())
+        {
+            self_names.push(name);
+        }
         for c in &ex.citations {
             match resolve::resolve(c, &row.id, &rel_dir, &index, &corpus) {
                 Some(resolve::Outcome::Edge { dst_id }) => {
@@ -494,13 +527,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
                 Some(resolve::Outcome::MalformedQualifier) => {
                     let outer = c.raw.split(':').next().unwrap_or("");
-                    // Positive evidence required to call it cross-repo: the citing
-                    // root must be known AND differ from the outer segment. Either
-                    // "root unknown" or "root == outer" falls back to the generic
-                    // bucket — the safe default when we cannot confirm a self-
-                    // reference, since claiming "genuinely cross-repo" is the
-                    // stronger assertion.
-                    if citing_repo_name.is_some_and(|name| name != outer) {
+                    // Positive evidence required to call it cross-repo: at least one
+                    // name for the citing repo must be known AND the outer segment
+                    // must match none of them. Either "no name known" or "outer is one
+                    // of our own names" falls back to the generic bucket — the safe
+                    // default when we cannot confirm a self-reference, since claiming
+                    // "genuinely cross-repo" is the stronger assertion.
+                    if !self_names.is_empty() && !self_names.contains(&outer) {
                         cross_repo_file_qualified_total += 1;
                         *cross_repo_file_qualified_by_source
                             .entry(src_rel.clone())
@@ -1381,6 +1414,90 @@ mod tests {
             json!(0),
             "neither may silently resolve, even though the inner `target:F-2` form \
              would on its own: {out:#?}"
+        );
+    }
+
+    /// The production shape the test above cannot reach: **no `[[roots]]` entry at
+    /// all**.
+    ///
+    /// `ctx.workspace.roots` is the user's optional per-machine registry
+    /// (`~/.config/librarian/workspace.toml`), and a repo has to be hand-added to it.
+    /// codescout is not in its own — it appears there only as an umbrella *member* —
+    /// so `containing_root` returned `None` for every row, `is_some_and(None)` folded
+    /// that into the self-reference branch, and `cross_repo_file_qualified` was
+    /// unreachable in every real repo. Measured 2026-08-27 before the fix: 0 in the
+    /// new bucket against 20 `malformed_qualifier` findings in codescout, 13 of which
+    /// named another repo, plus 4 of 4 in claude-plugins.
+    ///
+    /// The sibling test above passes throughout, because it hand-builds the `Root` a
+    /// real run derives. That is the class: **a test that constructs the state
+    /// production computes cannot tell you the computation works.**
+    ///
+    /// So this one registers nothing and leans on the git-root basename instead. The
+    /// tmpdir's own name stands in for the repo name, read back rather than hardcoded,
+    /// which is what makes the self-reference arm real here.
+    #[tokio::test]
+    async fn the_split_still_fires_when_the_repo_is_absent_from_the_roots_registry() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A git root whose basename is a grammar-VALID repo name. `double_qualified_re`
+        // requires every qualifier segment to match `[a-z][a-z0-9_-]{1,119}`, and a bare
+        // tempdir basename (`.tmpAbC123`) matches none of it — so the self-repo citation
+        // would never be extracted, and this test's redundant-prefix arm would assert on
+        // a citation that does not exist. Found by running it: the cross-repo arm passed
+        // and the self-repo arm reported zero.
+        let repo_root = tmp.path().join("my-repo");
+        std::fs::create_dir(&repo_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let dst = repo_root.join("target.md");
+        std::fs::write(&dst, "## F-2 — anchor entry\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "dst", &dst, "target");
+
+        // Read back rather than hardcoded: the production code derives this from the
+        // git root, so the test must too or it stops pinning the derivation.
+        let repo_name = repo_root.file_name().unwrap().to_str().unwrap().to_string();
+
+        let src = repo_root.join("source.md");
+        std::fs::write(
+            &src,
+            format!(
+                "Redundant: `{repo_name}:target:F-2`. Cross-repo: `claude-plugins:target:F-2`.\n"
+            ),
+        )
+        .unwrap();
+        seed_scan_artifact(&cat, "src", &src, "source");
+
+        let root = repo_root;
+        let ctx = TestToolContextBuilder::new(cat)
+            // Deliberately NO .with_root(...) — that is the whole point.
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        let out = call(&ctx, json!({ "write": true })).await.unwrap();
+
+        assert_eq!(
+            out["counts"]["cross_repo_file_qualified"],
+            json!(1),
+            "an unregistered repo must still reach its own bucket: {out:#?}"
+        );
+        assert_eq!(
+            out["cross_repo_file_qualified"][0]["raw"], "claude-plugins:target:F-2",
+            "{out:#?}"
+        );
+        assert_eq!(
+            out["counts"]["malformed_qualifier"],
+            json!(1),
+            "and the self-repo one must still be recognised as redundant, via the \
+             git-root basename rather than a registry name: {out:#?}"
+        );
+        assert_eq!(
+            out["malformed_qualifier"][0]["raw"],
+            format!("{repo_name}:target:F-2"),
+            "{out:#?}"
         );
     }
 }
