@@ -260,10 +260,12 @@ eight slots have `hook_at: null` while their process is alive and serving — on
 seconds before the sample, on the codescout project itself, from a server up for seven
 hours. Gate CLOSED is the *forgiving* direction, so this is not the harm this file
 describes; but it means Phase C's surgical re-arm is silently inactive for those sessions,
-which is the optimisation the whole guide-ledger work exists to deliver. And it is
-permanent by design: `refreshLivenessStamp`'s invariant 1 (`if (!e.hook_at) continue;`)
-never opens the gate, so a slot that misses its `SessionStart` stamp can never be repaired
-by the refresh. Filed separately — different mechanism, opposite direction, different fix:
+which is the optimisation the whole guide-ledger work exists to deliver. It is not repairable
+by the refresh — `refreshLivenessStamp`'s invariant 1 (`if (!e.hook_at) continue;`) never
+opens a gate — but it is **not permanent**: a later `SessionStart` stamps it, measured
+2026-08-28 06:23Z on the very slot cited here. (This sentence originally read "permanent by
+design", generalising from one code path to the whole system; corrected same day.) Filed
+separately — different mechanism, opposite direction, different fix:
 `docs/issues/2026-08-28-rendezvous-slot-never-stamped-leaves-phase-c-inactive.md`
 
 ## Hypotheses tried

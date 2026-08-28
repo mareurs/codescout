@@ -12,8 +12,8 @@ opened: 2026-08-28
 owner: marius
 related:
 - docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md
-severity: low
-unverified: The INVARIANT is confirmed at the loaded plugin copy (lib.mjs:385) and the unstamped-while-serving STATE is measured (3 of 8 slots; the codescout one made 23 calls in 40 minutes). WHY pid 3708928's SessionStart stamp never landed is NOT established - three candidates listed, none tested. Candidate 1 (a /mcp reconnect spawning a server without inheriting the predecessor's stamp) is the one that would make this routine rather than incidental, and it is cheap to stage; test it before designing anything.
+severity: informational
+unverified: 'REFUTED 2026-08-28, both by measurement: (a) candidate 1 - a /mcp reconnect DOES inherit the predecessor stamp (new pid''s hook_at predated its own start by 3 minutes); (b) the file''s own headline claim that a missed stamp is permanent - the one measured instance was stamped by a later SessionStart-class event. Invariant 1 governs the REFRESH hook only; it says nothing about the other writer, and I over-generalised from it. Still unexplained and still true: that server served calls for ~8 hours with a null slot. No fix is implemented and none is currently warranted - the failure direction is forgiving and the exposure self-heals.'
 ---
 
 # BUG: a rendezvous slot that misses its SessionStart stamp can never be stamped again, so Phase C stays inactive for the life of that server
@@ -57,6 +57,64 @@ No error and no log line. A live, actively-used server whose slot reads `"hook_a
 Seven hours old, on the codescout project where the companion is active, and its session
 logged **23 MCP calls in the preceding 40 minutes** — the most recent 12 seconds before
 the sample.
+
+## Corrected 2026-08-28 06:23Z — both of my own claims are refuted, 90 minutes after filing
+
+A `/mcp` reconnect supplied the decisive measurement this file asked for. It refutes the
+candidate I named as most-suspicious **and** the severity claim in the Summary.
+
+### Candidate 1 is refuted — a reconnect DOES inherit
+
+The new server for this session:
+
+```
+pid 851714   started_at = 2026-08-28T06:23:18Z
+             hook_at    = 2026-08-28T06:20:10Z   ← three minutes BEFORE the process existed
+```
+
+A stamp predating its own process cannot have been written for it; it was inherited from
+the predecessor slot, which is exactly what `4800c297` claims to do. So reconnect-without-
+inheritance is **not** the mechanism, and the candidate I called "the one that would make
+this routine" is dead. Worth noting the inherited value is the predecessor's last *refresh*,
+not a fresh stamp — which is why it reads as slightly stale rather than as `started_at`.
+
+### "Permanent for the process lifetime" is refuted — it self-heals
+
+The headline claim of this file was that a missed stamp *"can never be stamped again"*,
+reasoning from `refreshLivenessStamp`'s invariant 1. The invariant is real and I read it in
+the loaded copy; the conclusion drawn from it was too strong — it establishes that **the
+refresh** cannot repair a null slot, not that nothing can.
+
+The exhibit in this very file:
+
+```
+pid 3708928  (session 6896e62b, up since 2026-08-27T22:19:29Z)
+  05:25Z  hook_at = null      ← what I filed
+  06:23Z  hook_at = 2026-08-28T06:20:51Z
+```
+
+It got stamped. The refresh cannot have done it, so a `SessionStart`-class event did — a
+`/clear`, a `/compact`, or a new conversation on that session. **The correct statement is
+that a missed stamp survives until the next `SessionStart` for that session, not until the
+process dies.**
+
+The error was reasoning from one code path to a claim about the whole system: invariant 1
+governs the refresh hook and says nothing about the other writer. It is the same shape as
+*"already fails loudly" is a claim about a code path, not about a feature*, which this repo
+already has three datapoints for.
+
+### What survives, and at what severity
+
+Still true, still unexplained: pid 3708928 served MCP calls for roughly **eight hours** with
+a null slot, so Phase C's surgical re-arm was inactive for that session across that window,
+silently. The population also improved on its own — 3 of 8 unstamped at 05:25Z, 1 of 6 at
+06:23Z, and the survivor is `MRV-poc`, a project where the companion is not active and
+gate-closed is correct.
+
+Severity accordingly drops from `low` to **informational**: the failure direction is the
+forgiving one, the exposure is bounded by the next `SessionStart` rather than by process
+lifetime, and the only measured instance has since healed itself. What is left is a
+frequency question with no known harm, not a defect with a fix.
 
 ## Reproduction
 
@@ -167,4 +225,3 @@ the failure direction is the forgiving one.
 - `docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md` — the
   sibling bug; its 2026-08-28 measurement subsection is where this was found.
 - `claude-plugins:80ed23f` — the liveness refresh, and invariant 1.
-
