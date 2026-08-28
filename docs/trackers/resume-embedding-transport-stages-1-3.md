@@ -65,8 +65,8 @@ the ADR rather than inferred from the plan's `draft` status.
 
 ## ET-1 — Pin the load-bearing invariant with a test, before anything depends on it
 
-**Status:** open — do this first
-**Valid:** conditional — until a test pins it, then `invariant`
+**Status:** DONE 2026-08-28 — `2bd3415b` (`experiments`), patch-id `9e434457`
+**Valid:** invariant — now pinned by a test, mutation-verified 3/3
 
 The whole consolidation rests on one property, currently true and currently
 maintained by **three files agreeing with each other by accident**. Nothing pins
@@ -90,8 +90,28 @@ Proof chain, each link read 2026-07-25:
 (`embed_batch:353-440`) and the entire reranker are **already dead code**. Gating
 them is a no-op at runtime.
 
-**Next:** write the test. Re-read the five links first — the line numbers are
-from 2026-07-25 and will have drifted.
+**Done.** Two tests in `src/retrieval/client.rs::selection_tests`:
+`a_lean_build_cannot_construct_a_non_lite_client` (links 1–3) and
+`lite_alone_forces_dense_only_and_vetoes_the_reranker` (links 4–5, each half behind
+its own negative guard so neither can pass vacuously). Mutation-verified with three
+probes, each killing its test on its own named assertion.
+
+**The line numbers HAD drifted, and two links moved in substance — re-read them
+before citing the chain above:**
+
+- `dense_only` is now `lite || disable_sparse || backend_is_local(config)`
+  (`src/retrieval/client.rs:194-196`). The third term is new. Harmless to the
+  implication — it is an OR — but the expression this entry quotes is stale.
+- Link 5's inline `if !opts.rerank || self.lite || ...` was extracted into a named
+  `should_rerank(caller_wants, operator_enabled, lite, n_candidates)`
+  (`src/retrieval/search.rs:21-28`). That refactor is why this was cheap to pin.
+
+**Gate at commit time:** clippy green, `--no-default-features` green, 4617 tests
+pass. One failure, `server::tests::tool_surface_under_budget`, and two `fmt` diffs —
+all three owned by a concurrent session's uncommitted work, none reachable from a
+test-only change. Detail in the commit message.
+
+**ET-2 is now unblocked.**
 
 ## ET-2 — Stage 1: split the module, gate the HTTP half — banks the whole win alone
 
