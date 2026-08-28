@@ -150,6 +150,71 @@ async fn activate_nonexistent_path_errors() {
     assert!(result.is_err());
 }
 
+/// Shape B from `docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`
+/// — the mechanism that file called "a hypothesis wearing a conclusion's clothes",
+/// isolated from `/clear`, from the companion plugin, and from any second session.
+///
+/// The asymmetry is six lines in `ActivateProject::call`: with the rendezvous gate
+/// OPEN the ledger is preserved (only the project-scoped topic re-arms, and only on a
+/// genuine switch); with it SHUT the whole ledger is cleared. `rendezvous_active` is
+/// **monotone** — nothing closes it — so a companion hook that dies mid-process leaves
+/// the gate latched open. A later `/clear` then mints a conversation that gets neither
+/// path: no blunt re-arm here, and no rekey elsewhere, because the rekey was the dead
+/// hook's job. That is the one case where Phase C is strictly less forgiving than the
+/// blunt predecessor it replaced.
+///
+/// **Asserted on a tool-contract topic, deliberately.** `project-activation-bootstrap`
+/// is the sole member of `PROJECT_SCOPED`, so the gate-OPEN path also drops it whenever
+/// the activation registers as a switch — a test keyed on it would be measuring path
+/// canonicalization, not the gate. `librarian` can only be removed by `clear()`, which
+/// isolates the disputed branch and is the semantically right target: preserving
+/// tool-contract guides the model already holds is exactly what the open gate is for.
+///
+/// This settles the MECHANISM only. It cannot measure how often a hook dies mid-process
+/// — nothing in-process can, and the server keeps no state that would answer it.
+#[tokio::test]
+async fn rendezvous_gate_open_withholds_the_rearm_a_shut_gate_performs() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+
+    // A dead hook looks exactly like this: gate latched open from an earlier stamp,
+    // a topic already delivered, and no rekey — because rekeying was the hook's job.
+    let mut led = crate::tools::guide_ledger::GuideLedger::default();
+    led.insert("librarian".to_string());
+    led.set_rendezvous_active(true);
+
+    let ctx = ToolContext {
+        agent: Agent::new(Some(dir.path().to_path_buf())).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(led)),
+        workspace_override: None,
+    };
+
+    let activate = json!({ "path": dir.path().to_str().unwrap() });
+
+    ActivateProject.call(activate.clone(), &ctx).await.unwrap();
+    assert!(
+        ctx.guide_hints_emitted.lock().contains("librarian"),
+        "gate OPEN must leave a tool-contract topic suppressed — this is the starvation \
+         path a dead hook produces, and the asymmetry the bug file describes"
+    );
+
+    // Same call, same project, gate SHUT: the blunt always-safe clear runs.
+    ctx.guide_hints_emitted.lock().set_rendezvous_active(false);
+    ActivateProject.call(activate, &ctx).await.unwrap();
+    assert!(
+        !ctx.guide_hints_emitted.lock().contains("librarian"),
+        "gate SHUT must clear the ledger — without this half the assertion above would \
+         pass even if activate had stopped touching the ledger entirely"
+    );
+}
+
 #[tokio::test]
 async fn activate_replaces_previous_project() {
     let dir1 = tempdir().unwrap();

@@ -268,6 +268,51 @@ design", generalising from one code path to the whole system; corrected same day
 separately — different mechanism, opposite direction, different fix:
 `docs/issues/2026-08-28-rendezvous-slot-never-stamped-leaves-phase-c-inactive.md`
 
+## Mechanism SETTLED 2026-08-28 — Shape B ran, and it discriminates
+
+**The mechanism this file called "a hypothesis wearing a conclusion's clothes" is now a
+regression test.** § *Resume* prescribed Shape B — in-process, deterministic, six lines at
+`src/tools/config/mod.rs:267-283` — and it is implemented as
+`rendezvous_gate_open_withholds_the_rearm_a_shut_gate_performs` in
+`src/tools/config/tests.rs`.
+
+Both halves assert, exactly as § *Resume* specified:
+
+- gate **OPEN**, topic already delivered, ledger **not** rekeyed — the topic stays
+  suppressed. This is the starvation path a dead hook produces.
+- same call, gate **SHUT** — the blunt clear runs and the topic re-arms.
+
+The second half is not decoration: without it the first would pass even if `activate` had
+stopped touching the ledger at all.
+
+**One deliberate design choice.** The assertion is keyed on `librarian`, a **tool-contract**
+topic — not on `project-activation-bootstrap`. The latter is the sole member of
+`PROJECT_SCOPED`, so the gate-OPEN path *also* drops it whenever the activation registers as
+a switch; a test keyed on it would have been measuring tempdir canonicalization rather than
+the gate. `librarian` can only be removed by `clear()`. That isolates the disputed branch,
+and it is the semantically right target anyway: preserving tool-contract guides the model
+already holds is precisely what the open gate exists to do.
+
+**Mutation-verified, not merely green.** Collapsing the gate so both paths clear
+(`if false && led.rendezvous_active()`) fails the first assertion with its own message;
+reverted immediately. A test that cannot fail would have settled nothing, and this file's
+whole complaint was about claims that had never been made falsifiable.
+
+### What this does and does not close
+
+**Closes:** the mechanism. It is no longer arguable, and it is now guarded against silent
+removal — anyone collapsing the asymmetry gets a named failure.
+
+**Does not close:** frequency. Nothing in-process can measure how often a companion hook
+dies mid-process, and § *Measured 2026-08-27* established the server keeps no state that
+could answer it. The 2026-08-28 join gave a first number — 0 of 5 — over a ~20-minute
+snapshot, which is not a rate.
+
+**Status stays `open`,** and the three options in § *Resume* are unchanged. The decision
+between them is a judgement about a cross-repo change with a per-prompt write cost, which is
+not mine to take unilaterally — option 3 (instrument, gate nothing) remains the one the
+evidence most directly supports.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** an idle TTL would eventually close the gate on a stale keyed ledger.
