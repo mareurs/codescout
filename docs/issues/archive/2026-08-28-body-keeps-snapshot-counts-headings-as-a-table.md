@@ -1,7 +1,7 @@
 ---
-id: ec40b63996d15b62
+id: ac7b2b741844aa87
 kind: bug
-status: open
+status: fixed
 title: 'BUG: body_keeps_snapshot treats a heading as a table row, so it false-POSITIVES on heading-only trackers and false-NEGATIVES on a table that genuinely lags — one predicate, both errors, one cause'
 owners:
 - marius
@@ -11,6 +11,7 @@ tags:
 - append_entry
 - update_entry
 - false-positive
+closed: 2026-08-28
 ---
 
 # BUG: `body_keeps_snapshot` counts headings as a table
@@ -190,32 +191,77 @@ both follow from the same one-line change.
 
 ## Fix
 
-Not started. **Direction, not a decision** — reproduce before building:
+**Fixed 2026-08-28.** `experiments` SHA `16b5b243`, patch-id
+`2293ef75e6a6525efc99c14d3c80b1eec0e25081`.
 
-Discriminate on **how** an id is anchored, not how many are. An id appearing only
-as `## <ID> — <title>` is a prose entry; an id appearing as a table row (`| <ID> |`)
-is a snapshot row. Gate on the *row* count, so:
+The *Direction* above was right and was followed. One refinement worth recording,
+because this file's own title asserts the opposite: **the predicate was innocent.**
+`body_keeps_snapshot` never saw the distinction it is accused of ignoring —
+`body_claimed_indices` folds `## F-12` and `| F-12 |` into one `BTreeSet<u64>`
+before the call. The fix is therefore upstream of it, and the predicate's body is
+unchanged.
 
-- table-bearing trackers (`windows-platform-support`) keep today's behaviour;
-- heading-only trackers (`tool-usage-patterns`) go silent, correctly;
-- the `provenance-subsystem` false positive stays suppressed, since scattered
-  mentions are neither.
+Added `body_snapshot_row_indices` (the `|`-anchored subset) and routed the three
+snapshot call sites through it:
 
-`link_scan`'s extractor already classifies both shapes, so the parsing exists.
+| site | asks |
+|---|---|
+| `augmentation.rs` `snapshot_stale_note` | does the body's ROW still show old values? |
+| `augmentation.rs` `append_entry` → `snapshot_missing` | which rows is the table missing? |
+| `doctor.rs` `scan_snapshot_drift` | has the rendered table fallen behind params? |
 
-**Do not simply raise the threshold**, per Hypothesis 2 — that moves the boundary
-between two populations that are on the same side of it.
+Every message at those sites already said *"the row"* and *"the committed table"*,
+so all three were always asking the narrower question and being handed the wider
+answer.
 
+**Two call sites are deliberately NOT changed**, and narrowing either would be a
+silent regression:
+
+1. **Id allocation** in `append_entry` keeps the wide reading. Its own comment says
+   the set answers *"one read, both directions"* — `body_max` drives the next id, and
+   a heading claiming `F-33` **must** still block reissuing `F-33`, or every
+   historical citation of it silently re-points.
+2. **`scan_params_behind_body`** subtracts the other way round. An id the body
+   defines by heading which `params` has never seen is a real finding there, and
+   that check is documented as deliberately un-gated.
 ## Tests added
 
-None yet. The regression test must include a fixture the current suite lacks:
-**100% coverage via headings, zero table rows**, asserting `body_keeps_snapshot`
-is `false`. Today's fixtures cover 100%-with-table (true) and 21%-scattered
-(false); the failing case is the third shape neither pins. Note
-`doctor.rs:6746` (`params_behind_body_is_not_gated_on_body_keeps_snapshot`)
-deliberately exercises the low-coverage path — the new test is its complement, not
-a replacement.
+**Eight.** Three were red before the fix; two exist to stop the fix over-correcting.
 
+| test | pins |
+|---|---|
+| `body_snapshot_row_indices_reads_rows_and_ignores_headings` | the split itself, against the same fixture the wide reader uses |
+| `body_snapshot_row_indices_is_empty_for_a_headings_only_body` | the shape this bug asked for: 100% coverage, zero rows |
+| `append_entry_does_not_claim_a_snapshot_when_the_body_is_headings_only` | **red before** — and asserts `undefined_in_body` still fires, so the advisory is corrected rather than lost |
+| `append_entry_still_reports_a_missing_row_when_the_body_renders_a_table` | guard: a real table one row behind still fires |
+| `snapshot_drift_is_silent_when_the_body_has_only_headings` | **red before** |
+| `snapshot_drift_fires_when_headings_mask_a_lagging_table` | **red before** — the false-negative half |
+| `snapshot_drift_is_silent_when_the_table_is_complete` | guard: not "always fire when a table exists" |
+| `undefined_entries_covers_the_headings_only_body_snapshot_drift_now_ignores` | the coverage this fix depends on, asserted rather than assumed |
+
+### One existing fixture changed, and why
+
+`snapshot_drift_does_not_accept_a_prose_mention_as_a_snapshot_row` anchored its
+three ids as **headings**. That no longer exercises this scan, so the anchors are
+now index rows. Name, intent and assertions are untouched — prose must not count as
+anchored, which is orthogonal to this change.
+
+The shape it used to cover is not left unguarded: the new sibling test asserts
+`scan_undefined_entries` reports that entry instead. That is the check whose remedy
+— *"add the `## BL-4 — title` heading"* — is the one a headings-only tracker's
+maintainer actually needs, where `snapshot_drift`'s *"re-render the table"* names a
+table that does not exist.
+
+### A first draft of the headings-only test was VACUOUS
+
+Worth recording, because it passed and looked like evidence. It gave the body
+headings for **every** params id. That shape passes today, **with the bug present** —
+coverage clears the gate, then `claimed.difference(in_body)` is empty, so
+`missing.is_empty()` hits `continue` before the table question is ever asked. It
+asserted nothing and would have shipped as a green regression test.
+
+Caught by running it and reading which tests went red. The fixture now omits one
+params id from the headings, so the false positive is reachable and the test bites.
 ## Workarounds
 
 Ignore `snapshot_hint` on a tracker with no table. Check first:
@@ -229,12 +275,15 @@ reintroduces the two-formats defect BL-39 removed.
 
 ## Resume
 
-Add the failing fixture described under *Tests added* and confirm it fails against
-`body_keeps_snapshot` as written. Then change the predicate to count table-row
-anchors rather than any anchor, and re-run the three existing snapshot fixtures in
-`src/librarian/tools/doctor.rs` (~`:6746`, ~`:6836`) plus
-`src/librarian/catalog/augmentation.rs` to confirm the true positives still fire.
+**Done.** Nothing outstanding on this defect.
 
+One deliberate non-goal, recorded so it does not read as an oversight: the
+measured 100% / 61% / 21% coverage table in `body_keeps_snapshot`'s docstring was
+**annotated, not re-measured**. Those figures came from the wide reading, so they do
+not describe what callers now pass. They are kept because they are what justifies
+the majority threshold — and that reasoning is unaffected, since the defect was
+never the threshold. Re-deriving them under the narrow reading would be a fresh
+measurement, not a correction, and nothing currently depends on the number.
 ## References
 
 - `src/librarian/catalog/augmentation.rs:1405-1413` — the predicate

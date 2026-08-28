@@ -1476,7 +1476,7 @@ pub(crate) fn body_entry_heading_level(body: &str, id_prefix: &str) -> Option<us
 ///
 /// Note that those two sit on **opposite sides of every threshold**, which is the
 /// evidence that no tuning could have separated them.
-/// See `docs/issues/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
+/// See `docs/issues/archive/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
 pub(crate) fn body_keeps_snapshot(
     claimed: &std::collections::BTreeSet<u64>,
     in_body: &std::collections::BTreeSet<u64>,
@@ -2229,7 +2229,7 @@ mod tests {
     /// headings and index rows into one set, so heading coverage alone cleared
     /// `body_keeps_snapshot`.
     ///
-    /// See `docs/issues/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
+    /// See `docs/issues/archive/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
     #[test]
     fn append_entry_does_not_claim_a_snapshot_when_the_body_is_headings_only() {
         let dir = tempfile::tempdir().unwrap();

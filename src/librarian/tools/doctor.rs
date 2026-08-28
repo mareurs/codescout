@@ -6784,7 +6784,7 @@ mod tests {
     ///
     /// `body_claimed_indices` reads headings and rows into one set, so heading
     /// coverage alone satisfied the majority gate. See
-    /// `docs/issues/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
+    /// `docs/issues/archive/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`.
     #[test]
     fn snapshot_drift_is_silent_when_the_body_has_only_headings() {
         let tmp = tempfile::tempdir().unwrap();

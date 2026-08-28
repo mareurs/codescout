@@ -130,11 +130,13 @@ cited entries*. A body edit, which a restore deliberately does not do.
 
 ## CM-4 — body_keeps_snapshot: one predicate, both errors
 
-**Status:** open
+**Status:** fixed 2026-08-28 — `experiments` `16b5b243`, patch-id
+`2293ef75e6a6525efc99c14d3c80b1eec0e25081`.
 **Valid:** invariant
 
 **Observed.** Filed as
-`docs/issues/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`. The
+`docs/issues/archive/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`
+(archived 2026-08-28; the move re-keyed it `ec40b63996d15b62` → `ac7b2b741844aa87`). The
 predicate gates on majority id coverage, but a heading satisfies coverage, so:
 `tool-usage-patterns` (30 headings, **0** table rows) gets a false positive telling
 a maintainer to fix a table that does not exist, while `prompt-hamsa-audit-log`
@@ -143,9 +145,25 @@ a maintainer to fix a table that does not exist, while `prompt-hamsa-audit-log`
 Not a threshold bug: the known false positive (21%, scattered) and this one (100%,
 headings) sit on opposite sides of every coverage threshold.
 
-**Next:** gate on **row** anchors rather than any anchor — `link_scan` already makes
-that distinction. Add the fixture the suite lacks: 100% coverage, zero table rows,
-asserting `false`.
+**Done.** Added `body_snapshot_row_indices` (the `|`-anchored subset) and routed
+the three snapshot call sites through it — `snapshot_stale_note`, `append_entry`'s
+`snapshot_missing`, and `doctor`'s `scan_snapshot_drift`. Eight tests; three red
+before the fix, two guarding against over-correction.
+
+**The title of this entry is slightly wrong, and it is worth knowing why.** The
+predicate was innocent: `body_claimed_indices` folds headings and rows into one
+`BTreeSet<u64>` *before* `body_keeps_snapshot` is called, so it never saw the
+distinction it is accused of ignoring. The fix is upstream of it and its body is
+unchanged.
+
+Two call sites deliberately keep the wide reading, and narrowing either would be a
+silent regression: **id allocation** (a heading claiming `F-33` must still block
+reissuing `F-33`, or citations re-point) and **`scan_params_behind_body`** (which
+subtracts the other way round, where a heading params never saw is a real finding).
+
+One existing fixture changed — `snapshot_drift_does_not_accept_a_prose_mention_as_a_snapshot_row`
+anchored its ids as headings and now uses rows. The shape it vacated is covered by
+a new test asserting `scan_undefined_entries` reports it instead.
 
 ## CM-5 — hamsa Index table is 4 rows behind its params
 
