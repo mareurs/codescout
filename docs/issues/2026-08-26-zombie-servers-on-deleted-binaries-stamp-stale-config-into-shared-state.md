@@ -320,6 +320,50 @@ The sidecar at measurement time read `last_indexed_at: 04:42:33Z` — 07:42:33 l
 **17 seconds after pid 4033882 started**, which is what sync-on-activation looks like.
 Strong, not proof; answering it for every future write is precisely what `written_by` does.
 
+#### Corrected 2026-08-28 — the config divergence is ONE axis, not two, and it is deterministic
+
+Raised by a peer session and verified here independently before adopting. My subsection
+above called the protocol split a *second* divergence axis alongside stale code. That
+framing is wrong, and wrong in the direction that makes it sound unfixable: "live config
+differs between processes" reads as nondeterministic drift. It is neither. It is a
+**per-spawning-profile split**, fully predictable from four config files.
+
+The marker is the presence of `CODESCOUT_EMBED_URL`, which exactly one surface class sets:
+
+| surface | `CODESCOUT_EMBEDDER_PROTOCOL` | `CODESCOUT_EMBED_URL` |
+|---|---|---|
+| `~/.claude/settings.json` (`env`) | `llama-server` | **unset** |
+| `~/.claude/.claude.json` → `mcpServers.codescout` | — (no env block) | unset |
+| `~/.claude-sdd/.claude.json` → `mcpServers.codescout.env` | `openai` | **set** |
+| `~/.claude-kat/.claude.json` → `mcpServers.codescout.env` | `openai` | **set** |
+| `~/.config/codescout/.env` → `.env.amd` | (`EMBEDDER_URL` only) | unset |
+
+So `openai` ⇔ spawned by `-sdd` or `-kat`; `llama-server` ⇔ spawned by `~/.claude`. **Limit,
+as the peer stated it:** the marker cannot separate `-sdd` from `-kat` — both set it
+identically.
+
+**What the correlation count is and is not worth.** Two observers measured it minutes apart
+on partly different pid sets — 9/9 theirs, 8/8 mine, zero exceptions either time, with
+turnover between the samples. But both keys ship in the *same* env block, so given these
+config files the correlation is **1.0 by construction**; no census could have come out
+otherwise, and the sample size is not evidence for the mechanism. Reading the four files
+once is. The census is still not vacuous — it falsifiably checks that no *other* surface
+injects the key into a `~/.claude` server or strips it from an sdd/kat one, which
+`~/.config/codescout/.env` could plausibly have done and does not. Weigh it as a
+no-override check, not as 9 independent confirmations.
+
+**Why it matters for the fix.** A deterministic split is assertable: which processes will
+disagree about protocol is knowable from config *before* any of them writes. It also
+composes with direction 1 — `written_by.pid` plus `/proc/<pid>/environ` turns a recorded
+writer into a named profile for as long as that process lives, which is the window in which
+anyone would act on it.
+
+Credit: peer session `codescout-f6`, which measured this and deliberately left the edit to
+me. Same mechanism on a different variable, with a retraction worth reading — an evidence
+line that compared a variable's NAME across the divergence instead of its VALUE:
+`docs/issues/archive/2026-08-27-cargo-test-fails-from-bash-passes-via-run-command.md`
+§ Root cause, and memory `gotchas`, same section title.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** a config file somewhere sets `all-minilm`.
