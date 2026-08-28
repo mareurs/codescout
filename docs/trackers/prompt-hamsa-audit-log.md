@@ -1499,3 +1499,47 @@ But `b2`'s t3 shows the **opposite** (3 verified, 5/5 correct), and n=5 per cell
 A peer modified `src/util/path_security.rs` at 08:43:05, two minutes into the run. That file is **t2-only** ground truth; the primary metric excludes t2 and rests on `read_file.rs` / `grep.rs` / `file_group.rs`, none of which moved during the window. The primary metric is uncontaminated.
 
 **P-R4 partially failed:** s5 scored 2/5 on t2 rather than ~0/5.
+
+
+## A-34 — position or competition? Decomposing the residual gap A-33 left
+
+**Valid:** conditional — the s6/s7 run completes and this entry's outcome is filled in
+
+**Pre-registered 2026-08-28, run launched 09:07:08.** A-33 settled that the Conclude Last prose was not load-bearing — the deletion stands and `OP-5` stays retired — but left the **larger** effect unexplained. With the prose gone, the real profile still scores **4/10** plausibility-verified excluding t2, against **7/10** for the block delivered alone. Something about the profile *as a document* costs `OP-1` roughly half its effect.
+
+### Two mechanisms, different remedies
+
+| mechanism | what it means | remedy |
+|---|---|---|
+| **Position** | the block sits at the end of a 3.8 KB file, far from the question | splice at the **top** instead of appending — a compiler change, free to the operator |
+| **Instruction competition** | two unrelated imperative sections compete for the same attention | trim the operator's own rules — a different and more expensive decision |
+
+The arms run so far cannot distinguish them. These two can.
+
+### The 2×2
+
+- **`s6-block-at-top`** — s5's content with the block moved to the **top**. Varies **position** only: an identical multiset of lines apart from one blank line introduced by the reconstruction.
+- **`s7-no-competing-rules`** — block still at the **end**, with the two competing instruction sections (Memory, Subagent Dispatch) removed and the *factual* Three Instances retained. Varies **instruction competition** only. 1190 bytes against s5's 3845.
+
+Against the existing anchors: **s2 7/10** (ceiling), **s5 4/10** (current).
+
+### Decision table, frozen before the run
+
+Stated as a table so that no outcome can be narrated afterwards as the one expected.
+
+| result | mechanism | remedy |
+|---|---|---|
+| **P-P1** s6 high (≥6/10), s7 low (~4/10) | position | compile the block to the top |
+| **P-P2** s6 low, s7 high | instruction competition | trim the other rules, or accept the cost |
+| **P-P3** both high | both contribute | fixes are additive |
+| **P-P4** both low (~4/10) | neither | cause is something else about the document — the H1 framing, or that *any* surrounding text costs. Next arm strips content rather than reordering it |
+
+**P-P5** — whatever the split, s7 should **not exceed** s2, since s7 is s2 plus ~900 bytes of factual prose. If it does, the effect is noise at this n and the whole decomposition is unsupported.
+
+**Confidence:** P-P1/P-P2 **low individually** — this is a genuine fork and I hold no strong prior on which wins, which is exactly why both are run. P-P4 medium-high. The decision table, not any single prediction, is this pre-registration's real content.
+
+### Contamination guard
+
+Ground-truth mtimes for the primary-metric cells, captured **before** launch: `read_file.rs` 2026-08-27 15:32, `grep.rs` 2026-08-27 17:10, `file_group.rs` 2026-05-24 21:07. To be re-checked after the run — a peer modified `path_security.rs` two minutes into the previous one.
+
+**Outcome:** PENDING.
