@@ -15,7 +15,7 @@ related:
 - '4574d18db7aacec8'
 - '3be6b587a9c92a7a'
 severity: high
-unverified: 'MECHANISM confirmed for both symptom forms at path:line, and BOTH diagnosis gaps are now closed (read-only form: 00948381; silent wrong-project form: 76e287f8). The underlying clobber is NOT fixed — Agent::activate still clears the registry and reassigns default_workspace_root for anything sharing the session''s process, and the two structural remedies remain undecided (option 2 is a policy call; option 3 is blocked on MCP RequestContext carrying no per-caller identity). WHICH specific call triggers each occurrence is still not logged per-incident; occurrence 4 is the only one with a named trigger (SendMessage resume of a subagent).'
+unverified: 'MECHANISM confirmed for both symptom forms at path:line. Diagnosis is now closed at three levels: the two earlier gaps (00948381, 76e287f8) plus 3ccfefb2, which makes the refusal state its cause and name the project it is about. NOT live-verified through a running server - needs cargo rb + /mcp, then a write against a read-only-activated foreign root. The underlying CLOBBER is still not fixed: Agent::activate clears the registry and reassigns default_workspace_root for anything sharing the process, and the two structural remedies stand (option 2 is a policy call; option 3 is blocked on MCP RequestContext carrying no per-caller identity). Per-incident trigger logging is deliberately NOT done - naming the project answers the practical question without it.'
 ---
 
 ## Summary
@@ -256,6 +256,66 @@ Not attempted. Two things worth checking before any change:
 2. Whether the state change can be made **legible** regardless of scope — an activation that
    flips `read_only` for a session that did not request it should be visible in that
    session's next call, not discovered by a write refusal.
+
+### Done 2026-08-28 — Fix item 2, at the point of failure
+
+**SHA:** `3ccfefb2` (`experiments`). **patch-id:**
+`5e6cd821540336f76930737b7be91d2c1f2af2a9`.
+
+Item 2 asked whether the state change can be made legible regardless of scope. It can, and
+the cheapest place is the refusal itself — no per-caller identity needed, so none of
+option 3's blocker applies.
+
+`PathSecurityConfig` now carries `write_block { root, cause }`, and the refusal states which
+of the two causes it is:
+
+> File writes are disabled: the active project is `/work/some-other-repo` and it was
+> activated read-only. Call `workspace(action='activate', path='/work/some-other-repo',
+> read_only: false)`… If that is not the project you expected to be in, something else
+> sharing this process activated it…
+
+**`root` is the load-bearing half.** The failure this file describes is
+`default_workspace_root` being reassigned by something else in the process, so the single
+most useful fact is *which project answered*. A session that believes it is in `codescout`
+and reads a different path has its diagnosis in one line, with no `workspace(status)` round
+trip — which is what the Impact section's "reads as speculative rather than diagnostic"
+was costing.
+
+**Precedence is a named, tested rule** (`WriteBlockCause::classify`), extracted rather than
+left inline because inside `project_security_config` it needs a whole `ActiveProject` to
+exercise, and getting it wrong fails silently — by shipping confident, actionable, WRONG
+advice. `ConfiguredOff` outranks `ActivatedReadOnly`: telling someone whose `project.toml`
+disables writes to re-activate writable is a call that succeeds and changes nothing, so
+that message now says re-activating **will not** clear it.
+
+A builder with no root in scope keeps the original hedged wording. The change's whole point
+is that the refusal stops asserting causes, so a path that cannot attribute one must not
+gain a confident message.
+
+**What this does NOT do.** The clobber is untouched — `Agent::activate` still clears the
+registry and reassigns the default for everything in the process, and options 2 and 3 stand
+as written. This makes the consequence diagnosable in one read, not impossible. It also does
+not log *which call* did it; naming the project turns out to answer the practical question
+("is my default still mine?") without needing the trigger, so per-incident trigger logging
+is no longer the cheapest next step — the structural remedy is.
+
+#### The test that mattered was the one measuring whether the feature was wired at all
+
+Seven tests, each mutation-verified with its blast radius predicted first. Four unit tests
+covered the message and the precedence — and **all four passed with the derivation deleted**,
+full suite green at 4598, because every one of them builds `PathSecurityConfig` by hand. The
+feature would have shipped completely inert.
+
+That is the **third** instance of this class in this repo, all found within one day:
+`link_scan`'s `cross_repo_file_qualified` bucket (0 findings in every real repo under a
+passing unit test), and this codebase's own `indexed_with_model` reader, which outlived its
+producer by three and a half months behind a test that hand-built the response it asserted
+on. `project_security_config` therefore has three tests of its own; deleting the assignment
+now fails two of them.
+
+One method note worth keeping: a mutation of mine **silently did not apply**, and its test
+passed — character-identical to a test that cannot fail. Mutations are only evidence when the
+edit is applied under an asserted occurrence count.
 
 ## Workarounds
 
