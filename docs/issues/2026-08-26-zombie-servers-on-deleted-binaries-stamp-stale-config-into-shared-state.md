@@ -529,6 +529,46 @@ emission fire on real input — the branch a unit test cannot show is reachable 
 running binary. What it does not prove is a second binary physically writing that value,
 which needs two builds and will verify itself for free on the next rebuild.
 
+### Re-costed 2026-08-28 — direction 2 is INVERTED at one of its two call sites
+
+Direction 2 says a process whose `/proc/self/exe` is gone *"should decline to overwrite
+shared per-project state… rather than winning the race."* Taken to the writer — which is
+where the Resume points, `write_index_state_with_dirty` being the single whole-file writer
+— that is **harmful at the main sync path**, and would manufacture the exact failure this
+file exists to prevent.
+
+The sidecar write does not precede the vector write. Measured in `src/retrieval/sync.rs`:
+
+| line | what happens |
+|---|---|
+| 904 | `flush_pending(embedder, store, collection, …)` — **vectors go into the shared store** |
+| 1017 | `let (added, deleted, skipped) = stream_index(…)` — embed pass completes |
+| 1065 | the sidecar write, `ModelStamp::Record(&self.config.model)` |
+
+So a zombie that declines only the write at 1065 has **already** put its vectors in Qdrant.
+The sidecar then keeps the *previous* writer's `indexed_with_model` and
+`last_indexed_commit`, and `index(action="status")` reports a model that did not produce the
+vectors now in the store. That is strictly worse than letting the zombie record what it
+actually did: the write at 1065 is the honest account of the damage, and refusing it
+destroys the evidence while keeping the damage. The call site's own comment says as much —
+*"the vectors now in the store were produced by `self.config.model`, and that is the only
+fact `index(action="status")` can honestly report"*.
+
+Note the two call sites disagree on ordering, so no single rule at the writer is right for
+both. The worktree-delta write at `sync.rs:839` is explicitly **before** its embed pass
+("this write happens BEFORE the embed pass below runs… by design"), where a refusal would
+be harmless. The main path is after. A guard at the writer cannot tell them apart.
+
+**The refusal has to sit before the embed pass, not at the sidecar write** — i.e. a zombie
+declines to *re-index at all*, rather than declining to record that it did. That is a
+larger behaviour change than direction 2 as drafted, and on this host it would stop **6 of
+8** servers from indexing, so it is a policy call and is left for the operator rather than
+taken unilaterally.
+
+Direction 1 is unaffected and already shipped: recording *who* wrote the sidecar is
+additive, and it is what makes a zombie's write legible instead of silent — which is the
+value the refusal was reaching for, without the evidence loss.
+
 ## Tests added
 
 For the 2026-08-26 `shutdown_with_deadline` fix (`ca2b0226`), two unit tests in
