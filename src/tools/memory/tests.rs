@@ -844,7 +844,7 @@ async fn write_private_goes_to_private_store() {
 //
 // `write` replaces a topic wholesale. Writing two new sections to a
 // 17-section memory deleted the other fifteen and returned `{"status":"ok"}`.
-// docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md
+// docs/issues/archive/2026-08-28-memory-write-has-no-shrink-guard.md
 
 /// 751 bytes — the size measured in the reproduction, and comfortably over
 /// `memory::SHRINK_GUARD_MIN_BYTES`.

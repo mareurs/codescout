@@ -883,7 +883,11 @@ shrink guard needing `force=true` and emits a `field_patch` event with
 `prev_bytes`/`new_bytes`. `src/tools/memory/mod.rs` has no equivalent — a grep for
 `shrink|prev_bytes|guard|truncat` finds only output-side hits.
 
-Filed: `docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md`.
+Filed: `docs/issues/archive/2026-08-28-memory-write-has-no-shrink-guard.md`
+— **fixed and archived the same day** (`experiments` `5b7b82cc`, patch-id
+`4477be7feb16fad3ff16b9dfabaa1e884a3ca53e`). The tool now refuses a write that
+would drop a topic below half its bytes, unless `force=true`. The wrong-tool call
+this entry records is the one that motivated the guard.
 
 ### T-32 — grep used as a proxy for a tool call it cannot stand in for
 

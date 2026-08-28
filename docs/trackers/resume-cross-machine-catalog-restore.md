@@ -164,20 +164,41 @@ agent's paraphrase would make it durable and untrue.
 
 ## CM-6 — `memory(write)` has no shrink guard
 
-**Status:** open
+**Status:** fixed 2026-08-28 — `experiments` `5b7b82cc`, patch-id
+`4477be7feb16fad3ff16b9dfabaa1e884a3ca53e`. Half of it; see *Next*.
 **Valid:** invariant
 
-**Observed.** Filed as `docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md`.
+**Observed.** Filed as `docs/issues/archive/2026-08-28-memory-write-has-no-shrink-guard.md`
+(archived 2026-08-28; the move re-keyed it `d8a7d136a92ee5a2` → `efb6cea2d5c0cf7e`).
 `memory(action="write")` replaces a topic wholesale; writing two sections to the
 `gotchas` memory deleted the other 15 (391 → 66 lines, 83%) and returned
 `{"status": "ok"}`. The identical artifact operation is refused by a 50% shrink
 guard without `force=true`. Restored from git; both `.md` and `.anchors.toml` must
 be restored together.
 
-**Next:** port the artifact guard, and report `prev_bytes`/`new_bytes`/
-`sections_before`/`sections_after` unconditionally — a field that appears only on
-failure cannot confirm success. **Until then: never `memory(write)` to add to an
-existing topic.** Use `edit_markdown`, then assert the section count.
+**Done — the guard.** `MemoryStore::shrink_check` (pure, non-mutating) plus the
+refusal at the tool, in both the private and project branches. Deliberately NOT in
+`MemoryStore::write`, even though that is the single chokepoint: `tools/onboarding.rs`
+rewrites two memories wholesale by design, `overwrite_replaces_content` pins
+replace-wholesale as the specified primitive semantics, and the artifact precedent
+puts its guard in a *tool* with `force` as a caller argument. Ten tests; the
+file-unchanged assertion is mutation-verified — warn-but-write leaves `expect_err`
+and the error-text check both passing and fails only there.
+
+**Next — two things this did NOT do:**
+
+1. **Unconditional delta reporting** (`prev_bytes`/`new_bytes`/`sections_before`/
+   `sections_after`). Still open, still right: a field that appears only on failure
+   cannot confirm success.
+2. **The `TOOL_SURFACE_CHAR_BUDGET` sweep.** `force` cost ~280 chars against ~27 of
+   headroom, so the budget was raised 56_266 → 56_519 at the owner's direction and
+   against the gate's own advice. That is **debt**. The sweep that repays it must
+   *lower* the constant.
+
+The **workaround is retired for agents on a rebuilt binary** — a destructive
+`memory(write)` now refuses — but note the guard ships in code, not in the running
+MCP server until `cargo rb` + `/mcp`. Until this host's binary is rebuilt, keep using
+`edit_markdown` and assert the section count.
 
 ## CM-7 — `@tool_*` buffer grep nesting is unreproduced
 

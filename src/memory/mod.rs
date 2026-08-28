@@ -449,7 +449,7 @@ mod tests {
     //
     // Repro that motivated it: writing 2 sections to a 17-section memory
     // destroyed 15 of them and returned `{"status":"ok"}`.
-    // See docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md.
+    // See docs/issues/archive/2026-08-28-memory-write-has-no-shrink-guard.md.
 
     #[test]
     fn shrink_check_flags_a_destructive_overwrite() {

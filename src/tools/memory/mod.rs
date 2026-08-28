@@ -143,7 +143,7 @@ fn closest_topics(query: &str, available: &[String]) -> Vec<String> {
 ///
 /// Motivating incident: two new sections written to a 17-section memory
 /// deleted the other fifteen and returned `{"status":"ok"}`.
-/// See `docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md`.
+/// See `docs/issues/archive/2026-08-28-memory-write-has-no-shrink-guard.md`.
 fn shrink_guard_error(topic: &str, r: &crate::memory::ShrinkReport) -> RecoverableError {
     RecoverableError::with_hint(
         format!(
