@@ -12,7 +12,7 @@ tags:
 - augmentation
 - cross-machine
 topic: cross-machine catalog restore
-entry_high_water_CM: 8
+entry_high_water_CM: 9
 entry_prefix: CM
 ---
 
@@ -209,6 +209,55 @@ reports 22 and all are false.
 two *already-fixed* writer defects, so the obvious diagnosis may name a mechanism
 that no longer exists.
 
+## CM-9 — CM is the ninth declared ledger with no TAXONOMY row — left for the session that owns the file
+
+**Valid:** dated 2026-08-28
+
+**Status:** open — a one-row edit, deliberately not made in the session that found it.
+
+**Observed 2026-08-28, after compaction.** This ledger declares `entry_prefix: CM` and
+`entry_high_water_CM: 8` in committed frontmatter, and `docs/TAXONOMY.md` carries **zero**
+rows naming it. That is the same defect class `HY-22` § *Class 1* documents — declared
+ledgers absent from the prefix registry, because the registry is a prose table and nothing
+binds it to the frontmatter it describes.
+
+`HY-22` counted eight. **`CM` is the ninth**, and it is ours: this tracker was created at
+`25f15f80`, after that sweep's scan, so its absence is not an omission the sweep made.
+
+**Why the row was not added here.** `docs/TAXONOMY.md` was under a *concurrent* Claude
+session's hand — PID 2215517, cwd this repo, the file written 60 seconds before the check,
+mid-sweep and uncommitted. Editing a file another session is holding in memory risks a lost
+update in the direction that leaves no trace: their write lands last and this row vanishes
+with no conflict, no error, and nothing to notice. The row is cheap; re-finding it after it
+silently disappears is not.
+
+**What to do.** Add one row to the § *Other declared ledgers scoped to one work stream*
+table the peer sweep introduced:
+
+| Prefix | Ledger | Captures | Entries | Append |
+|---|---|---|---:|---|
+| **CM-N** | `resume-cross-machine-catalog-restore.md` (`f4923e5e894de62f`) | Work left after a cross-machine catalog resume — what was restored, what was decided against, what is permanently lost | 9 | prose |
+
+Prose ledger: no `entry_collection`; append with `anchor_heading` + `title` + `body`.
+
+**Two adjacent findings checked and dismissed — do not re-chase them.**
+
+1. **No `HY` prefix collision.** `grep -rl '^entry_prefix: HY' docs/` returns two files,
+   but the second — `docs/issues/archive/2026-08-17-ledger-id-reissue-silently-repoints-citations.md`
+   — has **no `entry_prefix` key in its frontmatter at all** and defines zero `HY-N`
+   headings. The match is body text, in a bug file that is *about* ledger prefixes. The
+   grep was a proxy and it was wrong; the frontmatter read is what settles it. Same failure
+   mode as `T-32`.
+2. **`link_scan`'s `prefix_conflicts: [F, W]` is structural, not drift.** Eleven
+   `*-session-log.md` files define `F-N`/`W-N` in per-stream namespaces; the five files
+   with an empty `entry_prefix:` are those logs, which own two prefixes where the field
+   holds one name. Pre-existing, by design, and documented — cite qualified
+   (`bug-fix-session-log:F-33`), never bare.
+
+**Rests on:** the registry being prose with no binding to frontmatter — the condition
+`HY-22` names. If a `doctor` check ever derives the table from declarations, this entry and
+its eight siblings close together.
+
 ## Template for new entries
 
 ```
@@ -230,4 +279,3 @@ Opened at the end of the cross-machine restore, before compaction. Eight entries
 two decisions deliberately taken (CM-1, and the not-reconstructing in CM-2/CM-5),
 four filed bugs carried forward as work (CM-4, CM-6, CM-7, CM-8), and two measured
 residuals (CM-2, CM-3).
-
