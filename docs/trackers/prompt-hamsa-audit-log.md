@@ -1464,4 +1464,38 @@ Primary metric is **plausibility-class verified rate excluding t2** — the metr
 
 **Confidence:** P-R1 medium-high — it is the direct prediction of A-32's mechanism, but n=10 on the cleanest cut with a ±30pt per-cell noise band. P-R2 medium. P-R4 high.
 
-**Outcome:** PENDING.
+**Outcome — RUN 2026-08-28, n=35, 0 errored.**
+
+**P-R3 did not fire. The deletion stands — the prose was not load-bearing.**
+
+Primary metric, plausibility **verified** excluding t2 (cells t1+t3, n=10):
+
+| arm | verified | correct |
+|---|---|---|
+| `b2` block text alone | 7/10 | 10/10 |
+| `s2` compiled block alone | 7/10 | 10/10 |
+| `s3` prose + block | 5/10 | 9/10 |
+| `s4` real profile, **before** delete | **2/10** | 10/10 |
+| `s5` real profile, **after** delete | **4/10** | 8/10 |
+
+`wrong+unchecked` halved, 2/35 → 1/35. Removing the prose recovered roughly half the loss, and nothing suggests reverting.
+
+### Calibration, stated rather than buried
+
+2/10 → 4/10 is a **two-run** difference at n=10, against A-20's ±30pt per-cell band. P-R1 is directional agreement with the mechanism and with the s2/s3/s4 gradient — **not standalone evidence**. The defensible claim is *"the deletion did not hurt, and probably helped"*.
+
+### P-R2 held, and it now matters more than P-R1
+
+s5 sits at 40% against s2's 70% **with the prose already gone**. That residual is the ~3.5 KB of *unrelated* instruction the profile still carries — Three Instances, the Memory rule, Subagent Dispatch. A **bulk** effect, not a stacking one, and now the largest untested cost to the deployed rule. Next arm: block-at-top, or a trimmed profile.
+
+### Watch item — not a finding
+
+s5's `t3-grep-n-of-n` fell to 3/5 correct with the rows **perfectly anti-correlated**: the 2 runs that verified were scored incorrect, the 3 that did not were scored correct. That is the t2 inversion signature in a second cell, and t3's ground truth (`src/tools/grep.rs`) last moved 2026-08-27, after the baseline.
+
+But `b2`'s t3 shows the **opposite** (3 verified, 5/5 correct), and n=5 per cell. So this is a flag to check before trusting t3, not a claim. It belongs to the fixture-rot bug already filed as `prompt-engineering:docs/issues/2026-08-28-conclude-last-traps-read-live-source-so-a-fix-inverts-the-expected-answer.md`.
+
+### Contamination check on this run
+
+A peer modified `src/util/path_security.rs` at 08:43:05, two minutes into the run. That file is **t2-only** ground truth; the primary metric excludes t2 and rests on `read_file.rs` / `grep.rs` / `file_group.rs`, none of which moved during the window. The primary metric is uncontaminated.
+
+**P-R4 partially failed:** s5 scored 2/5 on t2 rather than ~0/5.
