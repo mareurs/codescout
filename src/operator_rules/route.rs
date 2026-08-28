@@ -259,4 +259,43 @@ mod tests {
             );
         }
     }
+
+    /// `OP-4`'s `path~` predicate cannot fire against a real write response.
+    ///
+    /// Pinned rather than fixed: write tools answer with the no-echo `"ok"`
+    /// convention, and `names_path_containing` scans only `abs_path`/`rel_path`
+    /// (top level and `items[]`) plus `violations[].path`. Giving writes a path
+    /// field is a change to the no-echo convention, not a bug fix — see
+    /// docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md
+    ///
+    /// **When this test starts failing, that is the fix landing.** Delete it and
+    /// assert delivery instead; close the bug file.
+    #[test]
+    fn op_4s_path_predicate_cannot_fire_against_a_write_response_today() {
+        let observed = json!({"status": "ok", "wrote_to": "/home/u/work/claude/codescout"});
+        let hit = route(Some("edit_file"), &observed);
+        assert!(
+            !hit.iter().any(|r| r.id == "OP-4"),
+            "OP-4 fired — the write-response shape gained a path field. This is the \
+             GOOD failure: delete this test, assert delivery, and close the bug file."
+        );
+    }
+
+    /// The same rule DOES fire once a response names the path — so the defect is
+    /// the response shape, not the selector or the matcher.
+    ///
+    /// Without this cell the test above is indistinguishable from "OP-4's selector
+    /// is malformed", which is a different bug with a different fix.
+    #[test]
+    fn op_4s_predicate_is_itself_sound_given_a_path_bearing_response() {
+        let hit = route(
+            Some("edit_file"),
+            &json!({"abs_path": "/home/u/.claude/CLAUDE.md"}),
+        );
+        assert!(
+            hit.iter().any(|r| r.id == "OP-4"),
+            "OP-4's selector is broken independently of the response shape; got {:?}",
+            hit.iter().map(|r| &r.id).collect::<Vec<_>>()
+        );
+    }
 }
