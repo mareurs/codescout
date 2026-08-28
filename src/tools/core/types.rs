@@ -1119,6 +1119,41 @@ pub trait Tool: Send + Sync {
             }
         };
 
+        // --- Operator rules: `triggered`-rule delivery (Phase 2) -----------
+        //
+        // Independent of the guide path above — a call may receive both. The
+        // two stamp disjoint key namespaces (`op:OP-N` vs `<topic>` /
+        // `<topic>#<heading>`), asserted by Gate 5 in
+        // `operator_rules::route::tests::op_keys_collide_with_no_guide_key`.
+        //
+        // Computed here, while `&val` is still borrowable: the small-output
+        // branch below moves `val`.
+        //
+        // `always` rules are excluded inside `route`, not here — a resident
+        // rule delivered on a call would arrive twice, and stamping it would
+        // assert a per-session delivery event that never happened (spec § 5).
+        let op_content: Vec<Content> = {
+            let mut emitted = ctx.guide_hints_emitted.lock();
+            let mut out = Vec::new();
+            for r in crate::operator_rules::route::route(selector.as_deref(), &val) {
+                let key = crate::operator_rules::route::ledger_key(&r.id);
+                // `contains` then `insert` rather than relying on `insert`'s
+                // return value: a repeat insert REFRESHES the stamp (see
+                // `a_repeat_insert_refreshes_the_stamp_and_persists_it`), so
+                // its bool does not mean "was absent".
+                if emitted.contains(&key) {
+                    continue;
+                }
+                emitted.insert(key);
+                out.push(Content::text(format!(
+                    "<!-- operator-rule {} — delivered once this session for this call \
+                     shape; see docs/trackers/operator-rules.md -->\n{}",
+                    r.id, r.imperative
+                )));
+            }
+            out
+        };
+
         // Build the primary response block (the tool's actual output).
         // `force_inline` tools (e.g. get_guide) opt out of overflow buffering:
         // their full payload is always returned inline regardless of size.
@@ -1193,6 +1228,7 @@ pub trait Tool: Send + Sync {
         // per-section slices / preamble fallback (declaring topic).
         let mut blocks = vec![primary];
         blocks.extend(guide_content);
+        blocks.extend(op_content);
         Ok(blocks)
     }
 

@@ -1373,6 +1373,109 @@ async fn write_echo(
     serde_json::from_str(&text).expect("a write result must round-trip as JSON")
 }
 
+/// Stub tool exercising the operator-rules routing path in `call_content`.
+///
+/// No production tool overrides `selector_key` except `LibrarianAdapter` —
+/// `Memory` in particular does not, so OP-3 (`serves: memory.write`) cannot
+/// route on a real `memory(action="write", ...)` call today even though it
+/// is the rule Task 6 expects that call to surface. This stub projects
+/// `{tool}.{action}` the same way `LibrarianAdapter::selector_key` does, so
+/// the router path in `call_content` can be exercised regardless.
+struct RoutedEchoTool {
+    name: &'static str,
+    result: serde_json::Value,
+}
+
+#[async_trait::async_trait]
+impl Tool for RoutedEchoTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn description(&self) -> &str {
+        "test routed"
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> anyhow::Result<serde_json::Value> {
+        Ok(self.result.clone())
+    }
+    fn selector_key(&self, input: &serde_json::Value) -> Option<String> {
+        match input.get("action").and_then(serde_json::Value::as_str) {
+            Some(action) => Some(format!("{}.{}", self.name(), action)),
+            None => Some(self.name().to_string()),
+        }
+    }
+}
+
+/// Joins every text block in a `call_content` result, in order, for substring
+/// assertions that don't care which block carried the text.
+fn joined_text(content: &[rmcp::model::Content]) -> String {
+    content
+        .iter()
+        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// OP-3 (`triggered`, serves `memory.write`) must arrive once per session for
+/// a call shape it serves, and not again on a repeat of the same shape — the
+/// same once-per-session contract the guide ledger already gives topics, now
+/// asserted for the `op:OP-3` key. `RoutedEchoTool` stands in for `memory`
+/// (see its doc comment) since the real tool has no `selector_key` override.
+#[tokio::test]
+async fn a_triggered_operator_rule_is_delivered_once_per_session() {
+    let ctx = bare_ctx().await;
+    let tool = RoutedEchoTool {
+        name: "memory",
+        result: serde_json::json!({"ok": true}),
+    };
+    let input = serde_json::json!({"action": "write"});
+
+    let first = tool.call_content(input.clone(), &ctx).await.unwrap();
+    let first_text = joined_text(&first);
+    assert!(
+        first_text.contains("operator-rule OP-3"),
+        "expected an OP-3 operator-rule block on the first memory.write call, got: {first_text}"
+    );
+
+    let second = tool.call_content(input, &ctx).await.unwrap();
+    let second_text = joined_text(&second);
+    assert!(
+        !second_text.contains("operator-rule OP-3"),
+        "OP-3 must be delivered once per session for this call shape, got a repeat: {second_text}"
+    );
+}
+
+/// OP-1 is `always`-bound (and, as of the current ledger, carries no
+/// `**Serves:**` entries at all) so `route()` must never surface it —
+/// `always` rules are resident in the profile, not routed just-in-time.
+/// Reuses the same `memory.write` call as the test above deliberately: this
+/// asserts absence in a call that is already known to deliver *something*
+/// (OP-3), rather than absence in a call that delivers nothing, which would
+/// pass trivially regardless of whether routing works at all.
+#[tokio::test]
+async fn an_always_operator_rule_is_never_delivered_by_the_router() {
+    let ctx = bare_ctx().await;
+    let tool = RoutedEchoTool {
+        name: "memory",
+        result: serde_json::json!({"ok": true}),
+    };
+    let content = tool
+        .call_content(serde_json::json!({"action": "write"}), &ctx)
+        .await
+        .unwrap();
+    let text = joined_text(&content);
+    assert!(
+        !text.contains("operator-rule OP-1"),
+        "OP-1 is `always`-bound and must never arrive via the triggered-rule router: {text}"
+    );
+}
+
 /// A worktree-bearing checkout, plus a ctx rooted at it.
 async fn worktree_repo_ctx(tmp: &tempfile::TempDir) -> (std::path::PathBuf, ToolContext) {
     let root = tmp.path().join("main");
