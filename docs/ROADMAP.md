@@ -77,7 +77,12 @@ memory `research/loadbearing-mcp-guidance`.
   report calibration 1–2/5→5/5). Remaining work: Hamsa-audit each Iron-Law/guide rule as a
   stranger would + coverage-check the auto-inject triggers. Audit ledger:
   `docs/trackers/prompt-hamsa-audit-log.md` (now entry-filterable; open items:
-  `entry_filter={"outcome":{"contains":"pending"}}`).
+  `entry_filter={"outcome":{"eq":""}}` — an open audit's `outcome` is **empty**, the
+  convention the tracker's own H1 states: *"`Outcome` starts empty and is filled when
+  evidence later arrives."* This line read `{"contains":"pending"}` until 2026-08-28;
+  measured that day, it returns **zero rows** while the `eq ""` form returns A-15,
+  A-17, A-24. Nothing was wrong with the tracker — the query never matched its
+  convention, and no one re-ran it after writing it down.).
 - *Shipped this stream:* reader-first tracker prompts (`tracker_design`), the
   `get_guide("untrusted-content")` data-vs-directive rule, and the prompt-tdd
   model-pinning + ambient-credential fixes (`../prompt-engineering` `aecb76f`/`8790c80`).

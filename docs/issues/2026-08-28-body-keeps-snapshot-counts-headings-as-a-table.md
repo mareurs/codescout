@@ -2,7 +2,7 @@
 id: ec40b63996d15b62
 kind: bug
 status: open
-title: 'BUG: body_keeps_snapshot uses id coverage as a proxy for "has a rendered table", but headings satisfy coverage — so the entry-heading convention the project adopted in August makes it false-positive on every conforming tracker'
+title: 'BUG: body_keeps_snapshot treats a heading as a table row, so it false-POSITIVES on heading-only trackers and false-NEGATIVES on a table that genuinely lags — one predicate, both errors, one cause'
 owners:
 - marius
 tags:
@@ -124,6 +124,56 @@ tracker there is nothing to edit, and a maintainer who takes the advice literall
 would **add** a hand-maintained table — reintroducing the "two entry formats" defect
 BL-39 spent its whole life removing.
 
+
+### 4. The same root cause ALSO produces the opposite error — a false negative
+
+**Added 2026-08-28, after the hamsa restore. This is the more serious half.**
+
+`docs/trackers/prompt-hamsa-audit-log.md` is a table-bearing tracker whose table
+genuinely lags:
+
+```
+$ grep -c '^| A-'  docs/trackers/prompt-hamsa-audit-log.md   # 30  index rows
+$ grep -c '^## A-' docs/trackers/prompt-hamsa-audit-log.md   # 34  entry headings
+$ grep -c '^| A-3[1-4] ' docs/trackers/prompt-hamsa-audit-log.md   # 0
+```
+
+A-31 … A-34 exist as `## A-N — <title>` headings with **no index row**. That table
+is not decorative: the tracker's own body calls it *"its **git-durable snapshot**"*.
+So four rows live only in a machine-local catalog — precisely the defect
+`snapshot_drift` was built for
+(`docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md`).
+
+`librarian(action="doctor")` run immediately after restoring its augmentation:
+
+```
+any snapshot_* check present: []
+snapshot_drift violations naming 59ebeebb6ed05c89: []
+```
+
+**Zero.** The check that exists for this case does not fire on it.
+
+**Mechanism** — inferred from the two observations together, not read off a
+single line:
+
+- `tool-usage-patterns` has **0** table rows and the gate fires ⇒ `in_body` counts
+  heading anchors, not just row anchors.
+- Therefore, on the hamsa log `in_body` = all 34 (headings) rather than the 30 that
+  are actually *in the table*, `claimed` = 34, intersection = 34 — no id looks
+  missing, and the four-row table lag is invisible.
+
+One predicate, two opposite failures, one cause:
+
+| tracker shape | reality | reported |
+|---|---|---|
+| headings only, no table | nothing to drift | **false positive** — "the committed table disagrees" |
+| table + heading-only new entries | table genuinely lags by 4 | **false negative** — silence |
+
+The false negative is the worse one: a false positive wastes a maintainer's time,
+while this one lets rows sit in a git-ignored catalog while the check that was
+built to notice reports healthy. It also means the fix under **Fix** is not merely
+noise-reduction — gating on row anchors repairs the miss as well as the nag, and
+both follow from the same one-line change.
 ## Hypotheses tried
 
 1. **Hypothesis:** the subagent that first reported this misread a real drift.
@@ -193,4 +243,3 @@ anchors rather than any anchor, and re-run the three existing snapshot fixtures 
 - `docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md` — the bug this warning was built for; still valid for table-bearing trackers
 - `get_guide("tracker-conventions")` § *One entry format, never two* — the convention that makes this fire
 - Found during the 2026-08-28 cross-machine restore; see `docs/conventions/cross-machine-catalog-resume.md`
-

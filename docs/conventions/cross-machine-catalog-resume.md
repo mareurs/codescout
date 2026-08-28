@@ -240,8 +240,18 @@ entries, and it is the one that fails first when augmentation is missing.
 
 ## Traps measured on the 2026-08-28 pass
 
-Both produced a **plausible number**, which is what makes them dangerous — neither
+All three produced **plausible output**, which is what makes them dangerous — none
 raised an error.
+
+**Escaped pipes silently shift every field in a parsed table row.** Reconstructing
+params from a body table by splitting on `|` breaks on any cell containing `\|`
+inside prose: the row yields 11–12 cells instead of 9, and every field right of the
+escape lands one column over. On the hamsa log this would have put a `confidence`
+value into `outcome` — a wrong row that looks entirely well-formed.
+
+Split on `(?<!\\)\|` and unescape, and **assert the cell count per row**. The
+assertion is the part that matters: it is what turns a silent mis-parse into a
+loud one, and it is what caught this. Three of 34 rows carried the escape.
 
 **Counting bare `---` to find duplicate frontmatter reports ~22× too many.**
 Session logs use `---` as an entry separator: same string, different position. A
