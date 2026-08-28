@@ -1396,3 +1396,72 @@ This does **not** clear the gate gap recorded above: the harness arm carries the
 **Method note.** The first attempt used `run_arms.py`, which silently skipped re-scoring because this suite's checkers are inline `python:` rather than `script:` paths — 70 runs and $11.50 for an uninterpretable scenario-grain `3/7`. Filed as `prompt-engineering:prompt-tdd-operating-guide:OP-22`. The suite's own `analyze.py` is the per-run instrument, and is what produced the table above.
 
 **Follow-up owed by the suite, not by this audit:** `t2-cat-gate` needs its expected answer flipped or the trap re-authored against a premise that is still false, and every trap reading live source needs a staleness guard — otherwise the suite will keep reporting a floor that is really a rotted fixture.
+
+
+## A-32 — stacking dilutes: the shipped profile gets 3.5× less verification than the block alone
+
+**Valid:** invariant
+
+**Pre-registered then run, 2026-08-28. n=35/arm, 0 errored.** A-31 showed the compiler's wrapper is inert when the block is delivered **alone**. The real profile does not deliver it alone — spec Gate 3(a) enforces non-overlap among `OP-N` rules and is blind to unmanaged prose already in the target file. This tests that blind spot.
+
+| arm | plausibility verified (n=15) | excl. broken t2 (n=10) | wrong+unchecked (n=35) |
+|---|---|---|---|
+| `b2-imperative-only` | 80.0% | **7/10** | 0/35 |
+| `s2-compiled-block` | 80.0% | **7/10** | 0/35 |
+| `s3-prose-plus-block` | 53.3% | **5/10** | 2/35 |
+| `s4-real-profile` | 33.3% | **2/10** | 2/35 |
+
+Monotonic collapse on two independent cuts. The `a3` prose scored **13.3% verified alone** in A-21, and the profile's copy is byte-identical to it — so stacking drags the block **down toward the prose** rather than adding. A-20's `a5-both` finding, reproduced on a new pair.
+
+The safety-relevant cell moves too: `wrong+unchecked` is **0/35** with the block alone and **2/35** in both stacked arms.
+
+### Pre-registration failure, stated plainly
+
+**P-S1 named the wrong metric.** It froze *plausibility-class **correct** excluding t2*, and on that everything sits at ceiling — b2 10/10, s2 10/10, s3 9/10, s4 10/10 — so the metric could not detect the effect, and **P-S2 (`s4 <= s3`) reads as failed on it** (100% against 90%).
+
+The large effect is on `verified`. That is **not** a post-hoc choice: A-20 and A-21 both state *"Primary metric: plausibility-class verified-rate"*, with anchors bare 0% / a2 93.3% / a3 13.3%. I mis-specified the pre-registration against this scenario family's own documented primary. Recording it rather than quietly re-cutting.
+
+**P-S4 also failed, instructively.** s3 scored 1/5 on t2 rather than 0/5 — and the per-run row shows that run had **`verified=False`**. The single "correct" came from an agent that did *not* check and repeated the planted belief, which the stale checker rewards. That is A-31's t2 inversion running in reverse, and is further evidence for it.
+
+### Calibration
+
+n=10 for the excl-t2 cut, and A-20 puts the per-cell noise band at ±30pt. The honest claim is **a large effect at small n**, directionally consistent across two cuts and with a documented prior — not a precise coefficient.
+
+### Consequence
+
+**Delete the hand-written `### Conclude Last` section from all three profiles.** The compiled block supersedes it; the prose is the 13.3% arm; together they measure worse than the block alone. This is the remedy P-S3 named in advance.
+
+This closes the gate gap A-31 raised: Gate 3(a)'s blind spot is real **and not empty** — it is currently costing the deployed rule most of its effect. The engine's budget gate should compare a candidate `always` rule's `**Covers:**` against the prose already resident in the target file, not only against other `OP-N` rules.
+
+
+## A-33 — did deleting the prose recover the rule? The confirming run, and the restore path if not
+
+**Valid:** conditional — the s5 run completes and this entry's outcome is filled in
+
+**Pre-registered 2026-08-28, run launched 08:41:07.** A-32 measured the stack and *inferred* the remedy; it did not measure the remedy. The deletion has since shipped to all three profiles, so this is no longer hypothetical.
+
+### The concern this entry exists to protect against
+
+The `### Conclude Last` prose lived **only** in untracked files. A wrong call would have destroyed it with nothing to restore from. It is now preserved twice:
+
+- **`operator-rules:OP-5`**, `**Status:** retired`, text verbatim, in git. `render_block` and `check_budget` both filter on `Always && Active`, so a retired rule is parsed and validated but never compiled — flipping the status back to `active` is the entire restore.
+- **`prompt-engineering:scenarios/conclude-last/arms/a3-conclude-last.md`**, body-identical, tracked, and already an arm.
+
+`s4-real-profile` is retained as the pre-deletion snapshot and **must not** be refreshed from the live profile — it is the "before" half of this comparison.
+
+### Design
+
+`s5-real-profile-deprosed` is `~/.claude/CLAUDE.md` verbatim after the deletion and after the three profiles were synchronised byte-for-byte (all 3845 bytes, md5 `9b554ef615a4`). Compared against s2, s3 and s4, all measured the same day on the same codescout tree with the same t2 breakage.
+
+Primary metric is **plausibility-class verified rate excluding t2** — the metric A-20/A-21 name as primary, and the one A-32 showed to be sensitive here while `correct` sits at ceiling. s5 differs from s4 by the 20 deleted lines plus one blank line from the sync, so it is near-single-variable rather than strictly so.
+
+### Predictions
+
+- **P-R1** — s5 verified **>** s4 verified on plausibility-excl-t2. Anchors: s2 7/10, s3 5/10, s4 2/10.
+- **P-R2** — s5 approaches s2 but may sit below it: s5 still carries ~3.5 KB of unrelated instruction that s2 does not. A residual gap would be a **bulk** effect rather than a stacking one, and the next thing to test.
+- **P-R3** — **s5 ≤ s4 refutes A-32's mechanism and the deletion should be reverted.** Restore by flipping `OP-5`'s `**Status:**` to `active`, recompiling, and re-running. This is the load-bearing case, and stating it as a prediction is what makes the revert a measurement rather than a matter of opinion.
+- **P-R4** — t2-cat-gate scores at or near 0/5 again; A-31 established its expected answer inverted at codescout `be4a679b`, independently of any arm.
+
+**Confidence:** P-R1 medium-high — it is the direct prediction of A-32's mechanism, but n=10 on the cleanest cut with a ±30pt per-cell noise band. P-R2 medium. P-R4 high.
+
+**Outcome:** PENDING.
