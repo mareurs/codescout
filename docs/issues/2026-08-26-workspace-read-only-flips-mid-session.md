@@ -339,6 +339,44 @@ suspected the activation rather than the path or the tool.
 Restored with `workspace(activate, path=<codescout>, read_only=false)`; writes resumed
 immediately, and this edit is the proof.
 
+### Measured 2026-08-28 — two escape routes from the structural remedy, both closed
+
+Before accepting "blocked", both plausible ways around it were tested. Neither works, and
+knowing *why* narrows the remaining design to one shape.
+
+**Route A — is option 3's blocker actually true?** Yes, measured rather than assumed.
+`rmcp 1.3.0`'s `RequestContext<R>` carries exactly `{ ct, id, meta, extensions, peer }`
+(`service.rs:654`). Of those: `id` is a per-request counter, `extensions` is server-side and
+never populated here, `peer` is the single stdio connection so a subagent and its parent
+share one, and `meta` is read in exactly one place in this codebase — `server.rs:1434`, for
+`get_progress_token()`. A progress token is per-request, not per-caller. **So there is no
+caller identity to key a per-caller default on**, and the file's blocker stands as written.
+
+**Route B — could the `workspaces.clear()` be the harm instead?** `activate`'s own comment
+calls the clear legacy (*"mirrors the previous single-slot drop-and-replace"*) and notes
+`ensure_resident` adds without clearing, which suggested a no-identity fix: stop clearing,
+and callers pinned with `workspace=` survive someone else's activate.
+
+Tested live. Activated `/home/marius/work/mirela` (clearing the registry and moving the
+default), then issued a **pinned** write back to codescout:
+
+```
+create_file(path="docs/issues/_pin_probe.md",
+            workspace="/home/marius/work/claude/codescout")   → "ok"
+```
+
+It succeeded. **Pinning already survives the clobber** — the pinned path is re-resolved on
+demand rather than read out of the registry — so the clear harms nothing and removing it
+would fix nothing. That is a cheap fix eliminated by one probe rather than by argument.
+
+**What the two results leave.** The entire harm is the `default_workspace_root`
+reassignment, and only for **unpinned** callers. "Which default is mine?" is a per-caller
+question by construction, so route B cannot reach it and route A has nothing to key it on.
+The remaining shapes are therefore genuinely a decision, not a task: change what `activate`
+MEANS (option 2 — e.g. a read-only activation stays resident but does not take the default),
+or wait for a transport that carries caller identity (option 3). Both are the operator's
+call, now on measured rather than presumed grounds.
+
 ## Workarounds
 
 `workspace(action="activate", path="<project root>", read_only=false)` restores writes
