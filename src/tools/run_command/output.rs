@@ -131,7 +131,31 @@ pub(crate) async fn handle_successful_output(
         Option<crate::tools::output_buffer::Truncation>,
         usize,
     )> = if let Some(ref tmpfile) = unfiltered_tmpfile {
-        let capture = std::fs::read_to_string(&tmpfile.0).ok();
+        // `.ok()` here used to discard the error, and that is how a transient read
+        // failure became an ABSENT key group rather than a reported one: the caller
+        // sees a response with no `unfiltered_output`, indistinguishable from a run
+        // that produced no capture at all. Named as the highest-value instrumentation
+        // point in `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`
+        // § Resume, after a load-contention flake on the wine lane dropped exactly this
+        // key group — the tell being that the surviving keys are set in the same block
+        // as the missing ones, so the response could not have come from that block.
+        //
+        // Behaviour is deliberately unchanged: still `None` on error, no retry, no
+        // timeout tuning — that file rules both out as actively harmful on one
+        // unreproduced occurrence. The only difference is that the next occurrence
+        // leaves a trace instead of a silence.
+        let capture = match std::fs::read_to_string(&tmpfile.0) {
+            Ok(content) => Some(content),
+            Err(e) => {
+                tracing::warn!(
+                    path = %tmpfile.0,
+                    error = %e,
+                    "tee capture unreadable; unfiltered_output keys will be absent from \
+                     this response"
+                );
+                None
+            }
+        };
         // tmpfile drops at function exit — TmpfileGuard::drop() removes the file.
         // Skip empty captures: when the terminal filter matched nothing, both
         // raw_stdout and the tee file are empty — surfacing a handle is misleading.

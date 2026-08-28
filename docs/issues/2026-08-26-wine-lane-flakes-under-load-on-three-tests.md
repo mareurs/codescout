@@ -132,6 +132,61 @@ change — and the two changes it would invite are both actively harmful:
 The cost of leaving it is bounded and known: at worst one spurious red on a lane whose
 failures are read by hand.
 
+## Instrumented 2026-08-28 — the `.ok()` § Resume named, and the mechanism pinned
+
+§ *Resume* named one action and ruled out the two that would have needed a judgement call
+(retries, raising the SQLite busy timeout — both "actively harmful" on one unreproduced
+occurrence). That one action is done, and a second, cheaper thing turned out to be available
+alongside it.
+
+**1. The `.ok()` no longer swallows the error.** `src/tools/run_command/output.rs` read the
+tee capture with `std::fs::read_to_string(&tmpfile.0).ok()` — the single place where a
+transient I/O failure becomes an absent field with no trace. It is now a `match` that logs
+the error at `warn` and still returns `None`.
+
+**Behaviour is unchanged, deliberately.** Same `None`, same degradation, no retry, no timeout
+change. The only difference is that a second occurrence leaves a record instead of a silence.
+
+**2. The inferred mechanism is now a test** —
+`an_unreadable_tee_capture_drops_the_whole_key_group_without_panicking`
+(`src/tools/run_command/tests.rs`). This file reasoned about the mechanism from an
+impossibility — *"the response could not have come from that block at all"* — but the path
+was never exercised. It now is, with an unreadable tee path, asserting the two properties
+the reasoning depended on:
+
+- the degradation is **total** — all four of `unfiltered_output`, `unfiltered_output_lines`,
+  `unfiltered_truncated`, `unfiltered_buffered_lines` absent. A *partial* group is precisely
+  what made the flake read as impossible.
+- it does **not** panic, and the rest of the response is untouched.
+
+**Mutation-verified.** Leaking one key outside the group
+(`result["unfiltered_output_lines"] = json!(0)` before `Ok(result)`) fails the test naming
+`unfiltered_output_lines` as the survivor. Probe reverted.
+
+> **A process note worth keeping, because it nearly produced a false pass.** The first
+> mutation attempt used a blind `sed` whose anchor did not match, and a `git checkout` to
+> revert — which silently reverted the *fix* instead of the probe. The test then "passed
+> against the mutation" while running on unmutated code with the fix removed: a green that
+> meant nothing, of exactly the kind this repo's own guidance warns about. The second attempt
+> asserted the probe was present *and* the fix was still present before believing the result.
+> Verify the mutation landed before trusting that a test survived it.
+
+### What this does and does not change
+
+**Does not close the bug.** Status stays `open`. The root cause is still *not established* —
+contention remains a hypothesis that fits, and one local occurrence is not a finding. Nothing
+here makes the flake reproducible.
+
+**Does change what the next occurrence costs.** Previously it would have produced the same
+unreadable partial response and no evidence. Now the `warn` line names the path and the OS
+error, and the test pins the degradation contract so a future refactor cannot quietly turn a
+total drop into a partial one.
+
+The `unverified:` note still governs the rest: only
+`run_migrations_is_safe_under_concurrent_connections` remains in scope for this file, seen
+once, locally, mechanism inferred and still uninstrumented. **Do not add retries or raise the
+SQLite busy timeout on this evidence.**
+
 ## Tests added
 
 None; see Fix.

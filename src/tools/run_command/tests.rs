@@ -2917,6 +2917,60 @@ async fn non_filter_pipe_no_unfiltered_ref() {
     );
 }
 
+/// The wine-lane flake's inferred mechanism, pinned instead of assumed.
+///
+/// `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` recorded two
+/// `run_command` failures whose responses were missing keys that
+/// `src/tools/run_command/output.rs` sets in the **same block** as keys that were
+/// present. That impossibility is what identified the run, rather than the code, as
+/// wrong. The mechanism it inferred — never exercised — was the tee-capture read
+/// returning `None`, collapsing `unfiltered_ref` and dropping the whole key group.
+///
+/// This drives that path directly with an unreadable tee path. Two things are asserted
+/// that the bug file could only reason about: the degradation is **total** (no partial
+/// key group, which is what made the flake look impossible) and it does **not** panic.
+///
+/// It also pins the contract the `.ok()` → traced-`match` change preserves. The change
+/// added a `tracing::warn!` and nothing else; this test is what proves "nothing else".
+#[tokio::test]
+async fn an_unreadable_tee_capture_drops_the_whole_key_group_without_panicking() {
+    let (_dir, ctx) = project_ctx().await;
+    let missing = super::inner::TmpfileGuard(
+        "/nonexistent/codescout-unfiltered-this-path-cannot-be-read".to_string(),
+    );
+
+    let result = super::output::handle_successful_output(
+        "printf hi",
+        "hi\n".to_string(),
+        String::new(),
+        0,
+        false,
+        Some(missing),
+        &ctx,
+    )
+    .await
+    .expect("an unreadable capture must degrade, not error");
+
+    for key in [
+        "unfiltered_output",
+        "unfiltered_output_lines",
+        "unfiltered_truncated",
+        "unfiltered_buffered_lines",
+    ] {
+        assert!(
+            result.get(key).is_none(),
+            "an unreadable capture must drop the ENTIRE unfiltered_* group — a partial \
+             group is the shape that made the wine flake read as impossible — but {key} \
+             survived: {result}"
+        );
+    }
+
+    assert_eq!(
+        result["stdout"], "hi\n",
+        "the rest of the response must be unaffected by the capture failure: {result}"
+    );
+}
+
 /// Regression for docs/issues/archive/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md:
 /// when the filter matched nothing, the response used to omit `stdout` entirely (absent,
 /// not `""`) and attach a bare `unfiltered_output` ref with no size signal — an agent
