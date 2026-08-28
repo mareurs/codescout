@@ -14,6 +14,29 @@ pub mod sqlite_semantic_store;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+/// Existing entries smaller than this skip the shrink check. Below a few
+/// hundred bytes a percentage is noise — a 3-byte stub replaced by a 1-byte
+/// one is a "66% loss" nobody wants to hear about.
+///
+/// Deliberately a separate constant from the artifact guard's identically
+/// valued `librarian::tools::update::SHRINK_GUARD_MIN_BYTES`. The two floors
+/// answer different questions — that one is sized for just-created frontmatter
+/// shells, this one for stub memories — and agreeing today is not a reason to
+/// make moving one move the other.
+pub const SHRINK_GUARD_MIN_BYTES: usize = 200;
+
+/// What a rejected overwrite would have cost, for the caller's error message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShrinkReport {
+    /// Size of the entry currently on disk.
+    pub old_bytes: usize,
+    /// Size of the proposed replacement.
+    pub new_bytes: usize,
+    /// Percent reduction, truncated toward zero — so it reads at worst one
+    /// point more alarming than the truth, never less.
+    pub pct: usize,
+}
+
 /// Per-project memory store.
 #[derive(Debug, Clone)]
 pub struct MemoryStore {
@@ -98,6 +121,38 @@ impl MemoryStore {
         }
         crate::util::fs::atomic_write(&path, content)?;
         Ok(())
+    }
+
+    /// Would writing `content` over `topic` destroy more than half of what is
+    /// already there? Returns the numbers to show the caller, or `None` when
+    /// the write is safe.
+    ///
+    /// **Non-mutating, and deliberately not wired into [`Self::write`].**
+    /// Wholesale replacement is `write`'s specified behaviour — see the
+    /// `overwrite_replaces_content` test — and `tools/onboarding.rs` depends
+    /// on it to regenerate `onboarding` and `language-patterns`. Policy lives
+    /// with the caller that has a user to warn and a `force` flag to offer,
+    /// exactly as the artifact body-shrink guard sits in
+    /// `librarian/tools/update.rs` rather than in the catalog write primitive.
+    ///
+    /// A new topic, or an existing one below [`SHRINK_GUARD_MIN_BYTES`],
+    /// always returns `None`: the first destroys nothing, and a ratio over a
+    /// handful of bytes is noise.
+    pub fn shrink_check(&self, topic: &str, content: &str) -> Option<ShrinkReport> {
+        // A read error is not a shrink. Refusing a write because the existing
+        // entry could not be read would turn an unrelated IO fault into a
+        // blocked save, so an unreadable entry declines to object.
+        let existing = self.read(topic).ok().flatten()?;
+
+        if existing.len() < SHRINK_GUARD_MIN_BYTES || content.len() * 2 >= existing.len() {
+            return None;
+        }
+
+        Some(ShrinkReport {
+            old_bytes: existing.len(),
+            new_bytes: content.len(),
+            pct: 100 - (content.len() * 100 / existing.len().max(1)),
+        })
     }
 
     /// Read a memory entry by topic. Returns `None` if not found.
@@ -382,6 +437,82 @@ mod tests {
         store.write("key", "v1").unwrap();
         store.write("key", "v2").unwrap();
         assert_eq!(store.read("key").unwrap(), Some("v2".to_string()));
+    }
+
+    // ── shrink guard (CM-6) ─────────────────────────────────────────────
+    //
+    // `write` replaces wholesale by design — `overwrite_replaces_content`
+    // above pins that, and `tools/onboarding.rs` relies on it. The guard is
+    // therefore a separate, non-mutating check the TOOL layer consults,
+    // mirroring how the artifact guard lives in `librarian/tools/update.rs`
+    // rather than in the catalog write primitive.
+    //
+    // Repro that motivated it: writing 2 sections to a 17-section memory
+    // destroyed 15 of them and returned `{"status":"ok"}`.
+    // See docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md.
+
+    #[test]
+    fn shrink_check_flags_a_destructive_overwrite() {
+        // The exact byte counts measured in the reproduction: a 751-byte,
+        // 10-section memory replaced by a 112-byte, 1-section write.
+        let (_dir, store) = make_store();
+        store.write("victim", &"X".repeat(751)).unwrap();
+
+        let report = store
+            .shrink_check("victim", &"Y".repeat(112))
+            .expect("the measured 751 -> 112 overwrite must be flagged");
+        assert_eq!(report.old_bytes, 751);
+        assert_eq!(report.new_bytes, 112);
+        // 100 - (112*100/751) under integer division. Truncating toward zero
+        // makes this read one point WORSE than the true 85.1%, which is the
+        // safe direction for a warning and matches the artifact guard's
+        // formula byte for byte.
+        assert_eq!(report.pct, 86, "the percentage is what the caller shows");
+    }
+
+    #[test]
+    fn shrink_check_is_silent_when_the_write_grows() {
+        let (_dir, store) = make_store();
+        store.write("victim", &"X".repeat(400)).unwrap();
+        assert!(store.shrink_check("victim", &"Y".repeat(900)).is_none());
+    }
+
+    #[test]
+    fn shrink_check_is_silent_for_a_new_topic() {
+        let (_dir, store) = make_store();
+        assert!(
+            store.shrink_check("never-written", "x").is_none(),
+            "a first write destroys nothing"
+        );
+    }
+
+    #[test]
+    fn shrink_check_is_silent_below_the_byte_floor() {
+        let (_dir, store) = make_store();
+        // Under the floor a ratio is meaningless — a 3-byte stub replaced by a
+        // 1-byte one is a 66% "loss" and nobody cares.
+        store
+            .write("stub", &"X".repeat(SHRINK_GUARD_MIN_BYTES - 1))
+            .unwrap();
+        assert!(store.shrink_check("stub", "y").is_none());
+    }
+
+    /// The predicate is `new * 2 < old`, so removing EXACTLY half is allowed.
+    /// Pinned because the obvious `<=` spelling would flip this, and a
+    /// boundary that moves silently is how a guard starts refusing good writes.
+    #[test]
+    fn shrink_check_permits_removing_exactly_half() {
+        let (_dir, store) = make_store();
+        store.write("half", &"X".repeat(800)).unwrap();
+
+        assert!(
+            store.shrink_check("half", &"Y".repeat(400)).is_none(),
+            "exactly half must pass"
+        );
+        assert!(
+            store.shrink_check("half", &"Y".repeat(399)).is_some(),
+            "one byte past half must fail — proves the boundary is live"
+        );
     }
 
     #[test]

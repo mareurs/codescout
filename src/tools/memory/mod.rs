@@ -134,6 +134,34 @@ fn closest_topics(query: &str, available: &[String]) -> Vec<String> {
     scored.into_iter().take(3).map(|(_, t)| t.clone()).collect()
 }
 
+/// The refusal a would-be destructive `memory(write)` gets.
+///
+/// Mirrors the artifact body-shrink guard in `librarian/tools/update.rs`: name
+/// the guard, show the byte counts, and name BOTH ways forward. The hint leads
+/// with *why* rather than *what*, because the failure mode is a wrong mental
+/// model — callers reach for `write` believing it appends. It replaces.
+///
+/// Motivating incident: two new sections written to a 17-section memory
+/// deleted the other fifteen and returned `{"status":"ok"}`.
+/// See `docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md`.
+fn shrink_guard_error(topic: &str, r: &crate::memory::ShrinkReport) -> RecoverableError {
+    RecoverableError::with_hint(
+        format!(
+            "memory-shrink guard: write to '{topic}' would reduce {} → {} bytes ({}% reduction)",
+            r.old_bytes, r.new_bytes, r.pct
+        ),
+        "memory(action=\"write\") REPLACES the topic wholesale — it does not append. \
+         To add or change one section, read the topic first and write the whole document \
+         back with your edit folded in, or edit the file under .codescout/memories/ with \
+         edit_markdown. If the shrinkage is intentional (a deliberate rewrite or prune), \
+         re-call with force=true.",
+    )
+    .with_extra(
+        "shrink",
+        json!({ "old_bytes": r.old_bytes, "new_bytes": r.new_bytes, "pct": r.pct }),
+    )
+}
+
 /// Build the "topic not found" error for memory reads. Rather than a bare
 /// warning telling the caller to go run `list`, the response embeds a *preview*
 /// of the store — the full `available_topics` list plus best-effort
@@ -661,6 +689,7 @@ impl Tool for Memory {
                 },
                 "content": { "type": "string", "description": "For write or remember." },
                 "private": { "type": "boolean", "default": false, "description": "Use gitignored private store." },
+                "force": { "type": "boolean", "default": false, "description": "For write: bypass the shrink guard. Required when the write would replace an existing topic with less than half its bytes. `write` REPLACES wholesale — it never appends — so a partial document is data loss, not an update." },
                 "include_private": { "type": "boolean", "default": false, "description": "For list: include private topics." },
                 "title": { "type": "string", "description": "For remember. Short label (auto-extracted if omitted)." },
                 "bucket": {
@@ -692,18 +721,36 @@ impl Tool for Memory {
                 let topic = require_topic_param(&input)?;
                 let content = super::require_str_param(&input, "content")?;
                 let private = parse_bool_param(&input["private"]);
+                let force = parse_bool_param(&input["force"]);
 
                 // Write markdown file — route to per-project dir when `project` param given.
+                //
+                // The shrink check runs against the SAME store the write lands
+                // in, inside each branch rather than hoisted above them. The
+                // private and project stores are different directories, so one
+                // check up top would read the wrong file and could clear a
+                // destructive write or block a harmless one.
                 if private {
                     ctx.agent
                         .with_project_at(ctx.workspace_override.as_deref(), |p| {
+                            if !force {
+                                if let Some(r) = p.private_memory.shrink_check(topic, content) {
+                                    return Err(shrink_guard_error(topic, &r).into());
+                                }
+                            }
                             p.private_memory.write(topic, content)?;
                             Ok(())
                         })
                         .await?;
                 } else {
                     let memories_dir = resolve_memory_dir(&input, ctx).await?;
-                    crate::memory::MemoryStore::from_dir(memories_dir)?.write(topic, content)?;
+                    let store = crate::memory::MemoryStore::from_dir(memories_dir)?;
+                    if !force {
+                        if let Some(r) = store.shrink_check(topic, content) {
+                            return Err(shrink_guard_error(topic, &r).into());
+                        }
+                    }
+                    store.write(topic, content)?;
                 }
 
                 // Collect non-fatal side-effect failures so the caller has a

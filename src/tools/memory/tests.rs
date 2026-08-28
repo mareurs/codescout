@@ -840,6 +840,153 @@ async fn write_private_goes_to_private_store() {
     assert_eq!(private, Some("verbose".to_string()));
 }
 
+// ── shrink guard (CM-6) ─────────────────────────────────────────────────
+//
+// `write` replaces a topic wholesale. Writing two new sections to a
+// 17-section memory deleted the other fifteen and returned `{"status":"ok"}`.
+// docs/issues/2026-08-28-memory-write-has-no-shrink-guard.md
+
+/// 751 bytes — the size measured in the reproduction, and comfortably over
+/// `memory::SHRINK_GUARD_MIN_BYTES`.
+fn ten_section_memory() -> String {
+    let mut s = String::from("# Big memory\n");
+    for i in 1..=10 {
+        s.push_str(&format!(
+            "\n## Section {i}\nLoad-bearing content that must not vanish silently.\n"
+        ));
+    }
+    assert!(s.len() > crate::memory::SHRINK_GUARD_MIN_BYTES);
+    s
+}
+
+#[tokio::test]
+async fn write_refuses_a_destructive_overwrite() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    let original = ten_section_memory();
+    Memory
+        .call(
+            json!({"action": "write", "topic": "big", "content": original}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let err = Memory
+        .call(
+            json!({"action": "write", "topic": "big",
+                   "content": "# Big memory\n\n## Section 11\nJust the new one.\n"}),
+            &ctx,
+        )
+        .await
+        .expect_err("replacing ten sections with one must be refused");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("memory-shrink guard"),
+        "the error must name the guard so the caller can find it; got: {msg}"
+    );
+
+    // The assertion that actually matters. An error that still writes is worse
+    // than no guard at all — the caller believes it failed AND has lost the
+    // data. Mutating the guard to warn-and-proceed must fail HERE, not above.
+    let on_disk = ctx
+        .agent
+        .with_project(|p| p.memory.read("big"))
+        .await
+        .unwrap();
+    assert_eq!(
+        on_disk,
+        Some(original),
+        "a refused write must leave the topic byte-identical"
+    );
+}
+
+#[tokio::test]
+async fn write_with_force_permits_the_overwrite() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    Memory
+        .call(
+            json!({"action": "write", "topic": "big", "content": ten_section_memory()}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    Memory
+        .call(
+            json!({"action": "write", "topic": "big", "content": "pruned", "force": true}),
+            &ctx,
+        )
+        .await
+        .expect("force=true is the documented escape and must work");
+
+    let on_disk = ctx
+        .agent
+        .with_project(|p| p.memory.read("big"))
+        .await
+        .unwrap();
+    assert_eq!(on_disk, Some("pruned".to_string()));
+}
+
+/// The private store is a different directory, so a guard hoisted above the
+/// private/project branch would check the wrong file. Pinned here because
+/// that mistake is invisible: it silently guards nothing on this path.
+#[tokio::test]
+async fn write_guard_also_covers_the_private_store() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    let original = ten_section_memory();
+    Memory
+        .call(
+            json!({"action": "write", "topic": "big", "content": original, "private": true}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let err = Memory
+        .call(
+            json!({"action": "write", "topic": "big", "content": "x", "private": true}),
+            &ctx,
+        )
+        .await
+        .expect_err("the private store must be guarded too");
+    assert!(err.to_string().contains("memory-shrink guard"));
+
+    let on_disk = ctx
+        .agent
+        .with_project(|p| p.private_memory.read("big"))
+        .await
+        .unwrap();
+    assert_eq!(on_disk, Some(original));
+}
+
+/// A guard that blocks first writes would make the tool unusable. The
+/// shrink check has nothing to compare against, so it must stay silent.
+#[tokio::test]
+async fn write_guard_is_silent_on_a_first_write() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    Memory
+        .call(
+            json!({"action": "write", "topic": "brand-new", "content": "x"}),
+            &ctx,
+        )
+        .await
+        .expect("a first write destroys nothing and must not be blocked");
+}
+
+#[tokio::test]
+async fn schema_advertises_force() {
+    let schema = Memory.input_schema();
+    assert_eq!(schema["properties"]["force"]["type"], "boolean");
+    // The description must say REPLACES, not "overwrites" — the wrong mental
+    // model ("write appends") is what the guard exists to catch, so the schema
+    // has to correct it at the point of use.
+    let desc = schema["properties"]["force"]["description"]
+        .as_str()
+        .unwrap();
+    assert!(desc.contains("REPLACES"), "got: {desc}");
+}
+
 #[tokio::test]
 async fn read_private_reads_from_private_store() {
     let (_dir, ctx) = test_ctx_with_project().await;

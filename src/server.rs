@@ -2581,7 +2581,20 @@ mod tests {
     /// six-character ASCII escape, so the over-count tracked prose density and
     /// every per-tool delta came out a multiple of 5. `serde_json` emits UTF-8
     /// directly, as the wire does.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_266;
+    /// **Raised 2026-08-28, 56_266 → 56_519, deliberately and against this
+    /// test's own advice — this is DEBT, not a clean baseline.**
+    ///
+    /// `memory`'s `force` param (the CM-6 shrink guard) cost ~280 chars and the
+    /// surface had ~27 of headroom, so it breached on arrival. The owner chose to
+    /// raise now and sweep later rather than block the data-loss fix on a
+    /// prose-golf pass across 26 tools. Recorded here because a raised budget is
+    /// indistinguishable from an earned one once the reason leaves the room.
+    ///
+    /// Set to the exact measured total, never rounded up: the ratchet still bites
+    /// on the very next added byte, which is the only thing keeping this honest.
+    /// The sweep that pays it back should LOWER this line, and any pass that
+    /// cannot is a pass that did not happen.
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_519;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
