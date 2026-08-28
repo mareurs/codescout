@@ -19,7 +19,7 @@ Recovering "early-Fable" (`claude-fable-5`) quality in codescout via prompts / t
 | Tracker | id | Role |
 |---|---|---|
 | [Findings (FND-N)](fable-tuning-findings.md) | `35de33286cd34f87` | What we learned, filterable by `dimension`/`status` |
-| [Tasks (T-N)](fable-tuning-tasks.md) | `ad1af8262fdce357` | Eval-gated recommendations |
+| [Tasks (FT-N)](fable-tuning-tasks.md) | `ad1af8262fdce357` | Eval-gated recommendations |
 | [Research](fable-tuning-research.md) | reflective | Sources + local-trace evidence |
 
 ## How to use

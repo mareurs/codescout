@@ -5,7 +5,7 @@ Recovering "early-`claude-fable-5`" quality in codescout via prompts/tools/track
 Trackers (docs/trackers/fable-tuning-*.md — query via `artifact(find, tags=["fable"])`, never raw read):
 - index    `ca8c26fecbbc4f37` — start here; § Session passover has full state
 - findings `35de33286cd34f87` — FND-1..17
-- tasks    `ad1af8262fdce357` — T-N with closure notes
+- tasks    `ad1af8262fdce357` — FT-N with closure notes (renamed from T-N in `d3282868`; the prefix collided with two other ledgers)
 - research `ab2170158c7d264e` — sources + local-trace evidence
 
 Headline (all point one way — parity, not degradation):
@@ -21,4 +21,4 @@ Observability (the standing guard):
 
 Durable method: subtract-and-measure protocol (P-1..P-8, prompt-hamsa-audit-log `59ebeebb6ed05c89` § Protocol; README § Measure before shipping; Hamsa SKILL.md H12). New prompt-surface changes enter via the protocol (base-arm-first, pre-registered decision rule), NOT new fable tasks.
 
-Open: T-3..T-6 (medium, priors weakened by FND-16/17; T-6 multi-turn is the one unexplored regime = likeliest escape from ceiling, needs harness work). T-10 (cc.py --config-dir) — root cause + a second path-encoding bug filed llm-proxy `docs/issues/2026-07-10-ccpy-config-dir-hardcoded-and-path-encoding.md` (llm-proxy:40f1645).
+Open: FT-3..FT-6 (medium, priors weakened by FND-16/17; FT-6 multi-turn is the one unexplored regime = likeliest escape from ceiling, needs harness work). FT-10 (cc.py --config-dir) — root cause + a second path-encoding bug filed llm-proxy `docs/issues/2026-07-10-ccpy-config-dir-hardcoded-and-path-encoding.md` (llm-proxy:40f1645).

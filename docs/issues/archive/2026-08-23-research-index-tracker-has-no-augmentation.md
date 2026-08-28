@@ -210,6 +210,24 @@ What shipped:
 Verified on the live server: `librarian(action="context", anchor_id=…)` renders
 the 15-row `[LIVE]` table, and `artifact(get, entry_filter={"topic": {"eq":
 "retrieval-quality"}})` returns `entry_total: 3`.
+
+> **Correction, 2026-08-28 — the sentence above attaches the 3 to the wrong field.**
+> `entry_total` is the **considered** count (every row in the collection), not the
+> match count: `src/librarian/tools/get.rs:460` reads `out["entry_total"] =
+> json!(considered)`, assigned after the filter loop, with matches going to
+> `entries`. The unit test at `get.rs:1763` pins it — 3 items in, filter matches 1,
+> `assert_eq!(out["entry_total"], 3)` — and `git log -S` shows that line unchanged
+> since `6fffc05c` (2026-05-28), so the semantics already held on 2026-08-26.
+> `952ad795`'s commit message states it correctly ("returns 3"); only this prose
+> mis-transcribed it.
+>
+> True shape, re-verified 2026-08-28 on the live server during the cross-machine
+> restore: **`entries[3]`, `entry_total: 15`**.
+>
+> Annotated rather than rewritten, because the misreading is the point: this
+> sentence was used as the acceptance criterion for the 2026-08-28 restore and had
+> to be corrected mid-flight. An archived bug file is what a later session
+> inherits. See `docs/conventions/cross-machine-catalog-resume.md`.
 ## Tests added
 
 None — bug is filed, not fixed.
