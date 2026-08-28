@@ -184,19 +184,47 @@ a new test asserting `scan_undefined_entries` reports it instead.
 
 ## CM-5 — hamsa Index table is 4 rows behind its params
 
-**Status:** open
+**Status:** fixed 2026-08-28 — `experiments` `bc6eee3a`, patch-id
+`3171b3c5c03b5ccac343909b980ac3d15bc49928`. Verified: `git diff` against
+`dde7491b` is the four rows plus a trailing newline, zero deletions; 34 rows
+and 34 `## A-N` headings; `doctor`'s `snapshot_drift` now 0 repo-wide.
 **Valid:** dated 2026-08-28
 
-**Observed.** `prompt-hamsa-audit-log.md` has 30 `| A-N |` index rows against 34
-`## A-N` headings; A-31..A-34 have no row. Its own body calls that table "its
-**git-durable snapshot**", so four entries live only in a machine-local catalog.
+**Observed.** `prompt-hamsa-audit-log.md` had 30 `| A-N |` index rows against 34
+`## A-N` headings; A-31..A-34 had no row. Its own body calls that table "its
+**git-durable snapshot**", so four entries lived only in a machine-local catalog.
 A blank line orphaning A-30's row was repaired on 2026-08-28; the missing rows were
 not.
 
-**Next:** add the four rows — Gap / Move / Prediction / Confidence in the author's
-voice. Deliberately not reconstructed: filling a "git-durable snapshot" with an
-agent's paraphrase would make it durable and untrue.
+**The "author's voice" concern was misplaced, and the section's own prose
+retires it.** The Index says it is *rendered from* `params.audits` and is that
+collection's git-durable snapshot — a full projection, not a summary. Nothing
+needed reconstructing, because the text already exists in the catalog; the
+"Gap (1-line)" column label is stale and is what made the table read as a
+digest. So the work was mechanical, and the right tool was a generator rather
+than transcription: `jq` over `params.audits`, spliced server-side.
 
+**Verify the generator before trusting it.** The template was checked by
+projecting **A-30** — a row already on disk — and diffing the two: byte-identical
+at 3320 bytes. That positive control is what licenses the other four; without it,
+"full projection" is an inference from prose about a convention, and the prose
+was already wrong about one column. Also checked the four payloads carry no `|`
+or newline before splicing, either of which would have broken the table.
+
+**Cost a data-loss incident on the way, now filed.** The first attempt built the
+new body from `jq -r '.body'` of `artifact get --full --json`. That body is
+**capped at 500 lines** and the file's is 1553, so the write deleted 1047 lines
+and reported `updated: true`; the byte-only shrink guard did not fire, because
+the loss was 29% of bytes against 68% of lines. Restored from
+`git show dde7491b:<path>` and the bad commit was amended out before it left the
+machine. The response *did* warn — `body_meta.line_count` vs `source_line_count`,
+plus a whole `overflow` object — and `jq -r '.body'` reads past all of it.
+Filed as `docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`,
+which proposes giving the guard a line-ratio arm.
+
+**The lesson generalises past this entry:** never build a write payload from a
+`get` response — rebuild it from the file or from git, which is exactly what
+CM-8 did and why CM-8 was safe.
 ## CM-6 — `memory(write)` has no shrink guard
 
 **Status:** fixed 2026-08-28 — `experiments` `5b7b82cc`, patch-id
