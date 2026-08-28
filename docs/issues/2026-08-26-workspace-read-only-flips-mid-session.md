@@ -15,7 +15,7 @@ related:
 - '4574d18db7aacec8'
 - '3be6b587a9c92a7a'
 severity: high
-unverified: 'MECHANISM confirmed for both symptom forms at path:line. Diagnosis is now closed at three levels: the two earlier gaps (00948381, 76e287f8) plus 3ccfefb2, which makes the refusal state its cause and name the project it is about. NOT live-verified through a running server - needs cargo rb + /mcp, then a write against a read-only-activated foreign root. The underlying CLOBBER is still not fixed: Agent::activate clears the registry and reassigns default_workspace_root for anything sharing the process, and the two structural remedies stand (option 2 is a policy call; option 3 is blocked on MCP RequestContext carrying no per-caller identity). Per-incident trigger logging is deliberately NOT done - naming the project answers the practical question without it.'
+unverified: 'MECHANISM confirmed for both symptom forms at path:line. Diagnosis is now closed at three levels: the two earlier gaps (00948381, 76e287f8) plus 3ccfefb2, LIVE-VERIFIED 2026-08-28 on binary 404f4622 by staging the real condition - a foreign root activated read-only, then a write attempted against a codescout path, which named the foreign root. The underlying CLOBBER is still not fixed: Agent::activate clears the registry and reassigns default_workspace_root for anything sharing the process, and the two structural remedies stand (option 2 is a policy call; option 3 is blocked on MCP RequestContext carrying no per-caller identity). Per-incident trigger logging is deliberately NOT done - naming the project answers the practical question without it.'
 ---
 
 ## Summary
@@ -316,6 +316,28 @@ now fails two of them.
 One method note worth keeping: a mutation of mine **silently did not apply**, and its test
 passed — character-identical to a test that cannot fail. Mutations are only evidence when the
 edit is applied under an asserted occurrence count.
+
+#### Live-verified 2026-08-28 06:2xZ on binary `404f4622`
+
+Staged the real condition rather than asserting from the unit tests: activated a foreign
+root read-only, then attempted a write **to a path under `codescout`**.
+
+```
+create_file("/home/marius/work/claude/codescout/docs/issues/_probe.md")
+→ File writes are disabled: the active project is /tmp/…/foreign-root and it was
+  activated read-only. Call workspace(action='activate', path='/tmp/…/foreign-root',
+  read_only: false) to enable writes. If that is not the project you expected to be in,
+  something else sharing this process activated it — a subagent, or another caller on
+  this session — because activation replaces the default for everyone in the process.
+```
+
+That is the whole point, visible in one line: **the path written and the project blamed are
+different**, and the message says so. The old wording — "File writes are disabled for this
+project" — would have named neither, which is why four occurrences went by before anyone
+suspected the activation rather than the path or the tool.
+
+Restored with `workspace(activate, path=<codescout>, read_only=false)`; writes resumed
+immediately, and this edit is the proof.
 
 ## Workarounds
 
