@@ -1427,6 +1427,11 @@ fn joined_text(content: &[rmcp::model::Content]) -> String {
 /// same once-per-session contract the guide ledger already gives topics, now
 /// asserted for the `op:OP-3` key. `RoutedEchoTool` stands in for `memory`
 /// (see its doc comment) since the real tool has no `selector_key` override.
+///
+/// Also checks the delivered payload rather than just the marker (a mutation
+/// emitting the `operator-rule OP-3` comment with an empty or wrong body
+/// would otherwise ship green), and that a present-but-non-matching selector
+/// — `memory.read`, absent from OP-3's `**Serves:**` — routes nothing.
 #[tokio::test]
 async fn a_triggered_operator_rule_is_delivered_once_per_session() {
     let ctx = bare_ctx().await;
@@ -1442,6 +1447,10 @@ async fn a_triggered_operator_rule_is_delivered_once_per_session() {
         first_text.contains("operator-rule OP-3"),
         "expected an OP-3 operator-rule block on the first memory.write call, got: {first_text}"
     );
+    assert!(
+        first_text.contains("codescout memory or a tracker"),
+        "expected OP-3's imperative payload, not just its marker, got: {first_text}"
+    );
 
     let second = tool.call_content(input, &ctx).await.unwrap();
     let second_text = joined_text(&second);
@@ -1449,15 +1458,38 @@ async fn a_triggered_operator_rule_is_delivered_once_per_session() {
         !second_text.contains("operator-rule OP-3"),
         "OP-3 must be delivered once per session for this call shape, got a repeat: {second_text}"
     );
+
+    // A present-but-non-matching selector: `memory.read` isn't in OP-3's
+    // `**Serves:**` (`memory.write` only), so it must route nothing.
+    let non_matching = serde_json::json!({"action": "read"});
+    let third = tool.call_content(non_matching, &ctx).await.unwrap();
+    let third_text = joined_text(&third);
+    assert!(
+        !third_text.contains("operator-rule "),
+        "a non-matching action must not deliver any operator rule, got: {third_text}"
+    );
 }
 
-/// OP-1 is `always`-bound (and, as of the current ledger, carries no
-/// `**Serves:**` entries at all) so `route()` must never surface it —
-/// `always` rules are resident in the profile, not routed just-in-time.
-/// Reuses the same `memory.write` call as the test above deliberately: this
-/// asserts absence in a call that is already known to deliver *something*
-/// (OP-3), rather than absence in a call that delivers nothing, which would
-/// pass trivially regardless of whether routing works at all.
+/// OP-1 is `always`-bound, so `route()` must never surface it through
+/// `call_content` — `always` rules are resident in the profile, not routed
+/// just-in-time.
+///
+/// This documents intent at the delivery layer, but it is not what proves
+/// the `Binding::Triggered` filter load-bearing: OP-1 carries no
+/// `**Serves:**` entries at all (Gate 6 in `operator_rules::validate`
+/// forbids an `always` rule from having any), so the selector-match filter
+/// inside `route_in` already excludes it on its own — deleting the binding
+/// filter leaves this test green, which is exactly what happened when this
+/// test's RED/GREEN pair was captured (see task-5-report.md): it passed
+/// with `op_content` entirely absent from `call_content`. The mutation is
+/// caught one layer down by
+/// `operator_rules::route::tests::route_in_excludes_an_always_rule_even_when_its_selector_matches`,
+/// which builds a synthetic `always` rule with a matching `serves` — a
+/// combination `validate` forbids the real ledger from ever holding.
+///
+/// Reuses the same `memory.write` call as the test above so this at least
+/// asserts absence in a call already known to deliver something (OP-3),
+/// rather than in a call that delivers nothing at all.
 #[tokio::test]
 async fn an_always_operator_rule_is_never_delivered_by_the_router() {
     let ctx = bare_ctx().await;

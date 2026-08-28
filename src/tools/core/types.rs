@@ -1138,9 +1138,13 @@ pub trait Tool: Send + Sync {
             for r in crate::operator_rules::route::route(selector.as_deref(), &val) {
                 let key = crate::operator_rules::route::ledger_key(&r.id);
                 // `contains` then `insert` rather than relying on `insert`'s
-                // return value: a repeat insert REFRESHES the stamp (see
-                // `a_repeat_insert_refreshes_the_stamp_and_persists_it`), so
-                // its bool does not mean "was absent".
+                // return value: skipping `insert` on a repeat avoids refreshing
+                // the last-delivered stamp that `expire_idle`'s TTL reads, for a
+                // call that delivered nothing — and avoids `persist()`'s
+                // unconditional disk write (`guide_ledger.rs:216`) on every
+                // repeat call. (`insert`'s returned bool IS trustworthy as an
+                // absence signal — `HashMap::insert(..).is_none()` — that is
+                // not the reason to avoid it here.)
                 if emitted.contains(&key) {
                     continue;
                 }
