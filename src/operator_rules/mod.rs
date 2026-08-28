@@ -10,6 +10,7 @@ pub mod budget;
 pub mod corpus;
 pub mod profiles;
 pub mod render;
+pub mod route;
 pub mod rule;
 pub mod validate;
 

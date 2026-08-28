@@ -408,6 +408,20 @@ impl GuideIndex {
             .filter(|s| wanted.contains(s.heading.as_str()))
             .collect()
     }
+
+    /// Every ledger key the guide side can stamp — topic keys and section keys.
+    ///
+    /// Exists for Gate 5 in `operator_rules::route`, which must assert the `op:`
+    /// namespace collides with none of them. Returning the keys rather than
+    /// exposing `topics` keeps the map private.
+    pub fn ledger_keys(&self) -> Vec<String> {
+        self.topics
+            .iter()
+            .flat_map(|(t, e)| {
+                std::iter::once((*t).to_string()).chain(e.sections.iter().map(|s| s.ledger_key()))
+            })
+            .collect()
+    }
 }
 
 /// Build a one-topic index from a literal guide body, for tests that need
