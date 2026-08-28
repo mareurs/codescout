@@ -8,7 +8,7 @@ tags:
 - engine-5
 - ledger
 entry_prefix: OP
-entry_high_water_OP: 4
+entry_high_water_OP: 5
 ---
 
 # Operator Rules (OP-N)
@@ -25,6 +25,7 @@ Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md`.
 | OP-2 | triggered | underpowered-subagent-dispatch | unmeasured | active |
 | OP-3 | triggered | durable-fact-written-to-per-profile-store | unmeasured | active |
 | OP-4 | triggered | partial-profile-config-update | unmeasured | active |
+| OP-5 | always | unverified-assertion | measured: a3 13.3% alone; stacked it cuts OP-1 7/10 → 2/10 | **retired** |
 
 One `always` rule against a 3–5 start band and a 5–10 ceiling, so there is real headroom —
 but headroom is not licence: Gate 3(a) binds independently of size, and all four `**Covers:**`
@@ -119,6 +120,70 @@ That case is why the imperative is "apply to all three" and not "remember there 
 This rule's own subject matter makes it the most self-demonstrating entry in the ledger, and the compiler is the mechanism that discharges it for one specific file. Measured 2026-08-27 before any compile had run: `~/.claude/CLAUDE.md` is 4639 bytes (md5 `b583ffaa`) while `~/.claude-sdd/CLAUDE.md` and `~/.claude-kat/CLAUDE.md` are both 4640 (`d52fc86c`) — two in step, one drifted, with nothing having reported it. `operator-rules check` is the check that did not exist; this entry is the rule it enforces.
 
 **Note for Phase 2 — this selector is the one most likely to need work.** `path~` reads the **result**, and `names_path_containing` scans `abs_path` / `rel_path` / `items[]` / `violations[]`, shapes that a librarian response carries and an `edit_file` response may not. Recorded here as the spec projects it (§ 4); whether it matches a real `edit_file` call is a Phase 2 question, and a selector that silently never fires is exactly the failure `parse_shape`'s strict `is_ident` check exists to prevent elsewhere.
+
+## OP-5 — Conclude Last — Never Narrate Mid-Evaluation (retired, superseded by OP-1)
+
+**Imperative:** When making any claim that depends on evaluation, complete the full evaluation in thinking before writing the claim.
+**Binding:** always
+**Shape:** procedure
+**Covers:** unverified-assertion
+**Evidence:** measured: conclude-last/a3 0% -> 13.3% (n=15)
+**Rests on:** prompt-hamsa-audit-log:A-20, prompt-hamsa-audit-log:A-21, prompt-hamsa-audit-log:A-32
+**Status:** retired
+**Valid:** invariant
+
+**Retired 2026-08-28, and deleted from the three profiles the same day — not discarded.**
+
+> **`**Evidence:**` records its own arm only.** The stacking result that actually retired this rule — it cuts `OP-1` from 7/10 to 2/10 — lives in the prose below, because the field's grammar is strictly `measured: <arm> <base>% -> <shipped>% (n=N)`. Appending prose to it made `operator-rules check` fail with `Error: invalid float literal`, naming neither the rule nor the field. Gate 6 refusing a malformed measurement is correct; the diagnostic is not.
+
+This entry exists so the text survives in git and can be restored by flipping `**Status:**` back to `active`. It was previously resident only in `~/.claude/CLAUDE.md`, `~/.claude-sdd/CLAUDE.md` and `~/.claude-kat/CLAUDE.md`, all **untracked**, so deleting it would otherwise have destroyed the only copy.
+
+`**Binding:** always` with `**Status:** retired` is deliberate and safe: `render_block` and `check_budget` both filter on `binding == Always && status == Active`, so a retired rule is parsed and validated but never compiled into a profile. Flipping the status is the whole restore.
+
+### Why it was retired
+
+It addresses the same failure mode as `OP-1` — `**Covers:** unverified-assertion` on both — and measurement says the pair is worse than `OP-1` alone. `A-32`, 2026-08-28, plausibility-class verified rate:
+
+| configuration | verified (n=15) | excl. broken t2 (n=10) | wrong+unchecked (n=35) |
+|---|---|---|---|
+| OP-1 block alone | 80.0% | 7/10 | 0/35 |
+| this prose + block | 53.3% | 5/10 | 2/35 |
+| the real profile (same stack) | 33.3% | **2/10** | 2/35 |
+
+Alone it scored **13.3%** verified (`A-21`, arm `a3-conclude-last`). Stacked, it pulls `OP-1` down toward that figure instead of adding to it — `A-20`'s `a5-both` result on a new pair. Its shape is `procedure`, which `A-21` ranks below `imperative` precisely because *\"procedural detail only applies once checking has begun\"*.
+
+**A repaired variant exists and was never shipped here.** `a3v2-conclude-last-grounded` adds a fifth antidote item and scores **73.3%**. `A-21`'s closing note claims that item was applied to all three profiles; it was not — the profile text is byte-identical to unrepaired `a3`. If this rule is ever revived, revive `a3v2`, not this.
+
+### The text, verbatim as it stood
+
+```markdown
+### Conclude Last — Never Narrate Mid-Evaluation
+
+When making any claim that depends on evaluation — tracing logic, comparing values,
+following data flows, weighing tradeoffs, determining causation — complete the full
+evaluation in thinking before writing the claim.
+
+Once you commit to a direction in your output ("this causes X", "the effect is Y"),
+autoregressive momentum pulls subsequent tokens toward coherence with that commitment
+rather than toward correctness. The antidote:
+
+1. **Observe first.** State what you see without interpreting it.
+2. **Evaluate in thinking.** Work through the logic silently and arrive at a conclusion.
+3. **Then narrate.** Write the user-facing claim only after the evaluation is complete.
+4. **Self-correct openly.** If you realize mid-stream you committed wrong, say so.
+   Contradicting yourself is better than being confidently wrong.
+
+Treat "sounds right" as a red flag. If a claim feels obvious, that is when it most
+needs verification — obvious-sounding claims are the ones that slip past unchecked.
+```
+
+Also preserved, body-identical, as `prompt-engineering:scenarios/conclude-last/arms/a3-conclude-last.md` (tracked), which is what the `a3` arm measures.
+
+### Restoring it
+
+Flip `**Status:**` to `active` and run `codescout operator-rules compile`. That alone re-arms it — but Gate 3(a) should refuse it while `OP-1` is active, since both carry `**Covers:** unverified-assertion`. Retiring `OP-1` first, or reviving `a3v2` under a distinct `**Covers:**`, are the two coherent paths.
+
+**Do not restore it on the strength of intuition alone.** The measurement that retired it is n=10 on the cleanest cut, with a ±30pt per-cell noise band — a large effect at small n. `A-33` sets up the confirming run.
 
 ## Template for new entries
 
