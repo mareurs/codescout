@@ -1,13 +1,19 @@
 ---
-status: mitigated
-opened: 2026-08-27
-closed:
-severity: medium
-owner: marius
-related: []
-unverified: Root cause (two stale CODESCOUT_EMBED_* vars in ~/.claude-sdd and ~/.claude-kat settings.json) removed but NOT re-verified after a Claude Code restart — the running instance still carries them. The in-repo half (brittle strict-equality assertion) is fixed and mutation-checked. No regression test is possible for the root cause; it is machine config outside the repo.
-tags: ["env", "test-harness", "bash", "run_command", "false-failure", "embedder"]
 kind: bug
+status: fixed
+tags:
+- env
+- test-harness
+- bash
+- run_command
+- false-failure
+- embedder
+closed: 2026-08-28
+opened: 2026-08-27
+owner: marius
+related:
+- docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
+severity: medium
 ---
 
 # BUG: `cargo test` fails from native `Bash` but passes via `run_command` — a false red that reads as a code regression
@@ -17,8 +23,9 @@ kind: bug
 from a native harness `Bash` call and passes when the same command is run through
 codescout's `run_command`. The failure names a dead port. Nothing about the code
 differs between the two runs — only the environment the test process inherits.
-The test asserts strict equality against `"ok"`, so an attached warning fails it,
-which makes an environment difference present as a code regression.
+The test **asserted** strict equality against `"ok"`, so an attached warning failed
+it — which made an environment difference present as a code regression. Both halves
+are now closed: the assertion (2026-08-27) and the stale env (verified 2026-08-28).
 
 ## Symptom (Effect)
 ```
@@ -55,8 +62,11 @@ that config aside.
 - Project: codescout, branch `experiments`, commit `a9628a23`
 - Profile: `~/.claude-sdd`, Claude Code, MCP stdio
 - `CODESCOUT_EMBEDDER_URL` unset in every shell checked (login, non-login, harness)
-- Ambient `CODESCOUT_EMBED_URL=http://127.0.0.1:48080/v1` present in the desktop
-  session AND in the MCP server's `/proc/<pid>/environ`
+- Ambient `CODESCOUT_EMBED_URL=http://127.0.0.1:48080/v1` present in the harness
+  shell. **The second half of this line — that the same value was also in the MCP
+  server's `/proc/<pid>/environ` — does not survive re-checking**, and it was the
+  observation that wrongly exculpated this variable. See § Root cause, *The
+  name-vs-value error*.
 
 ## Root cause
 
@@ -81,11 +91,40 @@ the older `EMBED_` prefix rather than `EMBEDDER_`, which is why they never
 collided with the new block and were never noticed: three-profile config drift of
 exactly the kind the machine's global CLAUDE.md warns about.
 
-**Why `run_command` escaped it.** The MCP server additionally runs
-`load_startup_env()`, which sets `CODESCOUT_EMBEDDER_URL=…:48081` from
-`~/.config/codescout/.env`; that wins over both stale vars, and `run_command`
-children inherit it. Native `Bash` children get the stale pair without the
-corrective one.
+**Why `run_command` escaped it — CONFIRMED 2026-08-28, and it is not the
+`load_startup_env()` story.** Two different files carry an `env` block for the
+**same two variable names**, with opposite values, feeding two different process
+trees:
+
+| File | Feeds | `CODESCOUT_EMBED_MODEL` / `_URL` |
+|---|---|---|
+| `~/.claude-sdd/settings.json` → `env` | Claude Code → native `Bash` children | `all-minilm` / `…:48080/v1` — **stale** |
+| `~/.claude-sdd/.claude.json` → `.mcpServers.codescout.env` | MCP server → `run_command` children | `CodeRankEmbed` / `…:48081/v1` — **correct** |
+
+Measured: `run_command("env | grep -E '^(CODESCOUT|LIBRARIAN)_'")` returns 16 vars,
+and 15 of them match `.claude.json`'s block exactly. So `run_command` was never
+rescued by some *third*, corrective variable — it received **correct values for the
+very same two variables** that were stale on the `Bash` side.
+
+`load_startup_env()` is ruled out as the rescuer by reading its input file.
+`~/.config/codescout/.env` (symlink → `.env.amd`) sets `CODESCOUT_EMBEDDER_URL`,
+`CODESCOUT_EMBEDDER_MODEL_NAME`, `CODESCOUT_SPARSE_EMBEDDER_URL`,
+`LIBRARIAN_EMBED_MODEL` and `LIBRARIAN_EMBED_URL` — and **not** the short-prefix
+`CODESCOUT_EMBED_MODEL` / `CODESCOUT_EMBED_URL` pair that `apply_embed_overrides`
+reads. It contributes nothing to either variable that decided this bug. (The 16th
+var, `LIBRARIAN_ENABLED=1`, is in neither file; `src/server.rs` only ever reads it.)
+
+**The name-vs-value error — the transferable lesson.** § Environment recorded the
+stale var as "present in the MCP server's `/proc/<pid>/environ` too", and that
+observation is what retired the variable as a suspect: if both sides have it, it
+cannot be what distinguishes them. The comparison was on the **name**. By
+**value** the two sides disagreed, and that disagreement *is* the mechanism.
+Re-checked 2026-08-28 across 7 live `codescout start` processes: three carry
+`CODESCOUT_EMBED_URL=http://127.0.0.1:48081/v1`, four lack the var, and **none
+carries `48080/v1`**. So the original reading cannot be reproduced and may have
+come from a zombie server predating the `.claude.json` block (§ References).
+Either way the rule is the same: when a variable appears on both sides of a
+divergence, `grep -c` answers the wrong question — diff the values.
 
 **Why every earlier single-variable test "refuted" the hypothesis** — the finding
 worth carrying forward. With two independently sufficient causes, removing either
@@ -131,7 +170,18 @@ server's env at startup, so `run_command` children inherit
 4. **Hypothesis:** something PRESENT in the harness environment causes it.
    **Test:** additive bisect from the known-good `{HOME, PATH}` base, driving the
    test binary directly to bypass the `~/.cargo/config.toml` `[env]` mask.
-   **Verdict:** in progress — this is the live hypothesis.
+   **Verdict:** CONFIRMED — two stale vars in profile `settings.json`, each
+   independently sufficient. See § Root cause.
+5. **Hypothesis:** `load_startup_env()` is what rescued `run_command` (the
+   corrective-third-variable story). **Test:** read `~/.config/codescout/.env`, and
+   diff `run_command`'s live env against `.claude.json`'s `mcpServers.codescout.env`.
+   **Verdict:** rejected 2026-08-28 — that file never sets the short-prefix pair;
+   `.claude.json` does, with correct values. See § Root cause.
+6. **Hypothesis:** the stale var was equally present server-side, so it cannot be
+   the discriminator (the reasoning that retired hypothesis 2). **Test:** read
+   `CODESCOUT_EMBED_URL` per-pid from all live servers' `/proc/<pid>/environ`.
+   **Verdict:** rejected 2026-08-28 — 0 of 7 carry `48080/v1`. The names matched;
+   the values never did. See § Root cause, *The name-vs-value error*.
 
 ## Fix
 
@@ -142,10 +192,31 @@ server's env at startup, so `run_command` children inherit
 writing, with the sibling keys (`ANTHROPIC_BASE_URL`,
 `PUPPETEER_EXECUTABLE_PATH`) and the `permissions` block asserted intact.
 
-**Not effective in the session that made the change.** Claude Code reads
-`settings.json` at startup and sets the vars into its own process, so they persist
-in every child of the running instance — confirmed: the direct-binary test still
-FAILS here after the edit. Needs a Claude Code restart to verify.
+**Not effective in the session that made the change; VERIFIED after restart on
+2026-08-28.** Claude Code reads `settings.json` at startup and holds the vars in
+its own process, so every child of the running instance kept them and the
+direct-binary test still FAILED there. After the restart, from native `Bash`:
+
+| Check | Result |
+|---|---|
+| `env \| grep -c '^CODESCOUT_'` | **0** |
+| any var name containing `EMBED` | **none** |
+| `settings.json` → `env`, `-sdd` / `-kat` | 2 keys each, **0** `CODESCOUT_*` |
+| `settings.json` → `env`, `~/.claude` | 10 `CODESCOUT_*`, all current (`48081`, `CodeRankEmbed-Q4_K_M.gguf`) |
+| `target/debug/deps/codescout-<hash>` run directly — no cargo, no pin | `test result: ok. 1 passed; 0 failed` |
+| `ss -ltn`, then `POST :48081/v1/embeddings` | `48081` listening, **HTTP 200** in 5 ms; `48080` not listening |
+
+The last two rows are what make this a verification rather than a coincidence.
+Invoking the test binary directly bypasses cargo, so the `~/.cargo/config.toml`
+`[env]` pin cannot be what carried the run; and with no `CODESCOUT_EMBED_*` var
+set, `apply_embed_overrides` has nothing to apply, so `48080` — a literal that
+appears nowhere in `src/` and only ever entered through that override — can no
+longer reach the embed path at all.
+
+One thing deliberately **not** claimed: that no warning attaches. The relaxed
+assertion no longer distinguishes those cases, which is its whole point, so a green
+run is not evidence either way. `48081` answering `HTTP 200` is the direct evidence
+that the service is there.
 
 The machine-wide mitigation from `f2bc544e` remains and is independent of this:
 `~/.cargo/config.toml` `[env]` pins `CODESCOUT_EMBEDDER_URL` for every cargo
@@ -199,14 +270,18 @@ red gate that reads as a broken build.
 
 ## Resume
 
-1. Restart Claude Code, then confirm the root-cause removal took effect:
-   `env | grep CODESCOUT_EMBED_` → expect empty.
-2. Flip this file to `fixed` and drop `unverified:` once step 1 passes. Both
-   halves are then done: the stale vars are gone from both profiles, and the test
-   no longer misreports the condition.
-3. Optional afterwards: decide whether to keep the `~/.cargo/config.toml` `[env]`
-   pin. With the vars gone AND the assertion fixed it is doubly redundant, but it
-   is harmless and guards against the same profile drift recurring.
+**Nothing outstanding.** Steps 1 and 2 of the previous resume list completed
+2026-08-28 — the post-restart measurements are in § Fix, this file is `fixed`, and
+`unverified:` is dropped.
+
+One optional call was made rather than left open: **the `~/.cargo/config.toml`
+`[env]` pin stays.** With the stale vars gone AND the assertion fixed it is doubly
+redundant, but it is inert when work routes through `run_command`, load-bearing
+again the moment profile drift recurs, and lives outside every repo — so it costs
+nothing and guards a failure mode that has now happened once.
+
+Ready to archive to `docs/issues/archive/`. Record the fix SHA **and** its
+`git show <sha> | git patch-id --stable` at that time.
 ## References
 - codescout memory `gotchas` § "`cargo test` Fails From Native `Bash` But Passes
   Via `run_command` — Export `CODESCOUT_EMBEDDER_URL`" — the durable note, incl.
@@ -217,3 +292,10 @@ red gate that reads as a broken build.
   `global_config_dir_from`.
 - `src/config/project.rs` — `apply_embed_overrides` (`CODESCOUT_EMBED_MODEL` /
   `CODESCOUT_EMBED_URL`, documented as highest precedence).
+- `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
+  (`investigating`) — the standing bug this one's process census corroborates: 7
+  live `codescout start` processes here, started across 21:12 on 2026-08-27 through
+  07:42 on 2026-08-28, with **disagreeing** exec-time env (3 carry
+  `CODESCOUT_EMBED_URL`, 4 do not). Not re-filed; recorded here as a datapoint. It
+  is also the most likely source of the § Environment reading this file now
+  retracts.

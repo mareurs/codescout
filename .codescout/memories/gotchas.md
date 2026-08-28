@@ -213,14 +213,20 @@ removed) with nothing warning on mismatch. See
 
 ## `cargo test` Fails From Native `Bash` But Passes Via `run_command` — Export `CODESCOUT_EMBEDDER_URL`
 
-**Symptom, reproducible.** Run `cargo test` from a native harness `Bash` call in
+**RESOLVED 2026-08-28** — root cause found and removed. Kept for the mechanism and
+for the two debugging lessons at the end, both of which cost real time.
+
+**Symptom, as it presented.** Run `cargo test` from a native harness `Bash` call in
 this repo and `tools::memory::tests::write_and_read_roundtrip` FAILS with
 `semantic anchor creation failed: dense embed connect failed:
 http://127.0.0.1:48080/v1/embeddings`. Nothing listens on 48080; the dense
 embedder is `codescout-dense-amd` on **48081**. The same suite run through
-codescout's `run_command` is 4731 passed / 0 failed. The test asserts strict
-equality against `"ok"`, so an attached warning fails it — which makes this read
-exactly like a code regression when it is an environment difference.
+codescout's `run_command` is 4731 passed / 0 failed. The test **asserted** strict
+equality against `"ok"`, so an attached warning failed it — which made this read
+exactly like a code regression when it was an environment difference. That
+assertion was fixed 2026-08-27 (`src/tools/memory/tests.rs` now reads the status
+out of either result shape), so the same misconfiguration today produces a passing
+test with a warning attached rather than a red gate.
 
 **Remedy — already installed on this machine (2026-08-27).** `~/.cargo/config.toml`
 carries an `[env]` block, so every `cargo` invocation gets the var regardless of
@@ -253,10 +259,23 @@ export CODESCOUT_EMBEDDER_URL=http://127.0.0.1:48081
 set -a; . ~/.config/codescout/.env; set +a
 ```
 
-**Mechanism: NOT established. Do not repeat the plausible story.** The obvious
-explanation — "`load_startup_env()` runs at MCP server startup so `run_command`
-children inherit the var and `Bash` children do not" — is the one this entry
-originally asserted, and it does not survive its own measurements:
+**Mechanism: ESTABLISHED 2026-08-28. Two files, same two variable names, opposite
+values.** `settings.json` → `env` feeds the Claude Code process and therefore its
+native `Bash` children; `.claude.json` → `.mcpServers.<server>.env` feeds the MCP
+server and therefore its `run_command` children. In the `-sdd` and `-kat` profiles
+the first carried a **stale** `CODESCOUT_EMBED_MODEL=all-minilm` /
+`CODESCOUT_EMBED_URL=…:48080/v1`; the second carried the **correct** `CodeRankEmbed`
+/ `…:48081/v1`. Both names are `apply_embed_overrides` inputs at highest
+precedence, so two shells resolved different embedders from identical code and
+identical `project.toml`.
+
+The plausible story — "`load_startup_env()` runs at MCP server startup so
+`run_command` children inherit the var and `Bash` children do not" — is what this
+entry originally asserted, and it is **wrong twice**: it does not survive its own
+measurements below, *and* `~/.config/codescout/.env` never sets the short-prefix
+`CODESCOUT_EMBED_*` pair at all (it sets the `EMBEDDER_`-prefixed ones), so it was
+never the rescuer. Do not re-propose it. The measurements that constrained the
+search:
 
 | Condition | Result |
 |---|---|
@@ -270,18 +289,48 @@ originally asserted, and it does not survive its own measurements:
 The last row is the refutation: a near-empty environment passes, so the failure is
 caused by something **present** in the harness environment, not by the absent
 var — yet stripping the obvious suspect (ambient
-`CODESCOUT_EMBED_URL=http://127.0.0.1:48080/v1`, set in the desktop session and
-present in *both* the Bash shell and the MCP server's `/proc/*/environ`) does not
-fix it. Also checked and excluded: `XDG_CONFIG_HOME` and `CODESCOUT_ENV_FILE` are
+`CODESCOUT_EMBED_URL=http://127.0.0.1:48080/v1`) does not fix it. *Why that row
+misled:* the other stale var, `CODESCOUT_EMBED_MODEL=all-minilm`, was
+independently sufficient on its own, so removing either one alone changed nothing.
+
+**Retracted 2026-08-28.** The clause *"set in the desktop session and present in
+both the Bash shell and the MCP server's `/proc/*/environ`"* used to sit in the
+sentence above, and it is the observation that wrongly cleared this variable — if
+both sides have it, it cannot be the discriminator. Re-checked across 7 live
+`codescout start` processes: three carry `CODESCOUT_EMBED_URL=…:48081/v1`, four
+lack the var, and **none carries `48080/v1`**. The reading cannot be reproduced;
+the likeliest source is a zombie server predating the `.claude.json` block
+(`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`).
+The name was on both sides. The value never was. Also checked and excluded: `XDG_CONFIG_HOME` and `CODESCOUT_ENV_FILE` are
 unset, no shell profile sets `CODESCOUT_EMBEDDER_URL`, and `48080` appears as a
 literal nowhere in `src/`. Note `/proc/<pid>/environ` shows only the exec-time
 environment, so a var set later by `std::env::set_var` is invisible there — which
 is why that file cannot settle this either way.
 
-**So: use the remedy, and if you need the mechanism, bisect the environment**
-(`env -i` passes, full harness env fails — the culprit is in the difference).
-Measured 2026-08-27 at `c37c7c98`, while `shell_command_mode = "disabled"` routed
-all shell work through native `Bash`.
+**Fix applied 2026-08-28** — both stale vars deleted from
+`~/.claude-sdd/settings.json` and `~/.claude-kat/settings.json` (backups
+`*.bak-20260827`); `~/.claude`'s block was already correct and was left alone.
+Verified after a Claude Code restart: **zero** `CODESCOUT_*` and zero
+`EMBED`-named vars in native `Bash`, and the previously-failing test passes when
+the test binary is invoked **directly** — which bypasses the
+`~/.cargo/config.toml` pin, so the pass is not the pin propping it up. Full
+write-up, including the retracted evidence line:
+`docs/issues/2026-08-27-cargo-test-fails-from-bash-passes-via-run-command.md`
+(`fixed`).
+
+**Two transferable debugging lessons.**
+
+- **At a divergence, diff values — not names.** "The stale var is present in the
+  MCP server's environ too" retired the correct suspect for a day. The *name* was
+  on both sides; the *values* disagreed, and the disagreement was the whole
+  mechanism. `grep -c` answers the wrong question here.
+- **Bisect additively from a known-good base.** With two independently sufficient
+  causes, one-at-a-time elimination returns a clean *negative* for a variable that
+  genuinely is a cause — it did so three times running. `env -i` with `{HOME,PATH}`
+  passes; add variables back until it breaks.
+
+Measured 2026-08-27 at `c37c7c98` (diagnosis) and 2026-08-28 (resolution), across a
+period when `shell_command_mode` moved from `"disabled"` back to `"warn"`.
 
 **The symptom is session-scoped, not `Bash`-scoped — measured 2026-08-27 22:1x from
 a concurrent session, `codescout-d3`.** That session's native `Bash` ran the full
@@ -299,6 +348,12 @@ Two consequences for the bisection:
   `CODESCOUT_EMBED_URL` (the short name, `48080`) was present in the failing
   session's env and is **absent** from `codescout-d3`'s — `env | grep -c
   '^CODESCOUT_EMBED_URL='` → `0` in both its `Bash` and its `run_command`.
+  *Explained 2026-08-28:* that fingerprint — `CODESCOUT_EMBEDDER_URL=…:48081`
+  present, short-prefix `CODESCOUT_EMBED_URL` absent — is exactly
+  `~/.claude/settings.json`'s `env` block and exactly not `-sdd`'s, so `d3` was
+  almost certainly launched from the `~/.claude` profile. (Inferred from the env
+  fingerprint, not from the process itself, which is gone.) So "session-scoped" is
+  more precisely **profile-scoped**: which `settings.json` supplied the block.
 - One hypothesis is already dead, so nobody need re-run it: *"`env -i … bash -lc`
   passes only because `-l` re-sources profile files that set the var."* It does not
   — `env -i HOME=… PATH=… bash -lc 'env | grep -i EMBED'` prints nothing, and so
