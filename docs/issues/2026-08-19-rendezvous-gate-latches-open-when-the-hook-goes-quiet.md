@@ -11,7 +11,7 @@ opened: 2026-08-19
 owner: marius
 related: []
 severity: low
-unverified: 'MECHANISM confirmed (`src/tools/config/mod.rs:267-283`, and the gated branch observed executing live 2026-08-27). FREQUENCY still unmeasured — but as of `claude-plugins:80ed23f` it is now MEASURABLE, which it was not before: `hook_at` is refreshed on tool calls, so its age finally means time-since-proof-of-life. Re-read the live slots after this has been deployed a while and close on data. The stamp itself is not yet live-verified against a running server — needs `/reload-plugins` (the plugin cache is version-keyed) plus one tool call, then a check that this session''s slot `hook_at` moved forward. No codescout-side fix is implemented, deliberately.'
+unverified: 'MECHANISM confirmed (src/tools/config/mod.rs:267-283, gated branch observed executing live 2026-08-27). The stamp is now LIVE-VERIFIED (2026-08-28: this session''s slot moved 04:54:32Z -> 04:56:19Z after an MCP call; note the hook matcher is mcp__.* so native Bash calls never stamp). FREQUENCY now has a first number - 0 of 5 stamped slots showed the latch-open-while-quiet state, joined against usage.db call activity - but that is one ~20-minute snapshot, not a long-run rate. Re-run the join before closing. No codescout-side fix is implemented, deliberately.'
 ---
 
 # BUG: the rendezvous gate latches open, so a companion hook that goes quiet mid-process leaves `/clear` invisible again
@@ -214,6 +214,58 @@ So any real fix must **create the signal before it can gate on it**: an already-
 hook (`UserPromptSubmit`, `PreToolUse`, `Stop`, …) also stamping the slot. That is a cross-repo
 change in `../claude-plugins/codescout-companion/` with a per-prompt write cost — a design decision,
 not a defect repair, and still gated on an impact number nobody has.
+### Measured 2026-08-28 — the frequency this file waited eight days for: **0 of 5**
+
+The instrument is live and the number is in. Both prerequisites the `unverified:` named are
+now satisfied.
+
+**The stamp is live-verified.** `/reload-plugins` put 1.19.5 in the cache `~/.claude` and
+`~/.claude-sdd` actually load, and this session's slot moved `04:54:32Z → 04:56:19Z` after a
+tool call. One trap worth recording for whoever tests this next: the hook's matcher is
+`mcp__.*__(symbols|run_command|…)`, so **native `Bash` calls never stamp**. An 84-second
+window of `Bash` work left `hook_at` frozen and read exactly like a deployed-but-inert fix;
+a single `artifact(get)` moved it. (`~/.claude-kat` is still pinned at 1.19.4 and has no
+refresh at all.)
+
+**The confound, and how to get past it.** `hook_at` age alone cannot measure this bug,
+because an idle session and a session whose hook died look identical — both stop advancing.
+The discriminator is to join each slot against evidence the server was *working* after its
+last stamp. `usage.db.tool_calls.cc_session_id` matches the slot's `session` field, so:
+
+> **hook quiet** ⇔ `last_tool_call > hook_at + LIVENESS_THROTTLE_MS`
+
+Run 2026-08-28 05:25Z across all eight live slots:
+
+| pid | project | stamp age | last call | verdict |
+|---|---|---|---|---|
+| 2081534 | codescout | 349s | 349s | healthy |
+| 223261 | codescout | 111s | 86s | healthy |
+| 225825 | codescout | 1108s | 1109s | healthy |
+| 226958 | codescout | 533s | 513s | healthy |
+| 3024371 | claude-plugins | 661s | 661s | healthy |
+| 2537187 | MRV-poc | — | 9.5h | gate never opened |
+| 3708928 | codescout | — | 12s | gate never opened |
+| 289807 | prompt-test (eval bin) | — | 0s | gate never opened |
+
+**Every stamped slot tracks its own call activity to within seconds.** Five for five. Zero
+instances of the filed failure mode — a gate held open while the hook has gone quiet.
+
+That is one snapshot over a ~20-minute stamp window, not a long-run rate, so it does not
+close the file on its own. What it does do is put an upper bound where there was no number
+at all, and it is consistent with the mechanism being as narrow as the Summary claims: the
+hook must break mid-process *without* an MCP restart, and nothing observed here does that.
+
+**The measurement found the opposite polarity instead, and it is more common.** Three of
+eight slots have `hook_at: null` while their process is alive and serving — one of them 12
+seconds before the sample, on the codescout project itself, from a server up for seven
+hours. Gate CLOSED is the *forgiving* direction, so this is not the harm this file
+describes; but it means Phase C's surgical re-arm is silently inactive for those sessions,
+which is the optimisation the whole guide-ledger work exists to deliver. And it is
+permanent by design: `refreshLivenessStamp`'s invariant 1 (`if (!e.hook_at) continue;`)
+never opens the gate, so a slot that misses its `SessionStart` stamp can never be repaired
+by the refresh. Filed separately — different mechanism, opposite direction, different fix:
+`docs/issues/2026-08-28-rendezvous-slot-never-stamped-leaves-phase-c-inactive.md`
+
 ## Hypotheses tried
 
 1. **Hypothesis:** an idle TTL would eventually close the gate on a stale keyed ledger.
