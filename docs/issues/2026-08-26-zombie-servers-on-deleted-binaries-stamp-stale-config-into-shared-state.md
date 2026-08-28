@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
 severity: high
-unverified: 'Directions 2 and 3 remain unimplemented. Direction 1 (74dfbfca) is gate-green and mutation-verified but NOT yet live-verified: written_by only appears in index(action="status") once a sync has run through the new binary, so the first live read must follow cargo rb + /mcp + an actual index write. WHICH pid wrote any pre-2026-08-28 sidecar stays unprovable - the field fixes that going forward, not retroactively.'
+unverified: 'Directions 2 (refuse to write from a deleted binary) and 3 (let a response declare its build) remain unimplemented. Direction 1 (74dfbfca) is live-verified on all four branches - see the 2026-08-28 08:18 subsection - with one stated gap: the differs-branch input was a hand-edited sidecar, so a second physical build writing that value is still unobserved. WHICH pid wrote any pre-2026-08-28 sidecar stays unprovable; the field fixes that going forward, not retroactively.'
 ---
 
 # BUG: server processes on deleted binaries write their stale config into the live project sidecar
@@ -449,6 +449,41 @@ deleted.
 **Still open:** directions 2 (refuse to write from a deleted binary) and 3 (let a response
 declare its build). All three compose — and direction 1 makes the class visible, which is
 the precondition for judging whether 2's behaviour change is worth its untestability.
+
+#### Live-verified 2026-08-28 08:18 — all three branches, on a rebuilt server
+
+Build `03ed972f`, four servers started 08:17:08–08:18:03 against it (and four older ones
+already zombies, which is the census above reproducing itself an hour later).
+
+1. **Absence is silent.** The sidecar on disk was `schema_version: 4` with no `written_by`,
+   written by a pre-field binary. `index(action="status")` reported **no** `written_by`
+   key — "not recorded" must never read as "a problem", the same rule
+   `indexed_with_model` states.
+2. **The writer stamps itself.** `index(action="build")` rewrote it 18s later as
+   `schema_version: 5` with
+   `written_by: {git_sha: "03ed972f", git_dirty: false, pid: 223261, exe_deleted: false}`.
+   Pid 223261 is one of the four servers observed starting at 08:17:08, and `exe_deleted:
+   false` is correct for a live one — so the Linux probe answers definitely, not `None`.
+3. **Suppression on match.** With sidecar sha == reading sha, `status` stayed silent again.
+4. **The payload fires on difference.** With the sidecar carrying another build's stamp:
+
+```json
+"written_by": {
+  "git_sha": "74dfbfca", "git_dirty": true,
+  "pid": 2081534, "exe_deleted": true,
+  "reading_binary_sha": "03ed972f"
+}
+```
+
+Which reads, in one field group: *a still-running process, on an unlinked binary, built
+from a dirty tree at a commit you are no longer on, wrote your index state.* Pid 2081534 is
+a real zombie on this host — the top row of the census table above.
+
+**Scope of step 4, stated rather than glossed:** the *sidecar* was hand-edited to carry a
+different sha; the read path was not. What that proves is the live server's comparison and
+emission fire on real input — the branch a unit test cannot show is reachable in the
+running binary. What it does not prove is a second binary physically writing that value,
+which needs two builds and will verify itself for free on the next rebuild.
 
 ## Tests added
 
