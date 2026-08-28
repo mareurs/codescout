@@ -151,7 +151,50 @@ Precedent: `docs/issues/archive/2026-07-02-tool-usage-patterns-augmentation-lost
 restored this same class by reconstructing from body prose, and states plainly that
 the restore is per-machine and must be re-run elsewhere.
 
-#### First: mine the archive for quoted live calls
+#### First: measure the cost — do not restore what nothing queries
+
+**Run the documented queries. Restore only the trackers where one fails.** An
+augmentation whose absence breaks nothing is not a repair to make; filling it is
+authoring.
+
+Measured 2026-08-28 across 18 unaugmented trackers: **4** had a documented
+`entry_filter` query that fails today. The other 14 had none — no observable cost,
+and restoring them would have meant inventing 14 standing instructions to clear a
+check.
+
+**Proxies lie here; run the query.** Two greps were tried first, and both
+misranked the list:
+
+| method | verdict on `codescout-usage-frictions` | why it was wrong |
+|---|---|---|
+| line-scoped grep (id and `entry_filter` on one line) | **0** | multi-line prescriptions split the two across lines |
+| file-scoped (file mentions id *and* contains `entry_filter`) | **5** | its `entry_filter` mentions document a bug against a **different** tracker's id |
+| **running the query** | **no failing query → leave it** | the only method that separates "queries this" from "mentions both" |
+
+Extract the real queries, then execute each:
+
+```
+grep -n 'entry_filter' <tracker path>              # self-documented
+grep -rn '<artifact-id>' docs/ --include='*.md'    # then READ the hits
+artifact(action="get", id="<id>", entry_filter=<the documented filter>)
+```
+
+A failing one returns, verbatim:
+
+```
+entry_filter set but this artifact is not augmented — declare entry_collection
+on its augmentation, or retrofit it
+```
+
+That error **is** the measurement. No error — or no documented query to run —
+means leave it, and say so in your report, so the next session does not re-derive
+the same conclusion.
+
+**Leaving it is the honest default for a second reason:** `expects_augmentation`
+firing in `doctor` is a precise signal that something is missing. Filling every
+slot with reconstruction converts that signal into a false all-clear.
+
+#### Then: mine the archive for quoted live calls
 
 **Do this before deriving anything from body prose.** Bug files quote the original
 calls verbatim — argument names, collection names, response echoes — so the archive
@@ -199,6 +242,25 @@ table that matches.
 `get_guide("tracker-conventions")` has withdrawn the params-rendered-index pattern:
 no `render_template` writes a body, and a table row defines no citable token. Restore
 in two tiers:
+
+- **Tier 0 — the augmentation is CODE. Restore it verbatim; check for this first.**
+  A tracker written by a codescout action carries its augmentation in the binary via
+  `include_str!`, so the prompt and template are in the repo and recoverable
+  byte-for-byte with zero authoring. `legibility-backlog` is the known case —
+  `src/librarian/tools/legibility_scan/render_prompt.md` and `render_template.j2`,
+  `entry_collection: "candidates"`. Attach those exact bytes, then re-run the action
+  that owns it (`librarian(action="legibility_scan", write=true)`) to repopulate
+  params from the live engine.
+
+  **The owning action does not self-heal**, so it will not do this for you: run
+  against an existing-but-unaugmented tracker, `legibility_scan` returns
+  `ok: true` *with* `tracker_error: "no augmentation for artifact … — call
+  artifact_augment first"`. The create-and-augment path only fires when the tracker
+  does not exist.
+
+  **Verify byte-identity rather than asserting it** — read both source files and the
+  stored augmentation out of `catalog.db` and compare. That is what makes it
+  restoration instead of a close paraphrase.
 
 - **Tier A — `prompt` + `params` + `entry_collection`.** Only for trackers with a
   *documented* `entry_filter` workflow. Find them by evidence, not memory:
@@ -272,6 +334,31 @@ paths are **relativized** — project-internal paths render relative
 `grep -v '/home/.../codescout'` excludes *nothing*, which reads exactly like "this
 project has no violations." Filter on the leading `/` instead: absolute means
 another repo. See `get_guide("progressive-disclosure")` § Path-relative annotation.
+
+
+## You are probably not alone in the checkout
+
+A resume pass shares two things with any concurrent session: the **working tree**
+and the **catalog**. Both bit during the 2026-08-28 pass.
+
+- **Untracked files appeared mid-session** — two `resume-*.md` trackers, written by
+  a peer at 12:45. `git add -A docs/` would have swept them into a commit that had
+  nothing to do with them. **Stage explicit paths, never `-A`**, and re-read
+  `git status --short` before every commit. The failure mode is already on record:
+  `bug-fix-session-log:F-60`, *"a peer's routine commit absorbed this session's
+  uncommitted `append_entry` writes."*
+- **Worktrees make an unqualified write ambiguous, and the server refuses it.**
+  With linked worktrees present and no explicit activation, `edit_markdown` returns
+  `Write blocked: git worktrees detected but workspace(action='activate') has not
+  been called`, naming them. Answer it with an explicit
+  `workspace(action="activate", path="<main repo>")` rather than working around it —
+  the guard is asking which tree you mean, and on a resume the answer is always the
+  main checkout.
+- **Subagents must not call `workspace(action="activate")`.** It mutates the
+  *parent's* active project mid-turn
+  (`docs/issues/2026-08-23-subagent-activate-mutates-parent-active-project.md`, open).
+  Brief them to pass `workspace=<path>` per call instead. All four restore agents on
+  this pass were briefed that way and none tripped it.
 
 ## Related
 
