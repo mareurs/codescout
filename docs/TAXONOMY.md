@@ -52,6 +52,8 @@ interim and, once again, nothing re-counted. Do not increment this number; re-de
 | **A-N** | `docs/trackers/prompt-hamsa-audit-log.md` (craft-level twin in `claude-plugins/docs/trackers/`) | Prompt-audit record from a Hamsa audit: named gap, recommended move, prediction, confidence, outcome (filled when evidence lands) | Per the tracker's maintenance convention (`## A-N — <title>` section + Index row) | Hamsa SKILL.md heuristic / buddy memory when the finding generalizes |
 | **PV-N** | `docs/trackers/provenance-subsystem.md` (augmented artifact `e12cd7e0060ed9b8`) | Provenance/attribution **programme** state: measurement verdicts vs pre-registered kill conditions, standing design decisions, hazards not to rediscover, open decisions, buildable work. Typed `finding \| gap \| decision \| hazard \| task` | `artifact(action="append_entry", id_prefix="PV", entry_collection="items", entry={...})` — atomic monotonic id; query with `entry_filter` | Implementation plan (`docs/plans/`) once phase moves past MEASUREMENT; a `decision` flips to `settled` in place |
 | **CAP-N** | `docs/trackers/capability-proposals.md` (augmented artifact `01291679a5ee4707`) | **Pre-plan** proposal for a codescout capability we do not have: the ask, a substrate check citing what exists today at `path:line` and what is genuinely missing, and the open decisions. Reflective — judgment, not gathering | Append a `## CAP-N` section above `## Anti-goals` + an Index row, via `artifact(action="update", patch={body_edits: [...]})` | A spec + plan under `docs/superpowers/` once it has tasks and a file structure; or `rejected` in place with the reason kept |
+| **HY-N** | `docs/trackers/tracker-hygiene-log.md` (declared ledger, artifact `7e498b6dcb45b924`) | Verdict on the tracker-hygiene skill's own detectors: `hit` (a detector fired correctly), `miss` (a defect class no detector sees), `proposal` (a new detector or convention change). Dated `## Sweep YYYY-MM-DD` sections sit alongside and own no id | **Two shapes, and they differ.** An `HY-N` entry: `artifact(action="append_entry", id="7e498b6dcb45b924", id_prefix="HY", anchor_heading="## Template for new entries", title=…, body=…)` — prose ledger, no `entry_collection`; one call writes `## HY-N — <title>` and records the mark. A **sweep** entry is dated rather than numbered, so it goes through a plain `body_edits` insert with the `next-sweep-due` frontmatter bump riding along **in the same call**. `edit_markdown` is refused: declared ledger | A new detector in `codescout-companion/skills/tracker-hygiene/SKILL.md`, or a convention change in `get_guide("tracker-conventions")` |
+| **OP-N** | `docs/trackers/operator-rules.md` (declared ledger, artifact `fa21bfb35684794d`) | A rule that holds across every project, tool and model for **this operator** — its text, binding, shape, status and evidence. Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md` | `artifact(action="append_entry", id="fa21bfb35684794d", id_prefix="OP", anchor_heading="## Template for new entries", title=…, body=…)` — prose ledger, no `entry_collection` | Compiled into each Claude Code profile's `CLAUDE.md` by `codescout operator-rules compile`. A withdrawn rule is **retired in place** with its text kept verbatim (precedent: OP-5, *Conclude Last*, superseded by OP-1), never deleted |
 | **BUG (slug)** | `docs/issues/YYYY-MM-DD-<slug>.md` | Per-bug investigation file: Symptom / Repro / Root cause / Fix / Workaround | Create from `docs/issues/_TEMPLATE.md`; status field in frontmatter | Archived to `docs/issues/archive/` once the fix is verified on `experiments` — reaching master is NOT required. Record the SHA **labelled with its branch** *and* its `git patch-id --stable` — the SHA is positional and dies when `experiments` is rebased; the patch-id is a content hash of the diff and survives rebase and cherry-pick. **No pending-master-SHA Resume line, and no later reconciliation** — record both once and the record stays resolvable whichever path the fix takes to `master`. Measured 2026-08-19: 10 of 63 archived files had already lost their SHA to a rebase, while zero patch-ids collided across 3594 commits. Move via `artifact(action="move", …)`, never `git mv` |
 | **DC-N** | `docs/trackers/claim-decay.md` (augmented artifact `7d813ce54cb9f1c5`) | A durable written claim that decayed where **no process event is scheduled to repair it** — typed `measured-value-drift \| premature-assertion \| stale-pointer \| deferral-rationale \| status-zombie \| freshness-gap \| undecidable-green \| prohibition-false`. Records the *missing trigger*, not the wrong text. Evidence only: the narrative stays in the F-N / R-N / bug file the row cites | `artifact(action="append_entry", id="7d813ce54cb9f1c5", entry_collection="claims", id_prefix="DC", entry={…})` for the row, **then** a `## DC-N — <title>` section via `artifact(action="update", patch={body_edits:[…]})`. Both writes, always — the row is what `entry_filter` reads, the heading is what makes it citable. **Never** `artifact_augment(merge=true, params={claims:[…]})`: that REPLACES the array | A `librarian(action="doctor")` check, an `audit_doc_refs` severity rule, or a test — flip the row to `check-shipped` via `update_entry` when it lands |
 
@@ -90,28 +92,78 @@ Append to any of them with
 `artifact(action="append_entry", id=…, id_prefix="<PREFIX>", anchor_heading="## Template for new entries", title=…, body=…)`
 — one call, from the main checkout. No `entry_collection`.
 
+**Other declared ledgers scoped to one work stream** (registered 2026-08-28 — all eight
+were declared and defining entries while this document listed none of them, which is what
+`tracker-hygiene-log:HY-22` records). `HY` and `OP` earned main-table rows instead; the
+rest are here:
+
+| Prefix | Ledger | Captures | Entries | Append |
+|---|---|---|---:|---|
+| **AA-N** | `artifact-augmentation-followups.md` (`aabef87ec988dc1d`) | Enhancements to the `artifact_augmentation` feature — the followup roadmap after v1 | 21 | prose |
+| **CTX-N** | `context-performance.md` (`5d7f5c0a41d0b6f3`) | Packing-constant measurements: a constant chosen once from intuition that outlived the corpus justifying it | 2 | prose |
+| **FND-N** | `fable-tuning-findings.md` (`35de33286cd34f87`) | Fable tuning — findings | 18 | `entry_collection="findings"` |
+| **FT-N** | `fable-tuning-tasks.md` (`ad1af8262fdce357`) | Fable tuning — tasks. **Owned `T` until `d3282868`**; surrendered it because `tool-usage-patterns` had the stronger claim (`CLAUDE.md` hard-codes `id_prefix="T"` for `f2ecdd76a6189efb`). `params_schema` now pins `^FT-\d+$`, so writing `T-` here is refused | 12 | `entry_collection="tasks"` |
+| **GF-N** | `2026-08-16-iron-law-gate-firing-audit.md` (`ac8fbe339e66ade3`) | One empirical pass over codescout's own `usage.db` asking what the TU-N investigation did not | 8 | prose |
+| **SD-N** | `structural-debt-refactor.md` (`38a17e4acf1f1fa1`) | Structural debt in the 690-commit `experiments` cohort. `status: draft` | 11 | prose |
+
+`entry_collection` named ⇒ pass it to `append_entry` with an `entry={…}` row; `prose` ⇒
+omit it and pass `anchor_heading` + `title` + `body` so the server writes the
+`## PREFIX-N — <title>` section itself.
+
 If you find yourself wanting to introduce a new project-wide prefix, ask first
 whether it really earns a slot or whether it's a variant of one of the **eleven**
 in the table above.
 
-### Measured drift — 2026-08-19
+### Measured drift — 2026-08-19, re-derived 2026-08-28
 
-The table documents 11 prefixes. **29 are actually defining entries** in this repo
-(counted by `## PREFIX-N — title` headings, which is the only shape `link_scan` reads as a
-definition). **17 of them have no row in that table.** By number of files defining each:
+**Re-derived 2026-08-28.** The 2026-08-19 figures below are kept because the *shape* they
+describe is still right and the movement between them is the point.
 
-| Prefix | Definers | Prefix | Definers |
-|---|---:|---|---:|
-| `C` | 10 | `TMR`, `SD`, `BL` | 1 each |
-| `ADR` | 4 | `TU`, `GF`, `DF` | 1 each |
-| `BUG-N` (token, not the slug row) | 3 | `B`, `AB`, `I` | 1 each |
-| `LIMIT`, `L`, `AA`, `FND`, `FT` | 1 each | | |
+| | 2026-08-19 | 2026-08-28 |
+|---|---:|---:|
+| prefixes defining entries | 29 | **38** |
+| defining `## PREFIX-N — title` headings | not counted | **1,331** |
+| defining prefixes with **no** row here | 17 | **12** |
 
-This list is a **snapshot, not a slot allocation** — several are one-off spec-local
-namespaces that correctly do not earn a row. It is recorded so the next reader knows the
-table is a subset of reality rather than assuming an unlisted prefix is a mistake. Re-derive
-it rather than trusting this table to stay current.
+The count went *down* while the population went *up*, because this pass registered eight
+declared-but-undocumented ledgers (`AA` `CTX` `FND` `FT` `GF` `SD` in the work-stream table
+above, `HY` and `OP` in the main one) plus five resume queues. See
+`tracker-hygiene-log:HY-22` for how the gap was found and why no detector reports it.
 
+The twelve without a row, with the number of files defining each — **and none of them is a
+defect**:
+
+| Prefix | Files | Why no row |
+|---|---:|---|
+| `C` | 10 | Spec-local case numbering across the 2026-05-15/16 nav-eval rounds. Correctly local |
+| `ADR` | 4 | The ADR numbering convention, not a ledger |
+| `E` | 2 | Spec-local |
+| `BL` | 1 | Self-documented in `open-issue-work-queue.md`'s own header, which explicitly says work-stream-scoped, *"not a project-wide namespace"* |
+| `AB` `B` `CM` `DF` `I` `L` `TMR` `TU` | 1 each | One-off spec- or session-local namespaces |
+
+`BUG` defines 41 headings and **is** documented — as the `BUG (slug)` row in the main
+table, whose format a `**PREFIX-N**` scan does not match. Do not "fix" it.
+
+**Re-derive; do not trust these numbers.** Both a raw count and the reasoning above decay,
+and this section has now been wrong twice (see the parenthetical under § *Main taxonomy*,
+which records the same failure a third time for the declared-prefix count). The commands:
+
+```bash
+# prefixes that define entries, and how many headings each
+grep -rhoE '^#{1,6} [A-Z]{1,3}-[0-9]+ *[—–-] ' --include='*.md' docs/ > /tmp/defs.txt
+sed -E 's/^#+ ([A-Z]{1,3})-.*/\1/' /tmp/defs.txt | sort | uniq -c | sort -rn
+
+# prefixes that DECLARE (frontmatter entry_prefix) — fence-aware caveat below
+grep -rh '^entry_prefix:' --include='*.md' docs/
+```
+
+**The declaration grep is fence-naive and the guard is not.** `grep '^entry_prefix:'` also
+matches a line inside a ```` ```yaml ```` block or a Rust raw-string literal, so it reports
+`HY` in `docs/manual/src/concepts/entry-citations.md` and `OP` in
+`docs/superpowers/plans/2026-08-27-operator-rules-phase-1.md` — neither of which is a
+ledger. Probed 2026-08-28: `edit_markdown` on both returns *"heading not found"*, not the
+ledger refusal, so the guard **does** skip fenced declarations. Filter by hand, or trust the
+guard over the grep.
 ## Trackers that deliberately own no prefix
 
 Not every tracker is a ledger. Measured 2026-08-17: 27 unaugmented trackers under

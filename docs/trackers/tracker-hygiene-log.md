@@ -7,7 +7,7 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
-entry_high_water_HY: 21
+entry_high_water_HY: 22
 entry_prefix: HY
 expects_augmentation: true
 next-sweep-due: 2026-09-24
@@ -1632,6 +1632,98 @@ defect, and every one of those was reconstructing information the scan already h
 `tracker` and which declares no `entry_prefix` is *probably* an accident — a plan, spec or
 bug file quoting an entry heading. Reported as its own class it would have named this file
 directly, with no token intersection needed.
+
+## HY-22 — Two documentation-drift classes no detector sees — the prefix registry, and a terminal bug's prose-only residual
+
+**Verdict:** miss — two drift classes, neither visible to any live detector, both found by hand.
+**Valid:** dated 2026-08-28
+
+**How it surfaced.** Checking whether commit `67d4953f`'s subject — *"the T-N→FT-N
+rename"* — had left `docs/TAXONOMY.md` stale. **It had not**, and the reason is worth
+recording: the rename moved a *different* ledger. Three ledgers claimed `T`;
+`fable-tuning-tasks` surrendered it (`T` → `FT`, `d3282868`) because
+`tool-usage-patterns` had the stronger claim — `CLAUDE.md` hard-codes `id_prefix="T"`
+for id `f2ecdd76a6189efb`. So TAXONOMY's `T-N` row was correct all along, and "fixing"
+it on the strength of the commit subject would have broken it.
+See `docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`.
+
+Both renames verified complete: `fable-tuning-tasks.md` has `entry_prefix: FT`,
+`entry_high_water_FT: 12`, 12 `FT-N` headings and **0** stale `T-N`;
+`artifact-augmentation-followups.md` — flagged in that bug as holding 21 row-only `T-N`
+tasks, eight mis-binding — is now `entry_prefix: AA`, `entry_high_water_AA: 21`, **0**
+`T-N`.
+
+### Class 1 — eight declared ledgers have no `docs/TAXONOMY.md` row
+
+Measured 2026-08-28. Twenty-one prefixes are declared; the table carried rows for
+thirteen of them.
+
+| declared, no row | ledger | entries |
+|---|---|---:|
+| `AA` | `artifact-augmentation-followups.md` | 21 |
+| `CTX` | `context-performance.md` | 2 |
+| `FND` | `fable-tuning-findings.md` | 18 |
+| `FT` | `fable-tuning-tasks.md` | 12 |
+| `GF` | `2026-08-16-iron-law-gate-firing-audit.md` | 8 |
+| `HY` | `tracker-hygiene-log.md` (**this file**) | 21 |
+| `OP` | `operator-rules.md` | 5 |
+| `SD` | `structural-debt-refactor.md` | 11 |
+
+`S` is excluded — it is documented under § *Work-stream-specific prefixes*.
+
+**Why no detector sees it.** `doctor` reports `ledger_defines_nothing` and
+`entry_without_definition` — both are about a ledger's *internal* consistency.
+`link_scan` reports `prefix_conflicts` — about two ledgers sharing a namespace.
+Neither asks whether a declared prefix is *documented anywhere a reader will find it*,
+because the registry is a prose table and nothing binds it to the frontmatter it
+describes.
+
+The document half-knows this: § *Measured drift — 2026-08-19* says *"29 are actually
+defining entries… 17 of them have no row"* and *"re-derive it rather than trusting this
+table to stay current."* That is a snapshot with no repair trigger — the same shape as
+`claim-decay:DC-3`, one section above it.
+
+### Class 2 — a terminal bug's residual, stated in prose, reachable by no query
+
+`docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`
+is `status: fixed`, `closed: 2026-08-18`, **no `unverified:`** — while its `## Fix`
+section ends:
+
+> *"Still open, handed off: **(4) renaming `researcher`'s prefix** — no longer urgent,
+> per #2."*
+
+This is the exact pattern `get_guide("tracker-conventions")` introduced `unverified:`
+for, and its own measurement said so: *of 16 terminal bug files, 14 stated their blocker
+in prose and none of it was reachable by a query.* This is the fifteenth, and it was
+archived the day after that measurement was written.
+
+**Note the asymmetry with Class 1.** A detector *could* be written for this one —
+`terminal_status_with_caveat` already exists and reported **40** findings in the
+2026-08-28 `doctor` run. It did not catch this file. Whether that is a coverage gap in
+the predicate or a deliberate scope limit is not established here; it is the next thing
+to check, not a conclusion.
+
+### Tasks
+
+1. **DONE** — add `unverified:` to the archived prefix-collision bug.
+2. **DONE** — add TAXONOMY rows for the eight declared-but-undocumented ledgers.
+3. **DONE** — re-derive § *Measured drift*'s counts instead of leaving the 2026-08-19
+   snapshot to be read as current.
+4. **DONE — and the Class 2 framing above is corrected by it.** Not a predicate gap:
+   `terminal_status_with_caveat` fires on *"a bug file whose `status` is terminal and
+   whose `unverified:` field is **non-empty**"* (`src/librarian/tools/doctor.rs:58-63`),
+   and its own doc calls it *"the reader half of the `unverified:` convention… without
+   this the field only moved the problem from prose into frontmatter."* It did not fire
+   because the field was **absent**, which is the defect itself. Archived files are
+   included on purpose, so nothing about the file's location suppressed it. Confirmed by
+   the count moving **40 → 41** after task 1 landed.
+
+   **The lesson is about the check, not the file.** A convention with a reader half is
+   silent on exactly the population that never adopted the writer half, and that silence
+   is indistinguishable from compliance. `terminal_status_with_caveat`'s 41 findings are
+   the *declared* caveats; the undeclared ones — the population this entry found by hand —
+   are still uncounted, and no detector can count them, because there is nothing to key on.
+   That asymmetry is worth a detector proposal, but it is not this one's bug.
 
 ## Template for new entries
 
