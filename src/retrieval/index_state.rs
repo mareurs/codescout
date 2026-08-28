@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 /// version-gated. See the `index-state.json` schema section of
 /// `docs/state-protocol.md`. If version-gated degradation is ever built, update
 /// this comment to describe the real mechanism rather than the aspiration.
-pub const INDEX_STATE_SCHEMA_VERSION: u32 = 4;
+pub const INDEX_STATE_SCHEMA_VERSION: u32 = 5;
 
 /// The on-disk shape of `.codescout/index-state.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +89,84 @@ pub struct IndexState {
     /// module boundary. Empty when `last_sync_skipped_count == 0`.
     #[serde(default)]
     pub last_sync_skipped_sample: Vec<String>,
+    /// Which process wrote this file, and what code it was running.
+    ///
+    /// Shared per-project state has no lock and no ownership: whoever syncs last
+    /// wins. That is adjudicable only if a reader can tell WHO won. Measured on
+    /// this host 2026-08-28: seven concurrent `codescout start` processes, six of
+    /// them executing binaries that had already been unlinked -- one of which had
+    /// been running for nine minutes, zombified by a routine `cargo rb` rather
+    /// than by age. A rebuild invalidates every already-running server instantly,
+    /// so this is a property of the ordinary edit-build loop, not of long
+    /// sessions.
+    ///
+    /// `None` means a sidecar written before this field existed. Absence is "not
+    /// recorded", never "written by the current build" -- the same rule
+    /// `indexed_with_model` states above.
+    /// docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
+    #[serde(default)]
+    pub written_by: Option<WriterProvenance>,
+}
+
+/// Identity of the process that wrote an [`IndexState`], and of the code it was
+/// running.
+///
+/// Two of the three fields are portable and carry most of the diagnostic value on
+/// their own: a sidecar stamped with a `git_sha` different from the reading
+/// binary's own `env!("CODESCOUT_GIT_SHA")` proves a different build wrote it, on
+/// every platform, with no `/proc` walk. `exe_deleted` is the Linux-only bonus,
+/// not a gate -- which is why this ships without an answer for the non-Linux
+/// `/proc/self/exe` question that had been treated as blocking.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WriterProvenance {
+    /// `git rev-parse --short HEAD` at build time, baked in by `build.rs` as
+    /// `CODESCOUT_GIT_SHA`. Literally `"unknown"` when the build had no git.
+    pub git_sha: String,
+    /// Whether that build came from a dirty working tree, in which case `git_sha`
+    /// does not fully identify the code. `build.rs` bakes `"0"`/`"1"`/`"unknown"`;
+    /// `"1"` is the only true, matching `Commands::Version`'s own reading.
+    pub git_dirty: bool,
+    /// The writer's pid, so a reader can ask whether it is even still alive.
+    pub pid: u32,
+    /// Whether the writing process's own executable had already been unlinked.
+    ///
+    /// `None` off Linux, where `/proc/self/exe` does not exist. `None` means
+    /// "could not tell" and must never be read as "not deleted" -- the same
+    /// distinction `indexed_with_model` draws between absence and mismatch.
+    pub exe_deleted: Option<bool>,
+}
+
+/// Snapshot this process's identity for [`WriterProvenance`].
+pub fn current_writer() -> WriterProvenance {
+    WriterProvenance {
+        git_sha: env!("CODESCOUT_GIT_SHA").to_string(),
+        git_dirty: env!("CODESCOUT_GIT_DIRTY") == "1",
+        pid: std::process::id(),
+        exe_deleted: exe_is_deleted(),
+    }
+}
+
+/// Whether this process's executable has been unlinked since it started.
+///
+/// Measured 2026-08-28 by deleting a running binary's file and having it read its
+/// own `/proc/self/exe`: the kernel appends `" (deleted)"` to the link target, and
+/// `std::env::current_exe()` does NOT strip it.
+///
+/// Both halves of the predicate earn their place. `!exists()` alone is already
+/// correct in all three real cases -- live binary (path exists), unlinked one
+/// (the suffixed path does not), and a file genuinely NAMED `"x (deleted)"` that
+/// is alive (that path does exist). The suffix check is what keeps a stat that
+/// fails for an unrelated reason, such as permissions, from reporting a live
+/// binary as deleted; conjoined, the conservative answer is always "not deleted".
+#[cfg(target_os = "linux")]
+fn exe_is_deleted() -> Option<bool> {
+    let p = std::fs::read_link("/proc/self/exe").ok()?;
+    Some(p.to_string_lossy().ends_with(" (deleted)") && !p.exists())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn exe_is_deleted() -> Option<bool> {
+    None
 }
 
 /// What a sidecar write should do about [`IndexState::indexed_with_model`].
@@ -182,6 +260,7 @@ pub fn write_index_state_with_dirty(
         indexed_with_model,
         last_sync_skipped_count: skipped.len(),
         last_sync_skipped_sample: skipped.iter().take(SKIPPED_SAMPLE_CAP).cloned().collect(),
+        written_by: Some(current_writer()),
     };
     std::fs::create_dir_all(root.join(".codescout"))?;
     let body = serde_json::to_string_pretty(&state).map_err(std::io::Error::other)?;
@@ -340,6 +419,95 @@ mod tests {
         let st = read_index_state(root).expect("sidecar should exist");
         assert_eq!(st.last_sync_skipped_count, 2);
         assert_eq!(st.last_sync_skipped_sample, skipped);
+    }
+
+    /// Goes through the REAL writer, not a hand-built `IndexState`.
+    ///
+    /// That distinction is the whole point of the test. A fixture that constructs
+    /// the provenance it then asserts on would pass whether or not
+    /// `write_index_state_with_dirty` ever calls `current_writer()` — the same
+    /// class that let `link_scan`'s cross-repo bucket ship inert under a green
+    /// test, and that let this file's own `indexed_with_model` reader outlive its
+    /// producer by three and a half months.
+    #[test]
+    fn the_writer_stamps_this_build_and_this_process() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_index_state_with_dirty(root, &[], ModelStamp::Record("m"), &[]).unwrap();
+
+        let w = read_index_state(root)
+            .expect("sidecar must parse")
+            .written_by
+            .expect("the writer must stamp itself, not leave None");
+
+        assert_eq!(
+            w.git_sha,
+            env!("CODESCOUT_GIT_SHA"),
+            "the stamp must be THIS build's sha, so a reader can compare against its own"
+        );
+        assert_eq!(
+            w.pid,
+            std::process::id(),
+            "and THIS process's pid, so a reader can ask whether the writer still lives"
+        );
+    }
+
+    /// Back-compat parse, in the same family as the three sibling
+    /// `sidecar_written_before_*_existed_still_parses` tests above — the repo
+    /// already treats this shape as worth pinning once per added field, because
+    /// `read_index_state` reads a failed parse as "no sidecar", i.e. "never
+    /// indexed" for the whole project. A parse regression here would not raise
+    /// anywhere; it would silently present every pre-existing project as
+    /// unindexed.
+    ///
+    /// Scoped honestly, after measuring what it does and does not catch: it does
+    /// NOT pin the `#[serde(default)]` attribute — serde already maps a missing
+    /// field to `None` for any `Option<T>`, so removing the attribute leaves this
+    /// test green. Nor does it pin optionality; making `written_by` required is a
+    /// compile error at three independent sites (the `Default` bound
+    /// `#[serde(default)]` induces, the `.as_ref()` in `IndexStatus::call`, and the
+    /// two fixture literals in `semantic_search.rs`). What it does pin is the
+    /// round trip itself: a real on-disk document with no `written_by` key parses,
+    /// and the fields that WERE recorded survive the schema addition.
+    #[test]
+    fn a_sidecar_written_before_written_by_existed_still_parses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".codescout")).unwrap();
+        fs::write(
+            state_path(root),
+            r#"{"last_indexed_commit":"abc","last_indexed_at":"2026-01-01T00:00:00Z",
+                "schema_version":4,"indexed_with_model":"CodeRankEmbed"}"#,
+        )
+        .unwrap();
+
+        let st = read_index_state(root).expect("a pre-field sidecar must still parse");
+        assert_eq!(st.written_by, None, "absent means not recorded");
+        assert_eq!(
+            st.indexed_with_model.as_deref(),
+            Some("CodeRankEmbed"),
+            "and the fields that WERE recorded must survive the added field"
+        );
+    }
+
+    /// Pins the direction of the deleted-binary predicate.
+    ///
+    /// The test binary is running from a file that exists, so the only correct
+    /// answer is `Some(false)`. Weak in absolute terms — it cannot exercise the
+    /// true branch, since deleting the test runner mid-run is not something a
+    /// suite can do to itself — but it is the assertion that fails if the
+    /// predicate is ever inverted, which is the realistic regression. The true
+    /// branch was verified by hand on 2026-08-28 against a binary deleted while
+    /// running.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_live_binary_does_not_report_itself_deleted() {
+        assert_eq!(
+            exe_is_deleted(),
+            Some(false),
+            "the test runner's own executable exists, so this must be a definite false — \
+             None would mean 'could not tell' and true would mean the predicate is inverted"
+        );
     }
 
     #[test]

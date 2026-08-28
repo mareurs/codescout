@@ -1434,6 +1434,9 @@ mod worktree_search_tests {
             dirty_paths: Vec::new(),
             last_sync_skipped_count: 0,
             last_sync_skipped_sample: Vec::new(),
+            // No process wrote this fixture, so `None` is the honest value -- and
+            // it doubles as the pre-field sidecar case these readers must tolerate.
+            written_by: None,
         };
         std::fs::write(
             root.join(".codescout").join("index-state.json"),
@@ -1454,6 +1457,7 @@ mod worktree_search_tests {
             dirty_paths: Vec::new(),
             last_sync_skipped_count: skipped.len(),
             last_sync_skipped_sample: skipped.iter().map(|s| s.to_string()).collect(),
+            written_by: None,
         };
         std::fs::write(
             root.join(".codescout").join("index-state.json"),

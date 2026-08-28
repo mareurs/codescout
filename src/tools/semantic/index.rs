@@ -716,6 +716,34 @@ impl Tool for IndexStatus {
                 // model at sync time rather than this path deriving it.
                 if let Some(st) = crate::retrieval::index_state::read_index_state(&root) {
                     result["indexed_at"] = json!(st.last_indexed_at);
+                    // Who wrote this sidecar, reported only when it was NOT this build —
+                    // presence-means-a-problem, same convention as `model_mismatch` and
+                    // `last_sync_skipped` below and above.
+                    //
+                    // Facts, not a verdict. A peer's rebuild of unrelated code makes every
+                    // other running server "stale" while its answers stay correct, so a
+                    // flat "stale writer" warning would cry wolf continuously in exactly
+                    // the multi-session case this serves. What a reader needs instead is
+                    // enough to adjudicate: which build, whether that build was dirty,
+                    // which pid, and — the load-bearing one — whether the writer's own
+                    // executable had already been unlinked, which is the difference between
+                    // "an older peer wrote this" and "code that no longer exists wrote
+                    // this".
+                    //
+                    // `None` is silent by design: a pre-field sidecar is "not recorded",
+                    // never "written by the current build".
+                    // docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
+                    if let Some(w) = st.written_by.as_ref() {
+                        if w.git_sha != env!("CODESCOUT_GIT_SHA") {
+                            result["written_by"] = json!({
+                                "git_sha": w.git_sha,
+                                "git_dirty": w.git_dirty,
+                                "pid": w.pid,
+                                "exe_deleted": w.exe_deleted,
+                                "reading_binary_sha": env!("CODESCOUT_GIT_SHA"),
+                            });
+                        }
+                    }
                     // The durable half of
                     // docs/issues/archive/2026-08-26-index-status-claims-complete-without-checking-coverage.md:
                     // a caller who never runs index(action="verify") still sees whether the
