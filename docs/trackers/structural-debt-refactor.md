@@ -12,6 +12,7 @@ tags:
 - librarian
 - audit-doc-refs
 topic: refactoring
+entry_high_water_SD: 11
 entry_prefix: SD
 expects_augmentation: true
 ---

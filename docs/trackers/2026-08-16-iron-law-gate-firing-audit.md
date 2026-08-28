@@ -13,6 +13,7 @@ tags:
 - gate-correctness
 - agent-guidance
 topic: iron-law-gate-firing
+entry_high_water_GF: 8
 entry_prefix: GF
 expects_augmentation: true
 ---
