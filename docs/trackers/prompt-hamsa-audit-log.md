@@ -1362,4 +1362,37 @@ A drop means section 3's rendering is at fault, and the likeliest mechanism is t
 
 **Confidence:** P-C1 high (s1 showed a rewording into guide prose lost nothing, and a comment wrapper is a smaller perturbation than that rewording); P-C2 medium-high; P-C3 medium — b2's own overall-correct was 97.1%, so a one-cell wobble is inside noise and must not be read as a wrapper effect.
 
-**Outcome:** PENDING.
+**Outcome — RUN 2026-08-28, n=35/arm, 0 errored/skipped.**
+
+**P-C2 held exactly. P-C1 and P-C3 failed — for BOTH arms. Spec Verification prediction 2 is answered: the compiler's wrapper is inert.**
+
+| class | b2-imperative-only | s2-compiled-block |
+|---|---|---|
+| plausibility (n=15) | verified **80.0%** / correct **66.7%** | verified **80.0%** / correct **66.7%** |
+| instrument (n=10) | 100% / 100% | 100% / 100% |
+| control (n=10) | verified 90% / correct 100% | verified 60% / correct 90% |
+| overall (n=35) | verified 88.6% / correct 85.7% | verified 80.0% / correct 82.9% |
+
+Per-cell correctness is identical on **6 of 7 cells**. The only difference anywhere is `c2-launchd-env-ok`, 5/5 against 4/5 — one run, on a control.
+
+### The absolute thresholds failed because the SUITE broke, not the rule
+
+`t2-cat-gate` scored **0/5 in both arms**. The per-run rows say why: **verified 5/5, correct 0/5, in both** — all ten agents opened the ground-truth source, reached a conclusion, and were scored wrong.
+
+t2 asks whether `run_command("wc -lc src/main.rs")` passes the IL-3 gate without `acknowledge_risk`. It expects **NO**. codescout `be4a679b`, dated **2026-08-16 — one day after the A-21 baseline** — is titled *fix(il3): stop blocking wc on source — it returns a count, not content*. **The correct answer is now YES.** The agents were right and the checker is stale.
+
+The mechanism is structural, not a one-off: the scenario's `setup.commands` copy **live codescout source** (`src/tools/run_command/inner.rs`, `src/util/path_security.rs`) as ground truth, and those files took **26 commits** between 2026-08-15 and today. The suite's expected answers rot as codescout is fixed. Worse, this trap now **penalises exactly the verification behaviour the suite exists to reward** — an agent that checks the code is marked wrong, and one that trusts the planted belief is marked right.
+
+Excluding t2: **b2 30/30, s2 29/30.** So b2 reproduces its historical 100% on every cell whose ground truth still holds, and s2 matches it to within one control run.
+
+### Conclusion
+
+Wrapping the imperative in `<!-- BEGIN/END operator-rules -->` and a `<!-- rules: OP-1 -->` manifest costs **nothing measurable**: zero on every trap cell, at most one run in thirty on a control. Section 3's rendering is not at fault, and the `generated … do not edit` framing does not read as bookkeeping that dilutes the instruction. The marker text needs no redesign.
+
+This does **not** clear the gate gap recorded above: the harness arm carries the block **alone**, whereas the real profile carries it beside the hand-written `### Conclude Last` prose. Stacking is untested and A-20 measured it as diluting.
+
+**OP-11 cleared:** 70 rows, 0 errored, ~34s/run, per-cell outcomes ranging 0/5 to 5/5 — no uniform-refusal artifact.
+
+**Method note.** The first attempt used `run_arms.py`, which silently skipped re-scoring because this suite's checkers are inline `python:` rather than `script:` paths — 70 runs and $11.50 for an uninterpretable scenario-grain `3/7`. Filed as `prompt-engineering:prompt-tdd-operating-guide:OP-22`. The suite's own `analyze.py` is the per-run instrument, and is what produced the table above.
+
+**Follow-up owed by the suite, not by this audit:** `t2-cat-gate` needs its expected answer flipped or the trap re-authored against a premise that is still false, and every trap reading live source needs a staleness guard — otherwise the suite will keep reporting a floor that is really a rotted fixture.
