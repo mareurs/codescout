@@ -1,6 +1,15 @@
 use anyhow::{bail, Context, Result};
 
+use crate::prompts::guide_index::parse_shape;
 use crate::util::markdown_fence::FenceState;
+
+/// The selector type, borrowed wholesale from the section-grain matcher.
+///
+/// Aliased because this module already has a `Shape` — the RULE shape
+/// (`imperative`/`guard`/…), a measured field with nothing to do with call
+/// matching. Importing `guide_index::Shape` unaliased here shadows it in some
+/// positions and still compiles.
+pub use crate::prompts::guide_index::Shape as Selector;
 
 /// Strip a leading YAML frontmatter block, returning the body.
 ///
@@ -92,9 +101,8 @@ pub struct Rule {
     /// Short kebab-case failure-mode slug. Gate 3(a) compares these: two `always`
     /// rules covering one failure mode is what `A-20`'s dilution finding forbids.
     pub covers: String,
-    /// Selector shapes, `triggered` only. Phase 1 stores them verbatim; Phase 2
-    /// parses them with the section-grain grammar.
-    pub serves: Vec<String>,
+    /// Parsed selectors. `always` rules carry none — `validate` enforces that.
+    pub serves: Vec<Selector>,
     pub evidence: Evidence,
     pub rests_on: Option<String>,
     pub status: Status,
@@ -246,13 +254,23 @@ fn finish(d: Draft) -> Result<Rule> {
         ),
     };
     let evidence = parse_evidence(&need(d.evidence.clone(), "Evidence")?, &d.id)?;
+    let mut serves = Vec::with_capacity(d.serves.len());
+    for raw in &d.serves {
+        // Gate 4: an unparseable selector is refused here rather than
+        // silently never matching. `parse_shape` returns a String error that
+        // already names the defect; prefix it with the rule id so the operator
+        // learns WHICH rule to fix — the diagnostic failure `OP-5`'s evidence
+        // line hit (`invalid float literal`, naming neither rule nor field).
+        let sel = parse_shape(raw).map_err(|e| anyhow::anyhow!("{}: **Serves:** {e}", d.id))?;
+        serves.push(sel);
+    }
     Ok(Rule {
         title: d.title,
         imperative: need(d.imperative.clone(), "Imperative")?,
         binding,
         shape,
         covers: need(d.covers.clone(), "Covers")?,
-        serves: d.serves,
+        serves,
         evidence,
         rests_on: d.rests_on,
         status,
@@ -387,7 +405,10 @@ entry_high_water_OP: 2
         let r2 = &rules[1];
         assert_eq!(r2.id, "OP-2");
         assert_eq!(r2.binding, Binding::Triggered);
-        assert_eq!(r2.serves, vec!["Agent".to_string(), "Task".to_string()]);
+        assert_eq!(
+            r2.serves,
+            vec![parse_shape("Agent").unwrap(), parse_shape("Task").unwrap()]
+        );
         assert_eq!(r2.evidence, Evidence::Unmeasured);
         assert_eq!(r2.rests_on, None);
     }
@@ -497,5 +518,63 @@ entry_high_water_OP: 2
             doc,
             "no bare `---` closes before the heading, so nothing is stripped"
         );
+    }
+
+    const TRIGGERED_LEDGER: &str = "\
+# Operator Rules (OP-N)
+
+## OP-9 — a triggered rule for the selector tests
+
+**Imperative:** Never dispatch an implementer subagent on Haiku.
+**Binding:** triggered
+**Shape:** imperative
+**Covers:** underpowered-subagent-dispatch
+**Serves:** Agent, memory.write, edit_file(path~/.claude)
+**Evidence:** unmeasured
+**Status:** active
+";
+
+    #[test]
+    fn serves_parses_into_selectors() {
+        let rules = parse_ledger(TRIGGERED_LEDGER).unwrap();
+        let r = &rules[0];
+        assert_eq!(
+            r.serves.len(),
+            3,
+            "all three selectors parse; got {:?}",
+            r.serves
+        );
+        assert_eq!(r.serves[0].tool, "Agent");
+        assert_eq!(r.serves[0].action, None);
+        assert_eq!(r.serves[1].tool, "memory");
+        assert_eq!(r.serves[1].action.as_deref(), Some("write"));
+        assert_eq!(r.serves[2].path_contains.as_deref(), Some("/.claude"));
+    }
+
+    #[test]
+    fn an_unparseable_selector_fails_naming_the_rule_and_the_defect() {
+        let src = TRIGGERED_LEDGER.replace("edit_file(path~/.claude)", "edit_file(path~/.claude");
+        let err = parse_ledger(&src).unwrap_err().to_string();
+        assert!(
+            err.contains("OP-9"),
+            "the error must name the rule; got {err}"
+        );
+        assert!(
+            err.contains("unterminated predicate"),
+            "the error must name the defect, not just fail; got {err}"
+        );
+    }
+
+    #[test]
+    fn a_selector_with_a_malformed_tool_name_is_refused() {
+        // `is_ident` rejects a tool name with a space. Left unchecked this would be
+        // a rule that parses and never matches anything, forever.
+        let src = TRIGGERED_LEDGER.replace("**Serves:** Agent,", "**Serves:** not a tool,");
+        let err = parse_ledger(&src).unwrap_err().to_string();
+        assert!(
+            err.contains("OP-9"),
+            "the error must name the rule; got {err}"
+        );
+        assert!(err.contains("malformed tool"), "got {err}");
     }
 }

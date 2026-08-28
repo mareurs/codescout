@@ -43,6 +43,7 @@ pub fn render_block(rules: &[Rule]) -> String {
 mod tests {
     use super::*;
     use crate::operator_rules::rule::{Binding, Evidence, Rule, Shape, Status};
+    use crate::prompts::guide_index::parse_shape;
 
     fn rule(id: &str, binding: Binding, status: Status, imperative: &str) -> Rule {
         Rule {
@@ -53,7 +54,7 @@ mod tests {
             shape: Shape::Imperative,
             covers: format!("mode-{id}"),
             serves: if binding == Binding::Triggered {
-                vec!["Agent".into()]
+                vec![parse_shape("Agent").unwrap()]
             } else {
                 vec![]
             },

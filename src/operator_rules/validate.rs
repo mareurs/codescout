@@ -77,7 +77,10 @@ mod tests {
             binding,
             shape: Shape::Imperative,
             covers: format!("mode-{id}"),
-            serves: serves.iter().map(|s| s.to_string()).collect(),
+            serves: serves
+                .iter()
+                .map(|s| crate::prompts::guide_index::parse_shape(s).unwrap())
+                .collect(),
             evidence: Evidence::Unmeasured,
             rests_on: None,
             status: Status::Active,
