@@ -214,6 +214,11 @@ impl SecuritySection {
             library_paths: Vec::new(),
             shell_dangerous_patterns: self.shell_dangerous_patterns.clone(),
             max_index_bytes: self.max_index_bytes,
+            // No project root is in scope here, so there is nothing to name.
+            // `project_security_config` fills this in where `p.root` exists;
+            // leaving it None makes the refusal fall back to its unhedged
+            // original wording rather than assert a cause it cannot attribute.
+            write_block: None,
         }
     }
 }

@@ -407,6 +407,23 @@ fn project_security_config(p: &ActiveProject) -> crate::util::path_security::Pat
     if p.read_only {
         config.file_write_enabled = false;
     }
+    // Record WHY writes are off, and for which project, so `check_tool_access`
+    // can state a cause instead of hedging between two.
+    //
+    // Precedence is deliberate and is read BEFORE the flag above is mutated:
+    // a project whose own config disables writes stays `ConfiguredOff` even
+    // when it is also read-only, because that is the cause whose remedy is
+    // different. Telling someone to re-activate writable when their
+    // project.toml turns writes off is advice that costs a call and fails.
+    // docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md
+    let cause = crate::util::path_security::WriteBlockCause::classify(
+        p.config.security.file_write_enabled,
+        p.read_only,
+    );
+    config.write_block = cause.map(|cause| crate::util::path_security::WriteBlock {
+        root: p.root.clone(),
+        cause,
+    });
     config
 }
 
@@ -1946,6 +1963,85 @@ mod tests {
     /// code paths canonicalize via `std::fs::canonicalize`.
     fn canonical(p: &std::path::Path) -> std::path::PathBuf {
         std::fs::canonicalize(p).expect("path canonicalizes")
+    }
+
+    /// Build a minimal `ActiveProject` rooted in a tmpdir, so
+    /// `project_security_config` can be exercised for real.
+    fn active_project_at(
+        root: &std::path::Path,
+        read_only: bool,
+        writes_in_config: bool,
+    ) -> ActiveProject {
+        let mut config = crate::config::project::ProjectConfig::load_or_default(root).unwrap();
+        config.security.file_write_enabled = writes_in_config;
+        let file_lock = Arc::new(std::fs::File::create(root.join(".lock")).unwrap());
+        ActiveProject {
+            root: root.to_path_buf(),
+            config,
+            memory: MemoryStore::from_dir(root.join("mem")).unwrap(),
+            private_memory: MemoryStore::from_dir(root.join("priv")).unwrap(),
+            library_registry: LibraryRegistry::default(),
+            dirty_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            read_only,
+            head_sha: None,
+            has_git_remote: false,
+            write_lock: Arc::new(tokio::sync::Mutex::new(())),
+            file_lock,
+            session_write_roots: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Pins the WIRING, which nothing else does.
+    ///
+    /// Every other test of this feature constructs a `PathSecurityConfig` by
+    /// hand, so all of them pass with `project_security_config`'s assignment
+    /// deleted — measured: 4598 tests green with the wiring removed. That is the
+    /// exact shape that let two other features in this repo ship inert under a
+    /// green suite, so the derivation gets its own test rather than being
+    /// assumed from the unit tests of the thing it derives.
+    #[test]
+    fn project_security_config_attributes_a_read_only_project_to_its_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = active_project_at(tmp.path(), true, true);
+        let cfg = project_security_config(&p);
+
+        assert!(!cfg.file_write_enabled, "read-only must disable writes");
+        let block = cfg
+            .write_block
+            .expect("the derivation must attribute the block, not leave it None");
+        assert_eq!(block.root, tmp.path(), "must name THIS project");
+        assert_eq!(
+            block.cause,
+            crate::util::path_security::WriteBlockCause::ActivatedReadOnly
+        );
+    }
+
+    /// The other cause, through the same derivation — and the one whose remedy
+    /// differs, so mis-attributing it produces confidently wrong advice.
+    #[test]
+    fn project_security_config_attributes_a_config_disabled_project_to_its_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = active_project_at(tmp.path(), false, false);
+        let cfg = project_security_config(&p);
+
+        assert!(!cfg.file_write_enabled);
+        let block = cfg.write_block.expect("must attribute");
+        assert_eq!(block.root, tmp.path());
+        assert_eq!(
+            block.cause,
+            crate::util::path_security::WriteBlockCause::ConfiguredOff
+        );
+    }
+
+    /// A writable project must carry no block at all — otherwise the refusal
+    /// path could grow a message for a state that never refuses.
+    #[test]
+    fn project_security_config_leaves_a_writable_project_unattributed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = active_project_at(tmp.path(), false, true);
+        let cfg = project_security_config(&p);
+        assert!(cfg.file_write_enabled);
+        assert!(cfg.write_block.is_none());
     }
 
     /// THE LAST env-mutating test helper in the crate — and the only one left on

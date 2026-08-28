@@ -85,6 +85,74 @@ pub struct PathSecurityConfig {
     pub shell_dangerous_patterns: Vec<String>,
     /// Approx raw source-byte threshold above which `index(action='build')` requires confirmation.
     pub max_index_bytes: u64,
+    /// Why writes are blocked, when they are — so the refusal can STATE a cause
+    /// instead of guessing between two, and can name the project it is about.
+    ///
+    /// `None` when writes are enabled, and also when the config was built by a
+    /// path that has no project root to name (`SecuritySection::to_path_security_config`,
+    /// `Default`): the refusal then falls back to its original wording rather
+    /// than asserting a cause it does not know.
+    /// docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md
+    pub write_block: Option<WriteBlock>,
+}
+
+/// Why file writes are refused, and for which project.
+///
+/// Exists because one message served two unrelated causes with opposite
+/// remedies, and hedged between them: *"If this project was activated in
+/// read-only mode…"*. A refusal that guesses at its own cause reads as
+/// speculative, so the natural response is to doubt the path or the tool rather
+/// than the workspace state — which is exactly what happened across four
+/// occurrences before anyone suspected the activation.
+///
+/// `root` is the load-bearing half. The failure mode this was built for is a
+/// caller's `default_workspace_root` being reassigned out from under it by
+/// something else sharing the process, so the single most useful fact is WHICH
+/// project answered: a session that believes it is working in `codescout` and
+/// reads `writes are disabled for /home/…/some-other-repo` has its diagnosis in
+/// one line, with no `workspace(action="status")` round trip.
+#[derive(Debug, Clone)]
+pub struct WriteBlock {
+    /// The project the refusal is about — not necessarily the one the caller
+    /// thinks is active.
+    pub root: PathBuf,
+    pub cause: WriteBlockCause,
+}
+
+/// The two ways writes end up off. They need different remedies, which is the
+/// whole reason for distinguishing them: suggesting `read_only: false` to
+/// someone whose project config disables writes is wrong advice that costs a
+/// call and teaches the wrong lesson.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteBlockCause {
+    /// `security.file_write_enabled = false` in project config. Durable, and
+    /// re-activating writable does NOT clear it.
+    ConfiguredOff,
+    /// The workspace was activated read-only — the state `activate` assigns to
+    /// any non-home root that did not explicitly ask for writes.
+    ActivatedReadOnly,
+}
+
+impl WriteBlockCause {
+    /// The precedence rule, as a pure function.
+    ///
+    /// Extracted deliberately: inside `project_security_config` it would need a
+    /// fully-built `ActiveProject` to exercise, and an untested precedence here
+    /// does not fail loudly — it ships confident, actionable, WRONG advice
+    /// ("re-activate writable") to someone whose project config turns writes
+    /// off, where that call will succeed and change nothing.
+    ///
+    /// Config wins over activation state because their remedies differ and only
+    /// one of them is durable.
+    pub fn classify(config_allows_writes: bool, read_only: bool) -> Option<Self> {
+        if !config_allows_writes {
+            Some(Self::ConfiguredOff)
+        } else if read_only {
+            Some(Self::ActivatedReadOnly)
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for PathSecurityConfig {
@@ -98,6 +166,7 @@ impl Default for PathSecurityConfig {
             library_paths: Vec::new(),
             shell_dangerous_patterns: Vec::new(),
             max_index_bytes: 500 * 1024 * 1024,
+            write_block: None,
         }
     }
 }
@@ -571,9 +640,38 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
         | "edit_markdown"
             if !config.file_write_enabled =>
         {
-            bail!(
+            // State the cause when it is known. The hedged single message this
+            // replaces named one of two possible causes with an "if", and the
+            // reader could not tell which applied without a second call.
+            match &config.write_block {
+                Some(WriteBlock {
+                    root,
+                    cause: WriteBlockCause::ActivatedReadOnly,
+                }) => bail!(
+                    "File writes are disabled: the active project is {} and it was activated \
+                     read-only. Call workspace(action='activate', path='{}', read_only: false) \
+                     to enable writes. If that is not the project you expected to be in, \
+                     something else sharing this process activated it — a subagent, or another \
+                     caller on this session — because activation replaces the default for \
+                     everyone in the process.",
+                    root.display(),
+                    root.display()
+                ),
+                Some(WriteBlock {
+                    root,
+                    cause: WriteBlockCause::ConfiguredOff,
+                }) => bail!(
+                    "File writes are disabled for {} by security.file_write_enabled = false in \
+                     its .codescout/project.toml. Re-activating with read_only: false will NOT \
+                     clear this — change the config.",
+                    root.display()
+                ),
+                // No project root was available to the config builder, so say
+                // only what is known rather than asserting a cause.
+                None => bail!(
                     "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes. If you didn't expect this, a subagent may have changed the active project — call workspace(action='status') to check."
-                );
+                ),
+            }
         }
         "semantic_search" | "index" if !config.indexing_enabled => {
             bail!(
@@ -2229,6 +2327,119 @@ mod tests {
                 tool
             );
         }
+    }
+
+    /// The precedence rule, table-driven over all four inputs.
+    ///
+    /// The third row is the one that matters. Config-off AND read-only both
+    /// hold, and if activation won, the refusal would tell the caller to
+    /// re-activate writable — a call that succeeds, changes nothing, and sends
+    /// them looking somewhere else. A wrong-but-confident remedy is worse than
+    /// the hedged message this replaces.
+    #[test]
+    fn write_block_cause_precedence_prefers_the_durable_cause() {
+        use WriteBlockCause::*;
+        let cases = [
+            (true, false, None, "writes on, not read-only"),
+            (
+                true,
+                true,
+                Some(ActivatedReadOnly),
+                "activation is the cause",
+            ),
+            (
+                false,
+                true,
+                Some(ConfiguredOff),
+                "BOTH hold — config must win, its remedy is the only one that works",
+            ),
+            (false, false, Some(ConfiguredOff), "config alone"),
+        ];
+        for (allows, ro, want, why) in cases {
+            assert_eq!(
+                WriteBlockCause::classify(allows, ro),
+                want,
+                "classify(config_allows_writes={allows}, read_only={ro}): {why}"
+            );
+        }
+    }
+
+    /// The read-only refusal must NAME the project, because the failure it was
+    /// built for is the active project having been changed out from under the
+    /// caller. A message that says "this project" is uninformative in exactly
+    /// the case that matters.
+    #[test]
+    fn read_only_refusal_names_the_project_and_the_remedy() {
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            write_block: Some(WriteBlock {
+                root: PathBuf::from("/work/some-other-repo"),
+                cause: WriteBlockCause::ActivatedReadOnly,
+            }),
+            ..PathSecurityConfig::default()
+        };
+        let err = check_tool_access("edit_file", &config)
+            .expect_err("writes are off, this must refuse")
+            .to_string();
+        assert!(
+            err.contains("/work/some-other-repo"),
+            "must name the project that actually answered: {err}"
+        );
+        assert!(
+            err.contains("read_only: false"),
+            "must carry the remedy that works for this cause: {err}"
+        );
+        assert!(
+            err.contains("sharing this process"),
+            "must point at the mechanism, since the caller did not activate it: {err}"
+        );
+    }
+
+    /// The config-off refusal must NOT offer the read-only remedy, and must say
+    /// so explicitly — someone who has seen the other message will otherwise try
+    /// it first.
+    #[test]
+    fn configured_off_refusal_rejects_the_reactivation_remedy() {
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            write_block: Some(WriteBlock {
+                root: PathBuf::from("/work/locked"),
+                cause: WriteBlockCause::ConfiguredOff,
+            }),
+            ..PathSecurityConfig::default()
+        };
+        let err = check_tool_access("create_file", &config)
+            .expect_err("writes are off, this must refuse")
+            .to_string();
+        assert!(err.contains("/work/locked"), "{err}");
+        assert!(
+            err.contains("security.file_write_enabled"),
+            "must name the setting to change: {err}"
+        );
+        assert!(
+            err.contains("will NOT clear this"),
+            "must actively steer away from the wrong remedy: {err}"
+        );
+    }
+
+    /// A config built by a path with no project root in scope keeps the original
+    /// hedged wording. Saying nothing false is the requirement here: the point of
+    /// the change is that the refusal stops asserting causes, so a builder that
+    /// cannot attribute one must not gain a confident message.
+    #[test]
+    fn an_unattributed_block_falls_back_to_the_original_wording() {
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            ..PathSecurityConfig::default()
+        };
+        assert!(config.write_block.is_none(), "Default must not invent one");
+        let err = check_tool_access("edit_markdown", &config)
+            .expect_err("writes are off, this must refuse")
+            .to_string();
+        assert!(
+            err.contains("If this project was activated in read-only mode"),
+            "{err}"
+        );
     }
 
     #[test]
