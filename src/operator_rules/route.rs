@@ -18,14 +18,31 @@ pub fn ledger_key(id: &str) -> String {
 
 /// The `triggered`, `active` rules whose selector matches this call.
 ///
+/// Thin wrapper over `route_in`, bound to the live ledger. Kept as a
+/// stable entry point — Task 5's render path already depends on this
+/// exact signature — while the actual filter logic lives in `route_in`
+/// below, where it can be tested against a synthetic corpus.
+pub fn route(sel: Option<&str>, result: &Value) -> Vec<&'static Rule> {
+    route_in(&OPERATOR_RULES, sel, result)
+}
+
+/// `route`'s filter logic, generic over the input slice's lifetime.
+///
 /// `always` rules are excluded unconditionally: they are resident in the
 /// profile by construction, so routing one would deliver it twice and stamping
 /// one would assert a per-session delivery event that did not occur.
 ///
 /// `retired` rules are excluded on the same predicate `render_block` and
 /// `check_budget` use, so a retirement takes effect on every path at once.
-pub fn route(sel: Option<&str>, result: &Value) -> Vec<&'static Rule> {
-    OPERATOR_RULES
+///
+/// Split out from `route` so both filters can be exercised against a
+/// synthetic corpus: the real ledger cannot produce a non-empty `serves`
+/// on an `always` rule (`validate`, Gate 6, forbids it) or a retired
+/// `triggered` rule with a matching selector (none exists in the ledger
+/// today) — see `route_in_excludes_an_always_rule_even_when_its_selector_matches`
+/// and `route_in_excludes_a_retired_triggered_rule` below.
+fn route_in<'a>(rules: &'a [Rule], sel: Option<&str>, result: &Value) -> Vec<&'a Rule> {
+    rules
         .iter()
         .filter(|r| r.binding == Binding::Triggered && r.status == Status::Active)
         .filter(|r| r.serves.iter().any(|s| s.matches(sel, result)))
@@ -70,6 +87,15 @@ mod tests {
     fn always_rules_are_never_routed() {
         // OP-1 is `always`. It is resident in CLAUDE.md; routing it would
         // deliver it twice and contradict spec § 5.
+        //
+        // This documents intent against the real corpus, but it is not what
+        // proves the `Binding::Triggered` filter load-bearing: OP-1 has an
+        // empty `serves` (Gate 6 forbids an `always` rule from having any),
+        // so the selector-match filter alone already excludes it — deleting
+        // the binding filter leaves this test green. The mutation is caught
+        // by `route_in_excludes_an_always_rule_even_when_its_selector_matches`,
+        // which builds a synthetic `always` rule with a matching `serves` —
+        // a combination `validate` forbids the real ledger from ever holding.
         for sel in [
             "memory.write",
             "Agent",
@@ -87,6 +113,14 @@ mod tests {
 
     #[test]
     fn retired_rules_are_never_routed() {
+        // This documents intent against the real corpus, but it is not what
+        // proves the `Status::Active` filter load-bearing: the ledger's only
+        // retired rule, OP-5, is also `always` and so has an empty `serves`
+        // — the inner loop below runs zero times for it, and the assertion
+        // never executes. Deleting the status filter leaves this test green.
+        // The mutation is caught by `route_in_excludes_a_retired_triggered_rule`,
+        // which builds a synthetic retired `triggered` rule with a matching
+        // `serves` — a combination the ledger does not contain today.
         assert!(
             OPERATOR_RULES.iter().any(|r| r.status == Status::Retired),
             "this test is vacuous unless the ledger has at least one retired rule — \
@@ -109,6 +143,77 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A synthetic rule with a non-empty `serves` regardless of `binding` or
+    /// `status` — a combination `validate` (Gate 6) forbids the real ledger
+    /// from ever holding for `Binding::Always`, and one the ledger simply
+    /// does not contain today for a retired `Binding::Triggered` rule. Exists
+    /// so `route_in`'s binding/status filters can be tested in isolation from
+    /// that constraint, rather than through the corpus that happens to make
+    /// them coincide with the selector filter.
+    fn synthetic_rule(id: &str, binding: Binding, status: Status) -> Rule {
+        use crate::operator_rules::rule::{Evidence, Shape};
+        Rule {
+            id: id.into(),
+            title: "synthetic".into(),
+            imperative: "Do the synthetic thing.".into(),
+            binding,
+            shape: Shape::Imperative,
+            covers: format!("synthetic-{id}"),
+            serves: vec![crate::prompts::guide_index::parse_shape("route_in_test_tool").unwrap()],
+            evidence: Evidence::Unmeasured,
+            rests_on: None,
+            status,
+        }
+    }
+
+    #[test]
+    fn route_in_excludes_an_always_rule_even_when_its_selector_matches() {
+        let rules = vec![synthetic_rule(
+            "SYN-ALWAYS",
+            Binding::Always,
+            Status::Active,
+        )];
+        let hit = route_in(&rules, Some("route_in_test_tool"), &json!({"status": "ok"}));
+        assert!(
+            hit.is_empty(),
+            "an always rule must never route even when its selector matches; got {:?}",
+            hit.iter().map(|r| &r.id).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn route_in_excludes_a_retired_triggered_rule() {
+        let rules = vec![synthetic_rule(
+            "SYN-RETIRED",
+            Binding::Triggered,
+            Status::Retired,
+        )];
+        let hit = route_in(&rules, Some("route_in_test_tool"), &json!({"status": "ok"}));
+        assert!(
+            hit.is_empty(),
+            "a retired triggered rule must never route even when its selector matches; got {:?}",
+            hit.iter().map(|r| &r.id).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn route_in_includes_a_triggered_active_rule() {
+        // Positive control: without this, the two absence assertions above
+        // would be equally satisfied by a `route_in` that always returns
+        // nothing, regardless of its filters.
+        let rules = vec![synthetic_rule(
+            "SYN-ACTIVE",
+            Binding::Triggered,
+            Status::Active,
+        )];
+        let hit = route_in(&rules, Some("route_in_test_tool"), &json!({"status": "ok"}));
+        assert!(
+            hit.iter().any(|r| r.id == "SYN-ACTIVE"),
+            "a triggered, active rule with a matching selector must route; got {:?}",
+            hit.iter().map(|r| &r.id).collect::<Vec<_>>()
+        );
     }
 
     /// Gate 5, asserted directly.
