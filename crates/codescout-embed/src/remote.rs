@@ -89,15 +89,85 @@ impl RemoteEmbedder {
         });
     }
 
-    /// Build a reqwest client with a per-request timeout so that a hung
-    /// embedding server (e.g. Ollama during GPU discovery failure) doesn't
-    /// block `index_project` forever.
-    fn http_client() -> Client {
+    /// The single place the HTTP client is configured. Both entry points below
+    /// route through it.
+    ///
+    /// That sharing is deliberate and load-bearing for the tests, not just tidy:
+    /// a builder duplicated between the production path and the injectable one
+    /// lets a test pass while the shipped path has lost its bound entirely —
+    /// certifying a path the fix does not run on. One builder means removing
+    /// `.read_timeout()` here breaks the test that guards it.
+    ///
+    /// **Two bounds, deliberately. They catch opposite failures and neither
+    /// subsumes the other.**
+    ///
+    /// - `read_timeout` bounds the gap *between* bytes and resets after every
+    ///   successful read. This catches a peer that completes the TCP handshake
+    ///   and then goes silent: a wedged llama-server, an NVIDIA driver left in an
+    ///   invalid state by a failed suspend/resume. Measured 2026-08-29 — exactly
+    ///   that, listening and never answering for 15 hours, while its `/health`
+    ///   endpoint (a static string that never touches the model) stayed green.
+    /// - `timeout` bounds the *whole* request, catching the opposite shape: a
+    ///   peer that dribbles bytes indefinitely, never idle long enough to trip
+    ///   the read bound.
+    ///
+    /// The total bound alone is not sufficient, and cannot be tightened into
+    /// sufficiency: legitimate 32-input batches measure 23-33s end to end on GPU
+    /// and roughly 4x that on CPU, so a total bound tight enough to catch a wedge
+    /// promptly would cut off real work.
+    fn build_client(read_timeout: std::time::Duration) -> Client {
         Self::install_default_crypto_provider();
         Client::builder()
+            .read_timeout(read_timeout)
             .timeout(std::time::Duration::from_secs(300))
             .build()
             .expect("failed to build HTTP client")
+    }
+
+    /// Production entry point — [`Self::build_client`] with the operator's
+    /// override or the default.
+    ///
+    /// Reads `CODESCOUT_HTTP_READ_TIMEOUT_SECS` here in the constructor path,
+    /// mirroring how `EMBED_API_KEY` / `OPENAI_API_KEY` / `OLLAMA_HOST` are
+    /// already resolved. Like the `api_key` exemplar in
+    /// `docs/conventions/test-env-isolation.md`, that env read is paired with an
+    /// injection seam ([`Self::with_read_timeout`]) so no test has to touch
+    /// process-global state to exercise the bound.
+    ///
+    /// A zero or unparseable override falls back to the default rather than
+    /// erroring: an operator typo must not be able to restore the unbounded-wait
+    /// behaviour this exists to remove.
+    fn http_client() -> Client {
+        /// Gap-between-bytes allowance. Generous on purpose — a cold GGUF load can
+        /// accept a connection well before it can answer, and killing that would
+        /// trade a hang for a spurious failure. The goal is a *bounded* wait, not
+        /// a short one.
+        const DEFAULT_READ_TIMEOUT_SECS: u64 = 120;
+
+        let secs = std::env::var("CODESCOUT_HTTP_READ_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(DEFAULT_READ_TIMEOUT_SECS);
+        Self::build_client(std::time::Duration::from_secs(secs))
+    }
+
+    /// Rebuild the HTTP client with an explicit read timeout. Builder-style.
+    ///
+    /// The injection seam for [`Self::http_client`]'s env read. Tests use it to
+    /// make the silent-peer case observable in milliseconds rather than two
+    /// minutes without mutating process-global state — which
+    /// `docs/conventions/test-env-isolation.md` rules out as option B ("NOT
+    /// VIABLE": `#[serial]` coordinates only among annotated tests, so any
+    /// untagged test reading the same var still races).
+    ///
+    /// Routes through [`Self::build_client`], so it configures the client
+    /// identically to the production path apart from the duration. That is what
+    /// makes a test written against this method a real guard on the shipped
+    /// behaviour rather than on a parallel copy of it.
+    pub fn with_read_timeout(mut self, read_timeout: std::time::Duration) -> Self {
+        self.client = Self::build_client(read_timeout);
+        self
     }
 
     /// Returns the query prefix for models that require asymmetric embedding.
@@ -480,6 +550,65 @@ mod tests {
         assert!(
             result.unwrap_err().to_string().contains("not reachable"),
             "error message should mention 'not reachable'"
+        );
+    }
+    /// A peer that completes the TCP handshake and then goes silent is the shape
+    /// of a wedged model server, and it is the failure a *total*-request timeout
+    /// handles worst: the 300s bound eventually fires, but only after 300s.
+    ///
+    /// Measured 2026-08-29 on a developer host — an NVIDIA driver failed a
+    /// suspend/resume, `llama-server` became an unreapable zombie, and the
+    /// container kept its port open and answered `/health` (a static string that
+    /// never touches the model) for 15 hours while every inference request hung.
+    /// This crate's `http_client` doc comment had named that exact class
+    /// ("a hung embedding server, e.g. Ollama during GPU discovery failure")
+    /// since it was written; the bound it carried was simply the coarse one.
+    ///
+    /// Three details are load-bearing and each would silently defeat the test:
+    ///
+    /// - **Not a closed port.** That fails on connect, which already worked and
+    ///   already produced a clear error. The defect lives entirely in the gap
+    ///   between "connected" and "answered".
+    /// - **The accepted streams are held, not dropped.** A dropped stream closes
+    ///   the socket, which the client reports promptly as a clean EOF — the test
+    ///   would then pass with no read bound configured at all.
+    /// - **`with_read_timeout`, not `CODESCOUT_HTTP_READ_TIMEOUT_SECS`.**
+    ///   Mutating process env to reach this is option B of
+    ///   `docs/conventions/test-env-isolation.md`, marked NOT VIABLE: `#[serial]`
+    ///   coordinates only among annotated tests, so any untagged test reading the
+    ///   same var still races. `from_url` is used because it is the one
+    ///   constructor with no ambient-env fallback.
+    ///
+    /// The outer `tokio::time::timeout` is what lets this fail rather than wedge
+    /// the binary: remove `.read_timeout()` from `http_client` and the inner call
+    /// sits until the 300s total bound, well past this 30s ceiling.
+    #[tokio::test]
+    async fn a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _wedged = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                held.push(stream);
+            }
+        });
+
+        let embedder = RemoteEmbedder::from_url(&format!("http://{addr}"), MODEL, None)
+            .expect("plaintext loopback without an api_key is permitted")
+            .with_read_timeout(std::time::Duration::from_millis(250));
+
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(30), embedder.embed(&["x"]))
+                .await
+                .expect(
+                    "a silent peer must produce an error within the read timeout, not hang. \
+             If this fires, http_client has lost its read_timeout and every embed \
+             call has fallen back to the 300s total bound",
+                );
+
+        assert!(
+            result.is_err(),
+            "a peer that never answers cannot produce an embedding"
         );
     }
 
