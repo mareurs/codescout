@@ -219,8 +219,14 @@ the loss was 29% of bytes against 68% of lines. Restored from
 `git show dde7491b:<path>` and the bad commit was amended out before it left the
 machine. The response *did* warn — `body_meta.line_count` vs `source_line_count`,
 plus a whole `overflow` object — and `jq -r '.body'` reads past all of it.
-Filed as `docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`,
-which proposes giving the guard a line-ratio arm.
+Filed as
+`docs/issues/archive/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`
+and **fixed the next day** — `experiments` `45a88531`, patch-id
+`5bcb69c2d5f06b9126ea78c7e8cf2d640c097463`. The guard now trips on lines as
+well as bytes, and the predicate moved into one `crate::util::shrink_guard`
+shared by all three surfaces that overwrite documents wholesale; there turned
+out to be **three** private copies, not the two the bug file named, and
+`edit_markdown`'s had no test at all.
 
 **The lesson generalises past this entry:** never build a write payload from a
 `get` response — rebuild it from the file or from git, which is exactly what

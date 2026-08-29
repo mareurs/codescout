@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-28
-closed:
+closed: 2026-08-29
 severity: high
 owner: marius
 related:
@@ -131,38 +131,68 @@ and faithful to the gap.
 
 ## Fix
 
-Not yet implemented. Preferred option is (a); it is the one that would have
-caught this exact write.
+Fixed on `experiments` in `45a88531`, patch-id
+`5bcb69c2d5f06b9126ea78c7e8cf2d640c097463`.
 
-**(a) Give the shrink guard a line-ratio arm.** In
-`src/librarian/tools/update.rs:565-580`, fail when *either* ratio crosses the
-threshold: `new.len()*2 < original.len() || new_lines*2 < original_lines`.
-Cheap, symmetric with the existing predicate, and generalises past this
-round-trip to any line-dropping write. Port to `MemoryStore::shrink_check`
-(`src/memory/mod.rs`) in the same change — CM-6 gave it the identical
-byte-only predicate. Report whichever dimension tripped, so the message names
-what was actually lost.
+**Option (a) shipped, with a scope correction this file got wrong.** The plan
+said two implementations; there are **three**. `edit_markdown`
+(`src/tools/markdown/edit_markdown.rs`) carried a third private copy of the same
+byte-only predicate and its own `SHRINK_GUARD_MIN_BYTES = 200`, and it had **no
+shrink-guard test at all**. Fixing only the two named here would have left it
+broken, which is the failure mode that let this bug exist in the first place.
 
-**(b) Make the capped body unusable as a write payload.** When `apply_soft_cap`
-truncates, `get` could rename the key (`body_partial`) or drop `body` in favour
-of the overflow envelope. Stronger, and it breaks every existing reader of
-`.body` on a >500-line artifact — a real cost, since the current shape is
-useful for reading.
+The predicate, the floor and the report type therefore moved into a single
+`crate::util::shrink_guard`, with all three surfaces calling it and each keeping
+its own refusal text — `body_edits[]` for artifacts, `action='edit'` for
+markdown, read-modify-write for memories. `check()` returns which dimension
+tripped, and every message reports both, including the one that held: a reader
+deciding whether to pass `force=true` needs to see that bytes were fine,
+because that is the surprising part.
 
-**(c) Documentation only.** Note the hazard in `get_guide("librarian")` beside
-the `--params @<file>` guidance. Weakest: the failure mode is a pipeline that
-never reads prose.
+Option (c) shipped alongside it — `get_guide("librarian")` § *The shrink guard*,
+the `force` schema descriptions on `artifact` and `edit_markdown`, and
+`docs/architecture/augmented-artifacts.md`, whose "I have the body in hand"
+section now names the capped-`full=true` case explicitly. All of it written
+**shorter than what it replaced**: the guide section is drawn by every p50
+session, and a first, more verbose draft failed
+`a_p50_session_stays_under_the_committed_guide_byte_ceiling` at 12,308 B against
+a 12,000 B ceiling with margin 0. That test states that raising the ceiling is a
+spec amendment rather than a fix, so the section was compressed to net −70 B.
 
-(a) and (c) compose. (b) should not ship without (a) anyway.
-
+Option (b) — renaming the key to `body_partial` on a truncated read — was not
+taken and is not owed. With the line arm in place the round-trip now fails loudly
+at the write, which is where the caller can act on it.
 ## Tests added
 
-None yet — the fix is not written. A regression test for (a) is straightforward
-and should assert the guard fires on a **line**-heavy truncation whose byte
-ratio stays under threshold, i.e. it must be built from a body with long lines.
-A test using uniform-length lines would pass with the bug present, because both
-ratios move together — that fixture shape is the trap here.
+Seven in `src/util/shrink_guard.rs`, one in `src/librarian/tools/update.rs`, two
+in `src/tools/markdown/tests.rs`.
 
+The reproduction was written first and observed **red** — `updated: true` on a
+write dropping 90 of 100 lines — before any fix existed.
+
+- `util::shrink_guard::tests::catches_a_line_truncation_that_keeps_the_bytes`
+- `librarian::tools::update::tests::body_shrink_guard_catches_a_line_truncation_that_keeps_the_bytes`
+- `tools::markdown::tests::shrink_guard_blocks_a_line_truncation_that_keeps_the_bytes`
+- `tools::markdown::tests::shrink_guard_line_arm_yields_to_force` — the escape
+  hatch on the new arm. A guard that over-fires with no way out is worse than
+  the bug it closes.
+- `util::shrink_guard::tests::a_single_line_document_relies_on_the_byte_arm` —
+  pins that the line arm is *structurally unable* to fire on minified or
+  single-paragraph content, so the byte arm must carry it.
+
+**The fixture trap named in this file was real, and is now executable rather
+than a comment.** Every line-arm fixture is built from lines of unequal length
+and asserts that premise (`front.len() * 2 >= whole.len()`) before asserting the
+behaviour, so a later edit that quietly makes the fixture uniform fails on the
+premise instead of silently defanging the test.
+`util::shrink_guard::tests::a_uniform_fixture_cannot_tell_the_arms_apart` exists
+only to document the trap: it asserts that uniform lines yield
+`ShrinkDimension::Both`, i.e. that such a fixture cannot distinguish the arms.
+
+Clippy caught one defect in this very set: `assert_eq!(r.byte_pct, 100 - (4 *
+100 / 600))` is `identity_op` — integer division floors the term to 0, so the
+expression was a disguised `100`. Replaced with the literal and a note on why a
+600→4 byte write reads as 100% rather than 99%.
 ## Workarounds
 
 **Never build a write payload from a `get` response.** Rebuild it from the file
@@ -187,14 +217,9 @@ show the insertions you intended and **zero** unexplained deletions.
 
 ## Resume
 
-Implement fix (a) in `src/librarian/tools/update.rs:565-580` and mirror it in
-`MemoryStore::shrink_check` (`src/memory/mod.rs`). Write the regression test
-first, with a long-line fixture as described under *Tests added* — verify it
-fails before the fix by checking the byte ratio stays above 50% while the line
-ratio drops below it. Gate: `cargo fmt`, `cargo clippy --workspace --all-targets
---features local-embed -- -D warnings`, `cargo test`, `cargo check
---no-default-features`.
-
+N/A — fixed and verified. Gate green on `45a88531`: `cargo fmt`, `cargo clippy
+--workspace --all-targets --features local-embed -- -D warnings`, `cargo test`
+(4637 passed, 0 failed), `cargo check --no-default-features`.
 ## References
 
 - `src/librarian/tools/get.rs:16,72-85` — `SOFT_CAP_LINES`, `apply_soft_cap`

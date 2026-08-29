@@ -2277,7 +2277,7 @@ text
     /// `docs/trackers/prompt-hamsa-audit-log.md` on 2026-08-28 while losing only
     /// 29% of the bytes, because the capped prefix was an index table whose rows
     /// run 3-7 KB each. See
-    /// `docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
+    /// `docs/issues/archive/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
     ///
     /// The fixture has to be built from lines of UNEQUAL length. With uniform
     /// lines the two ratios move together, so a truncation that trips one trips

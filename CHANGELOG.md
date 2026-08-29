@@ -351,7 +351,7 @@ All notable changes to codescout are documented here.
   pipeline just never looks at sibling keys, so **never build a write payload from a `get`
   response**; `get`'s body is capped at 500 lines and `full=true` opts out of section-scoping,
   not out of the cap. See
-  `docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
+  `docs/issues/archive/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
 
 - **`artifact(action="find")` answered `count: 0` identically for "nothing is there" and
   "the catalog has never looked."** An artifact created outside `artifact(action="create")`

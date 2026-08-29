@@ -197,7 +197,7 @@ sibling keys, and the byte arm of the shrink guard cannot see a truncation
 that keeps a document's long-lined front. That combination deleted 1047 of
 1553 lines of a tracker on 2026-08-28 and returned `updated: true`; the line
 arm was added the next day in response. See
-`docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
+`docs/issues/archive/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
 
 **Rule: never build a write payload from a `get` response.** Rebuild it from
 the file or from `git show <sha>:<path>`.

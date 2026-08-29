@@ -16,7 +16,7 @@
 //! because the retained prefix was an index table whose rows run 3–7 KB each.
 //! The byte guard declined to fire, correctly by its own terms, and 1047 lines
 //! were deleted by a call that reported success. See
-//! `docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
+//! `docs/issues/archive/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
 //!
 //! The two ratios only diverge when line lengths are uneven — which is the
 //! normal shape of prose, tables and code, not an exotic case. Any test fixture
