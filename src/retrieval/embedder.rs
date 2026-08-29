@@ -977,21 +977,29 @@ mod tests {
         let url = format!("http://{addr}");
         // `with_config`, not `new()`: the latter reads process env, and a
         // developer's ambient CODESCOUT_* settings must never reach a test.
-        // Both legs point at the wedge so the assertion holds whichever runs.
+        // Both bases point at the wedge; only the dense one is exercised below.
+        //
+        // `dense_batch`, not `embed_one_batch`. The latter drives both legs through
+        // `tokio::try_join!`, which returns whichever errors FIRST — so with both
+        // bases wedged and one shared read bound, the surfacing message is a coin
+        // flip between the dense marker and "embed_batch sparse send", while the
+        // assertion below is dense-specific. `.dense_only(true)` does not help:
+        // `embed_one_batch` never consults it. This test called `embed_one_batch`
+        // from 9f4debc3 until 2026-08-29 and was flaky for exactly that reason — it
+        // passed on the authoring session's runs and failed for a concurrent one.
+        // `dense_batch` also *owns* the `is_timeout()` error map being pinned, so
+        // the narrower call is the more honest unit as well as the stable one.
         let e = EmbedderHttp::with_config(url.as_str(), url.as_str(), 3, "", "")
-            .dense_only(true)
             .with_read_timeout(std::time::Duration::from_millis(250));
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            e.embed_one_batch(vec!["x".to_string()]),
-        )
-        .await
-        .expect(
-            "a silent peer must produce an error within the read timeout, not hang. \
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(30), e.dense_batch(&["x"]))
+                .await
+                .expect(
+                    "a silent peer must produce an error within the read timeout, not hang. \
              If this fires, transport::client has lost its read_timeout and every \
              embed call can once again wait forever on a wedged server",
-        );
+                );
 
         let err = result.expect_err("a peer that never answers cannot produce an embedding");
         let msg = err.to_string();
