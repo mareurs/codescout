@@ -7,7 +7,7 @@
 //! handshake and then never wrote a byte blocked the caller forever. Measured
 //! 2026-08-29: a wedged local llama-server on `127.0.0.1:48081` turned
 //! `cargo test` into an unbounded hang with no failure and no output. See
-//! `docs/issues/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`.
+//! `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`.
 
 use std::time::Duration;
 

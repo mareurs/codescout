@@ -946,7 +946,7 @@ mod tests {
     /// `connect_timeout` all default to `None`. Measured 2026-08-29 — exactly
     /// this turned `cargo test` into an unbounded hang with no failure and no
     /// output. See
-    /// `docs/issues/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`.
+    /// `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`.
     ///
     /// Deliberately **not** a closed port. That fails on connect, which already
     /// worked and already produced a clear error; the sibling test above covers

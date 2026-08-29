@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-29
-closed:
+closed: 2026-08-29
 severity: high
 owner: marius
 related:
@@ -13,7 +13,7 @@ tags:
   - timeout
   - hang
 kind: bug
-unverified: Hypothesis 2 (that the ET-2 working-tree change is not the cause) is rejected on structural grounds only — remote-embed is a default feature so nothing is gated out, the edits are semantically identical, and the hung tests are in a module the change never touches. NOT confirmed by an independent run at HEAD, which needs a full rebuild in a clean tree. See Resume.
+unverified: "Only Fix 1 (the transport timeout) is applied. Fix 2 is NOT: tools::memory::tests still resolve their embedder from ambient config, so the suite's behaviour remains a function of the developer's shell -- it can no longer hang, but a configured-and-reachable local service still participates in tests that believe they are isolated. The pollution half of that same coupling was closed separately by docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md."
 ---
 
 # BUG: `EmbedderHttp` sets no request timeout, so a wedged embed server hangs `cargo test` forever instead of failing
@@ -164,36 +164,83 @@ type.
 
 ## Fix
 
-**Fix 1 (the type):** give the client an explicit timeout.
+**Fix 1 (the type) — APPLIED.** `src/retrieval/transport.rs` (new) states the
+timeout policy once, for both remote legs:
 
 ```rust
-client: reqwest::Client::builder()
-    .timeout(std::time::Duration::from_secs(/* configurable */ 120))
+reqwest::Client::builder()
+    .read_timeout(read_timeout)
     .build()
-    .expect("static reqwest client config is valid"),
 ```
 
-Make it configurable via `[embeddings]`/env rather than hardcoded — a cold GPU
-model load can legitimately exceed 60s, so too tight a default trades a hang for
-a spurious failure. Landing this also makes the existing `e.is_timeout()` branch
-at `embedder.rs:441` reachable, so the wedge case starts producing the
-already-written diagnostic.
+`read_timeout`, **not** `timeout` — the distinction is load-bearing and was the
+main design decision here. `timeout` bounds the whole request, and this crate's
+own measurements (`DEFAULT_INFLIGHT` in `retrieval::embedder`) record legitimate
+32-input GPU batches at 6.6-12.1s of inference and 23-33s end to end, so a
+total-request timeout tight enough to catch a wedge would cut off real work.
+`read_timeout` applies per read operation and resets after every successful read.
+reqwest's own doc: *"more appropriate for detecting stalled connections."*
 
-**Fix 2 (the tests):** stop `tools::memory::tests` resolving the embedder from
-ambient config. The isolation helper already exists for the pollution case; extend
-the same treatment so no test depends on a live local service.
+Default **120s**, matching the Qdrant client's timeout in
+`retrieval::client::from_config_only`, and deliberately generous — a cold GGUF
+load can accept a connection well before it can answer. The goal is a **bounded**
+wait, not a short one. Override with `CODESCOUT_HTTP_READ_TIMEOUT_SECS`; a zero
+or unparseable value falls back to the default rather than erroring, so an
+operator typo cannot restore the unbounded-wait behaviour.
 
-Neither is applied in this record.
+Put in one module rather than copied into both legs, deliberately: the same
+session filed `docs/issues/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`
+about a duplicated predicate whose two copies have different test coverage, and
+there was no reason to create a second instance of that shape.
 
+Env is read only in `EmbedderHttp::new` / `RerankerHttp::new`, never in their
+`with_config` / `with_protocol` siblings — those are the explicit-control paths
+the tests use. The new `with_read_timeout` builders **rebuild** the client rather
+than mutating it, mirroring `with_inflight_override`, so no test needs to touch
+real process env (`EnvGuard` and `serial_test` are banned crate-wide).
+
+Side effect worth naming: this makes the `e.is_timeout()` arm of the dense
+`send()` error map reachable for the first time. It could never fire while no
+timeout was configured anywhere — so the wedge case, the confusing one, produced
+no message, while the obvious connect-refused case got the helpful one.
+
+**Fix commit:** `9f4debc3` on `experiments`
+**patch-id:** `447d6f36dedcdbfb855d572535c00d6139e91e9c`
+
+The patch-id is the durable half of the pair: `experiments` is rebased after
+every ship, so the SHA is positional and dies, while the patch-id is a content
+hash of the diff and survives both rebase and cherry-pick.
+
+**Fix 2 (the tests) — NOT APPLIED.** `tools::memory::tests` still resolve their
+embedder from ambient config. They can no longer hang, but the suite still
+reaches a live local service when one is configured. Recorded in `unverified:`
+so a query surfaces it; see § Resume.
 ## Tests added
 
-None yet. A regression test for Fix 1 is straightforward and should assert the
-*timeout*, not merely that a fast case works: bind a listener that accepts and
-never writes, point `EmbedderHttp` at it, and assert the call returns `Err`
-within the configured bound. Wrap in `tokio::time::timeout` at a longer bound so
-a broken fix fails rather than wedging the suite — the pattern already used at
-`embedder.rs:1352`.
+`a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever`
+— `src/retrieval/embedder.rs`, in the `remote-embed`-gated `tests` module.
 
+Binds a listener that accepts connections and **holds them open and silent**.
+Deliberately not a closed port: that fails on connect, which already worked and
+already produced a clear error. Holding rather than dropping the streams is also
+load-bearing — a dropped stream closes the socket, which the client reports
+promptly as a clean EOF, and the test would pass with no timeout configured at
+all and prove nothing.
+
+**Verified by mutation, not by passing.** Swapping `read_timeout` for
+`connect_timeout` — the realistic wrong-instrument mistake, since a wedged peer
+connects fine — moves the test from `ok in 0.56s` to `FAILED in 30.16s`, via the
+outer `tokio::time::timeout` firing with `Elapsed(())`. That outer bound is what
+makes the failure a red test rather than a wedged binary, the same guard and the
+same reason as `sparse_retry_cap_stops_at_exactly_8_attempts`.
+
+**End-to-end, against the still-wedged live server:** a memory test that
+previously hung past 900s completed in **5.22s** under
+`CODESCOUT_HTTP_READ_TIMEOUT_SECS=5`, with the embedder on `127.0.0.1:48081`
+still returning `HTTP 000`.
+
+Gate at fix time: fmt, clippy `--workspace --all-targets --features local-embed
+-D warnings`, test (4637 passed, 0 failed), and four lean configurations.
 ## Workarounds
 
 Run the suite with the ambient service config cleared:
@@ -209,11 +256,17 @@ Or restart the wedged embed server (`./scripts/retrieval-stack.sh`).
 
 ## Resume
 
-Confirm hypothesis 2 properly: `git stash` the ET-2 tree, run
-`cargo test tools::memory::` against the wedged server at `HEAD`, confirm the
-same 16 tests hang, unstash. Then implement Fix 1 in
-`src/retrieval/embedder.rs:368` with the timeout sourced from config.
+Fix 1 is done. **Fix 2 is the open half:** stop `tools::memory::tests` resolving
+the embedder from ambient config, so no test depends on a live local service.
+The isolation helper already exists for the pollution case
+(`test_ctx_with_project` vs `test_ctx_with_project_raw`,
+`src/tools/memory/tests.rs:42-46`); extend the same treatment to every test that
+builds a real `Agent`.
 
+When doing it, verify the isolation the way this fix was verified: point the
+ambient config at a listener that accepts and never answers, and confirm the
+tests are **unaffected** rather than merely fast. A test that got quicker because
+the timeout now fires is still coupled to the environment.
 ## References
 
 - `src/retrieval/embedder.rs:368` — the untimed client
