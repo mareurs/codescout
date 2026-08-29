@@ -247,6 +247,12 @@ mod tests {
         use crate::prompts::guide_index::GUIDE_INDEX;
         let op_keys: Vec<String> = OPERATOR_RULES.iter().map(|r| ledger_key(&r.id)).collect();
         assert!(!op_keys.is_empty(), "no rules — the corpus failed to load");
+        assert!(
+            op_keys.iter().all(|k| k.starts_with("op:")),
+            "an op key lost its `op:` prefix — the disjointness this test asserts \
+             depends on it staying disjoint from the guide-side `<topic>` / \
+             `<topic>#<heading>` namespace"
+        );
         let guide_keys = GUIDE_INDEX.ledger_keys();
         assert!(
             !guide_keys.is_empty(),
@@ -268,6 +274,11 @@ mod tests {
     /// field is a change to the no-echo convention, not a bug fix — see
     /// docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md
     ///
+    /// `Some("edit_file")` below is a synthetic selector: no production tool
+    /// overrides `selector_key` for `edit_file`/`create_file` at all, so this
+    /// string never actually reaches `route()` on a real call — see
+    /// docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md.
+    ///
     /// **When this test starts failing, that is the fix landing.** Delete it and
     /// assert delivery instead; close the bug file.
     #[test]
@@ -286,6 +297,11 @@ mod tests {
     ///
     /// Without this cell the test above is indistinguishable from "OP-4's selector
     /// is malformed", which is a different bug with a different fix.
+    ///
+    /// As above, `Some("edit_file")` is synthetic — no production `edit_file`
+    /// call ever produces this selector today (see
+    /// docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md).
+    /// This test isolates the predicate from that separate blocker.
     #[test]
     fn op_4s_predicate_is_itself_sound_given_a_path_bearing_response() {
         let hit = route(

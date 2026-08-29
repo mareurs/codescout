@@ -409,7 +409,11 @@ impl GuideIndex {
             .collect()
     }
 
-    /// Every ledger key the guide side can stamp — topic keys and section keys.
+    /// Every STATICALLY KNOWN ledger key the guide side can stamp — topic keys
+    /// and section keys. Does NOT include the `<topic>#<preamble>` form
+    /// (`types.rs:957`), synthesized at call time when a call's shape matches
+    /// no section; that key cannot be enumerated from `topics` because it
+    /// exists only as a runtime string, not a stored field.
     ///
     /// Exists for Gate 5 in `operator_rules::route`, which must assert the `op:`
     /// namespace collides with none of them. Returning the keys rather than

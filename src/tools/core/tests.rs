@@ -1375,12 +1375,15 @@ async fn write_echo(
 
 /// Stub tool exercising the operator-rules routing path in `call_content`.
 ///
-/// No production tool overrides `selector_key` except `LibrarianAdapter` —
-/// `Memory` in particular does not, so OP-3 (`serves: memory.write`) cannot
-/// route on a real `memory(action="write", ...)` call today even though it
-/// is the rule Task 6 expects that call to surface. This stub projects
-/// `{tool}.{action}` the same way `LibrarianAdapter::selector_key` does, so
-/// the router path in `call_content` can be exercised regardless.
+/// No production tool overrides `selector_key` except `LibrarianAdapter`
+/// (which wraps every librarian tool) — `Memory` in particular does not,
+/// so OP-3 (`serves: memory.write`) cannot route on a real
+/// `memory(action="write", ...)` call today even though it is the rule
+/// Task 6 expects that call to surface. See
+/// docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md
+/// for the full production-routing gap this stub papers over. This stub
+/// projects `{tool}.{action}` the same way `LibrarianAdapter::selector_key`
+/// does, so the router path in `call_content` can be exercised regardless.
 struct RoutedEchoTool {
     name: &'static str,
     result: serde_json::Value,
@@ -1479,9 +1482,12 @@ async fn a_triggered_operator_rule_is_delivered_once_per_session() {
 /// `**Serves:**` entries at all (Gate 6 in `operator_rules::validate`
 /// forbids an `always` rule from having any), so the selector-match filter
 /// inside `route_in` already excludes it on its own — deleting the binding
-/// filter leaves this test green, which is exactly what happened when this
-/// test's RED/GREEN pair was captured (see task-5-report.md): it passed
-/// with `op_content` entirely absent from `call_content`. The mutation is
+/// filter leaves this test green. That was observed directly, not
+/// inferred: RED, run before the `op_content` block existed in
+/// `call_content`, passed vacuously — nothing was emitted for any tool
+/// yet, so `OP-1` was trivially absent. GREEN, run after `op_content`
+/// landed, passed again, but for the different reason above rather than
+/// because the binding filter was actually exercised. The mutation is
 /// caught one layer down by
 /// `operator_rules::route::tests::route_in_excludes_an_always_rule_even_when_its_selector_matches`,
 /// which builds a synthetic `always` rule with a matching `serves` — a

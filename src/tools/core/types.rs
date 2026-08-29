@@ -1132,7 +1132,7 @@ pub trait Tool: Send + Sync {
         // `always` rules are excluded inside `route`, not here — a resident
         // rule delivered on a call would arrive twice, and stamping it would
         // assert a per-session delivery event that never happened (spec § 5).
-        let op_content: Vec<Content> = {
+        let op_content: Vec<Content> = if selector.is_some() {
             let mut emitted = ctx.guide_hints_emitted.lock();
             let mut out = Vec::new();
             for r in crate::operator_rules::route::route(selector.as_deref(), &val) {
@@ -1156,6 +1156,12 @@ pub trait Tool: Send + Sync {
                 )));
             }
             out
+        } else {
+            // No tool outside the `LibrarianAdapter` family overrides
+            // `selector_key` (default `None`, `types.rs:1251`), so every other
+            // tool call takes this branch — skip the mutex lock and the corpus
+            // scan for calls that could never route regardless.
+            Vec::new()
         };
 
         // Build the primary response block (the tool's actual output).

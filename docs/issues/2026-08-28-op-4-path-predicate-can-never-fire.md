@@ -52,7 +52,7 @@ Two independent facts compose into a dead predicate:
    - `violations[].path` (the `doctor`-tool-specific shape)
 3. `edit_file`/`create_file` answer with the project's no-echo write convention — a
    bare `"ok"` string. `annotate_write_root`
-   (`src/tools/core/types.rs:185-201`) promotes that string to
+   (`src/tools/core/types.rs:184-201`) promotes that string to
    `{"status":"ok","wrote_to":<checkout root>}`, and only when the repo has linked
    worktrees. `wrote_to` is not one of the four scanned shapes, so it is invisible to
    `names_path_containing` regardless.
@@ -64,6 +64,16 @@ Two independent facts compose into a dead predicate:
 
 No response shape a real `edit_file`/`create_file` call can produce carries the written
 path, so `OP-4`'s `path~/.claude` predicate matches nothing, ever.
+
+There is also a second, independent blocker that stops this even earlier: neither
+`edit_file` nor `create_file` overrides `Tool::selector_key` at all, so in production
+`route()` is never even called with `Some("edit_file")` — both of this bug file's own
+tests pass that selector directly rather than obtaining it from a real call, which is
+why they exercise the predicate in isolation but not the actual routing path. This is
+not specific to `OP-4`: no production tool outside the `LibrarianAdapter` family
+overrides `selector_key`, so every `triggered` rule keyed to a non-librarian tool is
+unreachable the same way. Full finding:
+`docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`.
 
 *Measured 2026-08-28: two mutation-testing passes on this worktree, both reverted
 immediately after observing the result (see Evidence).*
@@ -136,9 +146,9 @@ changes the shape for every consumer of those responses), not a bug fix that can
 along inside a routing task.
 
 The alternative — widening `names_path_containing`'s top-level scan to also check
-`wrote_to` — was considered and rejected on two grounds: (1) the function's own doc
-comment (`src/util/librarian_response.rs:22-29`) explicitly declined to widen the
-top-level scan to serve a single caller's need, doing so once already for the
+`wrote_to` — was considered and rejected on two grounds: (1) an in-body comment in
+the function itself (`src/util/librarian_response.rs:55-60`) explicitly declined to
+widen the top-level scan to serve a single caller's need, doing so once already for the
 `doctor`-specific `violations` shape and stopping there; and (2) Mutation 1 above shows
 it would not even fix this specific case, since `wrote_to` never carries the actual
 written path for files outside the codescout checkout.
@@ -181,10 +191,17 @@ failure". At that point: delete that test, add a delivery assertion in its place
 the real write-response shape), and close this bug file (`status: fixed`, `closed:`
 filled in, fix SHA + patch-id recorded).
 
+Fixing the path-shape gap alone will not make `OP-4` route in production: the
+selector-key blocker above stops it earlier and needs its own, separate fix — see
+`docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md` for
+its scope and the smallest-fix candidate discussed there.
+
 ## References
 - `docs/trackers/operator-rules.md` § OP-4
 - `src/operator_rules/route.rs` (both pinning tests)
 - `src/prompts/guide_index.rs:194` (`Selector::matches` → `path~` delegation)
 - `src/util/librarian_response.rs:36-65` (`names_path_containing`)
-- `src/tools/core/types.rs:185-201` (`annotate_write_root`)
+- `src/tools/core/types.rs:184-201` (`annotate_write_root`)
+- `docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md` (the
+  broader selector-key blocker)
 - `.superpowers/sdd/2026-08-28-operator-rules-phase-2/task-4-brief.md`
