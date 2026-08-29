@@ -1090,10 +1090,11 @@ mod tests {
     use crate::retrieval::code_store::CodeVectorStore;
     use crate::retrieval::config::RetrievalConfig;
     use crate::retrieval::drift::ChunkRef;
-    use crate::retrieval::embedder::{
-        BatchEmbedder, CodeEmbedder, EmbedOutput, EmbedderHttp, SparseVector,
-    };
+    #[cfg(feature = "remote-embed")]
+    use crate::retrieval::embedder::EmbedderHttp;
+    use crate::retrieval::embedder::{BatchEmbedder, CodeEmbedder, EmbedOutput, SparseVector};
     use crate::retrieval::payload::CodePayload;
+    #[cfg(feature = "remote-embed")]
     use crate::retrieval::reranker::RerankerHttp;
     use crate::retrieval::search::Hit;
     use std::sync::{Arc, Mutex};
@@ -2852,9 +2853,11 @@ mod tests {
     /// acquiring the index lock (before any real indexing work), so this gives
     /// a controllable window in which the lock is provably still held —
     /// without needing real files, a real embedder, or a real Qdrant.
+    #[cfg(feature = "remote-embed")]
     struct SlowEnsureStore;
 
     #[async_trait::async_trait]
+    #[cfg(feature = "remote-embed")]
     impl CodeVectorStore for SlowEnsureStore {
         async fn ensure_collection(&self, _c: &str, _d: u64) -> Result<()> {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -2910,6 +2913,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "remote-embed")]
     fn test_retrieval_client(store: impl CodeVectorStore + 'static) -> RetrievalClient {
         RetrievalClient {
             code_store: Arc::new(store),
@@ -2918,6 +2922,7 @@ mod tests {
                 "http://unused.invalid",
                 3,
             )),
+            #[cfg(feature = "remote-embed")]
             reranker: RerankerHttp::new("http://unused.invalid"),
             config: RetrievalConfig {
                 qdrant_url: "http://unused.invalid".into(),
@@ -2985,6 +2990,7 @@ mod tests {
         RetrievalClient {
             code_store: store,
             embedder,
+            #[cfg(feature = "remote-embed")]
             reranker: RerankerHttp::new("http://unused.invalid"),
             config: RetrievalConfig {
                 qdrant_url: "http://unused.invalid".into(),
@@ -3026,6 +3032,7 @@ mod tests {
     /// OUTSIDE, tries to acquire the same lock while it runs: that outside
     /// acquire must fail iff `sync_project`'s guard is still alive at that
     /// moment.
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_holds_index_lock_for_its_full_duration() {
         let dir = tempfile::tempdir().unwrap();
@@ -3073,6 +3080,7 @@ mod tests {
     /// absent the `self.guard_index_dim(&collection, project_id).await?;` line
     /// in `sync_project`, this exact setup returns `Ok` with `added: 0`, not
     /// an error. Deleting that line makes `unwrap_err()` below panic.
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_fails_fast_on_a_dim_mismatch_before_touching_the_store() {
         let dir = tempfile::tempdir().unwrap();
@@ -3126,6 +3134,7 @@ mod tests {
     /// bug being "fixed" by deleting the guard: the two tests fail in opposite
     /// directions, so no single change satisfies both unless `force` is what
     /// discriminates.
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_force_migrates_a_dimension_mismatch_instead_of_refusing() {
         let dir = tempfile::tempdir().unwrap();
@@ -3164,6 +3173,7 @@ mod tests {
     /// discarded and rebuilt the index across a model change, and the field would
     /// become noise a reader learns to ignore. It also pins that `force=true` does
     /// not reset an index that needs no reset.
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn a_forced_sync_at_a_matching_dimension_reports_no_migration() {
         let dir = tempfile::tempdir().unwrap();
@@ -3243,6 +3253,7 @@ mod tests {
     /// Reverting the fix (using `write_index_state(root)` instead of reading back
     /// and re-writing the existing `dirty_paths`) makes this assertion fail with
     /// an empty vec.
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_preserves_existing_dirty_paths_never_clears_via_plain_write_index_state()
     {

@@ -1,5 +1,8 @@
+#[cfg(feature = "remote-embed")]
 use anyhow::{anyhow, Context, Result};
+#[cfg(feature = "remote-embed")]
 use futures::stream::{StreamExt, TryStreamExt};
+#[cfg(feature = "remote-embed")]
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
@@ -71,6 +74,7 @@ pub trait CodeEmbedder: BatchEmbedder {
     fn known_dim(&self) -> Option<usize>;
 }
 
+#[cfg(feature = "remote-embed")]
 #[async_trait::async_trait]
 impl CodeEmbedder for EmbedderHttp {
     async fn embed_one(&self, text: &str) -> anyhow::Result<EmbedOutput> {
@@ -111,6 +115,7 @@ impl DenseEmbedder for CodeDenseAdapter {
     }
 }
 
+#[cfg(feature = "remote-embed")]
 #[async_trait::async_trait]
 impl BatchEmbedder for EmbedderHttp {
     async fn embed_batch_dyn(&self, texts: &[String]) -> anyhow::Result<Vec<EmbedOutput>> {
@@ -126,6 +131,7 @@ impl BatchEmbedder for EmbedderHttp {
 /// (`src/retrieval/client.rs`) can reapply the exact same guard to a key
 /// arriving from `[embeddings].api_key` in project.toml — one guard, two
 /// sources, rather than a second copy that could drift from this one.
+#[cfg(feature = "remote-embed")]
 pub(crate) fn is_https_or_loopback(url: &str) -> bool {
     if url.starts_with("https://") {
         return true;
@@ -157,6 +163,7 @@ pub(crate) fn is_https_or_loopback(url: &str) -> bool {
             .unwrap_or(false)
 }
 
+#[cfg(feature = "remote-embed")]
 pub struct EmbedderHttp {
     dense_base: String,
     sparse_base: String,
@@ -192,28 +199,33 @@ pub struct EmbedderHttp {
     inflight_override: Option<String>,
 }
 
+#[cfg(feature = "remote-embed")]
 #[derive(Serialize)]
 struct EmbedReq<'a> {
     inputs: Vec<&'a str>,
 }
 
+#[cfg(feature = "remote-embed")]
 #[derive(Serialize)]
 struct OpenAiEmbedReq<'a> {
     input: Vec<&'a str>,
     model: &'a str,
 }
 
+#[cfg(feature = "remote-embed")]
 #[derive(Deserialize)]
 struct OpenAiEmbedResp {
     data: Vec<OpenAiEmbedItem>,
 }
 
+#[cfg(feature = "remote-embed")]
 #[derive(Deserialize)]
 struct OpenAiEmbedItem {
     embedding: Vec<f32>,
     index: usize,
 }
 
+#[cfg(feature = "remote-embed")]
 #[derive(Deserialize)]
 struct SparseEntry {
     index: u32,
@@ -238,6 +250,7 @@ struct SparseEntry {
 ///
 /// The machinery is deliberately kept for a faster sparse backend or a card
 /// with real headroom: raise via `CODESCOUT_EMBED_INFLIGHT` or this constant.
+#[cfg(feature = "remote-embed")]
 const DEFAULT_INFLIGHT: usize = 1;
 
 /// Drive `embed_one` over `texts` in `batch`-sized sub-batches, at most `inflight`
@@ -246,6 +259,7 @@ const DEFAULT_INFLIGHT: usize = 1;
 /// Uses `buffered`, never `buffer_unordered`: `flush_pending`
 /// (`src/retrieval/sync.rs:75`) zips embeddings onto payloads positionally, so
 /// reordering here attaches every vector to the wrong chunk — silently.
+#[cfg(feature = "remote-embed")]
 pub(crate) async fn embed_chunks_ordered<F, Fut>(
     texts: &[String],
     batch: usize,
@@ -281,6 +295,7 @@ where
     Ok(nested.into_iter().flatten().collect())
 }
 
+#[cfg(feature = "remote-embed")]
 impl EmbedderHttp {
     pub fn new(
         dense_base: impl Into<String>,
@@ -855,16 +870,19 @@ pub trait DenseEmbedder: Send + Sync {
 
 /// Production [`DenseEmbedder`] backed by the HTTP retrieval stack.
 /// Drops the sparse vector and surfaces only the dense one.
+#[cfg(feature = "remote-embed")]
 pub struct HttpDenseEmbedder {
     inner: EmbedderHttp,
 }
 
+#[cfg(feature = "remote-embed")]
 impl HttpDenseEmbedder {
     pub fn new(inner: EmbedderHttp) -> Self {
         Self { inner }
     }
 }
 
+#[cfg(feature = "remote-embed")]
 #[async_trait::async_trait]
 impl DenseEmbedder for HttpDenseEmbedder {
     async fn embed(&self, text: &str) -> anyhow::Result<Vec<f32>> {
@@ -885,7 +903,7 @@ impl DenseEmbedder for HttpDenseEmbedder {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "remote-embed"))]
 mod tests {
     use super::*;
 

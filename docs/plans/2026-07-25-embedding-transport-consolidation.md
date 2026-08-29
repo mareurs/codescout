@@ -1,7 +1,7 @@
 ---
 id: '0da5bd672ef60dfc'
 kind: plan
-status: draft
+status: active
 title: Embedding transport consolidation — codescout-embed owns remote HTTP
 tags:
 - architecture
@@ -130,6 +130,37 @@ required-model contract is adopted (preferred) or an empty model stays legal.
 ---
 
 ## Stage 1 — Split the module, gate the HTTP half
+
+> **SHIPPED 2026-08-28 — but NOT as written below. Read `ET-7` before this section.**
+>
+> Six defects were found executing this stage; five were still standing in the text
+> below when execution began. Full account, with evidence, in
+> `resume-embedding-transport-stages-1-3:ET-7`. The load-bearing ones:
+>
+> - **1.2's sibling row is wrong the same way 1.2 was.** `RerankerHttp` → `server-stack`
+>   breaks the lean build *and* the default build: `search.rs:154` references
+>   `self.reranker` from ungated `search_in`, so the type must exist in every
+>   configuration. "Never invoked in a lean build" is a *runtime* invariant
+>   (`should_rerank` gates on `lite`) and does not remove a code path. **Correct gate:
+>   `remote-embed`**, for the reranker and for everything else in this stage.
+> - **1.5/Task 6 is wrong.** `server-stack` is tonic/gRPC and never touches `reqwest`.
+>   `reqwest`/`rustls` go under `remote-embed` **only**; `server-stack` gains
+>   `"remote-embed"` as a feature dependency, because `from_config_only` is
+>   `server-stack`-gated yet constructs both `EmbedderHttp` and `RerankerHttp`.
+>   F-5's earlier `any(remote-embed, server-stack)` correction is therefore moot:
+>   the implication makes plain `remote-embed` sufficient.
+> - **1.1's surface list omits five items**, not the three its own note admits — add
+>   `DEFAULT_INFLIGHT` and `embed_chunks_ordered` (both `dead_code` otherwise), all
+>   three top-of-file `use` lines, and `is_https_or_loopback` (which this plan wrongly
+>   asserts stays ungated — its only consumer chain is HTTP-only).
+> - **1.0 prescribes `EnvGuard` / `serial_test`** "per `docs/conventions/test-env-isolation.md`".
+>   That convention **bans both crate-wide**. ET-1 avoided env mutation entirely.
+> - **The file split did not happen, deliberately.** The HTTP items are interleaved with
+>   ungated ones, so a split meant hand-moving ~1,300 lines. Gated in place with 15
+>   `#[cfg]` attributes; `cargo check --no-default-features` proves completeness.
+>
+> Measured outcome: **bare 274 → 226 (−48)**, `remote-embed` **+1 → +49**. This also
+> closes `ET-6` (re-measure before quoting the −48 figure).
 
 **This stage banks the entire 48-crate win on its own.** If Stages 2–3 never
 happen, this is still worth shipping — but the ADR records it as a waypoint,

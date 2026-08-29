@@ -12,6 +12,7 @@ pub mod memory_payload;
 pub mod payload;
 #[cfg(feature = "server-stack")]
 pub mod qdrant;
+#[cfg(feature = "remote-embed")]
 pub mod reranker;
 pub mod search;
 pub mod sqlite_code_store;

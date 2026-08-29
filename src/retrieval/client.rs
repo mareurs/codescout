@@ -1,8 +1,11 @@
 use crate::retrieval::code_store::{CodeVectorStore, VectorBackend};
 use crate::retrieval::config::RetrievalConfig;
-use crate::retrieval::embedder::{is_https_or_loopback, CodeEmbedder, EmbedderHttp};
+use crate::retrieval::embedder::CodeEmbedder;
+#[cfg(feature = "remote-embed")]
+use crate::retrieval::embedder::{is_https_or_loopback, EmbedderHttp};
 #[cfg(feature = "server-stack")]
 use crate::retrieval::qdrant::QdrantWrap;
+#[cfg(feature = "remote-embed")]
 use crate::retrieval::reranker::RerankerHttp;
 use anyhow::Result;
 use std::sync::Arc;
@@ -92,6 +95,7 @@ pub struct RetrievalClient {
     /// the crate. See `docs/plans/2026-06-16-two-stack-retrieval-lite.md`.
     pub(crate) code_store: Arc<dyn CodeVectorStore>,
     pub embedder: Arc<dyn CodeEmbedder>,
+    #[cfg(feature = "remote-embed")]
     pub reranker: RerankerHttp,
     pub config: RetrievalConfig,
     /// True for the daemon-free lite stack (sqlite-vec backend): dense-only, no
@@ -201,6 +205,7 @@ impl RetrievalClient {
     /// (`crate::retrieval::embedder::is_https_or_loopback`). Without this, a
     /// key arriving from project.toml would leak over cleartext HTTP where the
     /// env-var path does not.
+    #[cfg(feature = "remote-embed")]
     pub(crate) fn guarded_api_key(url: &str, api_key: Option<&str>) -> Option<String> {
         let key = api_key?;
         if key.is_empty() {
@@ -222,6 +227,7 @@ impl RetrievalClient {
     /// test can inspect the constructed `EmbedderHttp`'s resolved `api_key`
     /// directly — on the exact code path `build_embedder`/`from_env` run, not
     /// a copy of it.
+    #[cfg(feature = "remote-embed")]
     fn build_http_embedder(url: &str, config: &RetrievalConfig, dense_only: bool) -> EmbedderHttp {
         let http = EmbedderHttp::new(
             url,
@@ -241,6 +247,33 @@ impl RetrievalClient {
             Some(key) => http.api_key(Some(key)),
             None => http,
         }
+    }
+
+    /// The `[embeddings].url` arm of [`Self::build_embedder`], split out so a
+    /// build with no HTTP embed transport refuses the configuration with an
+    /// actionable message instead of failing to compile. Mirrors the lean arm of
+    /// [`Self::qdrant_code_store`], which names its missing feature the same way.
+    #[cfg(feature = "remote-embed")]
+    fn build_embedder_for_url(
+        url: &str,
+        config: &RetrievalConfig,
+        dense_only: bool,
+    ) -> Result<Arc<dyn CodeEmbedder>> {
+        Ok(Arc::new(Self::build_http_embedder(url, config, dense_only)))
+    }
+
+    #[cfg(not(feature = "remote-embed"))]
+    fn build_embedder_for_url(
+        _url: &str,
+        _config: &RetrievalConfig,
+        _dense_only: bool,
+    ) -> Result<Arc<dyn CodeEmbedder>> {
+        anyhow::bail!(
+            "an embedder url is configured, but this build has no HTTP embed \
+             transport. Rebuild with --features remote-embed, or unset \
+             [embeddings].url (CODESCOUT_EMBEDDER_URL) so the model name selects \
+             an in-process backend."
+        )
     }
 
     /// Select and build the query-side embedder from `config`: a configured
@@ -278,7 +311,7 @@ impl RetrievalClient {
         Self::guard_sparse(config, lite)?;
         let dense_only = Self::dense_only(config, lite);
         if let Some(url) = config.embedder_url.as_deref() {
-            Ok(Arc::new(Self::build_http_embedder(url, config, dense_only)))
+            Self::build_embedder_for_url(url, config, dense_only)
         } else {
             let inner = codescout_embed::create_embedder_with_config(
                 &config.model,
@@ -320,10 +353,12 @@ impl RetrievalClient {
             VectorBackend::Qdrant => Self::qdrant_code_store(&config).await?,
         };
         let embedder = Self::build_embedder(&config, lite).await?;
+        #[cfg(feature = "remote-embed")]
         let reranker = RerankerHttp::new(&config.reranker_url);
         Ok(Self {
             code_store,
             embedder,
+            #[cfg(feature = "remote-embed")]
             reranker,
             config,
             lite,
@@ -843,6 +878,7 @@ mod selection_tests {
         );
     }
 
+    #[cfg(feature = "remote-embed")]
     #[test]
     fn guarded_api_key_sends_the_key_over_https() {
         assert_eq!(
@@ -851,6 +887,7 @@ mod selection_tests {
         );
     }
 
+    #[cfg(feature = "remote-embed")]
     #[test]
     fn guarded_api_key_sends_the_key_over_loopback_http() {
         assert_eq!(
@@ -859,6 +896,7 @@ mod selection_tests {
         );
     }
 
+    #[cfg(feature = "remote-embed")]
     #[test]
     fn guarded_api_key_drops_the_key_over_plaintext_non_loopback_http() {
         assert_eq!(
@@ -867,6 +905,7 @@ mod selection_tests {
         );
     }
 
+    #[cfg(feature = "remote-embed")]
     #[test]
     fn guarded_api_key_is_none_when_no_key_is_configured() {
         assert_eq!(
@@ -875,6 +914,7 @@ mod selection_tests {
         );
     }
 
+    #[cfg(feature = "remote-embed")]
     #[test]
     fn build_http_embedder_never_sends_a_configured_key_over_plaintext_http() {
         // Binds `guarded_api_key` to the call site inside `build_http_embedder`

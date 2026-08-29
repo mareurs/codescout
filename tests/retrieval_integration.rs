@@ -1,3 +1,8 @@
+// Every test in this file drives the HTTP embedder or the HTTP reranker against
+// a mockito server, so the whole file is remote-embed-only. A build without HTTP
+// transport has neither type to construct.
+#![cfg(feature = "remote-embed")]
+
 use codescout::retrieval::embedder::EmbedderHttp;
 
 #[tokio::test]

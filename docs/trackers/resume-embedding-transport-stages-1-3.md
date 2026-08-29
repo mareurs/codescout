@@ -12,7 +12,7 @@ tags:
 - codescout-embed
 - dependencies
 topic: embedding transport boundary
-entry_high_water_ET: 6
+entry_high_water_ET: 7
 entry_prefix: ET
 ---
 
@@ -214,6 +214,106 @@ tracker discipline exists to catch.
 
 **Next:** re-run `cargo tree --no-default-features` counts before and after ET-2
 and record both here.
+
+## ET-7 — Stage 1's design table was wrong in six places; the corrected gate is `remote-embed` throughout
+
+**Observed:** 2026-08-28, executing ET-2 against the approved plan
+`docs/plans/2026-07-25-embedding-transport-consolidation.md` § Stage 1.
+
+**Outcome: shipped.** `bare 274 → 226 (−48)`, `remote-embed +1 → +49`. Gate green
+(`fmt`, `clippy --workspace --all-targets --features local-embed -D warnings`,
+`check --no-default-features`), plus four lean matrix configs.
+
+**The plan's Stage 1 could not be executed as written.** Six defects, found in this
+order. The first was already corrected in the plan's own preamble; the other five
+were not, and #2 would have broken the build in two configurations.
+
+1. **1.2's `server-stack` gate on `EmbedderHttp`** — already corrected to
+   `remote-embed` in the plan preamble. Correct.
+
+2. **The same error one table row down, uncorrected: `RerankerHttp` → `server-stack`.**
+   Justified as "invariant: never invoked in a lean build". That is a *runtime*
+   invariant — `should_rerank` gates on `lite`, which is what ET-1 pinned — and a
+   runtime guard does not delete a code path. `search.rs:154` hard-references
+   `self.reranker` from ungated `search_in`, so it must typecheck in **every**
+   configuration. Gating `pub mod reranker` on `server-stack` breaks the lean build
+   *and* the default build, and would silently drop reranking from the default build
+   — a behaviour regression, not a manifest cleanup. This is CLAUDE.md's
+   *"'already fails loudly' is a claim about a code path, not about a feature"*.
+
+3. **Task 6's "add `dep:reqwest`/`dep:rustls` to BOTH features" is wrong.**
+   `server-stack = ["dep:qdrant-client"]` is tonic/gRPC and does not use `reqwest`
+   at all. Correct shape: both deps under `remote-embed` only, and
+   `server-stack = ["dep:qdrant-client", "remote-embed"]` — because
+   `from_config_only` is `server-stack`-gated yet constructs **both** `EmbedderHttp`
+   and `RerankerHttp`. Without the implication, `--no-default-features --features
+   server-stack` compiles those call sites against configured-out types. That
+   configuration is not in the plan's verification list; it is now verified.
+
+4. **1.1's "entire surface" list omits five items.** The plan's own note caught three
+   (`CodeEmbedder`, `CodeDenseAdapter`, `CodeEmbedderAdapter`). Two more: `DEFAULT_INFLIGHT`
+   and `embed_chunks_ordered` are HTTP-only in practice — sole callers are
+   `EmbedderHttp::{resolve_inflight, embed_batch}` — so both become `dead_code` and
+   fail `-D warnings`.
+
+5. **Imports are unmentioned and all three are fully unused in a lean build** —
+   `anyhow::{anyhow, Context, Result}`, `futures::stream::{StreamExt, TryStreamExt}`,
+   `serde::{Deserialize, Serialize}`. The ungated traits use fully-qualified
+   `anyhow::Result` in their signatures, so nothing else needs them.
+
+6. **`is_https_or_loopback` does NOT stay ungated.** The plan says it does, "used by
+   ungated `guarded_api_key`". `guarded_api_key`'s only caller is `build_http_embedder`,
+   so once that is gated the whole API-key-over-cleartext guard chain is dead code.
+   Both are now `remote-embed`.
+
+**Mechanism deviation, deliberate.** Task 1 prescribed a physical
+`embedder/mod.rs` + `embedder/http.rs` split. The HTTP items are **interleaved**, not
+contiguous — `impl CodeEmbedder for EmbedderHttp` (75-92) sits between `CodeEmbedder`
+(41-72) and `CodeDenseAdapter` (96) — so a split meant hand-moving ~1,300 lines,
+transcription risk no gate catches. Gated in place with 15 `#[cfg]` attributes
+instead: same compile-time outcome, and `cargo check --no-default-features` proves
+completeness (rustc names each configured-out item). The plan's *goal* is manifest
+honesty, not file layout; the split was a means.
+
+**Two paired-definition helpers were extracted**, mirroring `qdrant_code_store`'s
+existing lean arm, because `#[cfg]` on a tail expression is unstable:
+`RetrievalClient::build_embedder_for_url` (client.rs) and
+`RetrievalClient::rerank_or_passthrough` (search.rs). The latter's lean arm is a
+reachable degradation, not `unreachable!()` — a lean non-lite stack with
+`rerank = true` still arrives there and gets vector-query order, exactly what the
+remote-embed version's `Err` arm returns when the reranker is unreachable.
+
+**Known cost, accepted deliberately.** Eleven test items are now `remote-embed`-gated
+because their fixtures build an inert `EmbedderHttp` placeholder
+(`sync.rs::test_retrieval_client` + 5 callers + `SlowEnsureStore`;
+`search.rs::client_with_store` + 2 callers + `effective_model_dim_falls_back_when_nothing_is_known`),
+plus `tests/retrieval_integration.rs` file-level. `FixedDimEmbedder` exists in both
+modules and would preserve the coverage — **not** taken: `effective_model_dim_falls_back_when_nothing_is_known`
+turns on what an embedder reports when its dim is unknown, and a placeholder chosen
+for a different assertion can be unreachable-by-construction for this one. Gating
+cannot make a test lie; swapping can. Retrofitting a lean-safe inert embedder is
+follow-up work, not Stage 1.
+
+**Also found, out of scope:** `rendezvous_poll_for_test` (`server.rs:988`) is dead
+under `--no-default-features --all-targets` because `guide_hint_tests` is
+`librarian`-gated. **Pre-existing** — CLAUDE.md's lean gate omits `--all-targets`, so
+it was never surfaced. Not touched.
+
+**Severity:** high — defect #2 alone would have failed `cargo build` in the default
+configuration, and the "fix" for that failure most people would reach for (gate
+`search_in`'s rerank block on `server-stack` too) silently removes reranking from
+every default deployment.
+
+**Status:** fixed-verified
+
+**Valid:** dated 2026-08-28
+
+True of the gate topology at this commit. Re-derive if `search_in` stops referencing
+`self.reranker`, or if `from_config_only` loses its `server-stack` gate.
+
+**Rests on:** `should_rerank` gating on `lite` rather than on a feature (ET-1 pins
+this), and `from_config_only` being `server-stack`-gated while constructing both HTTP
+types.
 
 ## Template for new entries
 

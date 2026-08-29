@@ -90,6 +90,60 @@ pub struct Hit {
 }
 
 impl RetrievalClient {
+    /// The rerank tail of [`Self::search_in`], split out so a build with no HTTP
+    /// transport has no `RerankerHttp` call to compile.
+    ///
+    /// The lean arm is a reachable degradation, not an `unreachable!()`:
+    /// `should_rerank` gates on `lite`, not on the feature, so a
+    /// `--no-default-features` build running a non-lite stack with
+    /// `[retrieval].rerank = true` still arrives here. It returns the
+    /// vector-query order, which is exactly what the `Err` arm of the
+    /// remote-embed version does when the reranker is unreachable at runtime.
+    #[cfg(feature = "remote-embed")]
+    async fn rerank_or_passthrough(
+        &self,
+        query: &str,
+        candidates: Vec<Hit>,
+        limit: usize,
+        mut timer: crate::perf::PhaseTimer,
+    ) -> Result<Vec<Hit>> {
+        let texts: Vec<String> = candidates.iter().map(|h| h.content.clone()).collect();
+        match self.reranker.rerank(query, &texts).await {
+            Ok(scores) => {
+                timer.lap("rerank");
+                timer.finish();
+                let mut zipped: Vec<(Hit, f32)> = candidates.into_iter().zip(scores).collect();
+                zipped.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                Ok(zipped
+                    .into_iter()
+                    .take(limit)
+                    .map(|(mut h, s)| {
+                        h.rerank_score = Some(s);
+                        h
+                    })
+                    .collect())
+            }
+            Err(e) => {
+                timer.lap("rerank_degraded");
+                timer.finish();
+                tracing::warn!("reranker degraded: {e}");
+                Ok(candidates.into_iter().take(limit).collect())
+            }
+        }
+    }
+
+    #[cfg(not(feature = "remote-embed"))]
+    async fn rerank_or_passthrough(
+        &self,
+        _query: &str,
+        candidates: Vec<Hit>,
+        limit: usize,
+        timer: crate::perf::PhaseTimer,
+    ) -> Result<Vec<Hit>> {
+        timer.finish();
+        Ok(candidates.into_iter().take(limit).collect())
+    }
+
     /// Core helper: embed → query (hybrid or dense-only) → optional rerank.
     ///
     /// `overlay_project_id`, when present, unions a second project into the
@@ -150,29 +204,8 @@ impl RetrievalClient {
             return Ok(candidates.into_iter().take(opts.limit).collect());
         }
 
-        let texts: Vec<String> = candidates.iter().map(|h| h.content.clone()).collect();
-        match self.reranker.rerank(query, &texts).await {
-            Ok(scores) => {
-                timer.lap("rerank");
-                timer.finish();
-                let mut zipped: Vec<(Hit, f32)> = candidates.into_iter().zip(scores).collect();
-                zipped.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                Ok(zipped
-                    .into_iter()
-                    .take(opts.limit)
-                    .map(|(mut h, s)| {
-                        h.rerank_score = Some(s);
-                        h
-                    })
-                    .collect())
-            }
-            Err(e) => {
-                timer.lap("rerank_degraded");
-                timer.finish();
-                tracing::warn!("reranker degraded: {e}");
-                Ok(candidates.into_iter().take(opts.limit).collect())
-            }
-        }
+        self.rerank_or_passthrough(query, candidates, opts.limit, timer)
+            .await
     }
 
     pub async fn search_code(
@@ -375,10 +408,11 @@ mod dim_guard_tests {
     use crate::retrieval::code_store::CodeVectorStore;
     use crate::retrieval::config::RetrievalConfig;
     use crate::retrieval::drift::ChunkRef;
-    use crate::retrieval::embedder::{
-        BatchEmbedder, CodeEmbedder, EmbedOutput, EmbedderHttp, SparseVector,
-    };
+    #[cfg(feature = "remote-embed")]
+    use crate::retrieval::embedder::EmbedderHttp;
+    use crate::retrieval::embedder::{BatchEmbedder, CodeEmbedder, EmbedOutput, SparseVector};
     use crate::retrieval::payload::CodePayload;
+    #[cfg(feature = "remote-embed")]
     use crate::retrieval::reranker::RerankerHttp;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -492,6 +526,7 @@ mod dim_guard_tests {
         RetrievalClient {
             code_store: store,
             embedder,
+            #[cfg(feature = "remote-embed")]
             reranker: RerankerHttp::new("http://unused.invalid"),
             config: RetrievalConfig {
                 qdrant_url: "http://unused.invalid".into(),
@@ -514,6 +549,7 @@ mod dim_guard_tests {
         }
     }
 
+    #[cfg(feature = "remote-embed")]
     fn client_with_store(store: Arc<dyn CodeVectorStore>, model_dim: usize) -> RetrievalClient {
         client_with_store_and_embedder(
             store,
@@ -557,6 +593,7 @@ mod dim_guard_tests {
     /// and then query the store. Asserting BOTH the specific error AND that
     /// the store was never queried distinguishes "the guard fired first" from
     /// "something else failed downstream".
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn search_in_fails_fast_on_a_dim_mismatch_without_querying_the_store() {
         let store = Arc::new(DimReportingStore {
@@ -587,6 +624,7 @@ mod dim_guard_tests {
     /// way — the mutation and the original agree by accident). Both
     /// directions must error so a comparison-operator mutation in either
     /// direction is caught.
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn guard_index_dim_errors_in_both_mismatch_directions() {
         let bigger_index = Arc::new(DimReportingStore {
@@ -656,6 +694,7 @@ mod dim_guard_tests {
     /// answer — a remote/HTTP backend (`known_dim()` is always `None`) with no
     /// `CODESCOUT_MODEL_DIM` set — so the caller's `fallback` must be the
     /// value that comes out.
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn effective_model_dim_falls_back_when_nothing_is_known() {
         let store = Arc::new(DimReportingStore::default());

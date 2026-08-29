@@ -8,11 +8,17 @@
 /// users). Required because reqwest uses `rustls-no-provider` feature: callers
 /// must install a provider before the first TLS handshake.
 pub fn install_default_crypto_provider() {
-    use std::sync::Once;
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
+    // Gated, not deleted: all four call sites stay unconditional and this
+    // degrades to a no-op. `server-stack` implies `remote-embed`, so the single
+    // feature covers both TLS consumers (the HTTP embedder and the reranker).
+    #[cfg(feature = "remote-embed")]
+    {
+        use std::sync::Once;
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
+    }
 }
 
 pub mod agent;
