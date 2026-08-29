@@ -204,6 +204,25 @@ discovery to reach a tally of three. codescout-97 caught the method error; the
 over-count was mine and is corrected here rather than quietly dropped, because a
 tracker that inflates its own evidence is the thing this file exists to catch.
 
+**A sibling class, deliberately NOT merged into this one.** A *new* test that
+goes compile-error → green has never been observed failing for a behavioural
+reason, so it too is unverified — but it is a different mechanism with a
+different trigger and a different population, and it is tracked separately in
+codescout-97's `W-73`. Its datapoints are their `guard_stale_binary` wiring test
+and this session's CM-7 test in `read_file.rs`; both were mutation-checked after
+the fact.
+
+The two classes were briefly summed into one three-datapoint claim, which is how
+the over-count above happened. They are two claims at two datapoints each:
+
+| Class | Population | Trigger | Detection |
+|---|---|---|---|
+| compile-error → green (`W-73`) | NEW tests | the test never ran red | mutate the new test |
+| unreachable fixture (this entry, #6) | PRE-EXISTING tests | data cannot reach the branch | read the fixture (structural) or mutate the family (distributional) |
+
+Keep them apart. A test can be in either, both, or neither, and the remedies
+differ — merging them yields a bigger number and a vaguer instruction.
+
 **Limit, unchanged:** nothing either session has measured shows how often the
 family run finds a blind sibling when the diff-scoped run is already green.
 That needs a deliberate sweep neither of us has run.
