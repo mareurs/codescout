@@ -64,6 +64,7 @@ impl RerankerHttp {
         let protocol = Protocol::from_env();
         let model_id = std::env::var("CODESCOUT_RERANKER_MODEL").ok();
         Self::with_protocol(base, protocol, model_id)
+            .with_read_timeout(crate::retrieval::transport::read_timeout_from_env())
     }
 
     /// Construct without reading process env vars.
@@ -79,10 +80,24 @@ impl RerankerHttp {
         crate::install_default_crypto_provider();
         Self {
             base: base.into(),
-            client: reqwest::Client::new(),
+            client: crate::retrieval::transport::client(std::time::Duration::from_secs(
+                crate::retrieval::transport::DEFAULT_READ_TIMEOUT_SECS,
+            )),
             protocol,
             model_id,
         }
+    }
+    /// Rebuild the HTTP client with a different read timeout. Builder-style, and
+    /// the exact counterpart of `EmbedderHttp::with_read_timeout` — the reranker
+    /// leg had the same unbounded-wait defect, since `reqwest::Client::new()`
+    /// sets no timeout of any kind.
+    ///
+    /// `new()` supplies the operator's `CODESCOUT_HTTP_READ_TIMEOUT_SECS` or the
+    /// default; `with_protocol` stays free of ambient config so tests are not a
+    /// function of the developer's shell.
+    pub fn with_read_timeout(mut self, read_timeout: std::time::Duration) -> Self {
+        self.client = crate::retrieval::transport::client(read_timeout);
+        self
     }
 
     pub async fn rerank(&self, query: &str, texts: &[String]) -> Result<Vec<f32>> {

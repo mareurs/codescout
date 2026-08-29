@@ -17,3 +17,5 @@ pub mod reranker;
 pub mod search;
 pub mod sqlite_code_store;
 pub mod sync;
+#[cfg(feature = "remote-embed")]
+pub(crate) mod transport;

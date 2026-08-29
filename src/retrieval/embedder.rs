@@ -340,6 +340,7 @@ impl EmbedderHttp {
         .api_key(api_key)
         .with_batch_override(batch_override)
         .with_inflight_override(inflight_override)
+        .with_read_timeout(crate::retrieval::transport::read_timeout_from_env())
     }
 
     /// Construct without reading process env vars.
@@ -365,7 +366,9 @@ impl EmbedderHttp {
             query_prefix: query_prefix.into(),
             dense_only: false,
             api_key: None,
-            client: reqwest::Client::new(),
+            client: crate::retrieval::transport::client(std::time::Duration::from_secs(
+                crate::retrieval::transport::DEFAULT_READ_TIMEOUT_SECS,
+            )),
             sparse_batch_cap: tokio::sync::OnceCell::new(),
             batch_override: None,
             inflight_override: None,
@@ -406,6 +409,19 @@ impl EmbedderHttp {
     /// override without ever mutating real process env.
     pub fn with_inflight_override(mut self, inflight_override: Option<String>) -> Self {
         self.inflight_override = inflight_override;
+        self
+    }
+    /// Rebuild the HTTP client with a different read timeout. Builder-style;
+    /// `new()` supplies the operator's `CODESCOUT_HTTP_READ_TIMEOUT_SECS` or the
+    /// default. Tests use this to make the wedged-peer case observable in
+    /// milliseconds rather than two minutes — mirroring `with_inflight_override`,
+    /// and for the same reason: nothing here may mutate real process env.
+    ///
+    /// Rebuilds rather than mutates, which is what keeps `with_config` free of
+    /// ambient config. A `reqwest::Client` is a handle around a refcounted inner,
+    /// so the discarded one costs a connection pool that was never opened.
+    pub fn with_read_timeout(mut self, read_timeout: std::time::Duration) -> Self {
+        self.client = crate::retrieval::transport::client(read_timeout);
         self
     }
 
@@ -922,6 +938,70 @@ mod tests {
         assert!(
             msg.to_lowercase().contains("connect"),
             "must flag a connect failure so the classifier can route it; got: {msg}"
+        );
+    }
+    /// A peer that completes the TCP handshake and then never writes a byte is
+    /// the shape of a wedged llama-server, and it is the case
+    /// `reqwest::Client::new()` waits on forever: `timeout`, `read_timeout` and
+    /// `connect_timeout` all default to `None`. Measured 2026-08-29 — exactly
+    /// this turned `cargo test` into an unbounded hang with no failure and no
+    /// output. See
+    /// `docs/issues/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`.
+    ///
+    /// Deliberately **not** a closed port. That fails on connect, which already
+    /// worked and already produced a clear error; the sibling test above covers
+    /// it. The entire defect lives in the gap between "connected" and
+    /// "answered", so the fixture has to occupy that gap.
+    ///
+    /// The outer `tokio::time::timeout` is what gives this test the ability to
+    /// fail at all: delete `.read_timeout()` from `transport::client` and the
+    /// inner call never returns, so the outer bound fires and `expect` panics.
+    /// A red test instead of a wedged binary — the same guard, and the same
+    /// reason, as `sparse_retry_cap_stops_at_exactly_8_attempts`.
+    #[tokio::test]
+    async fn a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accept every connection and hold it open, silent, for the life of the
+        // test. Holding the streams (rather than dropping them) is the point: a
+        // dropped stream closes the socket, which the client sees as a clean EOF
+        // and reports promptly — that would pass even with no timeout set, and
+        // the test would prove nothing.
+        let _wedged = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                held.push(stream);
+            }
+        });
+
+        let url = format!("http://{addr}");
+        // `with_config`, not `new()`: the latter reads process env, and a
+        // developer's ambient CODESCOUT_* settings must never reach a test.
+        // Both legs point at the wedge so the assertion holds whichever runs.
+        let e = EmbedderHttp::with_config(url.as_str(), url.as_str(), 3, "", "")
+            .dense_only(true)
+            .with_read_timeout(std::time::Duration::from_millis(250));
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            e.embed_one_batch(vec!["x".to_string()]),
+        )
+        .await
+        .expect(
+            "a silent peer must produce an error within the read timeout, not hang. \
+             If this fires, transport::client has lost its read_timeout and every \
+             embed call can once again wait forever on a wedged server",
+        );
+
+        let err = result.expect_err("a peer that never answers cannot produce an embedding");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("embed connect failed"),
+            "a read timeout must route to the embedder hint rather than the \
+             misleading 'check qdrant logs' fallback. This is the `e.is_timeout()` \
+             arm of the send() error map, which was unreachable for as long as no \
+             timeout was configured anywhere — so this assertion is also what pins \
+             that branch as live. got: {msg}"
         );
     }
 
