@@ -25,6 +25,20 @@ the **root** copy — the one that decides whether `[embeddings].api_key` is sen
 over cleartext HTTP — has none. A mutation to the root copy alone passes the
 entire test suite.
 
+
+**This is one of two instances of the same pattern, not an isolated gap.** Found
+2026-08-29 in the same file pair: `EmbedderHttp` also lacked the HTTP request
+timeout that `RemoteEmbedder::http_client` has carried all along — and the
+crate's doc comment for it names the exact trigger that then occurred on this
+host (*"a hung embedding server (e.g. Ollama during GPU discovery failure)"*).
+See `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`
+and `resume-embedding-transport-stages-1-3:ET-4`.
+
+In both cases the drift runs the same direction: the crate original has the
+guard, root's duplicate does not. That is the outcome
+`src/retrieval/config.rs:292`'s doc comment predicted when it consolidated the
+one sibling that *was* de-duplicated — *"so the two conventions cannot drift
+apart."*
 ## Symptom (Effect)
 
 No failure is observed. That is the point: the guard is load-bearing for a

@@ -182,11 +182,72 @@ mechanical after that. Hold batch size at 8 so the change is behaviour-preservin
 
 ## ET-4 — Stage 3: delete the duplicates and the root manifest entries
 
-**Status:** open — trailing cleanup, blocked on ET-3
-**Valid:** dated 2026-08-28
+**Status:** open — blocked on ET-3. **Re-framed 2026-08-29: this is a
+correctness item, not trailing cleanup.**
+**Valid:** dated 2026-08-29
 
-Remove root's now-unused dense transport code, `reqwest`, `rustls`, and
-`install_default_crypto_provider`.
+### The duplicates have measurably drifted, and only in one direction
+
+Two instances found on 2026-08-29, both in the same file pair
+(`src/retrieval/embedder.rs` vs `crates/codescout-embed/src/remote.rs`), both
+verified at the bytes:
+
+| duplicated item | crate (`remote.rs`) | root (`embedder.rs`) |
+|---|---|---|
+| `is_https_or_loopback` | 11 host-spoofing assertions (`:549-563`) | **zero tests** |
+| HTTP client timeout | `.timeout(300s)` + rationale (`:95-101`) | **none**, until `9f4debc3` |
+
+Neither is a stylistic difference. The first means a mutation to root's
+cleartext-API-key guard passes the entire suite
+(`docs/issues/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`).
+The second let a wedged embedder hang `cargo test` indefinitely
+(`docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`).
+
+**The crate's doc comment names the exact trigger that occurred:**
+
+> *"Build a reqwest client with a per-request timeout so that a hung embedding
+> server (e.g. Ollama during GPU discovery failure) doesn't block
+> `index_project` forever."*
+
+The host's GPU driver failed a suspend/resume on 2026-08-28 19:10; the dense
+llama-server accepted TCP and never answered for 15 hours. The crate had
+anticipated that class in a comment. Root's copy had not.
+
+### The project already proved the remedy, and stated why
+
+`normalize_embedder_url` (`src/retrieval/config.rs:292`) is the one piece of this
+surface that **was** consolidated, and its doc comment gives the reason:
+
+> *"shared with `RemoteEmbedder::from_url`'s identical three-branch logic rather
+> than duplicated here, so the two conventions cannot drift apart."*
+
+That is the hypothesis. The two rows above are its confirmation: the siblings
+that were left duplicated drifted, in the predicted direction — root's copy is
+the one missing the guard, both times. So Stage 3 is not tidying; it is closing a
+demonstrated defect channel, and its remaining surface should be audited pairwise
+rather than deleted wholesale.
+
+### Known asymmetry to resolve DURING the swap, not after
+
+The two timeouts are not the same instrument, and the crate's is the weaker one:
+
+- root (`transport::client`): `.read_timeout(120s)` — gap between bytes, resets
+  on every successful read
+- crate (`RemoteEmbedder::http_client`): `.timeout(300s)` — whole request
+
+A total-request bound can cut off a legitimately slow large batch;
+`embedder.rs`'s own `DEFAULT_INFLIGHT` measurements record 32-input GPU batches
+at 23-33s end to end, and CPU-backed batches are ~4x slower again. Swapping
+root's dense leg to `RemoteEmbedder` as-is would therefore **regress** the
+guard root just gained. Port `read_timeout` into the crate as part of ET-3.
+
+Remove root's now-unused dense transport code, `reqwest`, `rustls`,
+`install_default_crypto_provider`, and — added 2026-08-29 — `is_https_or_loopback`
+and `src/retrieval/transport.rs`, both of which duplicate a crate original.
+
+**Audit each pair before deleting.** Root's copy is not always the stale one: the
+`read_timeout`-vs-`timeout` row below is a case where root is *ahead* of the
+crate, and a wholesale delete would silently drop the better guard.
 
 **Verification is the feature-delta measurement**, not a passing test suite:
 re-run the crate counts and confirm `--no-default-features` actually dropped. The
