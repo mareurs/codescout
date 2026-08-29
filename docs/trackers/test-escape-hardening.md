@@ -158,11 +158,27 @@ could not reach the `tags`/`owners` `in`/`nin` branch that was broken. Two-engin
 agreement advertises maximum rigour while the fixture omits the disputed type
 entirely — which is why a test's *form* is no evidence about its *reach*.
 
-**Procedure.** When a mutation kills your new test, re-run that same mutation
-against every test naming the same property: take the shared phrase out of the
-test name and run `cargo test --lib <phrase>` rather than the single test. Any
-sibling still green is a fixture that cannot reach the path — fix it, or record
-why it cannot. Cost is one extra filtered run per mutation, seconds.
+**Procedure — read first, mutate second.** The two instances below were found by
+different methods, and the difference is not incidental: it is whether the
+missing property is **structural** or **distributional**.
+
+- **Structural — read the fixture.** The fixture's *shape* cannot express the
+  property: an absent column, an absent field, a type that is never constructed.
+  Visible in one read of the fixture's declaration, before any test is run. This
+  is the cheap path and it should be tried first — ask "can this data reach the
+  branch?" and look.
+- **Distributional — run the mutation.** The fixture's shape *permits* the case
+  and its values never produce it: 1200 lines that could each have been long and
+  none are. Reading does not settle it, because nothing in the fixture announces
+  the absence. Here you need the family run: disable the fix, take the shared
+  phrase out of the test names, and run `cargo test --lib <phrase>` rather than
+  the single test. Any sibling still green is a fixture that cannot reach the
+  path — fix it, or record why it cannot. Cost is one extra filtered run,
+  seconds.
+
+The distinction was supplied by codescout-97 on the correction below; the
+first draft of this section flattened both into "run a mutation", which made the
+intervention more expensive than it needs to be.
 
 **Complement, not a substitute: assert the fixture's premise inside the test.**
 Both repairs here now assert the discriminating property of their own data
@@ -172,12 +188,25 @@ fails on the premise instead of silently becoming another blind copy.
 `util::shrink_guard::tests::a_uniform_fixture_cannot_tell_the_arms_apart` goes
 further and pins the trap itself as an executable warning.
 
-**Scope of the claim:** three instances in one afternoon across three subsystems
-(`read_file`, `shrink_guard`, `librarian::filter`), two of them mine and one
-codescout-97's. All three were found by *running* a mutation; none by reading.
-That is the argument for the procedure and also its limit — nothing here shows
-how often the family run finds a blind sibling when the diff-scoped run is
-already green.
+**Scope of the claim, corrected 2026-08-29.** The first draft said "three
+instances — all found by running a mutation, none by reading". Both halves were
+wrong, and the corrected accounting is smaller and more useful:
+
+| Case | What it was | How found |
+|---|---|---|
+| `read_file` (mine) | blind incumbent, **distributional** (1200 short lines) | whole-family mutation, 2 passed / 1 failed |
+| `librarian::filter` (codescout-97's, BL-47) | blind incumbent, **structural** (no array column) | reading the fixture's `CREATE TABLE` |
+| `shrink_guard` (mine) | **not an instance** — a trap anticipated while writing a NEW test | reasoning about the fixture at write time |
+
+So: **two** discovered blind incumbents, not three, found by two different
+methods — and the third case was a trap avoided, which I had counted as a
+discovery to reach a tally of three. codescout-97 caught the method error; the
+over-count was mine and is corrected here rather than quietly dropped, because a
+tracker that inflates its own evidence is the thing this file exists to catch.
+
+**Limit, unchanged:** nothing either session has measured shows how often the
+family run finds a blind sibling when the diff-scoped run is already green.
+That needs a deliberate sweep neither of us has run.
 
 **Valid:** dated 2026-08-29
 ## History
