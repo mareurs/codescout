@@ -1004,6 +1004,43 @@ mod tests {
              that branch as live. got: {msg}"
         );
     }
+    /// Root's `is_https_or_loopback` decides whether `EMBED_API_KEY` and
+    /// `[embeddings].api_key` may cross a plaintext connection. Until 2026-08-29 it
+    /// had **no test at all**: every assertion on this behaviour lived on the
+    /// byte-equivalent twin in `codescout-embed`
+    /// (`remote.rs::tests::is_https_or_loopback_matches_host_exactly`), so a
+    /// mutation to root's copy alone passed the entire suite. See
+    /// `docs/issues/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`.
+    ///
+    /// **This test is the safety net for deleting that copy, not a substitute for
+    /// deleting it.** `ET-4` removes root's duplicate in favour of the crate's; an
+    /// untested function cannot be shown equivalent to its replacement, so these
+    /// assertions have to exist *first*. When the deletion lands, **re-point this
+    /// test at the crate's function — do not delete it.** It is the only thing that
+    /// will show the replacement preserved the guard.
+    ///
+    /// The cases are ported verbatim from the crate's version so the two remain
+    /// comparable while both exist. The four negatives are the whole point: each is
+    /// a host an unanchored `starts_with("127.")` / `starts_with("localhost")`
+    /// check would wrongly accept, leaking the key in cleartext to a host the
+    /// attacker controls.
+    #[cfg(feature = "remote-embed")]
+    #[test]
+    fn is_https_or_loopback_matches_host_exactly() {
+        // Genuine https / loopback — allowed (no key leak).
+        assert!(is_https_or_loopback("https://embed.corp.example/v1"));
+        assert!(is_https_or_loopback("http://localhost:48081/v1"));
+        assert!(is_https_or_loopback("http://127.0.0.1:48081"));
+        assert!(is_https_or_loopback("http://127.0.0.5/v1")); // 127.0.0.0/8
+        assert!(is_https_or_loopback("http://[::1]:48081/v1"));
+        assert!(is_https_or_loopback("http://user:pass@localhost:8080"));
+        // Spoofed hosts an unanchored prefix check would wrongly accept — these
+        // must NOT count as loopback, or the API key leaks over cleartext HTTP.
+        assert!(!is_https_or_loopback("http://127.evil.com/v1"));
+        assert!(!is_https_or_loopback("http://localhost.evil.com/v1"));
+        assert!(!is_https_or_loopback("http://127.0.0.1.evil.com/v1"));
+        assert!(!is_https_or_loopback("http://example.com/127.0.0.1"));
+    }
 
     /// The trait object must expose both query shapes. If `EmbedderHttp` ever stops
     /// satisfying `CodeEmbedder`, this fails to compile — which is the point.

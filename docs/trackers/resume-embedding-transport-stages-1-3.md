@@ -12,7 +12,7 @@ tags:
 - codescout-embed
 - dependencies
 topic: embedding transport boundary
-entry_high_water_ET: 7
+entry_high_water_ET: 8
 entry_prefix: ET
 ---
 
@@ -416,6 +416,102 @@ True of the gate topology at this commit. Re-derive if `search_in` stops referen
 **Rests on:** `should_rerank` gating on `lite` rather than on a feature (ET-1 pins
 this), and `from_config_only` being `server-stack`-gated while constructing both HTTP
 types.
+
+## ET-8 — Ordered execution plan for ET-3/4/5 and the findings around them
+
+**Observed:** 2026-08-29, after ET-2 shipped. Reviewed with the architecture
+(snow-lion) and refactoring (yak) lenses.
+
+**Status:** open — Phase A in progress
+
+**Valid:** dated 2026-08-29
+
+**Rests on:** the dependency direction measured below, and the crate visibility
+table. Both re-check in one command each; do so before resuming.
+
+### The architectural finding: there is no boundary to move
+
+Measured 2026-08-29 — `codescout_embed::` is referenced **44 times across 10
+root files**; `crates/codescout-embed/src/lib.rs` imports nothing from root. The
+dependency is already one-way and already points inward.
+
+So this is **not** an architecture task and no new wall is warranted — proposing
+one would be a boundary with no change scenario behind it. It is a **DRY
+violation with measured drift**: root re-implements what it already depends on,
+and the copies diverged, twice, always with root missing the guard
+(`ET-4`). The remedy is deletion toward an existing concrete, not a new
+abstraction.
+
+### What gates what — the crate's surface
+
+| crate fn | visibility | consequence |
+|---|---|---|
+| `normalize_embeddings_base` (`lib.rs:39`) | **`pub`** | already shared; the precedent that worked |
+| `is_https_or_loopback` (`remote.rs:48`) | private | blocks deleting root's copy |
+| `http_client` (`remote.rs:95`) | private | blocks sharing the timeout policy |
+| `query_prefix_for` (`remote.rs:105`) | private | this is ET-3's actual blocker |
+
+Three private fns must become `pub` before any root duplicate can go. That is
+the real precondition, and it is cheap — but it is a crate API change, so it
+belongs in its own phase ahead of the consumer swap.
+
+### Order
+
+Each phase ends green and is independently revertable. Baseline to hold:
+**4637 passed, 0 failed** (`cargo test`, ambient CODESCOUT_* unset).
+
+**Phase A — safety net. No behaviour change.**
+
+- **A1.** Port the 11 host-spoofing assertions from
+  `remote.rs:549-563` to root's `is_https_or_loopback`.
+
+  This is **not** an alternative to deleting root's copy, which is how
+  `docs/issues/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`
+  originally framed it. It is the **characterization test that makes the
+  deletion in D1 verifiable** — delete an untested function and nothing proves
+  the replacement equivalent. Verify the tests bind by mutating root's host
+  parse to the unanchored form and confirming red before committing green.
+
+**Phase B — crate API. Contract changes, ahead of any consumer.**
+
+- **B1.** Port `read_timeout` into `RemoteEmbedder::http_client`. The crate
+  currently uses `.timeout(300s)` (whole request); root uses `.read_timeout(120s)`
+  (gap between bytes). Swapping the consumer first would regress the guard root
+  gained in `9f4debc3`. Do this before C1, not after.
+- **B2.** Three-state query prefix on `RemoteEmbedder` — *derive* / *explicit* /
+  *explicitly suppressed*. `Option<String>` cannot express the third, and on the
+  default Q4 model suppressed is the correct state. This is ET-3's blocker; see
+  ET-3 for the three-row regression table.
+- **B3.** Typed connect error (`EmbedError::Connect { url }`) replacing the
+  `"embed connect failed"` substring contract. See ET-5 — it must land with this
+  phase, not after, or the contract crosses a crate boundary as a bare string
+  with nothing making both sides' tests fail together.
+- **B4.** Export `is_https_or_loopback` (and whatever else D-phase needs) as
+  `pub`.
+
+**Phase C — consumer migration.** ET-3 proper: swap root's dense leg to
+`RemoteEmbedder`. Hold batch size at 8 so the change is behaviour-preserving.
+
+**Phase D — delete duplicates.** ET-4. Audit each pair first; root is not
+reliably the stale side (B1 is the counterexample). D1 root's
+`is_https_or_loopback` (A1's tests prove equivalence), D2 root's
+`transport.rs` + wire structs, D3 drop `reqwest`/`rustls` from the root manifest
+and re-measure the crate delta.
+
+**Phase E — independent, no dependency on A-D.** Can be picked up by any session
+at any time: test isolation for `tools::memory::tests` (the unfixed half of
+`docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`);
+retrofit a lean-safe inert embedder to restore the 11 test items ET-2 gated;
+`rendezvous_poll_for_test` dead under `--no-default-features --all-targets`
+(pre-existing, `server.rs:988`); `init: true` on the llama.cpp compose services
+and healthchecks that exercise `/v1/embeddings` rather than `/health`.
+
+### Why this order and not the plan's
+
+The plan sequences by stage number. That ordering puts the consumer swap (C)
+before the crate is ready (B), and never mentions A at all — so the deletion in
+D would land against an untested function with no way to show equivalence. The
+order above is derived from what gates what, not from stage numbering.
 
 ## Template for new entries
 
