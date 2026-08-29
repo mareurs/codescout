@@ -14,28 +14,24 @@ pub mod sqlite_semantic_store;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-/// Existing entries smaller than this skip the shrink check. Below a few
-/// hundred bytes a percentage is noise — a 3-byte stub replaced by a 1-byte
-/// one is a "66% loss" nobody wants to hear about.
+/// The shared shrink predicate's floor and report type, re-exported so callers
+/// of this module keep their existing paths.
 ///
-/// Deliberately a separate constant from the artifact guard's identically
-/// valued `librarian::tools::update::SHRINK_GUARD_MIN_BYTES`. The two floors
-/// answer different questions — that one is sized for just-created frontmatter
-/// shells, this one for stub memories — and agreeing today is not a reason to
-/// make moving one move the other.
-pub const SHRINK_GUARD_MIN_BYTES: usize = 200;
-
-/// What a rejected overwrite would have cost, for the caller's error message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShrinkReport {
-    /// Size of the entry currently on disk.
-    pub old_bytes: usize,
-    /// Size of the proposed replacement.
-    pub new_bytes: usize,
-    /// Percent reduction, truncated toward zero — so it reads at worst one
-    /// point more alarming than the truth, never less.
-    pub pct: usize,
-}
+/// This module used to define its own copy of both, on the argument that the
+/// two floors answer different questions — that one sized for just-created
+/// frontmatter shells, this one for stub memories — and that agreeing today was
+/// no reason to couple them. That reasoning was about the *floor*, and as far
+/// as it went it was fine; it just did not govern the part that mattered. The
+/// **predicate** had been duplicated along with the floor, three times across
+/// the codebase, and on 2026-08-28 that cost 1047 lines of a tracker: a
+/// line-truncating write slipped under all three byte-only tests, and fixing
+/// any one copy would have left the other two. Divergence in a safety check is
+/// not a property it can afford.
+///
+/// The floors may genuinely want to differ some day. If that day comes, give
+/// [`crate::util::shrink_guard::check`] a floor parameter — do not fork the
+/// predicate again.
+pub use crate::util::shrink_guard::{ShrinkReport, SHRINK_GUARD_MIN_BYTES};
 
 /// Per-project memory store.
 #[derive(Debug, Clone)]
@@ -124,8 +120,8 @@ impl MemoryStore {
     }
 
     /// Would writing `content` over `topic` destroy more than half of what is
-    /// already there? Returns the numbers to show the caller, or `None` when
-    /// the write is safe.
+    /// already there, by bytes **or** by lines? Returns the numbers to show the
+    /// caller, or `None` when the write is safe.
     ///
     /// **Non-mutating, and deliberately not wired into [`Self::write`].**
     /// Wholesale replacement is `write`'s specified behaviour — see the
@@ -143,16 +139,7 @@ impl MemoryStore {
         // entry could not be read would turn an unrelated IO fault into a
         // blocked save, so an unreadable entry declines to object.
         let existing = self.read(topic).ok().flatten()?;
-
-        if existing.len() < SHRINK_GUARD_MIN_BYTES || content.len() * 2 >= existing.len() {
-            return None;
-        }
-
-        Some(ShrinkReport {
-            old_bytes: existing.len(),
-            new_bytes: content.len(),
-            pct: 100 - (content.len() * 100 / existing.len().max(1)),
-        })
+        crate::util::shrink_guard::check(&existing, content)
     }
 
     /// Read a memory entry by topic. Returns `None` if not found.
@@ -467,7 +454,16 @@ mod tests {
         // makes this read one point WORSE than the true 85.1%, which is the
         // safe direction for a warning and matches the artifact guard's
         // formula byte for byte.
-        assert_eq!(report.pct, 86, "the percentage is what the caller shows");
+        assert_eq!(
+            report.byte_pct, 86,
+            "the percentage is what the caller shows"
+        );
+        // Single-line content either side, so the line arm is structurally
+        // unable to fire — this case must be attributed to bytes alone.
+        assert_eq!(
+            report.dimension,
+            crate::util::shrink_guard::ShrinkDimension::Bytes
+        );
     }
 
     #[test]

@@ -343,6 +343,97 @@ async fn edit_action_rejects_both_new_string_and_content() {
     );
 }
 
+/// `edit_markdown` shares the shrink predicate with `artifact(update)` and
+/// `memory(write)` (`crate::util::shrink_guard`), and until 2026-08-29 all three
+/// tested only bytes. This surface had no shrink-guard coverage at all, so the
+/// line arm is pinned here rather than assumed to come along with the shared
+/// helper.
+///
+/// The fixture's lines must be of UNEQUAL length. With uniform lines the byte
+/// and line ratios are the same number, so the test would pass with the line arm
+/// deleted — see `util::shrink_guard::tests::a_uniform_fixture_cannot_tell_the_arms_apart`.
+#[tokio::test]
+async fn shrink_guard_blocks_a_line_truncation_that_keeps_the_bytes() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("wide.md");
+
+    // Fat lines at the front carry the bytes; thin ones behind carry the lines.
+    let fat: Vec<String> = (0..10).map(|_| "X".repeat(1000)).collect();
+    let thin: Vec<String> = (0..90).map(|_| "y".repeat(10)).collect();
+    let body = format!("{}\n{}", fat.join("\n"), thin.join("\n"));
+    let original = format!("# Title\n\n{body}\n");
+    std::fs::write(&file, &original).unwrap();
+
+    let truncated = fat.join("\n");
+    assert!(
+        truncated.len() * 2 >= original.len(),
+        "fixture must keep a majority of BYTES or the byte arm catches it and \
+         this proves nothing about lines"
+    );
+
+    let result = super::edit_markdown::EditMarkdown
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "heading": "# Title",
+                "action": "replace",
+                "content": truncated,
+            }),
+            &ctx,
+        )
+        .await;
+
+    let msg = format!("{result:?}");
+    assert!(
+        msg.contains("body-shrink guard"),
+        "a 90% line truncation must be refused; got: {msg}"
+    );
+    assert!(
+        msg.contains("lines"),
+        "the message must name the dimension that tripped — telling the caller \
+         bytes shrank when they did not is how a warning gets ignored; got: {msg}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        original,
+        "a refused write must leave the file byte-identical"
+    );
+}
+
+/// The escape hatch still works on the new arm: the same truncation goes
+/// through with `force: true`. Without this, a guard that over-fires would have
+/// no way out and the fix would be worse than the bug.
+#[tokio::test]
+async fn shrink_guard_line_arm_yields_to_force() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("wide_forced.md");
+
+    let fat: Vec<String> = (0..10).map(|_| "X".repeat(1000)).collect();
+    let thin: Vec<String> = (0..90).map(|_| "y".repeat(10)).collect();
+    let original = format!("# Title\n\n{}\n{}\n", fat.join("\n"), thin.join("\n"));
+    std::fs::write(&file, &original).unwrap();
+
+    let result = super::edit_markdown::EditMarkdown
+        .call(
+            json!({
+                "path": file.to_str().unwrap(),
+                "heading": "# Title",
+                "action": "replace",
+                "content": fat.join("\n"),
+                "force": true,
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_ok(), "force must bypass the line arm: {result:?}");
+    let after = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        after.lines().count() < original.lines().count(),
+        "the forced write must actually have shrunk the file"
+    );
+}
+
 /// The batch path is a SECOND read site with its own copy of the default, so a fix
 /// applied only to the single-edit path leaves the hole open here. Covered
 /// separately for that reason, not for symmetry.

@@ -118,7 +118,7 @@ Picking the wrong one cost a real ~600-line tracker body in 2026-05-25
 | Patch shape | Effect | Guard |
 |---|---|---|
 | `patch={body_edits: [{heading, action, content?\|old_string+new_string?, at?, replace_all?, include_subsections?}, ...]}` | Surgical per-section edits. Each entry mirrors `edit_markdown`'s batch shape. Atomic (all-or-nothing). | `action="replace"` is refused when it would consume nested headings — **unless** `include_subsections: true`, which is the guard's off switch, not a guard. |
-| `patch={body: "..."}` | Total overwrite — the new string becomes the entire body. | **50% shrink guard.** If the new body is more than 50% shorter than the old body, the write is refused with `RecoverableError("body-shrink guard: ...")`. |
+| `patch={body: "..."}` | Total overwrite — the new string becomes the entire body. | **50% shrink guard.** If the new body loses more than 50% of the old body's **bytes or lines**, the write is refused with `RecoverableError("body-shrink guard: ...")`, naming which dimension went over. |
 | `force=true` (top-level on the call) | Bypass the shrink guard. | Use only when shrinkage is intentional (full rewrite, archiving). |
 
 **Mutual exclusion.** `patch={body, body_edits}` together returns
@@ -185,6 +185,22 @@ The LLM's mental model "I have the body in hand, I'll write it back" is
 wrong — it has *a section* in hand. The shrink guard catches the >50%
 case; the surgical `body_edits[]` surface removes the temptation to write
 a partial body in the first place.
+
+**`full=true` does not exempt you from this, and that is the sharper trap.**
+`get`'s body is capped at 500 lines (`SOFT_CAP_LINES`,
+`src/librarian/tools/get.rs`); `full` opts out of section-scoping, not out of
+the cap. So on any artifact over 500 lines the "I have the body in hand"
+model is wrong in the one case where it feels safest. The response says so —
+`body_meta.line_count` against `body_meta.source_line_count`, plus an
+`overflow` object — but a shell pipeline reading `.body` never looks at
+sibling keys, and the byte arm of the shrink guard cannot see a truncation
+that keeps a document's long-lined front. That combination deleted 1047 of
+1553 lines of a tracker on 2026-08-28 and returned `updated: true`; the line
+arm was added the next day in response. See
+`docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
+
+**Rule: never build a write payload from a `get` response.** Rebuild it from
+the file or from `git show <sha>:<path>`.
 ## The artifact_augment lifecycle
 
 `artifact_augment` controls the prompt + params + ancillary fields:

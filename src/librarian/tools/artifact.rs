@@ -139,7 +139,7 @@ impl Tool for Artifact {
                 "force": {
                     "type": "boolean",
                     "default": false,
-                    "description": "update: bypass the body-shrink guard. Required when a body write would reduce the file by more than 50%. Use only when shrinkage is intentional (full rewrite, archiving stale sections). Default false. See get_guide(\"librarian\") § Body Editing Surfaces."
+                    "description": "update: bypass the body-shrink guard. Required when a body write would cut the file by >50% in bytes or lines. Use only when shrinkage is intentional (full rewrite, archiving stale sections). Default false. See get_guide(\"librarian\") § Body Editing Surfaces."
                 },
                 "commit_refresh": {
                     "type": "boolean",

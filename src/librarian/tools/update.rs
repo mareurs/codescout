@@ -120,16 +120,12 @@ struct Args {
     /// When true, also call augmentation::commit_refresh after the update.
     #[serde(default)]
     commit_refresh: bool,
-    /// Bypass the body-shrink guard. Required when a body write would reduce
-    /// the existing body by more than 50%. Use only when the shrinkage is
-    /// intentional (e.g. archiving stale sections, full rewrite).
+    /// Bypass the body-shrink guard. Required when a body write would cut the
+    /// file by more than 50% in EITHER bytes or lines. Use only when the
+    /// shrinkage is intentional (e.g. archiving stale sections, full rewrite).
     #[serde(default)]
     force: bool,
 }
-/// Body writes smaller than this byte count skip the shrink guard. Files this
-/// small are typically just-created frontmatter shells where a shrink ratio
-/// would be misleading. A real tracker with content is always many KB.
-const SHRINK_GUARD_MIN_BYTES: usize = 200;
 
 /// Merge a custom-frontmatter patch into `fm.extra`: each provided key is
 /// upserted, a `null` value deletes the key, omitted keys are preserved
@@ -562,24 +558,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     };
 
-    if body_changing && !a.force && original.len() >= SHRINK_GUARD_MIN_BYTES {
-        let allow_history_trim = matches!(
-            crate::librarian::catalog::augmentation::get(&cat, &a.id)?,
-            Some(aug) if aug.append_mode && aug.history_cap.is_some()
-        );
-        if !allow_history_trim && new_content.len() * 2 < original.len() {
-            let pct = 100 - (new_content.len() * 100 / original.len().max(1));
-            return Err(super::RecoverableError::with_hint(
-                format!(
-                    "body-shrink guard: write to {} would reduce {} → {} bytes ({}% reduction)",
-                    full.display(),
-                    original.len(),
-                    new_content.len(),
-                    pct
-                ),
-                "Use patch={body_edits:[{heading, action, content?|old_string+new_string?, ...}]} for surgical per-section edits (mirrors edit_markdown's batch shape). \
-                 If the shrinkage is intentional (e.g. archiving stale sections, full rewrite), re-call with force=true.",
-            ));
+    // The report is computed first so the augmentation lookup below only runs
+    // on a write that already looks destructive — the common, safe case pays
+    // nothing for the guard beyond two length counts.
+    if body_changing && !a.force {
+        if let Some(report) = crate::util::shrink_guard::check(&original, &new_content) {
+            let allow_history_trim = matches!(
+                crate::librarian::catalog::augmentation::get(&cat, &a.id)?,
+                Some(aug) if aug.append_mode && aug.history_cap.is_some()
+            );
+            if !allow_history_trim {
+                return Err(super::RecoverableError::with_hint(
+                    format!(
+                        "body-shrink guard: write to {} {}",
+                        full.display(),
+                        report.describe()
+                    ),
+                    "Use patch={body_edits:[{heading, action, content?|old_string+new_string?, ...}]} for surgical per-section edits (mirrors edit_markdown's batch shape). \
+                     A write that loses LINES while keeping bytes is usually a truncated read fed back in — rebuild the body from the file or from git, never from a `get` response, whose body is capped at 500 lines. \
+                     If the shrinkage is intentional (e.g. archiving stale sections, full rewrite), re-call with force=true.",
+                ));
+            }
         }
     }
 
@@ -2269,6 +2268,71 @@ text
         assert!(
             msg.contains("force"),
             "hint must name the force escape; got: {msg}"
+        );
+    }
+
+    /// The byte ratio and the line ratio diverge whenever a document is
+    /// front-loaded with long lines, and a truncating write keeps the front.
+    /// That is not hypothetical: it deleted 1047 of 1553 lines of
+    /// `docs/trackers/prompt-hamsa-audit-log.md` on 2026-08-28 while losing only
+    /// 29% of the bytes, because the capped prefix was an index table whose rows
+    /// run 3-7 KB each. See
+    /// `docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
+    ///
+    /// The fixture has to be built from lines of UNEQUAL length. With uniform
+    /// lines the two ratios move together, so a truncation that trips one trips
+    /// the other and this test would pass with the line arm deleted.
+    #[tokio::test]
+    async fn body_shrink_guard_catches_a_line_truncation_that_keeps_the_bytes() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        // 10 fat lines carry ~92% of the bytes; 90 thin ones carry ~92% of the
+        // lines. Truncating to the fat prefix is the shape that slipped through.
+        let fat: Vec<String> = (0..10).map(|_| "X".repeat(1000)).collect();
+        let thin: Vec<String> = (0..90).map(|_| "y".repeat(10)).collect();
+        let big_body = format!("{}\n{}", fat.join("\n"), thin.join("\n"));
+        let truncated = fat.join("\n");
+
+        // Pin the divergence itself, so a later change to the fixture that
+        // quietly makes it uniform fails here rather than silently defanging
+        // the assertion below.
+        assert!(
+            truncated.len() * 2 >= big_body.len(),
+            "fixture must keep >=50% of BYTES, or the byte arm catches it and \
+             this test proves nothing about the line arm"
+        );
+        assert!(
+            truncated.lines().count() * 2 < big_body.lines().count(),
+            "fixture must lose >50% of LINES, or there is nothing to catch"
+        );
+
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "wide.md",
+                "kind": "spec", "title": "T", "body": big_body,
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": truncated}}),
+        )
+        .await
+        .expect_err("a 90% line truncation must be blocked even when bytes survive");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("body-shrink guard"),
+            "error must name the guard; got: {msg}"
+        );
+        assert!(
+            msg.contains("lines"),
+            "the message must name the dimension that actually tripped, or the \
+             reader is told bytes shrank when they did not; got: {msg}"
         );
     }
 

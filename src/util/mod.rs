@@ -5,4 +5,5 @@ pub mod librarian_response;
 pub mod markdown_fence;
 
 pub mod path_security;
+pub mod shrink_guard;
 pub mod text;

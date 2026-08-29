@@ -136,20 +136,19 @@ fn closest_topics(query: &str, available: &[String]) -> Vec<String> {
 
 /// The refusal a would-be destructive `memory(write)` gets.
 ///
-/// Mirrors the artifact body-shrink guard in `librarian/tools/update.rs`: name
-/// the guard, show the byte counts, and name BOTH ways forward. The hint leads
-/// with *why* rather than *what*, because the failure mode is a wrong mental
-/// model — callers reach for `write` believing it appends. It replaces.
+/// Mirrors the artifact body-shrink guard in `librarian/tools/update.rs` — and
+/// since 2026-08-29 shares its predicate outright via
+/// `crate::util::shrink_guard`. Name the guard, show both dimensions, and name
+/// BOTH ways forward. The hint leads with *why* rather than *what*, because the
+/// failure mode is a wrong mental model — callers reach for `write` believing it
+/// appends. It replaces.
 ///
 /// Motivating incident: two new sections written to a 17-section memory
 /// deleted the other fifteen and returned `{"status":"ok"}`.
 /// See `docs/issues/archive/2026-08-28-memory-write-has-no-shrink-guard.md`.
 fn shrink_guard_error(topic: &str, r: &crate::memory::ShrinkReport) -> RecoverableError {
     RecoverableError::with_hint(
-        format!(
-            "memory-shrink guard: write to '{topic}' would reduce {} → {} bytes ({}% reduction)",
-            r.old_bytes, r.new_bytes, r.pct
-        ),
+        format!("memory-shrink guard: write to '{topic}' {}", r.describe()),
         "memory(action=\"write\") REPLACES the topic wholesale — it does not append. \
          To add or change one section, read the topic first and write the whole document \
          back with your edit folded in, or edit the file under .codescout/memories/ with \
@@ -158,7 +157,15 @@ fn shrink_guard_error(topic: &str, r: &crate::memory::ShrinkReport) -> Recoverab
     )
     .with_extra(
         "shrink",
-        json!({ "old_bytes": r.old_bytes, "new_bytes": r.new_bytes, "pct": r.pct }),
+        json!({
+            "old_bytes": r.old_bytes,
+            "new_bytes": r.new_bytes,
+            "byte_pct": r.byte_pct,
+            "old_lines": r.old_lines,
+            "new_lines": r.new_lines,
+            "line_pct": r.line_pct,
+            "tripped_on": r.dimension.as_str(),
+        }),
     )
 }
 

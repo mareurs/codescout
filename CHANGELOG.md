@@ -332,6 +332,27 @@ All notable changes to codescout are documented here.
 
 ### Fixed
 
+- **The body-shrink guard compared only bytes, so a write that truncated a document to its
+  long-lined front was accepted and reported success.** The two ratios diverge whenever line
+  lengths are uneven, which is the normal shape of prose, tables and code: a write keeping the
+  first 500 of 1553 lines of a tracker lost **68% of the lines but only 29% of the bytes**,
+  because the retained prefix was an index table whose rows run 3–7 KB each. The guard
+  declined to fire — correctly by its own terms — and 1047 lines were deleted by a call that
+  returned `updated: true`. It now refuses when **either** bytes or lines fall by more than
+  half, and the message names which dimension went over while reporting both.
+
+  The predicate, its 200-byte floor and the report type move into
+  `crate::util::shrink_guard`, shared by all three surfaces that overwrite documents
+  wholesale — `artifact(update, patch={body})`, `edit_markdown` and `memory(write)`. Each
+  previously carried its own copy, which is why fixing one would have left the other two;
+  `edit_markdown` had no shrink-guard test at all and now has two. `force=true` still
+  bypasses both arms. The read side that fed the bad write already warned three times over
+  (`body_meta.line_count` vs `source_line_count`, plus an `overflow` object) — a `.body`
+  pipeline just never looks at sibling keys, so **never build a write payload from a `get`
+  response**; `get`'s body is capped at 500 lines and `full=true` opts out of section-scoping,
+  not out of the cap. See
+  `docs/issues/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
+
 - **`artifact(action="find")` answered `count: 0` identically for "nothing is there" and
   "the catalog has never looked."** An artifact created outside `artifact(action="create")`
   — by `create_file`, a plain write, or a peer's git commit — is absent until a reindex,

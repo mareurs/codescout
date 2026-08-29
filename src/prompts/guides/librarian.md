@@ -252,7 +252,7 @@ artifact(update, id=X, patch={body_edits: [{
 }]})
 ```
 
-The shrink guard cannot catch this — it compares whole-file bytes, and a write
+The shrink guard cannot catch this — it compares whole-file totals, and a write
 that adds more than it removed passes by construction. Since 2026-08-06 the
 response and the `field_patch` payload both carry `replaced_subsections` naming
 what was destroyed; **read it.** To add a sibling, target the last existing child
@@ -261,19 +261,17 @@ with `insert_after` instead of replacing the parent.
 ### The shrink guard, `force`, and event forensics
 <!-- serves: artifact.update -->
 
-**Body-shrink guard.** Any body write that would reduce the file by more
-than 50% is refused with `RecoverableError("body-shrink guard: ...")`.
-The error hint names both `body_edits[]` and the `force=true` escape.
-Files under 200 B are exempt (the percentage is meaningless for shells).
-`append_mode + history_cap` artifacts are also exempt — trimming
-history is expected to shrink the body.
+**Body-shrink guard.** A body write losing >50% of the file's **bytes or
+lines** is refused with `RecoverableError("body-shrink guard: ...")`, naming
+which. The hint names `body_edits[]` and the `force=true` escape. Exempt:
+files under 200 B, and `append_mode + history_cap` artifacts, whose history
+trimming is meant to shrink.
 
 **Body mutations emit `field_patch` events.** Every body write records a
 `field_patch` event with `payload={field: "body", prev_bytes, new_bytes,
-edits_count, mode, forced, replaced_subsections}`. `prev_bytes` /
-`new_bytes` are whole-file aggregates: a replace that destroyed a child section
-while growing the file reads as a benign append, so `replaced_subsections` is the
-only field that reveals it. Query forensic history with
+edits_count, mode, forced, replaced_subsections}`. `prev_bytes`/`new_bytes` are whole-file aggregates: a replace that destroyed a
+child while growing the file reads as a benign append, so
+`replaced_subsections` is the only field that reveals it. Query forensic history with
 `artifact_event(action="list", artifact_id=X)`.
 
 **`patch` accepts only declared keys.** An unknown key returns
