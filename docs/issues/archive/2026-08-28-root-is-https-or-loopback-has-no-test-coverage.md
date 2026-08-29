@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-28
-closed:
+closed: 2026-08-29
 severity: medium
 owner: marius
 related:
@@ -13,6 +13,7 @@ tags:
   - duplication
   - embeddings
 kind: bug
+unverified: The duplication itself is NOT resolved -- two byte-equivalent copies of this predicate still exist, root's and the crate's. This record covers only the missing coverage. ET-4 removes the duplicate; until it lands, a change must be made in both places or they drift again, which is the failure mode that produced this bug.
 ---
 
 # BUG: root's `is_https_or_loopback` guard has zero test coverage; only the codescout-embed twin is tested
@@ -136,26 +137,54 @@ The assertions that pin it exist only in `codescout-embed`
 
 ## Fix
 
-Two options; the second is already planned.
+**Option 1 taken — the 11 assertions are ported to root.**
+`is_https_or_loopback_matches_host_exactly` now exists in
+`src/retrieval/embedder.rs`'s `remote-embed`-gated test module, ported verbatim
+from `crates/codescout-embed/src/remote.rs:549-563` so the two stay comparable
+while both copies exist.
 
-1. **Port the 11 assertions** to a root-side test module. Cheap, immediate, and
-   independent of the consolidation work. Keeps the duplication.
-2. **Delete root's copy** and route both call sites at the `codescout-embed`
-   function, which is the tested one. This is what
-   `docs/plans/2026-07-25-embedding-transport-consolidation.md` Stage 3 already
-   intends (tracked as `ET-4` in
-   `docs/trackers/resume-embedding-transport-stages-1-3.md`). Requires making the
-   `codescout-embed` function `pub`, which it currently is not.
+**The framing in the original version of this section was wrong and is worth
+correcting rather than deleting.** It offered porting the assertions and deleting
+root's copy in ET-4 as *alternatives* — "prefer (2) if ET-4 is executed soon".
+They are not alternatives. An untested function cannot be shown equivalent to its
+replacement, so the tests are the **precondition** for the deletion, not a
+substitute for it. Deleting first would have removed the guard and left nothing
+able to demonstrate the crate's version behaves identically. This is recorded as
+Phase A of `resume-embedding-transport-stages-1-3:ET-8`.
 
-Prefer (2) if `ET-4` is executed soon; take (1) if it slips, because the gap is a
-credential-disclosure guard and should not wait on a refactor.
+Consequently the test is written to **survive** ET-4: when root's copy goes,
+re-point it at the crate's function rather than deleting it.
 
-**Not fixed in this record.** SHA / patch-id: N/A.
+**Fix commit:** `28bb6e8a` on `experiments`
+**patch-id:** `52cb00b5b67d80de322ccc0c9f5a6166d1860fb0`
 
+**Still open, tracked elsewhere:** the duplication. `ET-4` deletes root's copy
+once `ET-3` unblocks it, and `ET-8` Phase B4 notes the crate's function must
+become `pub` first — it is private today.
 ## Tests added
 
-None — this record is the finding, not the fix. See § Fix.
+`retrieval::embedder::tests::is_https_or_loopback_matches_host_exactly`
+— 6 positive cases (https, `localhost`, `127.0.0.1`, `127.0.0.5` for the
+`127.0.0.0/8` range, `[::1]`, and `user:pass@localhost` for the userinfo path)
+and 4 spoofing negatives (`127.evil.com`, `localhost.evil.com`,
+`127.0.0.1.evil.com`, `example.com/127.0.0.1`).
 
+**Verified by mutation twice, because one probe proved less than it appeared
+to.** Replacing the host parse wholesale with the unanchored
+`starts_with("127.")` form fails at line 1032 on the `[::1]` *positive* — which
+establishes that the positives fire, and says nothing whatever about the four
+negatives, since the test panics before reaching them. A second mutation leaving
+every positive intact and breaking only the prefix check fails at line 1040 on
+`!is_https_or_loopback("http://127.evil.com/v1")`.
+
+So both axes are shown live: the false-negative (rejecting real loopback) and
+the false-positive (accepting a spoofed host) — and it is the second that this
+bug was actually about. A single probe would have left the security-relevant
+assertions unproven while looking like a completed verification.
+
+Gate at fix time: fmt, clippy `--workspace --all-targets --features local-embed
+-D warnings`, test **4638 passed / 0 failed** (baseline 4637 — one new pass,
+this test, no other test changing state).
 ## Workarounds
 
 None needed at runtime; current behaviour is correct. The exposure is to a
@@ -163,13 +192,11 @@ None needed at runtime; current behaviour is correct. The exposure is to a
 
 ## Resume
 
-Decide between Fix (1) and Fix (2) against `ET-4`'s timeline. If (1): copy
-`crates/codescout-embed/src/remote.rs:549-562` into a new
-`#[cfg(all(test, feature = "remote-embed"))]` module in
-`src/retrieval/embedder.rs` and re-point it at the root function. Verify the
-tests actually bind by mutating root's `host` parse to the unanchored form and
-confirming a **red** run before committing them green.
+N/A for the coverage gap — closed by `28bb6e8a`.
 
+For the duplication, see `resume-embedding-transport-stages-1-3:ET-8`. Phase B4
+exports the crate's function; Phase D1 deletes root's copy and re-points this
+test at the crate's.
 ## References
 
 - `src/retrieval/embedder.rs:135` — untested root definition

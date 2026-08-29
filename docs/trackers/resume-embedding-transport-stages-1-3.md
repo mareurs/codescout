@@ -199,7 +199,8 @@ verified at the bytes:
 
 Neither is a stylistic difference. The first means a mutation to root's
 cleartext-API-key guard passes the entire suite
-(`docs/issues/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`).
+(`docs/issues/archive/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`
+— the coverage half is closed by `28bb6e8a`; the duplication is this entry's job).
 The second let a wedged embedder hang `cargo test` indefinitely
 (`docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`).
 
@@ -422,7 +423,8 @@ types.
 **Observed:** 2026-08-29, after ET-2 shipped. Reviewed with the architecture
 (snow-lion) and refactoring (yak) lenses.
 
-**Status:** open — Phase A in progress
+**Status:** open — **Phase A DONE** (`28bb6e8a`, patch-id
+`52cb00b5b67d80de322ccc0c9f5a6166d1860fb0`). Next: Phase B1.
 
 **Valid:** dated 2026-08-29
 
@@ -466,8 +468,8 @@ Each phase ends green and is independently revertable. Baseline to hold:
   `remote.rs:549-563` to root's `is_https_or_loopback`.
 
   This is **not** an alternative to deleting root's copy, which is how
-  `docs/issues/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`
-  originally framed it. It is the **characterization test that makes the
+  `docs/issues/archive/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`
+  originally framed it — corrected there when A1 landed. It is the **characterization test that makes the
   deletion in D1 verifiable** — delete an untested function and nothing proves
   the replacement equivalent. Verify the tests bind by mutating root's host
   parse to the unanchored form and confirming red before committing green.

@@ -1010,7 +1010,7 @@ mod tests {
     /// byte-equivalent twin in `codescout-embed`
     /// (`remote.rs::tests::is_https_or_loopback_matches_host_exactly`), so a
     /// mutation to root's copy alone passed the entire suite. See
-    /// `docs/issues/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`.
+    /// `docs/issues/archive/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md`.
     ///
     /// **This test is the safety net for deleting that copy, not a substitute for
     /// deleting it.** `ET-4` removes root's duplicate in favour of the crate's; an
