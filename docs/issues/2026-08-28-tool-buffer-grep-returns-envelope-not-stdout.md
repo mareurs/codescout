@@ -1,7 +1,7 @@
 ---
 id: '2d546e0f7b8fcc0c'
 kind: bug
-status: open
+status: investigating
 title: 'BUG: grepping a @tool_* buffer that holds a run_command result returns the JSON envelope, and each re-read re-wraps — the stdout is unreachable'
 owners:
 - marius
@@ -59,21 +59,41 @@ the file.
 
 ## Reproduction
 
-**Not reproduced.** Attempts that did NOT trigger it:
+**REPRODUCED 2026-08-29**, on the third hypothesis — the compound command was
+indeed the missing ingredient, though not for the reason guessed. Deterministic,
+four steps, ~5 seconds.
 
-1. `seq 1 4000 | sed 's/^/line /' > /tmp/big.txt; cat` → `@cmd_*`; `grep 'line'`
-   on it returned stdout inline, capped at 100 lines with a correct paging hint.
-2. 50 lines × 300 chars (15400 bytes, over the 10000-byte buffer threshold but
-   under the 100-line cap) → grep returned stdout inline with `stdout_shown: 31`,
-   `stdout_total: 50`.
-3. `grep -o '"detail": "[^"]*"' @tool_4795f92d` — same source buffer as the live
-   case — returned stdout inline, `stdout_shown: 31`, `stdout_total: 125`.
+```
+1. librarian(action="doctor")
+   -> @tool_4e1a84e6   132088 bytes        (original: 136367)
 
-So a `@cmd_*` buffer greps correctly, and the *same* `@tool_*` buffer greps
-correctly with a different pattern. The live case differs in two ways not yet
-separated: it used a **compound command** (`grep -c ...; echo ---; grep -o ...`),
-and its result landed in a `@tool_*` rather than a `@cmd_*` handle.
+2. run_command("grep -c 'work/claude/codescout' @tool_4e1a84e6; echo ---;
+                grep -o '\"path\": \"[^\"]*\"' @tool_4e1a84e6")
+   -> @tool_4e1a9626   "exit 0 - 119 lines"   buffered_bytes: 10011
+                                            (original: 127 lines, 10273)
 
+3. run_command("grep -v 'work/claude/codescout' @tool_4e1a9626")
+   -> @tool_4e1ab2d8   "exit 0  (query @cmd_4e1ab2d6)"   11158
+                                            (original: 11492)
+
+4. read_file("@tool_4e1ab2d8")
+   -> 6 lines: { "type": "generic", "exit_code": 0, "output_id": "@cmd_4e1ab2d6", ...
+```
+
+Every number lands within 3% of the original transcript. The regress continues
+exactly as filed: `read_file("@cmd_4e1ab2d6")` gives the envelope again;
+`read_file("@tool_4e1ab2d8", start_line=5, end_line=6)` gives a NEW 13389-byte
+`@tool_*`, **larger than the six-line buffer it was asked to read two lines of**;
+`json_path="$.content"` on that gives another 11131-byte handle. It does not
+converge, and the reason it cannot is in the Root cause section.
+
+**Why the earlier three attempts missed it.** All three produced output whose
+lines were individually small. The trigger is not size as such, not the handle
+kind, and not the compound command as such — it is that the command emitted
+enough output to be handed back as an `output_id` envelope rather than inline,
+and the envelope form puts all of stdout on one line. Attempt 2 (15400 B) *did*
+exceed the threshold but returned inline with `stdout_shown`/`stdout_total`, so
+it never took the envelope path.
 ## Environment
 
 Branch `experiments` @ `14aab5ff`, linux, codescout 0.15.0, MCP over stdio,
@@ -81,40 +101,88 @@ release build from `cargo rb` at 11:55 local.
 
 ## Root cause
 
-**Unknown — see Hypotheses tried.** The leading hypothesis, *inferred from the
-handle kinds in the transcript and not measured*:
+**Measured 2026-08-29.** Not a leak and not a nesting bug: a **structural**
+impossibility for a line-oriented reader.
 
-`run_command` results are stored under two handle kinds with **different payload
-semantics** — `@cmd_*` appears to hold raw stdout, `@tool_*` appears to hold the
-serialized JSON envelope. A tool reading a `@tool_*` handle therefore gets the
-envelope; grepping it greps the envelope; and since that grep is itself a
-`run_command`, its result is another envelope. If correct, the defect is not the
-nesting but the **ambiguity**: nothing in the returned handle tells the caller
-which payload kind it holds, so there is no way to know a read will yield stdout
-until it does not.
+### The two payload kinds
 
-Do not act on this without measuring it. `src/tools/output_buffer.rs` is the place
-to look; it changed by +212 lines in the 437-commit range that landed today, so the
-behaviour may be newer than the transcript suggests.
+`run_command` can hand back a buffer through either of two response fields, and
+they hold *different things*:
 
+| Field | Payload | Shape (measured) | Line-sliceable |
+|---|---|---|---|
+| `unfiltered_output` | raw text | 400 lines / 1492 B | yes |
+| `output_id` (whole response overflowed) | **JSON envelope** | 4 lines / 10021 B, **line 3 = 9998 B** | **no** |
+
+```
+$ awk '{print NR": "length($0)}' @cmd_4e1ab2d6
+1: 1        {
+2: 17         "exit_code": 0,
+3: 9998       "stdout": "21\n---\n..."     <- ALL of stdout, on one line
+4: 1        }
+```
+
+### Why it cannot terminate
+
+`read_file` addresses buffers by **line**. The entire stdout lives on line 3,
+whose ~10 KB exceeds `INLINE_BYTE_BUDGET` (9000 B). So any read whose range
+includes line 3 overflows and is re-buffered into a new handle — which has the
+same one-enormous-line shape, so the next read does the same thing. **The
+smallest addressable unit is larger than the largest returnable one**, and no
+sequence of line-range reads can converge. Reads that *exclude* line 3 return
+only punctuation, and still re-buffer, because the wrapping response carries its
+own metadata.
+
+### The filed hypothesis was wrong, and the correction matters
+
+This file's leading hypothesis was that the discriminator is the handle
+**prefix** — `@cmd_*` holds raw stdout, `@tool_*` holds the envelope. **Refuted
+by measurement:** in the reproduced chain `@cmd_4e1ab2d6` and `@tool_4e1a9626`
+are byte-identical in structure (4 lines, line 3 = 9998 B) and *both* hold
+envelopes. A `@cmd_*` handle proves nothing about the payload.
+
+The real discriminator is **which response field the handle arrived in**. The
+filed diagnosis of the underlying defect survives intact — nothing in a handle
+tells the caller which payload kind it holds — but the axis was misidentified,
+and a fix built on the prefix would have changed nothing.
+
+### The data is intact
+
+`jq -e . @cmd_4e1ab2d6` parses, and extracting `.stdout` then counting entries
+returns 117 — nothing was truncated or corrupted. "The stdout is unreachable" is
+true only of line-oriented readers; byte- and pattern-oriented ones (`jq`,
+`grep`, `awk`, `head -c`) reach it immediately. That is narrower and more
+fixable than the title of this file, which is now overstated.
 ## Hypotheses tried
 
 1. **Hypothesis:** any grep of a buffer whose result exceeds the 10000-byte
    threshold nests.
    **Test:** repro attempt 2 — 15400 bytes, 50 lines.
-   **Verdict:** rejected — returned stdout inline.
+   **Verdict:** rejected — returned stdout inline. Correctly rejected, but the
+   reason is sharper than recorded: exceeding the threshold is *necessary*, and
+   what decides the outcome is whether the response comes back inline with
+   `stdout_shown`/`stdout_total` or as an `output_id` envelope.
 
 2. **Hypothesis:** it is specific to `@tool_*` source buffers.
    **Test:** repro attempt 3 — grepped the same `@tool_4795f92d` with a different
    pattern.
-   **Verdict:** rejected as *sufficient* — that grep returned stdout normally. May
-   still be necessary-but-not-sufficient.
+   **Verdict:** rejected, and now rejected *twice over* — the 2026-08-29
+   measurement shows `@cmd_*` and `@tool_*` handles holding structurally
+   identical envelopes. The prefix is not the axis.
 
 3. **Hypothesis:** the compound command (`;`-separated, mixing `grep -c` with
    `grep -o`) is the trigger.
-   **Test:** not yet run.
-   **Verdict:** deferred — this is the untested difference and the next thing to try.
+   **Test:** run 2026-08-29, exactly as prescribed by
+   `resume-cross-machine-catalog-restore:CM-7`.
+   **Verdict:** **confirmed as the reproducer, rejected as the cause.** It
+   reproduces every time, but only because it emits enough small-line output in
+   one shot to route the result through the envelope path. Any single command
+   with the same output profile does the same; the `;` is incidental.
 
+4. **Hypothesis:** the buffered JSON is truncated, and that is why reads fail.
+   **Test:** `jq -e .` on the buffer; counted the entries inside `.stdout`.
+   **Verdict:** rejected — valid JSON, all 117 entries present. The payload is
+   intact and merely unaddressable by line.
 ## Fix
 
 None. Do not fix before reproducing — the mechanism above is inferred from handle
@@ -151,4 +219,3 @@ kind is chosen and whether the stored payload differs by kind.
 - `get_guide("progressive-disclosure")` § The @ref buffer
 - `docs/trackers/tool-usage-patterns.md` T-27 — *grep -n on a @tool_\* buffer numbers the buffer, not the source* (a neighbouring quirk in the same surface)
 - Found during the 2026-08-28 cross-machine catalog repair; see `docs/conventions/cross-machine-catalog-resume.md`
-

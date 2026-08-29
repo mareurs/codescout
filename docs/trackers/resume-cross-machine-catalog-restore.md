@@ -271,19 +271,49 @@ MCP server until `cargo rb` + `/mcp`. Until this host's binary is rebuilt, keep 
 
 ## CM-7 — `@tool_*` buffer grep nesting is unreproduced
 
-**Status:** open
-**Valid:** dated 2026-08-28
+**Status:** reproduced 2026-08-29; root cause measured; fix not yet written.
+Bug file flipped to `investigating`.
+**Valid:** dated 2026-08-29
 
 **Observed.** Filed as
 `docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`. Six reads
 across four handle kinds never reached the payload; escaped by redirecting to a
-file. **Three reduction attempts failed to reproduce.**
+file. Three reduction attempts had failed to reproduce.
 
-**Next:** run the one untested difference — a compound `run_command`
-(`grep -c X @tool_ref; echo ---; grep -o Y @tool_ref`) against a large `@tool_*`
-buffer — and check whether the result handle is `@tool_*` or `@cmd_*`, and whether
-reading it yields stdout or an envelope. Do not fix before reproducing.
+**The prescribed probe worked on the first try.** Running the one untested
+difference — the compound `run_command` against a large `@tool_*` — reproduced
+every step, with all four numbers within 3% of the original transcript. Kept
+here because it is the cheapest known reproducer:
 
+```
+librarian(doctor) -> @tool_X (132 KB)
+run_command("grep -c 'work/claude/codescout' @tool_X; echo ---;
+             grep -o '\"path\": \"[^\"]*\"' @tool_X")   -> @tool_Y, 10011 B
+run_command("grep -v 'work/claude/codescout' @tool_Y")  -> @tool_Z, 11158 B
+read_file("@tool_Z")  -> the envelope, not the stdout
+```
+
+**Root cause, measured, not inferred.** The buffer holds the JSON envelope with
+**all of stdout on one line** — `awk` reports 4 lines, line 3 = 9998 B. `read_file`
+addresses buffers by *line*, and that line exceeds `INLINE_BYTE_BUDGET` (9000 B),
+so every read touching it overflows into a new buffer of the same shape. **The
+smallest addressable unit is larger than the largest returnable one**, so the
+regress cannot terminate. Reading two lines of a six-line buffer returned a
+13389-byte handle — bigger than the thing being read.
+
+**Two corrections the reproduction earned.** The bug file's leading hypothesis —
+handle *prefix* decides the payload, `@cmd_*` raw vs `@tool_*` envelope — is
+**refuted**: both held structurally identical envelopes. The real axis is which
+response *field* the handle came from (`unfiltered_output` = raw text, 400 lines;
+`output_id` = envelope). And the data was never lost: `jq -e .` parses and all 117
+entries are present, so "the stdout is unreachable" holds only for line-oriented
+readers — `jq`, `grep`, `awk`, `head -c` reach it immediately. The bug file's
+title is now overstated and says so.
+
+**Next:** design the fix. The shape of the defect — a line-addressed reader over a
+content whose lines can exceed the budget — suggests byte-range fallback in
+`read_file` when a single line overflows, and/or storing raw stdout rather than the
+envelope for `output_id` buffers. Not started; no option measured yet.
 ## CM-8 — duplicate frontmatter in the hamsa log
 
 **Status:** fixed 2026-08-28 — body edit only, no code. Verified: `git diff` is
