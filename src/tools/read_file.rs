@@ -325,6 +325,11 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 usize::MAX,
                 crate::tools::INLINE_BYTE_BUDGET,
             );
+            // The valve above yields one line even when that line alone busts the
+            // budget; without this the response exceeds the threshold it is
+            // measured against and gets re-wrapped.
+            let (chunk, line_truncated) =
+                clamp_over_budget_line(chunk, crate::tools::INLINE_BYTE_BUDGET);
             let orig_start = s as usize;
             let orig_end = orig_start + lines_shown.saturating_sub(1);
             let mut result = json!({
@@ -334,6 +339,14 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 "shown_lines": [orig_start, orig_end],
                 "complete": complete,
             });
+            if line_truncated {
+                // Deliberately does NOT set `next`: the only range that would
+                // advance past this line is the same one that produced it, so a
+                // `next` here rebuilds the retry loop the valve exists to break.
+                // The hint routes to an addressing mode that can reach the value.
+                result["line_truncated"] = json!(true);
+                result["hint"] = json!(over_budget_line_hint(path));
+            }
             if !complete {
                 // `complete == false` means the budget stopped us short of `e`, and
                 // the safety valve in `extract_lines_with_cost` always yields at
@@ -356,12 +369,19 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             usize::MAX,
             crate::tools::INLINE_BYTE_BUDGET,
         );
+        // Same valve, same consequence — see the range branch above.
+        let (chunk, line_truncated) =
+            clamp_over_budget_line(chunk, crate::tools::INLINE_BYTE_BUDGET);
         let mut result = json!({
             "content": chunk,
             "total_lines": total_lines,
             "shown_lines": [1, lines_shown],
             "complete": complete,
         });
+        if line_truncated {
+            result["line_truncated"] = json!(true);
+            result["hint"] = json!(over_budget_line_hint(path));
+        }
         if !complete {
             let next_start = lines_shown + 1;
             let next_end = (next_start + lines_shown - 1).min(total_lines);
@@ -372,6 +392,63 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         return Ok(result);
     }
     Ok(json!({ "content": text, "total_lines": total_lines }))
+}
+
+/// Cut a chunk down when a SINGLE line is wider than the whole inline budget.
+///
+/// The safety valve in `extract_lines_with_cost` deliberately emits at least one
+/// line even when that line exceeds the budget — without it, a caller re-requests
+/// the same range forever and never advances. The cost is that
+/// [`read_from_buffer`] then returns a chunk larger than the threshold it is
+/// measured against, `call_content` re-wraps the response in a `@tool_*`
+/// envelope, and the caller gets an envelope instead of content: exactly what
+/// that function's doc comment promises never happens.
+///
+/// The valve exists to guarantee *progress*, not completeness — so keep the
+/// progress and drop the excess bytes. Returns `(chunk, true)` when it cut.
+///
+/// Measured 2026-08-29: a `run_command` envelope pretty-prints to four lines, of
+/// which the third is the entire stdout as one JSON-escaped string 9998 bytes
+/// wide. Line-slicing could never address it. See
+/// `docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
+fn clamp_over_budget_line(chunk: String, budget: usize) -> (String, bool) {
+    if !crate::tools::exceeds_inline_limit(&chunk) {
+        return (chunk, false);
+    }
+    // Half the budget, not all of it. The kept bytes are re-measured AFTER JSON
+    // escaping and alongside the response's other keys, and an escape-heavy line
+    // can nearly double in width. Undershooting costs a few hundred bytes of
+    // preview; overshooting reinstates the wrap this function exists to prevent.
+    let keep = crate::tools::floor_char_boundary(&chunk, budget / 2);
+    let mut out = chunk[..keep].to_string();
+    out.push_str("\n…[truncated: this line is wider than the inline budget]");
+    (out, true)
+}
+
+/// The advisory attached whenever [`clamp_over_budget_line`] cuts.
+///
+/// Kept separate from the cut so the wording is testable without a
+/// `ToolContext`, and so both call sites phrase it identically. It names
+/// `json_path` because on a `@tool_*` ref an over-budget line is almost always a
+/// JSON-escaped payload, and field addressing reaches it in one call where line
+/// addressing cannot reach it at all.
+fn over_budget_line_hint(path: &str) -> String {
+    if path.starts_with("@tool_") {
+        format!(
+            "A single line here is wider than the inline budget, so it is shown truncated. \
+             On a @tool_* ref that is usually a JSON-escaped payload on one line — address the \
+             field instead of the line: read_file(\"{path}\", json_path=\"$.stdout\") for a \
+             run_command envelope, or json_path=\"$.<field>\" generally. \
+             run_command(\"grep PATTERN {path}\") also searches it."
+        )
+    } else {
+        format!(
+            "A single line here is wider than the inline budget, so it is shown truncated. \
+             Search it instead of slicing it: run_command(\"grep PATTERN {path}\"). \
+             For JSON content, read_file(\"{path}\", json_path=\"$.<field>\") addresses fields \
+             rather than lines."
+        )
+    }
 }
 
 /// Normalize native-`Read`-style `offset`/`limit` into `start_line`/`end_line`.
@@ -1929,6 +2006,92 @@ mod tests {
             "a paginated response must fit the threshold it is measured \
                  against; got {serialized} bytes vs {}",
             crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+        );
+    }
+
+    /// The third arm of the same contract, and the one the two above cannot
+    /// reach: a chunk that is ONE line wider than the whole budget.
+    ///
+    /// `read_from_buffer`'s doc comment promises it "never re-wraps its own
+    /// result in a `@tool_*` envelope". The safety valve in
+    /// `extract_lines_with_cost` always yields at least one line — deliberately,
+    /// to stop an agent re-requesting the same range forever — so when a single
+    /// line exceeds the budget it is emitted whole and the promise breaks.
+    ///
+    /// Both sibling tests use 1200 SHORT lines. That fixture can never reach the
+    /// valve: the budget stops it at a line boundary long before any one line is
+    /// oversized. They assert exactly the property under test here and would
+    /// both stay green with this defect present — which is why this arm is
+    /// written with a fixture whose premise is asserted rather than assumed.
+    ///
+    /// Real shape, measured 2026-08-29 on a live buffer: a `run_command`
+    /// envelope pretty-prints to 4 lines, of which line 3 is the entire stdout
+    /// as one JSON-escaped string, 9998 bytes wide. See
+    /// `docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
+    #[tokio::test]
+    async fn read_file_buffer_single_oversized_line_still_fits_the_threshold() {
+        let stdout = (1..=1200)
+            .map(|i| format!("row {i:05}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let envelope = json!({ "exit_code": 0, "stdout": stdout }).to_string();
+        let ctx = test_ctx().await;
+        let buf_id = ctx.output_buffer.store_tool("cmd", envelope);
+
+        // Premise of the fixture, asserted rather than assumed: after
+        // pretty-printing, the payload really is ONE line wider than the budget.
+        // If a future edit makes this fixture many-short-lines, this fails here
+        // instead of silently degrading into a copy of the two tests above.
+        let pretty = {
+            let raw = ctx.output_buffer.get(&buf_id).unwrap().stdout;
+            let v: Value = serde_json::from_str(&raw).unwrap();
+            serde_json::to_string_pretty(&v).unwrap()
+        };
+        let widest = pretty.lines().map(|l| l.len()).max().unwrap();
+        assert!(
+            widest > crate::tools::INLINE_BYTE_BUDGET,
+            "fixture must contain a single line wider than the whole budget, \
+             or it cannot reach the safety valve and proves nothing; widest \
+             line is {widest} vs budget {}",
+            crate::tools::INLINE_BYTE_BUDGET
+        );
+
+        let oversized_lineno = pretty
+            .lines()
+            .position(|l| l.len() > crate::tools::INLINE_BYTE_BUDGET)
+            .unwrap()
+            + 1;
+
+        let result = ReadFile
+            .call(
+                json!({
+                    "path": &buf_id,
+                    "start_line": oversized_lineno,
+                    "end_line": oversized_lineno,
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let serialized = serde_json::to_string(&result).unwrap().len();
+        assert!(
+            serialized <= crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD,
+            "a single over-budget line must still be paginated to fit, or \
+             call_content re-wraps the response and the caller gets an envelope \
+             instead of content — the exact outcome read_from_buffer's doc \
+             comment rules out; got {serialized} bytes vs {}",
+            crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
+        );
+
+        // Fitting is not enough on its own: a response that fits by silently
+        // dropping the line would pass the assertion above and strand the
+        // caller. It has to say the line was cut AND name the way through.
+        let rendered = serde_json::to_string(&result).unwrap();
+        assert!(
+            rendered.contains("json_path"),
+            "the response must name the addressing mode that does reach the \
+             payload, or the caller has a smaller response and no route: {result}"
         );
     }
 
