@@ -27,6 +27,11 @@ auto-loaded memory → skill prompts → static Rust lints/CI → per-task revie
 | 3 | `resolve_cite_ref` shipped 2 of 3 branches untested | semantic | mutation testing (branch) | I-3, I-4, I-5 |
 | 4 | Write/read asymmetry: id-keyed backlinks invisible for slug-less targets; both tests used slugged targets | semantic | mutation testing | I-3, I-4, I-5 |
 | 5 | Unescaped user string in a `LIKE` pattern (`%`/`_` acted as wildcards) | static | grep `#[test]` for LIKE-without-ESCAPE | I-2, I-5 |
+| 6 | Unreachable fixture: the assertion is exactly right, but the test DATA cannot reach the code path | semantic | mutation run against the whole assertion FAMILY, not just the new test | I-8 |
+
+(#6 added 2026-08-29 from a different work stream; the heading's count is the
+original set. It is a distinct mechanism from #2 — there the assertion was weak,
+here the assertion is precise and the data never reaches it.)
 
 Key finding from the feasibility exploration: a `call_graph`-based "untested new symbol"
 detector (I-6) is **structurally blind** to #3/#4 (a function that IS called by tests but
@@ -119,6 +124,62 @@ Reverted after the check.
 
 Closes **F-9** in `docs/trackers/archive/prompt-guide-refactor-session-log.md`, open
 since the prompt-guide-refactor work stream.
+
+### I-8 — Mutate the whole assertion family, not just the new test (defect #6)
+
+I-3 says surviving mutants are untested behaviour, and scopes the run to the
+diff. **That scoping is exactly what lets defect #6 through.** The mutant is
+killed by the test you just wrote, the run comes back clean, and the
+PRE-EXISTING tests asserting the same property are never observed at all. They
+can be green in the broken world with nothing anywhere saying so.
+
+**Defect #6 is not a weak assertion — that is #2.** Here the assertion is
+precisely the right one. The *fixture* cannot reach the code path, so the
+assertion never runs against the case its name claims. The tell: the test's
+**data** lacks the property under test while its **name and shape** claim
+otherwise.
+
+**Measured 2026-08-29 (this session's instance).** `src/tools/read_file.rs`
+carried two tests named `..._chunk_fits_the_threshold_it_is_measured_against`,
+asserting exactly the property a live defect violated — that an inlined chunk
+must fit `TOOL_OUTPUT_BUFFER_THRESHOLD` or `call_content` re-wraps the response.
+Both fixtures are 1200 **short** lines. The defect only fires when a **single**
+line exceeds the whole budget, and with short lines the budget always stops at a
+line boundary long before the safety valve is reached. Disabling the fix and
+running the whole `fits_the_threshold` family gave **2 passed / 1 failed**: both
+incumbents green with the defect present. Fix `61476cb5`; bug
+`docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
+
+**A sibling instance the same afternoon — found by codescout-97 in
+`src/librarian/filter.rs` (BL-47), theirs not mine — is the worse shape.** A
+*differential* test (`eval_matches_compile_on_fixture`, two engines required to
+agree on one AST) whose fixture table declares no array column at all, so it
+could not reach the `tags`/`owners` `in`/`nin` branch that was broken. Two-engine
+agreement advertises maximum rigour while the fixture omits the disputed type
+entirely — which is why a test's *form* is no evidence about its *reach*.
+
+**Procedure.** When a mutation kills your new test, re-run that same mutation
+against every test naming the same property: take the shared phrase out of the
+test name and run `cargo test --lib <phrase>` rather than the single test. Any
+sibling still green is a fixture that cannot reach the path — fix it, or record
+why it cannot. Cost is one extra filtered run per mutation, seconds.
+
+**Complement, not a substitute: assert the fixture's premise inside the test.**
+Both repairs here now assert the discriminating property of their own data
+*before* asserting behaviour (`widest > INLINE_BYTE_BUDGET`;
+`front.len() * 2 >= whole.len()`), so a later edit that flattens the fixture
+fails on the premise instead of silently becoming another blind copy.
+`util::shrink_guard::tests::a_uniform_fixture_cannot_tell_the_arms_apart` goes
+further and pins the trap itself as an executable warning.
+
+**Scope of the claim:** three instances in one afternoon across three subsystems
+(`read_file`, `shrink_guard`, `librarian::filter`), two of them mine and one
+codescout-97's. All three were found by *running* a mutation; none by reading.
+That is the argument for the procedure and also its limit — nothing here shows
+how often the family run finds a blind sibling when the diff-scoped run is
+already green.
+
+**Valid:** dated 2026-08-29
 ## History
 
 ### 2026-08-16 — I-7 opened and shipped same day (tracker-hygiene sweep → verify-open → fix)
