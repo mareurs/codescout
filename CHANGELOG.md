@@ -330,7 +330,40 @@ All notable changes to codescout are documented here.
   per-operation-tagged**, surviving a `SIGKILL` so OOM forensics can identify
   which background operation was running at time of death.
 
+### Deprecated
+
+- **`codescout::util::text::extract_lines_to_budget`** — scheduled for removal in the next
+  breaking release. Every budgeted chunk in this crate is inlined into a JSON tool response,
+  where the post-escaping cost is the binding one, so
+  `extract_lines_to_json_budget` is the correct choice everywhere. Callers outside this crate
+  should switch; the two differ only in how they charge a line.
+
+  It was retained in `7712d8e6` (2026-08-25) on the stated grounds that it "keeps its
+  raw-byte contract for callers whose budget really is raw bytes" — while the same commit
+  migrated all four call sites away from it, so that class has had zero members since the
+  day the sentence was written. `#[deprecated]` now makes the emptiness compiler-enforced
+  rather than documented. Removal is tracked in `docs/RELEASE-TODO.md` § Next Breaking
+  Release, together with the note that its tests must be retargeted rather than deleted —
+  they are the direct coverage of the shared `extract_lines_with_cost` core.
+
 ### Fixed
+
+- **`read_file` on a buffer returned an envelope instead of content when a single line
+  was wider than the whole inline budget.** `read_from_buffer` documents that it never
+  re-wraps its own result, but the safety valve in `extract_lines_with_cost` always emits
+  at least one line — deliberately, so a caller cannot re-request the same range forever —
+  so an over-budget line went out whole, the response reached 14508 bytes against a
+  10000-byte threshold, and `call_content` wrapped it. Measured on a `run_command` envelope
+  whose pretty-printed form is four lines, the third being all of stdout as one
+  JSON-escaped string 9998 bytes wide: line-slicing could never address it.
+
+  Such a chunk is now cut to fit, marked in-band, and the response carries
+  `line_truncated: true` plus a hint naming `json_path` — which reaches the payload in one
+  call where line addressing cannot reach it at all. It deliberately does not set `next`,
+  since the only range that would advance past the line is the one that produced it. The
+  shared extractor is unchanged: its trade-off is documented, test-pinned, and shared with
+  `read_markdown`, which has no stake in this. See
+  `docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
 
 - **The body-shrink guard compared only bytes, so a write that truncated a document to its
   long-lined front was accepted and reported success.** The two ratios diverge whenever line

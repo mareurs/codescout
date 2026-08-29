@@ -42,6 +42,44 @@ history (0.1.0 shipped 2026-02-25; current version is 0.15.0 per
 - [ ] **Symlink deny-list for writes** — While `canonicalize()` catches symlinks pointing outside the project, consider an explicit `follow_symlinks: false` option for extra safety.
 - [ ] **Content-type validation for file writes** — Prevent writing binary/executable content through `create_file` (e.g., reject files with null bytes or shebang lines to unexpected paths).
 
+## Next Breaking Release (0.16.0)
+
+Items that are **blocked on a breaking version bump**, not on priority. codescout
+is published (crates.io, 15 versions, 0.15.0 current), so removing a `pub` item
+is a semver break and cannot ride a patch release. Do these together when a
+0.16.0 is cut.
+
+- [ ] **Remove `codescout::util::text::extract_lines_to_budget`** — deprecated
+  2026-08-29; the raw-byte caller class it was retained for has been empty since
+  the commit that created it.
+
+  *Evidence:* `7712d8e6` (2026-08-25) migrated all four call sites to
+  `extract_lines_to_json_budget` and kept this wrapper on the stated grounds
+  that it *"keeps its raw-byte contract for callers whose budget really is raw
+  bytes"* — while the same commit message says *"Adopted at all four sites"*.
+  The retained class had zero members from the moment the sentence was written.
+  Confirmed 2026-08-29 by three independent signals: two search methods
+  (codescout `grep(include_hidden=true)` plus a bare shell sweep over 17 paths)
+  agreeing on zero production callers; `git log -S` showing no commit touching
+  the string since; and a structural check that every use of
+  `INLINE_BYTE_BUDGET` in the crate feeds a `json!({...})` response, so the
+  raw-byte cost model has no correct home here. `#[deprecated]` now makes that
+  compiler-enforced — a future production call fails the `-D warnings` gate.
+
+  **Before removing, retarget its tests — do not delete them with it.** Its nine
+  tests are the direct coverage of the shared `extract_lines_with_cost` core,
+  including `extract_lines_to_budget_single_line_exceeds_budget`, the only test
+  pinning the safety valve that `read_file::clamp_over_budget_line` (`61476cb5`)
+  depends on. Three direct tests for the live wrapper were added 2026-08-29;
+  check whether they cover the valve cases the nine do before dropping any.
+
+  *Also update when removing:* the `# Deprecated` doc section on the function,
+  the cross-reference in `extract_lines_to_json_budget`'s rustdoc, the
+  `#[allow(deprecated)]` on `src/util/text.rs`'s test module, and a CHANGELOG
+  **Removed** entry. Leave
+  `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md` alone —
+  it is a historical snapshot and rewriting it would falsify the record.
+
 ## Configuration Reference
 
 All security settings live in `.codescout/project.toml` under `[security]`:

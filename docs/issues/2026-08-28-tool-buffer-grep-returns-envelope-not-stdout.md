@@ -1,7 +1,7 @@
 ---
 id: '2d546e0f7b8fcc0c'
 kind: bug
-status: investigating
+status: fixed
 title: 'BUG: grepping a @tool_* buffer that holds a run_command result returns the JSON envelope, and each re-read re-wraps — the stdout is unreachable'
 owners:
 - marius
@@ -250,44 +250,71 @@ attempt controlled.
    intact and merely unaddressable by line.
 ## Fix
 
-Not implemented — the change lands in a shared primitive and wants a decision
-rather than a drive-by.
+Fixed on `experiments` in `61476cb5`, patch-id
+`f459ee93c80aba7eab5c3f922d1a6982b0b02f24`.
 
-**(a) Byte-truncate the oversized line inside the safety valve** — recommended.
-In `extract_lines_with_cost` (`src/util/text.rs:366-403`), when the valve fires
-because a *single* line exceeds the whole budget, emit a byte-truncated prefix of
-it with an explicit marker instead of the entire line. That keeps the valve's
-purpose (never return nothing, never stall) while removing the oversized response
-that causes the wrap. ~10 lines. Needs care on two points: the truncation must
-land on a UTF-8 char boundary (`floor_char_boundary` already exists in
-`src/tools/`), and the marker must be visible in the returned content, or a
-caller cannot tell a truncated line from a complete one — which would be a worse
-bug than this one.
+**Shipped option (b), not (a) — and the reversal was earned by counting.** The
+first write-up of this section recommended changing the shared primitive, and
+described the blast radius as *"`extract_lines_to_json_budget` alone has four
+call sites in `read_file.rs` plus others elsewhere"*. Both wrong, and measured
+2026-08-29:
 
-**Blast radius:** `extract_lines_to_json_budget` alone has four call sites in
-`read_file.rs` plus others elsewhere; every one currently relies on
-"at least one line, whole". A regression test must assert on a fixture whose
-**single line** exceeds the budget — a fixture of many small lines never reaches
-the valve and would pass with the fix reverted.
+| Symbol | Production callers |
+|---|---|
+| `extract_lines_with_cost` (private core) | 2, both wrappers |
+| `extract_lines_to_json_budget` | **4** — 3 in `read_file.rs`, 1 in `read_markdown.rs` |
+| `extract_lines_to_budget` | **0** |
 
-**(b) Point the caller at `$.stdout`.** When `read_file` line-slices a `@tool_*`
-whose pretty JSON holds a string field larger than the budget, name
-`json_path="$.<field>"` in the hint. Cheap, no semantic change, and it converts
-the failure into a one-step recovery. Composes with (a); worth doing even if (a)
-is declined.
+So "a primitive with several callers" counted a wrapper nothing calls. The real
+other consumer is `read_markdown`, which reads files whose lines are short and
+has no stake in this defect — and the valve's behaviour is pinned by
+`extract_lines_to_budget_single_line_exceeds_budget`, deliberately, with a
+comment saying why. Changing it to serve one caller's shape is how a general
+function accumulates other people's requirements.
 
-**(c) Expand escaped newlines when pretty-printing for text navigation.**
-Rejected. `read_file`'s `json_path` parses the pretty text
-(`read_file.rs:250-253`), so unescaping would break `json_path` on every
-`@tool_*` ref — including the `$.stdout` route that is currently the working
-escape.
+**What shipped instead:** `clamp_over_budget_line` in `src/tools/read_file.rs`,
+applied at both branches that inline a chunk. When the valve emits a line wider
+than the whole budget, the chunk is cut to half the budget on a char boundary
+(the kept bytes are re-measured *after* JSON escaping alongside the response's
+other keys, and an escape-heavy line can nearly double), marked in-band, and the
+response carries `line_truncated: true` plus a hint naming `json_path`.
 
-**Do not** change what `output_id` buffers store. The envelope is what makes
-`json_path` work at all, and (a)+(b) fix the observed harm without touching it.
+Deliberately does **not** set `next`: the only range that would advance past the
+line is the one that produced it, so a `next` here would rebuild the retry loop
+the valve exists to break.
+
+Option (c) — unescaping newlines in the pretty text — stays rejected:
+`read_file`'s `json_path` parses that text, so it would break the `$.stdout`
+route that is the working escape.
 ## Tests added
 
-None. A regression test is premature without a reproduction.
+`read_file_buffer_single_oversized_line_still_fits_the_threshold`
+(`src/tools/read_file.rs`).
 
+**It could not be run red in the normal order**, and that is worth recording
+rather than glossing: a peer session's `sync.rs` was mid-signature-change, so
+the crate did not compile when the test was written, and the fix landed before
+the first run. Redness was therefore established afterwards by mutation —
+disable the clamp and it fails at **14508 bytes vs 10000**, on the intended
+assertion.
+
+**The mutation paid twice.** Run against the whole `fits_the_threshold` family
+it reported **2 passed / 1 failed**: the two tests that already assert this
+exact property — *"the chunk fits the threshold it is measured against"* — stay
+green with the defect present, because their fixture is 1200 short lines and can
+never reach the safety valve. Two existing tests, blind to the thing they claim
+to check. The new test therefore asserts its own fixture premise (widest line >
+`INLINE_BYTE_BUDGET`) *before* asserting behaviour, so a later edit that makes
+it many-short-lines fails loudly instead of becoming a third blind copy.
+
+**Related coverage repair, same session.** Scouting the primitive turned up an
+inversion: `extract_lines_to_json_budget` had 4 production callers and **zero**
+direct tests, while its unused sibling had 0 callers and **nine**. The coverage
+was attached to the wrapper that was retired. Three direct tests now cover the
+live path (`src/util/text.rs`): the escaped-vs-raw cost difference that is the
+function's whole reason to exist, the after-serialization budget contract with
+the raw variant as an overshooting control, and the safety valve through the
+wrapper production actually calls.
 ## Workarounds
 
 **`read_file("@tool_X", json_path="$.stdout")`** — returns the payload as real

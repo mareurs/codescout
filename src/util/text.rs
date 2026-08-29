@@ -305,6 +305,30 @@ pub fn reindent_to(block: &str, target_base: &str) -> String {
 /// **Safety valve:** always includes at least 1 line (even if it exceeds the budget)
 /// to prevent infinite retry loops where the agent keeps requesting the same range.
 /// Exception: if byte_budget is 0, returns nothing (edge case for testing).
+///
+/// # Deprecated: the caller class this serves is empty
+///
+/// `7712d8e6` (2026-08-25) migrated all four call sites to
+/// [`extract_lines_to_json_budget`] and kept this one on the stated grounds that
+/// it "keeps its raw-byte contract for callers whose budget really is raw
+/// bytes". Measured 2026-08-29: that class has **no members and no place to
+/// acquire one**. Every use of `INLINE_BYTE_BUDGET` in this crate feeds content
+/// into a `json!({...})` tool response, where the escaped cost is the binding
+/// one — which is the entire reason the JSON-aware sibling exists.
+///
+/// Retained rather than removed only because this crate is published and this
+/// function is reachable as `codescout::util::text::extract_lines_to_budget`;
+/// deleting a `pub` item is a breaking change, not a cleanup. Scheduled for
+/// removal in the next breaking release — see `docs/RELEASE-TODO.md`.
+///
+/// Its tests are NOT dead weight: they are the direct coverage of the shared
+/// [`extract_lines_with_cost`] core, including the only test that pins the
+/// safety valve. Retarget them before removing this wrapper.
+#[deprecated(
+    note = "the raw-byte caller class is empty — every budgeted path in this crate \
+            serializes to JSON. Use extract_lines_to_json_budget. Scheduled for removal \
+            in the next breaking release."
+)]
 pub fn extract_lines_to_budget(
     text: &str,
     start_line: usize,
@@ -331,8 +355,13 @@ pub fn extract_lines_to_budget(
 /// nesting reported in
 /// `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md`.
 ///
-/// Use this wherever the extracted chunk is returned inline as JSON; use
-/// [`extract_lines_to_budget`] where the budget really is raw bytes.
+/// Use this for every budgeted chunk in this crate. The raw-byte variant
+/// [`extract_lines_to_budget`] is deprecated and its caller class is empty:
+/// measured 2026-08-29, every use of `INLINE_BYTE_BUDGET` here feeds a
+/// `json!({...})` tool response, so the escaped charge is always the binding
+/// one. This doc line previously pointed readers at that variant "where the
+/// budget really is raw bytes" — a class that had zero members from the moment
+/// the sentence was written, in the same commit that emptied it.
 pub fn extract_lines_to_json_budget(
     text: &str,
     start_line: usize,
@@ -402,6 +431,11 @@ fn extract_lines_with_cost(
     (result_lines.join("\n"), lines_shown, hit_end)
 }
 
+// `extract_lines_to_budget` is deprecated but deliberately still exercised here:
+// its nine tests are the direct coverage of the shared `extract_lines_with_cost`
+// core, and one of them is the only test pinning the safety valve. Scoped to the
+// test module so a deprecated call in production code still fails the gate.
+#[allow(deprecated)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -745,5 +779,94 @@ col 0
         assert_eq!(lines_shown, 0);
         assert!(complete); // no lines in range, nothing to show
         assert_eq!(content, "");
+    }
+
+    // ── extract_lines_to_json_budget ────────────────────────────────────────
+    //
+    // Added 2026-08-29. Until then this function had FOUR production callers
+    // and ZERO direct tests, while its unused sibling above had zero callers
+    // and nine tests — the coverage was attached to the wrapper that was
+    // retired, not the one that shipped. Everything below tests the live path.
+
+    /// The reason this function exists, stated as a difference the code must
+    /// exhibit. If someone ever "simplifies" it to delegate to the raw cost
+    /// closure, these two counts become equal and this test dies.
+    #[test]
+    fn json_budget_charges_escaping_so_it_fits_fewer_lines_than_the_raw_budget() {
+        // 20 quotes per line: 20 raw bytes, 40 escaped (each `"` -> `\"`).
+        let text: String = std::iter::repeat_n("\"".repeat(20), 20)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let (_, raw_lines, _) = extract_lines_to_budget(&text, 1, 100, 100);
+        let (_, json_lines, _) = extract_lines_to_json_budget(&text, 1, 100, 100);
+
+        // raw: 20+1 = 21/line -> 4 lines (84), a 5th would reach 105.
+        assert_eq!(raw_lines, 4, "raw cost model charges 21 per line");
+        // json: 40+2 = 42/line -> 2 lines (84), a 3rd would reach 126.
+        assert_eq!(json_lines, 2, "escaped cost model charges 42 per line");
+        assert!(
+            json_lines < raw_lines,
+            "the whole point of the JSON variant is that it fits FEWER lines \
+             into the same budget; equal counts mean the escaping charge was lost"
+        );
+    }
+
+    /// The contract in the units that actually bind: a chunk is measured after
+    /// JSON escaping, because that is the form the response is serialized in.
+    ///
+    /// The raw variant is exercised on the same input as a control — it
+    /// overshoots, which is the miniature of the measured 10169-vs-10000
+    /// overshoot that caused
+    /// `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md`.
+    /// Without the control this test would pass against any budget large
+    /// enough, and prove nothing about the cost model.
+    #[test]
+    fn json_budget_chunk_still_fits_the_budget_after_serialization() {
+        const BUDGET: usize = 200;
+        let text: String = std::iter::repeat_n("ab", 100)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // `to_string` wraps the value in quotes; the payload is what is budgeted.
+        let escaped_len = |s: &str| serde_json::to_string(s).unwrap().len() - 2;
+
+        let (json_chunk, _, _) = extract_lines_to_json_budget(&text, 1, 200, BUDGET);
+        assert!(
+            escaped_len(&json_chunk) <= BUDGET,
+            "escaped chunk must fit the budget it was measured against; got {} vs {BUDGET}",
+            escaped_len(&json_chunk)
+        );
+
+        let (raw_chunk, _, _) = extract_lines_to_budget(&text, 1, 200, BUDGET);
+        assert!(
+            escaped_len(&raw_chunk) > BUDGET,
+            "control: the raw-byte variant must OVERSHOOT once escaped, or this \
+             fixture cannot tell the two cost models apart; got {} vs {BUDGET}",
+            escaped_len(&raw_chunk)
+        );
+    }
+
+    /// The safety valve, exercised through the wrapper production actually
+    /// calls. It was previously pinned only via the retired sibling, so the
+    /// live path's guarantee rested on a test of a function nothing calls.
+    ///
+    /// `read_file`'s `clamp_over_budget_line` depends on this behaviour: it
+    /// exists precisely to catch the oversized line the valve emits here.
+    #[test]
+    fn json_budget_safety_valve_yields_one_line_even_when_it_busts_the_budget() {
+        let text = "x".repeat(1000);
+        let (content, lines_shown, complete) = extract_lines_to_json_budget(&text, 1, 1, 50);
+        assert_eq!(lines_shown, 1, "the valve must always make progress");
+        assert!(
+            complete,
+            "reaching end_line is 'complete' even when oversized"
+        );
+        assert_eq!(
+            content.len(),
+            1000,
+            "the line is emitted WHOLE — callers that inline it must clamp it \
+             themselves (see read_file::clamp_over_budget_line)"
+        );
     }
 }
