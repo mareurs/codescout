@@ -12,7 +12,7 @@ tags:
 - codescout-embed
 - dependencies
 topic: embedding transport boundary
-entry_high_water_ET: 8
+entry_high_water_ET: 9
 entry_prefix: ET
 ---
 
@@ -426,6 +426,12 @@ types.
 **Status:** open — **A and B1 DONE. B2 is BLOCKED on a user decision** (below);
 do not start it unilaterally.
 
+> **The live board is `ET-9`.** This entry holds the *reasoning* — why this order,
+> what gates what, why Phase D audits rather than deletes. `ET-9` holds the
+> *state*: 15 numbered tasks, their blockers, and the three decisions only the
+> operator can make. Strike rows there; revise the argument here. If they ever
+> disagree, this entry is the one to re-derive from.
+
 | phase | state | commit | patch-id |
 |---|---|---|---|
 | A | done | `28bb6e8a` | `52cb00b5b67d80de322ccc0c9f5a6166d1860fb0` |
@@ -557,6 +563,63 @@ The plan sequences by stage number. That ordering puts the consumer swap (C)
 before the crate is ready (B), and never mentions A at all — so the deletion in
 D would land against an untested function with no way to show equivalence. The
 order above is derived from what gates what, not from stage numbering.
+
+## ET-9 — Task board — every outstanding item from this work stream, with its blocker
+
+**Observed:** 2026-08-29. The live board. `ET-8` holds the *reasoning* (why this
+order, what gates what); this holds the *state*. Strike rows here as they land;
+do not restate the rationale.
+
+**Status:** open — 13 tasks, 1 blocked on an operator decision, 6 free for any
+session
+
+**Valid:** dated 2026-08-29
+
+### Sequenced — embedding transport (order derived in `ET-8`)
+
+| # | Phase | Task | State | Waits on |
+|---|---|---|---|---|
+| ~~T1~~ | A | Port the 11 host-spoofing assertions to root's `is_https_or_loopback` | **done** `28bb6e8a` | — |
+| ~~T2~~ | B1 | Port `read_timeout` into `RemoteEmbedder::http_client` | **done** `ffdf1b09` | — |
+| T3 | B2 | Three-state query prefix on `RemoteEmbedder` — *derive* / *explicit* / *suppressed* | **BLOCKED** | decision D1 |
+| T4 | B3 | Typed `EmbedError::Connect { url }` replacing the `"embed connect failed"` substring contract (`ET-5`) | ready after T3 | T3 |
+| T5 | B4 | Export `is_https_or_loopback` (and whatever else Phase D needs) as `pub` | ready after T3 | T3 |
+| T6 | C | Swap root's dense leg to `RemoteEmbedder`; hold batch size at 8 so it stays behaviour-preserving (`ET-3`) | ready after B | T3, T4, T5 |
+| T7 | D1 | Delete root's `is_https_or_loopback`; **re-point** T1's test at the crate's, do not delete it | ready after C | T6 |
+| T8 | D2 | Delete root's `src/retrieval/transport.rs` and the duplicated wire structs | ready after C | T6 |
+| T9 | D3 | Drop `reqwest` / `rustls` from the **root** manifest; re-measure the crate delta and record it | ready after D1/D2 | T7, T8 |
+
+Phase D is *audit each pair, then delete* — not delete-root's-copy. `ET-4` has the
+counterexample where root was ahead of the crate.
+
+### Free — no dependency on the sequence above
+
+| # | Task | Why it matters | Pointer |
+|---|---|---|---|
+| T10 | Stop `tools::memory::tests` resolving the embedder from ambient config | The unfixed half of the wedged-server bug. They can no longer hang, but the suite still reaches a live local service when one is configured | `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`, `unverified:` field |
+| T11 | Retrofit a lean-safe inert embedder; restore the 11 test items `ET-2` gated on `remote-embed` | `ET-2` gated them rather than swapping in `FixedDimEmbedder`, because swapping could make `effective_model_dim_falls_back_when_nothing_is_known` pass while proving nothing. Gating cannot make a test lie; the retrofit must not either | `ET-7` |
+| T12 | `rendezvous_poll_for_test` is dead under `--no-default-features --all-targets` | **Pre-existing, not from this stream.** `guide_hint_tests` is `librarian`-gated; CLAUDE.md's lean gate omits `--all-targets`, so nothing surfaced it | `server.rs:988` |
+| T13 | `init: true` on the llama.cpp compose services | Docker's own error recommends it. It is what would have let the dead process be reaped instead of zombifying and stranding 394 MiB of VRAM | `embedder-stack-ops-session-log:F-2` |
+| T14 | Point the healthchecks at `/v1/embeddings`, not `/health` | `/health` returns a static string that never touches CUDA, which is why the whole stack read green for 15 hours while every request hung | `embedder-stack-ops-session-log:F-2` |
+| T15 | `edit_markdown`'s frontmatter write never touches the catalog | The documented status-flip call desyncs the row `find(kind="bug", status=…)` reads. Two independent instances in one day | `docs/issues/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`, `open-issue-work-queue:BL-48` |
+
+T13 and T14 are one-line changes to `docker-compose.yml` and are the cheapest
+items on this board.
+
+### Decisions only the operator can make
+
+| # | Question | Blocks |
+|---|---|---|
+| **D1** | Does an unset `CODESCOUT_QUERY_PREFIX` mean **suppressed**, or *derive from the model name*? `ET-3`'s table says suppressed | **T3**, and therefore T4-T9 |
+| D2 | `~/.claude/settings.json` sets the prefix while the running model is `CodeRankEmbed-Q4_K_M`, for which the repo's `.env` records "NO query prefix (37, champion) … forcing the prefix drops to 34". Remove it to match, or was it deliberate? | nothing — separable from D1 |
+| D3 | 22 unpushed commits on `experiments`. Push? | nothing |
+
+D1 is the only one gating work. D2 is a live retrieval-quality question
+regardless of whether T3 is ever built.
+
+**Rests on:** `ET-8` for the ordering argument and `ET-4` for why Phase D audits
+rather than deletes. If either is revised, re-derive this board rather than
+patching rows.
 
 ## Template for new entries
 
