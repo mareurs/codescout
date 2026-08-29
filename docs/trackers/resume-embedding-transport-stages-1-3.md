@@ -115,15 +115,29 @@ test-only change. Detail in the commit message.
 
 ## ET-2 — Stage 1: split the module, gate the HTTP half — banks the whole win alone
 
-**Status:** open — the highest-value single piece in this stream
-**Valid:** dated 2026-08-28
+**Status:** shipped 2026-08-29 — `2c6f2677` on `experiments`, patch-id
+`07366d4b5d24c784f31fe56aa32c8a6e95411c61`. Record the patch-id, not just the
+SHA: `experiments` is rebased after every ship and the SHA dies with it.
+**Valid:** dated 2026-08-29
+
+**Measured on landing: `bare 274 → 226 (−48)`, `remote-embed +1 → +49`.** The
+predicted figure held exactly, which also closes `ET-6`.
+
+**Read `ET-7` before touching `ET-3`/`ET-4`.** The plan's Stage 1 design table
+was wrong in six places and the corrected gate is `remote-embed` throughout —
+not `server-stack`, which breaks both the lean and the default build. The file
+split described below did **not** happen: the HTTP items are interleaved, so
+they were gated in place instead.
 
 **This stage banks the entire 48-crate win on its own.** If Stages 2–3 never
 happen, Stage 1 alone is still worth having.
 
 **Measured payoff:** `--no-default-features` goes 274 → 226 crates (−48: the whole
-`hyper`/`h2`/`tower`/`rustls`/`ring` stack). Two CI lanes
-(`.github/workflows/ci.yml:46`, `:48`) stop compiling a TLS stack they never call.
+`hyper`/`h2`/`tower`/`rustls`/`ring` stack). **Six of nine test cells** stop
+compiling a TLS stack they never call — the matrix at
+`.github/workflows/ci.yml:70-76` runs `no-features` *and* `local-embed
+--no-default-features` across three OSes. (This line said "two CI lanes" citing
+`:46`/`:48` until 2026-08-29; those are the clippy job, not the test matrix.)
 Default build is unchanged at 339 — **the win is CI time and manifest honesty,
 not shipped binary size. Do not oversell this to reviewers.**
 
@@ -204,16 +218,43 @@ with its own crate-side test. **Constraint:** the dependency points one way;
 
 ## ET-6 — Re-measure the −48 crate figure before quoting it
 
-**Status:** open — cheap, do it alongside ET-2
-**Valid:** dated 2026-07-25
+**Status:** closed 2026-08-29 — re-measured during ET-2 (`2c6f2677`). The
+month-old figure held **exactly**: `bare 274 → 226 (−48)`.
+**Valid:** dated 2026-08-29
 
 The 274 → 226 figure was measured 2026-07-25. The dependency tree has moved since
 (`codescout-embed` gained the `local` ONNX module, among others). Quoting a
 month-old crate delta in a PR description is exactly the decay this repo's
 tracker discipline exists to catch.
 
-**Next:** re-run `cargo tree --no-default-features` counts before and after ET-2
-and record both here.
+**Measured 2026-08-29**, immediately before committing ET-2:
+
+| feature | crates | delta vs bare |
+|---|---|---|
+| *(bare)* | **226** | — |
+| `remote-embed` | 275 | **+49** |
+| `server-stack` | 324 | +98 |
+| `librarian` | 275 | +49 |
+| `http` | 259 | +33 |
+
+The headline number was safe to quote after all. Two sibling rows moved for
+reasons worth knowing, and neither is a regression:
+
+- **`remote-embed` +1 → +49** is the whole point — that `+1` was the bug the plan's
+  own baseline table flagged. Root forwarded the feature while keeping its own
+  `reqwest`/`rustls` unconditional, so enabling it cost one crate because the
+  stack was already paid for.
+- **`http` +17 → +33** is not growth. `http` (axum/tower-http) previously
+  **freeloaded** on the always-compiled `reqwest`'s hyper/h2 stack; now that
+  `reqwest` is optional it pulls that stack itself. A default build has the same
+  total crates as before — only the attribution changed, which is the manifest
+  honesty this stage was for.
+- **`server-stack` +98** is `qdrant-client` (+49) plus the newly-declared
+  `remote-embed` implication (+49) — a dependency it always had and never stated.
+
+**Method note for whoever re-runs this:** do not compose per-package closures.
+`cargo tree -p X --no-default-features` applies the flag to `X`, not to the root,
+and returns degenerate results.
 
 ## ET-7 — Stage 1's design table was wrong in six places; the corrected gate is `remote-embed` throughout
 
