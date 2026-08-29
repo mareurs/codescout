@@ -423,8 +423,44 @@ types.
 **Observed:** 2026-08-29, after ET-2 shipped. Reviewed with the architecture
 (snow-lion) and refactoring (yak) lenses.
 
-**Status:** open — **Phase A DONE** (`28bb6e8a`, patch-id
-`52cb00b5b67d80de322ccc0c9f5a6166d1860fb0`). Next: Phase B1.
+**Status:** open — **A and B1 DONE. B2 is BLOCKED on a user decision** (below);
+do not start it unilaterally.
+
+| phase | state | commit | patch-id |
+|---|---|---|---|
+| A | done | `28bb6e8a` | `52cb00b5b67d80de322ccc0c9f5a6166d1860fb0` |
+| B1 | done | `ffdf1b09` | `9bee6603a61ef66ba6aaf3b999896d64bceb68d2` |
+| B2 | **blocked** | — | — |
+| B3, B4, C, D | not started | — | — |
+
+**Why B2 is blocked, and what unblocks it.** B2 is not plumbing — it decides
+whether an unset `CODESCOUT_QUERY_PREFIX` means *suppressed* or *derive from the
+model name*, and that is benchmark-visible retrieval quality. The operator's live
+config currently disagrees with the repo's own measurement:
+
+- `~/.claude/settings.json` sets `CODESCOUT_QUERY_PREFIX = "Represent this query
+  for searching relevant code: "` alongside
+  `CODESCOUT_EMBEDDER_MODEL_NAME = CodeRankEmbed-Q4_K_M.gguf`.
+- The repo's `.env` has that exact line **commented out**, because "Q4_K_M is
+  benchmarked best with NO query prefix (37, champion) — forcing the prefix drops
+  to the f16+prefix tier (34)".
+
+So the machine is sitting on ET-3's row 2 (*CodeRank + custom prefix →
+regression*). Two questions to put to the user before writing code: (1) does unset
+mean suppressed — ET-3's table says yes; (2) should the `settings.json` prefix be
+removed to match the benchmark, or was it deliberate? Answering (1) is enough to
+start B2; (2) is separable and is theirs regardless.
+
+**Also landed alongside B1, not part of the plan:** `21174425` (patch-id
+`9885fb29d5499e85b27532de50688cbf59d1c942`) removed a race in the wedged-peer
+test that `9f4debc3` had shipped — `embed_one_batch` drives both legs through
+`tokio::try_join!`, which returns whichever errors first, so a dense-specific
+message assertion against two wedged bases was a coin flip. `dense_only(true)`
+never applied; `embed_one_batch` does not consult it. Fixed by calling
+`dense_batch` directly. Found by a peer session running the suite under
+contention; it passes in isolation, which is why its authoring session missed it.
+
+**Valid:** dated 2026-08-29
 
 **Valid:** dated 2026-08-29
 
@@ -476,7 +512,14 @@ Each phase ends green and is independently revertable. Baseline to hold:
 
 **Phase B — crate API. Contract changes, ahead of any consumer.**
 
-- **B1.** Port `read_timeout` into `RemoteEmbedder::http_client`. The crate
+- **B1. DONE** (`ffdf1b09`). Ported `read_timeout` into
+  `RemoteEmbedder::http_client`, keeping the existing total `timeout(300s)` — the
+  two bound opposite failures and neither subsumes the other. Note for later
+  phases: `http_client` and `with_read_timeout` now share one `build_client`, and
+  that sharing is load-bearing rather than tidy. Written as two separate builder
+  chains, the test exercised only the injectable one and would have passed with
+  the shipped path's bound removed entirely. The DRY violation and the vacuous
+  test were the same defect. The crate
   currently uses `.timeout(300s)` (whole request); root uses `.read_timeout(120s)`
   (gap between bytes). Swapping the consumer first would regress the guard root
   gained in `9f4debc3`. Do this before C1, not after.
