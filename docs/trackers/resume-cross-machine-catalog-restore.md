@@ -310,10 +310,33 @@ entries are present, so "the stdout is unreachable" holds only for line-oriented
 readers — `jq`, `grep`, `awk`, `head -c` reach it immediately. The bug file's
 title is now overstated and says so.
 
-**Next:** design the fix. The shape of the defect — a line-addressed reader over a
-content whose lines can exceed the budget — suggests byte-range fallback in
-`read_file` when a single line overflows, and/or storing raw stdout rather than the
-envelope for `output_id` buffers. Not started; no option measured yet.
+**Second pass, same day — traced to one function, and the severity drops.** The
+oversized line is made by `to_string_pretty`: it expands JSON *fields* onto
+separate lines but leaves a *string value's* embedded newlines escaped, so a
+`run_command` envelope's `stdout` stays on one line. Both pretty-print sites
+(`output_buffer.rs:618-776`, `read_file.rs:238-243`) say in their own comments
+that they exist to make the content navigable; both are defeated for the one
+field that carries the payload. The read then wraps because
+`extract_lines_with_cost` (`src/util/text.rs:366-403`) has a **documented safety
+valve** — always emit at least one line even if it exceeds the budget, to avoid
+stalling — and `extract_lines_to_json_budget`'s doc comment already names the
+resulting wrap, citing
+`docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md`. Stall or
+wrap: for a single over-budget line one of the two always happens, which is why
+varying the command never reproduced it.
+
+**And it was never unreachable.** `read_file(id, json_path="$.stdout")` returns
+the payload as 119 real lines, in one call. Neither the original session nor the
+first pass tried it.
+
+**Next:** decide on the fix, which touches a shared primitive and so is not a
+drive-by. Recommended is byte-truncating the oversized line inside the safety
+valve (~10 lines in `extract_lines_with_cost`, needs a char-boundary-safe cut and
+a visible marker), plus a hint naming `$.<field>` when `read_file` line-slices a
+`@tool_*` with an over-budget string field. A regression test must use a fixture
+whose SINGLE LINE exceeds the budget — many small lines never reach the valve and
+would pass with the fix reverted. Options and blast radius are written up in the
+bug file's § Fix.
 ## CM-8 — duplicate frontmatter in the hamsa log
 
 **Status:** fixed 2026-08-28 — body edit only, no code. Verified: `git diff` is

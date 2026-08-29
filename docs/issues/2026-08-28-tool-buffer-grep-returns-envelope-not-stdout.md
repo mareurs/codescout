@@ -153,6 +153,71 @@ returns 117 — nothing was truncated or corrupted. "The stdout is unreachable" 
 true only of line-oriented readers; byte- and pattern-oriented ones (`jq`,
 `grep`, `awk`, `head -c`) reach it immediately. That is narrower and more
 fixable than the title of this file, which is now overstated.
+
+## Root cause, traced to one function (2026-08-29, second pass)
+
+The § Root cause above stops at "a line-oriented reader cannot address a line
+bigger than its budget". True, but not the end of the trail. The trail ends at a
+**deliberate trade-off** in one shared function, and at a bug that was already
+filed and archived.
+
+### Where the oversized line comes from
+
+Both `resolve_refs` (`src/tools/output_buffer.rs:618-776`, for shell
+interpolation) and `read_file` (`src/tools/read_file.rs:238-243`, for direct
+reads) pretty-print a `@tool_*` buffer before use. Both say why, in almost the
+same words — `read_file`'s is *"pretty-print so start_line/end_line navigation and
+json_path extraction are useful"*.
+
+`serde_json::to_string_pretty` puts each **field** on its own line. A string
+**value** containing newlines does not expand — JSON escapes them as `\n`, so it
+stays one line. For a `run_command` envelope the payload lives in `stdout`, whose
+value is the entire multi-line output. **The transform that exists to prevent one
+unnavigable blob produces exactly that, for the only field anyone wants.**
+
+### Why the read then wraps
+
+`extract_lines_with_cost` (`src/util/text.rs:366-403`) carries a documented
+**safety valve**:
+
+```rust
+if bytes_used + line_bytes > byte_budget && !result_lines.is_empty() {
+    hit_end = false;
+    break;
+}
+```
+
+> **Safety valve:** always includes at least 1 line (even if it exceeds the
+> budget) to prevent infinite retry loops where the caller keeps requesting the
+> same range.
+
+So a 9998-byte line against a 9000-byte budget **is emitted whole**.
+`call_content` then wraps the oversized response in a `@tool_*` envelope — and
+`extract_lines_to_json_budget`'s own doc comment already names that outcome and
+cites `docs/issues/archive/2026-08-25-run-command-nested-buffer-recursion.md`.
+
+The two failure modes are therefore **traded against each other**: refuse the
+oversized line and navigation stalls forever; emit it and the response gets
+wrapped. For a single line larger than the budget one of the two always happens,
+and there is no third branch. That is why varying the *command* never reproduced
+it — the trigger is the line width of the buffered content, which no reduction
+attempt controlled.
+
+### Two corrections to this file's own first pass
+
+- **"Infinite regress" overstates it.** The new handles are created on purpose —
+  `read_file.rs:319-321` stores each oversized slice under its own handle
+  because that *"keeps it greppable"*, and the comment there records that
+  BUG-026 already fixed the off-by-`(s-1)` `next` which made such chains *"look
+  like they never converged"*. What actually happens is one deliberate wrap per
+  read, not an unbounded loop.
+- **The payload was reachable in ONE call the whole time.**
+  `read_file("@tool_X", json_path="$.stdout")` returns it as **119 real lines**,
+  because `extract_json_path` yields the unescaped string and oversized results
+  are stored as a raw-text `@file_*`. Neither the original session nor this one
+  tried it before the second pass. The honest severity is therefore *"line
+  slicing a command-envelope buffer wraps, and nothing points you at
+  `$.stdout`"* — not *"the stdout is unreachable"*.
 ## Hypotheses tried
 
 1. **Hypothesis:** any grep of a buffer whose result exceeds the 10000-byte
@@ -185,27 +250,62 @@ fixable than the title of this file, which is now overstated.
    intact and merely unaddressable by line.
 ## Fix
 
-None. Do not fix before reproducing — the mechanism above is inferred from handle
-names, and the repo's own record has three cases this month where a bug file's
-prescribed fix was wrong in *direction*
-(`docs/trackers/bug-ledger-resume-2026-08-28.md` § Method notes).
+Not implemented — the change lands in a shared primitive and wants a decision
+rather than a drive-by.
 
+**(a) Byte-truncate the oversized line inside the safety valve** — recommended.
+In `extract_lines_with_cost` (`src/util/text.rs:366-403`), when the valve fires
+because a *single* line exceeds the whole budget, emit a byte-truncated prefix of
+it with an explicit marker instead of the entire line. That keeps the valve's
+purpose (never return nothing, never stall) while removing the oversized response
+that causes the wrap. ~10 lines. Needs care on two points: the truncation must
+land on a UTF-8 char boundary (`floor_char_boundary` already exists in
+`src/tools/`), and the marker must be visible in the returned content, or a
+caller cannot tell a truncated line from a complete one — which would be a worse
+bug than this one.
+
+**Blast radius:** `extract_lines_to_json_budget` alone has four call sites in
+`read_file.rs` plus others elsewhere; every one currently relies on
+"at least one line, whole". A regression test must assert on a fixture whose
+**single line** exceeds the budget — a fixture of many small lines never reaches
+the valve and would pass with the fix reverted.
+
+**(b) Point the caller at `$.stdout`.** When `read_file` line-slices a `@tool_*`
+whose pretty JSON holds a string field larger than the budget, name
+`json_path="$.<field>"` in the hint. Cheap, no semantic change, and it converts
+the failure into a one-step recovery. Composes with (a); worth doing even if (a)
+is declined.
+
+**(c) Expand escaped newlines when pretty-printing for text navigation.**
+Rejected. `read_file`'s `json_path` parses the pretty text
+(`read_file.rs:250-253`), so unescaping would break `json_path` on every
+`@tool_*` ref — including the `$.stdout` route that is currently the working
+escape.
+
+**Do not** change what `output_id` buffers store. The envelope is what makes
+`json_path` work at all, and (a)+(b) fix the observed harm without touching it.
 ## Tests added
 
 None. A regression test is premature without a reproduction.
 
 ## Workarounds
 
-Redirect to a real file and read that:
+**`read_file("@tool_X", json_path="$.stdout")`** — returns the payload as real
+lines in one call. Verified 2026-08-29 on the reproduced buffer: 119 lines. This
+is the answer, and it needs no fix to be available today.
+
+For a shell-side read of the same buffer, any byte- or pattern-oriented tool
+reaches it — the content is intact, only line-addressing fails:
 
 ```
-run_command("grep -o '\"path\": \"[^\"]*\"' @tool_xxxx > /tmp/out.txt; wc -l /tmp/out.txt")
-read_file("/tmp/out.txt")
+grep PATTERN @tool_X          # matches inside the escaped line
+jq -r '.stdout' @tool_X       # the raw payload
+awk '{print NR": "length($0)}' @tool_X   # confirms the one-huge-line shape
 ```
 
-This also sidesteps Iron Law 3 cleanly, since the redirect is not a pipe to a
-trimmer.
-
+Re-running the original command with `> /tmp/out.txt` and reading the file also
+works, and is what the original session used to escape. It is the most expensive
+option of the four — prefer `$.stdout`.
 ## Resume
 
 Run hypothesis 3: issue a compound `run_command` (`grep -c X @tool_ref; echo ---;
