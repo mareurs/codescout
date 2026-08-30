@@ -5,8 +5,10 @@ prompt: |-
 
   Row shape: `{id, phase, task, status, status_note, bug, next}`.
   - `phase` (1-4) is readiness ordering, not priority.
-  - `status` is a NORMALIZED token, for filtering only: `open` | `in-progress` | `blocked` |
-    `done` | `done-archived` | `partial` | `dropped`.
+  - `status` is a NORMALIZED token, for filtering only: `not-started` | `open` |
+    `investigating` | `in-progress` | `blocked` | `done` | `done-archived` | `partial` |
+    `dropped` | `zombie`. Widened 2026-08-30 — `investigating` and `zombie` mirror the
+    bug-file vocabulary, and all three added values were already in use in the body.
   - `status_note` carries the human-readable status cell verbatim (markdown, commit shas,
     qualifying prose) and is what `render_template` prints, so the rendered table matches the
     committed snapshot character-for-character. When a status changes, update BOTH fields.
@@ -65,14 +67,18 @@ params_schema:
             type: string
           status:
             type: string
+            description: Widened 2026-08-30 to admit the vocabulary the committed bodies were already using. `params_status_drift`'s first live run found 4 of its 6 findings were not drift at all but rows whose body states `not started`, `investigating` or `zombie` — words this enum did not contain, so params had to be approximated into the nearest declared value and then disagreed with the body forever. `investigating` and `zombie` are lifted verbatim from the project's bug-file status vocabulary, which this queue mirrors. NOTE `not-started` and `open` are near-synonyms here, so this enum no longer partitions cleanly — a deliberate trade for a vocabulary that matches what authors write.
             enum:
+            - not-started
             - open
+            - investigating
             - in-progress
             - blocked
             - done
             - done-archived
             - partial
             - dropped
+            - zombie
           status_note:
             type: string
             description: The Status cell verbatim, incl. markdown and qualifying prose. Rendered in place of the token.
