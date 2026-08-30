@@ -110,7 +110,7 @@ second.
 cargo fmt
 cargo clippy -- -D warnings
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
-cargo test
+cargo test --workspace
 ```
 
 ## What to Contribute

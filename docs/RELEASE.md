@@ -32,7 +32,7 @@ Full release checklist — run from `master`, never from `experiments` or featur
 
 # 2. Build release binary and verify
 cargo build --release
-cargo test
+cargo test --workspace
 cargo clippy -- -D warnings
 # CI runs a SECOND, wider clippy job (ci.yml:61) — the only one that lints #[test]
 # code and codescout-embed's feature-gated `local` module. Run it too:
@@ -286,7 +286,7 @@ git status --short
 # 3. Full gate, run from experiments
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo test
+cargo test --workspace
 
 # 4. Documentation gate. A cohort this size is exactly where the human-facing
 #    surfaces rot, because nothing fails the build when they do:
