@@ -12,7 +12,7 @@ tags:
 - codescout-embed
 - dependencies
 topic: embedding transport boundary
-entry_high_water_ET: 9
+entry_high_water_ET: 10
 entry_prefix: ET
 ---
 
@@ -798,6 +798,73 @@ showed a check cannot see a lean runtime failure.
 **Rests on:** `ET-8` for the ordering argument and `ET-4` for why Phase D audits
 rather than deletes. If either is revised, re-derive this board rather than
 patching rows.
+
+## ET-10 — T6 is a design task, not a consumer swap — and T9 is blocked by two surfaces outside this stream
+
+**Status:** open
+**Valid:** dated 2026-08-30
+
+**Observed.** 2026-08-30, at the bytes, *before* writing any T6 code —
+`ET-9`'s resume block says T6 "is a consumer swap, not a design task". Three
+checks say otherwise. This is a fourth correction to that block, alongside its
+own (a)/(b)/(c).
+
+**1 — The swap's documented blocker is already gone, and the doc still asserts
+it.** `build_embedder`'s doc comment (`src/retrieval/client.rs:303`) states that
+routing through `EmbedderHttp` "keeps the connect-error marker
+`src/tools/semantic/semantic_search.rs` matches on." T4 (`6be58840`) removed that
+constraint: `EmbedError::Connect` renders `CONNECT_FAILED_MARKER`
+(`crates/codescout-embed/src/embedder.rs:45`) and `classify_search_error` matches
+the shared constant (`src/tools/semantic/semantic_search.rs:143`), so both
+producers now land in the same bucket. The comment names the very reason T6 was
+deferred, and it is now false. Correct it in the same commit as the swap —
+otherwise the next reader re-derives a blocker that no longer exists.
+
+**2 — The swap cannot reach the ordinary deployment.** `RemoteEmbedder` is
+dense-only, and `CodeEmbedderAdapter::wrap` (`src/retrieval/embedder.rs:2099`)
+returns an empty `SparseVector`, so *anything* routed through that adapter emits
+no sparse leg. `build_embedder_for_url` is reached with
+`dense_only = lite || config.disable_sparse || backend_is_local(config)`
+(`client.rs:198`), and `disable_sparse` defaults **false** while
+`sparse_embedder_url` carries a default (`src/retrieval/config.rs:210`, `:194`).
+So on a normal server-stack deployment `dense_only == false` and `EmbedderHttp`
+must stay. T6 as scoped reaches only the **lite** stack,
+`CODESCOUT_DISABLE_SPARSE=1`, and a `local:` model paired with a url.
+
+**3 — T9 is blocked by sparse and the reranker, neither of which is in this
+stream.** Root's reqwest is declared under `remote-embed`
+(`Cargo.toml:89`; `remote-embed = ["codescout-embed/remote-embed", "dep:reqwest",
+"dep:rustls"]`), and `EmbedderHttp` — which *owns* the sparse leg — is
+`remote-embed`-gated. `server-stack = ["dep:qdrant-client", "remote-embed"]`, and
+that line's own comment states the reason in the manifest: "this stack's own
+reranker leg is HTTP over reqwest". Dropping root's `reqwest`/`rustls` therefore
+requires `EmbedderHttp` **deleted** and `RerankerHttp` **re-homed**; T6–T8
+deliver neither. Note also that root's reqwest is already redundant in
+crate-count terms — the crate pulls the same version under its own
+`remote-embed` and cargo unifies — so **T9's payoff is manifest honesty, not
+crates**. The −48 was measured on the *bare* lean build and `ET-2` already
+banked it.
+
+**Next.** Decide the fork before writing code:
+
+- **(A) Split `build_embedder_for_url` on `dense_only`** — `RemoteEmbedder` when
+  true, `EmbedderHttp` when false. Small and reviewable, but leaves **two dense
+  implementations** live permanently (the duplication `ET-4` exists to remove)
+  and makes dense behaviour differ by config: retry vs no-retry, and two
+  different batch caps.
+- **(B) Extract root's sparse leg into its own type first, then swap dense
+  wholesale.** The only path that ends with one dense implementation and lets
+  Phase D delete anything.
+
+`ET-9`'s correction (a) lands squarely on this fork: the **combined** path
+derives its batch cap from the sparse server's `/info`
+(`resolve_batch_size`, `src/retrieval/embedder.rs:756`, `FALLBACK = 8`) while the
+**dense-only** path never probes and uses 32. Splitting the legs means deciding
+whether dense keeps honouring a cap the sparse server advertises.
+
+**Rests on:** `ET-4` (why Phase D audits rather than deletes) and `ET-8` (the
+ordering argument). Finding 3 contradicts `ET-8`'s implied terminal state, so
+re-derive Phase D rather than patching T9's row.
 
 ## Template for new entries
 
