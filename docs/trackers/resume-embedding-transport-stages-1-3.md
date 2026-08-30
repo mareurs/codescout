@@ -587,12 +587,18 @@ order above is derived from what gates what, not from stage numbering.
 order, what gates what); this holds the *state*. Strike rows here as they land;
 do not restate the rationale.
 
-**Status:** open — 7 tasks, **none blocked**. D1 was answered 2026-08-30 and T3
-landed on it. T4 and T5 are ready now and are independent of each other; T11 is
-being worked by a concurrent session (an uncommitted `UnknownDimEmbedder`
-retrofit in `src/retrieval/search.rs`).
+**Status:** open — 5 tasks, **none blocked**, and the *Free* list is now empty.
+D1 was answered 2026-08-30 and T3 landed on it. **T4 is ready now**; T6–T9 chain
+behind it. T11 is **done** (`4b7cd31e`) — struck below.
 
-**Valid:** dated 2026-08-29
+**One row below is stale and was deliberately NOT struck by the session
+recording this**, because it belongs to a lane still in flight and a row's owner
+should strike it. Evidence, so it is not lost: **T5 is done** —
+`pub fn is_https_or_loopback` exists at `crates/codescout-embed/src/remote.rs:57`,
+verified at the bytes, landed as `16dc28a5` whose subject names T5 explicitly.
+Its row still reads *ready now*, and the count above already excludes it.
+
+**Valid:** dated 2026-08-30
 
 ### Sequenced — embedding transport (order derived in `ET-8`)
 
@@ -616,7 +622,28 @@ counterexample where root was ahead of the crate.
 | # | Task | Why it matters | Pointer |
 |---|---|---|---|
 | ~~T10~~ | Stop `tools::memory::tests` resolving the retrieval stack from ambient config | **done** `fd638c76`, patch-id `2afe9f1378e8dece47fea600ecf840c57a215ab0`. **Co-authored** — the five-fixture isolation is session `2f584bf5`'s (`bug-fix-session-log:W-75`); the `CodeChunkSearch` trait, `Agent::code_search` seam, call site and regression test are mine. **This row understated the task**: the coupling was not "the embedder" but the whole `RetrievalClient` — `create_semantic_anchors` embeds through the seam and then searches code through a client *no seam covered*, so stubbing both documented seams still left every `write` test talking to the developer's live stack. Measured on libtest's clock: 0.88s live / 20.35s wedged before, 0.04–0.08s across live / wedged / refused / no-config after. Spread 19.47s → 0.04s. Regression test mutation-checked: restoring `RetrievalClient::from_env` at the call site turns it red | `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`, `unverified:` field |
-| T11 | Retrofit a lean-safe inert embedder; restore the 11 test items `ET-2` gated on `remote-embed` | `ET-2` gated them rather than swapping in `FixedDimEmbedder`, because swapping could make `effective_model_dim_falls_back_when_nothing_is_known` pass while proving nothing. Gating cannot make a test lie; the retrofit must not either | `ET-7` |
+| ~~T11~~ | Retrofit a lean-safe inert embedder; restore the test items `ET-2` gated on `remote-embed` | **done** `4b7cd31e`, patch-id `d26a28fcd9acb8013822071098746fbbf8796123`. The fake is `UnknownDimEmbedder` (`known_dim() -> None`), duplicated per-module beside `FixedDimEmbedder`. **`ET-7`'s refusal was right for a sharper reason than it states**: `effective_model_dim` is `known_dim().or(config.model_dim).unwrap_or(fallback)`, so a `Some(_)` embedder **shadows the operator's pin** — `FixedDimEmbedder` would not merely break the fallback test, it would silently neuter `client_with_store`'s two callers, which pass `Some(model_dim)` expecting it consulted. Measured: lean `retrieval::sync` 33→39, `retrieval::search` 5→8, +9 total and nothing else moved — lean now equals default. Mutation-checked ×3, not merely green: `.unwrap_or(fallback)`→`.unwrap_or(0)` kills the fallback test (0 vs 999); `known_dim` `None`→`Some(384)` kills it in search.rs (384 vs 999) and kills two sync.rs tests (`Some((999, 384))` vs `Some((999, 3))`), so **both duplicated copies are protected**. **Honest limit:** under that mutation only ONE of three search.rs tests died — the other two stay green for the wrong reason (with `known_dim` shadowing at 384 their stored dims still mismatch, so the guard still fires), so they do not discriminate "pin consulted" from "embedder answered". Pre-existing, but correctness rests on one test | `ET-7` |
+
+**Two corrections to `ET-7`'s T11 inventory, both measured 2026-08-30.**
+`test_retrieval_client` has **six** callers, not the five recorded — `references`
+finds 3186/3290/3335/3389/3429/3514, where the original count was grep-derived.
+And `tests/retrieval_integration.rs` is **correctly gated forever**, not retrofit
+debt: every test there drives `EmbedderHttp` against a mockito server, so they
+test the HTTP transport itself. It was left alone. Zero test items remain
+`remote-embed`-gated in `sync.rs`/`search.rs`; every surviving gate there is
+structural (`rerank_or_passthrough`'s paired definition, the `RerankerHttp`
+import, three `reranker:` field initialisers).
+
+**Found while executing T11, and now fixed by others:** `2c6f2677` had left
+CI's `no-features` **test** lane red since 2026-08-29 — three ungated tests
+asserting a call a lean build cannot satisfy. Fixed `f3dbfdf4`, patch-id
+`ff3ffccb37031041c8f9ed64cb2baaa35ef2004a`; record archived at
+`docs/issues/archive/2026-08-30-et2-gating-left-the-lean-test-lane-red.md`
+(`6cc63559`). It is the **third** instance of the `ET-7`/T12 family and the
+first T12's `--all-targets` remedy cannot reach, because compiling is not
+running. CLAUDE.md's gate now says `cargo test --workspace --no-default-features`
+rather than `cargo check` (`6764eb18`) — so the lean **run** is a documented
+gate from here on, and this board's future rows should be verified against it.
 | ~~T12~~ | `rendezvous_poll_for_test` was dead under `--no-default-features --all-targets` | **done** `141b69a3` — gate is now `all(test, feature = "librarian")`, matching its three callers in `guide_hint_tests`. Verified both ways: too wide leaves the lean warning, too narrow drops the 44 tests. Was hidden because CLAUDE.md's lean gate omits `--all-targets`, so no routine command builds lean *test* targets | `server.rs:988` |
 | ~~T13~~ | `init: true` on the three GPU compose services | **done** `9360be99` — as hygiene, **not** as F-2's remedy. Docker's kill path does name `--init` on a Z-state PID, but that zombie held 394 MiB of VRAM and a reaped process holds none, so the driver's fd release was stuck and tini's `wait(2)` would have blocked in the same place. F-2's fix idea #1 claims more than its own evidence supports | `embedder-stack-ops-session-log:F-2` |
 | ~~T14~~ | Healthchecks probe each service's **own** inference endpoint | **done** `9360be99`. Not one shared path — the three servers speak three APIs (`/v1/embeddings`, `/v1/rerank`, `/embed_sparse`), so T14 as written was only literally right for dense-gpu. Measured on this host: `/health` 0.8 ms vs inference 23 ms, a 29x gap no forward pass fits in | `embedder-stack-ops-session-log:F-2` |
