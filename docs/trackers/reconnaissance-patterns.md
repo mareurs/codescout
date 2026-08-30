@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 139
+entry_high_water_R: 140
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-140 | 2026-08-31 | miss → rule (2 instances, one direction) | **A warning that prescribes an action must state its recovery cost, DERIVED — understating it licenses the thing warned against.** An overstated cost fails safe; an understated one converts a warning into permission, so the error and the harm point the SAME direction. Instance 1, verified here: the `.worktrees/bench` warning stated recovery as one `git worktree add --detach`, which fails — the path holds 24 entries and bench is not a registered worktree, so real recovery is move-then-add plus a **163M re-index**. Instance 2, reported first-hand: the relaying session verified the warning's DESCRIPTIVE claims and never ran the command, so their operator got the understated cost with a verification wrapped round it — confirmation of one half reading as confirmation of the whole. The tempting symmetric second direction (*omit* the cost and it gets discounted) is recorded as an **untested PREDICTION with its own promote-when**, because asking its supposed source first-hand revealed no incident behind it — an argument in the past habitual, read as a report. Writing it as a pairing would have manufactured symmetry inside an entry about warnings that mislead. |
 | R-139 | 2026-08-30 | miss → rule (parent of R-138) | **The parameter your own context supplies for free is the one you will omit — and it is invisible to you SPECIFICALLY.** Four instances in one evening across three sessions, every one found by review and none by self-review: a count published without its counting rule (4 off a trimmed view / 8 verbs / **9** lines with clap's auto-`help`); a query published without its key (fenced blocks containing `cargo test` — missed a parenthetical fifth site); a second query without its key (`cargo clippy` — unreachable for the wrapper form `scripts/build-windows.sh clippy …`); and an instruction without naming which part is the evidence (*"verify positively with `artifact --help`"* — the author's own probe discarded output and tested only the exit code, so nothing in their practice could surface the ambiguity). Result is never an error, always a **confident wrong answer**, so nothing downstream catches it. **Why peer review works where care does not:** the missing parameter is invisible precisely to whoever holds it, making a second reader a different INSTRUMENT rather than a redundancy — and it predicts which reader, one who does not share the author's context, not a more careful one. Test: *what did I know that the reader will not, that made this unambiguous to me?* Publish a number's **derivation** ("8-or-nothing because the `#[cfg]` sits on the whole variant") not the number; report a count **with the key searched for**; name which half of an instruction is the evidence. **Do not budget for vigilance** — all four were committed by authors actively writing about this class, one reintroducing a bare integer *in the commit fixing a bare integer*; what caught the wrapper was an unconditional policy (verify before contradicting a peer). Corollary: consolidating N copies removes the redundancy that could have caught an error in them — keep the derivation, not the copies | this session + `codescout-ae` + `git-travel-augmentation-shape`; `334cf64b`, `2f412a1c`, `bdfd7a62`, `610e132a`; kin R-138, law B |
 | R-138 | 2026-08-30 | miss → rule (child of R-139) | **A sweep that searches by SHAPE returns a confident wrong COUNT — and two agreeing sweeps are one sweep.** Two sessions independently enumerated every site transcribing the four-command gate, to deduplicate them; both returned **four**, the real count was **five**, and the agreement raised confidence in the wrong number instead of exposing it. Both had searched for the gate's shape — a fenced block containing `cargo test` — while `docs/ROADMAP.md:93` states the same proposition inline in parentheses mid-sentence, invisible to that query and to every refinement of it. Escalates law C from a zero to a **plausible positive integer**, which is worse: a sweep that missed a site is byte-identical in output to a sweep over a corpus that has none, and unlike a zero it never invites suspicion. **Corollary, causal not coincidental:** the evading site was also the STALEST (three commands, unrevised since 2026-08-06) — a site that evades one sweep evades every later maintenance pass for the same reason, so it accrues all the drift the found sites had corrected; expect prose restatements to be the worst copies and look there FIRST. It compounded through the reference graph: that paragraph pointed at the weakest of the five as "the full gate definition", so a reader distrusting local prose and following the canonical pointer landed on the copy linting neither `codescout-embed` nor the `local-embed` module — the label discharged the scrutiny. Tells: query units differ from question units (fenced-blocks vs statements-of-X); independence of authorship is not independence of METHOD. **Third instance the same evening generalises it past prose:** `ci.yml:284` is `scripts/build-windows.sh clippy …`, a WRAPPER invocation containing no `cargo clippy` substring, so it is invisible to any audit keyed on one — the class is *any query keyed on a token the site does not contain*, not prose-vs-fenced-block. Caught by a POLICY (verify before contradicting a peer), not by attention; knowing the class prevented none of the three instances, all three committed while writing about it. Do: search the narrowest token, then broaden past the tool name (`clippy`, not `cargo clippy`); read one whole file end-to-end before trusting a corpus count; report the count AND the form searched for; budget for an unconditional check rather than for vigilance | this session + `codescout-ae` (`bdfd7a62`); `docs/trackers/gate-contract-consolidation.md`; kin R-4, R-3, law C |
 | R-137 | 2026-08-30 | miss → rule | **After compaction, a peer is a better witness to your past than you are.** `codescout-ae` asserted a hand-edit was theirs; I relayed it unchecked; they later checked their commit list, found the SHA absent, and corrected the record — including the claim they had never said it. I still held the message and quoted it verbatim; their context had been compacted between the two, and they had offered exactly that bound themselves. Three claims resolving differently: the hand-edit happened (true, by diff), they authored it (false, by their commit check), they never said so (false, by my transcript). **The session was right where it re-derived and wrong where it recalled**, and only the transcript-holder could separate those. Inverts the usual default that first-person testimony outranks a bystander's — here the bystander holds the bytes and the first person holds a summary, and the loss is invisible from the inside. Rules: never relay a peer's claim about their own authorship unchecked; if you hold the transcript, quote it rather than contradict; prefer a re-derivable instrument to anyone's memory. Tell: a reconstructed memory carries a detail that does not fit — this one said "this morning" of a **16:50** SHA, in plain text both of us read | kin R-134 |
@@ -5346,6 +5347,92 @@ So the class is not *prose vs fenced block*. It is **any query keyed on a token 
 **Do not budget for vigilance.** All four instances were committed by authors actively writing about this class — one reintroduced a bare integer *in the commit fixing a bare integer*, roughly ten minutes after withdrawing an ordinal for the same reason. Knowing the class prevented nothing. What caught the wrapper form was a standing policy (*verify before contradicting a peer*) that fires unconditionally, whether or not anyone suspects a problem. **Build the check that runs when nobody is worried.**
 
 **Corollary for consolidation work.** Deduplicating N copies of a claim into one removes the redundancy that could have caught an error in it — N copies disagreeing is a signal; one copy is never in disagreement with anything. That is a real cost, not a footnote, and the remedy is not to keep copies: it is to make the survivor carry its **derivation**, so a reader can re-check the claim instead of re-measuring it under a rule of their own choosing.
+
+## R-140 — A warning that prescribes an action must state its recovery cost, DERIVED — understating it licenses the thing warned against
+
+**Valid:** invariant
+
+**Status:** open
+
+**Rests on:** two first-hand instances, 2026-08-30/31, both in the `.worktrees/bench`
+deletion warning. Neither is relayed: one was verified here at the bytes, the other reported
+first-hand by the session that made it.
+
+A warning exists to stop an action. When it also tells the reader what recovery would cost,
+that number is not decoration — it is the term the reader weighs the warning against.
+**State it, and derive it before stating it.**
+
+### Why understating is worse than being merely wrong
+
+An overstated recovery cost fails safe: the reader does not delete. An understated one
+**converts a warning into permission** — the reader reads "recoverable in one command",
+discounts the warning, and proceeds. The error and the harm point the *same direction*,
+which is what makes a correction urgent rather than tidy, and it is the property that should
+decide how fast a correction goes out.
+
+### Instance 1 — the warning itself (verified here)
+
+`codescout-fe` warned three sessions not to delete `.worktrees/bench`, and stated recovery
+as one command: `git worktree add --detach .worktrees/bench ede25e69…`.
+
+That command fails. The path exists and holds 24 entries, and bench is **not a registered
+worktree** — `git -C .worktrees/bench rev-parse HEAD` returns *fatal: not a git repository*
+and `git worktree list --porcelain` shows only the main checkout. The commit object is
+reachable, so recovery is possible: move-then-add plus a **163M re-index**, not one command.
+Verified here independently before the warning was carried onward — `code-explorer` gone,
+the gitdir pointer dangling into it, 174M on disk, and three live surfaces resolving against
+it.
+
+They caught and corrected it themselves within the hour, and supplied the framing above.
+
+### Instance 2 — the relay (reported first-hand by `git-travel-augmentation-shape`)
+
+They carried that warning to their operator having **verified its descriptive claims** —
+174M, the citation count, the three blind instruments — and **never run the recovery
+command**. So the operator received an understated recovery cost with a verification wrapped
+around it.
+
+Their own statement of why that is worse than simply repeating it is the load-bearing part:
+*confirmation of the descriptive half reads as confirmation of the whole, so the envelope
+lent authority to the one part nobody had checked.*
+
+That failure is also an instance of a **different law, which is theirs and deliberately not
+folded in here**: verify the ACTIONABLE half of a report, not the descriptive half.
+Descriptive claims are what a reader evaluates; the prescription is what a reader executes.
+
+### The opposite direction is a PREDICTION, not an instance
+
+It is tempting to write this as a symmetric pair — *omit* the cost and the warning gets
+discounted by whoever is impatient; *understate* it and the warning licenses the deletion.
+Two directions, one remedy. It reads well and **the second half has no incident behind it.**
+
+Sourced to `git-travel-augmentation-shape`, first-hand, when asked: the omission clause was
+an *argument for including the cost*, phrased in the past habitual (*"tends to get
+discounted by whoever is impatient to finish"*). Nobody discounted a warning; nothing was
+nearly deleted on those grounds. It is plausible and it is not evidence.
+
+**Kept, labelled, with its own criterion** — a prediction a reader can test beats a
+symmetry a reader will trust.
+
+**Promote-when (omission direction):** one real instance of a warning discounted for lack of
+a stated cost. Until then it stays a prediction.
+
+### The near-miss that shaped this entry, which is the entry's own subject
+
+This was nearly written as the two-direction pairing, from a peer's summary of a third
+session's instance. Asking that session **first-hand** is what revealed the second half did
+not exist — an argument in the past habitual read as a report, which is an easy slip in
+exactly that grammar.
+
+Had it been written from the summary, an entry about warnings that mislead would have
+manufactured its own symmetry, and would have done so through precisely the relayed-unverified
+transfer it warns about. Third time in one night that two sessions nearly put an unverified
+transfer inside the record defining the class.
+
+**The operational form:** when a peer offers you an instance from a third party, the entry is
+not sourced until the third party states it. A summary is a claim about a report, not the
+report — the same one-step-removed shape as `R-136`'s propositional row, applied to
+provenance instead of to instruments.
 
 ## Template for new entries
 
