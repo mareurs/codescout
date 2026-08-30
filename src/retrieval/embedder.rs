@@ -456,9 +456,10 @@ impl EmbedderHttp {
             // instead of the misleading "check qdrant logs" fallback.
             if e.is_connect() || e.is_timeout() {
                 anyhow!(
-                    "dense embed connect failed: {url} — the dense embedder is \
+                    "dense {marker}: {url} — the dense embedder is \
                          unreachable (connect/timeout). Check CODESCOUT_EMBEDDER_URL and \
-                         that the embedder is running (`./scripts/retrieval-stack.sh ps`). ({e})"
+                         that the embedder is running (`./scripts/retrieval-stack.sh ps`). ({e})",
+                    marker = codescout_embed::CONNECT_FAILED_MARKER
                 )
             } else {
                 anyhow::Error::new(e).context("dense openai send")

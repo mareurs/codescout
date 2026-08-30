@@ -21,7 +21,7 @@ pub mod local;
 pub mod remote;
 
 pub use chunker::{chunk_markdown, split, split_markdown, RawChunk};
-pub use embedder::{Embedder, Embedding};
+pub use embedder::{EmbedError, Embedder, Embedding, CONNECT_FAILED_MARKER};
 
 use anyhow::Result;
 

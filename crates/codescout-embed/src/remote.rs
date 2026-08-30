@@ -402,7 +402,26 @@ impl Embedder for RemoteEmbedder {
                     let resp = match req.send().await {
                         Ok(r) => r,
                         Err(e) => {
-                            last_err = Some(anyhow::anyhow!(e));
+                            // Typed for the unreachable cases, so a consumer can
+                            // classify without matching on reqwest's own wording.
+                            // Untyped, this surfaces as "error sending request for
+                            // url (...)", which matches no bucket in root's
+                            // classifier and falls through to the generic
+                            // Qdrant-oriented fallback — sending operators to debug
+                            // a healthy store. ET-5.
+                            //
+                            // The `is_connect() || is_timeout()` split mirrors the
+                            // one root's own EmbedderHttp already applies: a 4xx
+                            // body or a builder error is NOT a reachability problem
+                            // and must not claim to be one.
+                            last_err = Some(if e.is_connect() || e.is_timeout() {
+                                anyhow::Error::new(crate::EmbedError::Connect {
+                                    url: self.endpoint.clone(),
+                                    detail: e.to_string(),
+                                })
+                            } else {
+                                anyhow::Error::new(e)
+                            });
                             continue;
                         }
                     };
@@ -992,5 +1011,61 @@ mod tests {
                 .as_deref(),
             Some("x: ")
         );
+    }
+
+    /// A connect failure must render the crate's **published** marker, so a
+    /// consumer can route it to the embedder hint instead of "check qdrant logs".
+    ///
+    /// Port 1 is reserved and never listening, so this is connect-refused rather
+    /// than a timeout — the fast half of the same class the wedged-peer test
+    /// covers from the slow side.
+    ///
+    /// `resume-embedding-transport-stages-1-3:ET-5`. Before this, the retry loop
+    /// stored the raw `reqwest::Error`, whose Display is "error sending request
+    /// for url (...)" — containing neither this marker nor the "embedding server"
+    /// wording a consumer might match instead. A dead embedder on the resolver
+    /// path therefore fell through to the generic Qdrant-oriented fallback,
+    /// sending operators to debug a healthy store.
+    #[tokio::test]
+    async fn a_connect_failure_renders_the_published_marker() {
+        let embedder = RemoteEmbedder::from_url("http://127.0.0.1:1", MODEL, None).unwrap();
+        let err = embedder
+            .embed(&["x"])
+            .await
+            .expect_err("a port that refuses connections cannot produce an embedding");
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains(crate::CONNECT_FAILED_MARKER),
+            "a connect failure must carry `{}` so a consumer can classify it \
+             without matching on reqwest's own wording. got: {msg}",
+            crate::CONNECT_FAILED_MARKER
+        );
+        assert!(
+            msg.contains("127.0.0.1:1"),
+            "the marker is useless without the url it failed against. got: {msg}"
+        );
+    }
+
+    /// The typed error survives as a type, not only as text — so a consumer that
+    /// wants to branch structurally can downcast instead of substring-matching.
+    /// The marker exists for consumers (like root's `classify_search_error`) that
+    /// only ever see a rendered string.
+    #[tokio::test]
+    async fn a_connect_failure_is_downcastable_to_the_typed_error() {
+        let embedder = RemoteEmbedder::from_url("http://127.0.0.1:1", MODEL, None).unwrap();
+        let err = embedder.embed(&["x"]).await.unwrap_err();
+
+        let typed = err.downcast_ref::<crate::EmbedError>().expect(
+            "a connect failure must reach the caller as EmbedError, not as an opaque anyhow",
+        );
+        match typed {
+            crate::EmbedError::Connect { url, .. } => {
+                assert!(
+                    url.contains("127.0.0.1:1"),
+                    "url should name the endpoint, got {url}"
+                )
+            }
+        }
     }
 }

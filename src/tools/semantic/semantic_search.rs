@@ -134,7 +134,13 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
          If persistent, inspect container memory limits + model file. \
          Workaround: fall back to `grep` / `symbols` for this query while TEI recovers."
             .to_string()
-    } else if err_str.contains("embed connect failed")
+    // The marker comes from the crate that PRODUCES it, not from a literal here.
+    // Once the dense leg moves to `codescout_embed::RemoteEmbedder` the producer is
+    // across a crate boundary, where nothing would make a drifted literal and its
+    // test fail together (`resume-embedding-transport-stages-1-3:ET-5`). Importing
+    // the constant makes that impossible: change the wording and this follows in
+    // the same compile.
+    } else if err_str.contains(codescout_embed::CONNECT_FAILED_MARKER)
         || err_str.contains("openai send")
         || err_str.contains("embed sparse")
     {
@@ -1102,6 +1108,48 @@ mod classify_search_error_tests {
             !hint.contains("docker logs codescout-qdrant")
                 && !hint.contains("Stack reachable but query failed"),
             "must NOT route a client-side connect failure to the qdrant-logs fallback: {hint}"
+        );
+    }
+
+    /// ET-5: routes the crate's **real** error, not a hand-written imitation.
+    ///
+    /// The test above uses a literal, which is right for pinning operator-facing
+    /// wording and structurally cannot catch what this one exists for — the
+    /// producer moving into `codescout-embed` and drifting away from what this
+    /// classifier matches. Rendering the actual `EmbedError::Connect` is what
+    /// couples the two sides: change the crate's `Display` and this fails here,
+    /// in the consumer, which is precisely what "nothing makes the two tests fail
+    /// together" described.
+    ///
+    /// Measured 2026-08-30, before `EmbedError` existed: a connect failure from
+    /// `RemoteEmbedder` rendered as `error sending request for url (...)` and
+    /// matched NO bucket in this function, falling through to the generic
+    /// Qdrant-oriented fallback. That was live on the `ollama:`/`openai:`
+    /// resolver path, not merely a risk the swap would have introduced.
+    #[test]
+    fn the_crates_own_connect_error_routes_where_roots_does() {
+        let produced = codescout_embed::EmbedError::Connect {
+            url: "http://127.0.0.1:48081/v1/embeddings".into(),
+            detail: "connection refused".into(),
+        }
+        .to_string();
+
+        let from_crate =
+            classify_search_error(&format!("stack search failed: {produced}"), "codescout");
+        let from_root = classify_search_error(
+            "stack search failed: dense embed connect failed: \
+             http://127.0.0.1:48081/v1/embeddings — the dense embedder is unreachable",
+            "codescout",
+        );
+
+        assert_eq!(
+            from_crate, from_root,
+            "root's producer and the crate's must land in the SAME bucket, or the \
+             swap silently changes which hint an operator sees.\nproduced: {produced}"
+        );
+        assert!(
+            from_crate.contains("CODESCOUT_EMBEDDER_URL"),
+            "and that bucket must be the embedder hint. hint: {from_crate}"
         );
     }
 
