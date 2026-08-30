@@ -86,6 +86,31 @@ to follow.
    opposite direction, eight hours apart, walked into by the person who had just fixed
    the first one.
 
+6. **Most confident wrong answers are a real measurement of an ADJACENT proposition —
+   and which check reaches it depends on which kind.** Not a broken instrument: the
+   probe ran, reported faithfully, and answered a question next to the one asked. That
+   is why re-running it does not help and why the result survives scrutiny. Three
+   kinds, three different checks, and **a check for one kind does nothing for
+   another**:
+
+   | kind | the probe is right about… | the check that reaches it |
+   |---|---|---|
+   | **propositional** | a different question | a **positive control** |
+   | **temporal** | an instant that has passed | **bracket** the measurement |
+   | **sampling** | this observer, read as all | a **second observer** |
+
+   The temporal row is the one that survives careful instrument discipline, so flag it
+   hardest: a positive control does nothing there. `cargo fmt --check` reporting a
+   mutation that had already been reverted was not a broken probe — it read the file
+   perfectly, at a moment that had passed. `stat` either side of a long command, so
+   *"the gate passed"* becomes *"the gate passed on THESE bytes"*.
+
+   **Worked instances, and the counterexample, live in
+   `reconnaissance-patterns:R-136` — not here.** This row is the index; that entry is
+   the source of truth. Duplicating its examples would let the two drift, which is the
+   failure this page exists to prevent. Deliberately the only rule above without its
+   incident inline; do not "fix" that by pasting them in.
+
 **There is deliberately no separate long form.** Each rule above carries its own
 incident inline, and cites the artifact holding the detail. Do not replace this with a
 pointer to a fuller list elsewhere — the line that stood here until 2026-08-30 promised
