@@ -696,8 +696,57 @@ board is a claim about the past.
 **What T6 is.** Replace root's `EmbedderHttp` dense leg with
 `codescout_embed::remote::RemoteEmbedder` in
 `RetrievalClient::build_http_embedder` / `build_embedder_for_url`
-(`src/retrieval/client.rs:231`, `:257`). Hold batch size at **8** so the change is
-behaviour-preserving — `ET-3`.
+(`src/retrieval/client.rs:231`, `:257`).
+
+> **Three of this block's premises were checked at the bytes on 2026-08-30 and
+> two are false. Read the corrections below before designing the swap** — they
+> remove one decision entirely and replace another. This is `ET-8`'s own "a
+> plan's reference code is a sketch" arriving on this entry.
+>
+> **(a) "Hold batch size at 8" does not name root's dense batch.** Root has no
+> fixed 8. `EmbedderHttp::resolve_batch_size` (`src/retrieval/embedder.rs:756`)
+> *discovers* the cap from the **sparse** server's `/info`
+> (`max_client_batch_size`), with `const FALLBACK: usize = 8` only when that
+> server does not answer — and the **dense-only** path never probes it at all,
+> using **32** (`embed_batch`, `:806-809`). `RemoteEmbedder`'s hardcoded
+> `BATCH_SIZE = 32` (`crates/codescout-embed/src/remote.rs:384`) therefore
+> already equals root's dense-only batch. The 8 is a *sparse*-derived fallback,
+> and `resolve_batch_size`'s own doc records that the prior `const BATCH = 8`
+> "was justified by a comment citing a cap that only `sparse-amd` ever imposed,
+> and it silently survived that service's removal". Holding the dense leg at 8
+> would not preserve behaviour — it would *change* it.
+>
+> **(b) "`RemoteEmbedder` requires a model" is false, so contract 3's decision
+> evaporates.** `from_url` stores `model.to_string()` with no validation
+> (`remote.rs:331-350`) and `embed` serializes `model: &self.model` straight onto
+> the wire (`:400-405`). An empty model yields `{"model": "", "input": […]}` —
+> **byte-identical to what root sends today**. `ET-3`'s "decide whether the
+> crate's required-model contract is adopted (preferred)" describes a contract
+> that does not exist anywhere in the crate. The swap is model-neutral; adopting
+> a required-model rule is separate, optional hardening that would mean *adding*
+> validation, not inheriting it — and it is operator-facing, since a url-set /
+> model-unset deployment works today.
+>
+> **(c) A real contract this block does not name: the retry ladder doubles.**
+> `RemoteEmbedder::embed` carries its own `MAX_RETRIES = 3` with a 500 ms
+> doubling backoff (`remote.rs:385-395`), and root drives the dense leg through
+> `embed_chunks_ordered`'s batch/inflight machinery
+> (`DEFAULT_INFLIGHT = 1`). Stacking them makes a dead endpoint cost
+> retries × sub-batches before it reports, where today it is sub-batches alone.
+> Decide which layer owns retry **during** the swap; it is the one genuine
+> behaviour change of the three, and unlike (a) and (b) it has no correct default.
+>
+> Contract 1 (query prefix) is unaffected and still exactly right — confirmed at
+> the bytes: both `from_url` and `custom` hardcode
+> `query_prefix: QueryPrefix::Derive`, so omitting `.with_query_prefix(…)` is the
+> silent 37→34 regression this block warns about.
+>
+> The same wrong 8 appears a third time, in
+> `remote.rs::tests::ollama_large_batch_exceeding_batch_size` ("BATCH_SIZE is 8;
+> send 20 texts to exercise the chunking logic"). That test has been vacuous
+> since it was written — 20 < 32 is one chunk — and `git log -S` finds no commit
+> where the constant was ever 8. Filed as
+> `docs/issues/2026-08-30-ollama-large-batch-test-never-exceeded-the-batch-size.md`.
 
 **The three contracts it must carry across, all now built:**
 
