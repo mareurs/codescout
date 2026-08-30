@@ -467,6 +467,14 @@ pub struct UpdateArgs {
     /// Record a completed refresh cycle atomically.
     #[arg(long = "commit-refresh")]
     pub commit_refresh: bool,
+    /// Bypass the body-shrink guard. Required when a body write would cut the
+    /// file by more than 50% in EITHER bytes or lines. Use only when the
+    /// shrinkage is intentional (e.g. archiving stale sections, full rewrite).
+    ///
+    /// Mirrors the MCP tool's `force` param — the guard refusal's hint names
+    /// `force=true`, so the CLI has to offer the escape the hint promises.
+    #[arg(long)]
+    pub force: bool,
     #[command(flatten)]
     pub common: CommonOpts,
 }
@@ -477,11 +485,15 @@ impl UpdateArgs {
     }
 }
 
-pub(crate) async fn run_update(args: UpdateArgs) -> Result<()> {
-    let common = args.common();
-    let output = common.output();
-    let ctx = open_ctx(&common).await?;
-
+/// Translate `UpdateArgs` into the `artifact update` tool's JSON arguments.
+///
+/// Split out of [`run_update`] for the same reason [`compile_filter`] is split
+/// out of [`run_find`]: the CLI holds its own clap struct and hand-marshals
+/// every field, so a field can exist on the struct and never reach the tool.
+/// That failure mode is silent — the tool defaults the missing key and reports
+/// success — and it is only testable if the translation is reachable without a
+/// catalog. See `docs/issues/2026-08-30-cli-artifact-update-has-no-force-escape-for-the-shrink-guard.md`.
+fn build_update_tool_args(args: &UpdateArgs) -> Result<Value> {
     let mut tool_args = serde_json::Map::new();
     tool_args.insert("id".into(), Value::String(args.id.clone()));
 
@@ -527,8 +539,20 @@ pub(crate) async fn run_update(args: UpdateArgs) -> Result<()> {
     if args.commit_refresh {
         tool_args.insert("commit_refresh".into(), Value::Bool(true));
     }
+    if args.force {
+        tool_args.insert("force".into(), Value::Bool(true));
+    }
+    Ok(Value::Object(tool_args))
+}
 
-    let v = crate::librarian::tools::update::call(&ctx, Value::Object(tool_args)).await?;
+pub(crate) async fn run_update(args: UpdateArgs) -> Result<()> {
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+
+    let tool_args = build_update_tool_args(&args)?;
+
+    let v = crate::librarian::tools::update::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -730,5 +754,78 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(msg.contains("--commit"), "got: {msg}");
         assert!(msg.contains("--timestamp"), "got: {msg}");
+    }
+
+    // --- `artifact update --force` ------------------------------------------
+    //
+    // The CLI keeps its own clap struct and hand-marshals each field into the
+    // tool's JSON, so `--force` can break in two independent ways: the parser
+    // can reject it, or the parser can accept it and the marshalling can drop
+    // it. The second is the dangerous one — the tool defaults `force` to false
+    // and still reports `updated: true`, so a dropped flag looks like a working
+    // flag until a guard refusal contradicts it. One test per half.
+    //
+    // That `force: true` actually bypasses the guard is pinned tool-side by
+    // `librarian::tools::update::tests::body_shrink_guard_allows_with_force`;
+    // these close the CLI's half of the path.
+
+    fn update_args(id: &str) -> UpdateArgs {
+        UpdateArgs {
+            id: id.into(),
+            title: None,
+            status: None,
+            owners: None,
+            tags: None,
+            topic: None,
+            body: None,
+            patch_params: None,
+            commit_refresh: false,
+            force: false,
+            common: CommonOpts::default(),
+        }
+    }
+
+    #[test]
+    fn update_parser_accepts_force_flag() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            args: UpdateArgs,
+        }
+
+        let w = Wrap::try_parse_from(["codescout", "abc123", "--force"])
+            .expect("`--force` must be a recognised argument");
+        assert!(w.args.force);
+
+        // The control: without the flag it stays off, so the assertion above is
+        // about the flag and not about a field that is always true.
+        let w = Wrap::try_parse_from(["codescout", "abc123"]).unwrap();
+        assert!(!w.args.force);
+    }
+
+    #[test]
+    fn update_force_flag_reaches_the_tool_args() {
+        let mut a = update_args("abc123");
+        a.force = true;
+        let v = build_update_tool_args(&a).unwrap();
+        assert_eq!(
+            v.get("force"),
+            Some(&Value::Bool(true)),
+            "`--force` must be marshalled as a TOP-LEVEL key, sibling to `patch` \
+             — the tool reads `a.force`, not `patch.force`; got: {v}"
+        );
+    }
+
+    #[test]
+    fn update_omits_force_when_unset() {
+        let v = build_update_tool_args(&update_args("abc123")).unwrap();
+        assert!(
+            v.get("force").is_none(),
+            "an unset `--force` must not be sent at all — marshalling it \
+             unconditionally would disable the shrink guard for every CLI \
+             update; got: {v}"
+        );
     }
 }
