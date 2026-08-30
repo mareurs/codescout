@@ -1061,6 +1061,42 @@ finding 3 first.
 
 **Valid:** dated 2026-08-30
 
+### The criterion both of this stream's test fixes were verified under
+
+Added 2026-08-30. Two test-integrity fixes came out of this work stream —
+`614b1271` (the concurrency guard) and `236f31a4` (the chunking guard). Both were
+mutation-verified, and the rule that makes that verification *mean* something was
+developed with `codescout-ae` the same afternoon and lives in their log:
+**`bug-fix-session-log:W-84`**. Cited rather than restated, so there is one
+definition.
+
+The short form, because a citation nobody follows is not a link:
+
+> A test cannot detect a change its assertion is monotone under.
+
+Absence assertions are monotone under **removal** — kill the mechanism and the
+silence still holds. Existence assertions (`contains`, `> 0`, `is_some`) are
+monotone under **widening** — return a superset and the predicate still holds.
+Equality against an exact expected shape is monotone under **nothing**.
+
+Two consequences this stream actually depended on:
+
+1. **"Did the test die?" is the wrong question.** *Did it die on the assertion
+   under test?* is the right one. `all_empty_chunk_sends_no_requests_at_all` dies
+   under a removal mutation — via a panic at `.expect("embed_one_batch")`, which
+   says nothing about whether its `.expect(0)` has any power. It dies under the
+   forbidden-act mutation with `Expected 0 request(s)… but received 1`. Both red,
+   one informative.
+2. **The fixture has to discriminate.** The property is only observable when the
+   correct and mutated behaviours *disagree*; a fixture that does not separate them
+   cannot detect the mutation however strict the assertion is.
+
+**Both this stream's fixes pass the criterion, and by habit rather than by
+argument** — worth recording as a near miss rather than a win. They assert
+`met == 2` and `requests == [32, 32, 6]`. Had they been written `met > 0` and
+`requests > 1` — both entirely natural phrasings — each would have been monotone in
+exactly the direction its mutation moves, and each would have survived it while
+looking guarded.
 ## ET-10 — T6 is a design task, not a consumer swap — and T9 is blocked by two surfaces outside this stream
 
 **Status:** open
