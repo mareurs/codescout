@@ -1,7 +1,7 @@
 ---
 id: '640c4fc65a64461c'
 kind: bug
-status: mitigated
+status: fixed
 title: 'BUG: no check detects a params row whose content has gone stale relative to its body counterpart'
 tags:
 - librarian
@@ -9,9 +9,9 @@ tags:
 - snapshot-stale
 - windows-platform-support
 topic: tracker-entry-identity
-closed: 2026-08-18
+closed: 2026-08-30
 no_fix_commit: true
-unverified: The detection gap itself is NOT fixed — no `doctor` check compares an existing params row's fields against its body counterpart. What was repaired is the seven known-stale `WIN-N` rows on ONE tracker, live via `update_entry` against the machine-local catalog, so the same drift on any other tracker is still invisible. Whether the check should be report-only or a write-time guard is an open design question recorded in § Fix. **RECURRED 2026-08-30 on a second tracker** (`docs/trackers/open-issue-work-queue.md`, 4 rows) — see § Second instance; the queue row BL-44 was re-opened as a result.
+unverified: 'The check is a HEURISTIC and its limits are measured, not estimated: sensitivity 91.4% over 536 simulated drifts, so ~1 real disagreement in 12 is silent; it covers 4 of 9 params-backed ledgers here, the other 5 declaring no `status` enum and therefore having no closed vocabulary to compare against; and a status region whose prose merely mentions another enum word is reported despite being correct. All three are stated on the scan and in its violation message. A clean run is evidence, not proof.'
 ---
 
 ## Summary
@@ -183,6 +183,71 @@ an open-ended one.
 Caveat on the number: it counts `kind="tracker"` in **this project's** scope. Artifacts of
 another kind carrying an `entry_collection`, and any tracker in a sibling repo under an
 umbrella, are outside it — the query was not run at `scope="umbrella"`.
+
+## Fix — SHIPPED 2026-08-30
+
+**`92228de0`** on `experiments`, patch-id **`0ba7a71b3f8462e8`**.
+
+`scan_params_status_drift` runs beside the three id-set scans in `doctor`, consuming the
+same `ParamsBackedLedger` — extended with each entry's `(id, status)` and the `status`
+enum its `params_schema` declares. Gate green: fmt, clippy, **4873/0** full, **3385/0**
+lean. The lean count is unchanged from before the change, which is correct rather than
+suspicious: `doctor` sits behind the `librarian` default feature, so that lane compiles
+none of this and is not a check on it.
+
+### The dry run reshaped the design three times, and that is the substance
+
+§ *Fix* originally posed this as a design decision — report-only check versus write-time
+guard — and that framing turned out to be the wrong question. The real obstacle was the
+one `scan_params_behind_body` names in its own doc comment when it declines this
+comparison: *"a text comparison against a column whose format is each tracker's own
+choice — fragile."* It was right to decline on the evidence then available. Measuring the
+fragility changed the answer:
+
+| measurement | result |
+|---|---|
+| naive comparison, this repo | 26 findings — **20 of them `**done, archived**` against a params value of `done-archived`** |
+| after absorbing that one rendering | 6 findings on 101 rows |
+| sensitivity (536 simulated drifts) | **490 flagged / 46 silent — 91.4%** |
+| ledgers in scope | **4 of 9**, not the 6 first estimated |
+| entries reachable | 131, across **two** locators |
+
+The fragility is dominated by a single convention — comma versus hyphen — and absorbing
+it takes the check from 77% noise to usable. That is the fact the deferral could not have
+known without measuring.
+
+**Sensitivity was measured by a positive control, not asserted.** Substituting every other
+enum value for each entry's true status simulates a drift of known shape; 8.6% are silent
+because the substituted word already occurs in that entry's own region. The violation
+message states that rate. Without the control there would have been six findings and no
+evidence the check detects anything at all.
+
+**Coverage was wrong twice before it was right.** The first estimate, 6 of 9, came from
+reading `params_schema` and assuming the rendering. Only 2 ledgers render `| ID |` table
+rows; checking the other four found 2 more rendering entries as a heading plus a
+`**Status:**` line. A table-row-only implementation — which an earlier draft was — skipped
+**30 of 131** exposed entries while reporting nothing amiss about them.
+
+### Two decisions a later reader will be tempted to undo
+
+- **A boundary-anchored regex, not stripped punctuation.** Stripping is the obvious way to
+  absorb `done, archived`, and it makes `done` a substring of `aban`**`done`**`d` and
+  `open` of `re-`**`open`**`ed` — both of which occur in this repo's real status prose.
+- **The heading locator returns only the `Status:` line, never the section.** Entry prose
+  routinely narrates status history (*"was dropped as a design decision"*), and matching
+  against it reports the narration as the status.
+
+Both are pinned by tests that fail under **disjoint** mutations: a `contains` substitution
+kills the separator test, and strip-punctuation normalisation kills only the boundary one.
+
+### The mutation matrix found a defect in the tests themselves
+
+Under the first mutation the boundary test died — on its **first** assertion, the positive
+separator one, never reaching the assertions its name is about. It reported as a kill for
+a guard it had not exercised, and a green-or-red summary cannot show that. The test is
+split so each clause fails under its own mutation. Recorded as
+`reconnaissance-patterns:R-130`: *a mutation kill is not evidence that the named guard
+fired.*
 
 ## Resume
 
