@@ -1031,13 +1031,39 @@ mod selection_tests {
             Some("http://127.0.0.1:8081/v1"),
             &crate::config::project::default_embed_model(),
         );
+        let got = RetrievalClient::build_embedder(&c, /* lite */ true).await;
+
+        #[cfg(feature = "remote-embed")]
         assert!(
-            RetrievalClient::build_embedder(&c, /* lite */ true)
-                .await
-                .is_ok(),
+            got.is_ok(),
             "a url with the DEFAULT local: model is the ordinary remote deployment — \
              rejecting it would break every setup that configures a url and no model"
         );
+
+        // A lean build has no HTTP transport, so this configuration cannot be BUILT.
+        // The claim under test survives anyway, and it is asserted rather than
+        // skipped: the guard must not be WHAT refuses it. Gating this test out (the
+        // cheaper fix) would delete the guard's non-over-firing proof from exactly
+        // the configuration where a mis-widened guard could hide behind a
+        // legitimate refusal and look identical to today.
+        #[cfg(not(feature = "remote-embed"))]
+        {
+            // `match`, not `expect_err`: the Ok variant is `Arc<dyn CodeEmbedder>`,
+            // which is not `Debug`, so `expect_err`'s bound does not hold.
+            let msg = match got {
+                Ok(_) => panic!("a lean build cannot construct an HTTP embedder"),
+                Err(e) => e.to_string(),
+            };
+            assert!(
+                msg.contains("no HTTP embed transport"),
+                "the refusal must be the transport bail. got: {msg}"
+            );
+            assert!(
+                !msg.contains("local-dir"),
+                "the guard must NOT reject a url + DEFAULTED local: model, in any \
+                 build configuration. got: {msg}"
+            );
+        }
     }
 
     /// The guard must not over-fire: a url with an ordinary remote model is the
@@ -1047,12 +1073,31 @@ mod selection_tests {
     #[tokio::test]
     async fn build_embedder_still_accepts_a_url_with_an_ordinary_model() {
         let c = cfg_with(Some("http://127.0.0.1:8081/v1"), "CodeRankEmbed");
+        let got = RetrievalClient::build_embedder(&c, /* lite */ true).await;
+
+        #[cfg(feature = "remote-embed")]
         assert!(
-            RetrievalClient::build_embedder(&c, /* lite */ true)
-                .await
-                .is_ok(),
+            got.is_ok(),
             "a url with a non-local model is the ordinary remote setup and must build"
         );
+
+        // See the sibling above for why this asserts rather than gates.
+        #[cfg(not(feature = "remote-embed"))]
+        {
+            let msg = match got {
+                Ok(_) => panic!("a lean build cannot construct an HTTP embedder"),
+                Err(e) => e.to_string(),
+            };
+            assert!(
+                msg.contains("no HTTP embed transport"),
+                "the refusal must be the transport bail. got: {msg}"
+            );
+            assert!(
+                !msg.contains("local-dir"),
+                "the guard must NOT reject a url + ordinary remote model, in any \
+                 build configuration. got: {msg}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -2516,6 +2516,19 @@ mod tests {
     /// `CodeDenseAdapter(client.embedder)` line for
     /// `CodeDenseAdapter(Arc::new(EmbedderHttp::new(...)))` makes this test fail;
     /// reverting makes it pass again.)
+    ///
+    /// **Gated on `remote-embed` since 2026-08-30, and the asymmetry with the two
+    /// `selection_tests` this shares a regression with is deliberate.** Those two
+    /// assert a claim that survives a lean build — *the guard must not be what
+    /// rejects this config* — so they stay ungated and branch only on which error
+    /// arrives. This test's subject is `Arc::ptr_eq` on an `EmbedderHttp`
+    /// **instance**, and a build with no HTTP transport has no such instance to
+    /// share. There is no lean-meaningful version of the claim, so gating removes
+    /// nothing; gating the other two would have deleted the guard's
+    /// non-over-firing proof from the configuration where a mis-widened guard is
+    /// hardest to see. `2c6f2677` turned all three red at once, which is what made
+    /// one uniform remedy look right for all three.
+    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn memory_embedder_is_built_from_the_shared_code_embedder() {
         use crate::retrieval::embedder::{CodeDenseAdapter, DenseEmbedder};
