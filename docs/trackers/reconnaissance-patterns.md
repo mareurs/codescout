@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 127
+entry_high_water_R: 128
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-128 | 2026-08-30 | technique (validated on first use) | **Enumerate the call sites of a must-call function and look for the absentee.** Asked to audit root/crate *pairs* for a named defect class, the pair-shaped sweep came back clean — correctly, and that clean result was the confirming-negative worth doubting. Inverting the question from "which functions are duplicated?" to "which stated invariant does a site break?" found `BL-66`: root's `transport.rs` asserts `install_default_crypto_provider` runs "at every construction site", five call sites exist, and one crate client-builder is absent from the list. The pairwise diff **structurally** could not find it — the defective function has no twin, and an absentee is defined by there being one place it should be and isn't. Blind spot: only finds violations of invariants someone has *stated*. |
 | R-127 | 2026-08-30 | miss (self-caught in-turn) → confirms [[R-125]] | **I broke R-125's clause verifying R-125's own release, minutes after promoting it.** Checking whether `codescout-companion` 1.19.8 had propagated to the plugin caches, I ran `find … -path "*reconnaissance/SKILL.md" | head -1`, grepped the clause out of the one path it returned, got `0` in all three profiles, and reported *"that's the drift, caught live"* — citing `claude-plugins`' own stale-cache tracker entry as corroboration. **False.** Every profile holds TWO version-keyed cache dirs, `1.19.7/` and `1.19.8/`; `head -1` returned the stale one each time, and all three `1.19.8/` copies contain the clause. `head -1` answers *"the first path the walk yielded"*, never *"the path that loads"* — and a version-keyed cache holding two versions is the normal state, not an edge case. Two separable aggravators: **the zero AGREED with me** (law C's usual framing assumes a surprising zero prompts a re-check; agreement suppresses it, so a confirming negative needs the scrutiny a contradicting one gets for free), and **authorship is not activation** — having written, argued and shipped the clause minutes earlier did not make it fire. Caught only by re-reading my own command inside the sentence I was about to publish, which is exactly where R-125 placed it (Phase 3, the act of writing). That makes the placement argument tested rather than reasoned | severity low — self-caught in one turn, retracted in the same message, nothing built on the false reading; violates `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md` Decision clause 1 verbatim; no promotion owed, the clause it confirms is already shipped |
 | R-126 | 2026-08-30 | miss (found by dry run) | **An agreement assertion cannot see a shared convention being wrong.** `path_for` and `rel_path_for` were tested against EACH OTHER and agreed — both stem-keyed, both unsound, since a stem is not unique and `docs/research/README.md` is really augmented here. Gate green 4833/0 on a defect the test was positioned to catch. Tell, available at write time: ask what the assertion RANGES OVER — one input and two implementations, or the input space. Write the property (injective? round-trips? unique across the corpus?) and keep the agreement as a second assertion. Distinct from law C: no zero, no error, just two functions quietly agreeing on one file (`f565504a`, `bug-fix-session-log:W-76`) |
 | R-125 | 2026-08-29 | miss (self-correcting) → promote-ready | **Law C is stated only for the EMPTY result — and the remedy I first proposed for that gap was law C again.** A keyword count in a peer's diff (19 × "timeout" across +137 lines) was read as causation and the peer was pointed at their own uncommitted work; the real defect was a `tokio::try_join!` race inside the test itself, racy since `9f4debc3`, fixed in `21174425`. The first draft of this entry prescribed *"run the failing test in isolation"* as the cheap decisive check — but it **passes** in isolation, so that green confirms the flake reading wrongly, which is law C's original form committed while writing the entry about law C. Before calling any check decisive, ask whether it can EXPRESS the failure | `bug-fix-session-log:F-78`; mechanism re-verified here at `embedder.rs:606-617` (`try_join!`) and `:540`/`:806` (`dense_only` never consulted by `embed_one_batch`); cost was one `symbols()` read rather than a bisect, because the report carried the failing assertion text verbatim; **second datapoint, volunteered by the fix's own author**: it verified the fix with 10/10 isolated runs — the same instrument, same blind spot, that had already acquitted the bug twice; the structural fact (`dense_batch`, one leg, no `try_join!`, verified at `:992-996`) is what carries it. Three passes of one instrument in one afternoon, each green read as proof of a different proposition. Threshold **fired**. Disposition **corrected from case 2 to case 3**: both datapoints occurred with the skill LOADED and law C's text already covers both errors, so this is not a wording gap and a sixth mechanism on the file's longest bullet is the accretion the audit section forbids — loaded is not reached, and the remedy is placement (a trigger-shaped clause attached to the act of citing a green) not rewording. Promotion owed as a SKILL.md PR, not yet raised; kin [[R-3]]/[[R-113]]/[[R-77]]/[[R-79]]/[[R-104]] — all five of law C's recurrences are the empty form |
@@ -4330,6 +4331,59 @@ owed; the clause it confirms is already shipped.
 `~/.claude*/plugins/cache/sdd-misc-plugins/codescout-companion/{1.19.7,1.19.8}/`, and
 `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`, whose Decision clause 1
 this violates verbatim.
+
+## R-128 — Enumerate the call sites of a must-call function and look for the absentee — it finds what a pairwise diff cannot
+
+**Status:** validated — found a real defect on first use (`BL-66` / `ac9aa2f9b38eab9b`).
+**Valid:** invariant
+**Rests on:** `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`; the framing that a clean result must be interrogated, not banked.
+
+**Observed:** asked to audit a repo's root/crate boundary for a defect class named from two
+instances — *a hazard handled on root's side of a duplicated pair and never on the crate's,
+where root's own behaviour masks the gap so the crate ships it to every external consumer
+while the one caller that would notice is shielded.*
+
+**The brief's own noun nearly cost the finding.** "Audit the **pairs**" implies diffing twin
+functions, and a pair-shaped sweep is what I ran first. It came back clean, correctly: four
+pairs, all either delegated, byte-identical, or already reconciled. A clean sweep against a
+class with two confirmed instances is exactly the confirming-negative the ADR warns about,
+and stopping there would have produced a plausible "no further instances" — the shape of
+answer that is hardest to doubt because it agrees with hoping you are done.
+
+**What worked instead was inverting the question.** Not *"which functions are duplicated?"*
+but *"which invariant does this codebase assert, and which sites break it?"* Root's
+`transport.rs` states one in a comment — *"the only documented failure is TLS backend
+initialisation, which `install_default_crypto_provider` has already performed at **every
+construction site**"*. Enumerating the call sites of that must-call function gave five, and
+one HTTP-client builder in the crate was **absent from the list**. That absentee was the
+defect: reachable for external consumers, invisible in-process because root's startup call
+installs it globally first — the masking mechanism the class is made of.
+
+**Why the pairwise sweep structurally could not find it.** The defective function has no
+root twin. A diff needs two things to compare; an absentee is defined by there being only
+one place it *should* have been and isn't. The two instruments have disjoint blind spots,
+which is the whole point of naming this one separately rather than treating it as "audit
+harder".
+
+**The technique, stated so it transfers:**
+
+1. Find a function or step the code says must always precede something — a provider
+   install, a lock acquisition, a validation, a normalisation. Prose comments asserting
+   *"at every call site"* / *"always performed before"* are the richest source: someone
+   wrote that sentence because they had to reason about it.
+2. `references(symbol, path)` or `grep` its call sites and list them.
+3. List the sites that need it — the constructors, the entry points, the builders.
+4. **The defect is the set difference**, and it is usually one element.
+
+**Blind spot, so this is not over-trusted:** it only finds violations of invariants someone
+has *stated*. An invariant that was always merely assumed leaves nothing to enumerate, and
+this technique is silent on it — exactly as silent as the pairwise diff was on the
+absentee. Neither instrument covers the other's gap, so a clean result from one is not
+evidence about the other's territory.
+
+**Promote-when:** a second defect is found this way, or a session runs the enumeration and
+the set difference is empty on a surface later shown to be defective (which would bound the
+technique rather than confirm it).
 
 ## Template for new entries
 
