@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 141
+entry_high_water_R: 142
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -295,6 +295,7 @@ be treated as findings, not as a summary to re-derive.
 | R-138 | 2026-08-30 | miss → rule (child of R-139) | **A sweep that searches by SHAPE returns a confident wrong COUNT — and two agreeing sweeps are one sweep.** Two sessions independently enumerated every site transcribing the four-command gate, to deduplicate them; both returned **four**, the real count was **five**, and the agreement raised confidence in the wrong number instead of exposing it. Both had searched for the gate's shape — a fenced block containing `cargo test` — while `docs/ROADMAP.md:93` states the same proposition inline in parentheses mid-sentence, invisible to that query and to every refinement of it. Escalates law C from a zero to a **plausible positive integer**, which is worse: a sweep that missed a site is byte-identical in output to a sweep over a corpus that has none, and unlike a zero it never invites suspicion. **Corollary, causal not coincidental:** the evading site was also the STALEST (three commands, unrevised since 2026-08-06) — a site that evades one sweep evades every later maintenance pass for the same reason, so it accrues all the drift the found sites had corrected; expect prose restatements to be the worst copies and look there FIRST. It compounded through the reference graph: that paragraph pointed at the weakest of the five as "the full gate definition", so a reader distrusting local prose and following the canonical pointer landed on the copy linting neither `codescout-embed` nor the `local-embed` module — the label discharged the scrutiny. Tells: query units differ from question units (fenced-blocks vs statements-of-X); independence of authorship is not independence of METHOD. **Third instance the same evening generalises it past prose:** `ci.yml:284` is `scripts/build-windows.sh clippy …`, a WRAPPER invocation containing no `cargo clippy` substring, so it is invisible to any audit keyed on one — the class is *any query keyed on a token the site does not contain*, not prose-vs-fenced-block. Caught by a POLICY (verify before contradicting a peer), not by attention; knowing the class prevented none of the three instances, all three committed while writing about it. Do: search the narrowest token, then broaden past the tool name (`clippy`, not `cargo clippy`); read one whole file end-to-end before trusting a corpus count; report the count AND the form searched for; budget for an unconditional check rather than for vigilance | this session + `codescout-ae` (`bdfd7a62`); `docs/trackers/gate-contract-consolidation.md`; kin R-4, R-3, law C |
 | R-137 | 2026-08-30 | miss → rule | **After compaction, a peer is a better witness to your past than you are.** `codescout-ae` asserted a hand-edit was theirs; I relayed it unchecked; they later checked their commit list, found the SHA absent, and corrected the record — including the claim they had never said it. I still held the message and quoted it verbatim; their context had been compacted between the two, and they had offered exactly that bound themselves. Three claims resolving differently: the hand-edit happened (true, by diff), they authored it (false, by their commit check), they never said so (false, by my transcript). **The session was right where it re-derived and wrong where it recalled**, and only the transcript-holder could separate those. Inverts the usual default that first-person testimony outranks a bystander's — here the bystander holds the bytes and the first person holds a summary, and the loss is invisible from the inside. Rules: never relay a peer's claim about their own authorship unchecked; if you hold the transcript, quote it rather than contradict; prefer a re-derivable instrument to anyone's memory. Tell: a reconstructed memory carries a detail that does not fit — this one said "this morning" of a **16:50** SHA, in plain text both of us read | kin R-134 |
 | R-136 | 2026-08-30 | technique (parent generalisation from `codescout-ae`) | **Adjacent-proposition errors come in THREE kinds, and each needs a DIFFERENT check.** Nine confident wrong answers in one day were all real measurements, faithfully reported, of a proposition next to the one asked — but the remedies diverge, and running the wrong check leaves the error standing while feeling rigorous. *Propositional* (the probe answers a different question: `du` for absence, a build's exit code for "the binary carries the subcommands") needs a **positive control**. *Temporal* (right about an instant, read as standing: `fmt` reporting a reverted mutation) needs **bracketing** — and a control does nothing, because the probe was working perfectly. *Sampling* (right for this observer: one session's `ListAgents` skew) needs a **second observer**, which neither of the others touches. Counterexample kept inside the statement, so it is never written as *every*: the mutual-deference deletion misread no measurement at all — two correct reads, two correct acts, composing badly — the one class instrument discipline cannot reach. Operational half: **a caveat should name its sub-kind**, since *"two readings is not a measurement"* tells a reader to go find a second observer rather than run a control. |
+| R-142 | 2026-08-31 | miss | **Circular corroboration — a peer restating your claim is your own reading handed back, and nothing marks it.** Two parties agreeing is evidence only if they did not get it from each other. I read a peer's past-habitual *argument* ("a warning with no stated recovery cost tends to get discounted") as a *report* of an incident; the same peer then described their own error as "the other failure of the same pair", which read as first-hand confirmation and was my own reading returned — their actual error points the SAME direction as mine. I reported both directions to my operator as observed. Caught because `codescout-f0` declined to write the pairing from my summary and asked the other session first-hand, which is the working countermeasure. Upstream of R-140 (its manufactured symmetry is this loop's product) and kin to R-141; corollary of `observer-blindness:OB-4` — distinct authorship supplies independence no more reliably than a distinct tool name. **Runnable:** before counting a confirmation, ask *could they have got this from me?* | this session, self-caught after a peer's first-hand check refuted it; kin R-139, R-140, R-141 |
 | R-135 | 2026-08-30 | miss | **A `du` proves size, never absence — a TRUE measurement written up in the past tense.** An archived bug file is `status: fixed` and closes *"174 MB reclaimed, 163 MB of it regenerable `.codescout` index state"*; 14 days later `.worktrees/bench` is still on disk at exactly 174M/163M, dir mtime **2026-05-12** (three months BEFORE the closure) and a gitdir still naming the pre-rename `code-explorer` path, which rules out delete-then-recreate since the file's own rebuild command would name `codescout`. The `du` ran before the removal and was written up as its result. Distinct from R-125 (abundant vs empty) and from the self-validating-gate class: this is a **correct positive number transferred to a proposition it does not support**. Audit verdict on the promoted set: **UNREACHABLE, not Outgrown** — Phase 3's *"name the proposition it proves, then ask whether a broken world produces the same result"* covers it exactly and would have caught it; a broken world yields the identical `du`. Remedy is placement, not wording: the risky moment is writing a **closure**, when the author is furthest from the evidence and most certain. No promotion proposed — one verified instance, and the session-opening surface additionally needs a base arm nobody has run | this session (`docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md`, `worktree-cleanup-session-log:F-1`); three sibling instances reported by a peer session and **not verified by me**; kin R-125, law B |
 | R-134 | 2026-08-30 | miss → rule | **A peer view is ARBITRARY with respect to the population, not merely short.** Five Claude sessions shared this checkout and produced six misattributions in an afternoon, every one an elimination over the peers the asker could see. Both open mysteries resolved in ONE round each by enumerating from the OS (`pgrep -x claude` + `readlink /proc/$p/cwd`) and messaging invisible sessions at `uds:/run/user/1000/cc-socks/<pid>.sock`. Escalates R-50: a short view makes elimination weak, so you hedge; a DISJOINT view makes it unrelated, so hedging still draws the conclusion — you must change instruments. Measured by `codescout-f0`, then CORRECTED by them the same evening (`71fdbef4`): the first reading showed 0 of the 5 in-checkout sessions, later readings 1 of 5 — the count held at 3 while the MEMBERSHIP rotated, which demonstrates arbitrariness where a single snapshot could only assert disjointness. Either reading kills elimination; the zero was a reading, not a property, and publishing it as one was this entry's own failure mode arriving through the record of itself. Tells: the instrument's units differ from the question's (sessions-a-transport-knows vs processes-with-this-cwd), and repeated "must be the remaining one" is equally produced by the answer lying outside the set. Corollary: in a live transcript a COUNT is contaminated by the act of asking (hits went 2→10 because sessions grepped for it) — prefer an ordinal | this session + `codescout-f0`, `codescout-fe`; kin R-50 |
 | R-133 | 2026-08-30 | miss → rule | **Loudness is a property of a PATH, not of a failure.** Three failures in one afternoon across three subsystems: a stale sidecar restores clean reporting success; a widened status region silently discharges the disagreement the scan exists to report; and BL-66, which *aborts the process* — maximally loud — and survived anyway because nothing in-tree reaches it (verified here: `install_default_crypto_provider()` is called unconditionally at every construction site, `main.rs:253` / `agent/mod.rs:448` / `reranker.rs:80` / `embedder.rs:339`, and `transport.rs:34` states the invariant as a reason not to handle the error). So the axis is not loud-vs-silent output but whether any TRAVERSED path observes the failure. When adding a guard, name the path that reaches it and the observer who acts on it; "an external consumer we do not have" is a legitimate reason to keep it and is not coverage of our own risk. Reachability twin of R-132's monotonicity. Tell: ask what an observer would SEE differently if this were broken right now | this session + `codescout-ae` (`e6414362`, BL-66); kin R-131, R-132 |
@@ -5516,6 +5517,66 @@ confident id that evening; the third is **not sourced here** and is deliberately
 
 **Promote-when:** a third first-hand instance, or one where an unopened composite anchor
 reaches a shipped artifact rather than a message.
+
+## R-142 — Circular corroboration — a peer restating your claim is your own reading handed back, and nothing marks it
+
+**Verdict:** miss — I treated a peer's restatement of my own claim as independent
+confirmation, and reported the result to my operator as two observed instances.
+
+**The law.** Two parties agreeing is evidence only if they did not get it from each
+other, and **nothing in a conversation marks which is which.** A claim you introduce
+can return to you through a peer's restatement, and the return arrives carrying the
+authority of independence while having none of it.
+
+**The instance, 2026-08-30/31, four concurrent sessions in one checkout.** A peer wrote
+that *"a warning with no stated recovery cost tends to get discounted by whoever is
+impatient to finish the cleanup"* — past habitual, an **argument** for stating the cost.
+I read it as a **report** of an incident. Shortly after, the same peer described their own
+error as *"shipped the other failure of the same pair within the hour"* — which read to me
+as first-hand confirmation of the pairing. It was my own reading handed back: their actual
+error (relaying my understated recovery command, verification wrapped around it) points the
+**same** direction as mine, not the opposite.
+
+On that basis I told my operator both failure directions had been observed within an hour,
+and proposed the pairing to a third session for a durable ledger entry.
+
+**What stopped it.** `codescout-f0` declined to write the pairing from my summary and asked
+the other session **first-hand**, on the stated grounds that writing my account of someone
+else's instance into a ledger is the relayed-unverified shape the entry was about. The
+first-hand answer differed. Filed instead as `R-140`: one direction with two sourced
+instances, the omission direction kept as an explicitly labelled untested prediction.
+
+**Why the grammar matters.** Past habitual (*"tends to"*, *"gets discounted by whoever"*)
+states a disposition, not an event. It is the natural register for an argument, and it is
+one word away from the register of a report. Reading the second out of the first needs no
+carelessness — the sentence supports it.
+
+**Why it is upstream, not a sibling.** `R-141` is about referents nobody opens; `R-139` is
+about vigilance not scaling. This is about **provenance inside a conversation**: the loop
+runs entirely between parties who are each behaving well, and produces a confidence neither
+of them separately holds. `R-140`'s manufactured symmetry is its direct product, which is
+why both cite here.
+
+**Runnable form.** When a second party confirms a claim you are about to publish or record,
+ask one question before counting it: **could they have got this from me?** If yes it is one
+source, not two. Source it first-hand, or mark it relayed and say so in the artifact. The
+cost is a single message; a peer paid it tonight and it changed a ledger entry's
+conclusion.
+
+**Corollary.** Agreement is worth what its independence is worth — the same reason
+`observer-blindness:OB-4` holds that instruments sharing a substrate are one instrument.
+Distinct authorship supplies independence no more reliably than a distinct tool name does.
+
+**Status:** open — one instance, self-caught after a peer's first-hand check refuted it.
+
+**Valid:** dated 2026-08-31
+
+The law is not time-bound; the instance is a fact about this evening.
+
+**Rests on:** `R-140` (the entry that would have carried the manufactured symmetry) and
+`R-139` (knowing a class does not prevent it). The sourcing discipline that caught it is
+the practice `get_guide("tracker-conventions")` states for citations — prefer a
+first-hand definer to a restatement.
 
 ## Template for new entries
 
