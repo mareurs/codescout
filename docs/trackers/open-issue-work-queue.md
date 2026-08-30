@@ -91,13 +91,14 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
 | BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | **partial** — hint + manual fixed; diagnosis corrected in 3 places. Its prescribed fix (a) was a NO-OP for its own Rust repro (`PREWARM_LANGUAGES` is JVM-only), and a mux keyed by workspace keeps the server warm across sessions, so the cold window is far narrower than filed. The actually-false sentence is cross-repo (`session-start.mjs:339`) and still emitting — stays open for that | `caa8bc1df0e8c0d8` |
-| BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | open | `19f44bead56b56cc` |
+| BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | **mechanism shipped, operational half open** — `e799f29d` + `1ad9af66` + `f565504a` + `e1b91221`, gate green 4833/0. Shape travels in `docs/augmentations/<flattened-path>.yaml`; `reindex` re-attaches when the row is ABSENT and never overwrites a live one; `params` do not travel. Left: the export has not been RUN here (9 artifacts, needs `/mcp`); `artifact_augment` does not write through on shape change; and the 13 declared-but-absent trackers on this machine have no recoverable shape — their only copy is another machine's gitignored, unbacked catalog | `19f44bead56b56cc` |
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `e6c0ddb91fe28228` |
 | BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `54a70b49f6f26681` |
 | BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
 | BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | investigating (cross-ref) | `c752708c2757e139` |
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | **zombie 2026-08-30** — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code + live measurement, plus a newly-found 9 (→ BL-64) acquitted twice. Survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger in frontmatter | `73158c500ff6b293` |
+| BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | **open** — third instance of one mechanism in a day (after `19289b1f` and BL-60); strands `fix=export_augmentations`, which exists to run on the OTHER machine. Root cause INFERRED from `--help`. Two findings now argue for a key-set coverage test over a fourth round of flags | `2f2409074ee2319d` |
 | BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | open — no `%` in the LIKE so it matches zero rows, and the fn is `#[cfg(test)]` with no `reindex` subcommand in the CLI. Harmless today; reads as a missing-`%` typo whose repair restores the cascade-delete | `d5c8f2e8ca951ddc` |
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **blocked** — harness, not this repo. Caused 6 misattributions across 4 sessions in one afternoon; real population ≥ 6 while both sides report "Peer sessions (2)" over disjoint sets. Mitigation in the bug file works today | `4266d09da90acb5e` |
@@ -312,6 +313,42 @@ catalog is machine-local and gitignored, so frontmatter is the only surface that
 shape. Breaks CLAUDE.md's documented `entry_filter` recipes on every new machine with no recovery
 path. Pairs with `docs/conventions/cross-machine-catalog-resume.md`.
 
+
+**Update 2026-08-30 — mechanism shipped; three things remain, one of them time-sensitive.**
+
+Shipped: `e799f29d` (sidecar format, `parse_declaration`, reindex attach,
+`fix=export_augmentations`), `1ad9af66` (the cross-machine round trip in one test),
+`f565504a` (path-keyed sidecar names), `e1b91221` (the three docs that asserted the old
+invariant). Gate green 4833/0.
+
+**The design decision, taken by the operator:** shape travels in a committed sidecar
+*including* `prompt`; `params` stay catalog-only, because they are live state and
+committing them recreates the drift class BL-29/BL-40/BL-42 closed. So a restored tracker
+comes back working and empty.
+
+**The sharpest edge was not the feature.** `doctor::declares_true` returned `false` for
+any string outside `true/yes/on/1`, so introducing a sidecar PATH would have made
+`expects_augmentation: docs/augmentations/…yaml` read as **not declared** and switched the
+check off on the artifacts most carefully configured — the failure that function's own doc
+comment warned about, delivered by the change quoting it. Replaced with a three-state
+`parse_declaration`; anything uninterpretable is now reported rather than skipped.
+
+**Measured here before writing anything, correcting the bug file's framing:** doctor
+reports 13 on THIS machine, not only on a fresh clone. `artifact_augmentation.updated_at`
+dates a restore burst on 2026-08-28 09:16–10:11 — the CM-N stream. So 22 lost on a
+437-commit pull, 9 restored by hand, 13 never were. There is no catalog backup.
+
+**Remaining:**
+
+1. **Run the export here.** 9 artifacts, dry-run verified clean. Needs `/mcp` on the
+   13:34:59 binary — the live server predates `f565504a` and would write the colliding
+   stem-keyed names.
+2. **`artifact_augment` write-through.** A sidecar goes stale when shape changes until
+   someone re-exports. Export covers backfill and is idempotent, so this is not blocking.
+3. **The 13, and this one has a deadline.** Their shape is already gone here. It survives
+   only in the catalog of a machine that has not lost it — gitignored, unbacked, one `rm`
+   from unrecoverable. Run `fix=export_augmentations` THERE and commit the result. Blocked
+   only by BL-65 in the sense that the CLI cannot invoke it; MCP on that host can.
 ### BL-51 — A rendezvous slot that misses its SessionStart stamp can never be stamped again
 
 **Status:** open
@@ -613,6 +650,36 @@ that is the cheapest available evidence and it did not exist when the file was w
 Worth more than its phase-3 priority suggests if it does recur: retry-succeeds is exactly
 what a false negative looks like from the caller's side, which is this project's
 most-repeated law (`reconnaissance-patterns` law C, a zero that lies).
+### BL-65 — the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only
+
+**Status:** open — unowned, self-contained, phase 1.
+
+**Valid:** dated 2026-08-30
+
+`docs/issues/2026-08-30-cli-doctor-exposes-no-fix-flag.md`. `librarian(action="doctor",
+fix=…)` offers six repairs; `codescout doctor` offers none — its args are `--project`,
+`--json`, `--no-color`, `--fail-on-violations`. The subcommand's own help calls it a
+"Read-only scan", which is accurate about the CLI and describes half of what `doctor` is.
+
+**Third instance of one mechanism in one day.** The CLI keeps its own clap structs and
+hand-marshals into the tool's JSON; `Args` carries no `deny_unknown_fields` and every
+optional field is `#[serde(default)]`, so a param on one surface is **defaulted in
+silence** on the other rather than rejected. Preceded by the `--force` gap (`19289b1f`,
+archived) and BL-60 (`0c4931ef`).
+
+**Why it is worth more than its size.** It strands `fix=export_augmentations` (BL-50),
+which exists specifically to be run on the machine whose catalog still HOLDS augmentations
+this one lost — and the natural interface on that machine is the shell. Still reachable
+there via MCP, so this is a usability gap and not a dead end; the file says so rather than
+overstating it.
+
+**Root cause is marked INFERRED** — read off `--help`, not from `DoctorArgs`. Reproduced by
+running the binary rather than reading the struct, on BL-60's lesson that a bug file's
+"nothing to run" is a claim rather than an instruction.
+
+**The remedy two independent findings now point at**, and it is not a fourth round of
+flags: a test asserting the CLI's marshalled key set covers the tool's `Args` field set.
+That closes the mechanism instead of its next instance. BL-60's Resume argues the same.
 ### BL-45 — Decision 1: may a process on an unlinked binary re-index?
 
 **Status:** open — awaiting an operator decision, not blocked on work.

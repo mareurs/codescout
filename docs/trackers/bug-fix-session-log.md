@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 79
-entry_high_water_W: 75
+entry_high_water_F: 80
+entry_high_water_W: 76
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -127,6 +127,7 @@ entry_high_water_W: 75
 | F-70 | 2026-08-26 | med | process | fixed-verified | A dead citation that was wrong when written is indistinguishable from one that decayed — 0 of 6 in a 321-citation sweep were decay, and three independent artifacts misread it from the prose; the `--diff-filter=AD` probe is the only discriminator |
 | F-76 | 2026-08-29 | med | plan-prose | fixed-verified | A bug file's own evidence table cited `sync.rs:904` for the main sync path — that line is a `flush_pending` inside `sync_worktree`, the very call site the section exists to distinguish. On `sync_project` the vectors land inside `stream_index` (`:620`/`:626`, invoked at `:1017`). Conclusion unchanged, but a reader verifying it at that line is led straight back to the inverted fix |
 | F-77 | 2026-08-29 | med | cross-session | mitigated | A peer's hazard report was accurate when written and false when read — eleven correct filenames described work committed eight hours earlier (`45a88531`); a second peer credited this session with an edit it never made. Cross-session messages carry a send time, never an observation time |
+| F-80 | 2026-08-30 | high | cross-session | open | Closed an authorship question by ELIMINATION over a population no instrument reports completely, and sent it as a positive ID. `ListAgents` is scoped to one Claude profile's socket dir; this machine runs three, and a fourth session in `~/.claude-sdd` shared the checkout, wrote the contested hunks, and could not be seen or messaged (BL-58). Cost: `fix-embedding-transport-stage-1`'s correct first read — "not mine" — was abandoned to my well-argued wrong analysis, the inverse of every other misattribution that day. Remedy is a different KIND of instrument: grep session transcripts for `tool_use` write calls carrying a distinctive symbol from the diff, across ALL THREE profile dirs — positive identification, and it reaches exited sessions the process table cannot |
 | F-79 | 2026-08-30 | low | cross-session | mitigated | Told a peer a shared file was clean, kept editing it, and their explicit-path `git add` swept my BL-51/BL-52 re-statusing into a commit about archiving a different bug. Not `W-69`'s committer-side check but its missing sender-side half: "clean" is a claim with an expiry only the sender can see, so an all-clear should name a SHA or be retracted the moment you touch the file again |
 | F-78 | 2026-08-29 | low | self-friction | fixed-verified | Attributed a test failure to a peer's uncommitted file from a keyword count in its diff (19 × "timeout" across +137 lines). Wrong twice: the real cause was a `tokio::try_join!` race inside the test itself (`21174425`), and the "cheap decisive check" I first proposed — run it in isolation — PASSES, so it confirms the flake reading wrongly. The instrument whose subject was the failure was reading `embed_one_batch` |
 
@@ -210,6 +211,7 @@ entry_high_water_W: 75
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 | W-73 | 2026-08-29 | med | "Compile-error → green" is the trigger for spending a mutation: a test whose only observed RED was a compile error has never run its assertions against a wrong world. In statically typed languages that is the NORMAL TDD cycle, so the shape is common rather than rare | `guard_stale_binary`'s wiring test would have shipped looking like proof. The policy unit tests (`Some(true)` refuses, `Some(false)`/`None` do not) still pass when the guard is written, tested and never called — five green tests, defect 100% present, and nothing else in 4642 tests notices. Mutating the call to `let _ = ...` failed with the exact symptom its doc comment predicts. Second datapoint the same afternoon in `read_file.rs`, where two pre-existing tests assert the identical property and stay green because their 1200-short-line fixture can never reach the valve | **validated — promoted 2026-08-30** → memory `test-design-discipline` § The mechanical backstop |
 | W-74 | 2026-08-30 | med | When the closure step IS the broken operation, run it rather than routing around it — the write is mandatory, so the reproduction costs nothing and is the one moment the broken path runs against a known-correct expected answer. Distinct from CLAUDE.md's reproduce-before-the-fix-plan rule, which governs the START of a fix and weighs a real cost | Closing BL-48 required the exact `edit_markdown(frontmatter={set:{status:…}})` call BL-48 describes as broken; `artifact(update)` was the known, faster workaround. Writing the prediction down and then using the broken call yielded three findings unreachable by re-reading: the fix is not live in this server, so every catalog measurement in the window is of old code and no tool response says so; the desync is field-SELECTIVE (`get.rs:335` serves `status` from the catalog column, `:525-533` re-parses `extra` from disk), so one payload mixes two epochs and self-contradicts only when `extra` happens to be populated — a bug with none returns a stale status looking perfectly consistent; and chasing that to `/proc/<pid>/exe` found an UNLINKED binary, BL-45's own condition, which corrected a claim I had already written into the record (I cited the on-disk mtime as the running build; the process predates it) | open |
+| W-76 | 2026-08-30 | high | Dry-run a writing `fix=` against the REAL corpus and read its output before the first confirmed run — a real corpus contains the input that breaks the convention | BL-50's sidecar name was keyed on the artifact's file stem; two unit tests covered it, gate green 4833/0, design reviewed. The export's dry run printed `docs/research/README.md -> docs/augmentations/README.yaml` on its first line. `README` is not a unique stem, so a second augmented README would have shared the sidecar, the second export overwriting the first's shape and both artifacts restoring to one prompt — the silent shape-loss the feature exists to prevent, reintroduced by its own naming. Invisible in code, tests and review; visible in one line of real output (`f565504a`) | validated |
 | W-75 | 2026-08-30 | high | Reproduce before AND after each round of a fix, checking a wedge listener's own hit count, not just wall-clock time or a green test run | A round-1 isolation fix that passed all 77 memory tests still left 2 wedge hits (6.35s) from a third resolution path (`create_semantic_anchors`'s own `RetrievalClient::from_env`) that a concurrent session was independently fixing in the same live working tree mid-investigation — caught only by re-running the reproduction, not by trusting the passing suite | validated |
 ## Category conventions
 
@@ -7248,6 +7250,106 @@ reproduction rule.
 **Fix commit:** `fd638c76` ("fix(memory): close the third ambient-config path in the memory tests (T10)") on `experiments`, patch-id `2afe9f1378e8dece47fea600ecf840c57a215ab0` (`git show fd638c76 | git patch-id --stable`, verified independently rather than trusting the relayed value).
 
 **Rests on:** `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`'s updated `## Fix` section, which carries the exact before/after wedge-hit counts.
+
+## W-76 — Running the feature found a defect both its unit tests agreed was correct
+
+**Valid:** dated 2026-08-30
+
+**Observed:** 2026-08-30, shipping BL-50 (augmentation shape travels in a committed
+sidecar, `e799f29d`). The default sidecar path was keyed on the artifact's file stem:
+`docs/trackers/tool-usage-patterns.md` → `docs/augmentations/tool-usage-patterns.yaml`.
+Two unit tests covered it, the whole gate was green at 4833/0, and the design had been
+reviewed and approved.
+
+Then I ran `librarian(action="doctor", fix="export_augmentations")` as a dry run against
+the real catalog. Its first line:
+
+```
+docs/research/README.md  ->  docs/augmentations/README.yaml
+```
+
+`README` is not a unique stem. A second augmented `README.md` anywhere in the tree would
+have been assigned the same sidecar; the second export would silently overwrite the
+first's shape, both artifacts would then declare that path, and both would restore to one
+prompt. That is exactly the silent shape-loss the feature exists to prevent, reintroduced
+by its own naming convention. Fixed in `f565504a` — the default is now derived from the
+whole repo-relative path, which is injective because paths are.
+
+**Why the tests could not see it, and this is the transferable half.** The unit test
+asserted that `path_for` and `rel_path_for` **agree with each other**. They did. Both
+were stem-keyed and both were wrong together, so the assertion passed on a defect it was
+positioned to catch. A test that pins two functions to one another is blind to their
+shared convention being unsound — it can only see them diverging.
+
+**Counterfactual:** the collision is invisible in the code, in the tests, and in review.
+It becomes visible the moment a real corpus is fed through, because a real corpus contains
+a `README.md`. Nothing else on this project's gate would have surfaced it before the
+second augmented README existed, at which point the loss is silent and already done.
+
+**Status:** validated
+
+**Promote-when:** a second instance appears of "the dry run of a writing fix exposed
+something its tests asserted correctly". At that point the rule is stronger than this
+entry: a `fix=` that writes should be dry-run against the real corpus before its first
+confirmed run, and the output READ rather than counted.
+
+## F-80 — I eliminated down to one candidate over a population no instrument reports completely, and a peer dropped a correct position because of it
+
+**Valid:** dated 2026-08-30
+
+**Observed:** 2026-08-30. Contested hunks appeared in `src/tools/memory/tests.rs`. Three
+sessions each denied them. I read the first 28 of 200 added lines — the `NoCodeSearch`
+stub and its doc comment, which genuinely WERE
+`fix-embedding-transport-stage-1`'s — generalised from the part to the whole, and sent
+`codescout-ae` a **positive identification**: that session wrote both the hunks and W-75.
+
+Two things were wrong with it, and only one is the obvious one.
+
+The visible error is arguing from 14% of the diff. The structural error is the closing
+step: my support was "the other two candidates deny it, and `ListAgents` shows three
+sessions." That is elimination, and **elimination is only as strong as the completeness of
+the candidate set** — which no instrument here reports. `ListAgents` is scoped to one
+Claude profile's socket directory. This machine runs three (`~/.claude`, `~/.claude-sdd`,
+`~/.claude-kat`, per the first section of the global CLAUDE.md). A fourth session, live in
+`~/.claude-sdd` since 11:10:52, shared the checkout, wrote the hunks, and could not be
+seen or messaged by any of us. Filed as BL-58.
+
+**Cost, which is what makes this worth an entry rather than a note.**
+`fix-embedding-transport-stage-1`'s FIRST read — "these are not mine" — was correct, and
+they abandoned it. Not under pressure: to a well-argued, artifact-citing analysis that
+happened to be wrong. Every other misattribution that day was someone claiming authorship
+too readily; this was the inverse, and I caused it. Their own account of it is the
+sharpest statement of the lesson: a first-person negative about your own authorship is
+close to the strongest evidence available in a shared checkout, and it should not yield
+to a third party's inference from a diff, because the third party can only ever be
+inferring.
+
+**Remedy, and it is a different KIND of instrument rather than a more careful use of the
+same one.** Parse the session transcripts for `tool_use` entries with a write tool
+(`edit_file`, `edit_code`, `create_file`, `edit_markdown`, `artifact`) and match the input
+payload against a distinctive symbol from the diff. That answers *who wrote this line*
+directly, instead of answering it by exclusion. It also works on a session that has since
+exited, which the process table cannot reach.
+
+Glob **all three profile directories**, not just your own — that is the load-bearing half.
+My first pass searched only `~/.claude` and returned a clean, complete-looking **zero** for
+`"Network-free stubs"` across what I then believed was every transcript. Same blind spot,
+reached by a different route; without CLAUDE.md's first section I would have concluded the
+blocks had no author.
+
+**Also caught, and worth recording because it is the same reflex in the opposite
+direction:** mid-investigation I found four writes from me to that exact path, concluded
+"it is mine", and was about to report a false confession. They were dated 2026-08-28 and
+were about the memory-write shrink guard. Path matched, content did not. Path-matching is
+elimination wearing a different hat.
+
+**Status:** open
+
+**Promote-when:** a third session-attribution error lands whose root cause is a
+profile-scoped or otherwise partial population read as complete. Two exist now (this, and
+the buddy banner in BL-59). At three, the rule belongs in CLAUDE.md: never close an
+authorship question by elimination; identify positively from write history, across every
+profile.
 
 ## Template for new entries
 

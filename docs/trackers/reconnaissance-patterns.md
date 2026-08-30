@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 125
+entry_high_water_R: 126
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-126 | 2026-08-30 | miss (found by dry run) | **An agreement assertion cannot see a shared convention being wrong.** `path_for` and `rel_path_for` were tested against EACH OTHER and agreed — both stem-keyed, both unsound, since a stem is not unique and `docs/research/README.md` is really augmented here. Gate green 4833/0 on a defect the test was positioned to catch. Tell, available at write time: ask what the assertion RANGES OVER — one input and two implementations, or the input space. Write the property (injective? round-trips? unique across the corpus?) and keep the agreement as a second assertion. Distinct from law C: no zero, no error, just two functions quietly agreeing on one file (`f565504a`, `bug-fix-session-log:W-76`) |
 | R-125 | 2026-08-29 | miss (self-correcting) → promote-ready | **Law C is stated only for the EMPTY result — and the remedy I first proposed for that gap was law C again.** A keyword count in a peer's diff (19 × "timeout" across +137 lines) was read as causation and the peer was pointed at their own uncommitted work; the real defect was a `tokio::try_join!` race inside the test itself, racy since `9f4debc3`, fixed in `21174425`. The first draft of this entry prescribed *"run the failing test in isolation"* as the cheap decisive check — but it **passes** in isolation, so that green confirms the flake reading wrongly, which is law C's original form committed while writing the entry about law C. Before calling any check decisive, ask whether it can EXPRESS the failure | `bug-fix-session-log:F-78`; mechanism re-verified here at `embedder.rs:606-617` (`try_join!`) and `:540`/`:806` (`dense_only` never consulted by `embed_one_batch`); cost was one `symbols()` read rather than a bisect, because the report carried the failing assertion text verbatim; **second datapoint, volunteered by the fix's own author**: it verified the fix with 10/10 isolated runs — the same instrument, same blind spot, that had already acquitted the bug twice; the structural fact (`dense_batch`, one leg, no `try_join!`, verified at `:992-996`) is what carries it. Three passes of one instrument in one afternoon, each green read as proof of a different proposition. Threshold **fired**. Disposition **corrected from case 2 to case 3**: both datapoints occurred with the skill LOADED and law C's text already covers both errors, so this is not a wording gap and a sixth mechanism on the file's longest bullet is the accretion the audit section forbids — loaded is not reached, and the remedy is placement (a trigger-shaped clause attached to the act of citing a green) not rewording. Promotion owed as a SKILL.md PR, not yet raised; kin [[R-3]]/[[R-113]]/[[R-77]]/[[R-79]]/[[R-104]] — all five of law C's recurrences are the empty form |
 | R-124 | 2026-08-27 | miss (paired hit) | **One law, hit where the skill was invoked and never fetched where it was not.** The prohibition form of *"a fix — and equally a prohibition — is a claim about CURRENT STATE"* went unchecked: CLAUDE.md's "all native `Bash` are hard-denied" was acted on unverified and used to tell the user the mandated gate was unrunnable. The same law's request form had fired correctly hours earlier, stopping a deliberately-deleted `shell_enabled` switch from being re-added. Reading the hook SOURCE would have confirmed the wrong answer — `pre-tool-guard.mjs:177` is `enforce("This call is blocked...")` — and one positive control refuted it | `shell-gating-session-log:F-1` (miss) + `shell-gating-session-log:W-1` (hit); `cat src/main.rs` matched the guard's own block branch at `:165` and executed anyway, PostToolUse hint only; `BREAKER_THRESHOLD = 3` stands the guard down by design, so "hard" is wrong even as intent; audit verdict mode 3 **Unreachable** (placement, not wording) — no law added, base arm owed; kin [[R-19]] (same law, assert-a-checkable-fact form, already quoted in SKILL.md § When NOT to Use), [[R-89]] (recurred for the same placement reason) |
 | R-123 | 2026-08-27 | miss (x2) | **Adjacency is not causation — the nearest recent commit is a suspect, not a cause.** Twice in one session an observation was attributed to the most recent commit touching that surface, and both times the real cause predated it: `Monitor` executing in a deny-list arm was a list that lacked it (fixed 16 min earlier in `e67d419`), and `artifact(get)`'s `headings_truncated` was six weeks old (`3bccb234`), not the peer commit 12 min prior. Adjacency is what makes the check feel unnecessary — same file, same day, plausible subject line | cost: two bug reports, one filed `high` against the wrong layer, then retracted; sibling of [[R-118]] (a check that was refused) with the opposite origin and the same output |
@@ -4203,6 +4204,49 @@ lengthening the bullet a sixth time."*
 
 **Rests on:** `embed_one_batch`'s `try_join!` race and its non-consultation of `dense_only`, both
 read directly at `embedder.rs:606-617`, `:540`, `:806`.
+## R-126 — A test that pins two functions to each other is blind to their shared convention being wrong
+
+**Valid:** invariant
+
+**Rests on:** the distinction between an *agreement* assertion and a *property*
+assertion. An agreement assertion can only observe divergence; it is satisfied by any
+world in which both sides are wrong the same way.
+
+**The shape.** Two functions produce related values — an encoder and a decoder, a writer
+and a reader, a path-builder and the declaration that names the path. The natural test
+asserts they agree. That assertion is real and worth keeping: a disagreement is a genuine
+defect class. But it cannot see the case where both implement one unsound convention,
+because agreement is exactly what that case produces.
+
+**Measured 2026-08-30**, BL-50. `augmentation_sidecar::path_for` and `rel_path_for`
+derived a sidecar name from an artifact's **file stem**. The unit test asserted both
+returned the stem-keyed name — one absolute, one repo-relative — and passed. Whole gate
+green at 4833/0, design reviewed and approved.
+
+The convention was unsound: a stem is not unique. `docs/research/README.md` is a real
+augmented artifact in this repo, so any second augmented `README.md` would have shared its
+sidecar, the second export silently overwriting the first's shape, both artifacts then
+restoring to one prompt. The test was positioned exactly where that defect lived and could
+not report it, because both halves were wrong together (`f565504a`).
+
+**The tell, and it is available at write time.** Ask what the assertion RANGES OVER. An
+agreement assertion ranges over one input and two implementations. A property assertion
+ranges over the input space: *is this mapping injective?* *does it round-trip for any
+value?* *is the result unique across the corpus?* When two functions share a derivation,
+the property is the thing under test and the agreement is a corollary — write the
+property, keep the agreement as a second assertion. The corrected test does both: two
+same-stem paths must not collide, AND the two functions must still agree.
+
+**What surfaced it** was not analysis but a dry run against the real corpus: the export's
+first printed line was the collision. A real corpus contains a `README.md`. See
+`bug-fix-session-log:W-76` for that half — this entry is the structural law, that one is
+the practice.
+
+**Relation to law C** (a zero that lies): distinct. Law C is about a RESULT that misreads
+as an answer. This is about an ASSERTION whose form excludes the defect from its range.
+They compose badly — a stem collision produces no zero and no error, just two artifacts
+quietly agreeing on one file.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.
