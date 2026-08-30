@@ -99,7 +99,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | **zombie 2026-08-30** — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code + live measurement, plus a newly-found 9 (→ BL-64) acquitted twice. Survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger in frontmatter | `73158c500ff6b293` |
 | BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | **open** — third instance of one mechanism in a day (after `19289b1f` and BL-60); strands `fix=export_augmentations`, which exists to run on the OTHER machine. Root cause INFERRED from `--help`. Two findings now argue for a key-set coverage test over a fourth round of flags | `2f2409074ee2319d` |
-| BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | open — no `%` in the LIKE so it matches zero rows, and the fn is `#[cfg(test)]` with no `reindex` subcommand in the CLI. Harmless today; reads as a missing-`%` typo whose repair restores the cascade-delete | `d5c8f2e8ca951ddc` |
+| BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | **done** — `9f743091`, patch-id `92db5adf65b7a748`. Took (a) delete-the-block over (b) plumb-`force`: **both** `index_repo` call sites are test-only while `index_repo` is public API, so (b) was a semver break serving only tests, building a reference implementation nothing references. A comment now stands where the block was — that is the remedy, the hazard being a reader "fixing" the missing `%`. Regression test mutation-verified: **with** `%` FAILS, **without** `%` passes | `6ff4394bb3b18d86` |
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **blocked** — harness, not this repo. Caused 6 misattributions across 4 sessions in one afternoon; real population ≥ 6 while both sides report "Peer sessions (2)" over disjoint sets. Mitigation in the bug file works today | `4266d09da90acb5e` |
 | BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `6411eb594cd7231d` |
@@ -508,9 +508,9 @@ already known.
 
 ### BL-64 — `reindex_cli` carries a broken copy of a deliberately removed DELETE
 
-**Status:** open — in-repo, low severity, unowned. **Valid:** dated 2026-08-30
+**Status:** done — `9f743091`, patch-id `92db5adf65b7a748`. **Valid:** dated 2026-08-30
 
-`docs/issues/2026-08-30-reindex-cli-carries-a-broken-copy-of-a-deliberately-removed-delete.md`.
+`docs/issues/archive/2026-08-30-reindex-cli-carries-a-broken-copy-of-a-deliberately-removed-delete.md`.
 
 `src/librarian/mod.rs:392-398` still holds the pre-walk
 `DELETE FROM artifact WHERE abs_path LIKE ?1` that `reindex.rs` removed from the real path
@@ -527,6 +527,38 @@ typo, and repairing the typo restores a cascade-delete of every augmentation und
 root. `reindex.rs`'s own comment records that arc — destructive DELETE, removed in
 `d482ca8a`, then properly re-plumbed as `force_rewalk`. The CLI-named twin never left
 stage one.
+
+**Fixed 2026-08-30 — `9f743091`, patch-id `92db5adf65b7a748`.**
+
+The record left (a) vs (b) genuinely open. One fact settled it that the bug file did not
+have: **both** call sites of `index_repo` are test-only — `indexer.rs:1624` is inside
+`#[cfg(test)] mod tests` (opening at `:707`) and `mod.rs:452` is inside `reindex_cli`,
+itself `#[cfg(test)]` — while `index_repo` is public API via `lib.rs:39` → `mod.rs:24`. So
+(b) was a semver-breaking signature change serving only test callers, to make a reference
+implementation nothing references; the real path bypasses `index_repo` and calls
+`index_repo_sync` directly. (a) touches only `#[cfg(test)] pub(crate)` code.
+
+**The comment is the remedy, not the deletion** — the danger was always the next reader,
+so the reasoning now stands where the block was, mirroring `tools/reindex.rs`.
+
+`reindex_cli_never_wipes_augmentations_under_the_root` pins it, and the mutation matrix is
+the result rather than the green tick: **with** `%` (the "typo fix") the test FAILS;
+**without** `%` (the shipped code) it passes. It discriminates on the hazard, not on the
+presence of a DELETE — and it confirms at runtime that the shipped statement was inert.
+Two things stayed green under the failing mutation, which is why the assertion is on the
+augmentation: the sibling `reindex_cli_indexes_repo`, and the test's own
+`COUNT(*) == 1` — the count cannot see the wipe, because `id = sha256(abs_path)` means the
+re-walk re-inserts the same row.
+
+**Correction worth keeping:** the bug file's *Tests added* section said "if (a) is taken
+there is nothing to assert; the deletion is the change." That was wrong. A deletion leaves
+no artefact to assert on, but the **invariant it establishes** is assertable, and asserting
+it is the only thing that stops the code returning. "Nothing to assert" is what a removed
+guard always looks like from the inside.
+
+One finding surfaced and deliberately not actioned: `index_repo` is `pub` on a `pub mod`
+path with **no production caller at all**. Dead public API, not a defect — and removing it
+would be semver-breaking for library consumers even though nothing here calls it.
 
 Fix is (a) delete the block and the parameter, matching what the sibling actually did, or
 (b) plumb `force_rewalk`/`force_embed` through `index_repo` — only 2 call sites. Not (c),

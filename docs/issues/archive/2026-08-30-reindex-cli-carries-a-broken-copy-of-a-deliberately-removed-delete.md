@@ -1,7 +1,7 @@
 ---
-id: d5c8f2e8ca951ddc
+id: 6ff4394bb3b18d86
 kind: bug
-status: open
+status: fixed
 title: 'BUG: reindex_cli is test-only and carries a broken copy of a DELETE that was deliberately removed for causing data loss'
 tags:
 - librarian
@@ -9,11 +9,10 @@ tags:
 - dead-code
 - latent-data-loss
 - cli-parity
-closed: null
+closed: 2026-08-30
 opened: 2026-08-30
 owner: marius
 severity: low
-unverified: 'Severity is low ONLY because the function is #[cfg(test)] and no `reindex` subcommand exists — verified against `codescout --help`. If either fact changes, re-rate: the block is one character from being the data-loss path `d482ca8a` removed.'
 ---
 
 # BUG: `reindex_cli` is test-only and carries a broken copy of a DELETE removed for causing data loss
@@ -113,43 +112,70 @@ no force argument exists on that signature. `index_repo` in turn hardcodes
 
 ## Fix
 
-Two candidates, and the choice is a real one rather than a formality.
+**Taken: (a)** — deleted the block and the `force` parameter. `9f743091` on `experiments`,
+patch-id `92db5adf65b7a748`.
 
-- **a. Delete the block and the `force` parameter.** Smallest, and it matches what
-  `reindex.rs` actually did — that path removed its DELETE rather than repairing it.
-  Costs the ability to say `reindex_cli(env, repo, true)` in a test.
-- **b. Plumb `force` properly**, mirroring the MCP path: add `force_rewalk` / `force_embed`
-  to `index_repo` and pass them through. Makes `reindex_cli` a correct reference
-  implementation of the same operation. Blast radius is small — `index_repo` has exactly
-  **two** call sites (`indexer.rs:1624`, `mod.rs:452`).
+One fact decided it that this record did not have when it was written. **Both call sites of
+`index_repo` are test-only** — `indexer.rs:1624` sits inside `#[cfg(test)] mod tests`
+(which opens at `indexer.rs:707`), and `mod.rs:452` is inside `reindex_cli`, itself
+`#[cfg(test)]` — while `index_repo` is *public API* via `lib.rs:39 pub mod librarian` →
+`librarian/mod.rs:24 pub mod indexer`.
 
-**Not (c): restore the `%`.** That is the data-loss path by construction.
+So (b) was not the neutral "make it a correct reference implementation" it reads as. It
+meant a **semver-breaking signature change to public API, serving only test callers**, to
+build a reference implementation that nothing references — the real path bypasses
+`index_repo` entirely and calls `index_repo_sync` directly (`tools/reindex.rs:311`) with
+its own force values. (a) touches only `#[cfg(test)] pub(crate)` code and has zero API
+impact.
 
-Deliberately not applied in this record: the function is test-only, so neither option is
-urgent, and picking between them is a judgement about whether `reindex_cli` is meant to
-survive at all.
-
+**The comment is the actual remedy, not the deletion.** A comment now stands where the
+block was, recording why there is no force step, that `d482ca8a` removed the same thing
+from the MCP path, and that forced re-walk lives in `index_repo_sync`'s `force_rewalk` /
+`force_embed`. This mirrors what `tools/reindex.rs` already does, and it is what makes the
+decision survive the next reader — the danger was never what the code did.
 ## Tests added
 
-None. The testable claim if (b) is taken is the one the MCP side already pins —
-`force=true` on an existing-unchanged file yields `updated=1, added=0, unchanged=0`
-(`force_wipes_then_reindexes`). If (a) is taken there is nothing to assert; the deletion
-is the change.
+`reindex_cli_never_wipes_augmentations_under_the_root` (`src/librarian/mod.rs`).
 
+**This section's original claim — "if (a) is taken there is nothing to assert; the deletion
+is the change" — was wrong, and the way it was wrong is worth keeping.** A deletion leaves
+no artefact to assert on, true; but the *invariant the deletion establishes* is assertable,
+and asserting it is the only thing that stops the code coming back. "Nothing to assert" is
+what a removed guard always looks like from the inside.
+
+The test indexes one spec, attaches an augmentation to it, reindexes, and asserts the
+augmentation survives. Mutation matrix — which is the result, not the green tick:
+
+| mutation | outcome |
+|---|---|
+| re-add the DELETE **with** `%` (the "typo fix") | test **FAILS** |
+| re-add the DELETE **without** `%` (the shipped code) | test **passes** |
+
+So it discriminates on the *hazard*, not on the presence of a DELETE — and it confirms at
+runtime this record's central claim, that the shipped statement was genuinely inert.
+
+Two things stayed green under the failing mutation, and both are the reason the assertion
+is where it is: the sibling `reindex_cli_indexes_repo`, and this test's own
+`COUNT(*) FROM artifact == 1`. The count cannot see the wipe, because `id =
+sha256(abs_path)` means the re-walk re-inserts the same row. Only the augmentation
+discriminates, because `artifact_augmentation` is `ON DELETE CASCADE` and `Catalog::open`
+sets `PRAGMA foreign_keys = ON` — verified at `catalog/mod.rs:422`, since the test would be
+vacuous if it did not.
+
+The reproduction was run before the fix, per CLAUDE.md: `LIKE '/r/'` → 1, `LIKE '/r/%'` → 3.
 ## Workarounds
 
 None needed — nothing reaches it.
 
 ## Resume
 
-Decide (a) vs (b). (a) if `reindex_cli` is vestigial and should go; (b) if a CLI reindex
-is wanted later, since the plumbing is the part that would otherwise be re-derived.
+Done — nothing outstanding. Fixed at `9f743091` (patch-id `92db5adf65b7a748`), gate green
+(fmt; clippy `--workspace --all-targets --features local-embed`; 4837/0 full; 3362/0 lean).
 
-**Whichever is chosen, do not leave the block as-is.** Its danger is not what it does, it
-is what a future reader does to it: the pattern reads as an obvious missing-`%` typo, and
-"fixing" the typo restores a cascade-delete of every augmentation under the root, with the
-`ON DELETE CASCADE` doing the damage silently.
-
+**One finding surfaced by the fix and deliberately not actioned here:** `index_repo` is
+`pub` on a `pub mod` path and has no production caller at all — dead public API rather than
+a defect, and out of scope for a bug file. If it is ever tidied, note that removing it is a
+semver-breaking change for library consumers even though nothing in this repo calls it.
 ## References
 
 - `src/librarian/mod.rs:392-398` — the block
@@ -161,4 +187,3 @@ is what a future reader does to it: the pattern reads as an obvious missing-`%` 
 - Found while investigating
   `docs/issues/2026-08-25-sdd-ledger-and-catalog-rows-vanished.md`
   (`open-issue-work-queue:BL-56`) as a candidate cause; **acquitted** there, twice over.
-

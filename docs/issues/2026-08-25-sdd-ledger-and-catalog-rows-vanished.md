@@ -290,8 +290,13 @@ independent reasons:
   Nothing user-facing reaches it.
 
 Filed separately as
-`docs/issues/2026-08-30-reindex-cli-carries-a-broken-copy-of-a-deliberately-removed-delete.md`
+`docs/issues/archive/2026-08-30-reindex-cli-carries-a-broken-copy-of-a-deliberately-removed-delete.md`
 — harmless today, and one character from being the data-loss path it descends from.
+**Fixed and archived 2026-08-30** (`9f743091`, patch-id `92db5adf65b7a748`): the block and
+its `force` parameter are gone, a comment records the decision where they stood, and a
+mutation-verified regression test now fails if anyone restores the `%`. That does not
+disturb this hypothesis's rejection — the statement really was inert, which is exactly what
+acquitted it here, and the fix confirmed it at runtime rather than by reading.
 
 ### What remains: hypothesis 8, and it is unfalsifiable rather than untested
 
