@@ -1906,65 +1906,139 @@ mod tests {
         );
     }
 
-    /// `tokio::try_join!` must run the dense and sparse legs concurrently — a
-    /// regression to sequential `.await`s produces byte-identical output
-    /// values, so only wall-clock timing catches it.
+    /// Two-party rendezvous with a deadline, for asserting that two mock
+    /// handlers are in flight *at the same time*.
     ///
-    /// Equal delays are deliberate, not arbitrary: the separation between the
-    /// concurrent and sequential cases is `sum` vs `max`, and that ratio
-    /// (`sum/max`) is maximized (2×) when both delays are equal. Unequal
-    /// delays throw headroom away — an earlier version used 300ms/600ms
-    /// (only a 1.5× ratio) and measured just 4-6ms of margin on the
-    /// sequential side (903.8-905.7ms against a 900ms ceiling) — a false
-    /// negative waiting to happen on any machine a few ms faster. With both
-    /// legs at 500ms and an 800ms ceiling, measured locally (5 runs each):
-    ///   concurrent ≈ 502.8-503.6ms  → ~296-297ms below the ceiling
-    ///   sequential ≈ 1004.8-1005.5ms → ~205ms above the ceiling
-    /// Do not "optimize" these back down to unequal/smaller delays — that
-    /// silently reintroduces the tight margin this comment exists to prevent.
+    /// Each caller announces arrival and blocks until the other arrives.
+    /// Returns `true` only if the peer actually showed up.
+    ///
+    /// The deadline is the load-bearing part: a plain `std::sync::Barrier`
+    /// would block forever when the callers are serialised, hanging the whole
+    /// test binary with no attributable failure. Timing out instead lets every
+    /// handler return, the HTTP exchange complete, and the test fail on a named
+    /// assertion.
+    fn meet_peer(
+        state: &(std::sync::Mutex<usize>, std::sync::Condvar),
+        timeout: std::time::Duration,
+    ) -> bool {
+        let (lock, cvar) = state;
+        let mut arrived = lock.lock().expect("rendezvous mutex");
+        *arrived += 1;
+        if *arrived >= 2 {
+            cvar.notify_all();
+            return true;
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            let (guard, res) = cvar
+                .wait_timeout(arrived, remaining)
+                .expect("rendezvous mutex");
+            arrived = guard;
+            // Re-check the predicate before trusting `timed_out()`: a spurious
+            // wakeup and a genuine notify are indistinguishable otherwise.
+            if *arrived >= 2 {
+                return true;
+            }
+            if res.timed_out() {
+                return false;
+            }
+        }
+    }
+
+    /// `tokio::try_join!` must run the dense and sparse legs concurrently — a
+    /// regression to sequential `.await`s produces byte-identical output values,
+    /// so nothing in the *result* can catch it.
+    ///
+    /// This OBSERVES the overlap rather than inferring it from elapsed time.
+    /// Each mock handler announces its arrival and waits for the other before
+    /// responding, so the exchange can only complete if both requests were in
+    /// flight together. Under sequential awaits the first handler waits for a
+    /// request that cannot be sent until it returns, the wait times out, and
+    /// `met` never reaches 2.
+    ///
+    /// It replaces a wall-clock assertion (two 500ms mock sleeps under an 800ms
+    /// ceiling) that was **valid only on an idle machine**. Loaded, it measured
+    /// 3 failures in 5 runs at 847-903ms, and its panic message named a
+    /// sequential-await regression — so every flake had to be manually
+    /// discriminated from the bug it guards. Raising the ceiling would only have
+    /// moved the threshold; the inference itself was the defect. See
+    /// `docs/issues/archive/2026-08-30-concurrency-timing-test-flakes-as-its-own-regression-signature.md`.
+    ///
+    /// The rendezvous is strictly stronger in both directions: it cannot fail on
+    /// a healthy build at any load, and it fails on every machine when the legs
+    /// are serialised. It also drops ~1s of sleep from the suite.
+    ///
+    /// Acceptance is a mutation: replace the `try_join!` in `embed_one_batch`
+    /// with two sequential `.await`s and this test must fail deterministically.
     #[tokio::test]
     async fn dense_and_sparse_legs_run_concurrently() {
+        // Shared between the two handlers: an arrival counter guarded by a
+        // condvar, plus a tally of how many handlers actually met their peer.
+        let rendezvous =
+            std::sync::Arc::new((std::sync::Mutex::new(0usize), std::sync::Condvar::new()));
+        let met = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // Generous: a healthy run never waits at all, because the peer request
+        // is already in flight. Only a serialised regression pays this.
+        const PEER_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
         let mut dense_server = mockito::Server::new_async().await;
         let mut sparse_server = mockito::Server::new_async().await;
+
+        let (rv, tally) = (
+            std::sync::Arc::clone(&rendezvous),
+            std::sync::Arc::clone(&met),
+        );
         let dense_mock = dense_server
             .mock("POST", "/v1/embeddings")
             .with_status(200)
-            .with_chunked_body(|w| {
-                std::thread::sleep(std::time::Duration::from_millis(500));
+            .with_chunked_body(move |w| {
+                if meet_peer(&rv, PEER_WAIT) {
+                    tally.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
                 w.write_all(br#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
             })
             .create_async()
             .await;
+
+        let (rv, tally) = (
+            std::sync::Arc::clone(&rendezvous),
+            std::sync::Arc::clone(&met),
+        );
         let sparse_mock = sparse_server
             .mock("POST", "/embed_sparse")
             .with_status(200)
-            .with_chunked_body(|w| {
-                std::thread::sleep(std::time::Duration::from_millis(500));
+            .with_chunked_body(move |w| {
+                if meet_peer(&rv, PEER_WAIT) {
+                    tally.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
                 w.write_all(br#"[[{"index":1,"value":0.5}]]"#)
             })
             .create_async()
             .await;
 
         let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
-        let start = std::time::Instant::now();
         let out = e
             .embed_one_batch(vec!["x".to_string()])
             .await
             .expect("embed_one_batch");
-        let elapsed = start.elapsed();
 
         assert_eq!(out[0].dense, vec![0.1_f32, 0.2, 0.3]);
         assert_eq!(out[0].sparse.indices, vec![1u32]);
-        assert!(
-            elapsed < std::time::Duration::from_millis(800),
-            "legs should run concurrently (~max(500,500)=500ms), took {elapsed:?} — \
-                 a sequential-await regression would take ~1000ms"
-        );
-        assert!(
-            elapsed >= std::time::Duration::from_millis(400),
-            "delays should have actually elapsed (~500ms), took {elapsed:?} — a \
-                 near-zero time means the mock delay did not run and this test is not \
-                 exercising anything"
+        // Both handlers must have met their peer. Under sequential awaits the
+        // FIRST times out (0) and the second then finds the counter already at
+        // 2 and succeeds (1) — so a total of 1, not 0, is the regression
+        // signature, and asserting `> 0` would pass under the very bug this
+        // test exists to catch.
+        assert_eq!(
+            met.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "the dense and sparse legs did not overlap: a handler waited {PEER_WAIT:?} \
+             for the other leg's request and it never arrived, so `embed_one_batch` is \
+             awaiting them sequentially rather than under `try_join!`"
         );
         dense_mock.assert_async().await;
         sparse_mock.assert_async().await;
