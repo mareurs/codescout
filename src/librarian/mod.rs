@@ -1,7 +1,10 @@
 //! librarian — workspace artifact registry embedded in codescout.
 
 pub mod adapter;
-pub use adapter::{adapters_for, install_augmentation_guard_oracle, try_build_runtime_with};
+pub use adapter::{
+    adapters_for, install_augmentation_guard_oracle, install_catalog_frontmatter_sync,
+    try_build_runtime_with,
+};
 
 pub mod classify;
 pub mod filter;

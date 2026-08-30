@@ -1466,6 +1466,22 @@ impl Tool for EditMarkdown {
 
         crate::util::fs::atomic_write(&resolved, &new_content)?;
 
+        // A frontmatter write can move catalog-INDEXED columns (status, title, tags,
+        // time_scope), and nothing else brings the row back into step: the guard above
+        // deliberately lets a plain catalogued file through, so this is the population
+        // whose row can silently contradict its own file. See `librarian_sync` and
+        // `open-issue-work-queue:BL-48`.
+        //
+        // Gated on `frontmatter_changed` because a body-only edit cannot move an indexed
+        // column, and a catalog write per body edit would be pure cost.
+        //
+        // Return value deliberately dropped: `false` means "no librarian, or not an
+        // artifact", both ordinary. The file write has already landed, so a failed sync
+        // must not turn a successful edit into an error.
+        if frontmatter_changed {
+            crate::util::librarian_sync::sync_after_frontmatter_write(&resolved);
+        }
+
         if let Ok(mut cov) = ctx.section_coverage.lock() {
             cov.update_mtime(&resolved);
         }

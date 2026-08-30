@@ -374,6 +374,9 @@ impl CodeScoutServer {
                 // The markdown guard needs the catalog to recognise augmented
                 // artifacts whose frontmatter carries no id. BL-33.
                 crate::librarian::install_augmentation_guard_oracle(&lib_ctx);
+                // The write-side twin: a direct frontmatter edit moves catalog-indexed
+                // columns, and nothing else brings the row back into step. BL-48.
+                crate::librarian::install_catalog_frontmatter_sync(&lib_ctx);
                 tools.extend(crate::librarian::adapters_for(lib_ctx));
             }
         }

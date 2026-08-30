@@ -74,6 +74,100 @@ pub fn install_augmentation_guard_oracle(ctx: &LibToolContext) {
     }));
 }
 
+/// Writes a file's catalog row back into step after a direct frontmatter edit.
+///
+/// The write-side twin of [`CatalogAugmentationOracle`], and deliberately its neighbour:
+/// the guard reads the catalog to decide whether to REFUSE an edit; this writes the
+/// catalog after one it allowed. The guard lets a plain catalogued file through on
+/// purpose (`a_catalogued_but_unaugmented_file_stays_directly_editable`), and that
+/// population is exactly the one whose row could silently contradict its own file.
+/// `open-issue-work-queue:BL-48`.
+struct CatalogFrontmatterSyncer {
+    catalog: Arc<parking_lot::Mutex<crate::librarian::catalog::Catalog>>,
+}
+
+impl crate::util::librarian_sync::CatalogFrontmatterSync for CatalogFrontmatterSyncer {
+    fn sync_frontmatter(&self, abs_path: &std::path::Path) -> bool {
+        // Canonicalize for the same reason the oracle does: the catalog stores canonical
+        // absolute paths, and a resolved path may still carry a symlinked prefix.
+        let Ok(abs) = std::fs::canonicalize(abs_path) else {
+            return false;
+        };
+        let Ok(content) = std::fs::read_to_string(&abs) else {
+            return false;
+        };
+        // No frontmatter block at all means nothing indexed can have moved.
+        let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
+            return false;
+        };
+
+        let id = crate::librarian::ids::artifact_id_from_abs(&abs);
+
+        // Plain `lock()` is safe for the reason stated on the oracle: this is only ever
+        // reached from the core markdown tools, none of which hold the catalog lock.
+        let cat = self.catalog.lock();
+
+        // NEVER create a row. A path the catalog does not know is ordinary markdown, and
+        // inventing an artifact for it would turn every `edit_markdown` on a stray `.md`
+        // into a catalog write. `false` here is the normal answer, not a failure.
+        let Ok(Some(row)) = crate::librarian::catalog::artifact::get(&cat, &id) else {
+            return false;
+        };
+
+        let now = chrono::Utc::now().timestamp_millis();
+        let file_mtime = std::fs::metadata(&abs)
+            .ok()
+            .and_then(|m| {
+                m.modified().ok().and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|d| d.as_millis() as i64)
+                })
+            })
+            .unwrap_or(now);
+
+        // File wins where it speaks, row survives where the file is silent. The
+        // conservative direction on purpose: this runs after an edit that may have
+        // touched one key, and a frontmatter block that omits `tags` is far more likely
+        // to mean "not my business" than "delete the tags". A full re-derivation is
+        // `librarian(action="reindex")`'s job, not a per-edit hook's.
+        let updated = crate::librarian::catalog::artifact::ArtifactRow {
+            id: row.id.clone(),
+            abs_path: row.abs_path.clone(),
+            kind: fm.kind.clone().unwrap_or(row.kind),
+            status: fm.status.clone().unwrap_or(row.status),
+            title: fm.title.clone().or(row.title),
+            owners: if fm.owners.is_empty() {
+                row.owners
+            } else {
+                fm.owners.clone()
+            },
+            tags: if fm.tags.is_empty() {
+                row.tags
+            } else {
+                fm.tags.clone()
+            },
+            topic: fm.topic.clone().or(row.topic),
+            time_scope: fm.time_scope.clone().or(row.time_scope),
+            source: row.source,
+            created_at: row.created_at,
+            updated_at: now,
+            file_mtime,
+            file_sha256: crate::librarian::util::sha_of_bytes(content.as_bytes()),
+            confidence: row.confidence,
+        };
+
+        crate::librarian::catalog::artifact::upsert_and_mint_slug(&cat, &updated).is_ok()
+    }
+}
+
+/// Wire the catalog into the markdown frontmatter sync, once, at server construction.
+pub fn install_catalog_frontmatter_sync(ctx: &LibToolContext) {
+    crate::util::librarian_sync::install_catalog_sync(Arc::new(CatalogFrontmatterSyncer {
+        catalog: Arc::clone(&ctx.catalog),
+    }));
+}
+
 pub fn adapters_for(ctx: Arc<LibToolContext>) -> Vec<Arc<dyn crate::tools::Tool>> {
     lib_all_tools()
         .into_iter()
@@ -1043,5 +1137,151 @@ mod tests {
                     || names_path_containing(&v, "docs/trackers/")
             );
         }
+    }
+
+    /// Seed a catalog holding one row for `abs`, at `status`, with `tags`/`title`.
+    ///
+    /// The id is computed from the CANONICALIZED path because that is what the syncer
+    /// does — a tempdir path is a symlink on macOS, and an id derived from the
+    /// uncanonicalized form would simply never match, making every assertion below
+    /// vacuously "no row found".
+    #[cfg(test)]
+    fn seed_catalog_for(
+        abs: &std::path::Path,
+        status: &str,
+        tags: Vec<String>,
+        title: Option<&str>,
+    ) -> (
+        String,
+        Arc<parking_lot::Mutex<crate::librarian::catalog::Catalog>>,
+    ) {
+        let id = crate::librarian::ids::artifact_id_from_abs(abs);
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        let mut builder = crate::librarian::catalog::artifact::TestArtifactRowBuilder::new(&id)
+            .with_abs_path(abs)
+            .with_kind("bug")
+            .with_status(status)
+            .with_tags(tags);
+        if let Some(t) = title {
+            builder = builder.with_title(t);
+        }
+        crate::librarian::catalog::artifact::upsert(&cat, &builder.build()).unwrap();
+        (id, Arc::new(parking_lot::Mutex::new(cat)))
+    }
+
+    /// The whole of BL-48 in one assertion: a file whose frontmatter says `fixed` must
+    /// leave a catalog row that also says `fixed`.
+    ///
+    /// Without the syncer the row keeps `open` indefinitely, and
+    /// `artifact(find, kind="bug", status=…)` — the triage query CLAUDE.md and the
+    /// activation bootstrap both prescribe — reports a value the file contradicts.
+    /// `docs/issues/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`.
+    #[test]
+    fn sync_frontmatter_writes_the_files_status_onto_its_catalog_row() {
+        use crate::util::librarian_sync::CatalogFrontmatterSync;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("2026-08-30-a-bug.md");
+        std::fs::write(
+            &path,
+            "---\nkind: bug\nstatus: fixed\nclosed: 2026-08-30\n---\n\n# A bug\n",
+        )
+        .unwrap();
+        let abs = std::fs::canonicalize(&path).unwrap();
+
+        let (id, catalog) = seed_catalog_for(&abs, "open", vec![], None);
+        let syncer = CatalogFrontmatterSyncer {
+            catalog: Arc::clone(&catalog),
+        };
+
+        assert!(
+            syncer.sync_frontmatter(&path),
+            "a path the catalog knows must report that a row was found and updated"
+        );
+
+        let row = crate::librarian::catalog::artifact::get(&catalog.lock(), &id)
+            .unwrap()
+            .expect("the row must still exist");
+        assert_eq!(
+            row.status, "fixed",
+            "the row must adopt the file's status — this single assertion IS the bug"
+        );
+    }
+
+    /// The one way this hook could do real damage: inventing an artifact for ordinary
+    /// markdown. `edit_markdown` runs on plenty of files the catalog has never heard of,
+    /// and every one of them reaches this code.
+    #[test]
+    fn sync_frontmatter_never_creates_a_row_for_an_uncatalogued_file() {
+        use crate::util::librarian_sync::CatalogFrontmatterSync;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ordinary-notes.md");
+        std::fs::write(&path, "---\nstatus: fixed\n---\n\n# Notes\n").unwrap();
+        let abs = std::fs::canonicalize(&path).unwrap();
+        let id = crate::librarian::ids::artifact_id_from_abs(&abs);
+
+        // An EMPTY catalog — nothing seeded, so this path is not an artifact.
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        let catalog = Arc::new(parking_lot::Mutex::new(cat));
+        let syncer = CatalogFrontmatterSyncer {
+            catalog: Arc::clone(&catalog),
+        };
+
+        assert!(
+            !syncer.sync_frontmatter(&path),
+            "a path with no row must report false"
+        );
+        assert!(
+            crate::librarian::catalog::artifact::get(&catalog.lock(), &id)
+                .unwrap()
+                .is_none(),
+            "and must NOT have created one — turning every edit_markdown on a stray .md \
+             into a catalog write is the one unrecoverable failure available here"
+        );
+    }
+
+    /// The conservative direction, asserted so it is a decision rather than an accident:
+    /// the file wins where it speaks, the row survives where the file is silent.
+    ///
+    /// This runs after an edit that may have touched a single key. A frontmatter block
+    /// that omits `tags` means "not my business" far more often than "delete the tags",
+    /// and a full re-derivation from the file is `reindex`'s job, not a per-edit hook's.
+    #[test]
+    fn sync_frontmatter_preserves_row_fields_the_file_does_not_mention() {
+        use crate::util::librarian_sync::CatalogFrontmatterSync;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial.md");
+        // Only `kind` and `status` — no tags, no title.
+        std::fs::write(&path, "---\nkind: bug\nstatus: fixed\n---\n\n# Partial\n").unwrap();
+        let abs = std::fs::canonicalize(&path).unwrap();
+
+        let (id, catalog) = seed_catalog_for(
+            &abs,
+            "open",
+            vec!["alpha".to_string(), "beta".to_string()],
+            Some("Kept title"),
+        );
+        let syncer = CatalogFrontmatterSyncer {
+            catalog: Arc::clone(&catalog),
+        };
+        assert!(syncer.sync_frontmatter(&path));
+
+        let row = crate::librarian::catalog::artifact::get(&catalog.lock(), &id)
+            .unwrap()
+            .expect("row");
+        assert_eq!(row.status, "fixed", "the file spoke about status");
+        assert_eq!(
+            row.tags,
+            vec!["alpha".to_string(), "beta".to_string()],
+            "the file said nothing about tags, so the row's must survive — a sync that \
+             cleared them would silently destroy catalog state on every status flip"
+        );
+        assert_eq!(
+            row.title.as_deref(),
+            Some("Kept title"),
+            "same for title: silence is not deletion"
+        );
     }
 }
