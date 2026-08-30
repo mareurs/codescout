@@ -103,6 +103,17 @@ Filed twice on 2026-08-30, **21 seconds apart**, by two sessions hitting the sam
 failure in their final gates. The measurements, the ranges-have-met analysis, the
 rendezvous fix and the 903 ms coincidence are the other session's work, folded in here.
 
+**That session cannot be identified, and the reason is worth recording.** Its file was
+never committed — `git log --all -- <path>` returns nothing — so git holds no author
+record, and every session here commits under one identity anyway. `ListAgents` reports
+two peers while the real population has been at least four all day
+(`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`).
+So the work folded in above is credited to *someone*, and the someone is unreachable:
+they have not been told their analysis survived, and no instrument available here can
+tell them. **Attribution by elimination was tried and was wrong** — the peer I was
+talking to was assumed to be the peer who wrote the file, and denied it with evidence
+(six commits, zero touching this file). Different sets; nothing distinguishes them.
+
 Neither session could have complied with `CLAUDE.md`'s *don't re-file a filed bug as
 new*: the other file did not exist when each began writing, and an untracked file is
 invisible to `artifact(find)` until a reindex.
@@ -114,8 +125,21 @@ in isolation, and together they destroyed the fuller analysis and left a citatio
 path that no longer existed. This file is the reconstruction. Sibling in structure to
 `reconnaissance-patterns:R-129` — nothing crossed between sessions, the harm was
 entirely in each reading the other's state and acting on it — but the failure mode is
-*deletion* rather than misinterpretation, and no citation sweep could catch it: at the
-moment each commit landed, the cited file still existed.
+*deletion* rather than misinterpretation, and **no citation sweep could catch it: at the
+moment each commit landed, the cited file still existed.**
+
+The rule that would have prevented it: **when deferring to a peer's artifact, say so
+before removing yours.** One message converts a race into a handoff. It reaches what
+`R-129`'s two clauses do not — both of those assume the thing being read is a *failure*
+(a red test, a broken gate), and this was a *file*, read correctly and acted on
+correctly, twice, in opposite directions.
+
+With one qualifier that this incident supplies and that is the harder half: the
+deference must be announced **to the artifact's author**, not to whichever peer is in
+front of you. That is the step that failed here, and it failed *silently*, because the
+addressing is the broken part — see the unidentifiability note above. A protocol clause
+that assumes you can reach the author is only as good as the instrument that names
+them.
 
 ## References
 
@@ -126,4 +150,3 @@ moment each commit landed, the cited file still existed.
 - `reconnaissance-patterns:R-129` — in a shared checkout a peer seeing this failure has
   no way to tell it from a real regression. This bug is a standing generator of exactly
   that false report, on the project's own gate command.
-
