@@ -137,7 +137,8 @@ any of them:
 corpus to have "nothing worth keeping", but three live surfaces resolve against it:
 
 - `scripts/run-tc-benchmark.sh:18` — `PROJECT_PATH="${CODESCOUT_PROJECT_PATH:-${REPO_ROOT}/.worktrees/bench}"`
-- `scripts/sweep-bm25-boost.sh:10` and `docs/PROBES.md:116` — the expected-file lists are
+- `scripts/sweep-bm25-boost.sh:10` and `docs/PROBES.md` (the `sweep-bm25-boost.sh` row;
+  cited without a line number because this one moved from :116 to :141 within a day) — the expected-file lists are
   relative to this pinned corpus, not to HEAD
 - `docs/trackers/retrieval-benchmark.md` — 8 references, including the corpus definition
 
