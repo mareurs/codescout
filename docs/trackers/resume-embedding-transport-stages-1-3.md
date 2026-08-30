@@ -813,6 +813,102 @@ wire structs, since `reranker.rs` keeps `transport.rs` alive.
 --no-default-features` is a documented gate as of `6764eb18`, and `2c6f2677`
 showed a check cannot see a lean runtime failure.
 
+#### Handover — five things a scout already checked at the bytes (2026-08-30)
+
+Recorded by the session that built the retry knob and then stood down from T6, so
+the implementing session spends its budget on `ET-10`'s A/B fork rather than
+re-deriving these. **Four diverge and need a decision; one is a parity already
+confirmed — do not re-check that one.**
+
+(It was written as three-and-two. DIVERGES 4 was drafted as a confirmed parity and
+demoted before this was committed, after a concurrent session filed the bug that
+contradicts it. Its footnote keeps the reasoning that produced the wrong call,
+because the shape recurs.)
+
+**DIVERGES 1 — the api-key cleartext policy is drop-and-warn in root and `bail!`
+in the crate.** Both are safe (neither leaks a key), but the outcomes differ and
+the difference is operator-visible.
+
+| | plaintext non-loopback url + api_key set |
+|---|---|
+| root, `EmbedderHttp::new` (`EMBED_API_KEY`) | `tracing::warn!`, drop the key, **carry on unauthenticated** |
+| root, `RetrievalClient::guarded_api_key` (`[embeddings].api_key`) | same — warn, drop, carry on |
+| crate, `RemoteEmbedder::from_url` / `custom` | **`bail!`** — construction fails |
+
+So an operator with `EMBED_API_KEY` set against a plaintext internal gateway
+starts codescout today (and gets a 401 from the server, or not); after a naive
+swap `build_embedder` returns `Err` and the retrieval client never constructs at
+all. Whichever policy wins, it is a **choice**, not an inheritance.
+
+Beware one doc line while deciding: root's `is_https_or_loopback` says it "Mirrors
+the codescout-embed `RemoteEmbedder` guard". That is true of the **predicate** and
+false of the **policy** — and since T7 deletes root's predicate, the policy
+difference survives that deletion unnoticed unless it is decided here.
+
+**DIVERGES 2 — a mutation-verified test binds root's policy to the real
+construction path, and cannot survive unchanged.**
+`build_http_embedder_never_sends_a_configured_key_over_plaintext_http`
+(`src/retrieval/client.rs:919`) asserts `http.api_key_for_test() == None`, and its
+own comment records the mutation that kills it. Under the crate's `bail!` policy
+there is no constructed embedder to inspect, so the assertion has no object.
+**Re-point it at whichever policy wins — do not delete it.** That is exactly the
+treatment T7's row already prescribes for the loopback-guard test, and for the
+same reason: it exists to make the change checkable, so outliving it is worse than
+useless. Note it depends on `EmbedderHttp::api_key_for_test`, a `#[cfg(test)]`
+accessor (`src/retrieval/embedder.rs:390`); fork branch A must keep an
+inspectable construction, branch B must supply an equivalent seam.
+
+**DIVERGES 3 — root resolves six ambient inputs the crate does not.**
+`EmbedderHttp::new` reads `CODESCOUT_EMBEDDER_MODEL_NAME`,
+`CODESCOUT_QUERY_PREFIX`, `EMBED_API_KEY`, `CODESCOUT_EMBED_BATCH`,
+`CODESCOUT_EMBED_INFLIGHT`, and `transport::read_timeout_from_env()`.
+`RemoteEmbedder` reads only the last of those. **`CODESCOUT_EMBED_BATCH` and
+`CODESCOUT_EMBED_INFLIGHT` have no `RemoteEmbedder` equivalent at all** — the
+batch size is the hardcoded `BATCH_SIZE = 32` and there is no inflight concept.
+Either the swap keeps root's `embed_chunks_ordered` driving the crate per
+sub-batch, or those two operator escape hatches silently stop working.
+
+**PARITY 1, CONFIRMED — read timeout.** Same variable
+(`CODESCOUT_HTTP_READ_TIMEOUT_SECS`), same default (**120s** on both sides), same
+"zero or unparseable falls back rather than erroring" filter. T2 landed this and
+it holds. Nothing to carry across.
+
+**DIVERGES 4 — error bodies do NOT route the same, and this one nearly went into
+this handover as a confirmed parity.** Both sides do put the response body in the
+error text, and the **context-size** class specifically does still route: those
+four patterns (`larger than the max context size`, `exceed_context_size`,
+`input is too large`, `physical batch size`) are hoisted to the very front of
+`classify_search_error`, so the archived
+`2026-08-26-dense-embedder-slot-context-drops-large-embeds` class does not reopen.
+That much holds.
+
+But it does not generalise, and generalising it is the error. Root's producer
+emits `dense openai status {code}: {body}` and **that arm was deliberately hoisted
+above the collection bucket**, its comment naming the reason: the message "carries
+the embedder's RESPONSE BODY, which is arbitrary remote text. A body containing
+'not found' or 'Collection' would hijack the collection bucket." The crate's
+producer emits `HTTP {status} from embedding server: {body}` and was **never given
+the same protection** — so an ordinary embedder 404 whose body reads
+`model 'coderank' not found` is classified as a **missing Qdrant collection**, and
+the operator is told to re-index a collection that is fine.
+
+The hazard was identified and fixed for one of two producers. It is live today on
+the `ollama:`/`openai:` resolver path, and the swap would carry it onto the dense
+leg. Filed by a concurrent session as
+`docs/issues/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`;
+its sibling,
+`docs/issues/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`,
+covers root's sparse leg and matters to fork branch B, which moves that leg.
+
+*Written first, by this same scout, as "PARITY 2, CONFIRMED — error bodies still
+route", and corrected before it was committed. The reasoning was: the context-size
+arms are hoisted, they match body text, therefore body-carrying errors route. True
+of the arms I checked and false of the class I inferred — I generalised from the
+one producer that had been fixed. The tell was available and not taken: root's
+hoisting comment exists precisely because arbitrary bodies hijack buckets, so a
+second producer with the same shape and no hoisted arm was the question, not the
+reassurance.*
+
 **Rests on:** `ET-8` for the ordering argument and `ET-4` for why Phase D audits
 rather than deletes. If either is revised, re-derive this board rather than
 patching rows.
