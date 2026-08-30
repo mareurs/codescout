@@ -47,7 +47,14 @@ struct EmbedData {
 /// `true` when `url` is `https://…` or targets a loopback host (`localhost`,
 /// `127.0.0.1`, `[::1]`). Used by `from_url` / `custom` to keep local Ollama
 /// setups working while rejecting API keys over plaintext HTTP on the network.
-fn is_https_or_loopback(url: &str) -> bool {
+///
+/// **`pub` as of 2026-08-30 so root can delete its copy rather than keep a second
+/// one** (`resume-embedding-transport-stages-1-3:ET-9` T5, the precondition for
+/// T7). The two copies had already drifted, and in only one direction: root's had
+/// no test at all until `28bb6e8a` added one. That is the shape `ET-4` records —
+/// a duplicated *security* predicate whose two halves are unequally guarded. This
+/// is the surviving copy; root's goes in Phase D and its test re-points here.
+pub fn is_https_or_loopback(url: &str) -> bool {
     if url.starts_with("https://") {
         return true;
     }

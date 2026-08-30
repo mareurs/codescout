@@ -1051,6 +1051,54 @@ mod tests {
         assert!(!is_https_or_loopback("http://example.com/127.0.0.1"));
     }
 
+    /// T5's payoff and T7's safety net: root's copy and the crate's must agree on
+    /// **every** case, so Phase D's deletion is provably behaviour-preserving
+    /// rather than hopefully so.
+    ///
+    /// The test above pins root's copy against fixed expectations. This pins the
+    /// two copies against *each other*, which is the different claim the deletion
+    /// actually needs — a divergence on any input neither fixed list happens to
+    /// name still shows up here, and would show up nowhere else.
+    ///
+    /// `codescout_embed::remote::is_https_or_loopback` became `pub` for this
+    /// (`resume-embedding-transport-stages-1-3:ET-9` T5). Delete this test in the
+    /// same commit that deletes root's copy; until then it is the only thing that
+    /// makes that deletion checkable.
+    #[cfg(feature = "remote-embed")]
+    #[test]
+    fn roots_loopback_guard_agrees_with_the_crates_on_every_case() {
+        for url in [
+            // The ten ported cases, so a drift on any of them fails here too.
+            "https://embed.corp.example/v1",
+            "http://localhost:48081/v1",
+            "http://127.0.0.1:48081",
+            "http://127.0.0.5/v1",
+            "http://[::1]:48081/v1",
+            "http://user:pass@localhost:8080",
+            "http://127.evil.com/v1",
+            "http://localhost.evil.com/v1",
+            "http://127.0.0.1.evil.com/v1",
+            "http://example.com/127.0.0.1",
+            // And cases NEITHER fixed list names. Agreement is the claim here, so
+            // the inputs must not be limited to what the two already assert on —
+            // that would only re-check what is already checked.
+            "https://127.0.0.1",
+            "http://LOCALHOST:8080",
+            "http://127.0.0.1@evil.com/v1",
+            "ftp://localhost",
+            "localhost:48081",
+            "",
+        ] {
+            assert_eq!(
+                is_https_or_loopback(url),
+                codescout_embed::remote::is_https_or_loopback(url),
+                "root and the crate disagree on {url:?} — deleting root's copy in \
+                 Phase D would change behaviour, and neither copy's own test would \
+                 have noticed"
+            );
+        }
+    }
+
     /// The trait object must expose both query shapes. If `EmbedderHttp` ever stops
     /// satisfying `CodeEmbedder`, this fails to compile — which is the point.
     ///
