@@ -13,7 +13,7 @@ tags:
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: 'Mechanism (merge-over-replace) is INFERRED from behaviour, not read from source — Claude Code is not in this repo. What is measured is the input/output pair: key deleted on disk, still present in a server spawned 11s after the reconnect, while a sibling key changed in the same edit DID take. Whether a full restart clears it is also untested at filing time.'
+unverified: 'Mechanism (merge-over-replace) is INFERRED from behaviour, not read from source — Claude Code is not in this repo. It has since made a correct falsifiable prediction (see § The mechanism made a prediction), which is evidence and not proof. Still untested: whether a full Claude Code restart clears a deleted key.'
 ---
 
 # BUG: `/mcp` reconnect applies a CHANGED env var from `settings.json` but not a REMOVED one
@@ -92,6 +92,32 @@ This is the same shape as the "sourcing cannot unset" hazard already noted in
 `docs/trackers/retrieval-benchmark.md`, one layer up: there it was shell env files,
 here it is the harness's own config merge.
 
+### The mechanism made a prediction, and it held
+
+The merge hypothesis is not merely consistent with the observation — it forecast a
+**different** outcome for a **different** edit, and that outcome occurred.
+
+Prediction: if the harness merges rather than replaces, then re-adding the key with
+an empty value should take effect on the next reconnect, because that is an *update*
+rather than a deletion — the same operation that already worked for `BM25_BOOST`.
+
+Run: set `"CODESCOUT_QUERY_PREFIX": ""`, `/mcp`, read the new server (pid 4031908,
+age 13 s):
+
+```
+QUERY_PREFIX = $        # cat -A: empty string, not the old value
+BM25_BOOST   = 5.0
+```
+
+So the same key that could not be **removed** by a reconnect was successfully
+**changed** by one, minutes later, in the same file. That is the update/delete
+asymmetry isolated on a single variable, with everything else held constant — which
+is stronger than the original observation, where the asymmetry was split across two
+different keys and could have been explained by something specific to one of them.
+
+Still **evidence, not proof**: a merge is not the only implementation that would
+produce this, and the harness source remains unread. But any competing explanation
+now has to account for one key behaving both ways within minutes.
 ## Why this is worse than a plain stale-config bug
 
 **The half that works falsely confirms the half that does not.** The natural
@@ -150,4 +176,3 @@ None — no codescout code is involved.
 - `docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md` — same family.
 - `docs/issues/2026-08-29-stale-model-dir-env-masked-by-shell.md` — adjacent, but a
   different mechanism (ambient shell masking a repo file, not a harness merge).
-
