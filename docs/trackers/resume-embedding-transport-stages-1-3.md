@@ -587,16 +587,23 @@ order above is derived from what gates what, not from stage numbering.
 order, what gates what); this holds the *state*. Strike rows here as they land;
 do not restate the rationale.
 
-**Status:** open — 5 tasks, **none blocked**, and the *Free* list is now empty.
-D1 was answered 2026-08-30 and T3 landed on it. **T4 is ready now**; T6–T9 chain
-behind it. T11 is **done** (`4b7cd31e`) — struck below.
+**Status:** open — 4 tasks, **none blocked**. D1 was answered 2026-08-30 and T3
+landed on it. **T6 is the head of the queue**; T7–T9 chain behind it. T11 is
+**done** (`4b7cd31e`).
 
-**One row below is stale and was deliberately NOT struck by the session
-recording this**, because it belongs to a lane still in flight and a row's owner
-should strike it. Evidence, so it is not lost: **T5 is done** —
-`pub fn is_https_or_loopback` exists at `crates/codescout-embed/src/remote.rs:57`,
-verified at the bytes, landed as `16dc28a5` whose subject names T5 explicitly.
-Its row still reads *ready now*, and the count above already excludes it.
+**Both stale rows are now struck by their owner**, resolving the hand-off the
+previous session left here — and there were **two**, not one. That session
+verified T5 at the bytes, correctly declined to strike another lane's row, and
+recorded the evidence so it could not be lost. That protocol worked and is worth
+keeping. What it did not catch is that **T4 was stale by the same mechanism**
+(landed `6be58840`, row still reading *ready now*), because the check was aimed
+at one row rather than swept across the table.
+
+The generalisation, since this is now two instances in one table: a row's *State*
+column is a claim about the past that nothing re-verifies. Sweep the whole
+**ready now** column against `git log` when picking work up, not just the row you
+came for — a stale row costs a session picking up finished work, which is the one
+failure this board exists to prevent.
 
 **Valid:** dated 2026-08-30
 
@@ -607,8 +614,8 @@ Its row still reads *ready now*, and the count above already excludes it.
 | ~~T1~~ | A | Port the 11 host-spoofing assertions to root's `is_https_or_loopback` | **done** `28bb6e8a` | — |
 | ~~T2~~ | B1 | Port `read_timeout` into `RemoteEmbedder::http_client` | **done** `ffdf1b09` | — |
 | ~~T3~~ | B2 | Three-state query prefix on `RemoteEmbedder` — *derive* / *explicit* / *suppressed* | **done** `64c65248`, patch-id `72781e6b15e10b4edb56e8af39773db230555b5f`. `QueryPrefix` enum + `with_query_prefix`; constructors keep `Derive` so nothing observable changed yet. Two mutations run: `Suppressed` falling through to `derive_for` dies (the failure prints the offending wire body — literally the 34-point config), and `embed_query` ignoring the policy dies. **The pure resolver unit test survived the second mutation** — policy and its use are separate claims | — |
-| T4 | B3 | Typed `EmbedError::Connect { url }` replacing the `"embed connect failed"` substring contract (`ET-5`) | **ready now** | — |
-| T5 | B4 | Export `is_https_or_loopback` (and whatever else Phase D needs) as `pub` | **ready now**. `QueryPrefix::derive_for` is already `pub` as of T3 | — |
+| ~~T4~~ | B3 | Typed `EmbedError::Connect { url }` replacing the `"embed connect failed"` substring contract (`ET-5`) | **done** `6be58840`, patch-id `07a8ea7c676e197bc862da3639bf63c19787d248`. Closes `ET-5`. Reproducing first showed the risk was **already realised**: `RemoteEmbedder` surfaced connect failures as reqwest's own `error sending request for url (…)`, which matched no arm of `classify_search_error` and fell through to the generic Qdrant fallback — live on the `ollama:`/`openai:` resolver path. Mutating `CONNECT_FAILED_MARKER` now fails root's two tests while the crate's pass, which is ET-5's "nothing makes the two fail together" turned false | — |
+| ~~T5~~ | B4 | Export `is_https_or_loopback` (and whatever else Phase D needs) as `pub` | **done** `16dc28a5`, patch-id `dcf74187a08c2cf01399481c8a201f31a0ec2196`. `QueryPrefix::derive_for` shipped `pub` with T3. **`http_client` is NOT needed** — `ET-8`'s table assumed root's `transport.rs` dies in Phase D, but `reranker.rs` uses it at `:67`, `:83`, `:99` and the reranker is outside this consolidation, so **T8 should be re-scoped to the wire structs only**. Carries a differential pinning root's copy against the crate's on 16 urls, six named by neither fixed-expectation test; delete it with root's copy in T7 | — |
 | T6 | C | Swap root's dense leg to `RemoteEmbedder`; hold batch size at 8 so it stays behaviour-preserving (`ET-3`). **Carries D1's root-side half**: map unset `CODESCOUT_QUERY_PREFIX` → `QueryPrefix::Suppressed`, a set value → `Explicit`, and expose `Derive` as an opt-in sentinel | ready after B | T4, T5 |
 | T7 | D1 | Delete root's `is_https_or_loopback`; **re-point** T1's test at the crate's, do not delete it | ready after C | T6 |
 | T8 | D2 | Delete root's `src/retrieval/transport.rs` and the duplicated wire structs | ready after C | T6 |
