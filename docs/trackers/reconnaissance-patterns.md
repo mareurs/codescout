@@ -2376,7 +2376,30 @@ pathspec, a glob) with one habit instead of one habit per variant.
 **Kin:** R-95 (a rationale nobody re-audits) — this entry's own corrected rule
 was the un-audited claim the third instance walked past.
 
-**Status:** promote-when **FIRED** (3 instances) — **promotion not applied.** The target
+**Fourth instance — 2026-08-30, and it is the one that indicts the flag in favour of the
+readback.** `git add docs/trackers/open-issue-work-queue.md && git commit -F -` — this
+entry's own *second draft*, the form it labels "worse than useless" — swept 147 lines of a
+peer's staged work (an ADR, `bug-fix-session-log:W-77`, and this file's `R-127`) into
+`7e452f85`, a commit about BL-50. Same shape and same direction as instances 2 and 3: this
+session as perpetrator, content intact, attribution wrong, commit message silent.
+
+What is new is not the sweep. It is **why the guard missed**. This session was not ignoring
+the rule — it ran a *content* diff, deliberately, citing `W-69`. It ran it on the wrong side
+of the staging boundary: `git diff -- <path>` **before** `git add`, which structurally cannot
+see what a peer stages one second later. So the failure was not "forgot the rule" but
+"executed the wrong member of the rule's family", and no amount of sharpening the *flag*
+would have prevented it.
+
+That is the argument for this entry's step 3 over its step 2. A flag has to be recalled at
+the moment of the commit; a `git status --short` readback between `add` and `commit` is one
+habit that catches every variant, and here it would have printed four files where one was
+intended. `git commit --only <paths>` would also have held — but only in the counterfactual,
+and the entry has now recorded **four** instances of a correct rule not being reached for.
+
+Discovery was the peer's, not this session's: their own `git commit` returned "nothing to
+commit, working tree clean", which is this entry's step 3 read from the victim side.
+
+**Status:** promote-when **FIRED** (4 instances, was 3) — **promotion not applied.** The target
 is adopting per-session git worktrees as the default for concurrent sessions; that is a
 workflow change and an explicit human decision, still untaken. The interim enforceable
 form is this entry's own corrected rule — a `git status --short` readback between `add`
