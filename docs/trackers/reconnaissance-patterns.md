@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 129
+entry_high_water_R: 130
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-130 | 2026-08-30 | technique (found by a peer, checked against my own matrices) | **A mutation kill is not evidence that the named guard fired.** One level below [[tests-that-cannot-fail]]: a test can die under your mutation for a reason unrelated to the clause its name claims, and the matrix records `KILLED` either way. `codescout-ae`'s `status_token_present_does_not_match_a_status_word_inside_a_longer_word` died on its **first** assertion (the positive separator one) and never reached the boundary assertions it is named for — a tick for a guard that never ran. Fixed by splitting, with the discriminating evidence coming from a **second** mutation (strip-punctuation normalisation, the obvious alternative implementation) that the separator clause survives: two mutations, two disjoint kills, each test provably guarding its own clause. Rules: read which ASSERTION died, not the test name; one mutation is never enough for a multi-clause test; `positive`-then-`negative` ordering is the risky shape because the positive clause absorbs the kill. Re-checked both matrices I published today — both died for their named reason, but by luck (each had one load-bearing assertion, so no earlier clause was available to absorb it) |
 | R-129 | 2026-08-30 | miss (×1, reported + relayed) + near-miss (×2) — **promote-when FIRED same day** | **In a shared checkout, the deliberate break this project mandates is indistinguishable from a defect.** CLAUDE.md and `sdd-ruling-log` require *demand a deliberate break* — break the thing, watch the specific test die. Nothing in a shared tree distinguishes that from a real failure. Mutation-verifying a packaging gate, I removed a `Cargo.toml` `exclude` negation; an IL-3 refusal killed the chained restore and the window stayed open for minutes. `codescout-ae`: *"had my gate landed inside your window, I'd have seen a red packaging test and no way to know it was deliberate — I'd very likely have reported it, and on today's form at the wrong person."* Worse, no `git add` is needed for the break to reach them: `cargo test` compiles the WORKING TREE and cargo does not consult git, so their "4862 passed" silently included my untracked test and a third session's dirty files, under a "HEAD is green" claim. **Rule: announce a mutation window BEFORE opening it, not after closing it** — one message, false alarm becomes a no-op. Distinct from [[R-90]], which is about writes crossing between sessions; here nothing crosses and the harm is entirely in the other session's reading, so no git discipline reaches it. Sub-lesson: a cleanup step chained AHEAD of a blockable step is not protected by being first — the block takes the whole command. **Instance 3 fired both promote conditions within minutes of the entry being written:** `codescout-ae` measured a lean-lane failure, checked attribution, and reported it as the documented feature-gating class; I verified it was not mine and relayed it to its owner citing that class. All three of us were careful and all three were wrong — there was no defect. `swap-dense-leg` was mutation-checking, and the deletion of `\|\| err_str.contains(SPARSE_STATUS_MARKER)` landed BETWEEN the gate's `cargo test` and its lean lane; the "full passes / lean fails" shape had nothing to do with feature gating. Their framing, sharper than mine: the working-tree hazards make **numbers** unreliable, this one makes a peer confidently report a **specific defect** with correct evidence and a wrong conclusion — **the hazard where being careful and being wrong are most compatible**, and attribution discipline does not touch it. Target: CLAUDE.md beside *demand a deliberate break*. Held for an operator call, because per-session worktrees would dissolve [[R-90]] and this together |
 | R-128 | 2026-08-30 | technique (validated on first use) | **Enumerate the call sites of a must-call function and look for the absentee.** Asked to audit root/crate *pairs* for a named defect class, the pair-shaped sweep came back clean — correctly, and that clean result was the confirming-negative worth doubting. Inverting the question from "which functions are duplicated?" to "which stated invariant does a site break?" found `BL-66`: root's `transport.rs` asserts `install_default_crypto_provider` runs "at every construction site", five call sites exist, and one crate client-builder is absent from the list. The pairwise diff **structurally** could not find it — the defective function has no twin, and an absentee is defined by there being one place it should be and isn't. Blind spot: only finds violations of invariants someone has *stated*. |
 | R-127 | 2026-08-30 | miss (self-caught in-turn) → confirms [[R-125]] | **I broke R-125's clause verifying R-125's own release, minutes after promoting it.** Checking whether `codescout-companion` 1.19.8 had propagated to the plugin caches, I ran `find … -path "*reconnaissance/SKILL.md" | head -1`, grepped the clause out of the one path it returned, got `0` in all three profiles, and reported *"that's the drift, caught live"* — citing `claude-plugins`' own stale-cache tracker entry as corroboration. **False.** Every profile holds TWO version-keyed cache dirs, `1.19.7/` and `1.19.8/`; `head -1` returned the stale one each time, and all three `1.19.8/` copies contain the clause. `head -1` answers *"the first path the walk yielded"*, never *"the path that loads"* — and a version-keyed cache holding two versions is the normal state, not an edge case. Two separable aggravators: **the zero AGREED with me** (law C's usual framing assumes a surprising zero prompts a re-check; agreement suppresses it, so a confirming negative needs the scrutiny a contradicting one gets for free), and **authorship is not activation** — having written, argued and shipped the clause minutes earlier did not make it fire. Caught only by re-reading my own command inside the sentence I was about to publish, which is exactly where R-125 placed it (Phase 3, the act of writing). That makes the placement argument tested rather than reasoned | severity low — self-caught in one turn, retracted in the same message, nothing built on the false reading; violates `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md` Decision clause 1 verbatim; no promotion owed, the clause it confirms is already shipped |
@@ -4502,6 +4503,33 @@ and the block killed the **whole** command — including the restore that had be
 first for safety. *A cleanup step chained ahead of a blockable step is not protected by
 being first; the block takes the command, not the step.* Put restores in their own call.
 
+**First application, ~1 hour after writing — and it is a PARTIAL confirmation, which is the
+useful kind.** `codescout-ae` opened a mutation window on `doctor.rs` and announced it
+first, naming the two tests that would go red and their expected duration. I held my gate
+runs, at no cost, and said so. The first half of the protocol did exactly what it is for:
+the announcement let a peer decide whether to care, and the answer was *no* — which is the
+normal case and why it is cheap.
+
+**The close failed, through nothing the author did.** Their MCP server dropped mid-run while
+the mutation was on disk; for part of the window they had no codescout tools to restore
+with, and the announced "~2 minutes" ran long. A peer holding gate runs on their word had no
+way to learn the window had outlived its estimate. So the rule needs a companion clause:
+**announce the close explicitly, because a silent window is indistinguishable from a
+finished one.** An announced duration is an estimate, not a contract, and the estimate is
+exactly what fails when something goes wrong.
+
+**And the worse consequence, which is not a false alarm at all: the operator rebuilt during
+the window.** That release binary was compiled from deliberately-broken source. Here the
+blast radius was nil — verified rather than assumed: `git grep 'fn status_token_present'
+HEAD` returns **0**, the function exists only in uncommitted work. But the general case is
+strictly worse than everything else in this entry: **a rebuild inside a mutation window
+bakes the mutation into the binary every session then uses, and `git_sha` names a commit
+that never contained it.** Every earlier hazard here produces a wrong *report*; this one
+produces a wrong *artifact*, and the MCP server serving every session is that artifact. See
+[[R-130]] for the sibling in test-reading, and `docs/PROBES.md`'s `codescout version` note,
+which this sharpens — the field is not merely a lower bound on what got compiled, it can
+name a commit whose source is not in the binary at all.
+
 **Status:** promote-when **FIRED** on the day of writing — promotion not yet applied.
 
 **Promote-when (as written):** *a third instance, or one where the false alarm was actually
@@ -4537,6 +4565,60 @@ That does not settle the question, it reframes it. Worktrees are a structural fi
 **known cost in ledger friction**, not an obviously-better fix that keeps being deferred out
 of inertia — and the operator should have both numbers. The CLAUDE.md rule remains the
 cheaper move, and it is now cheaper for a stated reason rather than by assumption.
+
+## R-130 — A mutation kill is not evidence that the named guard fired
+
+**Verdict:** technique (found by `codescout-ae`, checked against my own day's work) · **Observed:** 2026-08-30
+
+**Valid:** invariant
+
+Mutation testing's whole appeal is that it converts "the test passes" into "the test can
+fail". This entry is the level below that, and it is not covered by
+[[tests-that-cannot-fail]] or by the *vacuous assertion* material: **a test can die under
+your mutation for a reason that has nothing to do with the guard its name claims.** The
+matrix records `KILLED`, you tick the box, and the named clause was never exercised.
+
+**The instance.** Mutation-checking BL-44's `status_token_present`, `codescout-ae` replaced
+a boundary-anchored regex with a plain `contains` and predicted two deaths. Both died. But
+`status_token_present_does_not_match_a_status_word_inside_a_longer_word` died on its
+**first** assertion — the positive separator one — and never reached the boundary
+assertions its name is about. It reported as a kill for a guard it had not run.
+
+The fix was to split it, and the discriminating evidence came from a *second* mutation:
+strip-punctuation normalisation, the obvious alternative implementation their doc comment
+argues against. That keeps `**done, archived**` matching `done-archived` (separator test
+green) while making `done` a substring of `abandoned` (boundary test dies). Two mutations,
+two **disjoint** kills, each test provably guarding its own clause.
+
+**The rule.** A kill counts only if you know **which assertion** died. In practice:
+
+- Read the panic's assertion, not just the test name. `left`/`right` and the message tell
+  you which clause fired; the name only tells you what someone intended.
+- **One mutation is never enough for a multi-clause test.** Design a second mutation that
+  the first clause survives — if you cannot construct one, the clauses are not separable
+  and the test is really one test wearing two names.
+- A test whose assertions are ordered `positive` then `negative` is the risky shape: the
+  positive one is usually the easier thing to break, so it absorbs the kill.
+
+**Checked against my own work the same day, rather than assumed.** Two mutation matrices I
+published today, both re-examined for this failure mode:
+
+- `reindex_cli_never_wipes_augmentations_under_the_root` — died on the augmentation
+  `.expect(...)`, with the earlier `COUNT(*) == 1` assertion **passing first**. Right
+  reason, and I had already recorded that the count could not see the wipe.
+- `every_escaping_include_str_survives_cargo_package` — died on the `missing` assertion,
+  and the panic named `docs/trackers/operator-rules.md` specifically. Right reason.
+
+Both survive the check. That is luck as much as design: each has one load-bearing assertion,
+so there was no earlier clause available to absorb the kill. A test with two negative
+assertions would not have been so forgiving, and neither matrix would have shown it.
+
+**Status:** open
+
+**Promote-when:** one instance where a published matrix turns out to have ticked a clause
+that never ran. Then it belongs beside *demand a deliberate break* in CLAUDE.md, as its
+qualifier — that rule as written says break it and watch the test die, and this says
+watching it die is not enough.
 
 ## Template for new entries
 
