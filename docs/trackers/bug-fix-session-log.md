@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 81
+entry_high_water_F: 82
 entry_high_water_W: 85
 ---
 
@@ -127,6 +127,7 @@ entry_high_water_W: 85
 | F-70 | 2026-08-26 | med | process | fixed-verified | A dead citation that was wrong when written is indistinguishable from one that decayed — 0 of 6 in a 321-citation sweep were decay, and three independent artifacts misread it from the prose; the `--diff-filter=AD` probe is the only discriminator |
 | F-76 | 2026-08-29 | med | plan-prose | fixed-verified | A bug file's own evidence table cited `sync.rs:904` for the main sync path — that line is a `flush_pending` inside `sync_worktree`, the very call site the section exists to distinguish. On `sync_project` the vectors land inside `stream_index` (`:620`/`:626`, invoked at `:1017`). Conclusion unchanged, but a reader verifying it at that line is led straight back to the inverted fix |
 | F-77 | 2026-08-29 | med | cross-session | mitigated | A peer's hazard report was accurate when written and false when read — eleven correct filenames described work committed eight hours earlier (`45a88531`); a second peer credited this session with an edit it never made. Cross-session messages carry a send time, never an observation time |
+| F-82 | 2026-08-30 | high | measurement | open | Recommended a gate change to the operator as **"zero added time, strictly better"** on a symmetry argument I had not measured — in an argument whose subject was measurement discipline, on the same day I wrote `W-82`/`W-84`/`W-85` and corrected two of my own overstatements. Measured: documented order 71.8s (binary CLOBBERED, `exit 2`), reordered 80.4s, append-a-build 79.6s — so ~8.6s slower, not free, and the two fixes cost the same. Did not flip to "slower" either: two single runs on a machine with four concurrent builders is sampling+temporal adjacency (`reconnaissance-patterns:R-136`). The proposal survived on structure — four commands not five, prevents rather than repairs, and REMOVES the proposition whose exit code could be misread rather than documenting the trap — an argument only visible once the speed claim died. Caught by a peer's honesty marker about their OWN identical claim, not by any check of mine; second instance today after `F-81`, same shape |
 | F-81 | 2026-08-30 | high | cross-session | open | Announced a mutation window to ONE peer, because my window collided with theirs and I wrote it as a reply — reply-shaped thinking silently scoped the broadcast. A second peer ran `cargo test` into my deliberate break, watched it pass on re-run after I had restored, and committed it as a "load-dependent flake" in a file they had never touched. Worse than silence: silence leaves the observer's uncertainty calibrated, while a partial announcement makes the ANNOUNCER believe coordination happened, so nobody is looking. Pairs with F-80 — an unannounced edit invents a phantom SESSION, an edit announced to a subset invents a phantom FLAKE, and the observer reaches for whichever ghost they already believe in. Mitigations: say what you break, not how; broadcast to every peer; and say that your broadcast is a subset, since `ListAgents` under-reports |
 | F-80 | 2026-08-30 | high | cross-session | open | Closed an authorship question by ELIMINATION over a population no instrument reports completely, and sent it as a positive ID. `ListAgents` is scoped to one Claude profile's socket dir; this machine runs three, and a fourth session in `~/.claude-sdd` shared the checkout, wrote the contested hunks, and could not be seen or messaged (BL-58). Cost: `fix-embedding-transport-stage-1`'s correct first read — "not mine" — was abandoned to my well-argued wrong analysis, the inverse of every other misattribution that day. Remedy is a different KIND of instrument: grep session transcripts for `tool_use` write calls carrying a distinctive symbol from the diff, across ALL THREE profile dirs — positive identification, and it reaches exited sessions the process table cannot |
 | F-79 | 2026-08-30 | low | cross-session | mitigated | Told a peer a shared file was clean, kept editing it, and their explicit-path `git add` swept my BL-51/BL-52 re-statusing into a commit about archiving a different bug. Not `W-69`'s committer-side check but its missing sender-side half: "clean" is a claim with an expiry only the sender can see, so an all-clear should name a SHA or be retracted the moment you touch the file again |
@@ -8023,6 +8024,37 @@ defect — removing it would delete the acceptance criterion that makes the test
 **Promote-when:** the guard line is added and a second concurrent collision is either prevented
 or observed anyway → that outcome decides whether artifact-carried coordination works at all, or
 whether shared checkouts need something the artifact layer cannot provide.
+## F-82 — Advocating a change to a shared contract on a claim I had not measured — in an argument about measurement
+
+**Valid:** dated 2026-08-30
+
+**Observed:** A peer proposed appending `cargo build --bin codescout` to the gate, to repair the librarian-less binary the lean lane leaves behind. I countered with a reorder — lean third, default-features fourth — and recommended it to my operator as **"zero added time, strictly better"**, on a symmetry argument: both orders run the same two invocations over the same two feature sets, cargo's cache is keyed on feature set rather than order, and clippy precedes both with a third set so neither inherits a warm cache.
+
+I still believe the argument. I had not measured the direction it was about. The peer had timed the *reordered* sequence; nobody had timed the *documented* one, so the comparison had one side — and I was proposing to change `CLAUDE.md`'s gate, a contract every session pays on every task, on the missing half.
+
+**Got:** measured it, and the claim died.
+
+| order | steps 3+4 | binary after |
+|---|---|---|
+| documented (default 3rd, lean 4th) | 47.0 + 24.7 = **71.8s** | **clobbered**, `artifact --help` exits **2** |
+| reordered (lean 3rd, default 4th) | 26.9 + 53.5 = **80.4s** | correct |
+| documented + appended build | 71.8 + 7.8 = **79.6s** | correct |
+
+The reorder is ~8.6s **slower**, and the two fixes land within a second of each other. Not "free", and not "strictly better" on the axis I claimed it on.
+
+**What I did NOT then claim:** that the reorder is slower. Two single runs at different times on a machine with four sessions building concurrently is sampling *and* temporal adjacency together (`reconnaissance-patterns:R-136`), and 8.6s sits inside what concurrent builds produce here. The defensible statement is that the two fixes cost about the same.
+
+**The proposal survived anyway, on better ground.** Four commands rather than five; it *prevents* rather than repairs, so the terminal state is correct by construction instead of by a step a hurried session can omit — silently, since the omitter's own gate still passes; and it needs no positive-verification line at all, because it **removes** the proposition whose exit code could be misread rather than documenting the trap. That last argument only became visible once the speed claim died, which is the argument for killing weak claims even when the conclusion holds.
+
+**The part worth keeping.** The subject of the argument was measurement discipline. That did not inoculate the argument. I had spent the day writing `W-82` (run a positive control), `W-84` (mutate per call site), `W-85` (isolate before believing a green suite), and correcting two of my own overstatements — and then advanced an unmeasured number in support of changing the gate. Knowing the class does not fire at the moment of use; that is `W-85`'s own corrected promote-when, and this is it happening to its author within the hour.
+
+**And it was not my check that caught it.** A peer flagged that *their* symmetry reasoning was unmeasured, in their own file, about their own claim. I recognised my identical claim in their disclosure. The tell was external, again — `exit_code` surviving `2>/dev/null`, a peer re-running a number, and now a peer's honesty marker about a different instance of the same argument.
+
+**Second instance today of the same shape.** `F-81`'s withdrawn finding was also reasoned, never measured, and also concerned coordination. Both were plausible, both were mine, and both were caught by someone else's disclosure rather than by my own review.
+
+**Status:** open
+**Promote-when:** a third instance of advancing an unmeasured number in an argument *about* measurement → the remedy is not more knowledge, it is a mechanical one: any number offered in support of changing a shared contract must name the command that produced it, at the point it is offered.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
