@@ -1,17 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- conventions
+- citation
+- git
+- silent-absence
+- claude-md-drift
+closed: 2026-08-30
 opened: 2026-08-30
-closed:
-severity: medium
 owner: marius
 related: []
-tags:
-  - conventions
-  - citation
-  - git
-  - silent-absence
-  - claude-md-drift
-kind: bug
+severity: medium
 ---
 
 # BUG: the SHA + patch-id citation rule has no answer for a merge commit, and `git patch-id` reports that by printing nothing
@@ -103,6 +103,48 @@ the merge.
    same session.
    **Verdict:** rejected — the control returns a patch-id. The input is the
    difference, not the invocation.
+
+## Fix provenance
+
+**Applied 2026-08-30 on `experiments`.**
+
+- SHA: `c8b952e7` (`experiments` — orphans on the next rebase)
+- patch-id: `89419e042f043d8072772d3e3e0b13e6e606f1ab`
+
+This file argued the fix was on a user-owned surface and raised it rather than
+editing. The operator authorised all three, so all three carry it, sized to each:
+`src/prompts/guides/tracker-conventions.md` has the full rule (the other two defer to
+it), `docs/RELEASE.md` has it with the corpus measurement, `CLAUDE.md` has one clause
+and a pointer.
+
+**Two things were added beyond the proposed wording**, both from the audit above:
+
+- **The `git diff <first-parent>..<merge>` trap is named explicitly.** This file's
+  § *Workarounds* already knew it produces a hash that is not the object a
+  cherry-pick reproduces — but that knowledge sat in a workarounds section, which is
+  where a reader goes *after* deciding what to do. Moved to the rule itself, because
+  a plausible value in a field that means something else is worse than an empty one.
+- **The worked example is cited.**
+  `docs/issues/archive/2026-08-13-url-silently-overrides-local-dir-model.md` wrote the
+  recommended form before the rule existed. That reframes the change from inventing a
+  convention to codifying one, which is the easier thing to ask a reader to accept.
+
+**Gate:** the *new* four commands from `4c88e129` — `cargo test --workspace` replaced
+`cargo test` while this bug was open, so the run that gated it is not the one this
+file was filed under. fmt, clippy `--workspace --all-targets --features local-embed`,
+`cargo test --workspace` **4930/0**, lean **3385/0**.
+
+**One thing this does not do.** `src/prompts/guides/tracker-conventions.md` is
+`include_str!`'d into the binary, so `get_guide("tracker-conventions")` serves the old
+text until a release rebuild. The file on disk is correct now; the *tool* is correct
+after `cargo rb`.
+
+**No lint enforces this.** § *Tests added* explains why — nothing in the repo parses
+patch-id citations. `doctor`'s `archived_fix_sha_unresolvable` verifies SHA/patch-id
+pairs that exist; it cannot see a merge cited without one. If a lint over
+`docs/issues/` frontmatter ever lands, an empty-patch-id assertion belongs in it, and
+so does a `git cat-file -t` check on the patch-id field — the audit above shows that
+second one is decisive and cheap.
 
 ## Fix
 
