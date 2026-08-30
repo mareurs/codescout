@@ -1,5 +1,5 @@
 ---
-id: 640c4fc65a64461c
+id: '640c4fc65a64461c'
 kind: bug
 status: mitigated
 title: 'BUG: no check detects a params row whose content has gone stale relative to its body counterpart'
@@ -11,7 +11,7 @@ tags:
 topic: tracker-entry-identity
 closed: 2026-08-18
 no_fix_commit: true
-unverified: The detection gap itself is NOT fixed — no `doctor` check compares an existing params row's fields against its body counterpart. What was repaired is the seven known-stale `WIN-N` rows on ONE tracker, live via `update_entry` against the machine-local catalog, so the same drift on any other tracker is still invisible. Whether the check should be report-only or a write-time guard is an open design question recorded in § Fix.
+unverified: The detection gap itself is NOT fixed — no `doctor` check compares an existing params row's fields against its body counterpart. What was repaired is the seven known-stale `WIN-N` rows on ONE tracker, live via `update_entry` against the machine-local catalog, so the same drift on any other tracker is still invisible. Whether the check should be report-only or a write-time guard is an open design question recorded in § Fix. **RECURRED 2026-08-30 on a second tracker** (`docs/trackers/open-issue-work-queue.md`, 4 rows) — see § Second instance; the queue row BL-44 was re-opened as a result.
 ---
 
 ## Summary
@@ -101,6 +101,53 @@ mechanism that let them go stale (editing one side and not the other, with no ch
 either side of *this* direction) is still fully present. The same class of drift can
 recur on this tracker or any other mirrored one the next time someone edits a body table
 row without also calling `update_entry`.
+
+## Second instance — 2026-08-30, `open-issue-work-queue.md`, 4 rows
+
+**Valid:** dated 2026-08-30
+
+**Rests on:** this file's own § Summary and § Resume; queue row `BL-44`.
+
+§ Resume asked for "the repro's row-for-row diff across the corpus … no sweep of other
+mirrored trackers has been done". One more tracker has now been swept, incidentally, by a
+session resuming from compaction that did not know this file existed. It drifted too.
+
+`docs/trackers/open-issue-work-queue.md` held **four** rows present on both sides with
+disagreeing content — `BL-49`, `BL-56`, `BL-60`, `BL-64` — and in every one, `params`
+held the older and wronger side:
+
+| row | params said | committed body said |
+|---|---|---|
+| BL-49 | `open` — "the hint actively misleads" | `partial` — hint fixed, cross-repo half open |
+| BL-56 | `open` — "worth a root cause" | `zombie 2026-08-30`, hypotheses acquitted |
+| BL-60 | `open` — "Not yet scouted by this session" | `done-archived`, SHA + patch-id |
+| BL-64 | credits "hypothesis 4" | (body silent; the bug file settles it as 9) |
+
+BL-60 is the sharp one: it read `open` and "not yet scouted" for a bug that had been
+fixed, tested, archived, SHA-and-patch-id'd, **and** re-verified against the shipped
+release binary. Its `bug` field also still pointed at `025ff58280c36d07`, the pre-archive
+id, which now returns `unknown artifact id` — so the row was stale in its citation as well
+as its content.
+
+**The drop-time prediction fired verbatim.** BL-44 was dropped on the judgement that the
+detection gap was "a design decision, not a queued task". The BL-42 detail section had
+already written down what that would cost: *"a canonical `entry_filter={"status":{"eq":"open"}}`
+query — the exact pattern this tracker's own augmentation prompt recommends — would have
+surfaced two closed issues as open, with the wrong explanation."* That is exactly what
+happened, on a different tracker, twelve days later, to an agent with no knowledge of the
+prediction. Two of two mirrored trackers ever swept have drifted.
+
+**And the workflow itself causes it.** The stale rows were created by `0131e504` and
+`8dd4b910` — commits that correctly updated the body table via `body_edits` and simply did
+not issue a matching `update_entry`. Nothing reported it, because both surfaces that could
+have are **id-set** comparisons: `update_entry`'s `snapshot_stale` computes
+`claimed.difference(&in_body)`, and `doctor`'s `params_behind_body` (shipped for BL-40)
+computes the reverse — but every id was present on both sides, so both are silent by
+construction. The asymmetry is also one-directional in *warning*: moving params without the
+body is reported, moving the body without params is not.
+
+Rows repaired 2026-08-30 via four `update_entry` calls plus a body edit. The gap is
+untouched, and `BL-44` is re-opened.
 
 ## Resume
 
