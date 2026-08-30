@@ -204,6 +204,72 @@ relative — known gap.
   comparing tails matters.
 
 ## History
+### 2026-08-30 — D2 resolved: prefix removed, boost 3.0→5.0 — and the precedence list below was missing a layer
+
+**Changed, in `~/.claude/settings.json` § `env`:**
+
+```diff
+-  "CODESCOUT_QUERY_PREFIX": "Represent this query for searching relevant code: ",
+-  "CODESCOUT_BM25_BOOST": "3.0",
++  "CODESCOUT_BM25_BOOST": "5.0",
+```
+
+Backed up to `settings.json.bak-20260830-173902`; JSON re-validated (21 top-level
+keys, `env` 13→12); `diff` shows exactly these two lines.
+
+**Why.** Both deltas are measured, not argued. Prefix is **−4 on Q4_K_M** (2026-05-12)
+and was re-measured as **37 no-prefix vs 32 with** (2026-07-28) — same direction
+twice — against a live-verified `CodeRankEmbed-Q4_K_M.gguf` at `:48081`. Boost 5.0 is
+the sweep peak (3.0→34, 5.0→35). Prefix is query-side only, so **no re-index**.
+
+#### The precedence list in the 2026-07-28 entry is incomplete — and that is why its fix did not stick
+
+That entry names three layers: the MCP `env` block in `<profile>/.claude.json`, then
+`$CODESCOUT_ENV_FILE`/`<global_config_dir>/.env`, then hardcoded defaults. There is a
+fourth, and it outranks all of them for a Claude Code–spawned server:
+
+> **`<profile>/settings.json` § `env`** — injected by Claude Code into every MCP
+> server it spawns. Not the shell's environment: the parent `claude` process
+> (pid 801487) carries **no** `CODESCOUT_QUERY_PREFIX`, while its child server
+> (3881801) does.
+
+The 2026-07-28 fix removed the prefix from `.claude-sdd` and `.claude-kat`'s
+**`.claude.json`**, and recorded `~/.claude` as clean — correctly, for the file it
+checked. The setting was in `settings.json` the whole time. So the entry's
+"**real — now fixed**" verdict was true for two profiles and false for the third, for
+one month.
+
+**Measured consequence:** six live `codescout` servers, **three with the prefix and
+three without**, all querying one shared Qdrant index. The split is exactly the
+profile boundary — `~/.claude` sessions had it, the other two did not.
+
+#### Still inconsistent after this change, deliberately
+
+| source | `BM25_BOOST` | `QUERY_PREFIX` |
+|---|---|---|
+| `~/.claude/settings.json` | **5.0** (changed) | **absent** (removed) |
+| `~/.claude-sdd/.claude.json` | 3.0 | absent |
+| `~/.claude-kat/.claude.json` | 3.0 | absent |
+| `.env.gpu` (layer 2, symlinked) | 3.0 | commented out |
+
+Only this profile was moved. `CLAUDE.md`'s three-instance rule argues for aligning
+the other two, and that is a live decision, not an oversight — left to the operator
+because `.env.gpu:124-125` explicitly cautions *"3.0 the long-standing default.
+Re-sweep with `scripts/sweep-bm25-boost.sh` before trusting either."*
+
+#### What this entry does NOT claim
+
+No local re-measurement was taken. Both deltas are inherited from 2026-05-12 /
+2026-07-28 runs, and this tracker's own history is a catalogue of numbers that did
+not transfer across machines, corpora and reranker hosts. The current reranker is
+`llama-server` (~13× the TEI p50 the 37/75 champion used), so **do not expect 37/75
+and do not cite one if it appears.** The claim here is narrow: two settings now match
+the best-measured configuration on record, and the drift that hid one of them for a
+month is named.
+
+**Takes effect on MCP restart.** Whether `/mcp` alone suffices, or Claude Code must be
+restarted, depends on when it reads `settings.json` — unverified; check the new
+server's `/proc/<pid>/environ` rather than assuming.
 
 ### 2026-08-16 (later) — first run attempt on `desktop-threadripper`: corpus indexed, harness scores 0/75, NOT root-caused
 
