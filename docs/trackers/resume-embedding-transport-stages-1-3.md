@@ -570,7 +570,7 @@ order above is derived from what gates what, not from stage numbering.
 order, what gates what); this holds the *state*. Strike rows here as they land;
 do not restate the rationale.
 
-**Status:** open — 11 tasks, 1 blocked on an operator decision, 4 free for any
+**Status:** open — 10 tasks, 1 blocked on an operator decision, 3 free for any
 session
 
 **Valid:** dated 2026-08-29
@@ -598,7 +598,7 @@ counterexample where root was ahead of the crate.
 |---|---|---|---|
 | T10 | Stop `tools::memory::tests` resolving the embedder from ambient config | The unfixed half of the wedged-server bug. They can no longer hang, but the suite still reaches a live local service when one is configured | `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`, `unverified:` field |
 | T11 | Retrofit a lean-safe inert embedder; restore the 11 test items `ET-2` gated on `remote-embed` | `ET-2` gated them rather than swapping in `FixedDimEmbedder`, because swapping could make `effective_model_dim_falls_back_when_nothing_is_known` pass while proving nothing. Gating cannot make a test lie; the retrofit must not either | `ET-7` |
-| T12 | `rendezvous_poll_for_test` is dead under `--no-default-features --all-targets` | **Pre-existing, not from this stream.** `guide_hint_tests` is `librarian`-gated; CLAUDE.md's lean gate omits `--all-targets`, so nothing surfaced it | `server.rs:988` |
+| ~~T12~~ | `rendezvous_poll_for_test` was dead under `--no-default-features --all-targets` | **done** `141b69a3` — gate is now `all(test, feature = "librarian")`, matching its three callers in `guide_hint_tests`. Verified both ways: too wide leaves the lean warning, too narrow drops the 44 tests. Was hidden because CLAUDE.md's lean gate omits `--all-targets`, so no routine command builds lean *test* targets | `server.rs:988` |
 | ~~T13~~ | `init: true` on the three GPU compose services | **done** `9360be99` — as hygiene, **not** as F-2's remedy. Docker's kill path does name `--init` on a Z-state PID, but that zombie held 394 MiB of VRAM and a reaped process holds none, so the driver's fd release was stuck and tini's `wait(2)` would have blocked in the same place. F-2's fix idea #1 claims more than its own evidence supports | `embedder-stack-ops-session-log:F-2` |
 | ~~T14~~ | Healthchecks probe each service's **own** inference endpoint | **done** `9360be99`. Not one shared path — the three servers speak three APIs (`/v1/embeddings`, `/v1/rerank`, `/embed_sparse`), so T14 as written was only literally right for dense-gpu. Measured on this host: `/health` 0.8 ms vs inference 23 ms, a 29x gap no forward pass fits in | `embedder-stack-ops-session-log:F-2` |
 | T15 | `edit_markdown`'s frontmatter write never touches the catalog | The documented status-flip call desyncs the row `find(kind="bug", status=…)` reads. Two independent instances in one day | `docs/issues/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`, `open-issue-work-queue:BL-48` |
