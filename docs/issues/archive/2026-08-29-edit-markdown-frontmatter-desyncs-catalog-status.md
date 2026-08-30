@@ -12,7 +12,8 @@ tags:
   - tooling
   - silent-divergence
 kind: bug
-unverified: "fixed in tree only. The server that closed this file (PID 803849, started 11:10:11) runs an UNLINKED binary — /proc/<pid>/exe reports '(deleted)' — so its code predates 11:10:11; the 11:39:59 rebuild replaced the file on disk, not the running image, and the fix landed 11:46:13. This very status flip therefore reproduced the bug. Also: the server-side install at src/server.rs:374 is covered by no test. Re-verify both after the next `cargo rb`."
+unverified: "Liveness caveat CLEARED 2026-08-30 13:2x: re-verified after the rebuild this field asked for, on a fresh server (PID 1899149, /proc/<pid>/exe live, binary inode 6442149 built 13:25:19). This very frontmatter write is the probe — it sets a CATALOG COLUMN (owners), and the catalog reflected it with no reindex. Remaining and unchanged: the server-side install at src/server.rs:374 is covered by no test; deleting that line leaves all 8 green."
+owners: ["marius"]
 ---
 
 # BUG: `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely
@@ -240,6 +241,32 @@ Closed. Two things are genuinely outstanding; neither blocks the archive.
 
 Both are recorded in the `unverified:` frontmatter key, so a triage query reaches
 them without anyone opening this file.
+### Re-verified live 2026-08-30, after the rebuild this section asked for
+
+Item 1 is **closed**. The operator rebuilt and reconnected; the new server (PID 1899149)
+runs a live image — `/proc/<pid>/exe` resolves rather than reporting `(deleted)`, binary
+inode 6442149, built 13:25:19, comfortably after `518549d6` at 11:46:13.
+
+The probe was a frontmatter write on **this file**, chosen so it could not be answered by
+the fresh half of the payload: it sets `owners`, a **catalog column**, not an `extra` key.
+
+| | before | after |
+|---|---|---|
+| `owners` | `[]` | `["marius"]` |
+| `updated_at` | `1788080569757` | `1788085622663` |
+
+`updated_at` is the stronger of the two and was not part of the prediction. It is the
+catalog **row's** own timestamp: under the bug this morning it stayed frozen at
+`1788018155906` across a status flip, because nothing wrote the row. Its advancing here
+proves a write occurred rather than a re-read.
+
+**This narrows item 2 rather than closing it.** The four-link chain's first link —
+`server.rs:374` actually installing the syncer — is now confirmed *empirically*: a real
+server, a real `edit_markdown`, a real catalog column moving. What remains is exactly a
+**regression** gap: nothing automated would notice if that install were deleted, and the
+mutation proving so (all 8 tests stay green without it) still stands. The honest statement
+is no longer "we do not know whether the install works" but "it works, and no test guards
+it."
 ## References
 
 - `src/tools/markdown/edit_markdown.rs:1341-1346` — the only librarian

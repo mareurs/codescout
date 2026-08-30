@@ -11,7 +11,6 @@ opened: 2026-08-30
 owner: marius
 related: []
 severity: low
-unverified: 'Fixed in tree and verified through a debug `cargo run` (both flags present on both subcommands). NOT verified through the shipped release binary, deliberately: `cargo rb` unlinks the running image of every live session in this checkout. Re-verify at the next rebuild anyone else performs.'
 ---
 
 # BUG: the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra`
@@ -140,6 +139,25 @@ field can exist on the struct and never reach the tool … only testable if the
 translation is reachable without a catalog"* — and the create side never received the
 same treatment, which is why the same defect could recur there unobserved. Both halves
 are now testable without a catalog.
+### Re-verified against the shipped release binary, 2026-08-30
+
+The `unverified:` key on this file said the fix had been checked only through a debug
+`cargo run`, and asked for a re-check at the next rebuild anyone performed. That rebuild
+happened; the key is now **removed** rather than left standing, because nothing is
+outstanding.
+
+```
+$ codescout artifact update --help   → --time-scope ✓   --extra ✓
+$ codescout artifact create --help   → --time-scope ✓   --extra ✓
+$ readlink -f $(which codescout)     → target/release/codescout, inode 6442149, 13:25:19
+```
+
+The inode is recorded deliberately. `which codescout` resolves through a symlink, and a
+mtime on the target says nothing about which image answered — the same confusion that had
+to be corrected in the sibling bug
+(`docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`).
+Matching the inode against `/proc/<server-pid>/exe` is what makes "the shipped binary has
+the flags" a claim about the running artefact rather than about a path.
 ## Tests added
 
 Eight, in `src/cli/artifact.rs`, split the way the `--force` tests are: one per
