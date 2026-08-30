@@ -1163,9 +1163,29 @@ build the member, command 4 builds it with the feature off.
 | `-p codescout-embed --no-default-features` (what gate 4 reaches) | 19 |
 | **run by neither test gate command** | **37** |
 
-`codescout-ae` measured 33 an hour earlier (52 vs 19); the tree gained tests in
-between, so the two agree on direction and magnitude and differ only by when they
-were taken. **The 37 include this session's own regression guards** —
+`codescout-ae` measured **33** (52 vs 19). I first explained the gap as "the tree
+gained tests between us" — **wrong, and invented rather than checked.** They re-ran
+and got the same 52; the tree had not changed. The gap is **passed-vs-total**,
+verified here: `51 passed; 4 ignored` in the lib plus 1 integration test. The four
+are the `ollama_*` family, `#[ignore]`d pending a live server.
+
+So both numbers are right about different questions, and the entry keeps both:
+
+| number | question it answers |
+|---|---|
+| **37** | tests not compiled by either gate command |
+| **33** | live guards actually lost (the other 4 are `#[ignore]`d, so not coverage either way) |
+
+**The comfortable explanation is the finding.** "The tree changed between us" costs
+nothing to say, retires the discrepancy, and teaches nothing — and it would have
+buried the fact that an `#[ignore]`d test was padding a coverage count. That is the
+same `#[ignore]` that concealed the vacuity in
+`ollama_large_batch_exceeding_batch_size` this morning: first it hid a test that
+could not fail, now it inflates a number measuring what is guarded. **A discrepancy
+reconciled by a plausible story nobody checked is worse than an open one**, because
+the open one still has someone looking at it.
+
+**The 33 include this session's own regression guards** —
 `an_oversize_batch_is_split_into_batch_size_requests`,
 `a_short_response_errors_instead_of_panicking`, and
 `a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever` — the
