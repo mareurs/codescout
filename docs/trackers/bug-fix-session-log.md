@@ -7910,6 +7910,33 @@ An intermittent-looking result on a file nobody admits touching gets explained b
 **Status:** open
 **Promote-when:** a third instance of a mutation window being misread by a peer → the announcement protocol is currently convention held in session memory only, and should become a documented surface (skill or `docs/conventions/`) rather than something each session re-derives.
 
+
+### Withdrawn in part, same day — the carrier was wrong, and mitigation 2 is impossible
+
+The **diagnosis** in this entry stands: a partial announcement is worse than silence, and it did
+manufacture a phantom flake in a peer's tracker. What does not stand is the finding I attached
+to it — that *a precise mutation announcement contains a verbatim executable instruction*, offered
+as the mechanism behind the 16:56 phantom mutation.
+
+**Refuted 2026-08-30.** The session that applied that mutation (`807989`) **never received the
+announcement** — it is one of the two sessions invisible to `ListAgents` (`BL-58`). Nobody executed
+a broadcast. The actual carrier was a **doc comment** at `src/retrieval/embedder.rs:1975` naming
+the exact edit and function, written ~16:50 and acted on ~16:55 by a reader of the test. Verified
+at the bytes rather than accepted: the comment says what it is reported to say, and
+`git log --all -S` on the mutant's distinctive form returns 0 across every ref with a control
+returning 3, so it came from no checkout.
+
+The reasoning was sound and the mitigation costs nothing, so **say what you break, not how** stays
+as practice — it simply cannot be cited as measured. Kept visible rather than deleted, on the same
+grounds as `W-84`'s overstatement: a claim that arrives as a narrowing teaches more than one that
+arrives clean.
+
+**Mitigation 2 of this entry — "broadcast to every peer" — is now known to be unachievable**, not
+merely hard. Two of five sessions in this checkout could not receive any message I sent, and one
+had been running since before the day's first inter-session message. Mitigation 3 (*say that your
+broadcast is a subset*) is correct and insufficient: an honest subset is still a subset. The real
+remedy is not in the message layer at all — see `W-85`'s placement-cost section: the coordination
+hint has to ride the artifact, because the artifact reaches the population the registry cannot.
 ## W-85 — Run a suspicious test alone — a green suite cannot distinguish a working guard from a disarmed one
 
 **Valid:** dated 2026-08-30
@@ -7956,6 +7983,46 @@ None is a fact to recall; each is a command to execute. A memory is read at sess
 
 Worth pairing with `F-81`'s shape: both are cases where the remedy is structural placement rather than better knowledge.
 
+
+### The cost of placement, measured the same day — what fires for everyone, fires concurrently
+
+The correction above says a procedure belongs **where it executes** — a gate step, a checklist
+line, a doc-comment on the test itself — and cites this entry's own fix as having taken that
+shape. That is right, and here is its price, established by an incident that also refuted a
+separate finding of mine.
+
+`src/retrieval/embedder.rs:1975` carries exactly such a placement:
+
+> *"Acceptance is a mutation: replace the `try_join!` in `embed_one_batch` with two sequential
+> `.await`s and this test must fail deterministically."*
+
+At ~16:50 a peer wrote it. At ~16:55 a **different** session read the test and ran the
+mutation it prescribes, on the lines it names. The two collided in one working tree, and the
+transient edit was read — by me among others — as a phantom, spawning an authorship hunt, a
+tool-layer cache hypothesis, and a protocol finding of mine that is now withdrawn (see `F-81`).
+
+**The property that makes placement work is the property that makes it collide.** A doc comment
+reaches whoever touches the code — which is precisely the population that would perform the
+mutation, and far better targeting than any message. It reaches them *whenever* they touch it,
+including simultaneously. There is no version of "fires at the moment of use" that fires for
+only one reader.
+
+**The announcement protocol cannot patch this, structurally.** The colliding session never
+received the broadcast — it sits outside the `ListAgents` registry that under-reports by 40%
+(`BL-58`: 3 reported, 5 real). The sessions who most need an announcement are exactly the ones
+that cannot receive one.
+
+**So the collision guard has to ride the same carrier as the instruction.** If a doc comment is
+strong enough to make two sessions run the same mutation five minutes apart, it is strong enough
+to carry "this tree is shared — confirm `git status` is clean before applying, and revert
+promptly." That reaches the population at risk by construction, which no message can. Offered to
+the file's owner rather than applied: it is their file, and the comment itself is **not** the
+defect — removing it would delete the acceptance criterion that makes the test verifiable.
+
+**Status:** validated — the cost is measured, the remedy is proposed and unshipped.
+**Promote-when:** the guard line is added and a second concurrent collision is either prevented
+or observed anyway → that outcome decides whether artifact-carried coordination works at all, or
+whether shared checkouts need something the artifact layer cannot provide.
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
