@@ -33,6 +33,95 @@ struct Args {
     scope: Option<super::scope::Scope>,
 }
 
+/// Re-attach augmentation shape from committed sidecars, for artifacts that declare one
+/// and currently have no augmentation row.
+///
+/// This is the half of the cross-machine gap that a reindex can actually close. Bodies,
+/// frontmatter and catalog rows already rebuild from disk here; augmentation did not,
+/// because it had no on-disk form — so a fresh clone came up with the artifacts present and
+/// their `append_entry` / `entry_filter` workflows broken, and `reindex` reported healthy.
+///
+/// **Attach-only-when-absent, never overwrite.** A live augmentation's `params` are this
+/// machine's state and move on independently of the committed shape, so syncing in either
+/// direction would eventually clobber real work. Repair is the whole contract: if a row
+/// exists, this function does nothing to it.
+///
+/// `params` are not carried (see `augmentation_sidecar`), so a restored tracker comes back
+/// working and empty rather than holding another machine's rows.
+fn restore_declared_augmentations(
+    catalog: &crate::librarian::catalog::Catalog,
+    targets: &[std::path::PathBuf],
+) -> (usize, Vec<String>) {
+    use crate::librarian::augmentation_sidecar as sidecar;
+    use crate::librarian::tools::doctor::{parse_declaration, Declaration};
+
+    let mut restored = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+
+    // Same LEFT JOIN as the doctor check, and for the same reason: an artifact that already
+    // has a row is never opened from disk.
+    let Ok(mut stmt) = catalog.conn.prepare(
+        "SELECT a.id, a.abs_path FROM artifact a \
+         LEFT JOIN artifact_augmentation g ON g.artifact_id = a.id \
+         WHERE g.artifact_id IS NULL AND a.missing_since IS NULL \
+         ORDER BY a.abs_path",
+    ) else {
+        return (
+            0,
+            vec!["could not prepare augmentation-restore query".to_string()],
+        );
+    };
+    let Ok(rows) = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .and_then(|m| m.collect::<rusqlite::Result<Vec<(String, String)>>>())
+    else {
+        return (
+            0,
+            vec!["could not read augmentation-restore candidates".to_string()],
+        );
+    };
+
+    for (id, abs_path) in rows {
+        let path = std::path::Path::new(&abs_path);
+        // Component-boundary containment, not a prefix match — `/repo-backup` must not
+        // pass as `/repo`. Reindex is scoped, and so is its repair.
+        if !targets.iter().any(|t| path.starts_with(t)) {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
+            continue;
+        };
+        let Some(raw) = fm.extra.get("expects_augmentation") else {
+            continue;
+        };
+        let Declaration::Declared { sidecar: Some(rel) } = parse_declaration(raw) else {
+            // `true` with no sidecar, absent, or unparseable: nothing on disk to attach.
+            // The doctor check reports those; this pass has no opinion.
+            continue;
+        };
+        let Some(root) = crate::librarian::current_project::lookup_git_root(path) else {
+            continue;
+        };
+        let sidecar_path = root.join(&rel);
+        match sidecar::read(&sidecar_path) {
+            Ok(s) => {
+                let row = s.to_row(&id);
+                match crate::librarian::catalog::augmentation::upsert(catalog, &row) {
+                    Ok(()) => restored += 1,
+                    Err(e) => errors.push(format!("{abs_path}: attach failed: {e}")),
+                }
+            }
+            // A declared-but-unreadable sidecar is surfaced, never swallowed: it is the
+            // one case where the shape was supposed to travel and did not.
+            Err(e) => errors.push(format!("{abs_path}: {rel}: {e:#}")),
+        }
+    }
+    (restored, errors)
+}
+
 fn backfill_commits(
     catalog: &crate::librarian::catalog::Catalog,
     repo_path: &std::path::Path,
@@ -270,6 +359,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
+    // Re-attach augmentation shape from committed sidecars. Runs after the walk, because
+    // an artifact indexed for the first time in THIS call must be eligible — the fresh-clone
+    // case is exactly one where the row and its restore both land in the same reindex.
+    let (augmentations_restored, augmentation_restore_errors) = {
+        let cat = ctx.catalog.lock();
+        restore_declared_augmentations(&cat, &targets)
+    };
+
     // Persist the durable half of the degraded signal. `embed_note` above is an
     // envelope field — gone the moment this call returns — so a later
     // `artifact(action="find")` has no way to know the last refresh was partial.
@@ -304,6 +401,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "embedded": total_embedded,
         "embeddings_enabled": want_embeddings,
         "orphans_removed": orphan_removed,
+        // Reported even when zero, and distinguishable from "nothing needed restoring" by
+        // the note below. The bug this closes was invisible precisely because a reindex
+        // that repaired nothing looked identical to one with nothing to repair.
+        "augmentations_restored": augmentations_restored,
+        "augmentation_restore_error_count": augmentation_restore_errors.len(),
+        "augmentation_restore_errors": augmentation_restore_errors.iter().take(20).collect::<Vec<_>>(),
         "unknown_count": unknown_count,
         "unknown_sample": sample,
         "backfill_error_count": backfill_errors.len(),
@@ -683,6 +786,123 @@ mod tests {
             v["unknown_count"].as_u64().unwrap(),
             1,
             "README.md should be unknown"
+        );
+    }
+
+    /// Build a repo whose single tracker declares a sidecar, and write that sidecar.
+    /// `.git` matters: the declared path is repo-relative and `lookup_git_root` is what
+    /// resolves it, so without the marker the restore silently finds nothing.
+    fn seed_sidecar_repo(root: &std::path::Path) {
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
+        std::fs::write(
+            root.join("docs/trackers/t.md"),
+            "---\nkind: tracker\nstatus: active\n\
+             expects_augmentation: docs/augmentations/t.yaml\n---\n\n# t\n",
+        )
+        .unwrap();
+        crate::librarian::augmentation_sidecar::write(
+            &root.join("docs/augmentations/t.yaml"),
+            &crate::librarian::augmentation_sidecar::AugmentationSidecar {
+                schema_version: 1,
+                prompt: "committed prompt".into(),
+                entry_collection: Some("rows".into()),
+                params_schema: None,
+                render_template: None,
+                append_mode: false,
+                history_cap: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn aug_for(
+        cat: &Catalog,
+        abs: &std::path::Path,
+    ) -> Option<crate::librarian::catalog::augmentation::AugmentationRow> {
+        let id: String = cat
+            .conn
+            .query_row(
+                "SELECT id FROM artifact WHERE abs_path = ?1",
+                [abs.to_string_lossy().to_string()],
+                |r| r.get(0),
+            )
+            .ok()?;
+        crate::librarian::catalog::augmentation::get(cat, &id)
+            .ok()
+            .flatten()
+    }
+
+    const TRACKER_RULES: &str = "[[rule]]\nglob = \"**/docs/trackers/*.md\"\nkind = \"tracker\"\n";
+
+    #[tokio::test]
+    async fn reindex_reattaches_a_declared_sidecar_when_the_row_is_absent() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        seed_sidecar_repo(root);
+        let ctx = mk_ctx(root.to_path_buf(), TRACKER_RULES);
+
+        let v = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            v["augmentations_restored"].as_u64().unwrap(),
+            1,
+            "the declared sidecar must be attached in the same run that indexed the \
+             artifact — the fresh-clone case is exactly that one: {v}"
+        );
+
+        let cat = ctx.catalog.lock();
+        let row = aug_for(&cat, &root.join("docs/trackers/t.md")).expect("row must exist");
+        assert_eq!(row.prompt, "committed prompt");
+        assert_eq!(row.entry_collection.as_deref(), Some("rows"));
+        assert_eq!(
+            row.params, "{}",
+            "params are data and must NOT travel — a restored tracker comes back working \
+             and empty, never holding another machine's rows"
+        );
+    }
+
+    /// The one that matters. `params` are live state that moves on independently of the
+    /// committed shape, so a restore that behaved like a sync would silently destroy real
+    /// work every time someone reindexed a machine whose tracker had advanced.
+    ///
+    /// Written as mutate-then-reindex rather than two fixtures, because the dangerous
+    /// version of this code is indistinguishable from the correct one until a row that
+    /// ALREADY EXISTS meets a sidecar that disagrees with it.
+    #[tokio::test]
+    async fn reindex_never_overwrites_a_live_augmentation() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        seed_sidecar_repo(root);
+        let ctx = mk_ctx(root.to_path_buf(), TRACKER_RULES);
+        let art = root.join("docs/trackers/t.md");
+
+        call(&ctx, json!({})).await.unwrap();
+
+        // Simulate the tracker being used: params fill up, and the prompt is edited live.
+        {
+            let cat = ctx.catalog.lock();
+            let mut row = aug_for(&cat, &art).unwrap();
+            row.prompt = "locally edited prompt".into();
+            row.params = r#"{"rows":[{"id":"R-1"}]}"#.into();
+            crate::librarian::catalog::augmentation::upsert(&cat, &row).unwrap();
+        }
+
+        let v = call(&ctx, json!({})).await.unwrap();
+        assert_eq!(
+            v["augmentations_restored"].as_u64().unwrap(),
+            0,
+            "a row that already exists is not a restore candidate: {v}"
+        );
+
+        let cat = ctx.catalog.lock();
+        let row = aug_for(&cat, &art).unwrap();
+        assert_eq!(
+            row.prompt, "locally edited prompt",
+            "the committed sidecar must not clobber a live prompt"
+        );
+        assert_eq!(
+            row.params, r#"{"rows":[{"id":"R-1"}]}"#,
+            "and it must not clobber live params — this is the data-loss case"
         );
     }
 

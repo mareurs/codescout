@@ -16,6 +16,8 @@ pub mod ids;
 pub mod statements;
 pub mod util;
 
+pub mod augmentation_sidecar;
+
 pub mod artifact_store;
 pub mod embedding;
 pub mod freshness;

@@ -722,6 +722,108 @@ fn validate_rehome_request<'a>(
     Ok((op.to_path_buf(), np.to_path_buf()))
 }
 
+/// Write a committed sidecar for every augmented artifact under `scope_root` that has none,
+/// and stamp the artifact's `expects_augmentation:` to name it.
+///
+/// This is the export half of making shape travel, and it is the one that is
+/// **time-sensitive on a machine that still holds rows others have lost**: the catalog is
+/// gitignored, machine-local, and has no backup, so an augmentation absent from every clone
+/// exists in exactly one place until this runs.
+///
+/// Skips an artifact whose sidecar already exists AND is already declared — so it is
+/// idempotent, and a second run reports 0 rather than rewriting files.
+fn export_augmentation_sidecars(
+    cat: &crate::librarian::catalog::Catalog,
+    scope_root: &std::path::Path,
+    confirm: bool,
+) -> Result<(Vec<Value>, Vec<Value>)> {
+    use crate::librarian::augmentation_sidecar as sidecar;
+
+    let mut stmt = cat.conn.prepare(
+        "SELECT a.id, a.abs_path FROM artifact a \
+         JOIN artifact_augmentation g ON g.artifact_id = a.id \
+         WHERE a.missing_since IS NULL \
+         ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut exported: Vec<Value> = Vec::new();
+    let mut failed: Vec<Value> = Vec::new();
+
+    for (id, abs_path) in rows {
+        let art = std::path::Path::new(&abs_path);
+        // Component-boundary containment, the same predicate the other writing fixes use:
+        // a prefix match would let `/repo-backup` pass as `/repo`, and this WRITES.
+        if !art.starts_with(scope_root) {
+            continue;
+        }
+        let sidecar_abs = sidecar::path_for(scope_root, art);
+        let sidecar_rel = sidecar::rel_path_for(art);
+
+        let Ok(content) = std::fs::read_to_string(art) else {
+            failed.push(json!({ "path": abs_path, "error": "unreadable" }));
+            continue;
+        };
+        let declared_already = crate::librarian::frontmatter::parse(&content)
+            .ok()
+            .and_then(|(fm, _)| fm)
+            .and_then(|fm| fm.extra.get("expects_augmentation").cloned())
+            .is_some_and(|v| {
+                matches!(parse_declaration(&v), Declaration::Declared { sidecar: Some(s) } if s == sidecar_rel)
+            });
+        if declared_already && sidecar_abs.is_file() {
+            continue;
+        }
+
+        let Ok(Some(row)) = crate::librarian::catalog::augmentation::get(cat, &id) else {
+            failed
+                .push(json!({ "path": abs_path, "error": "augmentation row vanished mid-sweep" }));
+            continue;
+        };
+
+        if !confirm {
+            exported.push(json!({ "path": abs_path, "sidecar": sidecar_rel }));
+            continue;
+        }
+
+        let doc = sidecar::AugmentationSidecar::from_row(&row);
+        if let Err(e) = sidecar::write(&sidecar_abs, &doc) {
+            // One unwritable file must not abandon the rest of the sweep — the same
+            // reasoning as `repair_frontmatter_id`, and it matters more here because the
+            // rows this is rescuing may exist nowhere else.
+            failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
+            continue;
+        }
+        match stamp_augmentation_declaration(art, &sidecar_rel) {
+            Ok(()) => exported.push(json!({ "path": abs_path, "sidecar": sidecar_rel })),
+            Err(e) => failed.push(json!({
+                "path": abs_path,
+                "error": format!("sidecar written but declaration not stamped: {e:#}")
+            })),
+        }
+    }
+    Ok((exported, failed))
+}
+
+/// Point an artifact's `expects_augmentation:` at its sidecar, preserving everything else.
+///
+/// Goes through `frontmatter::parse` + `frontmatter::write` rather than a line edit, because
+/// that pair already owns the reserved-key and scalar-quoting rules a hand-written
+/// `expects_augmentation: <path>` line would have to re-learn.
+fn stamp_augmentation_declaration(artifact: &std::path::Path, sidecar_rel: &str) -> Result<()> {
+    let content = std::fs::read_to_string(artifact)?;
+    let (fm, body) = crate::librarian::frontmatter::parse(&content)?;
+    let mut fm = fm.ok_or_else(|| anyhow::anyhow!("no frontmatter block"))?;
+    fm.extra.insert(
+        "expects_augmentation".to_string(),
+        Value::String(sidecar_rel.to_string()),
+    );
+    std::fs::write(artifact, crate::librarian::frontmatter::write(&fm, body))?;
+    Ok(())
+}
+
 /// Opt-in catalog repair. Two fixes: `prune_missing` — remove every row
 /// anchored under a dead/renamed repo `root`; `reseat_worktree` — re-point
 /// `no_collision` worktree-scoped rows (from `scan_worktree_scoped`) onto
@@ -953,9 +1055,47 @@ async fn run_fix(
                 },
             }))
         }
+        // Scope is mandatory for the same reason `repair_frontmatter_id`'s is: this WRITES
+        // and the catalog is machine-global. "Sweep-all" means don't make me name each
+        // artifact — not cross into another repository.
+        "export_augmentations" => {
+            let scope_root = match root {
+                Some(r) => std::path::PathBuf::from(r),
+                None => match ctx.current_project.as_deref() {
+                    Some(cp) => cp.git_root.clone(),
+                    None => {
+                        return Err(RecoverableError::new(
+                            "fix=export_augmentations needs a scope — activate a project, \
+                             or pass root=<repo root>. The catalog spans every repo indexed \
+                             on this machine, and this fix writes files.",
+                        ))
+                    }
+                },
+            };
+            let (exported, failed) = {
+                let cat = ctx.catalog.lock();
+                export_augmentation_sidecars(&cat, &scope_root, confirm)?
+            };
+            Ok(json!({
+                "fix": "export_augmentations",
+                "mode": if confirm { "applied" } else { "dry_run" },
+                "root": scope_root.to_string_lossy(),
+                "exported": exported,
+                "failed": failed,
+                "totals": { "exported": exported.len(), "failed": failed.len() },
+                "hint": if confirm {
+                    "Commit docs/augmentations/ and the stamped frontmatter together — the \
+                     sidecar is only a recovery path once it is in git."
+                } else {
+                    "dry run: nothing written. Re-run with confirm=true. Run this on a \
+                     machine whose catalog still HOLDS the augmentations — it can only \
+                     export rows this catalog has."
+                },
+            }))
+        }
         other => Err(RecoverableError::new(format!(
             "unknown fix '{other}' — expected 'prune_missing', 'reseat_worktree', \
-             'rehome', 'repair_frontmatter_id', or 'mint_slugs'"
+             'rehome', 'repair_frontmatter_id', 'mint_slugs', or 'export_augmentations'"
         ))),
     }
 }
@@ -3541,21 +3681,60 @@ fn scan_terminal_status_with_caveat(conn: &rusqlite::Connection) -> Result<Vec<V
     Ok(out)
 }
 
-/// YAML's several spellings of true, plus the quoting accident.
+/// What an artifact's `expects_augmentation:` frontmatter value actually says.
 ///
-/// `expects_augmentation: "true"` must not read as absent. A declaration that silently
-/// does not count is worse than no declaration at all, because its author believes they
-/// are covered — the same reasoning that makes `validity_unparseable` a reported finding
-/// rather than a skipped line.
-fn declares_true(v: &Value) -> bool {
+/// Three states, not two, because the shape now travels: an artifact can declare that it
+/// expects an augmentation *and* name the committed sidecar holding it.
+pub(crate) enum Declaration {
+    /// No key, or an explicit false.
+    Absent,
+    /// Declared. `sidecar` is the repo-relative path recorded by the author, when there is
+    /// one — `true` is still valid and still means "declared, shape not recorded".
+    Declared { sidecar: Option<String> },
+    /// Present and uninterpretable. **Reported, never treated as absent** — see below.
+    Unparseable,
+}
+
+/// Parse `expects_augmentation`: YAML's several spellings of true, plus a sidecar path.
+///
+/// `expects_augmentation: "true"` must not read as absent. A declaration that silently does
+/// not count is worse than no declaration at all, because its author believes they are
+/// covered — the same reasoning that makes `validity_unparseable` a reported finding rather
+/// than a skipped line.
+///
+/// That argument is exactly why this replaced a `-> bool` predicate. The bool form returned
+/// `false` for every string outside the true-set, so introducing the sidecar form would have
+/// made `expects_augmentation: docs/augmentations/foo.yaml` read as **not declared** and
+/// switch the check off on the artifacts most carefully configured — the failure the old
+/// function's own doc comment warned about, delivered by the change that quoted it. Anything
+/// uninterpretable is now a finding.
+pub(crate) fn parse_declaration(v: &Value) -> Declaration {
+    let declared = || Declaration::Declared { sidecar: None };
     match v {
-        Value::Bool(b) => *b,
-        Value::String(s) => matches!(
-            s.trim().to_ascii_lowercase().as_str(),
-            "true" | "yes" | "on" | "1"
-        ),
-        Value::Number(n) => n.as_i64() == Some(1),
-        _ => false,
+        Value::Bool(true) => declared(),
+        Value::Bool(false) => Declaration::Absent,
+        Value::Number(n) => match n.as_i64() {
+            Some(1) => declared(),
+            Some(0) => Declaration::Absent,
+            _ => Declaration::Unparseable,
+        },
+        Value::String(s) => {
+            let t = s.trim();
+            match t.to_ascii_lowercase().as_str() {
+                "true" | "yes" | "on" | "1" => declared(),
+                "false" | "no" | "off" | "0" => Declaration::Absent,
+                // A path is a declaration *with* its shape. Extension-gated rather than
+                // "any other string": a typo'd `expects_augmentation: ture` must stay a
+                // reported finding, not become a sidecar path that will never resolve.
+                _ if t.ends_with(".yaml") || t.ends_with(".yml") => Declaration::Declared {
+                    sidecar: Some(t.to_string()),
+                },
+                _ => Declaration::Unparseable,
+            }
+        }
+        // Includes `expects_augmentation:` with no value at all, which parses as null. The
+        // author wrote a key and it does nothing; that is the case this reports.
+        _ => Declaration::Unparseable,
     }
 }
 
@@ -3617,24 +3796,75 @@ fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<
         let Some(raw) = fm.extra.get("expects_augmentation") else {
             continue;
         };
-        if !declares_true(raw) {
-            continue;
-        }
+
+        let sidecar_rel = match parse_declaration(raw) {
+            Declaration::Absent => continue,
+            Declaration::Unparseable => {
+                out.push(Violation::new(
+                    "augmentation_declaration_unparseable",
+                    Some(id.clone()),
+                    abs_path.clone(),
+                    format!(
+                        "`expects_augmentation: {raw}` is neither a boolean nor a sidecar \
+                         path ending .yaml/.yml, so it declares nothing. Its author almost \
+                         certainly believes this artifact is covered and it is not — the \
+                         same failure `validity_unparseable` exists to catch. Write \
+                         `true`, or the repo-relative path of the sidecar holding its shape."
+                    ),
+                ));
+                continue;
+            }
+            Declaration::Declared { sidecar } => sidecar,
+        };
+
+        // A declared sidecar that EXISTS on disk is a different finding from one that does
+        // not: the first is one command from repaired, the second needs a machine that
+        // still holds the row. Reporting both under one detail would hide that.
+        let recoverable = sidecar_rel.as_deref().is_some_and(|rel| {
+            crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))
+                .map(|root| root.join(rel).is_file())
+                .unwrap_or(false)
+        });
+
+        let detail = if recoverable {
+            let rel = sidecar_rel.unwrap_or_default();
+            format!(
+                "frontmatter declares `expects_augmentation: {rel}` and that sidecar is \
+                 present, but this catalog holds no augmentation row for it. The shape \
+                 travelled; only the attach is missing. Run librarian(action=\"reindex\") — \
+                 it re-attaches a declared sidecar whenever the row is absent, and never \
+                 overwrites a live one. `params` are deliberately not carried, so the \
+                 restored tracker starts with no rows."
+            )
+        } else {
+            let named = match sidecar_rel.as_deref() {
+                Some(rel) => format!(
+                    "declares `expects_augmentation: {rel}`, but no such sidecar exists on \
+                     disk"
+                ),
+                None => "declares `expects_augmentation: true`, which records that a shape \
+                         is expected but not what it was"
+                    .to_string(),
+            };
+            format!(
+                "frontmatter {named}, and this catalog holds no augmentation for it. Its \
+                 prompt, params, params_schema, render_template and entry_collection are \
+                 all absent: every documented `append_entry` / `update_entry` / \
+                 `entry_filter` call against this id fails at use, and it contributes no \
+                 [LIVE] block to librarian(action=\"context\"). With no sidecar there is \
+                 nothing on disk to rebuild from, so `reindex` cannot help and reports \
+                 healthy regardless. The shape survives only in the catalog of a machine \
+                 that has not lost it — run librarian(action=\"doctor\", \
+                 fix=\"export_augmentations\") THERE and commit the result. Failing that, \
+                 re-author with artifact_augment(id=…, prompt=…, …)."
+            )
+        };
 
         out.push(Violation::new(
             "augmentation_declared_but_absent",
             Some(id.clone()),
             abs_path.clone(),
-            "frontmatter declares `expects_augmentation: true`, but this catalog holds no \
-             augmentation for it. Its prompt, params, params_schema, render_template and \
-             entry_collection are all absent: every documented `append_entry` / \
-             `update_entry` / `entry_filter` call against this id fails at use, and it \
-             contributes no [LIVE] block to librarian(action=\"context\"). Augmentation has \
-             no on-disk form, so `reindex` cannot rebuild it and reports healthy regardless \
-             — expect this in a fresh clone or after a catalog rebuild. Re-attach with \
-             artifact_augment(id=…, prompt=…, …). See get_guide(\"librarian\") § Augmentation \
-             Lifecycle."
-                .to_string(),
+            detail,
         ));
     }
     Ok(out)
@@ -4809,11 +5039,17 @@ mod tests {
         );
     }
 
-    /// A quoting accident must not silently disarm the declaration, and `false` must not
-    /// arm it. Both directions, because a truthiness helper that is wrong either way
-    /// produces a gate whose author believes they are covered.
+    /// A quoting accident must not silently disarm the declaration, `false` must not arm
+    /// it, and a value that means nothing must be REPORTED rather than skipped. Three
+    /// states, because a truthiness helper that is wrong in any of them produces a gate
+    /// whose author believes they are covered.
+    ///
+    /// Filtered by check name on purpose: the scan emits two, and collecting every
+    /// violation regardless would let a finding under one name silently satisfy an
+    /// assertion about the other. That is how this test read before the third state
+    /// existed, and it is why it failed on a change it should have passed.
     #[test]
-    fn augmentation_declaration_reads_yaml_truthiness_both_ways() {
+    fn augmentation_declaration_reads_yaml_truthiness_three_ways() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         seed_declared(&cat, tmp.path(), "bare", Some("true"), false);
@@ -4822,20 +5058,114 @@ mod tests {
         seed_declared(&cat, tmp.path(), "off", Some("false"), false);
         seed_declared(&cat, tmp.path(), "empty", Some("\"\""), false);
 
-        let fired: std::collections::BTreeSet<String> =
-            scan_augmentation_declared_but_absent(&cat.conn)
-                .unwrap()
-                .into_iter()
-                .filter_map(|v| v.artifact_id)
-                .collect();
+        let all = scan_augmentation_declared_but_absent(&cat.conn).unwrap();
+        let by_check = |name: &str| -> std::collections::BTreeSet<String> {
+            all.iter()
+                .filter(|v| v.check == name)
+                .filter_map(|v| v.artifact_id.clone())
+                .collect()
+        };
+        let set = |ids: &[&str]| -> std::collections::BTreeSet<String> {
+            ids.iter().map(|s| s.to_string()).collect()
+        };
 
         assert_eq!(
-            fired,
-            ["bare", "quoted", "yes"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<std::collections::BTreeSet<_>>(),
+            by_check("augmentation_declared_but_absent"),
+            set(&["bare", "quoted", "yes"]),
             "true/\"true\"/yes must arm the declaration; false and \"\" must not"
+        );
+        assert_eq!(
+            by_check("augmentation_declaration_unparseable"),
+            set(&["empty"]),
+            "an empty value declares nothing while looking like a declaration — report it, \
+             the same way validity_unparseable does, rather than skipping the line"
+        );
+        // `false` is a considered no. It must fire NOTHING — not the absent check, not the
+        // unparseable one — or the reader learns to ignore this family of findings.
+        assert!(
+            !all.iter().any(|v| v.artifact_id.as_deref() == Some("off")),
+            "an explicit `false` must produce no finding at all: {:?}",
+            all.iter()
+                .map(|v| (&v.check, &v.artifact_id))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// A declared sidecar that EXISTS is one command from repaired; one that does not is a
+    /// different problem needing a different machine. The check must not collapse them into
+    /// one detail, because the remedy is the discriminator and a reader acts on the remedy.
+    ///
+    /// Both artifacts here are `augmentation_declared_but_absent` — same check, same
+    /// severity, opposite advice. That is the whole point of the split, so the assertions
+    /// are on the DETAIL rather than on which check fired.
+    #[test]
+    fn a_present_sidecar_and_a_missing_one_get_opposite_advice() {
+        let tmp = tempfile::tempdir().unwrap();
+        // `lookup_git_root` walks up for `.git`, and the sidecar path is repo-relative, so
+        // without this marker the recoverable branch cannot resolve and both artifacts
+        // would take the same arm — the exact collapse this test exists to forbid.
+        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        seed_declared(
+            &cat,
+            tmp.path(),
+            "has_sidecar",
+            Some("docs/augmentations/has_sidecar.yaml"),
+            false,
+        );
+        crate::librarian::augmentation_sidecar::write(
+            &tmp.path().join("docs/augmentations/has_sidecar.yaml"),
+            &crate::librarian::augmentation_sidecar::AugmentationSidecar {
+                schema_version: 1,
+                prompt: "recorded".into(),
+                entry_collection: Some("rows".into()),
+                params_schema: None,
+                render_template: None,
+                append_mode: false,
+                history_cap: None,
+            },
+        )
+        .unwrap();
+
+        seed_declared(
+            &cat,
+            tmp.path(),
+            "no_sidecar",
+            Some("docs/augmentations/absent.yaml"),
+            false,
+        );
+
+        let all = scan_augmentation_declared_but_absent(&cat.conn).unwrap();
+        let detail = |id: &str| -> String {
+            all.iter()
+                .find(|v| v.artifact_id.as_deref() == Some(id))
+                .unwrap_or_else(|| panic!("{id} must produce a finding"))
+                .detail
+                .clone()
+        };
+
+        let present = detail("has_sidecar");
+        assert!(
+            present.contains("reindex"),
+            "a present sidecar's remedy is one reindex; the detail must name it: {present}"
+        );
+        assert!(
+            !present.contains("export_augmentations"),
+            "a present sidecar needs no export — pointing at another machine is wrong \
+             advice here: {present}"
+        );
+
+        let missing = detail("no_sidecar");
+        assert!(
+            missing.contains("export_augmentations"),
+            "with no sidecar the shape lives only on another machine; the detail must say \
+             so: {missing}"
+        );
+        assert!(
+            missing.contains("cannot help"),
+            "and it must say reindex will NOT fix it, or the reader's first move is the \
+             one thing that does nothing and reports success: {missing}"
         );
     }
 
@@ -10427,6 +10757,73 @@ root = "work/elsewhere/ghost"
             again["minted"],
             json!(0),
             "slugs are immutable; a second apply must mint nothing: {again:#?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn export_augmentations_writes_a_sidecar_stamps_the_declaration_and_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // Augmented, and declaring nothing yet — the state every augmented artifact was in
+        // before this fix existed.
+        seed_declared(&cat, root, "t", None, true);
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let sidecar = root.join("docs/augmentations/t.yaml");
+        let args = || json!({ "fix": "export_augmentations", "root": root.to_string_lossy() });
+
+        let dry = call(&ctx, args()).await.unwrap();
+        assert_eq!(dry["mode"], json!("dry_run"));
+        assert_eq!(dry["totals"]["exported"], json!(1), "{dry:#?}");
+        assert!(
+            !sidecar.exists(),
+            "a dry run must write nothing — this fix's whole value is that it runs on a \
+             machine holding the only copy of these rows"
+        );
+
+        let mut applied = args();
+        applied["confirm"] = json!(true);
+        let out = call(&ctx, applied.clone()).await.unwrap();
+        assert_eq!(out["mode"], json!("applied"));
+        assert_eq!(out["totals"]["exported"], json!(1), "{out:#?}");
+        assert_eq!(out["totals"]["failed"], json!(0), "{out:#?}");
+
+        let doc = crate::librarian::augmentation_sidecar::read(&sidecar)
+            .expect("the sidecar must be written and parseable");
+        assert_eq!(doc.prompt, "p");
+
+        // The sidecar alone is inert: nothing finds it unless the artifact names it.
+        let content = std::fs::read_to_string(root.join("t.md")).unwrap();
+        assert!(
+            content.contains("expects_augmentation: docs/augmentations/t.yaml"),
+            "the declaration must be stamped, or reindex has no way to reach the file it \
+             just wrote: {content}"
+        );
+
+        // Idempotent: a second confirmed run must not rewrite files it already exported.
+        let again = call(&ctx, applied).await.unwrap();
+        assert_eq!(
+            again["totals"]["exported"],
+            json!(0),
+            "already-exported artifacts must be skipped, not rewritten: {again:#?}"
+        );
+    }
+
+    /// This fix WRITES and the catalog is machine-global — 207 files across five unrelated
+    /// repos, when the same guard was missing from `repair_frontmatter_id`.
+    #[tokio::test]
+    async fn export_augmentations_refuses_without_a_scope() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let ctx = TestToolContextBuilder::new(cat).build();
+        let err = call(&ctx, json!({ "fix": "export_augmentations" }))
+            .await
+            .unwrap_err();
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("root="),
+            "the refusal must name the way out: {text}"
         );
     }
 
