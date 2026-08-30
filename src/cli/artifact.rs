@@ -364,6 +364,17 @@ pub struct CreateArgs {
     /// Augmentation params JSON (`@<file>` / `-` / literal JSON string).
     #[arg(long = "augment-params")]
     pub augment_params: Option<String>,
+    /// Temporal scope tag written to frontmatter and the catalog (e.g.
+    /// `2026-W25`, a date, or `dated_snapshot`). Filterable via `artifact find`.
+    #[arg(long = "time-scope")]
+    pub time_scope: Option<String>,
+    /// Custom frontmatter keys as a JSON object (`@<file>`, `-`, or literal).
+    ///
+    /// Distinct from `--augment-params`, which seeds AUGMENTATION params.
+    /// `extra` is plain YAML frontmatter — where `unverified:`, `opened:` and
+    /// `entry_prefix` live.
+    #[arg(long)]
+    pub extra: Option<String>,
     #[command(flatten)]
     pub common: CommonOpts,
 }
@@ -374,11 +385,16 @@ impl CreateArgs {
     }
 }
 
-pub(crate) async fn run_create(args: CreateArgs) -> Result<()> {
-    let common = args.common();
-    let output = common.output();
-    let ctx = open_ctx(&common).await?;
-
+/// Translate `CreateArgs` into the `artifact create` tool's JSON arguments.
+///
+/// Split out of [`run_create`] for the reason [`build_update_tool_args`] gives
+/// on the update side, and this bug is that reason arriving twice: the CLI holds
+/// its own clap struct and hand-marshals every field, so a field can exist on
+/// the struct and never reach the tool. The failure is silent — the tool
+/// defaults the missing key and reports `created` — and it is only testable if
+/// the translation is reachable without a catalog.
+/// See `docs/issues/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`.
+fn build_create_tool_args(args: &CreateArgs) -> Result<Value> {
     let mut tool_args = serde_json::Map::new();
     tool_args.insert("kind".into(), Value::String(args.kind.clone()));
     tool_args.insert("title".into(), Value::String(args.title.clone()));
@@ -408,6 +424,14 @@ pub(crate) async fn run_create(args: CreateArgs) -> Result<()> {
     if let Some(t) = &args.topic {
         tool_args.insert("topic".into(), Value::String(t.clone()));
     }
+    if let Some(t) = &args.time_scope {
+        tool_args.insert("time_scope".into(), Value::String(t.clone()));
+    }
+    if let Some(e) = &args.extra {
+        let raw = crate::cli::read_at_or_stdin(e)?;
+        let parsed: Value = serde_json::from_str(&raw).context("--extra is not valid JSON")?;
+        tool_args.insert("extra".into(), parsed);
+    }
     if let Some(b) = &args.body {
         tool_args.insert(
             "body".into(),
@@ -433,8 +457,17 @@ pub(crate) async fn run_create(args: CreateArgs) -> Result<()> {
         }
         tool_args.insert("augment".into(), Value::Object(aug));
     }
+    Ok(Value::Object(tool_args))
+}
 
-    let v = crate::librarian::tools::create::call(&ctx, Value::Object(tool_args)).await?;
+pub(crate) async fn run_create(args: CreateArgs) -> Result<()> {
+    let common = args.common();
+    let output = common.output();
+    let ctx = open_ctx(&common).await?;
+
+    let tool_args = build_create_tool_args(&args)?;
+
+    let v = crate::librarian::tools::create::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
 }
@@ -475,6 +508,17 @@ pub struct UpdateArgs {
     /// `force=true`, so the CLI has to offer the escape the hint promises.
     #[arg(long)]
     pub force: bool,
+    /// Temporal scope tag written to frontmatter and the catalog (e.g.
+    /// `2026-W25`, a date, or `dated_snapshot`). Filterable via `artifact find`.
+    #[arg(long = "time-scope")]
+    pub time_scope: Option<String>,
+    /// Custom frontmatter keys as a JSON object (`@<file>`, `-`, or literal).
+    ///
+    /// Distinct from `--patch-params`, which merge-patches AUGMENTATION params.
+    /// `extra` is plain YAML frontmatter — where `unverified:`, `closed:` and
+    /// `entry_prefix` live. Each key is upserted; a `null` value deletes it.
+    #[arg(long)]
+    pub extra: Option<String>,
     #[command(flatten)]
     pub common: CommonOpts,
 }
@@ -522,6 +566,14 @@ fn build_update_tool_args(args: &UpdateArgs) -> Result<Value> {
     }
     if let Some(t) = &args.topic {
         patch.insert("topic".into(), Value::String(t.clone()));
+    }
+    if let Some(t) = &args.time_scope {
+        patch.insert("time_scope".into(), Value::String(t.clone()));
+    }
+    if let Some(e) = &args.extra {
+        let raw = crate::cli::read_at_or_stdin(e)?;
+        let parsed: Value = serde_json::from_str(&raw).context("--extra is not valid JSON")?;
+        patch.insert("extra".into(), parsed);
     }
     if let Some(b) = &args.body {
         patch.insert(
@@ -781,6 +833,27 @@ mod tests {
             patch_params: None,
             commit_refresh: false,
             force: false,
+            time_scope: None,
+            extra: None,
+            common: CommonOpts::default(),
+        }
+    }
+
+    fn create_args() -> CreateArgs {
+        CreateArgs {
+            kind: "bug".into(),
+            title: "T".into(),
+            rel_path: "docs/issues/x.md".into(),
+            repo: None,
+            status: None,
+            owners: None,
+            tags: None,
+            topic: None,
+            body: None,
+            augment_prompt: None,
+            augment_params: None,
+            time_scope: None,
+            extra: None,
             common: CommonOpts::default(),
         }
     }
@@ -826,6 +899,198 @@ mod tests {
             "an unset `--force` must not be sent at all — marshalling it \
              unconditionally would disable the shrink guard for every CLI \
              update; got: {v}"
+        );
+    }
+
+    // `--time-scope` / `--extra`, both subcommands.
+    //
+    // `docs/issues/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`. Same
+    // two-independent-halves shape as `--force` above: the parser can reject the
+    // flag, or accept it and the marshalling can drop it. The second half is the
+    // one that bit — before this, neither flag existed at all, so a CLI caller
+    // could not set either field and got no signal that they were unreachable.
+    //
+    // These matter more than their surface suggests: `extra` is where
+    // `unverified:`, `opened:`, `closed:` and `entry_prefix` live, and
+    // `get_guide("tracker-conventions")` builds its whole queryability argument
+    // on those being reachable. A write path that drops them defeats the
+    // convention at the moment of writing.
+
+    #[test]
+    fn update_parser_accepts_time_scope_and_extra() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            args: UpdateArgs,
+        }
+
+        let w = Wrap::try_parse_from([
+            "codescout",
+            "abc123",
+            "--time-scope",
+            "2026-W25",
+            "--extra",
+            r#"{"unverified":"not re-checked since the rebuild"}"#,
+        ])
+        .expect("`--time-scope` and `--extra` must be recognised arguments");
+        assert_eq!(w.args.time_scope.as_deref(), Some("2026-W25"));
+        assert!(w.args.extra.is_some());
+
+        // Control: absent flags stay None, so the assertions above are about the
+        // flags rather than about fields that are always populated.
+        let w = Wrap::try_parse_from(["codescout", "abc123"]).unwrap();
+        assert!(w.args.time_scope.is_none() && w.args.extra.is_none());
+    }
+
+    #[test]
+    fn update_time_scope_and_extra_reach_the_patch() {
+        let mut a = update_args("abc123");
+        a.time_scope = Some("2026-W25".into());
+        a.extra = Some(r#"{"closed":"2026-08-30","legacy":null}"#.into());
+        let v = build_update_tool_args(&a).unwrap();
+        let patch = v.get("patch").expect("patch object");
+
+        assert_eq!(
+            patch.get("time_scope"),
+            Some(&Value::String("2026-W25".into())),
+            "`--time-scope` must land INSIDE `patch` — the tool reads \
+             `patch.time_scope`, not a top-level key; got: {v}"
+        );
+        // Parsed as JSON, not passed through as a string: the tool expects an
+        // object, and a string here would be accepted-and-wrong rather than
+        // rejected. `null` must survive, because that is how `extra` deletes a key.
+        assert_eq!(
+            patch.get("extra"),
+            Some(&serde_json::json!({"closed": "2026-08-30", "legacy": null})),
+            "`--extra` must be parsed into an object with nulls preserved; got: {v}"
+        );
+    }
+
+    #[test]
+    fn update_omits_time_scope_and_extra_when_unset() {
+        let v = build_update_tool_args(&update_args("abc123")).unwrap();
+        let patch = v.get("patch").expect("patch object");
+        assert!(
+            patch.get("time_scope").is_none() && patch.get("extra").is_none(),
+            "unset flags must not be sent at all — marshalling `extra` \
+             unconditionally would send an empty object, and the tool upserts \
+             every key it is given; got: {v}"
+        );
+    }
+
+    #[test]
+    fn update_rejects_extra_that_is_not_json() {
+        let mut a = update_args("abc123");
+        a.extra = Some("closed: 2026-08-30".into());
+        let err = build_update_tool_args(&a)
+            .expect_err("non-JSON `--extra` must fail loudly, not be dropped");
+        assert!(
+            err.to_string().contains("--extra"),
+            "the error must name the flag the caller got wrong: {err}"
+        );
+    }
+
+    #[test]
+    fn create_parser_accepts_time_scope_and_extra() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            args: CreateArgs,
+        }
+
+        let w = Wrap::try_parse_from([
+            "codescout",
+            "--kind",
+            "bug",
+            "--title",
+            "T",
+            "--rel-path",
+            "docs/issues/x.md",
+            "--time-scope",
+            "dated_snapshot",
+            "--extra",
+            r#"{"opened":"2026-08-30"}"#,
+        ])
+        .expect("`--time-scope` and `--extra` must be recognised on create too");
+        assert_eq!(w.args.time_scope.as_deref(), Some("dated_snapshot"));
+        assert!(w.args.extra.is_some());
+    }
+
+    #[test]
+    fn create_time_scope_and_extra_reach_the_tool_args() {
+        let mut a = create_args();
+        a.time_scope = Some("dated_snapshot".into());
+        a.extra = Some(r#"{"opened":"2026-08-30","severity":"low"}"#.into());
+        let v = build_create_tool_args(&a).unwrap();
+
+        // Create takes both as TOP-LEVEL keys, unlike update which nests them in
+        // `patch`. Asserting the level is the point: a value marshalled to the
+        // wrong depth is silently defaulted by the tool, which is this bug.
+        assert_eq!(
+            v.get("time_scope"),
+            Some(&Value::String("dated_snapshot".into())),
+            "`--time-scope` must be a top-level key on create; got: {v}"
+        );
+        assert_eq!(
+            v.get("extra"),
+            Some(&serde_json::json!({"opened": "2026-08-30", "severity": "low"})),
+            "`--extra` must be a parsed top-level object on create; got: {v}"
+        );
+    }
+
+    #[test]
+    fn create_omits_time_scope_and_extra_when_unset() {
+        let v = build_create_tool_args(&create_args()).unwrap();
+        assert!(
+            v.get("time_scope").is_none() && v.get("extra").is_none(),
+            "unset flags must not be sent at all; got: {v}"
+        );
+    }
+
+    #[test]
+    fn create_still_marshals_every_pre_existing_field() {
+        // Characterization guard for the `build_create_tool_args` extraction.
+        // The refactor moved ~60 lines out of `run_create`; this pins that the
+        // move was behaviour-preserving rather than merely compiling, which is
+        // the failure mode the extraction exists to make testable in the first
+        // place.
+        let mut a = create_args();
+        a.repo = Some("codescout".into());
+        a.status = Some("open".into());
+        a.owners = Some("marius, other".into());
+        a.tags = Some("cli, librarian".into());
+        a.topic = Some("parity".into());
+        a.augment_prompt = Some("keep it current".into());
+
+        let v = build_create_tool_args(&a).unwrap();
+        assert_eq!(v.get("kind"), Some(&Value::String("bug".into())));
+        assert_eq!(v.get("title"), Some(&Value::String("T".into())));
+        assert_eq!(
+            v.get("rel_path"),
+            Some(&Value::String("docs/issues/x.md".into()))
+        );
+        assert_eq!(v.get("repo"), Some(&Value::String("codescout".into())));
+        assert_eq!(v.get("status"), Some(&Value::String("open".into())));
+        // Comma-split with surrounding whitespace trimmed.
+        assert_eq!(
+            v.get("owners"),
+            Some(&serde_json::json!(["marius", "other"]))
+        );
+        assert_eq!(
+            v.get("tags"),
+            Some(&serde_json::json!(["cli", "librarian"]))
+        );
+        assert_eq!(v.get("topic"), Some(&Value::String("parity".into())));
+        // Body is defaulted to empty rather than omitted — the server requires it.
+        assert_eq!(v.get("body"), Some(&Value::String(String::new())));
+        assert_eq!(
+            v.get("augment").and_then(|a| a.get("prompt")),
+            Some(&Value::String("keep it current".into())),
+            "augment.prompt must survive the extraction; got: {v}"
         );
     }
 }
