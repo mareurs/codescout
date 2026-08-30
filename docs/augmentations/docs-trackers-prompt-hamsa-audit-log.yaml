@@ -1,0 +1,57 @@
+schema_version: 1
+prompt: |-
+  Ledger of prompt audits produced by the prompt-hamsa specialist. One entry per audit (spoken or written): the named GAP, the recommended MOVE, the PREDICTION the move makes, and the OUTCOME — what later evidence showed. This is how an unverified, N=0 inspection becomes a measured hold-rate.
+
+  READING IT. Entries are `A-N`, monotonic, never reused. Rows live in the `audits` collection; query them with `artifact(action="get", id="59ebeebb6ed05c89", entry_filter={…})`. Fields: `id`, `date`, `artifact`, `gap`, `move`, `prediction`, `confidence`, `outcome`. An audit whose evidence has not landed yet carries `outcome: ""` — an EMPTY STRING, not null and not a missing key. Find the open set with `entry_filter={"outcome": {"eq": ""}}`. NOTE: `docs/ROADMAP.md` documents `entry_filter={"outcome":{"contains":"pending"}}` for this purpose and that query matches NOTHING — no row's `outcome` contains "pending" (the word occurs only in A-17's `confidence`). Use the `eq ""` form; the ROADMAP line is stale.
+
+  WRITING TO IT. Add a row with `artifact(action="append_entry", id="59ebeebb6ed05c89", entry_collection="audits", id_prefix="A", entry={…})`; change one with `artifact(action="update_entry", id="59ebeebb6ed05c89", entry_collection="audits", entry_id="A-N", fields={…})`. Use `fields=`, NOT `entry=` — `update_entry` accepts `entry=` and silently writes nothing (`docs/issues/archive/2026-08-16-update-entry-ignores-an-unknown-patch-param-and-reports-success.md`). NEVER `artifact_augment(merge=true, params={audits: […]})`: RFC 7396 array semantics REPLACE the collection rather than merge into it. Every entry also needs a `## A-N — <title>` body section — an index-table row alone defines no citable token (`docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`). The `## Index` table in the body is a hand-maintained git-durable snapshot that does NOT re-render itself; update its row in the same pass or the snapshot and the catalog disagree.
+
+  NEVER INVENT AN `outcome`. This ledger exists to record whether a prediction held; a fabricated outcome destroys the one thing it measures. Leave it `""` until evidence actually lands, and prefer "refuted" / "ceiling" / "no-ship" over silence when it does.
+
+  PROVENANCE OF THIS AUGMENTATION (2026-08-28) — RECONSTRUCTED, not restored. `catalog.db` is machine-local and gitignored, so the original augmentation did not survive the move to this machine (`docs/issues/2026-08-28-augmentation-declaration-records-existence-not-shape.md`). Recovered from live calls quoted in archived bug files: `entry_collection="audits"`, `id_prefix="A"`, the field name `outcome`, and the empty-string convention. Derived from the `## Index` table header (which the body declares is the snapshot of `params.audits`): `date`, `artifact`, `gap`, `move`, `prediction`, `confidence` — these six names are plausible, not confirmed, and a future recovery of a quoted call may correct them. Rows A-1..A-30 are parsed verbatim from that table. Rows A-31..A-34 had NO index row (snapshot drift) and were summarised from their body sections. No `outcome` was invented: A-15, A-17 and A-24 are `""` because their sections record none.
+entry_collection: audits
+params_schema:
+  type: object
+  required:
+  - audits
+  additionalProperties: true
+  properties:
+    audits:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        - date
+        - gap
+        additionalProperties: true
+        properties:
+          id:
+            type: string
+            pattern: ^A-[0-9]+$
+          date:
+            type: string
+            pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}$
+          artifact:
+            type: string
+          gap:
+            type: string
+          move:
+            type: string
+          prediction:
+            type: string
+          confidence:
+            type: string
+          outcome:
+            type: string
+render_template: |-
+  **Prompt-audit ledger — {{ audits | length }} entries (`A-N`, monotonic).** Full rows live in the catalog; the `## Index` table in the body is the git-durable snapshot.
+
+  **Open — no `outcome` recorded yet:**
+  {% for a in audits %}{% if not a.outcome %}
+  - **{{ a.id }}** ({{ a.date }}) — {{ a.gap }}
+  {% endif %}{% endfor %}
+
+  Query: `artifact(get, id="59ebeebb6ed05c89", entry_filter={"outcome": {"eq": ""}})`.
+  Append: `append_entry(entry_collection="audits", id_prefix="A")`.
+  Patch: `update_entry(..., fields={...})` — never `entry=`.

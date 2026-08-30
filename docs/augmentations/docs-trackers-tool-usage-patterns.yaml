@@ -1,0 +1,73 @@
+schema_version: 1
+prompt: |-
+  READ THIS FIRST — what this tracker is for.
+
+  `docs/trackers/tool-usage-patterns.md` is codescout's internal Langfuse for *tool selection quality*: each T-N observation is a real tool call or sequence pulled from a session trace and judged against the ideal. It is a decision surface, not a log — it exists to feed Iron Law updates, the Anti-Patterns table, and edits to the three prompt surfaces (the `server_instructions` and `onboarding_prompt` slices of `src/prompts/source.md`, and `build_system_prompt_draft()`).
+
+  WHAT A CONSUMER SHOULD DO WITH IT
+
+  1. Before proposing any prompt-surface or Iron Law change, query this tracker for prior art:
+     `artifact(action="get", id="f2ecdd76a6189efb", entry_filter={"verdict": {"eq": "wrong-tool"}})`.
+     A candidate that duplicates a recorded T-N — or that a T-N already refuted — must not be re-litigated. T-25's 2026-08-20 correction is the standing example: "ranking err_family by count is the wrong move" was recorded on 2026-08-15 with an explicit do-not-re-litigate note and was re-derived from scratch four days later across five agents at ~150k tokens.
+  2. Read the row, then read the body section. Params are the index; the `### T-N` heading in the body is the definition and holds the evidence, the measured numbers, and any later correction. A row without its section is not citable.
+  3. Do NOT treat error frequency as friction. Every Iron-Law gate measures BELOW the corpus base rate (T-25, 840 matched errors); the signal is recovery, not count.
+
+  VERDICT VOCABULARY is fixed — `legitimate` | `debatable` | `wrong-tool` — and defined in the body's "Scope and methodology" section. `null` means the body section carries no `**Verdict:**` line; do not infer one from prose. Proof standard: a claim that a better tool exists must be verified by actually running the alternative before a verdict is set or changed.
+
+  MAINTENANCE
+
+  - Add a row: `artifact(action="append_entry", id="f2ecdd76a6189efb", entry_collection="observations", id_prefix="T", entry={tool:…, verdict:…, session:…, summary:…, prompt_gap:…})`. The server assigns the next T-N. NEVER hand-build the array — `artifact_augment(merge=true, params={observations:[…]})` REPLACES the collection; that call took this queue from 19 rows to 1 on 2026-08-16.
+  - Change a row: `artifact(action="update_entry", id="f2ecdd76a6189efb", entry_collection="observations", entry_id="T-17", fields={verdict:"wrong-tool"})`. Never use `patch={params:…}` to flip one row — RFC 7396 array semantics replace the whole collection (T-21).
+  - Then add the prose: `artifact(action="update", id="f2ecdd76a6189efb", patch={body_edits:[{heading:"## Prompt improvement candidates", action:"insert_before", content:"### T-N — <title>\n…"}]})`. The file is librarian-managed, so `edit_markdown` and `read_markdown` on it are refused. The `### T-N — <title>` heading shape is what makes the id citable to link_scan.
+  - Param-*shape* mistakes (wrong key name, inverted filter leaf, buffer handle under the wrong param) are NOT T-N observations — they are repair-and-continue candidates (`docs/adrs/2026-07-10-repair-and-continue-input-handling.md`). Only a genuine tool-*selection* gap earns a row.
+
+  RESTORE NOTE (2026-08-28): this augmentation lives only in the machine-local `catalog.db` and is not in git, so it must be rebuilt per machine. Reconstructed here from the intact body prose after `librarian(action="doctor")` reported `augmentation_declared_but_absent`; the same loss was recorded and restored on another machine on 2026-07-05 (`docs/issues/archive/2026-07-02-tool-usage-patterns-augmentation-lost.md`). 30 rows recovered, T-001..T-030 (body numbering is inconsistent: T-001..T-013 are zero-padded, T-14..T-30 are not, and T-14 appears in the body before T-013). Ten rows carry `verdict: null` because their body section has no `**Verdict:**` line — T-005, T-008, T-011, T-012, T-17, T-18, T-19, T-20, T-21, T-22. Event history was not recoverable.
+entry_collection: observations
+params_schema:
+  type: object
+  required:
+  - observations
+  properties:
+    observations:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        properties:
+          id:
+            type: string
+            pattern: ^T-\d+$
+          tool:
+            type:
+            - string
+            - 'null'
+          verdict:
+            type:
+            - string
+            - 'null'
+            enum:
+            - legitimate
+            - debatable
+            - wrong-tool
+            - null
+          session:
+            type:
+            - string
+            - 'null'
+          summary:
+            type:
+            - string
+            - 'null'
+          prompt_gap:
+            type:
+            - string
+            - 'null'
+render_template: |-
+  **{{ observations | length }} observations** — {{ observations | selectattr("verdict", "equalto", "wrong-tool") | list | length }} wrong-tool, {{ observations | selectattr("verdict", "equalto", "debatable") | list | length }} debatable, {{ observations | selectattr("verdict", "equalto", "legitimate") | list | length }} legitimate.
+
+  | id | tool | verdict | session |
+  |----|------|---------|---------|
+  {% for o in observations %}| {{ o.id }} | {{ o.tool or "—" }} | {{ o.verdict or "—" }} | {{ o.session or "—" }} |
+  {% endfor %}
+  Full prose per observation lives in the body (`### T-N` sections). Filter rows with `artifact(action="get", id="f2ecdd76a6189efb", entry_filter={"verdict": {"eq": "wrong-tool"}})`.

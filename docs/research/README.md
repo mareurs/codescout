@@ -3,7 +3,7 @@ id: '5086e3c7c0b9d83c'
 kind: tracker
 status: active
 title: Research Index
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-research-README.yaml
 ---
 
 

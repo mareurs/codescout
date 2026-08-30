@@ -7,7 +7,7 @@ tags:
 - codescout
 - legibility
 - dzo
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-legibility-backlog.yaml
 ---
 
 ## Backlog (auto-managed)

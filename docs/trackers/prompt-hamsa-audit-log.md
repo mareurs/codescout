@@ -7,7 +7,7 @@ tags:
 - prompt-hamsa
 - prompt
 - audit
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-prompt-hamsa-audit-log.yaml
 ---
 
 # Prompt Hamsa — Audit Log

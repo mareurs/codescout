@@ -1,0 +1,71 @@
+schema_version: 1
+prompt: |-
+  Maintain the FT-N task index for the Fable-tuning work stream in `params.tasks` — one row per `### FT-N — <title>` section in the body. The body is the authoritative prose (rationale, closure notes, evidence); params is the filterable index over it. They must agree.
+
+  FIELDS per row: `id` (`FT-<n>`, matching the body heading exactly), `task` (the heading title, verbatim), `priority` (high|medium|low), `surface` (prompt|tool|infra|methodology|tracker), `eval_gate` (boolean — true when the change must run as a pre-registered A/B arm through `prompt-hamsa-audit-log`, id `59ebeebb6ed05c89`, against the "original Fable captures" baseline before shipping), `status` (open|in-progress|done|blocked|dropped), and an optional `notes` carrying a status qualifier the body spells out.
+
+  KEEP `status` AND `priority` TO THE BARE ENUM VALUES. `docs/trackers/fable-tuning-index.md` documents `artifact(action="get", id="ad1af8262fdce357", entry_filter={"and":[{"status":{"eq":"open"}},{"priority":{"eq":"high"}}]})` as the way to pull the next task, and a qualifier baked into the value ("done (NOT-INDICATED)") silently breaks that `eq`. Put the qualifier in `notes` — FT-2 ("NOT-INDICATED") and FT-12 ("moot") are the two live examples.
+
+  HOW TO WRITE: add rows with `artifact(action="append_entry", id="ad1af8262fdce357", entry_collection="tasks", id_prefix="FT")` and change them with `artifact(action="update_entry", ..., entry_id="FT-N", fields={...})`. Never rebuild the array by hand — `artifact_augment(merge=true, params={tasks:[...]})` REPLACES the collection. Do not delete resolved tasks; the closure notes are the record. Every task also needs its own `### FT-N — <title>` body section: a params row defines no citable token, and this ledger lost every one of its twelve citations once for exactly that reason (`docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md`).
+
+  THE `FT` PREFIX IS EXCLUSIVE AND HAS NO CEILING — extend it freely. Do NOT spell entries `T-N`. This ledger surrendered `T` to `docs/trackers/tool-usage-patterns.md` on 2026-08-18 (`d3282868`); reissuing `T-N` here would re-point ~65 foreign citations into this namespace as silent wrong edges that no count reports (`docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md`).
+
+  STANDING STATE (2026-07-10): 9 of 12 resolved; the high-priority backlog is EMPTY, so the documented open+high query correctly returns zero rows. Remaining open are opportunistic — FT-3..FT-6 (medium; priors weakened by FND-16, so run the base arm FIRST per protocol P-3 and expect a ceiling) and FT-10 (low). New prompt-change work enters via the P-1..P-8 protocol in `prompt-hamsa-audit-log` § Protocol, not as new FT tasks.
+
+  PROVENANCE — this prompt was RECONSTRUCTED on 2026-08-28, not restored. The original is unrecoverable: augmentations live only in `catalog.db`, which is machine-local and gitignored, and this is a fresh machine (`docs/conventions/cross-machine-catalog-resume.md` § 7). The prompt text is newly authored. The row SHAPE is recovered from quoted live calls, not derived from prose: `status` + `priority` from the documented `entry_filter` at `docs/trackers/fable-tuning-index.md:34`; `id`, and the fact that entries are params-backed, from the quoted call at `docs/issues/archive/2026-08-18-three-ledgers-own-prefix-t-kept-apart-only-by-zero-padding.md:53`; the `id` pattern `^FT-\d+$` and the fact that ALL 12 params ids are `FT`-keyed from that same file's § "Step (3) was the wrong fix — the rename shipped instead" and from commit `d3282868` ("all 12 params entry ids, the `params_schema` pattern `^T-\d+$` → `^FT-\d+$`"); `eval_gate` from the backticked reference in fable-tuning-index.md § How to use. `task`, the optional `notes`, and `entry_collection: "tasks"` follow this repo's own `task_list` archetype (`librarian(action="tracker_design", archetype="task_list")`), whose `^T-\d+$` id pattern the recovered pre-rename pattern matches byte-for-byte — evidence the original augmentation was seeded from that archetype. `surface` is DERIVED from the body's per-entry `**Surface:**` label; no quoted call names it. All 12 row VALUES are transcribed verbatim from the body's `### FT-N` sections and diffed against them (0 mismatches). No further field is known to have existed; if the original carried one, its name and values are lost and none has been invented to fill the gap.
+entry_collection: tasks
+params_schema:
+  type: object
+  required:
+  - tasks
+  properties:
+    tasks:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        - task
+        - priority
+        - surface
+        - eval_gate
+        - status
+        properties:
+          id:
+            type: string
+            pattern: ^FT-\d+$
+          task:
+            type: string
+          priority:
+            type: string
+            enum:
+            - high
+            - medium
+            - low
+          surface:
+            type: string
+            enum:
+            - prompt
+            - tool
+            - infra
+            - methodology
+            - tracker
+          eval_gate:
+            type: boolean
+          status:
+            type: string
+            enum:
+            - open
+            - in-progress
+            - done
+            - blocked
+            - dropped
+          notes:
+            type: string
+render_template: |-
+  ## Tasks (FT-N)
+
+  | ID | Task | Priority | Surface | Eval gate | Status |
+  |---|---|---|---|---|---|
+  {% for t in tasks %}| {{ t.id }} | {{ t.task }} | {{ t.priority }} | {{ t.surface }} | {% if t.eval_gate %}yes{% else %}no{% endif %} | {{ t.status }}{% if t.notes is defined %} ({{ t.notes }}){% endif %} |
+  {% endfor %}

@@ -9,7 +9,7 @@ tags:
 - model-behavior
 entry_high_water_FT: 12
 entry_prefix: FT
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-fable-tuning-tasks.yaml
 ---
 
 

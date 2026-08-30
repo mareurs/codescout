@@ -1,0 +1,58 @@
+schema_version: 1
+prompt: |-
+  Findings ledger for the Fable tuning work stream: what we learned about how the Claude **Fable** model (`claude-fable-5`) behaved when it "ran great" (2026-06-09 GA / April Mythos Preview) versus now. One row per finding, id `FND-N`, allocated by the server. Siblings: `ca8c26fecbbc4f37` (index — start there), `ad1af8262fdce357` (tasks, FT-N), `ab2170158c7d264e` (research/evidence).
+
+  Each entry carries six fields: `id`; `title` — the one-line claim, identical to the body anchor's heading text; `dimension` — which axis the finding is about (observed values: `timeline`, `exploration`, `coding`, `behavior`, `mechanism`, `meta`, `local-trace`; open, not an enum); `source` — where the evidence came from (`official`, `press`, `web`, `willison`, `migration-guide`, `local-trace`, `local-eval`, `local-audit`, or a `+`-joined combination); `confidence` — `high` | `medium` | `low`; `status` — `confirmed` | `plausible` | `refuted`.
+
+  To add a finding, let the server allocate the id:
+  `artifact(action="append_entry", id="35de33286cd34f87", entry_collection="findings", id_prefix="FND", entry={title, dimension, source, confidence, status})`.
+  Then write the matching body anchor by hand under `## Findings — per-entry anchors`, as `### FND-N — <title>` followed by a blank line and `**Dimension:** … · **Source:** … · **Confidence:** … · **Status:** …`. Both halves are load-bearing: the params row is what `entry_filter` queries, the anchor heading is the only shape `link_scan` accepts as a definition, and the anchor prose is what travels with the repo. Four findings (FND-14, 15, 16, 18) once existed **only** in the machine-local catalog because nobody wrote the anchor; they were backfilled 2026-08-18. To change a row, use `artifact(action="update_entry", id="35de33286cd34f87", entry_collection="findings", entry_id="FND-N", fields={…})` and edit the anchor's metadata line to match — never hand-rebuild the array, because a `params` write replaces the whole collection. Do not renumber: `entry_high_water_FND` in frontmatter is the allocator's memory.
+
+  PROVENANCE — this prompt was **reconstructed 2026-08-28, not recovered.** The original augmentation was lost with the machine-local, gitignored catalog on a machine move; nothing on disk records what it said. What is genuinely recovered: `dimension` and `status` as field names, from `docs/trackers/fable-tuning-index.md:21` ("filterable by `dimension`/`status`") and its worked query at line 33; `source` and `confidence`, plus every value of all four, from the body's own per-entry metadata lines — which were themselves rendered from the original params during the 2026-08-18 anchor backfill. All 18 rows were transcribed from those `### FND-N` anchors and diffed back against them (0 mismatches, ids contiguous 1..18); no value was invented. What is **chosen, not recovered**: `entry_collection: "findings"`. No quoted live call naming it survives anywhere — searched `docs/issues/archive/`, `docs/superpowers/`, `docs/trackers/`, `docs/evals/`, `docs/conventions/`, all of `/home/marius/work/claude` for the artifact id, `git log -S'35de33286cd34f87' --all` (2 commits, neither quoting a call), the catalog's own event log (empty), and memory `fable-tuning`. The name follows the archetype convention of a plural noun naming the entry type (`tasks`, `audits`, `candidates`, `observations`) and this tracker's own title and `## Findings` section. If a machine holding the original catalog ever surfaces, prefer its name over this one. The `render_template` and `params_schema` here are likewise newly authored.
+entry_collection: findings
+params_schema:
+  type: object
+  properties:
+    findings:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+            pattern: ^FND-[0-9]+$
+          title:
+            type: string
+            description: One-line claim; must match the body anchor heading text verbatim.
+          dimension:
+            type: string
+            description: 'Axis the finding is about. Observed: timeline, exploration, coding, behavior, mechanism, meta, local-trace. Deliberately not an enum — new dimensions are allowed.'
+          source:
+            type: string
+            description: 'Evidence origin: official, press, web, willison, migration-guide, local-trace, local-eval, local-audit, or a +-joined combination.'
+          confidence:
+            type: string
+            enum:
+            - high
+            - medium
+            - low
+          status:
+            type: string
+            enum:
+            - confirmed
+            - plausible
+            - refuted
+        required:
+        - id
+        - title
+        - dimension
+        - status
+        additionalProperties: true
+  additionalProperties: true
+render_template: |-
+  **Fable findings (FND-N)** — {{ findings | length }} entries · {{ findings | selectattr("status", "eq", "confirmed") | list | length }} confirmed
+
+  | id | dimension | status | conf | claim |
+  |---|---|---|---|---|
+  {% for f in findings %}| {{ f.id }} | {{ f.dimension }} | {{ f.status }} | {{ f.confidence }} | {{ f.title }} |
+  {% endfor %}

@@ -1,0 +1,118 @@
+schema_version: 1
+prompt: |-
+  Maintain the PV-N ledger for the provenance/attribution programme — the measurement
+  verdicts, standing design decisions, hazards not to rediscover, open decisions and
+  buildable work behind `docs/trackers/provenance-subsystem.md`.
+
+  Read the § STATE block at the top of the body before anything else. The programme is
+  CLOSED and yields nothing to build (PV-63). Several metrics were measured, reversed and
+  re-measured; the PV entry — not the round narrative — holds the final reading. Do not
+  re-open a metric without reading its entry first.
+
+  ENTRY SHAPE. Each entry is one object in the `items` array. Four required fields:
+  - `id` — `PV-<n>`, monotonic, never reused. Let the server allocate it.
+  - `type` — `finding` (settled measurement result) · `gap` (measurement not yet run) ·
+    `decision` (open question needing a call) · `hazard` (known failure mode, do not
+    rediscover) · `task` (buildable work).
+  - `status` — `settled` · `open` · `blocked` · `descoped` · `carried` (inherited from
+    design exploration, not yet acted on). One row, PV-29, carries `killed`; that value is
+    in the schema because it is in the body, not because it is documented vocabulary.
+  - `title` — the entry's one-line claim, byte-identical to its defining heading.
+  Optional: `detail` (the full statement with its figures inline, so a reader never has to
+  open the pipeline to check a number) and `note` (metadata about the row itself — verbatim
+  meta-line text, the provenance of a derived field, or a recorded loss).
+
+  APPEND: artifact(action="append_entry", id="e12cd7e0060ed9b8", id_prefix="PV",
+  entry_collection="items", entry={...}) — assigns the next id atomically.
+  QUERY: artifact(action="get", id="e12cd7e0060ed9b8", entry_filter={"type": {"eq":
+  "decision"}}). Note `entry_total` reports rows CONSIDERED (the whole collection), not rows
+  matched — that asymmetry is how a typo'd filter field is detectable (considered 30,
+  matched 0).
+
+  CITABILITY. A params row defines no citable token. As soon as anything cites an entry, add
+  a compact defining heading under § Defining sections for cited entries: `#### PV-N —
+  <title>` followed by a meta line of the form `type` · **status**. `link_scan` binds `PV-N`
+  to that heading shape and to nothing else. Confirm with librarian(action="doctor").
+
+  PROVENANCE — THIS PROMPT IS A 2026-08-28 RECONSTRUCTION, NOT A RESTORATION. The original
+  prompt is gone: augmentation lives only in the machine-local, git-ignored catalog, and
+  this is a fresh clone. Recovered rather than authored: `entry_collection = "items"` and
+  the `finding | gap | decision | hazard | task` type vocabulary, from `docs/TAXONOMY.md`
+  line 53 and this tracker's own § Conventions section (which also gives the five-value
+  status vocabulary). Every word of the prompt above is new; no earlier version survives
+  anywhere.
+
+  PARAMS PROVENANCE, AND THE LOSS. The original `items` array held 68 rows, PV-1..PV-68 —
+  fixed by commit f5f602e6, whose message records doctor reporting "42 of 68" undefined
+  after 26 entries gained defining headings. Thirty rows were rebuilt: the 26 the body
+  defines with a heading, plus PV-9, PV-11, PV-40 and PV-46, which the body anchors only as
+  the first cell of a table. THIRTY-EIGHT ROWS ARE PERMANENTLY LOST: PV-1, PV-3, PV-6,
+  PV-10, PV-12..PV-24, PV-28, PV-32..PV-37, PV-39, PV-41..PV-43, PV-45, PV-47..PV-52, PV-54,
+  PV-57, PV-59. Several are cited from the body's own STATE block and rounds, so a reader
+  will meet references that resolve to no row. Do not reconstruct them from the citing prose
+  to make the table look complete — that prose is a summary of a row, not the row.
+
+  PER-ROW FIDELITY. For the 22 entries with a compact defining section, `type`, `status` and
+  `title` are verbatim from the body meta line (re-rendered and diffed 2026-08-28: 0
+  mismatches on 26 titles and 22 type/status pairs). For the eight others — PV-2, PV-4,
+  PV-5, PV-7 (narrative sections, no meta line) and PV-9, PV-11, PV-40, PV-46 (table
+  anchors only) — `type` and `status` were DERIVED, PV-9's and PV-11's titles were AUTHORED,
+  and every one of the eight says so in its own `note`. Every `detail` string is
+  reconstructed from the body's own narrative and rounds; none of it is original text.
+  PV-68's `detail` is null and stays null — nothing about that entry exists in this repo
+  beyond its heading. Field names beyond `id`, `type` and `status` are not evidenced:
+  `title`, `detail` and `note` are this reconstruction's choices, and the original rows may
+  have carried fields nobody can name. Do not read this schema as a record of what was
+  there.
+entry_collection: items
+params_schema:
+  type: object
+  required:
+  - items
+  properties:
+    items:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        - type
+        - status
+        - title
+        properties:
+          id:
+            type: string
+            pattern: ^PV-[0-9]+$
+          type:
+            type: string
+            enum:
+            - finding
+            - gap
+            - decision
+            - hazard
+            - task
+          status:
+            type: string
+            enum:
+            - settled
+            - open
+            - blocked
+            - descoped
+            - carried
+            - killed
+          title:
+            type: string
+          detail:
+            type:
+            - string
+            - 'null'
+          note:
+            type: string
+render_template: |-
+  **PV-N ledger — {{ items | length }} rows, RECONSTRUCTED 2026-08-28.** The original params held 68 (PV-1..PV-68); the other 38 were lost with the machine-local catalog and are not recoverable. Programme status: CLOSED, nothing to build (PV-63).
+
+  | ID | type | status | title |
+  |---|---|---|---|
+  {% for it in items -%}
+  | {{ it.id }} | `{{ it.type }}` | **{{ it.status }}** | {{ it.title }} |
+  {% endfor %}

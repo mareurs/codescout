@@ -1,0 +1,25 @@
+schema_version: 1
+prompt: |
+  This artifact's `params.candidates` array is written mechanically by
+  `librarian(action="legibility_scan")`. Do NOT hand-synthesize it. On refresh,
+  the render_template projects the open/closed backlog table from params; the
+  Dzo's per-key verdict prose lives below the table and is human/Dzo-owned.
+entry_collection: candidates
+render_template: |
+  ## Backlog (auto-managed)
+
+  Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned {{ scan_meta.last_scan_at }} · **{{ scan_meta.n_candidates }} open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta. (`—` in tokens/lines = a non-body defect, e.g. a name collision.) The Dzo's verdicts are below.
+
+  | key | tier | defects | score | tok/budget | lines | tr/ed/se |
+  |---|:--:|---|--:|--:|--:|:--:|
+  {% for c in candidates if c.status == "open" -%}
+  | `{{ c.key }}` | {{ c.tier }} | {{ c.defects | join(", ") }} | {{ c.score }} | {% if c.measure.tokens %}{{ c.measure.tokens }}/{{ c.measure.budget }}{% else %}—{% endif %} | {% if c.measure.lines %}{{ c.measure.lines }}{% else %}—{% endif %} | {{ c.cost.truncations }}/{{ c.cost.edit_fails }}/{{ c.cost.sessions }} |
+  {% endfor %}
+
+  ### Closed (refactored — before → after)
+
+  | key | defects cleared | before → after | closed |
+  |---|---|---|:--:|
+  {% for c in candidates if c.status == "closed" -%}
+  | `{{ c.key }}` | {{ c.defects | join(", ") }} | {% if c.before.tokens %}{{ c.before.tokens }} → {{ c.after.tokens if c.after else "?" }} tok{% else %}structural{% endif %} | {{ c.closed_at }} |
+  {% endfor %}

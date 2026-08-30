@@ -1,0 +1,138 @@
+schema_version: 1
+prompt: |-
+  Maintain the index of every research artifact under `docs/research/`. Each row in
+  `entries` is a projection of one file's own § C-7 frontmatter; the files are the
+  source of truth and this array is only a view of them.
+
+  ## For a reader
+
+  The index renders as a `[LIVE]` table in `librarian(action="context",
+  anchor_id="5086e3c7c0b9d83c")` and on no other surface — nothing writes it to disk,
+  so opening `docs/research/README.md` and seeing no table is the healthy state, not
+  evidence of loss. (A 2026-08-23 session misread exactly that absence as repo-wide
+  augmentation loss; see
+  `docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md`.)
+
+  Do this with it, in order:
+
+  1. Filter, do not skim:
+     `artifact(action="get", id="5086e3c7c0b9d83c", entry_filter={"topic": {"eq": "retrieval-quality"}})`.
+     `topic` is freeform with no enum, so a miss means "no such tag", not "no such
+     research" — fall back to `artifact(action="find", semantic="…")` before concluding
+     nothing exists.
+  2. Open the file at `path` before citing anything. `summary` is a ≤200-character
+     pointer written to help you choose a file; it is never a citable finding, and § C-3
+     requires the source, not the index row.
+  3. Read `status` and `date` together. `superseded` entries render last and stay in the
+     index on purpose (§ C-6) — read them for history, cite the entry that superseded them.
+  4. Before adding research, read § Research quality criteria in the body. Saving a file
+     that does not meet C-1…C-7 puts a row here that the next reader cannot trust.
+
+  ## For a maintainer
+
+  Refresh procedure — the whole array, from disk, every time:
+
+  1. Glob `docs/research/*.md`, excluding `README.md`; parse each file's frontmatter.
+  2. Build one entry per file with exactly six keys: the five C-7 frontmatter keys
+     (`title`, `date`, `topic`, `summary`, `status`) plus `path`, the file's location
+     relative to the repo root (`docs/research/<filename>`).
+  3. Sort by `date` descending; `date: unknown` entries come last, ordered by title. The
+     render template places `superseded` entries after everything else regardless of date.
+  4. Write with
+     `artifact_augment(id="5086e3c7c0b9d83c", merge=true, params_path="<abs path to the rebuilt JSON>")`.
+
+  **Send every entry, every time.** A params write REPLACES `entries` rather than merging
+  into it, so a patch carrying only the new row deletes the other fourteen — and the
+  catalog is not in git, so nothing recovers them. This is also why a full rebuild from
+  disk is the cheap, correct move and hand-patching a single row never is.
+
+  Rules that hold on every refresh:
+
+  - The index and the directory are an exact bijection — check both directions. A file
+    with no row is invisible; a row with no file is a lie.
+  - Never invent a value. A file missing frontmatter is a defect in that file: fix the
+    file, or index it with `status: draft` and
+    `summary: "(missing frontmatter — needs review)"` and note it in § History.
+  - Frontmatter wins over the filename for the displayed `date`. `date: unknown` is valid
+    and must never be guessed (§ C-7).
+  - Body sections (§ How to save a research, § Research quality criteria, § C-1…C-7) are
+    human-edited. NEVER overwrite them on a refresh. Only § Suspected stragglers is yours
+    to rewrite, and § History only to append to, on a substantive change (new entry,
+    status flip, straggler found).
+  - § Suspected stragglers is a second gather pass: glob `docs/**/research-*.md` plus
+    `docs/observations.md` and report any match not under `docs/research/`. Report paths;
+    do not move files — relocation is § How to save step 5, on explicit user request only.
+  - Budget: under 100 entries; body under 600 lines.
+
+  ## Provenance
+
+  **This prompt is a RECONSTRUCTION dated 2026-08-28, not the original text.** The
+  augmentation was lost with the machine-local catalog (augmentation has no on-disk form
+  and is not in git; this is a fresh machine), and no source in the repo quotes the prompt
+  that shipped on 2026-08-26. Do not read it as recovered.
+
+  What IS sourced, and from where:
+
+  - `entry_collection: "entries"`, the `params_schema` shape (six required keys, `status`
+    enum, `summary` maxLength 200) and the superseded-last render rule come from
+    `docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md` § Fix
+    and commit `952ad795`, which state what shipped.
+  - The refresh procedure, straggler pass, conflict rules and length budget are adapted
+    from the prompt sketches in
+    `docs/superpowers/specs/2026-05-08-researcher-tracker-design.md` § Augmentation prompt
+    and `docs/superpowers/plans/2026-05-08-researcher-tracker.md` Task 5 — the design's
+    stated intent, not a transcript of the live prompt.
+  - The 15 rows are regenerated from the entry files' own frontmatter, which commit
+    `952ad795` states is exactly how they are meant to be rebuilt. They are recovered
+    data, not reconstruction.
+
+  **INFERRED, not sourced:** which sixth key the shipped schema required. The design named
+  three derived fields — `id` (filename slug), `path`, `sources_count` — and only one can
+  be the sixth alongside the five frontmatter keys. `path` is chosen: the render template
+  cannot link a row without it; the directory↔index bijection commit `952ad795` claims to
+  have checked in both directions is only mechanizable with it; it is exactly derivable
+  from disk with no heuristic, whereas `sources_count` was still an unresolved open
+  question in the design spec, and `id` is a restatement of `path`'s basename. If a
+  machine still holding the original augmentation contradicts this, that machine wins.
+entry_collection: entries
+params_schema:
+  type: object
+  properties:
+    entries:
+      type: array
+      items:
+        type: object
+        properties:
+          title:
+            type: string
+          date:
+            type: string
+          topic:
+            type: string
+          summary:
+            type: string
+            maxLength: 200
+          status:
+            type: string
+            enum:
+            - draft
+            - complete
+            - superseded
+          path:
+            type: string
+        required:
+        - title
+        - date
+        - topic
+        - summary
+        - status
+        - path
+  required:
+  - entries
+render_template: |-
+  | Date | Title | Topic | Status | Summary |
+  |---|---|---|---|---|
+  {% for e in entries if e.status != "superseded" %}| {{ e.date }} | [{{ e.title }}]({{ e.path }}) | {{ e.topic }} | {{ e.status }} | {{ e.summary }} |
+  {% endfor %}{% for e in entries if e.status == "superseded" %}| {{ e.date }} | [{{ e.title }}]({{ e.path }}) | {{ e.topic }} | superseded | {{ e.summary }} |
+  {% endfor %}
+  **Total:** {{ entries | length }} research entries. Superseded entries render last (§ C-6).

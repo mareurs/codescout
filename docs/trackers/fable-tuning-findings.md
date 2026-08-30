@@ -9,7 +9,7 @@ tags:
 - model-behavior
 entry_high_water_FND: 18
 entry_prefix: FND
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-fable-tuning-findings.yaml
 ---
 
 ## What this tracks

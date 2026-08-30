@@ -1,0 +1,68 @@
+schema_version: 1
+prompt: |-
+  Windows-platform issue index (WIN-N). `params.issues` is the structured mirror of the "## Issue index" table: one object per issue, shape {id, area, status, summary, ref, since}. `status` uses the "## Status legend" vocabulary (fixed | mitigated | open | deferred | wontfix); `area` uses the "## Areas" list plus the later-added `retrieval-stack`, `ci`, `tooling`.
+
+  Canonical query: artifact(action="get", id="52451519052d207c", entry_filter={"status":{"eq":"open"}}).
+
+  To add an issue: artifact(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={area, status, summary, ref, since}) — the server assigns the next WIN-N atomically. To flip a status: artifact(action="update_entry", id="52451519052d207c", entry_collection="issues", entry_id="WIN-N", fields={status:"..."}). **Never** artifact_augment(merge=true, params={issues:[...]}) — RFC 7396 replaces the array wholesale; that call took the sibling T-N queue from 19 entries to 1 on 2026-08-16. Never reuse or delete a WIN-N id. WIN-31 was never allocated and must stay unused.
+
+  After any params change, re-sync the "## Issue index" table AND add/update the `### WIN-N — <title>` section under "## Per-issue detail": `link_scan` derives a citable definition from that heading and from nothing else, so a WIN-N living only as a params row and a table row cannot be cited by anything.
+
+  Watch both drift directions. `update_entry`'s `snapshot_stale` and `doctor`'s `snapshot_drift` ask whether the body kept up with params; `doctor`'s `params_behind_body` and `append_entry`'s `warning` ask the reverse. Nothing at all detects a row present on both sides with disagreeing FIELDS — that is the still-open BL-44 gap (docs/issues/archive/2026-08-18-no-check-detects-a-params-row-stale-relative-to-its-body.md), and this tracker is where it was found.
+
+  PROVENANCE — RESTORED 2026-08-28 on a fresh machine, RECONSTRUCTED not recovered. The catalog is machine-local and gitignored, so the desktop's augmentation (including the BL-42 and BL-44 data repairs) does not travel. `params.issues` was rebuilt by machine-parsing the committed "## Issue index" table: 35 rows, WIN-1..WIN-36, no WIN-31; 0 transcription mismatches on re-render, and 0 field divergences against the 35 `### WIN-N` per-issue-detail sections. The prompt's factual content derives from the verbatim original quoted in docs/superpowers/plans/2026-07-02-perf-vdi-closure.md § Task 8 Step 2, updated to the append_entry/update_entry protocol the body's "## How to append" now documents (the original prompt prescribed the merge=true pattern since banned). `params_schema` and `render_template` are NEWLY AUTHORED — the original augmentation carried neither. Event history from the original is unrecoverable.
+entry_collection: issues
+params_schema:
+  type: object
+  required:
+  - issues
+  properties:
+    issues:
+      type: array
+      description: One object per WIN-N issue, mirroring the '## Issue index' table.
+      items:
+        type: object
+        required:
+        - id
+        - area
+        - status
+        - summary
+        - ref
+        - since
+        additionalProperties: false
+        properties:
+          id:
+            type: string
+            pattern: ^WIN-[0-9]+$
+            description: Server-assigned via append_entry(id_prefix="WIN"). Never reused, never deleted; WIN-31 was never allocated.
+          area:
+            type: string
+            description: 'One of the ''## Areas'' list: process-spawn, lsp, platform-gated, path-handling, build-install, test-portability, companion; plus later additions retrieval-stack, ci, tooling.'
+          status:
+            type: string
+            enum:
+            - fixed
+            - mitigated
+            - open
+            - deferred
+            - wontfix
+            description: The '## Status legend' vocabulary.
+          summary:
+            type: string
+            description: One-line account; the full story lives in the ref.
+          ref:
+            type: string
+            description: Bug file path, commit SHA, doc path, or 'session <date> observation'.
+          since:
+            type: string
+            description: ISO date the issue was first recorded.
+render_template: |
+  **Windows platform ledger** — {{ issues|length }} WIN-N entries (WIN-1..WIN-36, no WIN-31).
+
+  Live rows (open / deferred):
+
+  | id | area | status | since | ref |
+  |----|------|--------|-------|-----|
+  {% for i in issues %}{% if i.status == "open" or i.status == "deferred" %}| {{ i.id }} | {{ i.area }} | {{ i.status }} | {{ i.since }} | {{ i.ref }} |
+  {% endif %}{% endfor %}
+  Query all rows: `artifact(action="get", id="52451519052d207c", entry_filter={"status":{"eq":"open"}})`.

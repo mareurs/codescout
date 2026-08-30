@@ -11,7 +11,7 @@ tags:
 - bugs
 - work-queue
 topic: work-queue
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-open-issue-work-queue.yaml
 ---
 
 > **Prefix:** `BL-N` — a row in this queue. Work-stream-scoped, defined here, not a project-wide

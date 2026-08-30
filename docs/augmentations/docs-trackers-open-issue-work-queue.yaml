@@ -1,0 +1,95 @@
+schema_version: 1
+prompt: |-
+  Maintain the BL-N open-issue work queue — a sequencing layer over the open bug ledger. One
+  `tasks` row per queued item, mirroring the `## Queue — rendered snapshot` table in the body.
+
+  Row shape: `{id, phase, task, status, status_note, bug, next}`.
+  - `phase` (1-4) is readiness ordering, not priority.
+  - `status` is a NORMALIZED token, for filtering only: `open` | `in-progress` | `blocked` |
+    `done` | `done-archived` | `partial` | `dropped`.
+  - `status_note` carries the human-readable status cell verbatim (markdown, commit shas,
+    qualifying prose) and is what `render_template` prints, so the rendered table matches the
+    committed snapshot character-for-character. When a status changes, update BOTH fields.
+  - `bug` is the bug artifact's 16-hex id, or null when no bug file exists. `artifact(move)`
+    re-keys an artifact, so re-read the id after any archive step instead of trusting the
+    stored one.
+  - `next` is a one-line pointer to that bug's `## Resume`, never the instruction itself.
+
+  This tracker does NOT own bug status — the bug file is authoritative. If a row says `open`
+  and the bug says `fixed`, the bug is right and the row is stale. Never close a bug from here.
+
+  Add rows with `artifact(action="append_entry", entry_collection="tasks", id_prefix="BL")`;
+  change one with `artifact(action="update_entry", entry_collection="tasks", entry_id="BL-N",
+  fields={...})`. Never hand-build the `tasks` array — a params merge-patch replaces the
+  collection wholesale (that is BL-20). Every new BL-N also needs a `### BL-N — <title>`
+  section in the body: that heading is the only shape `link_scan` accepts as a definition, so
+  a row-only entry is uncitable (BL-39). Params live in the machine-local, gitignored catalog,
+  so re-render the body snapshot whenever rows change (BL-29) and confirm with
+  `librarian(action="doctor")`.
+
+  RECONSTRUCTED 2026-08-28 — this augmentation was never present on this machine (new catalog;
+  `~/.local/share/librarian/catalog.db` is machine-local and gitignored). All 44 rows were
+  rebuilt from the committed body's `## Queue — rendered snapshot (2026-08-18)` table, lines
+  45-88, and verified to re-render byte-identically to it. `status` was derived by normalizing
+  each cell to a token; `status_note` preserves the original cell verbatim, so nothing the
+  snapshot said was discarded. The `next` field is UNRECOVERABLE — the body states outright
+  that `next` "lives only in the catalog, which is machine-local and git-ignored" — so no
+  restored row carries one; populate it going forward. Same per-machine caveat as
+  `docs/issues/archive/2026-07-02-tool-usage-patterns-augmentation-lost.md`.
+entry_collection: tasks
+params_schema:
+  type: object
+  required:
+  - tasks
+  properties:
+    snapshot_rendered:
+      type: string
+      description: Date the body's snapshot table was last re-rendered from these params.
+    tasks:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        - task
+        - status
+        properties:
+          id:
+            type: string
+            pattern: ^BL-[0-9]+$
+          phase:
+            type: integer
+            minimum: 1
+            maximum: 4
+          task:
+            type: string
+          status:
+            type: string
+            enum:
+            - open
+            - in-progress
+            - blocked
+            - done
+            - done-archived
+            - partial
+            - dropped
+          status_note:
+            type: string
+            description: The Status cell verbatim, incl. markdown and qualifying prose. Rendered in place of the token.
+          bug:
+            type:
+            - string
+            - 'null'
+            description: '16-hex bug artifact id, or null when no bug file exists.'
+          next:
+            type:
+            - string
+            - 'null'
+            description: 'One-line pointer to the bug''s ## Resume. Catalog-only; lost in the 2026-08-28 reconstruction.'
+render_template: |-
+  **Queue** — {{ tasks|length }} rows, {{ tasks|selectattr("status","equalto","open")|list|length }} open (body snapshot rendered {{ snapshot_rendered }}).
+
+  | ID | Ph | Task | Status | Bug |
+  |----|---:|------|--------|-----|
+  {% for t in tasks %}| {{ t.id }} | {{ t.phase }} | {{ t.task }} | {{ t.status_note or t.status }} | {% if t.bug %}`{{ t.bug }}`{% else %}—{% endif %} |
+  {% endfor %}

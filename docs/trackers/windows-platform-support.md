@@ -12,7 +12,7 @@ tags:
 - portability
 - ci
 topic: windows
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-windows-platform-support.yaml
 ---
 
 # Windows Platform Support — WIN-N Issue Index

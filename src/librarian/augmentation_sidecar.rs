@@ -323,4 +323,57 @@ mod tests {
         assert_ne!(a, b, "two READMEs must not share a sidecar");
         assert_eq!(a, "docs/augmentations/docs-research-README.yaml");
     }
+
+    /// Every sidecar this repo ships must parse through the same deserializer the restore
+    /// path uses. The tests above round-trip a *synthetic* row; this one is the corpus.
+    ///
+    /// The export writes these files, so it is not the export this guards against — it is a
+    /// HAND edit. A prompt reflowed, a schema pasted in, a `params:` block added by someone
+    /// who reasonably assumed params belong in a file named after the augmentation. Each
+    /// leaves a file that still looks right and re-attaches wrong or not at all — and the
+    /// machine that finds out is the one whose catalog no longer holds the original.
+    #[test]
+    fn every_committed_sidecar_parses_and_carries_no_params() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SIDECAR_DIR);
+        assert!(
+            dir.is_dir(),
+            "{} is missing — the committed sidecars ARE the recovery path for a catalog \
+             that has lost its augmentations; an empty corpus is a silent pass here",
+            dir.display()
+        );
+
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&dir).expect("reading docs/augmentations") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            seen += 1;
+
+            let sidecar =
+                read(&path).unwrap_or_else(|e| panic!("{} does not parse: {e:#}", path.display()));
+            assert!(
+                !sidecar.prompt.trim().is_empty(),
+                "{} carries an empty prompt — it would restore an augmentation that \
+                 teaches nothing, which is worse than one that is visibly absent",
+                path.display()
+            );
+
+            // Checked on the PARSED key set, never the text: `params_schema` contains the
+            // substring `params`, so a grep-shaped check passes on all nine of these files.
+            let raw: std::collections::BTreeMap<String, serde_yml::Value> =
+                serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(
+                !raw.contains_key("params"),
+                "{} carries a `params` key — params are live state that churns, and \
+                 committing them recreates the params-vs-body drift class BL-29 closed",
+                path.display()
+            );
+        }
+
+        assert!(
+            seen > 0,
+            "docs/augmentations/ exists but holds no .yaml files"
+        );
+    }
 }

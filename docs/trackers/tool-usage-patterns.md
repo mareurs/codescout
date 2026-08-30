@@ -8,7 +8,7 @@ tags:
 - prompt-quality
 - iron-law-7
 topic: tool usage patterns audit optimization prompt quality
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-tool-usage-patterns.yaml
 ---
 
 

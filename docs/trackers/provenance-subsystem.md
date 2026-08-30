@@ -10,7 +10,7 @@ tags:
 - programme
 - design-log
 topic: provenance-attribution
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-provenance-subsystem.yaml
 ---
 
 # Provenance Subsystem — Programme Tracker (PV-N)
