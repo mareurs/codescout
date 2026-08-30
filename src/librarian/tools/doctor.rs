@@ -7517,6 +7517,48 @@ mod tests {
         );
     }
 
+    /// The *precision* half of the heading locator — which, until this test, nothing measured.
+    ///
+    /// Its sibling above asserts **silence** when the `Status:` line agrees with `params`, and
+    /// silence is also what a widened region produces: if the locator returned the whole
+    /// section, that fixture's `open` would still be found on its own `Status:` line, agreement
+    /// would still hold, and the assertion would still pass. So the test named for *not* reading
+    /// the prose cannot witness the locator reading the prose.
+    ///
+    /// Measured 2026-08-30 by mutating the locator to perform the forbidden act — return the
+    /// entire section as the region — rather than by removing it: **all six** of this scan's
+    /// `status_drift` tests passed, including both heading-form tests. Removing a mechanism
+    /// makes an absence test pass for an uninformative reason; only making the mechanism do the
+    /// forbidden thing can show whether the absence test is able to fail at all.
+    ///
+    /// The direction matters and is why no other test stumbles into it. A widened region makes
+    /// the `params` status **more** likely to be found, so the failure is a false *negative* —
+    /// the scan silently discharges the very disagreement it exists to report. Here `params`
+    /// says `open`, the `Status:` line says `done`, and the prose below happens to contain the
+    /// word `open`: correct code reports the drift, a section-swallowing region calls it
+    /// agreement and says nothing.
+    #[test]
+    fn status_drift_does_not_let_prose_discharge_a_real_disagreement() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_status_tracker(
+            &cat,
+            "widen",
+            tmp.path(),
+            "# T\n\n## FT-2 — closed after the review\n\n**Status:** done\n\n\
+             Left open for a week while the review ran.\n",
+            &[("FT-2", "open")],
+            &["open", "done"],
+        );
+
+        assert_eq!(
+            scan_params_status_drift(&cat.conn).unwrap().len(),
+            1,
+            "`params` says open, the Status line says done — the prose saying `open` is \
+             narration, and must not discharge the disagreement"
+        );
+    }
+
     /// The gate that keeps this scan off the fifteen fixtures written for its three
     /// siblings — and off the five real ledgers here that declare no `status` enum.
     ///
