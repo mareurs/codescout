@@ -149,6 +149,41 @@ body is reported, moving the body without params is not.
 Rows repaired 2026-08-30 via four `update_entry` calls plus a body edit. The gap is
 untouched, and `BL-44` is re-opened.
 
+## Exposed population — measured 2026-08-30
+
+**Valid:** dated 2026-08-30
+
+**Rests on:** `artifact(find, kind="tracker", augmented=true)` against this project's catalog.
+
+§ Resume asks for a corpus sweep "to size the existing damage" without saying how large the
+corpus is. It is **9**, and the bound is structural rather than a sample.
+
+The drift needs two sides to disagree, so it requires a params array mirrored by a body
+table — i.e. a declared `entry_collection`. A **prose ledger is immune by construction**:
+its entries are `## PREFIX-N` body sections with an `entry_high_water_<PREFIX>` in committed
+frontmatter and no params at all, so there is no second copy to fall behind. Scoping
+contributed by a peer session whose own ledger
+(`docs/trackers/resume-embedding-transport-stages-1-3.md`, ET-N) returns
+`augmentation: null`; verified here — it is absent from the augmented set.
+
+Measured: **9 augmented trackers in this project, and all 9 declare an `entry_collection`** —
+`open-issue-work-queue` (`tasks`), `windows-platform-support` (`issues`),
+`tool-usage-patterns` (`observations`), `provenance-subsystem` (`items`),
+`prompt-hamsa-audit-log` (`audits`), `legibility-backlog` (`candidates`),
+`fable-tuning-tasks` (`tasks`), `fable-tuning-findings` (`findings`),
+`docs/research/README.md` (`entries`). So "augmented" and "exposed" coincide exactly here,
+and `augmented=true` is a sufficient query for the sweep.
+
+**Two of the nine have ever been checked, and both had drifted** —
+`windows-platform-support` (7 rows, 2026-08-18) and `open-issue-work-queue` (4 rows,
+2026-08-30). That is 2 for 2, on trackers picked for unrelated reasons rather than because
+drift was suspected. **Seven remain unchecked**, which makes the sweep a bounded task, not
+an open-ended one.
+
+Caveat on the number: it counts `kind="tracker"` in **this project's** scope. Artifacts of
+another kind carrying an `entry_collection`, and any tracker in a sibling repo under an
+umbrella, are outside it — the query was not run at `scope="umbrella"`.
+
 ## Resume
 
 If picked up: decide doctor-check vs. write-time-guard (see § Fix), scope it to
