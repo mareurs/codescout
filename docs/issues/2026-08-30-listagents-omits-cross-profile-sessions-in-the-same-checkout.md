@@ -13,7 +13,7 @@ closed: null
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: Root cause is now CONFIRMED bidirectionally rather than inferred — the omitted session reported its own ListAgents view and it is reciprocally blind. What remains unread is the harness source, which is not in this repo, so the mechanism (profile-scoped registry) is named from behaviour rather than from code.
+unverified: Root cause CONFIRMED bidirectionally and the population is now MEASURED rather than inferred (see § The population, measured). What remains unread is the harness source, which is not in this repo, so the mechanism (profile-scoped registry) is still named from behaviour rather than from code.
 ---
 
 > **Not a codescout bug.** `ListAgents` is a Claude Code harness tool; its source
@@ -160,6 +160,63 @@ What the commit *does* settle, which no single observer could: the mutual invisi
 is confirmed from **both** ends of one pair, by two sessions independently reporting
 it. That is why it was written as a commit and not a message — commits are the only
 surface both sides can read.
+#### The population, MEASURED — five in this checkout, two invisible to everyone
+
+Everything above reasons from `ListAgents` output compared across observers. This
+section does not: it enumerates the sockets directly, which is **BL-58's own
+documented mitigation, sitting in the bug file and working the whole time.** Run
+2026-08-30 by `codescout-ae` and reproduced independently here — for each socket in
+`/run/user/1000/cc-socks/`, read the pid's `comm`, `cwd` and start time:
+
+| pid | cwd | started | in anyone's `ListAgents`? |
+|---|---|---|---|
+| 801487 | `codescout` | 11:09:44 | yes |
+| 803654 | `codescout` | 11:10:09 | yes |
+| **807989** | `codescout` | **11:10:52** | **NO — to any of the five** |
+| 810953 | `codescout` | 11:11:19 | yes |
+| **3954769** | `codescout` | 17:39:22 | **NO** |
+| 2053449 | `claude-plugins` | 13:41:42 | different repo |
+| 790936 | `agents/system` | 11:07:27 | different repo |
+| 21781 | — | — | dead socket |
+
+**Five sessions have `cwd` in this checkout. Each listed observer sees about three.
+Two are invisible to all of them** — and `807989` has been running since **11:10:52**,
+which is *before any two of the visible sessions had exchanged a message*. It was
+present for the entire day's work, including every authorship question.
+
+**This retroactively re-scopes every attribution made today.** Each one — the 16:56
+transient mutation, the F-80 misattribution, the bench-worktree file — was an
+elimination over a set of three or four when the real set was five. The invisible
+sessions outnumber the gap those investigations were worried about. Where a question
+ended in "unidentified", that is now the *correct* answer rather than a shrug.
+
+#### Invisible is NOT unreachable — and that is the practical remedy
+
+A session absent from every `ListAgents` is still addressable by its socket path:
+`SendMessage(to="uds:/run/user/1000/cc-socks/<pid>.sock")`. Verified 2026-08-30 — sends
+to both invisible pids were accepted by the transport. (Accepted is not the same as
+read; a reply is what would prove delivery, and that is pending.)
+
+So the defect is **discovery, not connectivity**. The enumeration above reconstructs
+what `ListAgents` should have returned, from a directory every session can read, in
+one command. Anyone blocked on "who else is in this tree?" should run it rather than
+trust the tool.
+
+#### A method note: identifying YOURSELF is its own trap
+
+`codescout-ae` first identified themselves with `pgrep -f 'release/codescout' | head -1`
+and got a parent chain terminating at **a different session** — one that sends them
+messages. Two `codescout` MCP servers were running and `head -1` sampled arbitrarily.
+
+The reliable route walks up from the shell `run_command` itself executes in, which is
+a child of your own server **by construction**:
+
+```
+sh(283140) -> codescout(4031908) -> claude(801487)
+```
+
+Same class as the day's other scope errors — the query was right about what to look
+for and wrong about where.
 ### The NAME is unusable as an address across the boundary, even where the socket works
 
 Reported 2026-08-30 by the omitted session itself, which is the only place this could be
