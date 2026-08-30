@@ -1473,6 +1473,77 @@ async fn a_triggered_operator_rule_is_delivered_once_per_session() {
     );
 }
 
+/// The REAL `Memory` tool must supply a selector key, or `OP-3`
+/// (`**Serves:** memory.write`) can never route on a real call.
+///
+/// This is the assertion `RoutedEchoTool` has been standing in for, and the
+/// substitution is the whole defect: the routing tests above are green against
+/// a stub *named* `"memory"` that projects `{tool}.{action}`, while the
+/// production `Memory` takes the trait default and returns `None`. So the suite
+/// proved the router works and said nothing about whether any real call reaches
+/// it — a green suite and a dead feature were consistent with each other for as
+/// long as the stub was the only caller.
+///
+/// Mutation that must kill this: delete `Memory`'s `selector_key` override, and
+/// the trait default at `types.rs` returns `None` again, which `Shape::matches`
+/// treats as "cannot match".
+#[test]
+fn the_real_memory_tool_supplies_a_selector_key_for_op_3() {
+    let tool = crate::tools::memory::Memory;
+    assert_eq!(
+        tool.selector_key(&serde_json::json!({
+            "action": "write",
+            "topic": "t",
+            "content": "c"
+        }))
+        .as_deref(),
+        Some("memory.write"),
+        "OP-3 declares `Serves: memory.write`; without this key route() is never \
+         consulted for a real memory write, however correct the rule and matcher are"
+    );
+}
+
+/// `OP-4` declares `**Serves:** edit_file(path~/.claude), create_file(path~/.claude)`,
+/// so both write tools must supply a selector key or `route()` is never consulted
+/// for either.
+///
+/// Neither takes an `action`, so the key is the bare tool name — the tool-only
+/// shape `Shape::matches` already supports. `route.rs` currently hands itself
+/// `Some("edit_file")` as an explicitly *synthetic* selector for this reason,
+/// its own comment noting the string "never actually reaches `route()` on a
+/// real call".
+///
+/// **This does not make `OP-4` fire, and that is deliberate.** Its `path~`
+/// predicate is evaluated against the tool's *response*, and write tools return
+/// no path by the no-echo convention
+/// (`docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`, whose own
+/// mutations show that widening to `wrote_to` still does not fire while a real
+/// `abs_path` does). That is a second, independent defect. This closes only the
+/// routing precondition — without it, fixing the predicate would change nothing.
+///
+/// Mutation that must kill this: drop either override and the trait default
+/// `None` returns, which `Shape::matches` treats as "cannot match".
+#[test]
+fn the_real_write_tools_supply_selector_keys_for_op_4() {
+    let input = serde_json::json!({"path": "/home/u/.claude/settings.json"});
+    assert_eq!(
+        crate::tools::edit_file::EditFile
+            .selector_key(&input)
+            .as_deref(),
+        Some("edit_file"),
+        "OP-4 serves edit_file(path~/.claude); without the key route() never runs"
+    );
+    assert_eq!(
+        crate::tools::create_file::CreateFile
+            .selector_key(&input)
+            .as_deref(),
+        Some("create_file"),
+        "OP-4 serves create_file(path~/.claude) in the same breath — covering only \
+         one of the pair would leave the rule half-routable, which is harder to \
+         notice than not routable at all"
+    );
+}
+
 /// OP-1 is `always`-bound, so `route()` must never surface it through
 /// `call_content` — `always` rules are resident in the profile, not routed
 /// just-in-time.

@@ -599,6 +599,27 @@ fn find_largest_array(v: &Value, path: &str, depth: usize, best: &mut Option<(St
     }
 }
 
+/// The `<tool>.<action>` projection a tool opts into operator-rule routing with.
+///
+/// Shared so the opted-in tools cannot drift apart in a way that makes one rule
+/// route while its sibling silently does not — `OP-4` names `edit_file` and
+/// `create_file` in a single rule, and a half-routable rule is harder to notice
+/// than an unroutable one, because it fires for some writes and not others.
+///
+/// An action-less call projects the **bare tool name**, never `None`.
+/// `Shape::matches` reads `None` as "cannot match", so returning it for a
+/// tool-only shape would make such declarations permanently unmatchable — a
+/// silent-absence failure rather than the fail-safe-toward-delivery direction
+/// this feature requires. `LibrarianAdapter::selector_key` carries the same
+/// reasoning and predates this helper; it is left untouched here only to avoid
+/// colliding with concurrent work in that file, and should adopt this once free.
+pub(crate) fn action_selector_key(name: &str, input: &Value) -> Option<String> {
+    match input.get("action").and_then(Value::as_str) {
+        Some(action) => Some(format!("{name}.{action}")),
+        None => Some(name.to_string()),
+    }
+}
+
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     /// Tool name as exposed over MCP (e.g. "symbols")
