@@ -226,6 +226,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // And beside both, the inverse of snapshot_drift: `params` behind a body that ran
     // ahead. Same two sets, subtracted the other way; opposite remedy.
     all_violations.extend(scan_params_behind_body(&cat.conn)?);
+    // And the content half of that same drift: the id is on both sides, but the two
+    // representations disagree about its STATUS. Its three siblings are id-set
+    // comparisons and are silent by construction when every id matches — which is how
+    // `BL-60` came to read `open` in `params` while the committed body said
+    // `done-archived`. See `scan_params_status_drift` for the measured sensitivity and
+    // the three cases it deliberately does not report.
+    all_violations.extend(scan_params_status_drift(&cat.conn)?);
     // Reads bug-file frontmatter rather than catalog columns: `unverified:` lands in
     // `extra`, which is not indexed. The SQL narrows first, so only terminal bug rows
     // are ever opened.
@@ -2029,7 +2036,7 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
     ))
 }
 
-/// One params-backed ledger, with everything the three entry-drift scans need in order
+/// One params-backed ledger, with everything the four entry-drift scans need in order
 /// to compare its `params` against its body.
 struct ParamsBackedLedger {
     id: String,
@@ -2043,16 +2050,30 @@ struct ParamsBackedLedger {
     /// `body_claimed_indices` for the row question, `body_defined_indices` for the
     /// citability question — so this deliberately does not pick one for them.
     body: String,
+    /// Each entry's `(id, status)` exactly as `params` records it, in collection order.
+    ///
+    /// Read only by [`scan_params_status_drift`]; the three id-set scans ignore it. An
+    /// entry with no `status` field is **absent rather than defaulted** — a ledger that
+    /// does not track status must not be reported as disagreeing about one.
+    statuses: Vec<(String, String)>,
+    /// The `status` enum this ledger's `params_schema` declares, if any.
+    ///
+    /// A closed vocabulary is the whole reason a body-vs-params status comparison is
+    /// possible without parsing a column whose format is each tracker's own choice —
+    /// which is the objection [`scan_params_behind_body`] records when it declines this
+    /// comparison. `None` disables [`scan_params_status_drift`] for this ledger, which is
+    /// why that scan reaches 4 of this repo's 9 params-backed ledgers rather than all 9.
+    status_enum: Option<Vec<String>>,
 }
 
 /// Every ledger whose entry rows live in `params`, in a stable order.
 ///
-/// [`scan_snapshot_drift`], [`scan_undefined_entries`] and [`scan_params_behind_body`]
-/// ask three different questions of the same two surfaces, and each needs the same
-/// preamble first: the augmentation row, the collection's ids, the single prefix owning
-/// them, and the body off disk. Extracted at the point a third hand-rolled copy would
-/// have existed — three checks that must agree on what a ledger *is* drifting apart is
-/// the same failure mode this whole family of bugs is about.
+/// [`scan_snapshot_drift`], [`scan_undefined_entries`], [`scan_params_behind_body`] and
+/// [`scan_params_status_drift`] ask four different questions of the same two surfaces, and
+/// each needs the same preamble first: the augmentation row, the collection's ids, the
+/// single prefix owning them, and the body off disk. Extracted at the point a third
+/// hand-rolled copy would have existed — four checks that must agree on what a ledger *is*
+/// drifting apart is the same failure mode this whole family of bugs is about.
 ///
 /// Ordered by `abs_path` for the reason `scan_artifact_paths` is: a report whose row
 /// order shifts after a VACUUM cannot be diffed against a prior run.
@@ -2061,18 +2082,23 @@ struct ParamsBackedLedger {
 /// empty collection (nothing to compare); a **mixed or malformed** prefix set, since one
 /// prefix per collection is the tracker convention and guessing which one "owns" the body
 /// would manufacture findings; and a file that is gone, which is `missing_file`'s finding.
+/// A ledger with no `status` field on its entries, or no `status` enum in its
+/// `params_schema`, is **not** skipped here — it is carried with those fields empty, so
+/// the three id-set scans still see it and only the status scan opts out.
 fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBackedLedger>> {
     let mut stmt = conn.prepare(
-        "SELECT a.id, a.abs_path, g.entry_collection, g.params \
+        "SELECT a.id, a.abs_path, g.entry_collection, g.params, g.params_schema \
          FROM artifact_augmentation g JOIN artifact a ON a.id = g.artifact_id \
          WHERE g.entry_collection IS NOT NULL ORDER BY a.abs_path",
     )?;
-    let rows: Vec<(String, String, String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+    let rows: Vec<(String, String, String, String, Option<String>)> = stmt
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
         .collect::<rusqlite::Result<_>>()?;
 
     let mut out = Vec::new();
-    for (id, abs_path, collection, params_text) in rows {
+    for (id, abs_path, collection, params_text, schema_text) in rows {
         let Ok(params) = serde_json::from_str::<serde_json::Value>(&params_text) else {
             continue;
         };
@@ -2104,6 +2130,23 @@ fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBacked
             .filter_map(|i| i.rsplit_once('-'))
             .filter_map(|(_, n)| n.parse::<u64>().ok())
             .collect();
+        // Entries missing `status` are dropped rather than defaulted — see the field's
+        // doc comment. This is why `statuses` may be shorter than `claimed`.
+        let statuses: Vec<(String, String)> = params
+            .get(&collection)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|e| {
+                let eid = e.get("id")?.as_str()?;
+                let st = e.get("status")?.as_str()?;
+                Some((eid.to_string(), st.to_string()))
+            })
+            .collect();
+        let status_enum = schema_text
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|s| declared_status_enum(&s));
         let Ok(body) = std::fs::read_to_string(&abs_path) else {
             continue;
         };
@@ -2114,9 +2157,46 @@ fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBacked
             prefix: prefix.to_string(),
             claimed,
             body,
+            statuses,
+            status_enum,
         });
     }
     Ok(out)
+}
+
+/// The `enum` declared for a `status` property anywhere in a JSON Schema, or `None`.
+///
+/// Walks rather than indexing a fixed path because the entry objects sit at different
+/// depths per tracker — `properties.tasks.items.properties.status` in one,
+/// `properties.issues.items.properties.status` in another — and the collection key is
+/// the tracker's own choice. The first `properties.status.enum` found wins; a schema
+/// declaring two would be a malformed schema, not a case worth resolving here.
+///
+/// Deliberately keyed on the name `status` and nothing else. `tool-usage-patterns`
+/// declares an enum on `verdict`, which is its disposition field but not a status, and
+/// treating any enum-valued string property as a status would put every ledger's
+/// severity, phase and category columns into a comparison they were never meant for.
+fn declared_status_enum(schema: &serde_json::Value) -> Option<Vec<String>> {
+    match schema {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::Object(props)) = map.get("properties") {
+                if let Some(serde_json::Value::Object(status)) = props.get("status") {
+                    if let Some(serde_json::Value::Array(vals)) = status.get("enum") {
+                        let out: Vec<String> = vals
+                            .iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect();
+                        if !out.is_empty() {
+                            return Some(out);
+                        }
+                    }
+                }
+            }
+            map.values().find_map(declared_status_enum)
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(declared_status_enum),
+        _ => None,
+    }
 }
 
 /// Every entry token cited anywhere in the catalog, computed fresh from the files.
@@ -3544,6 +3624,197 @@ fn scan_params_behind_body(conn: &rusqlite::Connection) -> Result<Vec<Violation>
                 total = in_body.len(),
                 coll = ledger.collection,
                 shown = shown.join(", "),
+                suffix = suffix
+            ),
+        ));
+    }
+    Ok(out)
+}
+
+/// Whether `haystack` states `token` as a status word, tolerating the renderings a
+/// hand-written body actually uses.
+///
+/// Not a substring test, and the difference is load-bearing in both directions.
+///
+/// **Separators flex.** A body writes `**done, archived**` where `params` holds
+/// `done-archived`; measured 2026-08-30, that single comma-vs-hyphen difference accounted
+/// for **20 of 26** findings on a naive comparison — the entire "each tracker's own
+/// format" objection turned out to be mostly this one convention. Each run of
+/// non-alphanumerics in the token therefore matches any run of non-alphanumerics.
+///
+/// **Word boundaries do not.** Normalising both sides by deleting punctuation — the
+/// obvious fix for the above — makes `done` a substring of `aban`**`done`**`d` and
+/// `open` of `re-`**`open`**`ed`, so the anchors are kept rather than stripped.
+fn status_token_present(haystack: &str, token: &str) -> bool {
+    let parts: Vec<String> = token
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|p| !p.is_empty())
+        .map(regex::escape)
+        .collect();
+    if parts.is_empty() {
+        return false;
+    }
+    let pattern = format!(r"(?i)\b{}\b", parts.join(r"[^A-Za-z0-9]*"));
+    regex::Regex::new(&pattern)
+        .map(|re| re.is_match(haystack))
+        .unwrap_or(false)
+}
+
+/// The slice of `lines` that states one entry's status, plus the locator that found it.
+///
+/// Two renderings, because measuring this repo's nine params-backed ledgers on 2026-08-30
+/// found both in use and covering disjoint sets: **table rows** (`| BL-60 | … |`) in
+/// `open-issue-work-queue` and `windows-platform-support` — 101 entries — and **a heading
+/// with a `**Status:**` line** in `fable-tuning-tasks` and `fable-tuning-findings` — 30
+/// entries. Supporting only the first, which an earlier draft of this scan did, silently
+/// skipped 30 of 131 exposed entries while reporting nothing amiss about them.
+///
+/// The heading form returns **only the `Status:` line**, never the whole section. A
+/// section's prose routinely narrates status history — *"was dropped as a design
+/// decision"*, *"local export DONE, one item left"* — and matching against it would report
+/// the narration as the status.
+///
+/// `None` means *this entry states no status in the body*, which is not a finding: a
+/// params-only entry has no second representation and therefore cannot drift from one.
+fn entry_status_region(lines: &[&str], eid: &str) -> Option<(String, &'static str)> {
+    let esc = regex::escape(eid);
+    // 1. Table row. Anchored at line start so a mention inside another row's prose
+    //    cannot masquerade as this entry's row.
+    if let Ok(row_re) = regex::Regex::new(&format!(r"^\|\s*`?{esc}`?\s*\|")) {
+        if let Some(l) = lines.iter().find(|l| row_re.is_match(l)) {
+            return Some(((*l).to_string(), "table row"));
+        }
+    }
+    // 2. Heading section, then its `Status:` line. The dash is required: it is what
+    //    `link_scan` treats as defining the entry, and a heading without one is a
+    //    section *about* the entry rather than the entry itself.
+    let head_re = regex::Regex::new(&format!(r"^(#{{2,6}})\s+`?{esc}`?\s*[—–-]")).ok()?;
+    let start = lines.iter().position(|l| head_re.is_match(l))?;
+    let level = lines[start].chars().take_while(|c| *c == '#').count();
+    for l in &lines[start + 1..] {
+        let depth = l.chars().take_while(|c| *c == '#').count();
+        if depth > 0 && depth <= level {
+            break; // next sibling-or-shallower heading ends the section
+        }
+        let trimmed = l.trim_start().trim_start_matches('*').trim_start();
+        if trimmed.starts_with("Status:") || trimmed.starts_with("Status**:") {
+            return Some(((*l).to_string(), "Status: line"));
+        }
+    }
+    None
+}
+
+/// `params_status_drift`: an entry's `params` status does not appear in the body region
+/// that states its status — the **content** half of the drift whose id half is
+/// [`scan_params_behind_body`].
+///
+/// That scan's own doc comment declines this comparison — *"Ids only, never statuses … a
+/// text comparison against a column whose format is each tracker's own choice — fragile,
+/// and a separate decision"* — and it was right to, on the evidence then available. What
+/// changed is that the fragility was measured rather than estimated
+/// (`docs/issues/archive/2026-08-18-no-check-detects-a-params-row-stale-relative-to-its-body.md`,
+/// queue row `BL-44`). It is dominated by one convention, `done, archived` for
+/// `done-archived`, which [`status_token_present`] absorbs; and a closed `status` enum
+/// declared in `params_schema` removes the need to identify a column at all, since any
+/// enum token anywhere in the region is evidence about the status.
+///
+/// **Why it is worth having.** Measured the same day on this repo, `open-issue-work-queue`
+/// held four entries whose `params` row contradicted its committed body — `BL-60` read
+/// `open` / *"not yet scouted"* for a fix that was shipped, tested, archived and
+/// patch-id'd. Every existing surface was silent, because all three are id-set
+/// comparisons and every id was present on both sides. `entry_filter` — the query
+/// `CLAUDE.md` prescribes for reading that tracker — returns the `params` side, so the
+/// documented read path served the wrong answer while the markdown a human opens was
+/// correct.
+///
+/// **Sensitivity, measured, not asserted.** Substituting every other enum value for each
+/// entry's true status simulates 536 drifts across this repo's qualifying ledgers; **490
+/// (91.4%) are flagged and 46 (8.6%) are silent**, the silent ones being where the
+/// substituted word happens to occur in that entry's own region already. So a clean run
+/// is evidence, not proof.
+///
+/// **Three blind spots, all deliberate, none of which the message hides:**
+/// - A ledger whose `params_schema` declares no `status` enum is skipped entirely — 5 of
+///   this repo's 9. Without a closed vocabulary there is nothing to compare against
+///   except free text.
+/// - An entry with no body region stating a status is skipped, not reported. It has one
+///   representation and cannot drift.
+/// - Prose inside a status region that happens to use an enum word is reported. The
+///   message is phrased for that: it says the region does not *state* the params status,
+///   never that the entry is wrong.
+///
+/// Reports only; there is no `fix=`. Which side is stale is a judgement — `params` behind
+/// a corrected body and a body behind a corrected `params` produce the identical finding,
+/// and their remedies are opposites.
+fn scan_params_status_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut out = Vec::new();
+    for ledger in params_backed_ledgers(conn)? {
+        let Some(enum_vals) = ledger.status_enum.as_ref() else {
+            continue;
+        };
+        let lines: Vec<&str> = ledger.body.lines().collect();
+        let mut findings: Vec<String> = Vec::new();
+        let mut compared = 0usize;
+        for (eid, status) in &ledger.statuses {
+            let Some((region, locator)) = entry_status_region(&lines, eid) else {
+                continue;
+            };
+            compared += 1;
+            if status_token_present(&region, status) {
+                continue;
+            }
+            let seen: Vec<&str> = enum_vals
+                .iter()
+                .filter(|t| status_token_present(&region, t))
+                .map(String::as_str)
+                .collect();
+            let seen = if seen.is_empty() {
+                "no enum value".to_string()
+            } else {
+                format!("`{}`", seen.join("`, `"))
+            };
+            findings.push(format!(
+                "{eid} (params `{status}`, {locator} states {seen})"
+            ));
+        }
+        if findings.is_empty() {
+            continue;
+        }
+        // Bounded sample; the count carries the magnitude. Same cap and reasoning as its
+        // three siblings — an unbounded list buries every other finding.
+        const SAMPLE: usize = 8;
+        let shown = findings
+            .iter()
+            .take(SAMPLE)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ");
+        let suffix = if findings.len() > SAMPLE {
+            format!(" … (+{} more)", findings.len() - SAMPLE)
+        } else {
+            String::new()
+        };
+        out.push(Violation::new(
+            "params_status_drift",
+            Some(ledger.id),
+            ledger.abs_path,
+            format!(
+                "{n} of {compared} `{coll}` entries have a `params` status their body \
+                 region does not state: {shown}{suffix}. The two representations of these \
+                 entries disagree, so `entry_filter` and the committed markdown answer \
+                 the same question differently — and only the body is in git. Read the \
+                 body and decide which side is right, then repair the other: \
+                 `artifact(action=\"update_entry\", …)` for the `params` side, a \
+                 `body_edits` patch for the body. This check is a HEURISTIC and both \
+                 directions of error are possible: it is silent on ~8.6% of real \
+                 disagreements (measured), and a status region whose prose merely \
+                 mentions another enum word is reported here despite being correct — it \
+                 reports that the region does not STATE the params status, never that \
+                 the entry is wrong.",
+                n = findings.len(),
+                compared = compared,
+                coll = ledger.collection,
+                shown = shown,
                 suffix = suffix
             ),
         ));
@@ -7047,6 +7318,249 @@ mod tests {
             scan_params_behind_body(&cat.conn).unwrap().is_empty(),
             "nothing ran ahead here; reporting it would be the same finding twice"
         );
+    }
+
+    /// Seed a tracker whose entries carry explicit statuses and whose `params_schema`
+    /// declares a `status` enum — the two preconditions `scan_params_status_drift` needs.
+    ///
+    /// Deliberately separate from `seed_tracker` rather than a parameter on it. That
+    /// helper pins `params_schema: None` and a uniform `"open"` status, and those two
+    /// facts are what keep its fifteen fixtures invisible to the status scan. Widening it
+    /// would silently enroll every one of them in a comparison they were not written for,
+    /// and several would fire.
+    fn seed_status_tracker(
+        cat: &Catalog,
+        id: &str,
+        dir: &std::path::Path,
+        body: &str,
+        entries: &[(&str, &str)],
+        status_enum: &[&str],
+    ) {
+        let path = dir.join(format!("{id}.md"));
+        std::fs::write(&path, body).unwrap();
+        let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
+        seed_artifact(cat, id, &abs);
+        let rows: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(i, s)| serde_json::json!({"id": i, "status": s}))
+            .collect();
+        let schema = serde_json::json!({
+            "properties": {
+                "tasks": { "items": { "properties": { "status": { "enum": status_enum } } } }
+            }
+        });
+        augmentation::upsert(
+            cat,
+            &augmentation::AugmentationRow {
+                artifact_id: id.to_string(),
+                prompt: "p".into(),
+                params: serde_json::json!({ "tasks": rows }).to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                updated_at: "2026-01-01T00:00:00.000Z".into(),
+                render_template: Some("{{ tasks }}".into()),
+                params_schema: Some(schema.to_string()),
+                append_mode: false,
+                history_cap: None,
+                entry_collection: Some("tasks".into()),
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// The shape this check exists for, taken from the incident rather than invented:
+    /// `BL-60`'s `params` row read `open` while its committed table row read
+    /// `done-archived`, and all three id-set scans were silent because the id was
+    /// present on both sides.
+    #[test]
+    fn status_drift_fires_when_params_and_the_body_row_disagree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_status_tracker(
+            &cat,
+            "disagree",
+            tmp.path(),
+            "| ID | Task | Status |\n| BL-1 | the CLI drops two fields | **done-archived** |\n",
+            &[("BL-1", "open")],
+            &["open", "done-archived"],
+        );
+
+        assert!(
+            scan_params_behind_body(&cat.conn).unwrap().is_empty(),
+            "the id is on both sides, so the id-set scans must stay silent — that \
+             silence is the gap this check fills"
+        );
+        let v = scan_params_status_drift(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].check, "params_status_drift");
+        assert!(v[0].detail.contains("BL-1"), "{}", v[0].detail);
+        assert!(
+            v[0].detail.contains("`open`"),
+            "the finding must name the params side, since the reader has to decide \
+             which of the two is stale: {}",
+            v[0].detail
+        );
+    }
+
+    /// The measured false-positive class, pinned. On 2026-08-30 a naive comparison over
+    /// this repo produced 26 findings and **20 were this**: `params` holds
+    /// `done-archived` while the body writes `**done, archived**`. Comma versus hyphen.
+    ///
+    /// Deleting the separator-flexing in `status_token_present` turns this red, which is
+    /// the point — without it the check is 77% noise and nobody would keep it on.
+    #[test]
+    fn status_drift_is_silent_when_the_body_punctuates_the_status_differently() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_status_tracker(
+            &cat,
+            "punct",
+            tmp.path(),
+            "| ID | Status |\n| BL-1 | **done, archived** |\n",
+            &[("BL-1", "done-archived")],
+            &["open", "done-archived"],
+        );
+
+        assert!(
+            scan_params_status_drift(&cat.conn).unwrap().is_empty(),
+            "`done, archived` and `done-archived` are the same status rendered two ways"
+        );
+    }
+
+    /// The negative half of the predicate, deliberately alone in its own test.
+    ///
+    /// It began life sharing a test with the positive assertions above it and had to be
+    /// split, because the mutation matrix showed why: under a `contains` substitution the
+    /// combined test died on its **first** assertion — the positive separator one — and
+    /// never reached these. It reported as a kill for a guard it had not exercised. A
+    /// test that dies for the wrong reason is not evidence about the reason in its name,
+    /// and the two here fail under different mutations, so they cannot share one.
+    ///
+    /// This is the reason the fix is a boundary-anchored regex rather than "strip the
+    /// punctuation from both sides". Stripping is the obvious way to absorb
+    /// `**done, archived**`, and it makes `done` a substring of `aban`**`done`**`d` and
+    /// `open` of `re-`**`open`**`ed` — both of which occur in this repo's real status
+    /// prose. That substitution keeps the positive test green and kills only this one.
+    #[test]
+    fn status_token_present_does_not_match_a_status_word_inside_a_longer_word() {
+        assert!(
+            !status_token_present("| the task was abandoned |", "done"),
+            "`done` is a substring of `abandoned`; a stripped-punctuation compare \
+             would report this row as stating `done`"
+        );
+        assert!(
+            !status_token_present("| **RE-OPENED 2026-08-30** |", "open"),
+            "`open` is a substring of `reopened`; same failure, and this exact row \
+             text exists in the queue tracker"
+        );
+    }
+
+    /// The positive half: the separator flexing that absorbs the measured
+    /// false-positive class (`**done, archived**` for `done-archived`, 20 of 26 findings
+    /// on 2026-08-30). Split from the negative assertions above — see that test's note.
+    #[test]
+    fn status_token_present_matches_a_status_the_body_punctuates_differently() {
+        assert!(status_token_present(
+            "| **done, archived** |",
+            "done-archived"
+        ));
+        assert!(status_token_present("| **done** |", "done"));
+    }
+
+    /// The second locator, covering the 30 entries a table-row-only implementation
+    /// silently skipped while reporting nothing amiss about them: `fable-tuning-tasks`
+    /// and `-findings` render entries as a heading plus a `**Status:**` line.
+    #[test]
+    fn status_drift_finds_the_heading_form_that_renders_no_table_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_status_tracker(
+            &cat,
+            "headings",
+            tmp.path(),
+            "# T\n\n## FT-1 — do the thing\n\n**Status:** done\n\nSome prose.\n",
+            &[("FT-1", "open")],
+            &["open", "done"],
+        );
+
+        let v = scan_params_status_drift(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].detail.contains("FT-1"), "{}", v[0].detail);
+    }
+
+    /// The region is the `Status:` line, never the whole section — and this is the
+    /// design decision that keeps the check usable rather than a style preference.
+    ///
+    /// Entry prose routinely narrates status history: this fixture's wording is taken
+    /// from a real queue row (*"was dropped as a design decision"*) whose status is
+    /// nonetheless `open`. Widening the region to the section makes that row fire, and
+    /// every other row whose author explained how it got where it is.
+    #[test]
+    fn status_drift_reads_the_status_line_and_not_the_sections_prose() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_status_tracker(
+            &cat,
+            "prose",
+            tmp.path(),
+            "# T\n\n## FT-1 — re-opened after a bad call\n\n**Status:** open\n\n\
+             Was dropped as a design decision, then done, then archived — all wrong.\n",
+            &[("FT-1", "open")],
+            &["open", "done", "dropped"],
+        );
+
+        assert!(
+            scan_params_status_drift(&cat.conn).unwrap().is_empty(),
+            "the Status line agrees with params; the narration below it is not a status"
+        );
+    }
+
+    /// The gate that keeps this scan off the fifteen fixtures written for its three
+    /// siblings — and off the five real ledgers here that declare no `status` enum.
+    ///
+    /// Without a closed vocabulary there is nothing to compare against but free text,
+    /// which is the objection `scan_params_behind_body` records when it declines this
+    /// comparison. The body here contradicts `params` outright and must still be silent.
+    #[test]
+    fn status_drift_is_silent_for_a_ledger_declaring_no_status_enum() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // seed_tracker pins params_schema: None and status "open" for every entry.
+        seed_tracker(
+            &cat,
+            "noenum",
+            tmp.path(),
+            "| ID | Status |\n| BL-1 | **done-archived** |\n",
+            &["BL-1"],
+        );
+
+        assert!(
+            scan_params_status_drift(&cat.conn).unwrap().is_empty(),
+            "params says `open` and the body says `done-archived`, but no enum is \
+             declared — reporting it would enroll every prose tracker in a comparison \
+             it never opted into"
+        );
+    }
+
+    /// An entry `params` tracks but the body states no status for cannot drift: it has
+    /// one representation. Silence here is not a miss, and pinning it stops a later
+    /// "why does this skip rows?" from being closed by reporting them.
+    #[test]
+    fn status_drift_skips_an_entry_whose_body_states_no_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_status_tracker(
+            &cat,
+            "nostatus",
+            tmp.path(),
+            "# T\n\nProse mentioning BL-1 in passing, with no row and no heading.\n",
+            &[("BL-1", "open")],
+            &["open", "done"],
+        );
+
+        assert!(scan_params_status_drift(&cat.conn).unwrap().is_empty());
     }
 
     /// Fires where `snapshot_drift` is silent because nothing is missing FROM the
