@@ -18,9 +18,16 @@ follow the links for the controlling convention.
 
 A **declared ledger** carries `entry_prefix: <PREFIX>` in its frontmatter (committed,
 so it survives a fresh clone) and gets server-assigned ids from
-`artifact(action="append_entry", id=…, id_prefix=…)`. **Twenty-two are declared today** (re-measured 2026-08-28 13:25 by
+`artifact(action="append_entry", id=…, id_prefix=…)`. **Twenty-three are declared today** (re-derived 2026-08-31 by
 reading `entry_prefix:` out of every frontmatter block): AA, CAP, CM, CTX, DC, ET, F, FND,
-FT, GF, GG, H, HY, OP, R, S, SD, SV, TB, U, W, WP.
+FT, GF, GG, H, HY, **OB**, OP, R, S, SD, SV, TB, U, W, WP.
+
+*Counting rule, stated because a bare integer inherits whichever rule the reader picks
+(`observer-blindness:OB-1`):* distinct **prefixes**, not declaration lines. Excluded from
+the raw grep are two worked examples inside `tracker-conventions.md`'s fenced blocks, one
+`entry_prefix: null` (a tracker deliberately owning no namespace), and the six bare
+`entry_prefix:` block-sequence headers — those contribute F and W, which are counted once
+each rather than seven times.
 
 *(This sentence read "Thirteen" until 2026-08-26 and "Fifteen" until 2026-08-28, and was
 **exact when measured** each time — `CTX` was declared on 2026-08-21 by `711a25cf`, two
@@ -60,6 +67,7 @@ the count next to the command that produces it.)*
 | **WIN-N** | `docs/trackers/windows-platform-support.md` (augmented artifact `52451519052d207c`) | Windows-platform issue: process-spawn / lsp / platform-gated / path-handling / build-install / test-portability / companion defect, fix, or cfg-gate decision | `artifact(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={…})` — atomic id, then sync the body `## Issue index` table. **Never** `artifact_augment(merge=true, params={issues:[…]})`: that REPLACES the array | Bug file (`docs/issues/`) for new incidents; `status` flips in place as fixes land |
 | **A-N** | `docs/trackers/prompt-hamsa-audit-log.md` (craft-level twin in `claude-plugins/docs/trackers/`) | Prompt-audit record from a Hamsa audit: named gap, recommended move, prediction, confidence, outcome (filled when evidence lands) | Per the tracker's maintenance convention (`## A-N — <title>` section + Index row) | Hamsa SKILL.md heuristic / buddy memory when the finding generalizes |
 | **PV-N** | `docs/trackers/provenance-subsystem.md` (augmented artifact `e12cd7e0060ed9b8`) | Provenance/attribution **programme** state: measurement verdicts vs pre-registered kill conditions, standing design decisions, hazards not to rediscover, open decisions, buildable work. Typed `finding \| gap \| decision \| hazard \| task` | `artifact(action="append_entry", id_prefix="PV", entry_collection="items", entry={...})` — atomic monotonic id; query with `entry_filter` | Implementation plan (`docs/plans/`) once phase moves past MEASUREMENT; a `decision` flips to `settled` in place |
+| **OB-N** | `docs/trackers/observer-blindness.md` (declared ledger, artifact `3922c2a0fd0dfcfc`) | A defect **class** indexed by its observer structure: who structurally cannot see it, who can, and the check that runs whether or not anyone suspects a problem. The unit is a class, never an instance — an instance is a bug file / `F-N` / `R-N`. Admission test: *would a more careful version of the same party have caught it?* If yes it is **not** an `OB`; the test is structural inability, never observed failure. Second required property: the failure returns a **plausible answer rather than an error**, which is why it survives review chains that catch louder bugs | `artifact(action="append_entry", id="3922c2a0fd0dfcfc", id_prefix="OB", anchor_heading="## Template for new entries", title=…, body=…)` — prose ledger, no `entry_collection`; one call writes `## OB-N — <title>` and records the high-water mark. Add the Index row after, with the returned id. `edit_markdown` is refused: declared ledger | An `H-N` hook proposal or an `I-N` intervention once the mechanism is designable; a CLAUDE.md rule once two or more classes share one mechanism shape |
 | **CAP-N** | `docs/trackers/capability-proposals.md` (augmented artifact `01291679a5ee4707`) | **Pre-plan** proposal for a codescout capability we do not have: the ask, a substrate check citing what exists today at `path:line` and what is genuinely missing, and the open decisions. Reflective — judgment, not gathering | Append a `## CAP-N` section above `## Anti-goals` + an Index row, via `artifact(action="update", patch={body_edits: [...]})` | A spec + plan under `docs/superpowers/` once it has tasks and a file structure; or `rejected` in place with the reason kept |
 | **HY-N** | `docs/trackers/tracker-hygiene-log.md` (declared ledger, artifact `7e498b6dcb45b924`) | Verdict on the tracker-hygiene skill's own detectors: `hit` (a detector fired correctly), `miss` (a defect class no detector sees), `proposal` (a new detector or convention change). Dated `## Sweep YYYY-MM-DD` sections sit alongside and own no id | **Two shapes, and they differ.** An `HY-N` entry: `artifact(action="append_entry", id="7e498b6dcb45b924", id_prefix="HY", anchor_heading="## Template for new entries", title=…, body=…)` — prose ledger, no `entry_collection`; one call writes `## HY-N — <title>` and records the mark. A **sweep** entry is dated rather than numbered, so it goes through a plain `body_edits` insert with the `next-sweep-due` frontmatter bump riding along **in the same call**. `edit_markdown` is refused: declared ledger | A new detector in `codescout-companion/skills/tracker-hygiene/SKILL.md`, or a convention change in `get_guide("tracker-conventions")` |
 | **OP-N** | `docs/trackers/operator-rules.md` (declared ledger, artifact `fa21bfb35684794d`) | A rule that holds across every project, tool and model for **this operator** — its text, binding, shape, status and evidence. Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md` | `artifact(action="append_entry", id="fa21bfb35684794d", id_prefix="OP", anchor_heading="## Template for new entries", title=…, body=…)` — prose ledger, no `entry_collection` | Compiled into each Claude Code profile's `CLAUDE.md` by `codescout operator-rules compile`. A withdrawn rule is **retired in place** with its text kept verbatim (precedent: OP-5, *Conclude Last*, superseded by OP-1), never deleted |
@@ -217,6 +225,16 @@ You observed something. Where does it go?
 │
 ├─ Is it about the recon skill itself (hit / miss / proposal)?
 │   → R-N in reconnaissance-patterns.md
+│
+├─ Is it a defect CLASS whose right party structurally cannot see it?
+│   → OB-N in observer-blindness.md (artifact 3922c2a0fd0dfcfc)
+│     Two admission tests, both required:
+│       (a) would a MORE CAREFUL version of the same party have caught it?
+│           yes → it is an F-N or a bug file, not an OB
+│       (b) does it return a PLAUSIBLE ANSWER rather than an error?
+│           no → it is loud, and something downstream already fires
+│     Name the blind party, who CAN see it, and a candidate mechanism.
+│     No mechanism yet? Write "none yet" — that is the worklist, not a gap.
 │
 ├─ Is it a feature idea — a capability codescout does not have yet?
 │   → CAP-N in capability-proposals.md (artifact 01291679a5ee4707)
