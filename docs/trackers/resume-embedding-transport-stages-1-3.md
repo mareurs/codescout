@@ -188,6 +188,36 @@ correctness item, not trailing cleanup.**
 
 ### The duplicates have measurably drifted, and only in one direction
 
+> **Corrected 2026-08-30 — the heading above is false, and the caveat at the foot
+> of this entry is the main event.** Drift is **bidirectional**. This entry's two
+> samples were root-deficient; three instances found on 2026-08-30 are all
+> **crate**-deficient, and in each the crate was shipping the hazard to every
+> external consumer while one root-side check hid it from exactly one caller:
+>
+> | instance | guarded in | missing in |
+> |---|---|---|
+> | status-error hoisted above the collection bucket | root | **crate** |
+> | dense-response arity check (a **panic**, not an error) | root | **crate** |
+> | crypto-provider install before a TLS handshake (`probe_ollama`) | root | **crate** |
+>
+> The first two surfaced during T6 and are archived under `docs/issues/archive/`;
+> the third was found by `codescout-ae` enumerating call sites of
+> `install_default_crypto_provider` and noticing which client-builder was absent
+> — a **pairwise** audit nearly missed it, because `probe_ollama` has no root
+> twin to be compared against.
+>
+> So the sentence to carry forward is the one this entry files as a caveat:
+> **audit each pair before deleting; root's copy is not always the stale one.**
+> On a crate-deficient pair, deleting root's copy removes the only guarded
+> version. The `read_timeout` row below was already the counterexample — it now
+> has three more.
+>
+> T7 followed the caveat rather than the heading, which is why it was safe:
+> `roots_loopback_guard_agrees_with_the_crates_on_every_case` pinned the two
+> copies against each other across 16 urls *before* root's was deleted, so the
+> deletion rested on measured agreement rather than on this entry's predicted
+> direction.
+
 Two instances found on 2026-08-29, both in the same file pair
 (`src/retrieval/embedder.rs` vs `crates/codescout-embed/src/remote.rs`), both
 verified at the bytes:
@@ -587,10 +617,25 @@ order above is derived from what gates what, not from stage numbering.
 order, what gates what); this holds the *state*. Strike rows here as they land;
 do not restate the rationale.
 
-**Status:** open — **2 tasks**, none blocked. T6 landed 2026-08-30 (four commits,
-row below) and took T8 with it. **T7 is the head of the queue**; T9 chains behind
-it and is **blocked by surfaces outside this stream** — see `ET-10` finding 3, and
-do not pick it up expecting the −48 crates, which `ET-2` already banked.
+**Status:** open — **T1 through T8 are all closed.** What remains is T9 and its
+precondition T16, and both are **discretionary rather than queued**: they buy
+manifest honesty and **zero crates**, because root and the crate declare the same
+`reqwest` and cargo unifies them. Verified at the bytes 2026-08-30, not inferred.
+So the consolidation's measurable payoff is fully banked (`ET-2`), its two measured
+drifts are closed (T1/T2/T5), and the duplication that produced them is gone (T6).
+
+**A reader picking this up should decide whether to continue at all**, and the
+honest input to that decision is `ET-4`'s corrected heading: drift is
+bidirectional, and three of the five known instances had the crate as the
+deficient side. That is an argument for auditing the remaining pairs — which
+`codescout-ae` did on 2026-08-30, finding them clean plus one non-pair instance
+(`probe_ollama`, `BL-66`) — rather than for grinding out T9.
+
+**One open bug from this stream is unrelated to T9 and worth more than it:**
+`docs/issues/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`.
+Root's sparse leg emits `embed_batch sparse status …` while the classifier matches
+`embed sparse`; the underscore breaks it, so every sparse HTTP failure is routed to
+the generic Qdrant bucket today. T16 moves that leg and will meet it.
 
 **Both stale rows are now struck by their owner**, resolving the hand-off the
 previous session left here — and there were **two**, not one. That session
@@ -618,9 +663,10 @@ failure this board exists to prevent.
 | ~~T4~~ | B3 | Typed `EmbedError::Connect { url }` replacing the `"embed connect failed"` substring contract (`ET-5`) | **done** `6be58840`, patch-id `07a8ea7c676e197bc862da3639bf63c19787d248`. Closes `ET-5`. Reproducing first showed the risk was **already realised**: `RemoteEmbedder` surfaced connect failures as reqwest's own `error sending request for url (…)`, which matched no arm of `classify_search_error` and fell through to the generic Qdrant fallback — live on the `ollama:`/`openai:` resolver path. Mutating `CONNECT_FAILED_MARKER` now fails root's two tests while the crate's pass, which is ET-5's "nothing makes the two fail together" turned false | — |
 | ~~T5~~ | B4 | Export `is_https_or_loopback` (and whatever else Phase D needs) as `pub` | **done** `16dc28a5`, patch-id `dcf74187a08c2cf01399481c8a201f31a0ec2196`. `QueryPrefix::derive_for` shipped `pub` with T3. **`http_client` is NOT needed** — `ET-8`'s table assumed root's `transport.rs` dies in Phase D, but `reranker.rs` uses it at `:67`, `:83`, `:99` and the reranker is outside this consolidation, so **T8 should be re-scoped to the wire structs only**. Carries a differential pinning root's copy against the crate's on 16 urls, six named by neither fixed-expectation test; delete it with root's copy in T7 | — |
 | ~~T6~~ | C | Swap root's dense leg to `RemoteEmbedder` | **done** in four commits — A `8097c2d6` / `18922aa3cc9f4be601e26f53ee68c9c483fec01b`, B `4fd4e5f4` / `d377f8ab6086f9d7137b4f4fc10d4628a26aa01c`, C `f9a205a9` / `469480c898f8db59c3a2e49acd12b628d9d824af`, D `797dd023` / `095ae63248a236e74a2135f101fa416cffb643dc`. **The seam is `dense_batch`, not the call site** — `RemoteEmbedder` is dense-only and root's two legs are fused per sub-batch, so a call-site swap reaches only the lite stack (`ET-10`). Root keeps chunking, both escape hatches, the concurrent sparse leg and the positional alignment; the crate owns the wire. D1's mapping landed **load-bearing**: `dense_query` prefixes via the crate's `embed_query`, so omitting `with_query_prefix` kills a test — root-side concatenation would have left that setting unfalsifiable. Root's empty predicate moved to `trim().is_empty()` to match the crate's, without which a whitespace-only chunk becomes a hard arity error. Two defects fixed en route, both the same shape (a hazard handled on root's side of the pair and never on the crate's): the collection-bucket hijack, and an index-out-of-bounds **panic** on a truncating server | — |
-| T7 | D1 | Delete root's `is_https_or_loopback`; **re-point** T1's test at the crate's, do not delete it | ready after C | T6 |
+| ~~T7~~ | D1 | Delete root's `is_https_or_loopback` | **done** `c24d2d60`, patch-id `d7e1f42fa6e68e0922a0197cdd234694f034364f`. Both copies and both callers were already `remote-embed`-gated, so the lean build was never at risk — `ET-2`'s design table calls this function *ungated*, which is stale. **Diverged from this row's "re-point T1's test, do not delete it"**: re-pointed, it was a literal duplicate of the crate's `is_https_or_loopback_matches_host_exactly`, same ten assertions on the same function. Replaced instead with `guarded_api_key_drops_the_key_for_a_host_that_only_looks_like_loopback`, which runs those inputs against **root's own behaviour** — a different claim, and one root had no coverage for at all (all five existing guard tests use a plainly non-loopback host). Mutation: a plausible `contains("localhost")` guard leaves all four old tests **green** and kills only the new one | — |
 | ~~T8~~ | D2 | Delete the duplicated **dense wire structs** — NOT `transport.rs`, which `reranker.rs` keeps alive (`ET-5`) | **already done** by T6 step D (`797dd023`): `OpenAiEmbedReq` / `OpenAiEmbedResp` / `OpenAiEmbedItem` deleted, confirmed dead by the compiler rather than by inspection. `EmbedReq` + `SparseEntry` stay — those are the sparse wire | — |
-| T9 | D3 | Drop `reqwest` / `rustls` from the **root** manifest; re-measure the crate delta and record it | ready after D1/D2 | T7, T8 |
+| T9 | D3 | Drop `reqwest` / `rustls` from the **root** manifest | **BLOCKED, verified at the bytes 2026-08-30** — and worth **zero crates** even once unblocked. Four live uses remain: `EmbedderHttp.client` (the sparse leg + the `/info` probe), `transport.rs::client` (the shared builder), `RerankerHttp.client`, and `lib.rs`'s `rustls::crypto::ring` install. Root's `reqwest` sits under `remote-embed` (`Cargo.toml:89`), and `EmbedderHttp` — which owns sparse — is `remote-embed`-gated, so the dep cannot move until sparse does. **And the payoff is not crates**: the crate declares the same `reqwest` under its own `remote-embed` and cargo unifies them, so every configuration compiles it either way. The −48 was measured on the *bare* lean build and `ET-2` already banked it. Pursue this for manifest honesty or not at all | T16 |
+| T16 | — | Gate root's **sparse leg** on `server-stack` rather than `remote-embed` — the precondition T9 actually has | **open, unscoped.** Sparse is only reachable when a sparse server is configured, which is the server-stack deployment; `dense_only` is true for every other. Moving it (with `resolve_batch_size`'s `/info` probe) would leave `EmbedderHttp` a thin orchestrator over `RemoteEmbedder` with no `reqwest` of its own, and `dep:reqwest`/`dep:rustls` could then sit under `server-stack` alone. Read `ET-10` finding 3 and T9's row before starting: this buys manifest honesty, not compile time | — |
 
 Phase D is *audit each pair, then delete* — not delete-root's-copy. `ET-4` has the
 counterexample where root was ahead of the crate.
