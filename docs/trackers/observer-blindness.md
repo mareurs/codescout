@@ -167,6 +167,39 @@ about the class.
   fires on an event that happens anyway rather than on suspicion.
 - **Not yet mechanised:** nothing gates a bare integer in a doc. Candidate `H-N`.
 
+### Sub-pattern — the remedy is the part that escapes verification
+
+Found 2026-08-31 by two sessions independently, each about **themselves**, on the same
+evening. Every unverified claim either of us published sat in the **remedy** half of a
+finding — never the diagnosis:
+
+- *This session, `OB-4`.* Diagnosis verified at five points: directory present at 174M,
+  gitdir target absent, 84 citations across 16 files, both script line references read at
+  the bytes, and the baseline SHA found in the script itself rather than taken from the
+  report. The **recovery command** was transcribed unchecked — and is false; it refuses,
+  because the path exists.
+- *This session, `OB-5`.* Conflation verified at four sites in `doctor.rs`. The **remedy**
+  — *"seed `by_check` with every check name at 0, roughly three lines"* — was published
+  without checking whether a name list existed. It does not; there are 20 `scan_*`
+  functions and every name is a bare `&str` at its own `Violation::new` site.
+- *`codescout-fe`,* in their own words: *"checking the remedy rather than the diagnosis,
+  which is the half I have been getting wrong all night"* — three self-reported instances
+  (a recovery command, a line number, a framing).
+
+**Why, and this is a mechanism rather than an excuse: attention follows contest.** The
+diagnosis is the claim you expect to be challenged, so it draws your scrutiny. The remedy
+is *offered* rather than argued — it reads as helpfulness rather than as an assertion — so
+it never enters the part of your attention that demands evidence. The asymmetry is
+**largest exactly when the diagnosis was hardest-won**, because effort spent establishing
+it feels like effort spent on the finding as a whole, and the remedy rides out on that
+credit.
+
+> **The check, and it is why this earns a sub-pattern rather than an anecdote: in any
+> finding you are about to publish, the sentence beginning "the fix is…" is a separate
+> claim with its own evidence requirement — and it usually has none.** Locate it and verify
+> it as if someone else had written it. Unlike "be careful", this names a specific sentence
+> to look at, which is what makes it runnable rather than aspirational.
+
 **Instances (2026-08-30):**
 
 | kind | published | parameter silently supplied | reader gets |
@@ -371,7 +404,7 @@ files; `git worktree list --porcelain` naming only the main checkout; `.gitignor
 **Blind party:** the reader of the report. `doctor`'s `summary.by_check` is built by iterating the violations that exist (`src/librarian/tools/doctor.rs:401-404`), so a check contributes a key **only if it found something**. Three different world-states collapse onto *absent key*:
 
 1. the check ran and found nothing — the happy case;
-2. the check was removed, commented out, or never wired in — the checks are a hardcoded straight-line sequence of `all_violations.extend(scan_*(…))` at `:196-307` with **no registry**, so a deleted line leaves no trace anywhere in the output;
+2. the check was removed, commented out, or never wired in — the invocations are hardcoded `all_violations.extend(scan_*(…))` calls with **no registry**, so a deleted line leaves no trace anywhere in the output;
 3. the check ran but was held back by its own gate — several are threshold-gated on citation volume *by design* (`:214-221`), which is correct behaviour that is nonetheless indistinguishable from (2).
 
 **Who can see it:** anyone holding the check inventory from a *different* source — reading `doctor.rs`, or querying the database directly. `codescout-fe` resolved a live instance by going to the database, which worked; the entry exists because that is a workaround, not the fix.
@@ -391,15 +424,46 @@ files; `git worktree list --porcelain` naming only the main checkout; `.gitignor
 
 Going to a second source happens to work for both, which is why they feel alike. But for `OB-4` there is no *"emit the discriminator"* option at all, and here there is — and it is three lines.
 
-**Mechanism status:** none yet — designed, unimplemented, cheap.
+**Mechanism status:** none yet — designed, and the design is **not** what this entry first said.
 
-- **Seed `by_check` with every check name at `0`** before counting. Then *absent* means "did not run" and `0` means "ran, found nothing", and states (1) and (2) separate. Cheapest correct fix; needs a name list, which is the same edit that would give the sequence a registry.
-- **Report gated checks as a third value** — `"threshold_not_met"` rather than `0` — to separate (3) from (1). Optional; (1)-vs-(2) is the load-bearing split.
+> **Correction 2026-08-31, and it is the second time in this ledger that the unverified
+> claim was the REMEDY rather than the diagnosis.** This entry originally proposed *"seed
+> `by_check` with every check name at 0 — roughly three lines."* All three parts of that
+> were wrong, corrected by `codescout-fe` and verified here. See `OB-1` § *the remedy is the
+> part that escapes verification*.
+
+- **There is no list to seed from.** 20 `scan_*` definitions, and each check's name exists
+  only as a bare `&str` passed to `Violation::new(check, …)` (`:142-150`) inside its own
+  function. Creating the enumeration **is** the work; it was never three lines.
+- **A hand-written `const` array reintroduces the defect one level up.** A check *added*
+  without a matching array entry is invisible in exactly the way a check *removed* is
+  invisible now — the registry becomes the new place the drift hides, and it fails in the
+  same silent-clean direction.
+- **The robust form is compiler-enumerated, and this repo already ships one.**
+  `src/librarian/augmentation_sidecar.rs:263-269` destructures exhaustively **on purpose**:
+  adding a field to `AugmentationSidecar` breaks compilation until that field is compared,
+  because otherwise *"a new shape field would travel in the sidecar, restore correctly, and
+  silently never be drift-checked — `sidecar_shape_drift` would report healthy on the one
+  field nobody wired up."* Its closing line is the best statement of this ledger's whole
+  principle: **"the compiler is the only reviewer guaranteed to be present on the day that
+  field is added."** An unconditional check, in the strongest available form — it cannot be
+  tired, rushed, or unaware of the class.
+- **Report gated checks as a third value** — `"threshold_not_met"` rather than `0` — to
+  separate (3) from (1). Optional; (1)-vs-(2) is the load-bearing split.
+- **`:196-307` is not the whole call surface.** `scan_frontmatter_id_mismatches` is defined
+  at `:3846` and invoked at `:957`, outside that block. Any enumeration must cover **both**
+  sites or it will confidently report a live check as never-run — which would be this same
+  class, produced by its own fix.
 - **Generalisable rule for any reporting tool:** report **coverage alongside findings**. A report that enumerates only what it found cannot distinguish a clean subject from an unexamined one, and `docs/adrs/2026-08-27-negative-results-name-their-scope.md` already states the principle for negative results — this is the same rule applied to a *summary object* rather than to a single zero.
 
-**Instances:** `summary.by_check` (verified at `doctor.rs:401-404` + `:196-307`, 2026-08-31); reported by `codescout-fe` from a live encounter, resolved by them via the database.
+**Instances — two, and the second is already closed:**
 
-**Status:** validated — one instance, verified in source; promotion of the *class* awaits a second sighting outside `doctor`
+1. `summary.by_check` (verified at `doctor.rs:401-404`, `:142-150`, `:196-307`, `:957`, 2026-08-31). Reported by `codescout-fe` from a live encounter with `worktree_scoped_row`, resolved by them via the database — a workaround that answered their question and left the instrument still unable to answer. **Open.**
+2. `AugmentationSidecar`'s shape fields (`augmentation_sidecar.rs:263-269`). An unwired field would be **reported healthy**, which is the same conflation — unexamined presented as clean. **Closed** by an exhaustive destructure, shipped by `git-travel-augmentation-shape` 2026-08-30, before either of us had a name for the class.
+
+That second instance is why the class is now validated rather than provisional, and it is worth more than a count: **it supplies the working remedy.** The fix for instance 1 is not to be invented, it is to be copied from instance 2.
+
+**Status:** validated — two instances, one closed by the right mechanism, both verified in source
 
 ## Template for new entries
 
