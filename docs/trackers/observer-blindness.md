@@ -126,7 +126,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
-| OB-4 | 2026-08-31 | a liveness marker with a good hit rate (2/3) is trusted, then spends that trust | the session doing cleanup | wrong instrument | **none yet** — worklist |
+| OB-4 | 2026-08-31 | a liveness marker with a good hit rate (2/3) spends the trust it earned — and three git-based instruments agreeing is **one** instrument | the session doing cleanup | wrong instrument | **none yet** — worklist |
 | OB-3 | 2026-08-31 | a peer/agent listing is arbitrary w.r.t. the real population | the session reading the listing | wrong instrument | shipped (OS enumeration) |
 | OB-2 | 2026-08-31 | shared `target/` left in a feature-clobbered state | the session that arms it | wrong instrument | **shipped** (gate ends safe) |
 | OB-1 | 2026-08-31 | a published claim omits the parameter its author's context supplied | the author, specifically | wrong instrument | partial (derivation + one policy) |
@@ -288,11 +288,41 @@ which reads as confirmation that the thing is known residue.
 `grep -rn 'worktrees/bench' scripts/ docs/ --include='*.toml'`. Verified 2026-08-31: **16
 files, 84 references**, including two live scripts (`scripts/run-tc-benchmark.sh:18`,
 `scripts/sweep-bm25-boost.sh:10`), `docs/PROBES.md:116`, and `docs/trackers/retrieval-benchmark.md`,
-which holds the corpus definition. It is the pinned retrieval-benchmark corpus, detached at
-`ede25e69`; rebuilding costs a `git worktree add --detach` plus a 163M re-index.
+which holds the corpus definition. It is the pinned retrieval-benchmark corpus at `ede25e69`.
+
+**Corrected 2026-08-31, and the correction is itself an `OB-1`.** This entry first said
+recovery costs *"a `git worktree add --detach` plus a 163M re-index"*. That was transcribed
+from the report without checking, and it is false: the command **refuses**, because the path
+exists and is non-empty. Verified here — `git worktree list --porcelain` lists **only** the
+main checkout, `git -C .worktrees/bench rev-parse HEAD` returns `fatal: not a git repository:
+(null)`, and the directory holds 16 visible entries (**24** with `ls -A` — the two numbers
+are one measurement under two counting rules, which is the harmless form of `OB-1`). The
+commit object *is* reachable (`git cat-file -t ede25e69…` → `commit`), so recovery is
+possible, but it is **move-then-add plus a 163M re-index**, not one command. I verified the
+directory, the gitdir, the citations and the line references, and published the one claim I
+had not checked — the remedy.
+
+**Three instruments agree, and their agreement is the trap — this is the sharpest part.**
+A careful person asking *"what worktrees exist here?"* reaches for `git worktree list`. It
+returns a **clean, complete-looking answer with no trace of 174M of load-bearing corpus**,
+because bench is not a registered worktree at all. `git status` is silent too — `.gitignore`
+ignores `.worktrees/` **twice** (`:7` and `:117`). And the gitdir pointer dangles. Three
+independent-*looking* signals all say *nothing here*, and their unanimity reads as
+corroboration.
+
+> They are not independent. **All three consult git, and the corpus's liveness is not a git
+> fact** — it is a fact about `scripts/` and `docs/`. Instruments sharing a substrate are
+> **one instrument**, and their agreement carries no more evidence than any one of them.
+> This is `reconnaissance-patterns:R-138`'s *"two agreeing sweeps are one sweep"* generalised
+> from queries to instruments: independence of **mechanism** is what makes agreement
+> informative, and neither independence of authorship nor of tool name supplies it.
+
+That is also why the citation grep works: **it never consults git.** When corroborating a
+negative, ask what substrate each confirming instrument reads, and count distinct substrates
+rather than distinct commands.
 
 **Plausible-answer property:** you get a confident *"this is dead"* reading supported by a
-real, verifiable dangling pointer. The evidence is genuinely true — it simply answers a
+real, verifiable dangling pointer — and by two further signals that appear to confirm it. The evidence is genuinely true — it simply answers a
 different question (*what does this directory's git metadata point at?*) than the one being
 asked (*does anything still depend on this directory?*). Kin to the `du`-proves-size-never-absence
 finding, `reconnaissance-patterns:R-135`.
@@ -324,8 +354,10 @@ sharpens a wrong answer.
 **Instances:** `.worktrees/bench` (live, nearly deleted twice); `bench-legacy` and
 `no-local-embedding` (correctly deleted, and the source of the marker's false credibility).
 
-**Status:** validated — reported by `codescout-fe`, independently verified here (directory
-present at 174M, gitdir target absent, 84 citations across 16 files)
+**Status:** validated — reported by `codescout-fe`, corrected by them, independently verified
+here at each step (directory present at 174M; gitdir target absent; 84 citations across 16
+files; `git worktree list --porcelain` naming only the main checkout; `.gitignore:7` and
+`:117`; `ede25e69` reachable as a commit object)
 
 ## Template for new entries
 
