@@ -86,7 +86,23 @@ to follow.
    opposite direction, eight hours apart, walked into by the person who had just fixed
    the first one.
 
-The long form, with the incident list, is the **Measurement** iron rule in `CLAUDE.md`.
+**There is deliberately no separate long form.** Each rule above carries its own
+incident inline, and cites the artifact holding the detail. Do not replace this with a
+pointer to a fuller list elsewhere — the line that stood here until 2026-08-30 promised
+"the long form, with the incident list, is the **Measurement** iron rule in
+`CLAUDE.md`", and no such rule exists in either `CLAUDE.md` on this machine: the
+project one has no *Measurement* section and no *Iron Rule* heading, and the global one
+has an `## Iron Rules` section with no *Measurement* rule and no incident list in it.
+
+That partial match is what made it dangerous rather than merely wrong. A reader
+chasing the pointer lands on a real `Iron Rules` section, finds no *Measurement* rule,
+and concludes they mis-remembered — which is a quieter failure than landing nowhere.
+It is also invisible to `audit_doc_refs`, which checks paths, symbols, line refs and
+links; a prose reference to a **named section in another file** is none of those. And
+it sat in the one page whose header says *start here before answering a question with
+a number*, promising the most load-bearing thing it could — so a reader who did not
+follow it saw nothing wrong. Found by `codescout-ae`, who ran the grep twice (literal
+word, then heading forms) before calling it dangling, on rule 3's own terms.
 
 ---
 
