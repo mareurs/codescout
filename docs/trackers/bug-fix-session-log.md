@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 79
-entry_high_water_W: 74
+entry_high_water_W: 75
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -206,10 +206,11 @@ entry_high_water_W: 74
 | W-71 | 2026-08-26 | high | Replace the question, don't tighten the answer — a predicate needing an exhaustive population fails silently (which processes are stale / which commits are the peer's); one whose subject is self has a population of one, so completeness is not a precondition. Corollary: each session publishes its own list; nobody derives everyone's | Instance 1 would have left the oldest stale server running — the same process that then needed `-9` and is the clearest pre-fix datapoint for `ca2b0226`. Instance 2 would have credited the wrong session for the `EMBED_API_KEY` test repair, the [[F-71]] shape again. Note [[W-70]] described this class 40 min before I repeated it: a lesson requiring you to notice you are guessing is weaker than one removing the guess from the procedure (R-49's temporal-not-attentional argument, from the other side) | validated |
 | W-72 | 2026-08-27 | high | A negative result must name what it examined — AND stay quiet when it is trustworthy. Both halves load-bearing: naming nothing makes a false negative read as a finding; naming an unchecked cause ends the search for the real one | Three bugs fixed this session were one defect (`444d756c` grep glob, `fc1bbf21` sub-project memories, `76e287f8` wrong-tree not-found), and the codebase already held SIX independent instantiations of the rule, none of them named. `unsatisfiable_absolute_glob` states the principle in its own doc comment yet left the relative-glob case unguarded in the SAME function for nine days; `symbols::WalkAudit` carried the `accepted` counter `grep::WalkAudit` needed, one directory away, for months. Unnamed, each new tool re-derives it from its own outage | validated |
 | W-70 | 2026-08-26 | high | Publish the retraction to the peer immediately even when you cannot fix it — two accidental sweeps of the same ledger, four minutes apart in opposite directions, both harmless solely because each session was told within ~3 min | Sweep 2 (`66671bf5`) happened with `git diff -- <file>` honestly run and PASSED; the peer's write landed between the diff and the add, so the guard narrows the race and does not close it. The only thing that prevented rather than repaired was a wire handshake — "file is clear as of `<sha>`, write freely". Absent disclosure, a session whose entry vanished re-runs `append_entry`, allocating a fresh id for content already in HEAD: two ids, divergent bodies, nothing validating for duplication | validated |
-| W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
+| W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` — **amended 2026-08-30: necessary, not sufficient.** The pre-add diff and the add are not atomic and the window is raceable; the guard that closes is a post-stage `git diff --cached`, and it must be a CONTENT diff. `--cached --stat` is NOT a check | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 | W-73 | 2026-08-29 | med | "Compile-error → green" is the trigger for spending a mutation: a test whose only observed RED was a compile error has never run its assertions against a wrong world. In statically typed languages that is the NORMAL TDD cycle, so the shape is common rather than rare | `guard_stale_binary`'s wiring test would have shipped looking like proof. The policy unit tests (`Some(true)` refuses, `Some(false)`/`None` do not) still pass when the guard is written, tested and never called — five green tests, defect 100% present, and nothing else in 4642 tests notices. Mutating the call to `let _ = ...` failed with the exact symptom its doc comment predicts. Second datapoint the same afternoon in `read_file.rs`, where two pre-existing tests assert the identical property and stay green because their 1200-short-line fixture can never reach the valve | validated |
 | W-74 | 2026-08-30 | med | When the closure step IS the broken operation, run it rather than routing around it — the write is mandatory, so the reproduction costs nothing and is the one moment the broken path runs against a known-correct expected answer. Distinct from CLAUDE.md's reproduce-before-the-fix-plan rule, which governs the START of a fix and weighs a real cost | Closing BL-48 required the exact `edit_markdown(frontmatter={set:{status:…}})` call BL-48 describes as broken; `artifact(update)` was the known, faster workaround. Writing the prediction down and then using the broken call yielded three findings unreachable by re-reading: the fix is not live in this server, so every catalog measurement in the window is of old code and no tool response says so; the desync is field-SELECTIVE (`get.rs:335` serves `status` from the catalog column, `:525-533` re-parses `extra` from disk), so one payload mixes two epochs and self-contradicts only when `extra` happens to be populated — a bug with none returns a stale status looking perfectly consistent; and chasing that to `/proc/<pid>/exe` found an UNLINKED binary, BL-45's own condition, which corrected a claim I had already written into the record (I cited the on-disk mtime as the running build; the process predates it) | open |
+| W-75 | 2026-08-30 | high | Reproduce before AND after each round of a fix, checking a wedge listener's own hit count, not just wall-clock time or a green test run | A round-1 isolation fix that passed all 77 memory tests still left 2 wedge hits (6.35s) from a third resolution path (`create_semantic_anchors`'s own `RetrievalClient::from_env`) that a concurrent session was independently fixing in the same live working tree mid-investigation — caught only by re-running the reproduction, not by trusting the passing suite | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -6039,6 +6040,57 @@ afternoon; the rules are general.
 **Rests on:** `bug-fix-session-log:F-67` for the prior loss, and `codescout-77`'s own
 retraction for datapoint 3 — not independently reproduced here.
 
+### Amendment 2026-08-30 — the pre-add diff is necessary and not sufficient, and `--stat` is not a check at all
+
+This entry prescribed `git diff -- <path>` before `git add <path>` as *the* covering
+check. Two failures the same day, from opposite sides, say it is one of two.
+
+**Failure 1 — the window is raceable (codescout-3b's datapoint).** They ran
+`git diff` on this ledger, saw exactly their two lines, and staged it.
+`git diff --cached` then showed 30: a peer had written a new entry between the read
+and the add. The diff and the add are not atomic, and in a shared checkout that gap
+is long enough. Their conclusion, which is right: the post-stage check cannot be
+raced, because it reads the index you are about to commit rather than the tree you
+looked at earlier.
+
+**Failure 2 — mine, and it is the sharper half.** I *did* run the post-stage check
+before `7930e0b7`. I ran `git diff --cached --stat`. It printed
+`docs/trackers/bug-fix-session-log.md | 61 ++++++++++++++-` and I read that as my
+own W-74 plus its index row. Two of those lines were codescout-3b's citation swaps,
+and I committed them under my message.
+
+A `--stat` reports a filename and a line count. It **structurally cannot** show whose
+lines they are. So it delivers the entire feeling of having verified while showing
+none of the evidence — which is worse than skipping the check, because skipping it
+leaves you appropriately uncertain.
+
+**The amended rule, three steps:**
+
+1. `git diff -- <path>` before `git add <path>` — the cheap filter. Raceable; keep it
+   anyway, it catches the common case for free.
+2. `git diff --cached` after staging, **content, never `--stat`** — the guard. Reads
+   the index, so nothing can land between it and the commit.
+3. If the file holds a peer's uncommitted work that `git add <path>` cannot separate,
+   **do not split by hand**. Name the foreign content in the commit message and
+   credit it, or hand the file to whoever owns the rest of its dependency unit.
+
+**Step 3 is not hypothetical.** `src/tools/memory/tests.rs` on this date held one
+session's five test fixtures interleaved with another's regression test in a single
+hunk with no separating context. Neither could split it. It resolved on a mechanical
+fact rather than a negotiation: the fixtures call `set_code_search_for_test` and name
+`CodeChunkSearch`, both `+0` at HEAD, so the file committed alone does not compile.
+Ownership followed the dependency unit — all four files, one commit, by the session
+that owned the seam.
+
+**`--stat` belongs to a family worth naming**, because all four members were consulted
+precisely *because* someone was being careful, and each returned a plausible value
+instead of an error: `git diff --cached --stat` (whose lines); file mtimes, destroyed
+as evidence by a `touch` run to bust a clippy fingerprint; a cached clippy
+`Finished in 0.48s`, byte-identical to a green that validates the change; and
+`ListAgents` reporting `Peer sessions (2)` where three were live
+(`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`).
+The last is the worst — the others misdescribe artifacts, that one misdescribes who
+else is writing to your tree, which is the premise this whole entry rests on.
 ## F-71 — Three confident claims from instruments with no resolving power, and the one that mattered hardened in a peer's committed ledger before the retraction arrived
 
 **Valid:** dated 2026-08-26
@@ -7128,6 +7180,33 @@ operation was mandatory, so there is no cost to weigh at all.
 reproduction, **or** one where routing around a known-broken closure path hid a
 live regression. At two, promote to CLAUDE.md § Bug Tracking beside the existing
 reproduction rule.
+
+## W-75 — Reproduction-driven fix caught a 2-round isolation gap and a live stale-buffer trap from a concurrent session
+
+**Observed:** 2026-08-30, picking up the open half ("Fix 2") of `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`: extending ambient-config isolation to every `tools::memory::tests` fixture that builds a real `Agent`.
+
+**Pattern:** Reproduce before fixing, and re-reproduce after each round rather than trusting the static trace. Point the ambient `CODESCOUT_EMBEDDER_URL` at a listener that accepts-and-never-answers (logging each connection), then check the listener's own hit count — not just test wall-clock time — before and after.
+
+**What the reproduction caught that static reading alone would have missed:**
+
+1. **Round 1** — static audit found 5 fixtures building `Agent::new(...)` directly (bypassing the two documented `test_ctx_with_project*` helpers): `test_ctx_no_project`, `multi_project_ctx`, `memory_write_routes_to_project_dir`, `memory_write_accepts_project_alias_for_project_id`, `workspace_ctx_with_sub_project`. Two of these (`memory_write_routes_to_project_dir`, `memory_write_accepts_project_alias_for_project_id`) reach a REAL successful "write" action with zero isolation. Measured before fixing: 12.25s / 4 wedge hits and 6.40s / 2 wedge hits respectively (vs. near-zero for an already-isolated control). Added `set_memory_embedder_for_test` + `set_semantic_memory_store_for_test` to all 5.
+
+2. **Re-reproduction after round 1 still showed 2 wedge hits** (6.35s), not zero — proving the fix was incomplete despite passing all 77 memory tests. Tracing `create_semantic_anchors` found a THIRD, architecturally separate resolution path: it built its own `RetrievalClient::from_env(...)` for code-chunk search, which neither the embedder nor the store seam could reach (the code's own comment already documented this as intentional: "the embedder seam only covers the dense vector path").
+
+3. **While tracing that third path, a second, unrelated agent session was independently editing `src/agent/mod.rs` and `src/tools/memory/mod.rs` in the same live working tree** — it had *already* built a proper `Agent::code_search` / `set_code_search_for_test` seam for exactly this gap, mid-investigation. A `symbols()` read of `create_semantic_anchors` returned the OLD `RetrievalClient::from_env` body from a stale buffer moments after the concurrent session's edit had landed on disk; re-reading fresh (`git status --short` showing `M src/agent/mod.rs` I had never touched was the tell) surfaced the new seam. That seam only auto-installs its `NoCodeSearch` default inside `test_ctx_with_project_raw` — none of the 5 fixtures from round 1 go through that helper, so all 5 still needed `set_code_search_for_test(NoCodeSearch)` added explicitly. After that: both previously-vulnerable tests ran in 0.03–0.04s with genuinely **zero** wedge connections.
+
+**Counterfactual:** Trusting the round-1 fix because "all 77 tests still pass" would have shipped a test suite that looked hermetic and was not — the exact failure shape this whole bug is about (a coupling invisible to the pass/fail gate, visible only in wall-clock time and a wedge listener's hit count). Trusting a single static read of `create_semantic_anchors` mid-investigation would have led to either (a) redundantly reimplementing a seam a concurrent session had just built, or (b) missing it entirely and reporting the fix as complete when a third gap remained.
+
+**Impact:** high — this closes a live pollution/coupling risk on a project whose own retrieval stack is genuinely running on the development machine right now, and it's a second, independently-found confirmation of `codescout:R-89`'s law ("a served copy can be stale even when the read succeeds") — this time on a *live concurrent edit* axis rather than build/process/distribution.
+
+**Confirming data points:**
+1. This session (2026-08-30) — two full rounds, both caught only by re-running the reproduction, not by reading the diff or trusting a green test run.
+
+**Status:** validated — gate green (fmt, clippy --workspace --all-targets --features local-embed, cargo test 4810 passed, cargo check --no-default-features), reproduction confirms zero coupling.
+
+**Valid:** dated 2026-08-30
+
+**Rests on:** `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`'s updated `## Fix` section, which carries the exact before/after wedge-hit counts.
 
 ## Template for new entries
 
