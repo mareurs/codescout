@@ -99,6 +99,12 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | open | `73158c500ff6b293` |
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
+| BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **blocked** — harness, not this repo. Caused 6 misattributions across 4 sessions in one afternoon; real population ≥ 6 while both sides report "Peer sessions (2)" over disjoint sets. Mitigation in the bug file works today | `4266d09da90acb5e` |
+| BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `6411eb594cd7231d` |
+| BL-60 | 1 | the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra` | open — **in-repo and the highest-value unowned item here.** Silent loss on the write path, against the very fields (`unverified`, `entry_prefix`, `closed`) the conventions rely on | `025ff58280c36d07` |
+| BL-61 | 3 | ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found` | open (**watch, not work**) — re-open trigger is `symbol not found` only; a timeout and a guarded zero are outside it, and BL-49 was checked against it | `d25aa6db7b4e6367` |
+| BL-62 | 3 | ZOMBIE WATCH: two Windows CI tests flake on wall-clock/race assumptions | open (**watch, not work**) — check the wine skip-list first; W-64 took it 32 → 8 with every survivor classified | `e817931ef9d51dd0` |
+| BL-63 | 3 | ZOMBIE WATCH: `symbols` search mode 0-matches then succeeds on retry | open (**watch, not work**) — Bug A fixed, Bug B mitigated + instrumented; read the instrumentation before treating it as live | `523233935cc53bc4` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -428,6 +434,102 @@ smallest addressable unit is larger than the largest returnable one, so it canno
 capped-get round-trip bug, where the frontmatter genuinely was set via `edit_markdown` and the
 catalog row kept its old value until an `artifact(update)` repaired it. The two bugs were
 adjacent in one session and got conflated; BL-48's evidence should point at that one.
+### BL-58 — ListAgents omits live cross-profile sessions, and the counts are incomparable
+
+**Status:** blocked — harness, not this repo. **Valid:** dated 2026-08-30
+
+`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`.
+Discovery is scoped to the calling session's config profile; the socket directory
+(`/run/user/<uid>/cc-socks/`) is machine-global. So a session in `~/.claude-sdd` writing
+this very checkout is invisible to a `~/.claude` session, and vice versa.
+
+**The count is the defect, not the omission.** Both sides report `Peer sessions (2)` over
+**disjoint** sets — two agents comparing notes find their numbers agree and read the
+agreement as corroboration. An incomplete count known to be incomplete is weak evidence;
+two matching counts over disjoint populations manufacture confidence out of the very
+discrepancy that should have exposed the gap. Measured population that day: at least six
+sessions, and no single call enumerates them.
+
+Cost, in one afternoon: six misattributions of authorship across four sessions, every one
+a correct elimination over a short population. One session held a commit rather than
+commit lines it believed were a peer's; another nearly filed a false confession.
+
+Not fixable here. What IS available here is the mitigation, and it works today:
+`ls /run/user/$(id -u)/cc-socks/` plus `/proc/<pid>/cwd` gives the real population, and
+any session is addressable as `uds:<socket path>` whether or not it is listed — verified
+by delivering to one.
+
+### BL-59 — the buddy compact banner names a peer's session as your own
+
+**Status:** blocked — `claude-plugins`, not this repo. **Valid:** dated 2026-08-30
+
+`docs/issues/2026-08-30-buddy-compact-banner-names-a-peers-session-as-your-own.md`, filed
+by `codescout-3b`. The SessionStart banner's `from=<sid>` reads as "this session's own
+pre-compaction transcript" and can name a **different live session**.
+
+One rung worse than BL-58, and the reason is worth keeping: BL-58 silently understates who
+else is writing your files; this silently overstates what **you yourself** wrote — and a
+session cannot refute it from the inside, because "you don't remember" is the hypothesis.
+It nearly converted an honest denial into a false confession. What broke it was reading
+the named session's actual write history and finding it disjoint.
+
+Second datapoint, unnoticed at the time: this session's own banner named `codescout-3b`'s
+sid as its origin.
+
+### BL-60 — the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra`
+
+**Status:** open — in-repo, unowned, phase 1. **Valid:** dated 2026-08-30
+
+`docs/issues/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`. A **silent** loss on
+the write path: the call succeeds, the fields are gone, and nothing surfaces until someone
+diffs intent against the stored row.
+
+It sorts above the other open items because of *which* fields it drops. `extra` is where
+`unverified:`, `opened:`, `closed:` and `entry_prefix` live — the fields
+`get_guide("tracker-conventions")` builds its whole queryability argument on, and the ones
+that make a caveat reachable by a triage query instead of buried in prose. A write path
+that drops them defeats the convention at the point of writing.
+
+Not yet scouted. **Run the reproduction before reading its fix plan** — a 2026-08-14 sweep
+changed the fix three times that way, and one of those changes inverted the direction.
+
+### BL-61 — ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found`
+
+**Status:** open — **watch, not work.** **Valid:** conditional — until the trigger below fires
+
+`docs/issues/2026-08-27-references-symbol-not-found-while-lsp-warms.md`, `status: zombie`:
+no longer observed, root cause unconfirmed. Listed here only so the roster is complete —
+which is BL-58's lesson applied to this queue, since these three sat live in the bug ledger
+and invisible to the queue.
+
+**Do not pick up.** Re-open trigger, quoted: `references` returns **`symbol not found`** for
+a symbol `symbols(name=…)` resolves. A timeout and a guarded zero are both explicitly
+outside it — BL-49 was checked against this trigger and is a separate bug. Its cold-start
+mechanism is already refuted; do not re-file it.
+
+### BL-62 — ZOMBIE WATCH: two Windows CI timing flakes
+
+**Status:** open — **watch, not work.** **Valid:** conditional — until a wine/MSVC lane fails again
+
+`docs/issues/2026-08-07-windows-ci-timing-flakes-block-the-gate.md`, `status: zombie`.
+Related to BL-55 by **symptom**, not by established cause. Before treating it as live,
+check whether either test is already retired: `bug-fix-session-log:W-64` took the
+windows-gnu skip-list from 32 entries to 8 with every survivor classified. The
+discriminator BL-55 exists to draw — "flaky by wall clock" vs "a defect that load
+exposes" — applies here too.
+
+### BL-63 — ZOMBIE WATCH: `symbols` search 0-matches then succeeds on retry
+
+**Status:** open — **watch, not work.** **Valid:** conditional — until the instrumentation records a recurrence
+
+`docs/issues/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md`,
+`status: zombie` and already partly closed: Bug A fixed in `b2344aab`, Bug B mitigated and
+**instrumented**. Read what the instrumentation has recorded before treating it as live —
+that is the cheapest available evidence and it did not exist when the file was written.
+
+Worth more than its phase-3 priority suggests if it does recur: retry-succeeds is exactly
+what a false negative looks like from the caller's side, which is this project's
+most-repeated law (`reconnaissance-patterns` law C, a zero that lies).
 ### BL-45 — Decision 1: may a process on an unlinked binary re-index?
 
 **Status:** open — awaiting an operator decision, not blocked on work.
