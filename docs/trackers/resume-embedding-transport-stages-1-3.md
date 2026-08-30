@@ -1126,6 +1126,50 @@ argument** — worth recording as a near miss rather than a win. They assert
 `requests > 1` — both entirely natural phrasings — each would have been monotone in
 exactly the direction its mutation moves, and each would have survived it while
 looking guarded.
+#### And one of the two is not run by the documented gate at all
+
+Measured 2026-08-30, after `codescout-ae` reported the same for a file of theirs.
+Filter `an_oversize_batch_is_split_into_batch_size_requests`:
+
+| lane | result |
+|---|---|
+| `cargo test` — **gate command 3** | `0 passed` (root package targets only) |
+| `cargo test --workspace --no-default-features` — **gate command 4** | `0 passed` (`remote-embed` off → compiles to nothing) |
+| `cargo test --workspace` — **not in the gate** | **`1 passed`** |
+
+So `236f31a4`'s chunking test is covered by **CI's `default` matrix lane and by no
+command in `CLAUDE.md`'s four-command gate.** The commit's "gate: cargo test 4877/0,
+lean 3385/0" is accurate about what was run and misleading about what it proves — the
+mutation verification stands on its own (the test was run explicitly with
+`--features remote-embed` and killed by `chunks(usize::MAX)`), but a **future**
+regression in the chunking loop is locally invisible.
+
+Worth naming plainly, because it is the same shape as the defect that commit fixed:
+the old test was concealed by `#[ignore]` **and** a wrong premise. The new one is
+CI-covered but locally invisible. Strictly better, and still not what the commit
+message implies.
+
+**This is a fourth blind spot in the gate**, alongside the three `CLAUDE.md` already
+documents (bare clippy missing test targets; an ungated module reaching a gated one;
+`check` not being `test`). The pattern it adds: **a workspace member's
+feature-gated tests are invisible to both test commands** — command 3 does not
+build the member, command 4 builds it with the feature off. Any test under
+`crates/codescout-embed/` behind `remote-embed` is in this hole.
+
+Not proposing a `CLAUDE.md` edit from here — that is the most load-bearing document
+in the repo and the gate already runs ~20 s; adding a fifth command is an operator
+call, not a drive-by. Recorded so the next person to add a crate test knows to run
+`cargo test --workspace` explicitly.
+
+**How `codescout-ae` nearly published the opposite**, worth carrying because the
+error is in the *instrument*: their `ci.yml` grep matched only lines containing
+`--features` or `--no-default-features`, which returned the two configs that have
+them and silently dropped the third — whose flags are the **empty string**. They
+almost reported "no gate lane runs it at all." A filter is a hypothesis about where
+the thing lives, and an empty value is precisely what a pattern-based filter cannot
+see. Third time in one day that a search's **scope**, not its pattern, was the thing
+that was wrong (`include_str!` in the binary probe; hidden paths in the citation
+sweep; this).
 ## ET-10 — T6 is a design task, not a consumer swap — and T9 is blocked by two surfaces outside this stream
 
 **Status:** open
