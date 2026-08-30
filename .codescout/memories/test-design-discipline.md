@@ -234,6 +234,58 @@ documentation-defect class by 55%, because mutation testing has no mutant for "t
 stated reason is now false."
 
 
+### Corollary: "compile-error → green" is the trigger for spending a mutation
+
+A test whose only observed RED was a **compile error** has never run its assertions against a
+wrong world. It went from "does not build" to "passes", and nothing in between demonstrated
+that it can fail for a behavioural reason. In a statically typed language that is the *normal*
+TDD cycle, so this shape is common rather than exotic — which is why it needs a trigger rather
+than an instinct.
+
+**Rule: if a new test never showed a red you can attribute to behaviour, break the thing it
+claims to guard and watch it fail.** One mutation, once, before you call it evidence.
+
+Measured 2026-08-29 (`bug-fix-session-log:W-73`). `guard_stale_binary`'s wiring test would have
+shipped looking like proof: the policy unit tests (`Some(true)` refuses, `Some(false)`/`None`
+do not) all pass when the guard is written, tested, and **never called** — five green tests,
+the defect 100% present, and nothing else in 4642 tests notices. Mutating the call site to
+`let _ = …` failed with the exact symptom its doc comment predicted. A second instance the same
+afternoon in `read_file.rs`: two pre-existing tests assert the identical property and stay green
+because their 1200-short-line fixture can never reach the valve.
+
+Two more on 2026-08-30, both whole cohorts. BL-48 shipped 8 tests, every one compile-error →
+green; three mutations killed three of them (`status: fm.status` → `row.status` → `left: "open"`,
+the bug's own symptom; removing the `frontmatter_changed` gate; removing the call). BL-60 shipped
+8 the same way; three mutations, three kills — including one worth keeping past its bug, a
+**characterization guard** proving a ~60-line function extraction was behaviour-*preserving*
+rather than merely compiling. Nothing else in 4819 tests would have caught a field silently lost
+in that move.
+
+### Corollary: a passing unit test proves the function, never its reach — mutate the CALLER
+
+Testing a function in isolation establishes that the function is correct. It says nothing about
+whether anything calls it, and no amount of isolated coverage can. The two are different claims
+and only a mutation *at the call site* separates them.
+
+Found twice independently on 2026-08-30, by two sessions, each by running the mutation rather
+than reasoning about coverage:
+
+- A hook chain with four links — `edit_markdown` calls the hook, the slot holds it, the syncer
+  updates the row, `server.rs:374` installs the syncer. Three were mutation-checked. Deleting the
+  install line left **all 8 tests green**. Predicted, then run, then recorded as a measured
+  residual rather than claimed as coverage.
+- A peer's policy resolver: a pure unit test for `resolve()` plus four wire tests. Mutating
+  `embed_query` to ignore the policy entirely killed the two wire tests; **the pure resolver test
+  passed.** Its author had written the prediction into the helper's doc comment beforehand and
+  still reports they would not have believed it without the red.
+
+**Rule: for any policy, guard, or hook that must be *installed* or *consulted*, the load-bearing
+mutation is at the call site, not in the unit.** A residual here is worth stating plainly — "this
+link is covered by nothing" is a useful sentence; a coverage claim that quietly omits it is not.
+An empirical check (observe the behaviour end-to-end in a live process) narrows such a residual
+from "we do not know it works" to "it works and no test guards it", which is a different and
+smaller debt — but it is not a regression test and should not be recorded as one.
+
 ## EXECUTED is not TESTED
 
 Borrowed vocabulary that names a failure this repo hit **eight times in one task**

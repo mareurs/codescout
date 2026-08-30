@@ -4109,7 +4109,7 @@ fix verification — each reading the same green as proof of a different proposi
 the author of a fix as readily as its diagnostician, and this instance landed minutes after that
 session had written a commit message about vacuous verification.
 
-**Status:** open — threshold met, promotion owed. Two datapoints for the
+**Status:** promoted 2026-08-30 — branch `recon/r-125-name-the-proposition`, commit `ea90d80` in `claude-plugins`. Landed at the **top of Phase 3 — Externalize**, per the case-3 disposition argued below: placement, not rewording, attached to the act of writing an entry rather than to a class of tool. Not pushed and no PR opened — that is outward-facing and awaits the operator. Two datapoints for the
 can-this-instrument-express-the-failure form (the isolation run as diagnosis; the isolation run
 as fix-verification), one for the abundant-result form.
 
@@ -4157,8 +4157,29 @@ datapoints occurred with the skill loaded** — because it is the one most likel
 summarising, and without it a reviewer will read this as the sixth wording gap and lengthen the
 bullet. If the reviewer still prefers mechanism six, the evidence supports that; they should just
 see first that the add-a-mechanism reading has been tried five times against this law and that
-neither of today's failures was a wording gap. Not yet raised — cross-repo edit, held for the
-user.
+neither of today's failures was a wording gap. **Raised 2026-08-30** as `ea90d80` on `recon/r-125-name-the-proposition`.
+
+The commit message opens with *"BOTH RECORDED FAILURES HAPPENED WITH THIS SKILL ALREADY
+LOADED"* — first line, capitalised — because this entry identified that as the fact most
+likely to be lost in summarising, and a reviewer who loses it reads the patch as a sixth
+wording gap and lengthens the bullet. The message also states outright that law C's existing
+text already covers both errors correctly, so the add-a-mechanism reading is pre-empted
+rather than merely unmentioned.
+
+**A converging datapoint arrived the next day, and it changes how much weight the clause
+carries.** The same principle was promoted independently on the codescout side as
+`docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`, distilled from **nine**
+instruments across four concurrent sessions in one day: `git diff --cached --stat` answering
+"how many lines" when asked "whose lines"; mtimes destroyed by the prober's own `touch`; a
+cached clippy green; a green `cargo test` on a tree failing `-D warnings`; a mid-run log
+total; a filtered test count; a page cap; a passing unit test whose caller ignored the
+policy; and `ListAgents` reporting a confident count of an incomplete set.
+
+That ADR is repo-shaped and governs instrument **choice**; this clause is the craft-shaped
+half and fires at the moment a claim is **written down**. Neither subsumes the other, and
+the two were reached by different routes from non-overlapping evidence — which is the
+strongest argument available that the underlying law is real rather than an artefact of one
+bad afternoon.
 
 **Kin, and an admission:** [[R-120]] — *"a decision procedure is a seam; reading it far enough to
 get an ANSWER is not far enough to get its PRECONDITIONS"* — describes exactly how the wrong
