@@ -245,6 +245,62 @@ as a reordering that does not end on the lean lane. **Not applied here — CLAUD
 operator-owned surface and the gate's composition has been argued at length in that section;
 changing it is the operator's call, not a drive-by from a bug file.**
 
+
+### Better: REORDER, do not append — and it is free
+
+*`codescout-ae`'s proposal, and it supersedes the fifth-step mitigation above. Verified
+here at ~20:5x rather than accepted.*
+
+This is an **ordering consequence, not a missing step.** Swap the last two gate commands so
+the lean lane runs third and `cargo test --workspace` runs fourth. The gate then ends on a
+default-features build, which rebuilds the bin target — it must, since the `cli_artifact`
+tests exec that path — and leaves `target/debug/codescout` correct. Same four commands, no
+fifth, nothing appended.
+
+Measured on the reordered sequence, and note the second row is the whole point:
+
+| step | wall | `--help \| grep -c artifact` after |
+|---|---|---|
+| 3. `cargo test --workspace --no-default-features` | 26.9 s | **0** — clobbered |
+| 4. `cargo test --workspace` | 53.5 s | **4** — restored |
+
+and the positive check passes: `./target/debug/codescout artifact --help` exits 0.
+
+**Cost: reasoned symmetric, not measured symmetric.** Only the reordered direction was
+timed. The argument that it is free: both orders run the same two cargo invocations over the
+same two feature sets, merely transposed, and cargo's cache is keyed on feature set rather
+than order. Clippy precedes both with a *third* set (`default + local-embed`), so neither
+lane inherits a warm cache from it — each order pays exactly one default rebuild and one
+lean rebuild. By contrast `codescout-ae` measured the appended `cargo build --bin codescout`
+at **~12 s** in the case that matters (immediately after the lean lane, i.e. every gate run)
+and 451 ms as a true no-op. So the fifth step pays ~12 s on a ~26 s gate to undo something
+the ordering need never have caused.
+
+### What NEITHER fix does
+
+Neither closes the window; both close the **terminal state**, which is the part that matters.
+During the lean lane the binary genuinely is librarian-less — measured above, for the ~54 s
+until step 4's build completed — and a concurrent session running default-features tests in
+that window still hits it.
+
+The difference is the bound:
+
+| | hazard window |
+|---|---|
+| gate as documented (lean last) | **unbounded** — until some session runs a default build, which may be never |
+| reorder, or the fifth step | bounded by the rest of your own gate run, while you are still at the keyboard |
+
+So the fix converts a hazard you leave behind and walk away from into one you are present
+for. That is a real improvement and it is not elimination; a session gating concurrently with
+another can still collide, and nothing here detects that — the same open half filed under
+`docs/issues/2026-08-30-a-transient-uncoordinated-mutation-during-an-announced-window.md`
+§ *The channel inversion*.
+
+**Still not applied to CLAUDE.md by this session.** `codescout-ae` owns that gate wording as
+of `4c88e129` and has offered to make the change; both of us are surfacing it to the operator
+rather than either deciding it. A gate is a contract every session pays on every task, and
+its shape is not one session's call — which is the same reason the fifth-step version was
+flagged rather than applied.
 ## Workarounds
 
 Right now, if `cli_artifact` tests fail with `unrecognized subcommand 'artifact'`:
