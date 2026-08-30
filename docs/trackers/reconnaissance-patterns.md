@@ -5106,6 +5106,43 @@ error standing while feeling rigorous.
 | **Temporal** | the probe was right about an *instant*, read as standing | **bracket the measurement** — capture state either side |
 | **Sampling** | right for *this observer*, read as true of all | **a second observer** |
 
+**A COUNT cannot answer a COMPLETENESS question — the sharpest case, three instances in one
+hour.** Verifying `.worktrees/bench` still matches its pinned commit `ede25e69`, two sessions
+produced two different, plausible, well-formed counts of "files present":
+
+| observer | number | what it actually counted |
+|---|---|---|
+| `codescout-ae` | **851** | files matching their walk |
+| `codescout-f0` | **778** | same, with `.codescout/` and `.git` pruned — and **61 tracked paths live under `.codescout/`** |
+
+Neither is the answer, and the 778 was the dangerous one: it supports *"73 files are
+missing, the corpus is damaged"*, which would have derailed an operator decision about
+whether the 174M corpus is safe to keep. Both numbers answer *how many things match my
+filter*. The question was **is anything missing**, and only a set difference answers it:
+
+```
+git ls-tree -r --name-only ede25e69 | sort > tracked
+(cd .worktrees/bench && find . -mindepth 1 \( -type f -o -type l \) -printf '%P\n') | sort > ondisk
+comm -23 tracked ondisk | wc -l     # 0 — every tracked path present
+```
+
+**`comm` cannot be wrong about this in the way a count can**, because it compares the two
+sets the question is about rather than summarising either. A count summarises, and a summary
+discards exactly the structure the question needs.
+
+Two more from the same hour, both `codescout-ae`'s, both the same shape:
+
+- **A diff against an empty index.** `GIT_INDEX_FILE=/tmp/… git diff --stat ede25e69`
+  returned `851 files changed, 272362 deletions(-)`, exit 0. The index isolation was
+  *correct*; the question was wrong — a fresh index is empty, so this diffed commit against
+  nothing. Note why it was persuasive: the file count **matched the true count**, because 851
+  is exactly "every tracked file, reported as deleted". Plausibility manufactured by the same
+  fact that made it meaningless.
+- **`find -type f` twice in one session**, read as *things that are there*. It means *regular
+  files*: it missed a symlink here, and earlier reported "0 files" for two directories that
+  `rmdir` then refused as non-empty — the second time after the first had already been
+  written up.
+
 **Propositional.** `du` proving a directory's size, read as proving absence. `nm` on a
 stripped binary returning 0, read as the code being gone. `cargo build` exiting 0, read as
 *the binary carries the librarian subcommands* — two propositions with a plausible bridge.
