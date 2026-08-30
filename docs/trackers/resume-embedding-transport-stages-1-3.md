@@ -66,7 +66,11 @@ the ADR rather than inferred from the plan's `draft` status.
 ## ET-1 — Pin the load-bearing invariant with a test, before anything depends on it
 
 **Status:** DONE 2026-08-28 — `2bd3415b` (`experiments`), patch-id `9e434457`
-**Valid:** invariant — now pinned by a test, mutation-verified 3/3
+**Valid:** invariant
+**Rests on:** `a_lean_build_cannot_construct_a_non_lite_client` and
+`lite_alone_forces_dense_only_and_vetoes_the_reranker` in
+`src/retrieval/client.rs::selection_tests` — cited by name, not by line, because
+this entry's own proof chain below has already drifted once.
 
 The whole consolidation rests on one property, currently true and currently
 maintained by **three files agreeing with each other by accident**. Nothing pins
