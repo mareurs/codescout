@@ -407,11 +407,45 @@ established relationship to the question. Reasoning harder would not have helped
 > cannot see". Socket addressing remains correct — delivery is unfiltered while discovery is
 > not — but it is no longer a fallback from an unknowable set.
 >
-> **And the answer was already on record — law G.** `CLAUDE.md`'s opening section states that
-> this machine runs three Claude Code instances with independent config dirs (`~/.claude`,
-> `~/.claude-sdd`, `~/.claude-kat`). Five sessions spent an evening deriving from behaviour a
-> partition the repo's own first section documents. Nobody read it, because nothing about a
-> peer-visibility question looks like a config-topology question.
+> **Verified from BOTH cells, which closes the set.** `codescout-ae` (`.claude`) lists
+> exactly `801487` and `810953`; `codescout-f0` (`.claude-sdd`) lists exactly the three other
+> `.claude-sdd` sessions. **2 + 3 + the two observers = 7**, every live session accounted
+> for, each seeing precisely their own profile minus themselves. One observer cannot
+> distinguish *profile-scoped* from *arbitrary subset* however carefully they look — which is
+> `R-136`'s **sampling** row, whose prescribed check is literally "a second observer", and
+> neither session reached for it for an hour.
+>
+> **Not a law-G search failure — a RELEVANCE-RECOGNITION failure.** *(`codescout-ae`'s
+> correction to a paragraph of mine that claimed the opposite; it makes the finding stronger,
+> so it is recorded rather than quietly fixed.)*
+>
+> The first draft here said the answer *"was already on record and nobody read it"*.
+> `CLAUDE.md`'s opening section documents the **topology** — three Claude Code instances,
+> independent config dirs, named. It does **not** document the **consequence**, that peer
+> discovery is scoped to the config dir. That step is an inference, not a lookup, and
+> searching `CLAUDE.md` for `ListAgents` returns nothing.
+>
+> The distinction decides the remedy. *"On record and unread"* is a story about negligence
+> and implies **search harder** — which would not have worked, because nobody failed to
+> search. What was on record was the **generator** of the answer, sitting in the first section
+> of every session's context, with nothing marking it as relevant to a peer-visibility
+> question. The actionable form:
+>
+> > **When an observed partition has no explanation, check whether the ENVIRONMENT already
+> > partitions along some axis before theorising about the instrument.**
+>
+> Knowing three profiles existed would have made profile-scoping the *first* hypothesis
+> rather than the third. And relevance-recognition failures are not fixed by diligence — the
+> same conclusion `R-139` reached about its counting-rule and query-key instances, where care
+> failed in every one and a procedure caught the ones that were caught.
+>
+> **Footnote that sharpens the probe's justification.** The documented topology has three
+> cells; only two are live — no `~/.claude-kat` session exists right now. That is knowable
+> *only* because socket enumeration is **profile-blind by construction**: it walks
+> `/run/user/1000/cc-socks/` and cannot be scoped by config dir even in principle. That is a
+> better argument for `scripts/peer-sessions.sh` than "sockets are the fallback when the
+> population is unknowable" ever was — it is not a fallback, it is the only enumerator whose
+> blind spot is structurally absent.
 >
 > What survives unchanged: **elimination over visible peers is still wrong**, since the
 > visible set is a profile, not a population. What dies is the claim that no correction is

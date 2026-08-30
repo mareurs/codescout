@@ -5129,6 +5129,27 @@ in-checkout ones, read as the tool being biased against the working directory. A
 observer measured the opposite direction (0-of-2 and 2-of-4), and the bias claim died.
 *The check:* another observer. Neither a control nor a bracket touches this one.
 
+> **This row's own case, followed to the end — and the lesson is sharper than "get a second
+> observer".** Both sessions then concluded the omission was **arbitrary**. It is not:
+> visibility is deterministic on `CLAUDE_CONFIG_DIR`, verified 7/7 across every live process
+> and closed from *both* cells (2 + 3 + the two observers = 7, each seeing exactly their own
+> profile minus themselves).
+>
+> > **"Arbitrary" is what two irreconcilable single-observer views look like from inside.**
+>
+> That is the sampling row's real failure mode. A lone observer does not merely get a *weak*
+> reading — they cannot distinguish *scoped by a variable I cannot see* from *no rule at all*,
+> however carefully they look, because both produce a set with no visible structure. Two
+> observers with contradictory data feel like evidence of noise and are actually evidence of a
+> **partition**: the disagreement is the signal, not the obstacle.
+>
+> So the check is not "add an observer and average". It is: **when observers disagree, look
+> for the variable that makes both readings correct.** Averaging here would have produced a
+> meaningless middle; the contradiction was the whole datum.
+>
+> Recorded because the taxonomy predicted the right instrument and neither session reached for
+> it for an hour — knowing the row exists did not make anyone run its check.
+
 ### The counterexample belongs in the statement
 
 Say *nearly* every, never *every*. The **mutual-deference deletion** of the same day does
