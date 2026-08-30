@@ -492,7 +492,7 @@ impl UpdateArgs {
 /// every field, so a field can exist on the struct and never reach the tool.
 /// That failure mode is silent — the tool defaults the missing key and reports
 /// success — and it is only testable if the translation is reachable without a
-/// catalog. See `docs/issues/2026-08-30-cli-artifact-update-has-no-force-escape-for-the-shrink-guard.md`.
+/// catalog. See `docs/issues/archive/2026-08-30-cli-artifact-update-has-no-force-escape-for-the-shrink-guard.md`.
 fn build_update_tool_args(args: &UpdateArgs) -> Result<Value> {
     let mut tool_args = serde_json::Map::new();
     tool_args.insert("id".into(), Value::String(args.id.clone()));
