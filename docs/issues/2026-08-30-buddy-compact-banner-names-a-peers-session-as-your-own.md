@@ -1,0 +1,148 @@
+---
+status: open
+opened: 2026-08-30
+closed:
+severity: medium
+owner: marius
+related: []
+tags: [companion-plugin, buddy, attribution, misleading-instrument, multi-session]
+kind: bug
+---
+
+# BUG: the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript"
+
+## Summary
+
+On reload-after-compaction the buddy hook prints
+`<!-- buddy:reloaded sid=<mine> from=<other> source=compact -->`. Measured
+2026-08-30, `from=` named a **different, concurrently live session**, not this
+session's predecessor. The line reads as "here is your own prior transcript",
+so an agent investigating what it did before the compaction will attribute that
+session's writes to itself. It nearly converted a correct denial of authorship
+into a false confession.
+
+Fix lives in `claude-plugins` (buddy), not this repo — filed here because it
+bit a codescout session and this is where this session's bugs go, following the
+precedent of `open-issue-work-queue:BL-51`.
+
+## Symptom (Effect)
+
+Emitted into this session's context at SessionStart:
+
+```
+<!-- buddy:reloaded sid=428b66b8-0b8c-48e5-84c6-754008e3ccc7 from=7114cb0d-4685-46db-a740-572dbe68113a source=compact -->
+```
+
+`7114cb0d` is not this session's predecessor. It is the live session
+`fix-embedding-transport-stage-1`, which was running concurrently and writing to
+the same checkout throughout.
+
+There is no error and no hedge. `from=` in a banner whose subject is
+*this* session's reload reads as provenance for *this* session.
+
+## Reproduction
+
+Not reduced to steps. Observed once, on this machine, with four concurrent
+Claude sessions across two profile directories (`~/.claude`, `~/.claude-sdd`).
+The banner is emitted by the buddy PreCompact/SessionStart hook pair; the
+minimal repro to try first is a compaction while at least one other session is
+live in the same project directory.
+
+## Environment
+
+Linux; codescout `experiments`; buddy plugin under
+`/home/marius/work/claude/claude-plugins/`; four concurrent sessions, three in
+`~/.claude` and one in `~/.claude-sdd`.
+
+## Root cause
+
+**Not established — mechanism not read.** The hook source was not opened. What
+is measured is only the effect: `from=` carried a session id belonging to
+another live session rather than to this session's own prior transcript.
+
+The plausible mechanism, stated as a hypothesis to check first rather than a
+finding: buddy resolves "the session to reload specialists from" by recency
+across the profile's project directory, so with concurrent sessions the
+most-recently-written transcript is a peer's rather than one's own. If that is
+right, `from=` is accurate about *where the specialists came from* and
+misleading only because the banner's subject is `sid`, which invites reading the
+whole line as one session's history.
+
+## Evidence
+
+Two independent identifications of `7114cb0d`, neither relying on the other:
+
+1. **Write-history**, from parsing the session JSONL for `tool_use` entries:
+   `7114cb0d`'s most-written paths are `src/retrieval/embedder.rs` (23),
+   `docs/TAXONOMY.md` (20), `src/retrieval/client.rs` (15),
+   `src/retrieval/search.rs` (11), `src/agent/mod.rs` (5) — the
+   embedding-transport work, and visibly not this session's.
+2. **Process table**, independently produced by the peer session `codescout-ae`:
+   `claude 801487 --resume 7114cb0d… = fix-embedding-transport-stage-1`, live.
+
+## Hypotheses tried
+
+1. **Hypothesis:** `7114cb0d` is this session's own pre-compaction transcript,
+   so the `NoCodeSearch` / W-75 writes found in it are this session's, forgotten
+   across the compaction.
+   **Test:** listed its written paths and compared against this session's known
+   work; separately, grepped this session's own transcript for write calls whose
+   payload contains `NoCodeSearch`, `CodeChunkSearch`,
+   `set_code_search_for_test`, `set_memory_embedder_for_test` or
+   `Network-free stubs`.
+   **Verdict:** rejected. Zero such writes in this session; `7114cb0d`'s write
+   history is another work-stream entirely.
+
+## Why this one is worse than its siblings
+
+It belongs to the family of instruments that return a plausible value instead of
+an error — a `--stat` that cannot show whose lines it counted, a touched mtime
+read as a build time, a cached `Finished in 0.48s`, and `ListAgents` reporting
+"Peer sessions (2)" in a four-session world (that last one being filed
+separately by `codescout-ae`).
+
+This one inverts the direction. `ListAgents` **understates who else is writing
+your files**; this banner **overstates what you yourself wrote**. And a session
+cannot refute it from the inside by introspection, because the hypothesis it
+plants — *you did this and do not remember* — predicts exactly the absence of
+memory that a compacted agent actually has. Only external evidence breaks it.
+
+## Fix
+
+Not implemented, and the shape matters more than the patch.
+
+Do not print a bare `from=<sid>` on a line whose subject is `sid=<mine>`. Either
+label the relationship (`specialists_from=`, plus `predecessor=` when it really
+is one), or omit `from=` entirely when the resolved source session is not this
+session's own predecessor — which the hook can determine, since it knows both
+ids.
+
+## Tests added
+
+None — not fixed, and the fix is in another repo.
+
+## Workarounds
+
+Do not treat the banner's `from=` as provenance for your own history. To
+establish what this session actually wrote, parse its own transcript for
+`tool_use` entries with a write tool (`edit_file`, `edit_code`, `create_file`,
+`edit_markdown`, `artifact`) and match on a distinctive symbol from the diff in
+question. That answers "who wrote this line" directly, rather than by
+elimination over a candidate set no instrument reports completely.
+
+## Resume
+
+Open the buddy hook that emits `buddy:reloaded` (search `claude-plugins` for the
+literal string) and read how the `from` session is selected — that is the
+unread premise this whole file rests on. Confirm or refute the recency
+hypothesis under *Root cause* before proposing the labelling change under *Fix*.
+
+## References
+
+- `docs/issues/2026-08-30-cli-artifact-drops-time-scope-and-extra.md` — sibling
+  filed the same day, also a silent-default class
+- `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — the standing
+  rule this violates: an instrument's answer must not read as a complete
+  population when it is one scope's view
+- `open-issue-work-queue:BL-51` — precedent for recording a `claude-plugins` bug
+  in this repo's ledger
