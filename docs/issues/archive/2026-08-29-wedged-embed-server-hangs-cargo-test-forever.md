@@ -1,19 +1,18 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-29
+tags:
+- testing
+- test-isolation
+- embeddings
+- timeout
+- hang
 closed: 2026-08-29
-severity: high
+opened: 2026-08-29
 owner: marius
 related:
-  - docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md
-tags:
-  - testing
-  - test-isolation
-  - embeddings
-  - timeout
-  - hang
-kind: bug
-unverified: "Only Fix 1 (the transport timeout) is applied. Fix 2 is NOT: tools::memory::tests still resolve their embedder from ambient config, so the suite's behaviour remains a function of the developer's shell -- it can no longer hang, but a configured-and-reachable local service still participates in tests that believe they are isolated. The pollution half of that same coupling was closed separately by docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md."
+- docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md
+severity: high
 ---
 
 # BUG: `EmbedderHttp` sets no request timeout, so a wedged embed server hangs `cargo test` forever instead of failing
@@ -211,10 +210,41 @@ The patch-id is the durable half of the pair: `experiments` is rebased after
 every ship, so the SHA is positional and dies, while the patch-id is a content
 hash of the diff and survives both rebase and cherry-pick.
 
-**Fix 2 (the tests) — NOT APPLIED.** `tools::memory::tests` still resolve their
-embedder from ambient config. They can no longer hang, but the suite still
-reaches a live local service when one is configured. Recorded in `unverified:`
-so a query surfaces it; see § Resume.
+**Fix 2 (the tests) — APPLIED 2026-08-30.** Two rounds, because the first missed
+a third resolution path:
+
+- Round 1: audited every `tools::memory::tests` fixture that builds a real
+  `Agent` (not just the two named `test_ctx_with_project*` helpers) — found 5
+  more direct `Agent::new(...)` construction sites
+  (`test_ctx_no_project`, `multi_project_ctx`, `memory_write_routes_to_project_dir`,
+  `memory_write_accepts_project_alias_for_project_id`, `workspace_ctx_with_sub_project`),
+  2 of which (the two `memory_write_*` tests) reach a REAL, successful "write"
+  action with no isolation at all. Added `set_memory_embedder_for_test` +
+  `set_semantic_memory_store_for_test` to all 5.
+- Round 2: a concurrent session (same day) independently found and fixed a
+  THIRD resolution path this seam never covered — `create_semantic_anchors`'s
+  code-chunk search built its own `RetrievalClient::from_env` rather than going
+  through the embedder/store seams (see `Agent::code_search` +
+  `Agent::set_code_search_for_test`, and the regression test
+  `a_memory_write_reaches_code_search_through_the_seam`). That fix only
+  auto-installs its `NoCodeSearch` default inside `test_ctx_with_project_raw`,
+  so it did not automatically cover the 5 fixtures from round 1 that bypass
+  that helper — added `set_code_search_for_test(NoCodeSearch)` to all 5.
+
+**Verified by reproduction, not by reading the fix.** Pointed `CODESCOUT_EMBEDDER_URL`
+at a listener that accepts and never answers (matching this bug's own repro
+shape) and confirmed, before fixing: `memory_write_routes_to_project_dir` took
+12.25s and hit the wedge 4 times; `memory_write_accepts_project_alias_for_project_id`
+took 6.40s and hit it twice. After fixing all three seams: both run in
+0.03–0.04s with **zero** connections to the wedge — not merely fast, genuinely
+hermetic. Full suite: `cargo fmt`, `cargo clippy --workspace --all-targets
+--features local-embed -D warnings`, `cargo test` (4810 passed, 0 failed, 46
+ignored), `cargo check --no-default-features` — all green.
+
+Not yet committed as of this update — landed in a working tree a concurrent
+session was also actively editing (`src/agent/mod.rs`,
+`src/tools/memory/mod.rs`); see that session's own commit for the `code_search`
+seam itself.
 ## Tests added
 
 `a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever`
@@ -256,17 +286,10 @@ Or restart the wedged embed server (`./scripts/retrieval-stack.sh`).
 
 ## Resume
 
-Fix 1 is done. **Fix 2 is the open half:** stop `tools::memory::tests` resolving
-the embedder from ambient config, so no test depends on a live local service.
-The isolation helper already exists for the pollution case
-(`test_ctx_with_project` vs `test_ctx_with_project_raw`,
-`src/tools/memory/tests.rs:42-46`); extend the same treatment to every test that
-builds a real `Agent`.
-
-When doing it, verify the isolation the way this fix was verified: point the
-ambient config at a listener that accepts and never answers, and confirm the
-tests are **unaffected** rather than merely fast. A test that got quicker because
-the timeout now fires is still coupled to the environment.
+N/A — both fixes are done as of 2026-08-30. See the updated § Fix for what
+changed and how it was verified (reproduction against a wedge listener, zero
+connections after the fix, full gate green). Not yet committed — landed in a
+working tree a concurrent session was also actively editing.
 ## References
 
 - `src/retrieval/embedder.rs:368` — the untimed client

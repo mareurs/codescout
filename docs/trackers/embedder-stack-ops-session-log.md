@@ -7,6 +7,7 @@ tags: ["embeddings", "retrieval", "docker", "gpu"]
 topic: embedder stack ops
 entry_prefix: ["F", "W"]
 entry_high_water_F: 2
+entry_high_water_W: 1
 ---
 
 # Session Log — Embedder Stack Ops
@@ -71,7 +72,7 @@ entry_high_water_F: 2
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
+| W-1 | 2026-08-29 | high | test-via-real-invocation-path | .env's stale CODESCOUT_MODEL_DIR would have stayed masked indefinitely, first breaking on the unit's own first real boot | validated |
 
 ---
 
@@ -339,15 +340,21 @@ True of that incident. The driver fault is cleared; the healthcheck blind spot i
 **Rests on:** the `dmesg` NVRM lines and the zombie's `ps` state, not on the
 container status, which was wrong throughout.
 
-**Fix idea / Pointer:** Two unclaimed, both one-line, both recorded in `ET-8`
-Phase E:
+**Fix idea / Pointer:** ~~Two unclaimed, both one-line, both recorded in `ET-8`
+Phase E~~ — **both DONE**, verified 2026-08-30 by re-reading `docker-compose.yml`
+directly (not from this entry's own claim): `init: true` is present on
+`dense-gpu`, `sparse-gpu` and `reranker-gpu`, each commented with a direct
+reference to this entry; `dense-gpu`'s and `reranker-gpu`'s healthchecks now
+POST to `/v1/embeddings` / `/v1/rerank` respectively (a 29x-slower real forward
+pass vs `/health`'s 0.8ms latch-read, measured and commented inline). Landed in
+`9360be99` ("fix(compose): healthcheck the inference path, not /health (T13,
+T14)"), patch-id `47ca28a05d9e5b5fa962b4ba43b9b16d68b52a9d`
+(`git show 9360be99 | git patch-id --stable`). A live `curl -X POST
+.../v1/embeddings` re-check the same day returned a real 768-dim vector in
+26ms — the fix is not just present in the file, it is currently doing its job.
 
-1. `init: true` on the llama.cpp compose services. Docker's own error message
-   recommends it, and it is what would have let the dead process be reaped
-   instead of zombifying and stranding its VRAM.
-2. Point the healthchecks at `/v1/embeddings` (and the reranker's own endpoint)
-   rather than `/health`, so the check traverses the subsystem that actually
-   breaks. Without this, the next occurrence is again invisible.
+1. ~~`init: true` on the llama.cpp compose services.~~ Done.
+2. ~~Point the healthchecks at `/v1/embeddings`...~~ Done.
 
 **Distinguishing this from `F-1`:** same surface, opposite state and opposite
 remedy. `F-1` is containers **`Exited`** after a host reboot, fixed by
@@ -355,6 +362,30 @@ remedy. `F-1` is containers **`Exited`** after a host reboot, fixed by
 fixable only by a reboot. If a future session sees `Exited`, `F-1` applies. If it
 sees `healthy` and requests hang, this does — and `docker ps` will be actively
 misleading, so go to `curl` and `dmesg` first.
+
+## W-1 — Boot-time systemd unit's clean environment surfaced a masked .env config bug
+
+**Observed:** 2026-08-29, immediately after adding `~/.config/systemd/user/codescout-retrieval-stack.service` (to auto-start the GPU embedder profile on login/boot) and testing it live via `systemctl --user start`.
+
+**Pattern:** Bring up infrastructure via the exact mechanism that will run it in production (a clean systemd unit environment), not by re-running the same manual shell command that has been "working" all session — an interactive shell's accumulated ambient environment variables can silently paper over a real config bug that a clean environment immediately exposes.
+
+**Counterfactual:** Without testing through the actual unit (vs. just trusting my earlier manual `docker compose --profile gpu up -d dense-gpu` success), the project-root `.env`'s stale `CODESCOUT_MODEL_DIR=/home/marius/models` would have stayed invisible indefinitely — every interactive debugging session this machine has ever had was shielded by an ambient `CODESCOUT_MODEL_DIR=./models` export that happens to override `.env` (Docker Compose precedence: process env > `.env` file > inline default). The bug would have first bitten in some future genuinely-clean context (CI, a fresh terminal, another machine, or exactly this systemd unit on the very first real reboot after enabling it) — at a moment with far less context loaded than right now, likely reading as a fresh, confusing GPU/VRAM-looking crash-loop (dense-gpu AND reranker-gpu both failing simultaneously) rather than the one-line fix it actually was.
+
+**Confirming data points:**
+1. This session (2026-08-29) — `dense-gpu`/`reranker-gpu` crash-looped only via the systemd unit path, not via my earlier manual restart, and the root cause (`docs/issues/2026-08-29-stale-model-dir-env-masked-by-shell.md`) was found and fixed within minutes once the clean-env log evidence was read directly (`No such file or directory` + an empty root-owned host directory with a matching mtime) rather than re-guessing a resource-contention story.
+2. Pending: any future "add automation for X" task on this machine that previously only ran interactively.
+
+**Impact:** high — this was a real, previously-invisible defect in a live config file that would have blocked the exact automation just built, on its very first real trigger (next reboot), with no advance warning.
+
+**Promote-when:** A second instance of "testing new automation via its real invocation path (not a manual shell re-run) surfaces a bug that manual testing had been silently masking." At 2 datapoints, promote to CLAUDE.md / the reconnaissance skill: "When adding a boot/CI/cron-triggered automation for an existing manual workflow, test it via that exact clean-environment mechanism before declaring it done — a manual shell re-run inherits ambient state the automation will not have."
+
+**Status:** validated — single datapoint, drift caught and fixed before the unit's first real unattended boot.
+
+**Valid:** dated 2026-08-29
+
+One confirmed datapoint; promote-when threshold (2 datapoints) not yet reached.
+
+**Rests on:** `docs/issues/2026-08-29-stale-model-dir-env-masked-by-shell.md` — the bug file this win's counterfactual is built on.
 
 ## Template for new entries
 

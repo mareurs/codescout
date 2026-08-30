@@ -550,12 +550,29 @@ reliably the stale side (B1 is the counterexample). D1 root's
 and re-measure the crate delta.
 
 **Phase E — independent, no dependency on A-D.** Can be picked up by any session
-at any time: test isolation for `tools::memory::tests` (the unfixed half of
-`docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`);
-retrofit a lean-safe inert embedder to restore the 11 test items ET-2 gated;
-`rendezvous_poll_for_test` dead under `--no-default-features --all-targets`
-(pre-existing, `server.rs:988`); `init: true` on the llama.cpp compose services
-and healthchecks that exercise `/v1/embeddings` rather than `/health`.
+at any time. Status as of 2026-08-30:
+
+- ~~test isolation for `tools::memory::tests`~~ **DONE.** The unfixed half of
+  `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`.
+  Took two rounds: round 1 added the embedder/store stubs to 5 fixtures that
+  bypassed the documented helpers; round 2 (after a concurrent session
+  independently built `Agent::code_search`/`set_code_search_for_test`) added
+  that override too, since its `NoCodeSearch` default only auto-installs inside
+  `test_ctx_with_project_raw`. Verified by reproduction (a wedge listener
+  logging hits, not just wall-clock time): 0 connections after the fix, vs. 4
+  and 2 before it. Gate green (fmt, clippy, `cargo test` 4810/0, `--no-default-features`).
+  See `bug-fix-session-log:W-75` for the full account.
+- ~~`init: true` on the llama.cpp compose services and healthchecks that
+  exercise `/v1/embeddings` rather than `/health`~~ **DONE**, commit `9360be99`
+  ("fix(compose): healthcheck the inference path, not /health (T13, T14)"),
+  patch-id `47ca28a05d9e5b5fa962b4ba43b9b16d68b52a9d`. This is the same fix
+  `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`'s
+  own "Fix idea" pointed at — see that entry for the live re-verification
+  (a real `POST /v1/embeddings` in 26ms).
+- retrofit a lean-safe inert embedder to restore the 11 test items ET-2 gated —
+  still open.
+- `rendezvous_poll_for_test` dead under `--no-default-features --all-targets`
+  (pre-existing, `server.rs:988`) — still open.
 
 ### Why this order and not the plan's
 
