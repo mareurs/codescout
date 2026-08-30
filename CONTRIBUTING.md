@@ -110,8 +110,24 @@ second.
 cargo fmt
 cargo clippy -- -D warnings
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features
 cargo test --workspace
 ```
+
+The two `cargo test` lanes follow the same logic as the two clippy ones. CI's test matrix is
+three configs — `default`, `local-embed`, `no-features` (`.github/workflows/ci.yml:70`) — and
+the lean lane is what mirrors `no-features`. A test that reaches a `#[cfg(feature = "librarian")]`
+item without gating itself compiles and passes under default features, so the default lane
+cannot see it by construction.
+
+Run them in that order. Both lanes share one `target/`, and `tests/cli_artifact.rs` resolves
+`target/debug/codescout` by path at run time, so the lean lane leaves a librarian-less binary
+sitting there; ending on the default lane puts it back.
+
+This block is a deliberate second copy, kept because a contributor should not have to read an
+internal agent contract to find out how to verify a patch. **[`CLAUDE.md`](CLAUDE.md) §
+Development Commands is authoritative** and carries the rationale for every command above — if
+the two ever disagree, this block is the bug.
 
 ## What to Contribute
 

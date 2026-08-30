@@ -115,9 +115,28 @@ A `cargo xtask gate` (or a `[alias]` entry in `.cargo/config.toml`) plus a one-l
 CLAUDE.md change pointing at it. The two non-default `cargo test` runs are the whole
 value — they are what the host-OS default build cannot see. Note this does NOT cover
 the Windows-only failures (`docs/issues/archive/2026-08-06-windows-doctor-rehome-and-index-lock-tests-fail.md`),
-which need a real Windows runner. Full gate definition and the ancestry check now live
-in [`docs/RELEASE.md`](RELEASE.md) § *Large-Cohort Promotion*; friction write-up is F-3
+which need a real Windows runner. The gate definition lives in
+[`CLAUDE.md`](../CLAUDE.md) § *Development Commands* and nowhere else;
+[`docs/RELEASE.md`](RELEASE.md) § *Large-Cohort Promotion* holds the ancestry check and
+now references the gate rather than restating it. Friction write-up is F-3
 in `docs/trackers/release-promotion-session-log.md`.
+
+**Update 2026-08-30 — partly discharged, and the pointer above was aimed at the wrong
+file.** The analysis above is kept as the dated record that argued for the change; do not
+read its present tense as current. Two corrections. (1) It describes CLAUDE.md's line as
+`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` — that is what it said on
+2026-08-06 and is no longer true. The lean lane landed: the gate is four commands and
+includes `cargo test --workspace --no-default-features`, so it now covers **two** of the
+nine CI cells on the host OS (`default` and `no-features`) rather than one. The remaining
+config, `--features local-embed --no-default-features`, has a *clippy* lane in the gate but
+no *test* lane, and the Windows cells still need a real runner. (2) This entry used to
+point at RELEASE.md § *Large-Cohort Promotion* as the "full gate definition". That block
+was the least complete of the five transcriptions in the repo — it omitted the lean lane
+and ran `cargo clippy --all-targets` with neither `--workspace` nor `--features
+local-embed`, which reaches neither `crates/codescout-embed` nor the `local-embed`-gated
+module. A reader following this pointer did everything right and landed on the weakest
+list. That is the argument for one definition and references everywhere else, and it is
+why the pointer now names CLAUDE.md.
 
 **Tracker cross-linking stream (2026-07-05, research-validated, SHIPPED W1–W3 + seed).**
 Plan: `~/.claude-sdd/plans/eager-pondering-brook.md`. `link_scan` derives scanner-owned

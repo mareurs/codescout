@@ -30,13 +30,13 @@ Full release checklist — run from `master`, never from `experiments` or featur
 #     the merge to master: the callout claims "not in vX.Y.Z and not on crates.io",
 #     and both stay true on master until a version is actually published.
 
-# 2. Build release binary and verify
+# 2. Build release binary, then run the gate
+#    The gate is defined ONCE — CLAUDE.md § Development Commands — as four commands
+#    in an order that is load-bearing. Do NOT restate it here. This block used to
+#    carry its own copy, and that copy had drifted to three commands (no `cargo fmt`,
+#    no lean lane) while still reading as a complete list, which is how a reader runs
+#    part of the gate and believes they ran the gate.
 cargo build --release
-cargo test --workspace
-cargo clippy -- -D warnings
-# CI runs a SECOND, wider clippy job (ci.yml:61) — the only one that lints #[test]
-# code and codescout-embed's feature-gated `local` module. Run it too:
-cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 
 # 3. Commit the version bump
 git add Cargo.toml Cargo.lock
@@ -287,10 +287,20 @@ nothing to reconcile, and no rebase owed afterwards.
 #    and if `cargo fmt --check` fails on it, it fails CI right after the merge.
 git status --short
 
-# 3. Full gate, run from experiments
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --workspace
+# 3. The gate, run from experiments. Defined ONCE in CLAUDE.md § Development
+#    Commands — run it from there, and do NOT restate it here.
+#    One deliberate local substitution: `cargo fmt --check` for `cargo fmt`. This is
+#    a verification pass on a tree that step 2 just confirmed clean, so formatting
+#    must REPORT rather than rewrite — a silent reformat here would add an
+#    uncommitted file to a cohort you have already declared complete.
+#    What this block used to hold is worth recording, because it is why it now holds
+#    nothing: it called itself the "Full gate" while running
+#    `cargo clippy --all-targets -- -D warnings` — neither the bare form nor the gate
+#    form. `--all-targets` selects target KINDS, not packages, and Cargo.toml declares
+#    `members = [".", "crates/codescout-embed"]`, so the root is a real package and
+#    default selection is the root ALONE. That line therefore never reached
+#    crates/codescout-embed or the local-embed-gated `local` module — under a heading
+#    that told the reader it was the full gate.
 
 # 4. Documentation gate. A cohort this size is exactly where the human-facing
 #    surfaces rot, because nothing fails the build when they do:
