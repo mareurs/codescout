@@ -18,6 +18,21 @@ pub type Embedding = Vec<f32>;
 /// so operator-facing text and its regression tests keep working across the swap.
 pub const CONNECT_FAILED_MARKER: &str = "embed connect failed";
 
+/// The stable substring every [`EmbedError::Status`] renders.
+///
+/// Same contract as [`CONNECT_FAILED_MARKER`], for the other half of the failure
+/// space: the server was reached and answered, with a status the caller cannot use.
+///
+/// **This one is load-bearing for ORDERING, not merely for wording.** The rendered
+/// message interpolates the server's own response body — arbitrary remote text — so a
+/// consumer that classifies these strings must match this marker *before* it tests
+/// for anything a body might coincidentally contain. Root's classifier learned that
+/// the hard way for its own producer and hoisted the arm above its collection bucket;
+/// the crate's producer had the identical shape and no such protection, so an
+/// embedder 404 whose body read `model not found` was reported as a missing Qdrant
+/// collection (`docs/issues/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`).
+pub const STATUS_FAILED_MARKER: &str = "embed status failed";
+
 /// Errors this crate publishes as a **contract**, not merely as prose.
 ///
 /// Lives in this ungated module rather than in `remote`, because the consumer
@@ -35,6 +50,23 @@ pub enum EmbedError {
         /// The underlying transport error, preserved verbatim.
         detail: String,
     },
+    /// The server was reached and answered with a status the caller cannot use.
+    ///
+    /// Distinct from [`Self::Connect`] in remedy, not merely in cause: the service
+    /// is *up*, so "check that the server is running" is the wrong advice and the
+    /// response body is usually the whole diagnosis. Retrying an unchanged request
+    /// against a 4xx never helps.
+    Status {
+        /// The endpoint that answered.
+        url: String,
+        /// The HTTP status code, kept numeric so a consumer can branch on the
+        /// class rather than re-parse it out of the message.
+        status: u16,
+        /// The server's response body, verbatim and **untrusted** — see
+        /// [`STATUS_FAILED_MARKER`] on why a consumer must match the marker before
+        /// it tests for anything this body might happen to contain.
+        body: String,
+    },
 }
 
 impl std::fmt::Display for EmbedError {
@@ -46,6 +78,25 @@ impl std::fmt::Display for EmbedError {
                  unreachable (connect/timeout). Check the configured embedder \
                  URL and that the server is running. ({detail})"
             ),
+            Self::Status { url, status, body } => {
+                // Bounded at the same 400 characters root's own dense leg used,
+                // and for root's reason: an HTML error page would otherwise flood
+                // every surface that renders this — including `SyncReport.skipped`,
+                // which holds one entry per skipped chunk. Truncating here rather
+                // than at construction keeps `body` intact for a consumer that
+                // downcasts and wants the whole thing.
+                let shown: String = body.trim().chars().take(400).collect();
+                let shown = if shown.is_empty() {
+                    "<empty response body>"
+                } else {
+                    &shown
+                };
+                write!(
+                    f,
+                    "{STATUS_FAILED_MARKER}: {url} — HTTP {status} from embedding \
+                     server: {shown}"
+                )
+            }
         }
     }
 }

@@ -487,14 +487,25 @@ impl Embedder for RemoteEmbedder {
                     let status = resp.status();
                     if !status.is_success() {
                         let body = resp.text().await.unwrap_or_default();
+                        // Typed for the same reason the connect arm above is: the
+                        // consumer classifies on wording across a crate boundary,
+                        // where nothing makes a literal and its test fail together.
+                        // This one additionally carries the server's own response
+                        // body, so a consumer must be able to match it BEFORE
+                        // testing for anything a body might coincidentally contain
+                        // — untyped, an embedder 404 reading `model not found` was
+                        // classified as a missing Qdrant collection. ET-5.
+                        let typed = crate::EmbedError::Status {
+                            url: self.endpoint.clone(),
+                            status: status.as_u16(),
+                            body,
+                        };
                         if status.is_server_error() {
-                            last_err = Some(anyhow::anyhow!(
-                                "HTTP {status} from embedding server: {body}"
-                            ));
+                            last_err = Some(anyhow::Error::new(typed));
                             continue;
                         }
                         // 4xx — bad request, wrong model, etc. — don't retry.
-                        bail!("HTTP {status} from embedding server: {body}");
+                        return Err(anyhow::Error::new(typed));
                     }
                     // Cap the response body at 32 MiB before json-decode. A
                     // hostile or misconfigured endpoint can otherwise stream
@@ -1224,6 +1235,158 @@ mod tests {
         );
     }
 
+    /// Spawn a loopback server answering every request with `status_line` and `body`.
+    ///
+    /// Distinct from [`spawn_counting_500_server`] in purpose: that one measures how
+    /// many times `embed` retries, so it must be a 5xx. These callers want the error
+    /// the caller finally *receives*, so they use a 4xx — `embed` returns on 4xx
+    /// without retrying, keeping the test to one round trip.
+    async fn spawn_status_server(status_line: &'static str, body: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = [0u8; 4096];
+                    let _ = stream.read(&mut buf).await;
+                    let resp = format!(
+                        "HTTP/1.1 {status_line}\r\nContent-Length: {}\r\n\
+                         Connection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// A status failure must render the crate's **published** marker — and must do
+    /// so even when the server's body contains text that another classifier arm
+    /// matches.
+    ///
+    /// The body here is the real case, not a contrivance. Untyped, this rendered as
+    /// `HTTP 404 from embedding server: model 'coderank' not found`, and root's
+    /// classifier tests `not found` (its Qdrant-collection arm) *before* it tests
+    /// `embedding server` — so a healthy collection was reported missing and the
+    /// operator was told to re-index it. See
+    /// `docs/issues/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`.
+    /// A marker the body cannot impersonate is what lets a consumer match on
+    /// specificity first.
+    #[tokio::test]
+    async fn a_status_failure_renders_the_published_marker() {
+        let url = spawn_status_server("404 Not Found", "model 'coderank' not found").await;
+        let embedder = RemoteEmbedder::from_url(&url, MODEL, None).unwrap();
+        let err = embedder
+            .embed(&["x"])
+            .await
+            .expect_err("a server answering 404 cannot produce an embedding");
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains(crate::STATUS_FAILED_MARKER),
+            "a status failure must carry `{}` so a consumer can classify it without \
+             matching on this crate's prose. got: {msg}",
+            crate::STATUS_FAILED_MARKER
+        );
+        assert!(
+            msg.contains("404"),
+            "the status code is half the diagnosis — 4xx means the request is wrong, \
+             5xx means the server is. got: {msg}"
+        );
+        assert!(
+            msg.contains("model 'coderank' not found"),
+            "the server's body is usually the whole diagnosis and must survive into \
+             the message. got: {msg}"
+        );
+        // The hazard, as an assertion rather than a comment: this body DOES carry
+        // the text that hijacked the collection bucket, and the marker is present
+        // regardless. A consumer testing the marker first is therefore always able
+        // to win, whatever the server chose to say.
+        assert!(
+            msg.contains("not found") && msg.contains(crate::STATUS_FAILED_MARKER),
+            "the marker must coexist with a body impersonating another arm. got: {msg}"
+        );
+    }
+
+    /// The typed form is reachable, and carries the status as a **number**.
+    ///
+    /// Mirrors `a_connect_failure_is_downcastable_to_the_typed_error`. The numeric
+    /// field is the point: a consumer branching on 4xx-vs-5xx must not have to
+    /// re-parse the code back out of the prose it just rendered.
+    #[tokio::test]
+    async fn a_status_failure_is_downcastable_to_the_typed_error() {
+        let url = spawn_status_server("422 Unprocessable Entity", "input too long").await;
+        let embedder = RemoteEmbedder::from_url(&url, MODEL, None).unwrap();
+        let err = embedder
+            .embed(&["x"])
+            .await
+            .expect_err("a server answering 422 cannot produce an embedding");
+
+        match err.downcast_ref::<crate::EmbedError>() {
+            Some(crate::EmbedError::Status { status, body, .. }) => {
+                assert_eq!(*status, 422, "the numeric status must survive typing");
+                assert_eq!(body, "input too long", "the body must survive verbatim");
+            }
+            other => panic!("expected EmbedError::Status, got {other:?}"),
+        }
+    }
+
+    /// Display is bounded at 400 characters; the typed field is not.
+    ///
+    /// Both halves matter and they pull in opposite directions. The bound exists
+    /// because an HTML error page would otherwise flood every surface that renders
+    /// this — `SyncReport.skipped` holds one entry per skipped chunk. Keeping the
+    /// field whole exists because a consumer that downcasts wants the real body, and
+    /// truncating at construction would have destroyed it for everyone.
+    #[test]
+    fn a_status_body_is_bounded_in_display_but_kept_whole_in_the_type() {
+        let e = crate::EmbedError::Status {
+            url: "http://127.0.0.1:9/v1/embeddings".into(),
+            status: 500,
+            body: "z".repeat(1000),
+        };
+
+        let msg = e.to_string();
+        assert_eq!(
+            msg.matches('z').count(),
+            400,
+            "Display must show exactly the 400-character bound, not the whole body"
+        );
+
+        let crate::EmbedError::Status { body, .. } = &e else {
+            panic!("constructed a Status, must still be one");
+        };
+        assert_eq!(
+            body.len(),
+            1000,
+            "the field keeps the whole body — truncation is a rendering concern"
+        );
+    }
+
+    /// An empty body must not render as a dangling colon.
+    ///
+    /// llama.cpp answers some refusals with a status and no body at all; `HTTP 400
+    /// from embedding server: ` reads as a truncated message rather than as the
+    /// complete information it actually is.
+    #[test]
+    fn a_status_with_no_body_says_so() {
+        let msg = crate::EmbedError::Status {
+            url: "http://127.0.0.1:9/v1/embeddings".into(),
+            status: 400,
+            body: "   ".into(),
+        }
+        .to_string();
+
+        assert!(
+            msg.contains("<empty response body>"),
+            "a whitespace-only body must be named as empty, not rendered as nothing. \
+             got: {msg}"
+        );
+    }
+
     /// The typed error survives as a type, not only as text — so a consumer that
     /// wants to branch structurally can downcast instead of substring-matching.
     /// The marker exists for consumers (like root's `classify_search_error`) that
@@ -1243,6 +1406,12 @@ mod tests {
                     "url should name the endpoint, got {url}"
                 )
             }
+            // Deliberately an arm rather than a wildcard: the two variants have
+            // opposite remedies, so a refused connection surfacing as `Status`
+            // would send an operator to read a response body that was never
+            // received. Keeping it exhaustive also means the next variant added
+            // to `EmbedError` fails this file rather than passing silently.
+            other => panic!("a refused connection must be Connect, got {other:?}"),
         }
     }
 }
