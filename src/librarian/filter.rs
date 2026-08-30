@@ -641,7 +641,7 @@ mod tests {
     /// `["session-log","bug-fix"]` (the stored JSON *string*) against the
     /// scalar `"session-log"`. Never equal, so the result was a silent zero —
     /// and `get_guide("librarian")` § Filter Syntax teaches exactly this form.
-    /// `docs/issues/2026-08-28-tags-in-filter-returns-zero.md`,
+    /// `docs/issues/archive/2026-08-28-tags-in-filter-returns-zero.md`,
     /// `open-issue-work-queue:BL-47`.
     ///
     /// End-to-end against a real `json()` column rather than a compile-shape

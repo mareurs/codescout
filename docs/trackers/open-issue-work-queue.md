@@ -88,7 +88,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
 | BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `39af18d5a73dadc0` |
 | BL-46 | 2 | Decision 2: the write-root split — unpinned WRITES resolve to the last writable root, unpinned READS keep resolving to the activated one | **not started** — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive | — |
-| BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `239227f3228b3460` |
+| BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
 | BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing | `92d619d7a115617b` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | open | `caa8bc1df0e8c0d8` |
 | BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | open | `19f44bead56b56cc` |
@@ -130,17 +130,22 @@ because a snapshot that carries instructions goes stale in the way that matters 
 ## Per-entry detail
 ### BL-47 — `tags.in` returns zero while `tags.contains` finds the same row
 
-**Status:** open — **picked up this session.** Unowned, self-contained, phase 1.
+**Status:** done — shipped `9e4e2d36`, live-verified, and the bug file archived 2026-08-30.
+(Was `open — picked up this session`; the params row already said `done`, so body and params
+disagreed until the archive pass reconciled them.)
 
 **Valid:** dated 2026-08-29
 
-`docs/issues/2026-08-28-tags-in-filter-returns-zero.md`. A filter form the librarian guide
+`docs/issues/archive/2026-08-28-tags-in-filter-returns-zero.md`. A filter form the librarian guide
 actively teaches returns an empty result where the sibling operator finds the row. The failure
 mode is a **zero that lies** — no error, no warning, just an answer that reads as "nothing
 matches". That is the ledger's most-repeated law (`reconnaissance-patterns` law C) reproduced as
 a defect in the query layer itself, which is why it sorts above larger items.
 
-**Fixed 2026-08-29 — gate green, uncommitted, and NOT yet live.**
+**Fixed 2026-08-29 — gate green, uncommitted, and NOT yet live.** *(True when written;
+superseded the same day — see the shipped/live-verified lines that close this entry. Left
+standing rather than deleted, because the gap between "gate green" and "live" is exactly
+what the entry goes on to argue.)*
 
 **Root cause, at `src/librarian/filter.rs`.** The array-column branch was gated on the *op*:
 `if op == LeafOp::Contains && is_array_col`. `tags`/`owners` are stored as JSON arrays, so
