@@ -706,21 +706,112 @@ mod tests {
         );
     }
 
+    /// Spawn a loopback server that answers **200** with exactly as many embedding
+    /// rows as the request asked for, and records the input-count of every request
+    /// it serves.
+    ///
+    /// Matching the arity is load-bearing, not politeness: `embed` rejects a
+    /// response whose length disagrees with the batch it sent, so a fixed-size
+    /// answer would fail the request instead of exercising the chunking loop.
+    ///
+    /// Reads headers, then exactly `Content-Length` bytes. A multi-chunk batch does
+    /// not fit one read, and counting a truncated body would silently under-report
+    /// the batch size — which is the same class of defect this helper exists to
+    /// catch.
+    async fn spawn_arity_echoing_server() -> (String, std::sync::Arc<std::sync::Mutex<Vec<usize>>>)
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<usize>::new()));
+        let seen_bg = std::sync::Arc::clone(&seen);
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let seen = std::sync::Arc::clone(&seen_bg);
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    let body_start = loop {
+                        match stream.read(&mut tmp).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                        }
+                        if let Some(p) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            break p + 4;
+                        }
+                    };
+                    let len: usize = std::str::from_utf8(&buf[..body_start])
+                        .ok()
+                        .and_then(|h| {
+                            h.lines()
+                                .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
+                                .and_then(|l| l.split(':').nth(1))
+                                .and_then(|v| v.trim().parse().ok())
+                        })
+                        .unwrap_or(0);
+                    while buf.len() < body_start + len {
+                        match stream.read(&mut tmp).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                        }
+                    }
+                    let count = serde_json::from_slice::<serde_json::Value>(&buf[body_start..])
+                        .ok()
+                        .and_then(|v| v.get("input").and_then(|i| i.as_array().map(Vec::len)))
+                        .unwrap_or(0);
+                    seen.lock().unwrap().push(count);
+                    let rows: Vec<String> = (0..count)
+                        .map(|i| format!(r#"{{"embedding":[0.1,0.2,0.3],"index":{i}}}"#))
+                        .collect();
+                    let body = format!(r#"{{"data":[{}]}}"#, rows.join(","));
+                    let _ = stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                                 Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(),
+                                body
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    /// `embed` must split an oversize batch into `BATCH_SIZE`-sized requests.
+    ///
+    /// Replaces `ollama_large_batch_exceeding_batch_size`, which sent 20 texts on
+    /// the stated premise that `BATCH_SIZE` was 8. It is 32, and `git log -S` finds
+    /// no commit in this file's history where it was ever 8 — so the loop ran
+    /// exactly one chunk and the chunking the test named was never entered. Being
+    /// `#[ignore]`d as well, no run anywhere could report that. See
+    /// `docs/issues/archive/2026-08-30-ollama-large-batch-test-never-exceeded-the-batch-size.md`.
+    ///
+    /// This asserts the **shape** of the split, not merely that one happened: 70
+    /// inputs against a 32 cap must arrive as 32 + 32 + 6, in order. Asserting only
+    /// `requests > 1` would pass for any chunk size that is not 70, which includes
+    /// several wrong ones.
+    ///
+    /// Runs against a loopback server, so unlike its predecessor it runs in CI.
     #[tokio::test]
-    #[ignore = "requires running Ollama"]
-    async fn ollama_large_batch_exceeding_batch_size() {
-        // BATCH_SIZE is 8; send 20 texts to exercise the chunking logic
-        let embedder = make_embedder();
-        let texts: Vec<String> = (0..20)
-            .map(|i| format!("fn function_{i}() -> i32 {{ {i} }}"))
-            .collect();
-        let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-        let results = embedder.embed(&refs).await.expect("large batch failed");
-        assert_eq!(results.len(), 20);
-        let dims = results[0].len();
-        assert!(
-            results.iter().all(|v| v.len() == dims),
-            "all vectors same dims"
+    async fn an_oversize_batch_is_split_into_batch_size_requests() {
+        let (url, seen) = spawn_arity_echoing_server().await;
+        let embedder = RemoteEmbedder::from_url(&url, "test-model", None).unwrap();
+        let texts: Vec<String> = (0..70).map(|i| format!("fn f{i}() {{}}")).collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+
+        let out = embedder.embed(&refs).await.expect("embed");
+
+        assert_eq!(out.len(), 70, "every input must get exactly one row back");
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![32, 32, 6],
+            "70 inputs against BATCH_SIZE=32 must be sent as three requests of 32, 32 \
+             and 6 — a single request of 70 means the chunking loop was bypassed"
         );
     }
 
