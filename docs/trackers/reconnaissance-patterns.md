@@ -4339,7 +4339,7 @@ this violates verbatim.
 
 ## R-128 — Enumerate the call sites of a must-call function and look for the absentee — it finds what a pairwise diff cannot
 
-**Status:** validated — found a real defect on first use (`BL-66` / `ac9aa2f9b38eab9b`).
+**Status:** validated — found a real defect on first use (`BL-66` / `a7af9964a16e8056`), now **fixed and archived** (`1909e5f0`, patch-id `90c1612bcd948c09e0fd373be2e754134bf9a463`). The reproduction raised its severity `low` → `high` and falsified three premises of the filing, so the technique found something strictly worse than what it was credited with: not a TLS-only misreport for operators with an https host, but a process abort for **every external consumer of the crate at zero configuration**. Worth noting for the technique's own account — the absentee it surfaced was the whole finding, and every later correction came from running the reproduction, not from more reading.
 **Valid:** invariant
 **Rests on:** `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`; the framing that a clean result must be interrogated, not banked.
 
