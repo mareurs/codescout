@@ -7206,6 +7206,8 @@ reproduction rule.
 
 **Valid:** dated 2026-08-30
 
+**Fix commit:** `fd638c76` ("fix(memory): close the third ambient-config path in the memory tests (T10)") on `experiments`, patch-id `2afe9f1378e8dece47fea600ecf840c57a215ab0` (`git show fd638c76 | git patch-id --stable`, verified independently rather than trusting the relayed value).
+
 **Rests on:** `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`'s updated `## Fix` section, which carries the exact before/after wedge-hit counts.
 
 ## Template for new entries
