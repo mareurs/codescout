@@ -1,12 +1,16 @@
 ---
-status: open
-opened: 2026-08-28
-closed:
-severity: high
-owner: marius
-related: ["F-14"]
-tags: [release-pipeline, packaging, include_str]
 kind: bug
+status: fixed
+tags:
+- release-pipeline
+- packaging
+- include_str
+closed: 2026-08-30
+opened: 2026-08-28
+owner: marius
+related:
+- F-14
+severity: high
 ---
 
 # BUG: No CI gate or pre-commit hook catches an `include_str!("../...")` path excluded from the published package
@@ -114,30 +118,55 @@ N/A — root cause is established directly from the `Cargo.toml` `exclude` mecha
 
 ## Fix
 
-Not implemented as part of this bug file — this is a *tracking* issue for the missing gate,
-opened per instruction as branch-level follow-up, out of scope for Operator Rules Phase 2
-Task 2. The *symptom* for Task 2's specific instance (`corpus.rs:16`) was fixed in the same
-change that opens this bug file: `Cargo.toml:34` gained `"!docs/trackers/operator-rules.md"`
-immediately after `"docs/"`, mirroring the proven `"!docs/PROGRESSIVE_DISCOVERABILITY.md"`
-pattern from F-14's own fix.
+**Built: `tests/packaged_includes.rs`.** `188cf9f0` on `experiments`, patch-id
+`c7604ff8088c8f32`.
 
-**What remains open (the actual subject of this bug):** no gate exists to catch the *next*
-occurrence. F-14's fix idea, still unimplemented:
+The gate scans every `.rs` under each package's `src/` for `include_str!` string literals,
+keeps the ones whose target resolves outside `src/`, and asserts each appears in
+`cargo package --list` for its package.
 
-> Add a CI step that runs `cargo publish --dry-run` (or at minimum `cargo package --list` with
-> an assertion that every `include_str!("../...")` path appears in the listing). Alternatively,
-> a pre-commit hook grepping `src/` for `include_str!.*"\.\./"` and cross-checking against
-> `cargo package --list`.
+**A test, not a CI job — and the choice was measured, not assumed.** F-14's fix idea offered
+either. The four documented gate commands all build from the working tree, so they are blind
+to `exclude` by construction; a CI job would see it, but only on push, and this repo had sat
+**119 commits ahead of origin for two days** when the gate was written. A CI-only gate would
+not have run once in that window. `cargo package --list` does not build — measured **0.21s**
+per package — so it costs nothing to put it where the gate commands already look. CI gets it
+free, since CI runs `cargo test`.
 
-Per this task's instructions, that test/gate is **not** implemented here — it is deliberately
-left as follow-up work for whoever picks up this bug file.
-
+**The oracle is cargo, deliberately.** The tempting alternative is to reimplement `exclude`'s
+gitignore-style negation in the test. That is two implementations of one operation — the
+exact defect class removed from `reindex_cli` in `9f743091` the same afternoon — and it would
+agree with itself while disagreeing with the tool that actually builds the tarball. Shelling
+out to `cargo package --list` asks cargo what cargo will do.
 ## Tests added
 
-None — intentionally. This bug file tracks the *absence* of a gate; adding the gate itself
-(a test asserting every `include_str!("../…")` path appears in `cargo package --list`) is the
-fix, and is explicitly out of scope for the task that opened this file.
+Three, in `tests/packaged_includes.rs`, and the second and third are not ceremony:
 
+| test | what it holds |
+|---|---|
+| `every_escaping_include_str_survives_cargo_package` | the invariant |
+| `the_scan_actually_finds_the_known_escaping_sites` | the population is non-empty |
+| `the_escape_detector_discriminates` | the predicate separates escaping from internal, and the parser reads both macro forms |
+
+**Mutation matrix — the result, rather than the green tick:**
+
+| mutation | gate | control |
+|---|---|---|
+| drop `"!docs/trackers/operator-rules.md"` from `exclude` (the defect that shipped) | **FAILS**, naming site, target and the fix | passes |
+| break `MARKER` so the scan finds nothing | **passes — vacuously** | **FAILS** |
+
+The second row is the argument for the control. With an empty population the gate is green
+over nothing, which is the same false-green shape as the original bug: a check that cannot
+see the thing it is named after. `tests/committed_paths.rs` already encodes this convention
+(`the_scan_actually_reads_files`), and its doc comment names the identical hazard — so this
+file follows it rather than inventing a shape.
+
+Runs in **both** lanes, verified by name in each run's output (4865/0 full, 3385/0 lean).
+Those counts are the working **tree**, not HEAD: two other sessions had uncommitted files in
+this shared checkout, and cargo does not consult git.
+
+**Stated blind spot, in the source rather than only here:** the scan reads string *literals*,
+so an argument built with `concat!` or via a `const` is invisible to it.
 ## Workarounds
 
 Before any `cargo publish`, manually run `cargo package --list --allow-dirty --offline` and
@@ -148,13 +177,13 @@ separate documentation gap.
 
 ## Resume
 
-Implement F-14's fix idea: a test (likely in `src/` near the crate root, or a
-`tests/packaging.rs` integration test) that runs `cargo package --list` (or parses
-`Cargo.toml`'s `exclude`/`include` directly) and asserts every `include_str!("\.\./[^"]+")`
-match resolves to a path present in the package listing. Consider whether this belongs in the
-four standard gate commands (likely not — it needs `cargo package`, which is slow and network/
-registry-adjacent) or as a dedicated CI job / pre-commit hook, per F-14's original suggestion.
+Done — nothing outstanding. `188cf9f0`, patch-id `c7604ff8088c8f32`; fmt clean, clippy
+`--workspace --all-targets --features local-embed` clean, 4865/0 full, 3385/0 lean.
 
+The reproduction was run before the fix, and it reported the *healthy* state — both escaping
+paths present in a 493-file package — which is the point: the symptom had already been
+patched by hand and only the gate was missing. What the run established is the oracle's
+shape and cost, not the presence of a defect.
 ## References
 
 - `docs/trackers/bug-fix-session-log.md:66` (F-14 index row) and the full write-up at
