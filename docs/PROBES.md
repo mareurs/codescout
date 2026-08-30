@@ -60,6 +60,32 @@ to follow.
    not reach it. Before believing a result, make the instrument find or rank one case
    whose answer you already know. (`reconnaissance-patterns:R-104`, widened.)
 
+5. **When two measurements of one thing disagree, reconcile by RE-RUNNING, never by
+   explaining.** Rules 1–4 govern a single instrument's output. This one governs the
+   case none of them reaches: two numbers, both plausible, differing. Measured
+   2026-08-30 — two sessions counted the tests in `codescout-embed` that no gate
+   command runs and got **33** and **37**. The larger holder wrote "the tree gained
+   tests between us", which is cheap, plausible, and was **never checked**. A re-run
+   showed the tree had not changed: the gap was four `#[ignore]`d `ollama_*` tests
+   padding the total, so 37 is *compiled-but-unreached* and 33 is *live guards
+   lost* — two right answers to two different questions, and the explanation would
+   have buried both. **A discrepancy closed by a story nobody ran is worse than an
+   open one**, because the open one still has someone looking at it.
+
+   Make it structural rather than a virtue. The re-run that caught this happened
+   because the other party wanted to know if *they* had missed tests — self-interest,
+   not rigour — so a rule resting on either party's diligence is not the reliable
+   version. The reliable version is: disagreement triggers a command, not a sentence.
+
+   Two tells from the same day, both cheap and both nearly scanned past. **`exit_code`
+   survives `2>/dev/null`** — a misplaced `--list` (before `--`, where cargo rejects
+   it) printed `0`, `0`, `0` with `exit_code 1`, and the three zeros read exactly like
+   a measurement. And **a count including non-executing members is not a coverage
+   number**: `#[ignore]` had concealed a test that could not fail *that same morning*,
+   then inflated a number measuring what is guarded *that afternoon* — same attribute,
+   opposite direction, eight hours apart, walked into by the person who had just fixed
+   the first one.
+
 The long form, with the incident list, is the **Measurement** iron rule in `CLAUDE.md`.
 
 ---
