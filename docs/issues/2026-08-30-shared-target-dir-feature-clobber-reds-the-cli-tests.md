@@ -14,6 +14,7 @@ owner: marius
 related:
 - docs/trackers/reconnaissance-patterns.md
 severity: medium
+unverified: 'No regression test: nothing fails if the gate order is reverted, so this can silently regress via a CLAUDE.md edit. And the fix closes the TERMINAL state only, not the window — during the lean lane the binary is still librarian-less (measured: ~54s), so two sessions gating concurrently still collide and nothing detects that. Not archived for the first reason: the documented archive trigger requires a regression test.'
 ---
 
 # BUG: a peer's lean build clobbers `target/debug/codescout`, reddening 10 `cli_artifact` tests with a gating-regression message
@@ -204,6 +205,51 @@ Options considered and NOT taken, kept for the record, cheapest first:
 - **Per-session worktrees.** The structural fix, and the one `R-129` argues is not free:
   `append_entry` refuses id allocation from a worktree, so every ledger append becomes a
   two-step with a merge between. Operator's call, not a drive-by.
+
+## Fix provenance
+
+**Applied 2026-08-30 21:18 on `experiments`** by `codescout-fe`, after `codescout-ae`
+proposed the reorder and both of us surfaced it to our operators rather than either session
+editing the gate on its own.
+
+- SHA: `73066479` (`experiments` — orphans on the next rebase)
+- patch-id: `8c42c7e35d91c50518796f94a8170f2a49e29d42` — **verified independently here**
+  (`git show 73066479 | git patch-id --stable`) rather than accepted from the relaying
+  session, and it matches to the character.
+
+One line changed in `CLAUDE.md`. The gate now reads:
+
+```
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace --no-default-features        <- third
+cargo test --workspace                              <- LAST
+```
+
+### Acceptance — the gate run in its new order
+
+Run end to end at `3fb977ab`, checking the binary at the point that matters rather than only
+at the end:
+
+| stage | observed |
+|---|---|
+| `cargo fmt --check` | 0 |
+| clippy `--workspace --all-targets --features local-embed -- -D warnings` | 0 |
+| both test lanes | **8319 passed / 0 failed**, 90 ignored |
+| **mid-gate**, after the lean lane | `--help` lists **no** `artifact` subcommand — the hazard is still real, in-window |
+| **end state** | `./target/debug/codescout artifact --help` exits **0**; `--help \| grep -c artifact` = **4** |
+
+The mid-gate row is the one worth keeping. It is positive evidence that the defect still
+exists and that the fix is an *ordering* remedy rather than a claim the clobber stopped
+happening — a gate run that never showed 0 would have meant the acceptance check was not
+exercising anything.
+
+### Why this is `fixed` and not archived
+
+The documented archive trigger is gate-green **plus a regression test**, and there is no
+test: nothing fails if someone reorders the gate line back. That is recorded in
+`unverified:` rather than in prose so a query can see it. The other half of the caveat is
+that this closes the **terminal state**, not the window — see § *What NEITHER fix does*.
 
 ## Tests added
 
