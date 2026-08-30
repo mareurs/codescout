@@ -139,7 +139,7 @@ hypothesis under *Root cause* before proposing the labelling change under *Fix*.
 
 ## References
 
-- `docs/issues/2026-08-30-cli-artifact-drops-time-scope-and-extra.md` — sibling
+- `docs/issues/archive/2026-08-30-cli-artifact-drops-time-scope-and-extra.md` — sibling
   filed the same day, also a silent-default class
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — the standing
   rule this violates: an instrument's answer must not read as a complete

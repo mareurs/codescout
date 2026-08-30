@@ -393,7 +393,7 @@ impl CreateArgs {
 /// the struct and never reach the tool. The failure is silent — the tool
 /// defaults the missing key and reports `created` — and it is only testable if
 /// the translation is reachable without a catalog.
-/// See `docs/issues/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`.
+/// See `docs/issues/archive/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`.
 fn build_create_tool_args(args: &CreateArgs) -> Result<Value> {
     let mut tool_args = serde_json::Map::new();
     tool_args.insert("kind".into(), Value::String(args.kind.clone()));
@@ -904,7 +904,7 @@ mod tests {
 
     // `--time-scope` / `--extra`, both subcommands.
     //
-    // `docs/issues/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`. Same
+    // `docs/issues/archive/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`. Same
     // two-independent-halves shape as `--force` above: the parser can reject the
     // flag, or accept it and the marshalling can drop it. The second half is the
     // one that bit — before this, neither flag existed at all, so a CLI caller

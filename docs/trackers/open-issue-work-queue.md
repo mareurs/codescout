@@ -101,7 +101,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **blocked** — harness, not this repo. Caused 6 misattributions across 4 sessions in one afternoon; real population ≥ 6 while both sides report "Peer sessions (2)" over disjoint sets. Mitigation in the bug file works today | `4266d09da90acb5e` |
 | BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `6411eb594cd7231d` |
-| BL-60 | 1 | the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra` | open — **in-repo and the highest-value unowned item here.** Silent loss on the write path, against the very fields (`unverified`, `entry_prefix`, `closed`) the conventions rely on | `025ff58280c36d07` |
+| BL-60 | 1 | the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra` | **done-archived** — `0c4931ef`, patch-id `a0a4a3b4…`. Both flags on both subcommands, marshalled at the depth each tool expects; `build_create_tool_args` extracted so the create half is testable without a catalog, as `19289b1f` already did for update. 8 tests, 3 mutations spent — incl. a characterization guard proving the extraction was behaviour-preserving. The bug's "nothing to run" was itself worth running: `--force` present alongside both flags absent proved the gap was current, not a stale build | `64c7dab799d1bca7` |
 | BL-61 | 3 | ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found` | open (**watch, not work**) — re-open trigger is `symbol not found` only; a timeout and a guarded zero are outside it, and BL-49 was checked against it | `d25aa6db7b4e6367` |
 | BL-62 | 3 | ZOMBIE WATCH: two Windows CI tests flake on wall-clock/race assumptions | open (**watch, not work**) — check the wine skip-list first; W-64 took it 32 → 8 with every survivor classified | `e817931ef9d51dd0` |
 | BL-63 | 3 | ZOMBIE WATCH: `symbols` search mode 0-matches then succeeds on retry | open (**watch, not work**) — Bug A fixed, Bug B mitigated + instrumented; read the instrumentation before treating it as live | `523233935cc53bc4` |
@@ -480,7 +480,7 @@ sid as its origin.
 
 **Status:** open — in-repo, unowned, phase 1. **Valid:** dated 2026-08-30
 
-`docs/issues/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`. A **silent** loss on
+`docs/issues/archive/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`. A **silent** loss on
 the write path: the call succeeds, the fields are gone, and nothing surfaces until someone
 diffs intent against the stored row.
 
@@ -493,6 +493,31 @@ that drops them defeats the convention at the point of writing.
 Not yet scouted. **Run the reproduction before reading its fix plan** — a 2026-08-14 sweep
 changed the fix three times that way, and one of those changes inverted the direction.
 
+**Done 2026-08-30 — `0c4931ef`, patch-id `a0a4a3b4d0ea3f1b1d52e9299b9809dad98fcf05`.**
+
+The record said *"Read the two struct pairs side by side; there is nothing to run."*
+Running it anyway cost two commands and returned something struct-reading could not:
+`--force` was present while both target flags were absent, which proves the gap is in
+**the code that ships today** rather than an artefact of a stale build. That is a
+different claim from "the flags are missing", and it is the one that licenses the fix.
+
+Shipped both flags on both subcommands, marshalled at the depth each tool expects —
+nested in `patch` for update, top level for create — with `--extra` parsed as JSON and
+`null` preserved, since `null` is how `extra` deletes a key.
+
+Extracted `build_create_tool_args` from `run_create`. `19289b1f` had already done this
+for update, and its doc comment states **this bug's own mechanism**: *"a field can
+exist on the struct and never reach the tool … only testable if the translation is
+reachable without a catalog."* The create side never got the same treatment, which is
+precisely why the identical defect could sit there unobserved. Both halves are now
+testable without a catalog.
+
+Eight tests, all of which went compile-error → green, so three deliberate breaks were
+spent per `bug-fix-session-log:W-73`. The one worth keeping past this bug is the
+characterization guard: dropping `augment.prompt` from the extracted builder fails
+`create_still_marshals_every_pre_existing_field`. Nothing else in 4819 tests would
+have caught a field silently lost in a 60-line move — the same class of loss as the
+bug, arriving by refactor instead of by omission.
 ### BL-61 — ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found`
 
 **Status:** open — **watch, not work.** **Valid:** conditional — until the trigger below fires

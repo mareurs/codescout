@@ -1,12 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cli
+- librarian
+- parity
+- silent-default
+closed: 2026-08-30
 opened: 2026-08-30
-closed:
-severity: low
 owner: marius
 related: []
-tags: [cli, librarian, parity, silent-default]
-kind: bug
+severity: low
+unverified: 'Fixed in tree and verified through a debug `cargo run` (both flags present on both subcommands). NOT verified through the shipped release binary, deliberately: `cargo rb` unlinks the running image of every live session in this checkout. Re-verify at the next rebuild anyone else performs.'
 ---
 
 # BUG: the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra`
@@ -52,6 +57,23 @@ Read the two struct pairs side by side; there is nothing to run.
 - `src/librarian/tools/update.rs` — `Args` (`time_scope`, `extra`)
 - `src/librarian/tools/create.rs` — the create-side equivalents
 
+### Performed 2026-08-30 — and there WAS something to run
+
+The line above says *"there is nothing to run"*. That is a claim, and running it is
+cheap, so it was run first:
+
+```
+$ codescout artifact update --help    # shipped binary
+$ codescout artifact create --help
+```
+
+Neither listed `--time-scope` or `--extra`; `--force` **was** present, which confirms
+the binary postdated `19289b1f` and that the absence was current rather than an
+artefact of a stale build. That second fact is the one struct-reading could not have
+supplied, and it is the difference between "the flags are missing" and "the flags are
+missing *from the code that ships today*".
+
+After the fix, the same two commands list both flags on both subcommands.
 ## Environment
 
 Linux, `experiments`, codescout 0.15.0, at `19289b1f`.
@@ -104,10 +126,44 @@ CLI's marshalled key set covers the tool's `Args` field set, so the next added
 param cannot go missing silently. That addresses the mechanism rather than the
 two instances of it.
 
+### Shipped 2026-08-30 — `0c4931ef` on `experiments`, patch-id `a0a4a3b4d0ea3f1b1d52e9299b9809dad98fcf05`
+
+`--time-scope` and `--extra` added to both `CreateArgs` and `UpdateArgs`, and
+marshalled at the depth each tool expects: nested in `patch` for update, top level
+for create. `--extra` is parsed as JSON with `null` preserved, because `null` is how
+`extra` deletes a key; a non-JSON value fails loudly naming the flag rather than being
+dropped.
+
+**`build_create_tool_args` extracted from `run_create`,** mirroring what `19289b1f`
+did for update. That commit's doc comment already states this bug's mechanism — *"a
+field can exist on the struct and never reach the tool … only testable if the
+translation is reachable without a catalog"* — and the create side never received the
+same treatment, which is why the same defect could recur there unobserved. Both halves
+are now testable without a catalog.
 ## Tests added
 
-None — not fixed.
+Eight, in `src/cli/artifact.rs`, split the way the `--force` tests are: one per
+independent failure mode, because the parser can reject a flag *or* accept it and the
+marshalling can drop it, and only the second is silent.
 
+All eight went **compile-error → green**, so per `bug-fix-session-log:W-73` none had
+ever run its assertions against a wrong world. Three deliberate breaks, each killed:
+
+| mutation | test that died | symptom |
+|---|---|---|
+| drop `time_scope` from the update marshalling | `update_time_scope_and_extra_reach_the_patch` | `left: None` |
+| marshal create's `extra` under a wrong key | `create_time_scope_and_extra_reach_the_tool_args` | `left: None` |
+| drop `augment.prompt` from the extracted builder | `create_still_marshals_every_pre_existing_field` | `left: None` |
+
+The third is the one worth keeping past this bug: it is a characterization guard
+proving the ~60-line extraction was behaviour-**preserving** rather than merely
+compiling. Nothing else in 4819 tests would have caught a field silently lost in that
+move — which is the same class of loss this bug is about, arriving via refactor
+instead of via omission.
+
+The assertions pin **depth**, not just presence, because a value marshalled to the
+wrong depth is silently defaulted by the tool. That is the defect, so a test that only
+checked presence somewhere in the payload would pass on the bug's own shape.
 ## Workarounds
 
 Use the MCP tool, which accepts both:
