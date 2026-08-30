@@ -67,6 +67,46 @@ elimination. And identifying yourself with `pgrep … | head -1` is unsafe: seve
 servers run at once, and on 2026-08-30 that sampled a chain terminating at a *peer*, naming
 the caller as a session that sends it messages. The script walks up from its own shell, which
 is a child of its own server by construction.
+
+### Disjointness is an observed STATE, not a property — corrected before publication
+
+A relayed report said `807989`'s `ListAgents` view was **entirely disjoint** from the five
+codescout sessions. Asked directly rather than published, and the source corrected it: the
+reading had already moved.
+
+| time | of the 5 codescout sessions, visible to `807989` |
+|---|---|
+| ~20:06 | **0** — `changelog-reader-d8`, `system-d9`, `claude-plugins-08` — fully disjoint |
+| ~20:2x | **1** — `system-d9`, `claude-plugins-08`, `codescout-fe` (= pid `3954769`) |
+
+Same count, **rotated membership**. `3954769` started 17:39:22, well before both readings, so
+its absence at 20:06 was not a start-time artefact. Stating disjointness as a standing property
+would have been the **seventh** version of the day's error — published by the file that exists
+to document it — and a later reading would have falsified it.
+
+### The sharper finding: on these readings the view is biased AGAINST the sessions that matter
+
+`scripts/peer-sessions.sh` reports 7 live sessions, 5 with `cwd` here — so 2 live elsewhere.
+`807989`'s three visible peers at ~20:2x are `system-d9` and `claude-plugins-08` (**both** of
+the outside sessions) plus `codescout-fe` (**one of four** in-tree peers):
+
+| population | visible to `807989` |
+|---|---|
+| sessions **outside** this checkout | 2 of 2 — **100%** |
+| sessions **inside** this checkout | 1 of 4 — **25%** |
+
+That is a claim about the **remedy**, not the confidence. A view short by a random 40% would
+make elimination weak; a view skewed against your own working directory makes it *unrelated to
+the question*, because the population every attribution asks about is exactly the one it
+under-samples. Socket addressing is therefore not a fallback — it is the only correct method.
+
+**Deliberately not stated as measured.** Two readings is a small sample and the source declined
+to claim the bias, which is the right call. The two facts — a fully disjoint instance at 20:06,
+and 1-of-4 now — are each sufficient to kill elimination without needing the stronger version.
+
+**Both of the day's open attributions were then settled by asking, in one round each**, after
+three rounds of elimination got them wrong: the worktree files are `3954769`'s, and the 16:56
+mutation was `807989`'s. Confirmed by the authors, not inferred.
 ## Symptom (Effect)
 
 2026-08-30, four sessions live in `/home/marius/work/claude/codescout`. `ListAgents`
