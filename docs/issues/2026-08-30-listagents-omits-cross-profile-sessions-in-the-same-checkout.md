@@ -364,6 +364,36 @@ That reclassifies every attribution attempt this file records. They were not
 underpowered inferences that needed more care; they were inferences over a set with no
 established relationship to the question. Reasoning harder would not have helped.
 
+##### A third observer, and the "inverted" reading does NOT hold
+
+`codescout-f0` offered a sharper figure than arbitrariness — that the view is
+*inverted*, near-complete for sessions outside this checkout and near-empty for those
+inside — and flagged it explicitly as two readings rather than a measurement, not to be
+cited as one. Tested from a third observer at ~20:5x, with the live population
+unchanged at 5-in-checkout + 2-elsewhere:
+
+| observer | outside sessions seen | in-checkout peers seen |
+|---|---|---|
+| `codescout-f0` (807989) | **2 of 2** | 1 of 4 |
+| this session (801487) | **0 of 2** | 2 of 4 |
+
+**Opposite directions.** They see both outside sessions and almost no in-checkout
+ones; I see neither outside session and half my in-checkout peers. So the omission is
+not inverted with respect to the tree — it is not oriented with respect to the tree at
+all. **Arbitrariness stands and the directional refinement does not**, which is the
+outcome their own caveat anticipated.
+
+My count has also moved while membership changed, independently of theirs: **2 → 3 →
+2** across today, with `codescout-36` appearing and then vanishing. Two observers now
+show a rotating membership under a near-fixed count, which is the demonstration rather
+than the assertion of arbitrariness — **a reader cannot re-derive the set by looking
+again, and cannot correct for a direction either, because there isn't one.**
+
+This is why the load-bearing conclusion was deliberately the weaker one. "Elimination
+over visible peers is not a weak method but an unrelated one" needs only
+arbitrariness, and arbitrariness is what three readings from two observers support. A
+directional bias would have been more useful — you can correct for a direction — and it
+is exactly the claim that did not survive contact with a third reading.
 ##### Ownership, resolved — and one more misattribution in the resolving
 
 Both worktree files are `codescout-fe`'s (`3954769`), confirmed by them directly and
