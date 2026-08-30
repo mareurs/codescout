@@ -1,17 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- tests
+- vacuous-assertion
+- codescout-embed
+- embeddings
+closed: 2026-08-30
 opened: 2026-08-30
-closed:
-severity: low
 owner: marius
 related:
-  - docs/trackers/resume-embedding-transport-stages-1-3.md
-tags:
-  - tests
-  - vacuous-assertion
-  - codescout-embed
-  - embeddings
-kind: bug
+- docs/trackers/resume-embedding-transport-stages-1-3.md
+severity: low
 ---
 
 # BUG: `ollama_large_batch_exceeding_batch_size` never exceeded the batch size — vacuous since the day it was written
@@ -149,6 +149,50 @@ The second is preferable and is a slightly larger change. Whichever is chosen,
 **verify by mutation** — `chunks(BATCH_SIZE)` → `chunks(usize::MAX)` must turn
 the test red. A fix that does not is the same defect with a bigger number.
 
+## Fix provenance
+
+**Applied 2026-08-30 on `experiments`.**
+
+- SHA: `236f31a4` (`experiments` — orphans on the next rebase)
+- patch-id: `7f066d41f254df6428d99ae17908e031f9d8c95a` (survives rebase and cherry-pick)
+
+Took the second of the two candidate fixes, as this file recommended: a loopback
+test that runs in CI, not a bigger number on an `#[ignore]`d one.
+
+**The assertion is the split's shape, not its existence.** 70 inputs against the
+32 cap must arrive as exactly `[32, 32, 6]`, in order. `requests > 1` would have
+passed for any chunk size that is not 70 — a laxer assertion reproducing this very
+defect with a bigger number, which is what the file warned against.
+
+**The mock had to echo the request's own arity.** `embed` rejects a response whose
+length disagrees with the batch it sent, so a fixed-size answer fails the request
+instead of exercising the loop. The helper reads headers then exactly
+`Content-Length` bytes — a 70-input body does not fit one read, and counting a
+truncated body would under-report the batch size, which is the same defect class
+the test exists to catch.
+
+**The old test was deleted, not renumbered.** Its chunking purpose is now covered
+properly, and its other assertion — consistent dimensions across a batch — already
+duplicates `ollama_batch_consistent_dimensions` two tests above it.
+
+**Mutation-verified as this file demanded:** `chunks(BATCH_SIZE)` →
+`chunks(usize::MAX)` gives `left: [70]`, `right: [32, 32, 6]`. The old test passes
+unchanged under that same mutation — which is the entire finding, now demonstrated
+rather than argued.
+
+## A second vacuity, found while fixing the first
+
+`cargo test -p codescout-embed an_oversize_batch_is_split_into_batch_size_requests`
+reports **`0 passed; 19 filtered out`, exit 0**. The `remote` module sits behind
+the `remote-embed` feature, so without `--features remote-embed` the test does not
+exist to be run. That zero is character-identical to a pass and had to be caught by
+reading the count rather than the exit code — the same shape as this bug one level
+out, and the same shape as the `0/N` checker-exec-bit trap `CLAUDE.md` records for
+the prompt-eval harness.
+
+The test itself is CI-safe: `.github/workflows/ci.yml` builds the workspace with
+features, and the lean lane (`--no-default-features`, 3385 passed) simply does not
+compile the module. Verified green in both.
 ## Tests added
 
 None yet — the fix is the test.

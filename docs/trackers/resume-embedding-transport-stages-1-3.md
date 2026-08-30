@@ -849,8 +849,10 @@ board is a claim about the past.
 > `remote.rs::tests::ollama_large_batch_exceeding_batch_size` ("BATCH_SIZE is 8;
 > send 20 texts to exercise the chunking logic"). That test has been vacuous
 > since it was written — 20 < 32 is one chunk — and `git log -S` finds no commit
-> where the constant was ever 8. Filed as
-> `docs/issues/2026-08-30-ollama-large-batch-test-never-exceeded-the-batch-size.md`.
+> where the constant was ever 8. **FIXED 2026-08-30** (`236f31a4`, patch-id
+> `7f066d41f254df6428d99ae17908e031f9d8c95a`): replaced with a CI-running loopback
+> test asserting the split's shape, `[32, 32, 6]` for 70 inputs. Archived as
+> `docs/issues/archive/2026-08-30-ollama-large-batch-test-never-exceeded-the-batch-size.md`.
 
 **The three contracts it must carry across, all now built:**
 

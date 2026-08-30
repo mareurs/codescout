@@ -122,6 +122,66 @@ A session that acted on such an announcement would have had no way to tell the
 announcer and no reason to think it needed to. The ~15-second lifetime fits
 someone realising and reverting.
 
+### A second instance, resolved — and it inverts the first
+
+Added later the same day. About 90 minutes after the event above, a full
+`cargo test` of mine showed one failure:
+`librarian::tools::doctor::tests::status_drift_fires_when_params_and_the_body_row_disagree`,
+`left: 0, right: 1`, on a file I have never touched. It passed in isolation and
+passed on a full re-run. I recorded it as **load-dependent** and said so in a
+commit message (`236f31a4`).
+
+That was wrong. `codescout-ae` identified it immediately as **their own mutation**:
+they had disabled the table-row locator in `entry_status_region`, which drops that
+test's finding count from 1 to 0 — same test, same assertion, same numbers. It
+"passed on re-run" because they had restored the file in between. Nothing
+intermittent about it.
+
+**Their protocol finding, which is the general one:** they had announced the window
+to `git-travel-augmentation-shape` and not to me, having addressed it as a reply to
+the peer whose window collided with theirs rather than as a broadcast. *In a
+four-session checkout, an announcement sent to one peer is not an announcement* —
+and it is **worse than silence**, because it creates a false record of coordination.
+A reader who checks "was a window announced?" finds yes.
+
+### The symmetry, which is the real finding
+
+The two incidents have one root cause and produce **opposite invented entities**:
+
+| | the real event | what the observer invented |
+|---|---|---|
+| 16:56 (this file, above) | an unannounced edit | a phantom **session** — an actor, to explain a real write |
+| 18:2x (this section) | an edit announced to the wrong subset | a phantom **flake** — a defect, to explain a real write |
+
+codescout-ae's framing, worth quoting because it names the mechanism rather than
+the instances:
+
+> An intermittent-looking result on a file nobody admits touching gets explained by
+> whatever kind of ghost the observer already believes in. You reach for a phantom
+> writer, I would have reached for a race. Neither of us reaches for "someone is
+> mid-experiment and did not tell me," which is the boring truth both times.
+
+That is the diagnostic to carry forward. In a shared checkout, an unexplained
+intermittent result on an untouched file should put *uncoordinated concurrent edit*
+at the TOP of the hypothesis list — above race, above cache, above flake — because
+it is the only hypothesis that is both common here and invisible to every
+single-observer instrument.
+
+**This also partially answers the 16:56 case.** It does not identify the writer, and
+nothing here should be read as doing so. But it removes the last reason to treat
+that event as exotic: an uncoordinated concurrent edit during someone else's
+announced window is now a *measured* occurrence in this checkout, twice in one
+afternoon, rather than a hypothesis. The undetermined part is narrower than it was
+— not "what could possibly have done this", but "which session".
+
+### Mitigations, now two
+
+1. **Say what you are breaking, never how** (from the first incident) — an
+   announcement naming the exact edit contains a verbatim executable instruction.
+2. **Broadcast to every peer, never to a subset** (from this one) — and treat a
+   partial announcement as worse than none, because it manufactures a false record
+   of coordination. `ListAgents` under-reports, so "every peer I can see" is already
+   a subset; say so when you announce.
 ## Fix
 
 **Put the mitigation in the announcement's form, not in a rule nobody can
