@@ -4940,6 +4940,28 @@ near-complete for the sessions sharing nothing, near-empty for the population ev
 attribution question is about. Two readings is not a measurement and the bias must not be
 cited as one.
 
+**And it did not survive — refuted one reading later** (`6521df4b`), exactly as that caveat
+anticipated. A third observer, population unchanged at 5-in-checkout plus 2-elsewhere, saw
+the opposite direction:
+
+| `codescout-f0` (807989) | outside **2 of 2** | in-checkout **1 of 4** |
+| `swap-dense-leg` (801487) | outside **0 of 2** | in-checkout **2 of 4** |
+
+So the omission is not *inverted* with respect to the tree — it is not **oriented** with
+respect to the tree at all. Arbitrariness stands; the directional refinement does not.
+
+Note which way that cuts, because it is the opposite of the usual moral. A directional bias
+would have been the **more useful** finding — a direction can be corrected for, an arbitrary
+omission cannot — and it is precisely the stronger, more useful claim that failed. The weaker
+one survived, and the weaker one is all the conclusion ever needed: *elimination over visible
+peers is unrelated to the question*, which follows from arbitrariness alone. Three readings
+from two observers support it; nothing supports the refinement.
+
+**Three corrections to this entry within an hour, each caught by another party rather than
+by its author** — and each author had already applied the discipline that catches it, one
+level too late. That is the entry's subject recurring in its own record, and the reason it is
+dated rather than tidied.
+
 That is a different kind of defect and it demands a different response. A short view makes
 elimination *weak*, so you widen it or hedge the conclusion. A disjoint view makes
 elimination **unrelated** to the question — no amount of care with the wrong instrument
