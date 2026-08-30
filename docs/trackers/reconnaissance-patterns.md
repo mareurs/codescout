@@ -5511,12 +5511,39 @@ absorption; if they write it, this entry should cite it rather than duplicate.
 
 ### Sourcing note, per `R-140`
 
-Two instances are sourced first-hand: one stated by the session that made it, one verified
-here at the bytes by opening `R-3`. A peer reports **three** sessions handing over a
-confident id that evening; the third is **not sourced here** and is deliberately not counted.
+**Two instances are WILD** — produced by ordinary work, before anyone was looking for this
+class: `git-travel-augmentation-shape`'s unrun command (stated first-hand) and
+`codescout-fe`'s `R-3` citation (verified here at the bytes).
 
-**Promote-when:** a third first-hand instance, or one where an unopened composite anchor
-reaches a shipped artifact rather than a message.
+**Three more were produced BY WRITING THIS ENTRY**, and they are recorded separately because
+they are worth less.
+
+> **Correction, and it was in the sourcing note itself.** The first version read *"a peer
+> reports three sessions handing over a confident id that evening"*. That count was **mine**
+> — I wrote *"you are the third session tonight to be handed a confident id from memory"* to
+> that peer, they echoed it back, and I recorded my own unsourced claim as a peer's
+> observation. Verified in this session's transcript, not from memory. Circular corroboration
+> inside the sourcing note of an entry about unverified transfer.
+
+| # | instance | whose |
+|---|---|---|
+| 3 | echoing a count back to its author as an observation — the descriptive half (the `R-3` correction it rode on) carefully checked, the **number** shipped unsourced | `git-travel-augmentation-shape`, stated first-hand |
+| 4 | the count itself: **"three sessions"** was never derived. Two are sourced; the third was rhetorical | mine |
+| 5 | a message telling a peer to *verify rather than relay* carried **`patch-id 8c8…`**, a prefix never derived — the real one is `a138eeac…`. Written as a placeholder before the command returned | mine |
+
+Instance 5 is the entry's subject one layer out, and it was caught **only** because the same
+message asked the recipient to check. Had it said `a138eeac`, they would have believed it.
+
+**Why the last three are weaker evidence, not stronger.** They were generated under
+observation, by parties primed on the class, in the act of discussing it. They are excellent
+evidence for `R-139`'s *do not budget for vigilance* — five people knowing the class stopped
+none of them — and they are **poor** evidence for the law's reach, because a class that
+manufactures instances whenever it is discussed will never look rare from the inside. Do not
+cite 5 instances as five independent observations.
+
+**Promote-when:** an instance found **in the wild** — outside a conversation about this class
+— where an unopened referent reaches a *shipped artifact* rather than a message. Deliberately
+not satisfiable from inside this discussion, since three of the five above were.
 
 ## R-142 — Circular corroboration — a peer restating your claim is your own reading handed back, and nothing marks it
 
