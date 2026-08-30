@@ -364,6 +364,58 @@ That reclassifies every attribution attempt this file records. They were not
 underpowered inferences that needed more care; they were inferences over a set with no
 established relationship to the question. Reasoning harder would not have helped.
 
+
+> ### SUPERSEDED — the discriminator is the CONFIG PROFILE, measured 7/7
+>
+> *`codescout-ae` found it; `codescout-f0` verified it independently across every live
+> session before this correction was written. The "arbitrary" framing below is **mine**, it
+> was the best available reading of two observers' contradictory data, and it is wrong.*
+>
+> Visibility in `ListAgents` is **deterministic on `CLAUDE_CONFIG_DIR`**. Measured across all
+> seven live `claude` processes by reading `/proc/<pid>/environ`:
+>
+> | profile | sessions | cwd |
+> |---|---|---|
+> | `~/.claude-sdd` | 790936, **807989**, 2053449, 3954769 | `agents/system`, codescout, `claude-plugins`, codescout |
+> | `~/.claude` | 801487, 803654, 810953 | all codescout |
+>
+> `codescout-f0` (807989, `.claude-sdd`) lists exactly three peers — `system-d9` (790936),
+> `claude-plugins-08` (2053449), `codescout-fe` (3954769). **Those are precisely the three
+> other `.claude-sdd` sessions. No exceptions in either direction.**
+>
+> **This explains both contradictory readings at once**, which is what makes it the right
+> answer rather than a third guess. `codescout-f0` sees 2-of-2 outside the checkout and
+> 1-of-4 inside it; `swap-dense-leg` (801487, `.claude`) sees 0-of-2 outside and 2-of-4
+> inside. Both are the same rule: *you see your own profile*. f0's profile happens to hold
+> both non-codescout sessions and one codescout one; 801487's holds three codescout ones and
+> nothing else. Neither observer could derive the rule from their own data, and the
+> "arbitrary" conclusion was what two irreconcilable single-observer views look like from
+> inside.
+>
+> **The remedy changes, and improves.** "Arbitrary" implied the population is
+> unrecoverable and socket addressing is the only method. It is not: the partition is
+> **enumerable**, and you can know exactly whom you are blind to.
+>
+> ```
+> for p in $(pgrep -x claude); do
+>   tr '\0' '\n' < /proc/$p/environ | grep '^CLAUDE_CONFIG_DIR='
+> done
+> ```
+>
+> `scripts/peer-sessions.sh` already enumerates by cwd; adding the profile column turns
+> "here is the population" into "here is the population **and** which half your instrument
+> cannot see". Socket addressing remains correct — delivery is unfiltered while discovery is
+> not — but it is no longer a fallback from an unknowable set.
+>
+> **And the answer was already on record — law G.** `CLAUDE.md`'s opening section states that
+> this machine runs three Claude Code instances with independent config dirs (`~/.claude`,
+> `~/.claude-sdd`, `~/.claude-kat`). Five sessions spent an evening deriving from behaviour a
+> partition the repo's own first section documents. Nobody read it, because nothing about a
+> peer-visibility question looks like a config-topology question.
+>
+> What survives unchanged: **elimination over visible peers is still wrong**, since the
+> visible set is a profile, not a population. What dies is the claim that no correction is
+> possible — the correction is one `/proc` read per process.
 ##### A third observer, and the "inverted" reading does NOT hold
 
 `codescout-f0` offered a sharper figure than arbitrariness — that the view is
