@@ -560,6 +560,26 @@ impl Embedder for RemoteEmbedder {
             self.cached_dims.store(dim, Ordering::Relaxed);
         }
 
+        // The server must return exactly one vector per non-empty input. A gateway
+        // that silently truncates an oversize request returns fewer — and the
+        // reconstruction below indexes `embedded[slot]` once per non-empty slot, so
+        // without this check a short response is an index-out-of-bounds **panic**,
+        // not an error. The `dim` block above anticipated the *no-data* case and
+        // not the *short* one; and its cached-dims fallback made the gap worse,
+        // since it let a zero-vector reconstruction proceed into the same panic.
+        //
+        // Reachable from any deployment whose endpoint truncates, which is exactly
+        // what the consumer-side check in root's `embed_one_batch` was written for.
+        if embedded.len() != filtered.len() {
+            bail!(
+                "embedding server returned {} vectors for {} non-empty inputs — the \
+                 server may be silently truncating an oversize request instead of \
+                 refusing it. Send a smaller batch.",
+                embedded.len(),
+                filtered.len()
+            );
+        }
+
         let mut all = vec![vec![0.0; dim]; texts.len()];
         for (slot, (orig_idx, _)) in non_empty.iter().enumerate() {
             all[*orig_idx] = std::mem::take(&mut embedded[slot]);
@@ -1384,6 +1404,40 @@ mod tests {
             msg.contains("<empty response body>"),
             "a whitespace-only body must be named as empty, not rendered as nothing. \
              got: {msg}"
+        );
+    }
+
+    /// A server returning fewer vectors than inputs must **error, not panic**.
+    ///
+    /// The reconstruction indexes `embedded[slot]` once per non-empty input, so a
+    /// short response was an index-out-of-bounds panic — a library aborting the
+    /// process on remote input it does not control, reachable from any endpoint
+    /// that truncates an oversize request instead of refusing it.
+    ///
+    /// Found 2026-08-30 when root's dense leg began delegating here: root's own
+    /// arity check had been catching this cleanly, and once the crate ran first the
+    /// panic surfaced. `embed_one_batch_errors_on_dense_arity_mismatch` in root is
+    /// the same assertion one layer up, and both are worth keeping — they fail for
+    /// different reasons now.
+    #[tokio::test]
+    async fn a_short_response_errors_instead_of_panicking() {
+        let url = spawn_status_server(
+            "200 OK",
+            r#"{"data":[{"embedding":[1.0,2.0,3.0],"index":0}]}"#,
+        )
+        .await;
+        let embedder = RemoteEmbedder::from_url(&url, MODEL, None).unwrap();
+
+        let err = embedder
+            .embed(&["a", "b", "c"])
+            .await
+            .expect_err("one vector for three inputs cannot be a successful embed");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains('1') && msg.contains('3'),
+            "the error must name both the returned and the expected count, so an \
+             operator can tell truncation from an outage. got: {msg}"
         );
     }
 

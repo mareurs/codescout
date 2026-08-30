@@ -197,32 +197,27 @@ pub struct EmbedderHttp {
     /// `with_config` defaults to `None`. Injectable via `with_inflight_override` so
     /// tests never need to mutate real process env to exercise the override path.
     inflight_override: Option<String>,
+    /// The read timeout the dense leg's client was built with.
+    ///
+    /// Stored as well as applied because `with_read_timeout` rebuilds `client` and
+    /// keeps nothing, and the delegated dense embedder needs the same value —
+    /// a duration recoverable from a `reqwest::Client` is not a thing.
+    read_timeout: std::time::Duration,
+    /// The dense leg, delegated to `codescout-embed`.
+    ///
+    /// Built lazily because the builders (`api_key`, `with_read_timeout`) run
+    /// after `with_config` and both feed it, and because `RemoteEmbedder::from_url`
+    /// is fallible while a builder returning `Self` has nowhere to put an error —
+    /// `dense_batch` returns `Result`, so first-use is where the error belongs.
+    /// Both of those builders reset this cell, so a late `api_key(...)` cannot be
+    /// silently ignored by an embedder that was already constructed.
+    dense: tokio::sync::OnceCell<codescout_embed::remote::RemoteEmbedder>,
 }
 
 #[cfg(feature = "remote-embed")]
 #[derive(Serialize)]
 struct EmbedReq<'a> {
     inputs: Vec<&'a str>,
-}
-
-#[cfg(feature = "remote-embed")]
-#[derive(Serialize)]
-struct OpenAiEmbedReq<'a> {
-    input: Vec<&'a str>,
-    model: &'a str,
-}
-
-#[cfg(feature = "remote-embed")]
-#[derive(Deserialize)]
-struct OpenAiEmbedResp {
-    data: Vec<OpenAiEmbedItem>,
-}
-
-#[cfg(feature = "remote-embed")]
-#[derive(Deserialize)]
-struct OpenAiEmbedItem {
-    embedding: Vec<f32>,
-    index: usize,
 }
 
 #[cfg(feature = "remote-embed")]
@@ -372,12 +367,21 @@ impl EmbedderHttp {
             sparse_batch_cap: tokio::sync::OnceCell::new(),
             batch_override: None,
             inflight_override: None,
+            read_timeout: std::time::Duration::from_secs(
+                crate::retrieval::transport::DEFAULT_READ_TIMEOUT_SECS,
+            ),
+            dense: tokio::sync::OnceCell::new(),
         }
     }
     /// Set the bearer token for the dense endpoint. Builder-style; `new()` reads
     /// it from `EMBED_API_KEY`. `None` sends no Authorization header.
     pub fn api_key(mut self, api_key: Option<String>) -> Self {
         self.api_key = api_key;
+        // The delegated dense embedder is built from this key, so a cell built
+        // before this call holds the wrong one. Resetting is what keeps the
+        // builder order that `new()` uses (`with_config().api_key(...)`) from
+        // depending on whether anything happened to embed in between.
+        self.dense = tokio::sync::OnceCell::new();
         self
     }
 
@@ -422,6 +426,8 @@ impl EmbedderHttp {
     /// so the discarded one costs a connection pool that was never opened.
     pub fn with_read_timeout(mut self, read_timeout: std::time::Duration) -> Self {
         self.client = crate::retrieval::transport::client(read_timeout);
+        self.read_timeout = read_timeout;
+        self.dense = tokio::sync::OnceCell::new();
         self
     }
 
@@ -433,67 +439,80 @@ impl EmbedderHttp {
         self
     }
 
+    /// The delegated dense embedder, built once on first use.
+    ///
+    /// Three settings are deliberate, and none of them is the constructor default:
+    ///
+    /// - `with_max_attempts(1)` — **fail-fast**, per the operator ruling of
+    ///   2026-08-30. Root's dense leg has never retried, so the crate's default of
+    ///   3 would have smuggled a behaviour change into a commit labelled a swap.
+    ///   It is *attempts*, not retries: 1 means one request, total.
+    /// - the **query prefix**, mapped from root's configured string: empty means
+    ///   `Suppressed`, non-empty means `Explicit`. Never the constructor default
+    ///   `Derive` — see the comment at the mapping.
+    /// - `with_read_timeout` — the same value root's own client carries, so the
+    ///   dense and sparse legs still give up together.
+    async fn remote_dense(&self) -> Result<&codescout_embed::remote::RemoteEmbedder> {
+        self.dense
+            .get_or_try_init(|| async {
+                // By the time a key reaches here it has already been through
+                // root's cleartext guard — `EmbedderHttp::new` drops it for a
+                // non-loopback plaintext url, and so does
+                // `RetrievalClient::guarded_api_key`. The crate's stricter policy
+                // for that combination is a `bail!`, so routing an unguarded key
+                // through here would turn today's warn-and-continue into a failure
+                // to construct the retrieval client at all. It cannot happen via
+                // this path, and that is the reason, not an accident.
+                // D1's mapping: an unset `CODESCOUT_QUERY_PREFIX` means
+                // **suppressed**, a set one means exactly that string. Never
+                // `Derive` — the constructors default to it, and `derive_for`
+                // matches on `coderank` while being blind to quantization, so it
+                // would prefix a `CodeRankEmbed-Q4_K_M` deployment that measures
+                // 37 without the prefix and 34 with it.
+                let query_prefix = if self.query_prefix.is_empty() {
+                    codescout_embed::remote::QueryPrefix::Suppressed
+                } else {
+                    codescout_embed::remote::QueryPrefix::Explicit(self.query_prefix.clone())
+                };
+                Ok(codescout_embed::remote::RemoteEmbedder::from_url(
+                    &self.dense_base,
+                    &self.dense_model_name,
+                    self.api_key.clone(),
+                )?
+                .with_read_timeout(self.read_timeout)
+                .with_query_prefix(query_prefix)
+                .with_max_attempts(1))
+            })
+            .await
+    }
+
     /// Send a dense-embedding batch to the OpenAI-compatible endpoint
     /// (`POST {base}/v1/embeddings`). Returns one vector per input, in input
     /// order. Works against any OpenAI-shape server — llama-server, vLLM, Ollama,
-    /// OpenAI proper, or a corporate embedding gateway. Sends `Authorization:
-    /// Bearer <key>` when an `api_key` is configured.
+    /// OpenAI proper, or a corporate embedding gateway.
+    ///
+    /// **Delegated to `codescout_embed` since 2026-08-30 (T6).** The split is by
+    /// what each side is actually able to own. Root keeps the orchestration that
+    /// has no crate equivalent — `embed_chunks_ordered`'s chunking and pipelining,
+    /// the `CODESCOUT_EMBED_BATCH` / `CODESCOUT_EMBED_INFLIGHT` escape hatches, the
+    /// concurrently-run sparse leg, and the positional re-expansion that keeps the
+    /// two legs aligned. The crate owns the wire: request shape, bearer auth,
+    /// response ordering, the 32 MiB body cap, and the typed `EmbedError`s that
+    /// `classify_search_error` routes on.
+    ///
+    /// Two consequences worth knowing rather than rediscovering. The crate
+    /// re-chunks internally at 32, so a root sub-batch above that becomes more than
+    /// one request — same vectors, same order, more round trips; below it, which is
+    /// every configuration that lowers `CODESCOUT_EMBED_BATCH` to satisfy a
+    /// server's cap, it is one request exactly as before. And the endpoint is built
+    /// by the crate's `normalize_embeddings_base`, which tolerates a `dense_base`
+    /// that already carries `/v1` or `/v1/embeddings` — root's own `format!` would
+    /// have produced a doubled path for those.
     async fn dense_batch(&self, inputs: &[&str]) -> Result<Vec<Vec<f32>>> {
-        let url = format!("{}/v1/embeddings", self.dense_base);
-        let body = OpenAiEmbedReq {
-            input: inputs.to_vec(),
-            model: &self.dense_model_name,
-        };
-        let mut req = self.client.post(&url).json(&body);
-        if let Some(key) = &self.api_key {
-            req = req.bearer_auth(key);
-        }
-        let http = req.send().await.map_err(|e| {
-            // A connect/timeout failure is client-side: the embedder URL is
-            // wrong or the service is down. Lift the URL + a "connect" marker
-            // to the top-level message so `e.to_string()` (what the search
-            // layer's classifier sees) routes this to the embedder hint
-            // instead of the misleading "check qdrant logs" fallback.
-            if e.is_connect() || e.is_timeout() {
-                anyhow!(
-                    "dense {marker}: {url} — the dense embedder is \
-                         unreachable (connect/timeout). Check CODESCOUT_EMBEDDER_URL and \
-                         that the embedder is running (`./scripts/retrieval-stack.sh ps`). ({e})",
-                    marker = codescout_embed::CONNECT_FAILED_MARKER
-                )
-            } else {
-                anyhow::Error::new(e).context("dense openai send")
-            }
-        })?;
-
-        // `error_for_status()` keeps the status code and DISCARDS the response body —
-        // and for this backend the body is the only place the actionable cause appears.
-        // llama.cpp refuses an oversized payload with a 400 whose body reads
-        // `input (1682 tokens) is larger than the max context size (1024 tokens)`, but
-        // through that helper the caller saw only "400 Bad Request", which reads as a
-        // generic outage. Unattributed skips were the result:
-        // docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md
-        let status = http.status();
-        if !status.is_success() {
-            let body_raw = http.text().await.unwrap_or_default();
-            let trimmed = body_raw.trim();
-            // Bounded: an HTML error page would otherwise flood every surface that
-            // renders this — including `SyncReport.skipped`, which holds one entry per
-            // skipped chunk.
-            let mut body: String = trimmed.chars().take(400).collect();
-            if body.is_empty() {
-                body = "<empty response body>".to_string();
-            }
-            // The "dense openai status" marker is load-bearing: `classify_search_error`
-            // routes on it and docs/greps name it. Keep it as the message prefix.
-            anyhow::bail!("dense openai status {}: {body}", status.as_u16());
-        }
-        let resp: OpenAiEmbedResp = http.json().await.context("dense openai json")?;
-        let mut items = resp.data;
-        items.sort_by_key(|i| i.index);
-        Ok(items.into_iter().map(|i| i.embedding).collect())
+        use codescout_embed::Embedder as _;
+        self.remote_dense().await?.embed(inputs).await
     }
-    /// Dense-only **query** embedding: applies the configured `query_prefix` (if
+    /// Dense-only **query** embedding: applies the configured query prefix (if
     /// any) and hits ONLY the dense endpoint — no sparse leg. This is the path
     /// for dense-only retrieval (memory recall; the sqlite-vec "lite" stack).
     /// Distinct from [`Self::embed`], which also fetches the sparse vector for
@@ -504,12 +523,28 @@ impl EmbedderHttp {
     /// asymmetric model wants the prefix on the query side and never on the
     /// document side. See
     /// `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md`.
+    ///
+    /// Since 2026-08-30 the prefix is applied by `codescout-embed`'s `embed_query`
+    /// rather than by string concatenation here. That is what makes the mapping in
+    /// [`Self::remote_dense`] load-bearing instead of decorative: with root doing
+    /// its own concatenation, the crate's `QueryPrefix` would be dead
+    /// configuration no mutation could falsify.
     pub async fn dense_query(&self, text: &str) -> Result<Vec<f32>> {
-        if self.query_prefix.is_empty() {
-            return self.dense_document(text).await;
+        use codescout_embed::Embedder as _;
+        // Same empty-input policy as the document side. `trim()`, not `is_empty()`
+        // — see [`Self::dense_document`].
+        if text.trim().is_empty() {
+            return Ok(vec![0.0; self.expected_dim]);
         }
-        self.dense_document(&format!("{}{}", self.query_prefix, text))
-            .await
+        let dense = self.remote_dense().await?.embed_query(text).await?;
+        if dense.len() != self.expected_dim {
+            return Err(anyhow!(
+                "embed dim mismatch: got {}, expected {}",
+                dense.len(),
+                self.expected_dim
+            ));
+        }
+        Ok(dense)
     }
 
     /// Dense-only **document** embedding: the same single-item dense call as
@@ -530,7 +565,7 @@ impl EmbedderHttp {
         // Callers should not be embedding empty text; a zero vector is a junk
         // index entry either way. This makes it a *predictable* junk entry rather
         // than whatever the server chose to return for `""`.
-        if text.is_empty() {
+        if text.trim().is_empty() {
             return Ok(vec![0.0; self.expected_dim]);
         }
         let dense = self
@@ -634,7 +669,11 @@ impl EmbedderHttp {
         //
         // Empty positions are re-expanded below: an empty sparse vector and a
         // zero dense vector, both at their original index.
-        let nonempty: Vec<&str> = inputs.iter().copied().filter(|s| !s.is_empty()).collect();
+        let nonempty: Vec<&str> = inputs
+            .iter()
+            .copied()
+            .filter(|s| !s.trim().is_empty())
+            .collect();
         let sparse_body = serde_json::json!({ "inputs": &nonempty });
 
         let (dense_nonempty, sparse_nonempty) = tokio::try_join!(
@@ -726,7 +765,7 @@ impl EmbedderHttp {
         let mut sparse_iter = sparse_nonempty.into_iter();
         let mut out = Vec::with_capacity(inputs.len());
         for s in &inputs {
-            if s.is_empty() {
+            if s.trim().is_empty() {
                 out.push(EmbedOutput {
                     dense: vec![0.0; self.expected_dim],
                     sparse: SparseVector {
@@ -778,7 +817,11 @@ impl EmbedderHttp {
     /// about what `""` means would be the same asymmetry one level down.
     async fn embed_one_batch_dense(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>> {
         let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
-        let nonempty: Vec<&str> = inputs.iter().copied().filter(|s| !s.is_empty()).collect();
+        let nonempty: Vec<&str> = inputs
+            .iter()
+            .copied()
+            .filter(|s| !s.trim().is_empty())
+            .collect();
 
         let dense_nonempty = if nonempty.is_empty() {
             Vec::new()
@@ -804,7 +847,7 @@ impl EmbedderHttp {
         let mut dense_iter = dense_nonempty.into_iter();
         let mut out = Vec::with_capacity(inputs.len());
         for s in &inputs {
-            let dense = if s.is_empty() {
+            let dense = if s.trim().is_empty() {
                 vec![0.0; self.expected_dim]
             } else {
                 dense_iter.next().ok_or_else(|| {
@@ -1508,6 +1551,57 @@ mod tests {
         assert_eq!(out[2].dense, vec![0.0_f32, 0.0, 0.0]);
         assert_eq!(out[3].dense, vec![8.0_f32, 0.0, 0.0]);
         dense_mock.assert_async().await;
+    }
+
+    /// Whitespace-only input counts as empty, on both sides of the delegation.
+    ///
+    /// This is a requirement of the swap, not a preference. Root filtered on
+    /// `is_empty()`; `codescout-embed` filters on `trim().is_empty()`. With the
+    /// dense leg delegated and the predicates disagreeing, a `"  "` chunk passes
+    /// root's filter, is dropped by the crate, and returns one vector short — which
+    /// the arity check turns into a hard error for input that embedded fine
+    /// before. A silent divergence between two filters becomes a loud failure one
+    /// layer up, which is the only reason it is visible at all.
+    #[tokio::test]
+    async fn whitespace_only_input_counts_as_empty_on_both_sides() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            // Only the genuinely non-blank input is sent — if root's predicate
+            // drifts back to `is_empty()`, the blank arrives here and this fails
+            // on the body rather than on the output.
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "input": ["real"]
+            })))
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[5.0,0.0,0.0],"index":0}]}"#)
+            .expect(1)
+            .create_async()
+            .await;
+        let sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(200)
+            .with_body(r#"[[{"index":1,"value":0.5}]]"#)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let chunk = vec!["  \t ".to_string(), "real".to_string()];
+        let out = e.embed_one_batch(chunk).await.expect("embed_one_batch");
+
+        assert_eq!(out.len(), 2);
+        assert_eq!(
+            out[0].dense,
+            vec![0.0_f32, 0.0, 0.0],
+            "a whitespace-only input is zero-filled, exactly like an empty one"
+        );
+        assert!(out[0].sparse.indices.is_empty());
+        assert_eq!(out[1].dense, vec![5.0_f32, 0.0, 0.0]);
+        assert_eq!(out[1].sparse.indices, vec![1u32]);
+
+        dense_mock.assert_async().await;
+        sparse_mock.assert_async().await;
     }
 
     /// The n=1 case of the same policy, on the single-document path the memory
