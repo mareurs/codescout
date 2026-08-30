@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- tests
+- flake
+- retrieval
+- shared-machine
+closed: 2026-08-30
 opened: 2026-08-30
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [tests, flake, retrieval, shared-machine]
-kind: bug
+severity: medium
 ---
 
 # `dense_and_sparse_legs_run_concurrently` flakes under load, and wall clock can no longer separate concurrent from sequential
@@ -82,6 +86,49 @@ Acceptance check is a mutation: replace `try_join!` with two sequential `.await`
 confirm the rewritten test fails deterministically, restore. **Announce that mutation
 window before opening it** (`reconnaissance-patterns:R-129`) — this checkout is shared.
 
+## Fix provenance
+
+**Applied 2026-08-30 on `experiments`.**
+
+- SHA: `614b1271` (`experiments` — orphans on the next rebase)
+- patch-id: `bf12a8cc52e518da7edad0887e7e96f41bf3f38f` (`git show <sha> | git patch-id --stable`; survives rebase and cherry-pick)
+
+Applied as designed above, with three things the design did not anticipate.
+
+**`std::sync::Barrier` was not usable.** It has no timeout, so a serialised
+regression blocks the handler forever and hangs the test binary with no
+attributable failure — the opposite of the goal. Replaced with
+`Arc<(Mutex<usize>, Condvar)>` and `wait_timeout`, which also satisfies
+`with_chunked_body`'s `Fn + Send + Sync` bound; `mpsc` does not, because
+`Receiver` is not `Sync`.
+
+**The regression signature is 1, not 0.** Under sequential awaits the FIRST
+handler times out (tally 0) and the second then finds the arrival counter already
+at 2 and succeeds (tally 1). So `assert!(met > 0)` would have read as a guard
+while passing under the exact bug the test names — the same shape as R-130 one
+level out: not a test that dies for the wrong reason, but an assertion that
+*survives* for the wrong reason. The mutation run confirmed it: `left: 1,
+right: 2`.
+
+**That blocking inside the handler is safe was not assumed.** This entry's own
+Measurements section supplied the proof: two 500 ms sleeps totalling ~503 ms
+means mockito runs the two handlers on genuinely parallel threads. Without that,
+a blocking rendezvous would deadlock under `#[tokio::test]`'s current-thread
+runtime.
+
+**Verification.** Mutation announced to three peers, applied, test failed
+deterministically in 10.2 s, restored byte-exact (sha256 identical, diff back to
+one hunk). Baseline held at 4721 `--lib` across 3 loaded runs; the test itself
+drops 0.69–0.79 s → 0.18 s. Full gate green: fmt, clippy
+`--workspace --all-targets --features local-embed`, `cargo test` 4873/0, lean
+3385/0.
+
+**One thing this fix did NOT establish.** During the announced window the file on
+disk briefly held a sequential-await `embed_one_batch` that no session claims and
+no worktree contains — filed separately as
+`docs/issues/2026-08-30-a-transient-uncoordinated-mutation-during-an-announced-window.md`.
+It is not a defect in this fix, and the fix's own verification is unaffected: the
+mutation run and the restore are both sha-anchored.
 ## Rejected alternatives
 
 - **Raise the ceiling.** Unavailable, not merely worse: above 903 ms leaves under 100 ms
