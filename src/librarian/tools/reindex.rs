@@ -906,6 +906,104 @@ mod tests {
         );
     }
 
+    /// The bug, end to end, in one test: export on the machine that HAS the augmentation,
+    /// then come up augmented on a catalog that never held it.
+    ///
+    /// `mk_ctx` builds a fresh in-memory catalog per call, so the second context on the same
+    /// root is precisely the fresh-clone case — same files, no rows. Before this change that
+    /// second catalog came up with the artifact present, its augmentation absent, and
+    /// `reindex` reporting healthy; every documented `append_entry` / `entry_filter` call
+    /// against it failed one caller at a time.
+    ///
+    /// What this adds over the unit tests, stated no more strongly than it can be shown:
+    /// it exercises the COMPOSITION — export writes a sidecar, stamps a declaration,
+    /// `parse_declaration` accepts that exact spelling, `lookup_git_root` resolves it, and
+    /// the attach lands a usable row. Each link is pinned separately elsewhere; this is the
+    /// only test that fails if two of them agree with their own unit test and not with each
+    /// other. It is deliberately NOT claimed that some specific mutation escapes the unit
+    /// suite and dies here — the path helpers are pinned together by
+    /// `path_is_keyed_on_the_file_stem_not_the_artifact_id`, so the obvious candidate does
+    /// not, and an unverified claim about one's own coverage is the failure this comment
+    /// would otherwise be an example of.
+    #[tokio::test]
+    async fn a_catalog_that_never_held_the_augmentation_comes_up_augmented() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
+        // No declaration and no sidecar — the state every augmented tracker was in.
+        std::fs::write(
+            root.join("docs/trackers/t.md"),
+            "---\nkind: tracker\nstatus: active\n---\n\n# t\n",
+        )
+        .unwrap();
+
+        // --- machine A: has the row, exports it -------------------------------------
+        let a = mk_ctx(root.to_path_buf(), TRACKER_RULES);
+        call(&a, json!({})).await.unwrap();
+        {
+            let cat = a.catalog.lock();
+            let id: String = cat
+                .conn
+                .query_row(
+                    "SELECT id FROM artifact WHERE abs_path = ?1",
+                    [root
+                        .join("docs/trackers/t.md")
+                        .to_string_lossy()
+                        .to_string()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            crate::librarian::catalog::augmentation::upsert(
+                &cat,
+                &crate::librarian::augmentation_sidecar::AugmentationSidecar {
+                    schema_version: 1,
+                    prompt: "the only copy of this prompt".into(),
+                    entry_collection: Some("rows".into()),
+                    params_schema: None,
+                    render_template: Some("{{ rows | length }}".into()),
+                    append_mode: true,
+                    history_cap: Some(9),
+                }
+                .to_row(&id),
+            )
+            .unwrap();
+        }
+        let exported = crate::librarian::tools::doctor::call(
+            &a,
+            json!({
+                "fix": "export_augmentations",
+                "root": root.to_string_lossy(),
+                "confirm": true,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(exported["totals"]["exported"], json!(1), "{exported:#?}");
+
+        // --- machine B: never held the row ------------------------------------------
+        let b = mk_ctx(root.to_path_buf(), TRACKER_RULES);
+        let v = call(&b, json!({})).await.unwrap();
+        assert_eq!(
+            v["augmentations_restored"].as_u64().unwrap(),
+            1,
+            "a catalog that never held this augmentation must come up with it: {v}"
+        );
+
+        let cat = b.catalog.lock();
+        let row = aug_for(&cat, &root.join("docs/trackers/t.md"))
+            .expect("the augmentation must exist on the second catalog");
+        assert_eq!(row.prompt, "the only copy of this prompt");
+        assert_eq!(row.entry_collection.as_deref(), Some("rows"));
+        assert_eq!(row.render_template.as_deref(), Some("{{ rows | length }}"));
+        assert!(row.append_mode);
+        assert_eq!(row.history_cap, Some(9));
+        assert_eq!(
+            row.params, "{}",
+            "shape travels, data does not — the restored tracker is working and empty"
+        );
+    }
+
     #[tokio::test]
     async fn force_wipes_then_reindexes() {
         // History (kept verbatim — see bug-tracker #7 / F-9):
