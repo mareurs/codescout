@@ -749,8 +749,26 @@ board is a claim about the past.
 > retry — and since Stage 1, that loop now runs while the per-project index lock
 > is held for the whole `sync_project` pass: unbounded retry there means the lock
 > never releases, wedging every subsequent index for that project"
-> (`embedder.rs:1481-1487`). Dense retry would run under that same lock. Decide
-> **during** the swap; unlike (a) and (b) this one has no correct default.
+> (`embedder.rs:1481-1487`). Dense retry would run under that same lock.
+>
+> **DECIDED 2026-08-30 by the operator: the dense leg stays fail-fast**, and the
+> knob that makes it expressible has landed — `RemoteEmbedder::with_max_attempts`,
+> `3587d823`, patch-id `1fa302e86eaf1476d6cda752ec64f6996b3229b2`. The swap must
+> call `.with_max_attempts(1)` at the construction site. Default stays 3, so no
+> existing caller moved.
+>
+> Two things about it the implementer should not have to rediscover. It is
+> **attempts, not retries**: the loop was always `0..n` and the error text always
+> said "attempts", so only the old `MAX_RETRIES` constant was misnamed — a
+> `with_max_retries` would have carried that off-by-one to every call site. And
+> its tests **count requests on the wire**, not the field, because a test
+> asserting `max_attempts == 1` passes for an `embed` that stores the value and
+> ignores it; mutating the loop to a hardcoded 3 kills three of them, each
+> reporting `left: 3` as observed by the server.
+>
+> The knob is **neutral to `ET-10`'s A/B fork**. Whichever way that resolves —
+> split on `dense_only`, or extract the sparse leg first — both branches need a
+> fail-fast dense embedder, and neither is preempted by it.
 >
 > Contract 1 (query prefix) is unaffected and still exactly right — confirmed at
 > the bytes: both `from_url` and `custom` hardcode
