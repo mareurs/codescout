@@ -13,7 +13,7 @@ closed: null
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: Root cause (profile-scoped discovery over a machine-global socket dir) is inferred from the evidence below, not read from harness source — ListAgents is Claude Code, not codescout, so the code is not in this repo. The symptom, the population, and the cross-profile delivery are all directly measured.
+unverified: Root cause is now CONFIRMED bidirectionally rather than inferred — the omitted session reported its own ListAgents view and it is reciprocally blind. What remains unread is the harness source, which is not in this repo, so the mechanism (profile-scoped registry) is named from behaviour rather than from code.
 ---
 
 > **Not a codescout bug.** `ListAgents` is a Claude Code harness tool; its source
@@ -93,6 +93,40 @@ The two methods answer different questions and are worth keeping as a pair:
 `/proc` + socket dir identifies **who is live**; payload-grep identifies **who wrote
 this line**, and unlike `/proc` it still works on a session that has exited.
 
+### The omission is SYMMETRIC, and the population is larger than either side could see
+
+Confirmed 2026-08-30 by asking the omitted session directly — the one check no observer
+can run from outside. It reports `ListAgents` showing it **two** peers:
+**`changelog-reader-d8`** and **`system-d9`**. Neither is any of the four sessions in the
+table above.
+
+So the two views are not nested, they are **disjoint**:
+
+| observer | reports | actually omits |
+|---|---|---|
+| `codescout-ae` (`~/.claude`) | 2: `fix-embedding-transport-stage-1`, `codescout-3b` | `2f584bf5`, `changelog-reader-d8`, `system-d9` |
+| `2f584bf5` (`~/.claude-sdd`) | 2: `changelog-reader-d8`, `system-d9` | `codescout-ae`, `fix-embedding-transport-stage-1`, `codescout-3b` |
+
+Two consequences the original filing did not reach.
+
+**First, the real population was never 4.** It is at least **six**, and no single call
+enumerates them. Every session in this incident was reasoning about a set roughly half
+the size of the true one, and the two extra sessions surfaced only because the omitted
+party was asked.
+
+**Second, and worse: the counts are not merely incomplete, they are INCOMPARABLE.**
+Both sessions report `Peer sessions (2)`. Two agents comparing notes would find their
+numbers agree and take the agreement as corroboration — while naming entirely disjoint
+sets. That is a failure mode strictly beyond under-reporting: an incomplete count that
+is *known* to be incomplete is merely weak evidence, but two matching counts over
+disjoint populations manufacture false confidence out of the discrepancy that should
+have exposed it.
+
+This also settles the mechanism. A one-directional omission would suggest a
+registration ordering or a race. A reciprocal one, with each side seeing exactly its
+own profile's sessions, is a **profile-scoped registry** — three profiles on this
+machine (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`, per CLAUDE.md), each with its
+own view, over a socket directory that is machine-global and shared by all of them.
 ## Root cause
 
 **Inferred, not read** — the source is not in this repo. Discovery appears scoped to
@@ -107,8 +141,13 @@ Ranked, and (b) is the one that matters even if (a) never happens.
 - **a. Enumerate the machine-global socket directory**, labelling each row with its
   profile. Delivery already works cross-profile, so this closes the gap without new
   transport.
-- **b. Never present the list as the population.** The response should name its scope
-  — *"2 peer sessions in profile `~/.claude`; other profiles not searched"*. This is
+- **b. Never present the list as the population, and name WHICH scope — not merely that
+  one exists.** The response should say *"2 peer sessions in profile `~/.claude`; other
+  profiles not searched"*. The profile **name** is load-bearing, not decoration: two
+  sessions in different profiles both report `Peer sessions (2)` over disjoint sets, so
+  a scope note that omits which profile leaves the counts still falsely comparable. A
+  bare "this list may be incomplete" would not have prevented any of the six
+  misattributions below it. This is
   exactly `docs/adrs/2026-08-27-negative-results-name-their-scope.md` applied to a
   **positive** result, and the ADR's argument carries over unchanged: a count that
   does not name what it counted cannot be trusted, and a confident small number
@@ -160,4 +199,3 @@ staging decision rests on.
   `--stat` amendment), F-79 (an all-clear is a claim with an expiry only its sender can see)
 - `docs/architecture/companion-plugin.md` — the multi-profile setup whose boundary this
   crosses
-
