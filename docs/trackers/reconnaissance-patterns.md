@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 142
+entry_high_water_R: 143
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -296,6 +296,7 @@ be treated as findings, not as a summary to re-derive.
 | R-137 | 2026-08-30 | miss → rule | **After compaction, a peer is a better witness to your past than you are.** `codescout-ae` asserted a hand-edit was theirs; I relayed it unchecked; they later checked their commit list, found the SHA absent, and corrected the record — including the claim they had never said it. I still held the message and quoted it verbatim; their context had been compacted between the two, and they had offered exactly that bound themselves. Three claims resolving differently: the hand-edit happened (true, by diff), they authored it (false, by their commit check), they never said so (false, by my transcript). **The session was right where it re-derived and wrong where it recalled**, and only the transcript-holder could separate those. Inverts the usual default that first-person testimony outranks a bystander's — here the bystander holds the bytes and the first person holds a summary, and the loss is invisible from the inside. Rules: never relay a peer's claim about their own authorship unchecked; if you hold the transcript, quote it rather than contradict; prefer a re-derivable instrument to anyone's memory. Tell: a reconstructed memory carries a detail that does not fit — this one said "this morning" of a **16:50** SHA, in plain text both of us read | kin R-134 |
 | R-136 | 2026-08-30 | technique (parent generalisation from `codescout-ae`) | **Adjacent-proposition errors come in THREE kinds, and each needs a DIFFERENT check.** Nine confident wrong answers in one day were all real measurements, faithfully reported, of a proposition next to the one asked — but the remedies diverge, and running the wrong check leaves the error standing while feeling rigorous. *Propositional* (the probe answers a different question: `du` for absence, a build's exit code for "the binary carries the subcommands") needs a **positive control**. *Temporal* (right about an instant, read as standing: `fmt` reporting a reverted mutation) needs **bracketing** — and a control does nothing, because the probe was working perfectly. *Sampling* (right for this observer: one session's `ListAgents` skew) needs a **second observer**, which neither of the others touches. Counterexample kept inside the statement, so it is never written as *every*: the mutual-deference deletion misread no measurement at all — two correct reads, two correct acts, composing badly — the one class instrument discipline cannot reach. Operational half: **a caveat should name its sub-kind**, since *"two readings is not a measurement"* tells a reader to go find a second observer rather than run a control. |
 | R-142 | 2026-08-31 | miss | **Circular corroboration — a peer restating your claim is your own reading handed back, and nothing marks it.** Two parties agreeing is evidence only if they did not get it from each other. I read a peer's past-habitual *argument* ("a warning with no stated recovery cost tends to get discounted") as a *report* of an incident; the same peer then described their own error as "the other failure of the same pair", which read as first-hand confirmation and was my own reading returned — their actual error points the SAME direction as mine. I reported both directions to my operator as observed. Caught because `codescout-f0` declined to write the pairing from my summary and asked the other session first-hand, which is the working countermeasure. Upstream of R-140 (its manufactured symmetry is this loop's product) and kin to R-141; corollary of `observer-blindness:OB-4` — distinct authorship supplies independence no more reliably than a distinct tool name. **Runnable:** before counting a confirmation, ask *could they have got this from me?* | this session, self-caught after a peer's first-hand check refuted it; kin R-139, R-140, R-141 |
+| R-143 | 2026-08-31 | miss → rule (2 instances, one reached a shipped artifact) | **Verify the ACTIONABLE half of a report — and a value whose instrument you did not state is actionable.** Clause 1: descriptive claims are what a reader *evaluates*, the prescription is what they *execute*, so effort flows to the legible half and the reader gets an unchecked instruction inside a verified envelope. Clause 2 is what the naive form gets wrong: **a bare value is not descriptive, it is a prescription** — checking it means running something, nothing says what, so the reader invents a rule, and two honest verifiers disagree in the form of a *correction* rather than a conflict. Instance 2: a peer reported `retrieval-benchmark.md` — **8 references**; I published **17** under a column headed *Verified*; the answer is **15**, stable since `d6d66e4c`, so neither was stale and both were derived. **Seven plausible instruments on that one file give seven answers (14/15/15/41/40/8/9), and `8` is exactly the occurrence count of the pinned SHA** — so their number was likely right under its own rule and my correction wrong under mine, with no rule stated anywhere. The two claims I got right that evening (`PROBES.md:116`→**141**; the corpus was already deleted once) were the ones whose instrument admits no choice: **where it admits one, diligence yields a confident wrong answer, which travels with a verifier's name on it.** Law B turned on the verifier (the entry first mis-cited this as R-136 — instance 3, in-entry). Mechanised at one site — `.worktrees/README.md` now carries the grep, not the number. | this session; the two instances are mine, recorded from the other side in R-140 § Instance 2; slot reserved by R-140 and R-141 |
 | R-135 | 2026-08-30 | miss | **A `du` proves size, never absence — a TRUE measurement written up in the past tense.** An archived bug file is `status: fixed` and closes *"174 MB reclaimed, 163 MB of it regenerable `.codescout` index state"*; 14 days later `.worktrees/bench` is still on disk at exactly 174M/163M, dir mtime **2026-05-12** (three months BEFORE the closure) and a gitdir still naming the pre-rename `code-explorer` path, which rules out delete-then-recreate since the file's own rebuild command would name `codescout`. The `du` ran before the removal and was written up as its result. Distinct from R-125 (abundant vs empty) and from the self-validating-gate class: this is a **correct positive number transferred to a proposition it does not support**. Audit verdict on the promoted set: **UNREACHABLE, not Outgrown** — Phase 3's *"name the proposition it proves, then ask whether a broken world produces the same result"* covers it exactly and would have caught it; a broken world yields the identical `du`. Remedy is placement, not wording: the risky moment is writing a **closure**, when the author is furthest from the evidence and most certain. No promotion proposed — one verified instance, and the session-opening surface additionally needs a base arm nobody has run | this session (`docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md`, `worktree-cleanup-session-log:F-1`); three sibling instances reported by a peer session and **not verified by me**; kin R-125, law B |
 | R-134 | 2026-08-30 | miss → rule | **A peer view is ARBITRARY with respect to the population, not merely short.** Five Claude sessions shared this checkout and produced six misattributions in an afternoon, every one an elimination over the peers the asker could see. Both open mysteries resolved in ONE round each by enumerating from the OS (`pgrep -x claude` + `readlink /proc/$p/cwd`) and messaging invisible sessions at `uds:/run/user/1000/cc-socks/<pid>.sock`. Escalates R-50: a short view makes elimination weak, so you hedge; a DISJOINT view makes it unrelated, so hedging still draws the conclusion — you must change instruments. Measured by `codescout-f0`, then CORRECTED by them the same evening (`71fdbef4`): the first reading showed 0 of the 5 in-checkout sessions, later readings 1 of 5 — the count held at 3 while the MEMBERSHIP rotated, which demonstrates arbitrariness where a single snapshot could only assert disjointness. Either reading kills elimination; the zero was a reading, not a property, and publishing it as one was this entry's own failure mode arriving through the record of itself. Tells: the instrument's units differ from the question's (sessions-a-transport-knows vs processes-with-this-cwd), and repeated "must be the remaining one" is equally produced by the answer lying outside the set. Corollary: in a live transcript a COUNT is contaminated by the act of asking (hits went 2→10 because sessions grepped for it) — prefer an ordinal | this session + `codescout-f0`, `codescout-fe`; kin R-50 |
 | R-133 | 2026-08-30 | miss → rule | **Loudness is a property of a PATH, not of a failure.** Three failures in one afternoon across three subsystems: a stale sidecar restores clean reporting success; a widened status region silently discharges the disagreement the scan exists to report; and BL-66, which *aborts the process* — maximally loud — and survived anyway because nothing in-tree reaches it (verified here: `install_default_crypto_provider()` is called unconditionally at every construction site, `main.rs:253` / `agent/mod.rs:448` / `reranker.rs:80` / `embedder.rs:339`, and `transport.rs:34` states the invariant as a reason not to handle the error). So the axis is not loud-vs-silent output but whether any TRAVERSED path observes the failure. When adding a guard, name the path that reaches it and the observer who acts on it; "an external consumer we do not have" is a legitimate reason to keep it and is not coverage of our own risk. Reachability twin of R-132's monotonicity. Tell: ask what an observer would SEE differently if this were broken right now | this session + `codescout-ae` (`e6414362`, BL-66); kin R-131, R-132 |
@@ -5399,7 +5400,7 @@ Their own statement of why that is worse than simply repeating it is the load-be
 lent authority to the one part nobody had checked.*
 
 That failure is also an instance of a **different law, which is theirs and deliberately not
-folded in here**: verify the ACTIONABLE half of a report, not the descriptive half.
+folded in here**, now written as `R-143`: verify the ACTIONABLE half of a report, not the descriptive half.
 Descriptive claims are what a reader evaluates; the prescription is what a reader executes.
 
 ### The opposite direction is a PREDICTION, not an instance
@@ -5507,7 +5508,10 @@ result R-139 measured across four instances that evening.
 `git-travel-augmentation-shape`'s **verify the ACTIONABLE half of a report, not the
 descriptive half** — descriptive claims are what a reader evaluates, the prescription is what
 a reader executes — is the general form and is theirs. Recorded here as attribution, not
-absorption; if they write it, this entry should cite it rather than duplicate.
+absorption. **Now written as `R-143`**, which cites this entry rather than duplicating it — and
+which sharpens the attribution: a *value* published without its instrument turns out to be on
+the actionable half too, so "verify the actionable half" does not make the descriptive half
+safe. Their instance 2 there is a referent that WAS opened and still came out wrong.
 
 ### Sourcing note, per `R-140`
 
@@ -5604,6 +5608,123 @@ The law is not time-bound; the instance is a fact about this evening.
 `R-139` (knowing a class does not prevent it). The sourcing discipline that caught it is
 the practice `get_guide("tracker-conventions")` states for citations — prefer a
 first-hand definer to a restatement.
+
+## R-143 — Verify the ACTIONABLE half of a report — and a value whose instrument you did not state is actionable
+
+**Valid:** invariant
+
+**Status:** open — 2 first-hand instances, one of which reached a shipped artifact
+
+**Rests on:** `R-140` § *Instance 2* and `R-141` § *The related law kept separate*. Both
+name this law, attribute it here, and deliberately leave it unwritten so it could be
+written rather than restated — R-141 says *"if they write it, this entry should cite it
+rather than duplicate."* This is that entry. Sibling of `R-141` (the referent you do not
+open); distinct from it, because instance 2 below is a referent that **was** opened.
+
+### The law, in two clauses
+
+**1.** Descriptive claims are what a reader *evaluates*; the prescription is what a reader
+*executes*. Verification effort flows to the descriptive half — it is legible, it looks
+like a claim, and it is cheap. The prescription requires constructing a state, so it gets
+skipped. **The reader then receives an unchecked instruction inside a verified envelope**,
+and the envelope is what lends it authority.
+
+**2.** And the clause the naive form gets wrong: **a value published without its instrument
+is not on the descriptive half at all — it is a prescription.** The reader cannot simply
+accept it; to check it they must run something, and nothing tells them *what*. So they
+invent a rule. Two honest verifiers then produce different numbers from the same file, and
+the disagreement does not surface as a conflict — **it surfaces as a correction**, where
+the later number wins on confidence rather than on rule.
+
+### Instance 1 — the unrun command (mine; recorded from the other side in `R-140` § Instance 2)
+
+I relayed `codescout-fe`'s `.worktrees/bench` deletion warning to my operator having
+verified its descriptive claims — 174M, the surfaces, the dangling gitdir — and having
+**never run its recovery command**. The command was wrong for the state actually on disk.
+My own framing at the time, which R-140 quotes: *confirmation of the descriptive half reads
+as confirmation of the whole.*
+
+### Instance 2 — the count, which refutes clause 1 taken alone
+
+The same report claimed *"`docs/trackers/retrieval-benchmark.md` — 8 references"*. I checked
+it, and published **17** in a table whose column header read **Verified**, as a correction.
+
+The value is **15**, and the file has held 15 since `d6d66e4c` (2026-08-26) — so neither
+number was ever stale. Both were derived, in good faith, and both were wrong.
+
+Seven plausible instruments on that one file give seven answers:
+
+| rule | value |
+|---|---|
+| `grep -o '\.worktrees/bench' \| wc -l` | 14 |
+| `grep -o 'worktrees/bench' \| wc -l` | **15** |
+| `grep -c 'worktrees/bench'` (lines) | **15** |
+| `grep -o '\bbench\b' \| wc -l` | 41 |
+| `grep -c '\bbench\b'` | 40 |
+| `grep -o 'ede25e69' \| wc -l` (the pin) | **8** |
+| non-fenced lines containing `worktrees/bench` | 9 |
+
+**`8` is exactly the occurrence count of the pinned SHA.** I cannot confirm that is what the
+peer counted and I am deliberately not asking — per `R-142`, a peer agreeing with a rule I
+supply is my own reading handed back, not confirmation. But it is the only one of seven
+rules that produces their number, and *"how many places cite the pin"* is a perfectly
+reasonable reading of "references". On that reading **their number was right under its own
+rule and my correction was wrong under mine**, and nothing in either report stated a rule.
+
+My `17` matches none of the seven. That one is a plain miscount — published under a
+Verified header, correcting a number that was probably defensible.
+
+### What this shows that clause 1 alone does not
+
+Clause 1 implies the descriptive half is the *safe* half — check the command and the rest
+takes care of itself. It does not. Of three claims I audited that evening, the two I got
+right (`PROBES.md:116` → **141**; the corpus had already been deleted once) were the ones
+whose instrument **admits no choice**: grep a literal string, get one hit, read the number
+beside it. The one I got wrong was the one where the instrument required me to pick a rule.
+
+> **The claims that survive verification are the ones whose instrument admits no choice.**
+> Where it admits one, diligence does not produce a caught error — it produces a *confident
+> wrong answer*, which is worse, because it now travels with a verifier's name on it.
+
+This is **Law B** (*"the instrument decides the answer"*, § *The seven laws*) turned on the
+verifier rather than the author: an unstated rule is not a small omission in a claim, it is
+the whole claim.
+
+> **Instance 3, committed inside this entry and caught before commit.** The sentence above
+> first read *"this is `R-136`'s 'the instrument decides the answer'"*. `R-136` is
+> *"Adjacent-proposition errors come in three kinds"*; the phrase belongs to Law B. I cited
+> an id for a clause without opening it — `R-141` exactly, inside the entry about verifying
+> referents, while writing the sentence that says to open them. Caught only by running
+> `grep '^## R-136 — '` as a deliberate step, not by noticing. Per `R-141`'s own accounting
+> this counts for **less** than the two wild instances above, because it was produced under
+> observation by a party primed on the class — it is evidence for `R-139` (*vigilance does
+> not scale*), not for this law's reach.
+
+### Runnable form
+
+- **Before relaying an instruction, run it.** Not the prose around it — the thing the reader
+  will execute. (This is the clause `R-141` covers for referents; it is the same discipline.)
+- **Rank a report's claims by cost-to-verify × cost-if-wrong, and spend the budget in that
+  order.** The default order is cheapest-first, which is close to backwards.
+- **Publishing a count, publish its command instead of its value** — one paste lets the
+  reader *re-check* rather than re-derive under a rule they invent. This is CLAUDE.md
+  § *Observer Blindness*'s "ship the derivation, not the value", and instance 2 is what that
+  sentence protects against.
+- **Correcting someone's number, state your rule.** A bare correction asserts they
+  miscounted; it may only mean you counted something else.
+
+### Where it is already mechanised
+
+`.worktrees/README.md` — the guard file this whole episode produced — now carries
+`grep -o 'worktrees/bench' … | wc -l` → **15** in that table cell instead of a bare number,
+with a note that the cell has been wrong twice under two honest counters. That is the one
+site fixed, not the class.
+
+**Promote-when:** a third instance of clause 2 specifically — two parties producing different
+values for one quantity, neither stating a rule — found **outside** a discussion of this
+class. Clause 1 already has its instances and needs no more. If it fires, the remedy to
+promote is not "count carefully" but a standing convention that any published count in a
+tracker carries its command, which is checkable by grep and therefore mechanisable.
 
 ## Template for new entries
 
