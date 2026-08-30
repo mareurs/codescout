@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 80
-entry_high_water_W: 77
+entry_high_water_W: 79
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -214,6 +214,8 @@ entry_high_water_W: 77
 | W-74 | 2026-08-30 | med | When the closure step IS the broken operation, run it rather than routing around it — the write is mandatory, so the reproduction costs nothing and is the one moment the broken path runs against a known-correct expected answer. Distinct from CLAUDE.md's reproduce-before-the-fix-plan rule, which governs the START of a fix and weighs a real cost | Closing BL-48 required the exact `edit_markdown(frontmatter={set:{status:…}})` call BL-48 describes as broken; `artifact(update)` was the known, faster workaround. Writing the prediction down and then using the broken call yielded three findings unreachable by re-reading: the fix is not live in this server, so every catalog measurement in the window is of old code and no tool response says so; the desync is field-SELECTIVE (`get.rs:335` serves `status` from the catalog column, `:525-533` re-parses `extra` from disk), so one payload mixes two epochs and self-contradicts only when `extra` happens to be populated — a bug with none returns a stale status looking perfectly consistent; and chasing that to `/proc/<pid>/exe` found an UNLINKED binary, BL-45's own condition, which corrected a claim I had already written into the record (I cited the on-disk mtime as the running build; the process predates it) | open |
 | W-76 | 2026-08-30 | high | Dry-run a writing `fix=` against the REAL corpus and read its output before the first confirmed run — a real corpus contains the input that breaks the convention | BL-50's sidecar name was keyed on the artifact's file stem; two unit tests covered it, gate green 4833/0, design reviewed. The export's dry run printed `docs/research/README.md -> docs/augmentations/README.yaml` on its first line. `README` is not a unique stem, so a second augmented README would have shared the sidecar, the second export overwriting the first's shape and both artifacts restoring to one prompt — the silent shape-loss the feature exists to prevent, reintroduced by its own naming. Invisible in code, tests and review; visible in one line of real output (`f565504a`) | validated |
 | W-75 | 2026-08-30 | high | Reproduce before AND after each round of a fix, checking a wedge listener's own hit count, not just wall-clock time or a green test run | A round-1 isolation fix that passed all 77 memory tests still left 2 wedge hits (6.35s) from a third resolution path (`create_semantic_anchors`'s own `RetrievalClient::from_env`) that a concurrent session was independently fixing in the same live working tree mid-investigation — caught only by re-running the reproduction, not by trusting the passing suite | validated |
+| W-78 | 2026-08-30 | high | Before attributing a test failure to the change under test, re-run the same failing tests IN THE SAME ENVIRONMENT at the unmodified base. The prompt to do so is a failure in a subsystem the change does not touch | A merge probe returned `4706 passed; 3 failed`; all three were `librarian` temp-guard tests and the branch touches `operator_rules`/`tools::core`/`prompts`, nothing near librarian. The control — same `/tmp` worktree, `checkout --detach experiments`, merge NOT applied — reproduced all three identically, so the failures were the probe's LOCATION, not the merge. Each test builds its "outside-temp" catalog via `TempDir::new_in(current_dir())`, which is inside temp when the checkout is; the assumption sits in a code comment and is enforced by nothing. Without the control the two readings were block-a-clean-merge or bisect-a-working-guard. The failing configuration is the SANCTIONED one — this project points its scratchpad at `/tmp` | validated |
+| W-79 | 2026-08-30 | med | Verify a merged branch's imported bug files AT THE DOOR, in the landing session — and mark attribution as inference when nobody bisected | `03b3fb5c` imported five bug files, all `status: open`, authored against a base 103 commits back. One was already fixed: a severity-**high** futex-deadlock report whose own reproduction now runs 77 passed, no hang. It would have entered `experiments` describing a hang that does not happen and sat in every triage query until someone spent a session on it. Four were correctly open and confirmed at the bytes, which is the half that makes it a check rather than a rubber stamp. The flip names `fd638c76` as closer but records the non-reproduction as measured and the cause as NOT — the file already carried one careful negative, and a confident wrong attribution would have undone it | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -7482,6 +7484,118 @@ a stronger signal than any one session's argument.
 if a fifth instance appears that `cargo test --workspace --no-default-features` also cannot
 see — that would mean the class is about *feature-combination* coverage generally, not the
 lean lane, and the remedy would be a matrix rather than a command.
+
+## W-78 — The control run separated the instrument from the change under test, and it was one command
+
+**Observed:** 2026-08-30, verifying whether `sdd/operator-rules-phase-2` could be
+merged into `experiments`.
+
+**Practice:** before attributing a test failure to the change under test, re-run
+the same failing tests **in the same environment at the unmodified base**.
+
+**Counterfactual, and it was close.** The merge probe ran in a scratch worktree
+under the session scratchpad — i.e. under `/tmp`, which is where this project's
+own system prompt instructs agents to put temporary work. `cargo test --workspace`
+returned **4706 passed, 3 failed**. All three were `librarian` temp-guard tests; the
+branch under test touches `src/operator_rules/`, `src/tools/core/`,
+`src/prompts/guide_index.rs` and docs, and does not go near `librarian`.
+
+That mismatch is the only thing that prompted a control instead of a report. The
+control — same `/tmp` worktree, `git checkout --detach experiments`, merge **not**
+applied — reproduced all three identically. The same three pass in the main
+checkout in 0.11s.
+
+**Root cause of the failures, once separated:** each test builds its
+"outside-temp" catalog with `tempfile::TempDir::new_in(std::env::current_dir())`.
+From a `/tmp` checkout that catalog is *inside* temp, so `catalog_is_real` is
+false, `should_refuse` correctly returns false, and `expect_err` panics with a
+message blaming the guard. The assumption is stated in a code comment
+(*"Assumes the repo checkout is not itself under the OS temp dir, which holds
+here"*) and enforced by nothing. Filed as
+`docs/issues/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
+
+**What the counterfactual costs.** Without the control, the two available readings
+were both wrong and both expensive: report "this branch breaks three librarian
+tests" and block a clean merge, or spend an afternoon bisecting a guard that was
+working correctly throughout. The merge was in fact clean — 4908/0 full and
+3381/0 lean after landing.
+
+**Why it generalises past this instance.** The failing configuration is not exotic;
+it is the *sanctioned* one. Verifying a branch in a scratch worktree without
+disturbing a shared tree is the correct move, and this project points that
+scratch space at `/tmp`. So the trap is reachable by doing the right thing, and
+the cost of the control is one command against an already-warm target dir.
+
+**Status:** validated
+
+**Valid:** invariant
+
+**Promote-when:** a second instance appears where an environment-sensitive failure
+was about to be attributed to a change. At two datapoints, promote to CLAUDE.md's
+gate discussion as a sentence: *a failure in a subsystem the change does not touch
+is a prompt to re-run at the base, not a finding.*
+
+**Rests on:** nothing in the code — it is a method, not a claim about a code path.
+The specific instance rests on `should_refuse`
+(`src/librarian/tools/temp_write_guard.rs:14-21`) classifying by path prefix, and
+on the three tests deriving "outside-temp" from `current_dir()`.
+
+## W-79 — Verify a merged branch's bug files at the door, not months later
+
+**Observed:** 2026-08-30, merging `sdd/operator-rules-phase-2` (`03b3fb5c`).
+
+**Practice:** when a branch merge imports bug files, run the verify-open pass on
+them **as part of landing**, in the same session, before the merge commit's
+neighbours scroll away.
+
+**Why it earns its place.** That branch carried five bug files, all
+`status: open`, authored 1-2 days earlier against a base 103 commits back. One was
+already fixed: `2026-08-29-memory-tests-deadlock-on-futex-in-isolation`, severity
+**high**, whose own reproduction —
+`cargo test --lib tools::memory::tests:: -- --test-threads=1`, the invocation its
+Summary calls a hang "in complete isolation" — now runs 77 passed, no hang.
+
+Without the pass it would have entered `experiments` as an open high-severity bug
+describing a hang that does not happen, and sat in every triage query until
+somebody spent a session reproducing it.
+
+**The cost asymmetry is the argument.** Checking five files against current code
+took one session and produced four confirmations plus one flip. Finding the same
+staleness later costs a full investigation per entry, and the investigator starts
+by believing the file. Earlier the same day, a verify-open sweep of the standing
+ledger found exactly this shape twice (BL-50 and BL-51) — both had been true when
+written and neither had a mechanism that would ever notice they had stopped being
+true.
+
+**Four were correctly open, which is the other half of the result.** A door check
+that only ever flips things is not a check. `atomic_write`'s leak is genuinely
+half-fixed (cleanup on `rename`'s `inspect_err`, none on the earlier
+`std::fs::write`); no `include_str`/`cargo package` gate exists anywhere in the
+repo; and both operator-rules routing bugs rest on one verified fact —
+`Tool::selector_key` defaults to `None` (`src/tools/core/types.rs:1251`) and only
+`LibrarianAdapter` overrides it, while OP-2/3/4 serve `memory.write`, `edit_file`
+and `create_file`.
+
+**Mark attribution as inference when it is inference.** The flip named `fd638c76`
+(ET-9 T10) as the closer — its subject is exactly the mechanism, and two of the
+tests the file lists are among the five fixtures it isolated — but nobody
+bisected, and 103 commits were in scope. The record says the non-reproduction is
+measured and the cause is not. That mattered here specifically: the file already
+carried one careful negative, explicitly ruling out the archived wrong-port bug,
+and a confident wrong attribution would have undone that care.
+
+**Status:** validated
+
+**Valid:** invariant
+
+**Promote-when:** a second branch merge imports bug files and the pass finds
+staleness again. At two datapoints, add a line to `docs/RELEASE.md`'s ship
+sequence: *a merge that imports `docs/issues/` files owes a verify-open pass on
+them before the merge commit lands.*
+
+**Rests on:** the archive-and-status discipline in
+`get_guide("tracker-conventions")`, and on `unverified:` being queryable — which
+is what made the standing-ledger sweep cheap enough to be worth doing at all.
 
 ## Template for new entries
 
