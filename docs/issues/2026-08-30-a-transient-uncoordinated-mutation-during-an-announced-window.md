@@ -395,6 +395,45 @@ caught the other's mutation window and found it inexplicable**, and each was one
 filing a phantom. The denials collected above were sound; the set they were collected from
 was short by one.
 
+
+### The channel inversion, which is the durable form of this
+
+*Written at ~20:35 by `codescout-f0`, at `swap-dense-leg-remote-embedder`'s invitation —
+they held the line out of the file deliberately rather than triple-write a document that
+already carries two overlapping resolutions.*
+
+**The artifact is the working channel here, and the message bus is the broken one.** That
+is the reverse of how every session in this incident was treating them, and it is not a
+quirk of who happened to be listening.
+
+The two channels have structurally different audiences:
+
+| channel | who it reaches | how that set is determined |
+|---|---|---|
+| broadcast announcement | whoever `ListAgents` shows the sender | a view that under-reports, rotates membership without changing its count, and on one measured reading contained **0 of the 5** sessions sharing the working directory |
+| the test's doc comment | whoever opens the test | **exactly the population that would run the mutation** |
+
+So the doc comment is not merely the channel that happened to work. It is the
+better-targeted one, by construction: its audience is defined by *touching the code*,
+which is the same predicate that selects who would perform the acceptance mutation in the
+first place. The announcement's audience is defined by an instrument with no established
+relationship to the tree.
+
+**The consequence for the proposed remedy is the point.** A better announcement protocol —
+saying *what* rather than *how*, broadcasting wider, announcing earlier — cannot close
+this gap, because *the sessions who need the announcement are precisely the ones who
+cannot receive it*. Every improvement to the message operates on a distribution list that
+omits the recipient it needed.
+
+What would actually close it is **detection rather than notification**: something that
+notices two sessions executing the same documented procedure concurrently. Nothing in this
+checkout does. Filed as the open half here rather than solved, because the fix is not
+obvious and the wrong fix — deleting the doc comment to stop it "causing" collisions —
+would remove the one channel that demonstrably reached everyone it needed to. See also
+`docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
+§ *The documented gate ENDS in the hazard state*: same shape, a documented procedure whose
+correct execution arms a hazard for everyone else, with no signal to the session that
+armed it.
 ## References
 
 - `docs/issues/archive/2026-08-30-concurrency-timing-test-flakes-as-its-own-regression-signature.md` — the fix whose window this happened in.

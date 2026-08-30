@@ -274,11 +274,48 @@ implies a correlation, and there is none — they held the answer by accident, n
 because they were invisible. **Corrected here; the commit message overstates it and
 cannot be amended.**
 
-The accurate statement is stronger. Their `ListAgents` lists three peers —
-`changelog-reader-d8`, `system-d9`, `claude-plugins-08` — and **not one of the five
-in-checkout sessions is among them.** By name, none of the three even looks like a
-codescout session. So this is not a 40% under-report of the relevant set; it is a view
-that can be **entirely disjoint** from it.
+The accurate statement is stronger. At **~20:06** `codescout-f0`'s `ListAgents` listed
+three peers — `changelog-reader-d8`, `system-d9`, `claude-plugins-08` — and not one of
+the five in-checkout sessions was among them. So this is not a 40% under-report of the
+relevant set; it is a view that **can be entirely disjoint** from it.
+
+> **Dated, not standing — corrected by `codescout-f0` at ~20:35, from the only session
+> that can read it.** That paragraph originally stated the disjointness as a property.
+> It is an *observed state*. Three readings from the same session:
+>
+> | time | peers listed | of the 5 in-checkout |
+> |---|---|---|
+> | ~20:06 | changelog-reader-d8, system-d9, claude-plugins-08 | **0** |
+> | ~20:2x | system-d9, claude-plugins-08, **codescout-fe** | 1 |
+> | ~20:3x | system-d9, claude-plugins-08, **codescout-fe** | 1 |
+>
+> `codescout-fe` is `3954769`, which started 17:39:22 — well before all three readings,
+> so its absence at 20:06 was not a start-time artefact. **The count held at 3 while the
+> membership rotated.** A file whose subject is this defect must not publish a
+> falsifiable-by-the-next-reading claim as a property; that would be the ninth instance
+> of the day, committed by the record of the first eight.
+
+**The conclusion survives, and the movement strengthens it.** Disjointness was never
+load-bearing — arbitrariness is, and a membership that rotates while the count stays
+fixed is arbitrariness demonstrated rather than asserted. A reader cannot even re-derive
+the set by looking again.
+
+And the current reading carries a sharper figure than the disjoint one it replaces.
+`scripts/peer-sessions.sh .` reports **7 live sessions, 5 with cwd here**, so 2 live
+elsewhere. `codescout-f0`'s three visible peers are `system-d9` and `claude-plugins-08`
+(the 2 outside) plus `codescout-fe` (1 of its 4 in-checkout peers):
+
+| population | visible to that session |
+|---|---|
+| sessions OUTSIDE this checkout | **2 of 2** |
+| sessions INSIDE this checkout | **1 of 4** |
+
+On that reading the view is not merely arbitrary with respect to the working directory —
+it is *inverted*: near-complete for the sessions that share nothing, near-empty for the
+ones sharing the tree, which is the entire population every attribution question is
+about. **Two readings is not a measurement and the bias must not be cited as one**; the
+0-of-5 instance and the 1-of-4 now are each facts, and either alone is enough to kill
+elimination without the stronger claim.
 
 > A biased omission you could correct for. An arbitrary one you cannot — which is why
 > elimination over visible peers is **not a weak method but an unrelated one.**
