@@ -1,14 +1,14 @@
 ---
 id: '00c57991620f6e05'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a peer''s lean build clobbers target/debug/codescout, reddening 10 cli_artifact tests with a gating-regression message'
 tags:
 - test-isolation
 - shared-checkout
 - feature-gating
 - false-red
-closed: ''
+closed: 2026-08-31
 opened: 2026-08-30
 owner: marius
 related:
@@ -171,7 +171,26 @@ wrong and it is a dead end.
 
 ## Fix
 
-Not applied. Options, cheapest first:
+**Fixed by reordering the gate — `73066479` (patch-id
+`8c42c7e35d91c50518796f94a8170f2a49e29d42`), 2026-08-30 21:18.** CLAUDE.md's gate now runs
+the lean lane THIRD and `cargo test --workspace` LAST, so the gate's **exit state** rebuilds
+the binary with default features, and following the documented sequence no longer arms the
+trap for the next session. Verified 2026-08-31: `artifact --help` exits 0 against
+`target/debug/codescout`, and `grep` finds the reorder live in CLAUDE.md.
+
+None of the three options below was taken. The reorder is a fourth, cheaper than all of
+them: no added command, no second target tree, no worktree ceremony. It also removes the
+proposition rather than documenting it — there is no longer a trap to warn about at the
+point where the gate ends.
+
+**This file was zombie-open for the interval, and the seam is worth recording.** At 20:25 it
+correctly declined to edit CLAUDE.md itself, calling the gate's composition the operator's
+call and not a drive-by from a bug file. The reorder landed 53 minutes later at 21:18.
+Nothing closed the loop. Correct behaviour on both sides and a defect in the handoff — the
+fix-then-forget class CLAUDE.md's verify-open cadence exists to catch, found by running that
+cadence on 2026-08-31 before a "what's open?" report.
+
+Options considered and NOT taken, kept for the record, cheapest first:
 
 - **Preflight assertion in the CLI tests.** Have `run_cmd` (`tests/cli_artifact.rs:11`)
   check the binary it is about to exec actually carries the subcommand, and fail with a
