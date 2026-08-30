@@ -1166,8 +1166,6 @@ mod tests {
     use crate::retrieval::code_store::CodeVectorStore;
     use crate::retrieval::config::RetrievalConfig;
     use crate::retrieval::drift::ChunkRef;
-    #[cfg(feature = "remote-embed")]
-    use crate::retrieval::embedder::EmbedderHttp;
     use crate::retrieval::embedder::{BatchEmbedder, CodeEmbedder, EmbedOutput, SparseVector};
     use crate::retrieval::payload::CodePayload;
     #[cfg(feature = "remote-embed")]
@@ -2994,11 +2992,9 @@ mod tests {
     /// acquiring the index lock (before any real indexing work), so this gives
     /// a controllable window in which the lock is provably still held —
     /// without needing real files, a real embedder, or a real Qdrant.
-    #[cfg(feature = "remote-embed")]
     struct SlowEnsureStore;
 
     #[async_trait::async_trait]
-    #[cfg(feature = "remote-embed")]
     impl CodeVectorStore for SlowEnsureStore {
         async fn ensure_collection(&self, _c: &str, _d: u64) -> Result<()> {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -3054,15 +3050,10 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "remote-embed")]
     fn test_retrieval_client(store: impl CodeVectorStore + 'static) -> RetrievalClient {
         RetrievalClient {
             code_store: Arc::new(store),
-            embedder: std::sync::Arc::new(EmbedderHttp::new(
-                "http://unused.invalid",
-                "http://unused.invalid",
-                3,
-            )),
+            embedder: std::sync::Arc::new(UnknownDimEmbedder),
             #[cfg(feature = "remote-embed")]
             reranker: RerankerHttp::new("http://unused.invalid"),
             config: RetrievalConfig {
@@ -3114,6 +3105,47 @@ mod tests {
 
         fn known_dim(&self) -> Option<usize> {
             Some(self.0)
+        }
+    }
+
+    /// A `CodeEmbedder` fake standing in for a **remote** backend: one that
+    /// cannot self-describe its dimension without a network round trip, so
+    /// `known_dim()` is always `None`. That is `EmbedderHttp`'s own answer, and
+    /// it is the only property of `EmbedderHttp` that `test_retrieval_client`
+    /// ever depended on — so using this instead lets the fixture, and the six
+    /// `sync_project` tests built on it, run in a build with no HTTP transport
+    /// rather than being `remote-embed`-gated out of it.
+    ///
+    /// Deliberately NOT `FixedDimEmbedder`, and the difference is load-bearing.
+    /// `effective_model_dim` is `known_dim().or(config.model_dim).unwrap_or(fallback)`,
+    /// so an embedder answering `Some(_)` **shadows the operator's `model_dim`
+    /// pin** — and `test_retrieval_client` pins `model_dim: Some(3)`, which is
+    /// exactly what its dim-guard tests turn on. See
+    /// `resume-embedding-transport-stages-1-3:ET-7`, which gated these tests
+    /// rather than swapping `FixedDimEmbedder` in for this reason.
+    struct UnknownDimEmbedder;
+
+    #[async_trait::async_trait]
+    impl BatchEmbedder for UnknownDimEmbedder {
+        async fn embed_batch_dyn(&self, _texts: &[String]) -> Result<Vec<EmbedOutput>> {
+            unreachable!("UnknownDimEmbedder is only used to answer known_dim()")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CodeEmbedder for UnknownDimEmbedder {
+        async fn embed_one(&self, _text: &str) -> Result<EmbedOutput> {
+            unreachable!("UnknownDimEmbedder is only used to answer known_dim()")
+        }
+        async fn embed_dense_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("UnknownDimEmbedder is only used to answer known_dim()")
+        }
+        async fn embed_document_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("UnknownDimEmbedder is only used to answer known_dim()")
+        }
+
+        fn known_dim(&self) -> Option<usize> {
+            None
         }
     }
 
@@ -3173,7 +3205,6 @@ mod tests {
     /// OUTSIDE, tries to acquire the same lock while it runs: that outside
     /// acquire must fail iff `sync_project`'s guard is still alive at that
     /// moment.
-    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_holds_index_lock_for_its_full_duration() {
         let dir = tempfile::tempdir().unwrap();
@@ -3282,7 +3313,6 @@ mod tests {
     /// unlinked, so an empty lock dir proves we returned ahead of even that. If
     /// the guard call is deleted, this empty tempdir walks to completion and
     /// returns `Ok` with `added: 0`, so `expect_err` panics.
-    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_refuses_an_unlinked_binary_before_acquiring_the_index_lock() {
         let dir = tempfile::tempdir().unwrap();
@@ -3323,7 +3353,6 @@ mod tests {
     /// absent the `self.guard_index_dim(&collection, project_id).await?;` line
     /// in `sync_project`, this exact setup returns `Ok` with `added: 0`, not
     /// an error. Deleting that line makes `unwrap_err()` below panic.
-    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_fails_fast_on_a_dim_mismatch_before_touching_the_store() {
         let dir = tempfile::tempdir().unwrap();
@@ -3377,7 +3406,6 @@ mod tests {
     /// bug being "fixed" by deleting the guard: the two tests fail in opposite
     /// directions, so no single change satisfies both unless `force` is what
     /// discriminates.
-    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_force_migrates_a_dimension_mismatch_instead_of_refusing() {
         let dir = tempfile::tempdir().unwrap();
@@ -3416,7 +3444,6 @@ mod tests {
     /// discarded and rebuilt the index across a model change, and the field would
     /// become noise a reader learns to ignore. It also pins that `force=true` does
     /// not reset an index that needs no reset.
-    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn a_forced_sync_at_a_matching_dimension_reports_no_migration() {
         let dir = tempfile::tempdir().unwrap();
@@ -3496,7 +3523,6 @@ mod tests {
     /// Reverting the fix (using `write_index_state(root)` instead of reading back
     /// and re-writing the existing `dirty_paths`) makes this assertion fail with
     /// an empty vec.
-    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn sync_project_preserves_existing_dirty_paths_never_clears_via_plain_write_index_state()
     {

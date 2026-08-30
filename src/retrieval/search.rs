@@ -445,8 +445,6 @@ mod dim_guard_tests {
     use crate::retrieval::code_store::CodeVectorStore;
     use crate::retrieval::config::RetrievalConfig;
     use crate::retrieval::drift::ChunkRef;
-    #[cfg(feature = "remote-embed")]
-    use crate::retrieval::embedder::EmbedderHttp;
     use crate::retrieval::embedder::{BatchEmbedder, CodeEmbedder, EmbedOutput, SparseVector};
     use crate::retrieval::payload::CodePayload;
     #[cfg(feature = "remote-embed")]
@@ -555,6 +553,48 @@ mod dim_guard_tests {
         }
     }
 
+    /// A `CodeEmbedder` fake standing in for a **remote** backend: one that
+    /// cannot self-describe its dimension without a network round trip, so
+    /// `known_dim()` is always `None`. That is `EmbedderHttp`'s own answer, and
+    /// it is the only property of `EmbedderHttp` the fixtures below ever
+    /// depended on — so using this instead lets them run in a build with no
+    /// HTTP transport, rather than being `remote-embed`-gated out of it.
+    ///
+    /// Deliberately NOT `FixedDimEmbedder`, and the difference is load-bearing.
+    /// `effective_model_dim` is `known_dim().or(config.model_dim).unwrap_or(fallback)`,
+    /// so an embedder answering `Some(_)` **shadows the operator's `model_dim`
+    /// pin**: `client_with_store` would stop testing the pin it is handed, and
+    /// `effective_model_dim_falls_back_when_nothing_is_known` could never reach
+    /// `unwrap_or` at all. That is the "a placeholder chosen for a different
+    /// assertion can be unreachable-by-construction for this one" trap recorded
+    /// in `resume-embedding-transport-stages-1-3:ET-7`, which is why that entry
+    /// gated these tests rather than swapping `FixedDimEmbedder` in.
+    struct UnknownDimEmbedder;
+
+    #[async_trait]
+    impl BatchEmbedder for UnknownDimEmbedder {
+        async fn embed_batch_dyn(&self, _texts: &[String]) -> Result<Vec<EmbedOutput>> {
+            unreachable!("UnknownDimEmbedder is only used to answer known_dim()")
+        }
+    }
+
+    #[async_trait]
+    impl CodeEmbedder for UnknownDimEmbedder {
+        async fn embed_one(&self, _text: &str) -> Result<EmbedOutput> {
+            unreachable!("UnknownDimEmbedder is only used to answer known_dim()")
+        }
+        async fn embed_dense_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("UnknownDimEmbedder is only used to answer known_dim()")
+        }
+        async fn embed_document_one(&self, _text: &str) -> Result<Vec<f32>> {
+            unreachable!("UnknownDimEmbedder is only used to answer known_dim()")
+        }
+
+        fn known_dim(&self) -> Option<usize> {
+            None
+        }
+    }
+
     fn client_with_store_and_embedder(
         store: Arc<dyn CodeVectorStore>,
         embedder: Arc<dyn CodeEmbedder>,
@@ -586,17 +626,8 @@ mod dim_guard_tests {
         }
     }
 
-    #[cfg(feature = "remote-embed")]
     fn client_with_store(store: Arc<dyn CodeVectorStore>, model_dim: usize) -> RetrievalClient {
-        client_with_store_and_embedder(
-            store,
-            Arc::new(EmbedderHttp::new(
-                "http://unused.invalid",
-                "http://unused.invalid",
-                3,
-            )),
-            Some(model_dim),
-        )
+        client_with_store_and_embedder(store, Arc::new(UnknownDimEmbedder), Some(model_dim))
     }
 
     /// Asserts the error is `RecoverableError` (isError: false — sibling
@@ -625,12 +656,15 @@ mod dim_guard_tests {
     /// `search_in`. The store reports an existing index at dim 999 against a
     /// configured `model_dim` of 3; absent the
     /// `self.guard_index_dim(collection, project_id).await?;` line at the top
-    /// of `search_in`, this call would instead proceed to embed the query
-    /// (against `http://unused.invalid`, which errors for an unrelated reason)
-    /// and then query the store. Asserting BOTH the specific error AND that
-    /// the store was never queried distinguishes "the guard fired first" from
+    /// of `search_in`, this call would instead proceed to embed the query and
+    /// then query the store. Asserting BOTH the specific error AND that the
+    /// store was never queried distinguishes "the guard fired first" from
     /// "something else failed downstream".
-    #[cfg(feature = "remote-embed")]
+    ///
+    /// The embedder is inert (`UnknownDimEmbedder`), so that mutation now
+    /// surfaces as a named panic rather than as a connect error against
+    /// `http://unused.invalid` — the failure this test previously described as
+    /// erroring "for an unrelated reason". Same verdict, less ambiguity.
     #[tokio::test]
     async fn search_in_fails_fast_on_a_dim_mismatch_without_querying_the_store() {
         let store = Arc::new(DimReportingStore {
@@ -661,7 +695,6 @@ mod dim_guard_tests {
     /// way — the mutation and the original agree by accident). Both
     /// directions must error so a comparison-operator mutation in either
     /// direction is caught.
-    #[cfg(feature = "remote-embed")]
     #[tokio::test]
     async fn guard_index_dim_errors_in_both_mismatch_directions() {
         let bigger_index = Arc::new(DimReportingStore {
@@ -728,18 +761,19 @@ mod dim_guard_tests {
     /// never actually reached its `unwrap_or` arm, and a
     /// `.unwrap_or(fallback) -> .unwrap_or(0)` mutation survived undetected.
     /// This is the case where NEITHER the embedder nor the config pin can
-    /// answer — a remote/HTTP backend (`known_dim()` is always `None`) with no
+    /// answer — a remote backend (`known_dim()` is always `None`) with no
     /// `CODESCOUT_MODEL_DIM` set — so the caller's `fallback` must be the
     /// value that comes out.
-    #[cfg(feature = "remote-embed")]
+    ///
+    /// `UnknownDimEmbedder` rather than a real `EmbedderHttp`: `known_dim() ==
+    /// None` is the whole of what this test needs from a remote backend, and
+    /// modelling it directly is what lets the test run in a build with no HTTP
+    /// transport. See that type's doc for why `FixedDimEmbedder` cannot stand
+    /// in here.
     #[tokio::test]
     async fn effective_model_dim_falls_back_when_nothing_is_known() {
         let store = Arc::new(DimReportingStore::default());
-        let embedder: Arc<dyn CodeEmbedder> = Arc::new(EmbedderHttp::new(
-            "http://unused.invalid",
-            "http://unused.invalid",
-            3,
-        ));
+        let embedder: Arc<dyn CodeEmbedder> = Arc::new(UnknownDimEmbedder);
         let client = client_with_store_and_embedder(store, embedder, /* model_dim */ None);
         assert_eq!(
             client.effective_model_dim(999),
