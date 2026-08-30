@@ -1042,6 +1042,17 @@ finding 3 first.
   and is deliberately unapplied, pending an operator call between a CLAUDE.md rule
   and per-session worktrees. This stream produced the instance that fired it.
 
+  The two options are not equivalent in cost, and the difference is measurable
+  rather than a matter of taste. A CLAUDE.md rule is one edit and changes no
+  workflow. Per-session worktrees would dissolve `R-90` and `R-129` together — the
+  larger, more permanent fix — but `append_entry` **refuses id allocation from a
+  worktree** by design (an entry id is ledger-wide state and must key to the main
+  tracker), so every `F-N` / `W-N` / `R-N` / `BL-N` append becomes write-locally,
+  then fold in from the main checkout after the merge. That is a real recurring
+  tax on the surface this project uses most, and it is the number the decision
+  turns on. Datapoint from `codescout-ae`, who priced it while I was arguing the
+  two framings without it.
+
 **Valid:** dated 2026-08-30
 
 ## ET-10 — T6 is a design task, not a consumer swap — and T9 is blocked by two surfaces outside this stream
