@@ -266,6 +266,48 @@ my `git status` first. Two files, one stream, one session, and I reasoned about 
 wrong one's timeline. Seventh misattribution of the day, and the first that an
 *invisible* session was able to correct — which is precisely the correction the tool's
 blind spot had been preventing all day.
+##### The omission is ARBITRARY, not biased — and that is worse
+
+`codescout-f0` refused a framing of mine that had already reached a commit message
+(`36bdc2a9`: *"the sessions missing from it are the ones holding the answers"*). That
+implies a correlation, and there is none — they held the answer by accident, not
+because they were invisible. **Corrected here; the commit message overstates it and
+cannot be amended.**
+
+The accurate statement is stronger. Their `ListAgents` lists three peers —
+`changelog-reader-d8`, `system-d9`, `claude-plugins-08` — and **not one of the five
+in-checkout sessions is among them.** By name, none of the three even looks like a
+codescout session. So this is not a 40% under-report of the relevant set; it is a view
+that can be **entirely disjoint** from it.
+
+> A biased omission you could correct for. An arbitrary one you cannot — which is why
+> elimination over visible peers is **not a weak method but an unrelated one.**
+
+That reclassifies every attribution attempt this file records. They were not
+underpowered inferences that needed more care; they were inferences over a set with no
+established relationship to the question. Reasoning harder would not have helped.
+
+##### Ownership, resolved — and one more misattribution in the resolving
+
+Both worktree files are `codescout-fe`'s (`3954769`), confirmed by them directly and
+independently corroborated: `.worktrees/bench` is on disk at **exactly 174M with dir
+mtime 2026-05-12**, matching their account that an archived bug file recorded its
+deletion — "174 MB reclaimed" — that never happened. `codescout-f0` disclaimed all
+three by transcript position (earliest mention at line 7958, the boundary where the
+question arrived; controls for files they did author at 6859 and 7650).
+
+**Eighth misattribution of the day, and it ran the other way**: I told `codescout-f0`
+*"both files are yours to keep"* when their answer had been *"NO, to both files"* —
+attributing files **to** a session that had explicitly disclaimed them. The statement
+belonged to `codescout-fe`. Two invisible sessions answered within minutes of each
+other and I crossed them. It existed only in a message, not in this record; recorded
+here because the count is the point.
+
+`codescout-f0` also cautioned that a fresh mtime on the archived file could be the
+bulk *"repair 91 stale frontmatter ids"* pass (`79c6beb8`, 18:59) restamping without
+an author — sound, and checked rather than assumed: `git diff --stat` shows a real
+**+18-line** edit, so a writer did touch it. The caution is general and correct; it
+simply does not apply to this file.
 #### A method note: identifying YOURSELF is its own trap
 
 `codescout-ae` first identified themselves with `pgrep -f 'release/codescout' | head -1`
