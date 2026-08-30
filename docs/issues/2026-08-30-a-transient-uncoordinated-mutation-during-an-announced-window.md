@@ -1,7 +1,7 @@
 ---
 id: '28d61d3b0dca0932'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: the working tree briefly held a mutation nobody applied, during the window announcing that exact mutation'
 tags:
 - shared-checkout
@@ -9,10 +9,11 @@ tags:
 - unexplained
 - protocol
 - mutation-testing
+closed: 2026-08-30
 opened: 2026-08-30
 owner: marius
 severity: medium
-unverified: Cause IS now established — see § Cause established. H2 (phantom cache) is refuted and the protocol finding is unsupported by this incident. What remains open is only whether the announcement-form clause is worth promoting on its own merits. Status left at `open` for the file's author to close.
+unverified: Cause is identified and verified, but NOTHING PREVENTS RECURRENCE. The mechanism is a doc comment naming its own acceptance mutation, which is good practice and should not be removed; no tooling coordinates two sessions performing the same named mutation on the same lines. The mitigation is a practice change only.
 ---
 
 # BUG: the working tree briefly held a mutation nobody applied, during the window announcing that exact mutation
@@ -33,6 +34,68 @@ unverified: Cause IS now established — see § Cause established. H2 (phantom c
 > misattributions in this checkout, three of them from reasoning about peers over
 > a set `ListAgents` reports incompletely.
 
+> ## RESOLVED 2026-08-30 — and the answer inverts this file's central finding
+>
+> **The mutation was `codescout-f0`'s (pid 807989)**, applied ~16:55:2x and reverted
+> 16:56:15. It was their acceptance check for the rendezvous rewrite of
+> `dense_and_sparse_legs_run_concurrently` — the same test I was rewriting. They
+> volunteered it unprompted after being reached by socket path, and it was
+> **established rather than asserted**: `git log --all -S 'let sparse_nonempty = async'
+> -- src/retrieval/embedder.rs` returns **0** commits across every ref, so that form has
+> never existed in any tree and cannot be produced by checking anything out. Verified
+> here independently, with a control (`sparse_nonempty) = tokio::try_join` returns 3),
+> so the zero is the probe working rather than the probe failing.
+>
+> **They never received the announcement.** They are outside its `ListAgents` view —
+> one of the two sessions invisible to all four others
+> (`2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`).
+>
+> ### What synchronised us was the ARTIFACT, not a message
+>
+> The test's own doc comment names its acceptance mutation, at
+> `src/retrieval/embedder.rs:1975`:
+>
+> > *"Acceptance is a mutation: replace the `try_join!` in `embed_one_batch` with two
+> > sequential `.await`s and this test must fail deterministically."*
+>
+> I wrote that line ~16:50. They read the test and performed the mutation it
+> prescribes, on the lines it names, ~5 minutes later. Two sessions independently
+> executing the same instruction is not a coincidence and not a phantom — **the
+> instruction was checked into the file.**
+>
+> ### Two claims in this file are therefore withdrawn
+>
+> **H2 — the tool-layer cache hypothesis — is REFUTED.** `read_file` and `grep` did not
+> serve bytes absent from disk. The disk really was different, exactly as H1 said and
+> as `git-travel-augmentation-shape`'s interleaving argument allowed. No investigation
+> into `read_file` is owed, and the severe claim it would have carried — that a tool
+> the Iron Laws mandate can serve phantom content — should not be repeated.
+>
+> **The protocol finding has no evidence behind it.** § *The protocol finding* argues
+> that an announcement naming the exact edit "contains a verbatim executable
+> instruction" and that a peer may act on it. **Nobody executed the announcement** —
+> its only candidate reader never received it. The finding was reasoned from a real
+> mechanism to the wrong carrier. Kept below rather than deleted, because the
+> *reasoning* was sound and the mitigation it produced (say what you are breaking, not
+> how) costs nothing; but it must not be cited as measured.
+>
+> ### The real finding, which is better
+>
+> **A doc comment is a broadcast channel with a larger and better-targeted audience
+> than any announcement.** An announcement reaches whoever is on a distribution list
+> that under-reports by 40%. A doc comment reaches **whoever touches the code** — which
+> is precisely the population that would perform the mutation.
+>
+> That makes it simultaneously the *right* place to record an acceptance mutation
+> (`docs/PROBES.md` rule 5's placement argument, and `W-85`'s — a procedure belongs
+> where it fires) and an **uncoordinated-write hazard**: writing *"the acceptance
+> mutation is X"* into a test means any session verifying that test performs X, on
+> those lines, at a time nobody chose.
+>
+> **Do not remove the doc comment.** It is correct and load-bearing. What is missing is
+> that two sessions can execute it concurrently with nothing to detect the collision —
+> and the announcement protocol cannot close that, because the sessions who need the
+> announcement are the ones who cannot receive it.
 ## Summary
 
 While fixing `dense_and_sparse_legs_run_concurrently`, I broadcast a heads-up to
