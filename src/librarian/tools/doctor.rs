@@ -4168,6 +4168,22 @@ fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<
 /// the older shape. The remedy therefore requires a human judgement about which side is right,
 /// exactly as `augmentation_declared_but_absent` concluded for its own case.
 ///
+/// **The first live run replaced that argument with a stronger one, and this is the argument
+/// the design now rests on.** The very first finding — `docs/trackers/open-issue-work-queue.md`
+/// — drifted in BOTH DIRECTIONS AT ONCE: the sidecar held a `prompt` edit the catalog never
+/// received (a hand-edit of the committed YAML never touches the catalog), while the catalog
+/// held a newer `params_schema`. So direction is not a property of an ARTIFACT at all; it is a
+/// property of each FIELD. A per-artifact `fix=` is therefore not merely risky, it is
+/// **incoherent** — there is no single direction for it to point, and either choice destroys
+/// real content: re-exporting would have deleted the widened-vocabulary documentation, and
+/// applying the sidecar would have deleted the refined schema description. Getting this from
+/// the FIRST live finding means the field-level case is not rare, so a repair shipped on the
+/// caution argument would have destroyed one field or the other on its first use.
+///
+/// Do not "fix" this by adding a `fix=`. If a future reader wants one, the smallest sound
+/// version is per-field and requires the operator to choose a side per field, which is the
+/// human judgement above with extra machinery, not a replacement for it.
+///
 /// A sidecar that exists but does not parse is reported separately as `sidecar_unparseable`,
 /// because **nothing else can see it**: `reindex` skips the artifact entirely once a row is
 /// present, so a corrupt committed shape would otherwise sit unread until the machine that
