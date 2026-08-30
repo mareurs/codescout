@@ -135,6 +135,29 @@ response field that names the real written path. Reverted immediately after this
 
 ## Fix
 
+**Update 2026-08-31 — the routing precondition is now closed; this bug is not.**
+`2447f709` gives `edit_file` and `create_file` a `selector_key`, so `route()` is now
+actually consulted for them and the synthetic `Some("edit_file")` in this module's tests is
+no longer synthetic. That was a necessary precondition — without it, fixing the predicate
+would have changed nothing observable — and it is not a fix for the predicate itself.
+
+The predicate still cannot fire, for the reason recorded here: `names_path_containing`
+reads the tool's **response**, and write tools answer `"ok"` under the no-echo convention.
+
+**One correction to the deferral, which offered a single option.** `route.rs` records this
+as *"giving writes a path field is a change to the no-echo convention, not a bug fix"* —
+true, and it is not the only route. `route(sel, result)` never receives the call's **input**
+at all, and the input is already captured in `call_content` before `self.call` consumes it
+(`types.rs`, the `selector` binding). So a second option exists: match `path~` against the
+input rather than the response. That changes a signature documented as a stable entry point
+rather than a convention — a different cost, not obviously a larger one, and it leaves
+no-echo intact.
+
+Neither option is taken here: both are design decisions with blast radius beyond a bug fix,
+and which convention to bend is the operator's call rather than a drive-by. Recording the
+second option because the deferral as written reads as a dead end, and a rationale that
+names one option is the least-audited kind of claim (`reconnaissance-patterns:R-95`).
+
 *Not implemented — deliberately out of scope for the task that filed this bug.*
 
 The remedy is to give write-tool responses (`edit_file`, `create_file`, and likely

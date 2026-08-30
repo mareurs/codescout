@@ -1,12 +1,16 @@
 ---
-status: open
-opened: 2026-08-28
-closed:
-severity: medium
-owner: marius
-related: [docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md]
-tags: [operator-rules, routing]
 kind: bug
+status: fixed
+tags:
+- operator-rules
+- routing
+closed: 2026-08-31
+opened: 2026-08-28
+owner: marius
+related:
+- docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md
+severity: medium
+unverified: 'OP-2 is NOT covered and never can be by this mechanism. It declares `Serves: Agent, Task`, which are Claude Code HARNESS tools; codescout has no such tools (verified against the served surface and `ls src/tools/`), so they never enter call_content and no selector_key work can route them. For OP-2 the selector_key gap named as this bug''s root cause is not the binding constraint. Of the three triggered rules: OP-3 now routes; OP-4 has its routing precondition only and still cannot fire for an independent reason (see related); OP-2 is structurally unreachable. Also NOT verified end-to-end: the fix is covered by two tests meeting at a verified point — the real tools return Some(key), and route() delivers given a Some selector — but no test drives a real memory(action="write") call through call_content and asserts the OP-3 block appears.'
 ---
 
 # BUG: Triggered operator rules route nothing in production — no non-librarian tool ever supplies a selector_key
@@ -164,6 +168,23 @@ routing mechanism has no live `triggered` rule it can ever deliver in production
 on every call, not selector-gated. It is unaffected by this bug.)
 
 ## Fix
+
+**Fixed 2026-08-31 at `2447f709`** (patch-id `f83c6439691efb24ca790d00752e7cc7a43a74fe`),
+with a follow-up at `a4968a13` correcting two comments the fix falsified.
+
+`memory`, `edit_file` and `create_file` now override `selector_key`, projecting
+`<tool>.<action>` via a shared `core::types::action_selector_key` so the opted-in tools
+cannot drift apart. The `call_content` guard is `if selector.is_some()`, so supplying the
+key is sufficient to reach `route()` — no change to the router was needed.
+
+**What the suite was doing instead, which is the finding.** The routing tests were green
+against `RoutedEchoTool`, a stub *named* `"memory"` projecting `{tool}.{action}` exactly as
+`LibrarianAdapter` does, while the real `Memory` took the trait default and returned `None`.
+A green suite and a dead feature were consistent with each other for as long as the stub was
+the only caller. The two new tests assert against the real tools for that reason.
+
+**Scope — read the `unverified:` field before treating this as closed.** OP-3 routes; OP-4
+gets only its precondition and still cannot fire; OP-2 is unreachable from here for good.
 
 *Not implemented — filing only, per this task's scope.* Any fix here is a design
 decision (which tools get selector overrides and how, whether `Agent`/`Task` need an
