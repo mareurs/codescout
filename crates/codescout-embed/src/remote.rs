@@ -617,6 +617,19 @@ impl Embedder for RemoteEmbedder {
 /// the daemon is at least up), or an error if the connection is refused or
 /// times out.
 pub async fn probe_ollama(host: &str) -> anyhow::Result<()> {
+    // Required before ANY client construction here, not merely before a TLS request:
+    // reqwest is built with `rustls-no-provider`, so its
+    // `default_rustls_crypto_provider()` compiles to a literal `panic!("No provider
+    // set")` which runs inside `ClientBuilder::build()` — eagerly, and regardless of
+    // URL scheme. Measured 2026-08-30: without this line the crate aborts the process
+    // on plain `http://localhost:11434`, the zero-configuration default, so the
+    // "Ollama is not reachable" branch in `create_embedder_with_config` never runs.
+    //
+    // Every other client in this crate is built by `build_client`, which installs it.
+    // This fn deliberately does not use `build_client` — a reachability probe wants a
+    // tight 2s TOTAL bound, not that path's `read_timeout` + 300s pair — so it has to
+    // install for itself.
+    RemoteEmbedder::install_default_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()?;
