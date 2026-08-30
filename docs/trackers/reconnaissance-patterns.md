@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 140
+entry_high_water_R: 141
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-141 | 2026-08-31 | miss → rule (2 instances sourced, sibling of R-140) | **The referent you did not open is the part that gets EXECUTED — and a lineage anchor names lineage, not authorship.** One session relayed a `git worktree add` they had not run; another cited `R-3` for a clause it does not contain. Both had checked the surrounding prose. A shell command reads as *mechanical* and an id as a *pointer*, so **neither reads as an assertion needing support** — and an id additionally reads as *precise*, which reads as *verified*, making a wrong id more persuasive than a vague gesture at the same wrong idea. The composite case is worse and is a designed trade: the SKILL.md bullet carrying the positive-control instruction ends `(R-3 → R-113 → R-77 …)`, and **`R-3`'s own Promoted-to field says the back-citation was chosen OVER a verbatim quote so it survives rewrites** — i.e. it survives by not tracking which clause came from where. So *"R-3 says X"* can be false while *"the bullet R-3 anchors says X"* is true, with nothing in the citation's surface distinguishing them. Remedy is unconditional, not vigilant: **all three sessions were actively writing about unverified relaying at the time.** |
 | R-140 | 2026-08-31 | miss → rule (2 instances, one direction) | **A warning that prescribes an action must state its recovery cost, DERIVED — understating it licenses the thing warned against.** An overstated cost fails safe; an understated one converts a warning into permission, so the error and the harm point the SAME direction. Instance 1, verified here: the `.worktrees/bench` warning stated recovery as one `git worktree add --detach`, which fails — the path holds 24 entries and bench is not a registered worktree, so real recovery is move-then-add plus a **163M re-index**. Instance 2, reported first-hand: the relaying session verified the warning's DESCRIPTIVE claims and never ran the command, so their operator got the understated cost with a verification wrapped round it — confirmation of one half reading as confirmation of the whole. The tempting symmetric second direction (*omit* the cost and it gets discounted) is recorded as an **untested PREDICTION with its own promote-when**, because asking its supposed source first-hand revealed no incident behind it — an argument in the past habitual, read as a report. Writing it as a pairing would have manufactured symmetry inside an entry about warnings that mislead. |
 | R-139 | 2026-08-30 | miss → rule (parent of R-138) | **The parameter your own context supplies for free is the one you will omit — and it is invisible to you SPECIFICALLY.** Four instances in one evening across three sessions, every one found by review and none by self-review: a count published without its counting rule (4 off a trimmed view / 8 verbs / **9** lines with clap's auto-`help`); a query published without its key (fenced blocks containing `cargo test` — missed a parenthetical fifth site); a second query without its key (`cargo clippy` — unreachable for the wrapper form `scripts/build-windows.sh clippy …`); and an instruction without naming which part is the evidence (*"verify positively with `artifact --help`"* — the author's own probe discarded output and tested only the exit code, so nothing in their practice could surface the ambiguity). Result is never an error, always a **confident wrong answer**, so nothing downstream catches it. **Why peer review works where care does not:** the missing parameter is invisible precisely to whoever holds it, making a second reader a different INSTRUMENT rather than a redundancy — and it predicts which reader, one who does not share the author's context, not a more careful one. Test: *what did I know that the reader will not, that made this unambiguous to me?* Publish a number's **derivation** ("8-or-nothing because the `#[cfg]` sits on the whole variant") not the number; report a count **with the key searched for**; name which half of an instruction is the evidence. **Do not budget for vigilance** — all four were committed by authors actively writing about this class, one reintroducing a bare integer *in the commit fixing a bare integer*; what caught the wrapper was an unconditional policy (verify before contradicting a peer). Corollary: consolidating N copies removes the redundancy that could have caught an error in them — keep the derivation, not the copies | this session + `codescout-ae` + `git-travel-augmentation-shape`; `334cf64b`, `2f412a1c`, `bdfd7a62`, `610e132a`; kin R-138, law B |
 | R-138 | 2026-08-30 | miss → rule (child of R-139) | **A sweep that searches by SHAPE returns a confident wrong COUNT — and two agreeing sweeps are one sweep.** Two sessions independently enumerated every site transcribing the four-command gate, to deduplicate them; both returned **four**, the real count was **five**, and the agreement raised confidence in the wrong number instead of exposing it. Both had searched for the gate's shape — a fenced block containing `cargo test` — while `docs/ROADMAP.md:93` states the same proposition inline in parentheses mid-sentence, invisible to that query and to every refinement of it. Escalates law C from a zero to a **plausible positive integer**, which is worse: a sweep that missed a site is byte-identical in output to a sweep over a corpus that has none, and unlike a zero it never invites suspicion. **Corollary, causal not coincidental:** the evading site was also the STALEST (three commands, unrevised since 2026-08-06) — a site that evades one sweep evades every later maintenance pass for the same reason, so it accrues all the drift the found sites had corrected; expect prose restatements to be the worst copies and look there FIRST. It compounded through the reference graph: that paragraph pointed at the weakest of the five as "the full gate definition", so a reader distrusting local prose and following the canonical pointer landed on the copy linting neither `codescout-embed` nor the `local-embed` module — the label discharged the scrutiny. Tells: query units differ from question units (fenced-blocks vs statements-of-X); independence of authorship is not independence of METHOD. **Third instance the same evening generalises it past prose:** `ci.yml:284` is `scripts/build-windows.sh clippy …`, a WRAPPER invocation containing no `cargo clippy` substring, so it is invisible to any audit keyed on one — the class is *any query keyed on a token the site does not contain*, not prose-vs-fenced-block. Caught by a POLICY (verify before contradicting a peer), not by attention; knowing the class prevented none of the three instances, all three committed while writing about it. Do: search the narrowest token, then broaden past the tool name (`clippy`, not `cargo clippy`); read one whole file end-to-end before trusting a corpus count; report the count AND the form searched for; budget for an unconditional check rather than for vigilance | this session + `codescout-ae` (`bdfd7a62`); `docs/trackers/gate-contract-consolidation.md`; kin R-4, R-3, law C |
@@ -5433,6 +5434,88 @@ transfer inside the record defining the class.
 not sourced until the third party states it. A summary is a claim about a report, not the
 report — the same one-step-removed shape as `R-136`'s propositional row, applied to
 provenance instead of to instruments.
+
+## R-141 — The referent you did not open is the part that gets executed — and a lineage anchor names lineage, not authorship
+
+**Valid:** invariant
+
+**Status:** open — 2 instances sourced first-hand, one evening, three sessions involved
+
+**Rests on:** `R-140` (what a *warning* must state) — this is its sibling about what a *relay*
+must open. Mechanism verified against `R-3`'s own `Promoted-to` field.
+
+Sibling of `R-139`: that entry is about the parameter you supply for free and cannot see is
+missing. This is about the referent you **pass on without opening**.
+
+### The law
+
+**In a relayed report, the part nobody checks is the part the reader will execute.**
+
+  - `git-travel-augmentation-shape` passed on a **command** they had not run.
+  - `codescout-fe` passed on an **id** they had not opened.
+
+Both had verified the surrounding prose carefully. Both shipped the one element that would
+be acted on.
+
+**Why these two slip past scrutiny while the prose around them is challenged** —
+`git-travel-augmentation-shape`'s formulation: a shell command reads as *mechanical*, an id
+reads as a *pointer*; **neither reads as an assertion needing support.** The claims around
+them get evaluated because they look like claims. The referent looks like plumbing.
+
+To which: **an id reads as precise, and precision reads as verification.** `R-3` looks
+checked in a way "the entry about instruments" does not, so a *wrong* id is more persuasive
+than a vague gesture at the same wrong idea. Specificity is doing work that only accuracy
+should do.
+
+### The composite case, which is worse — `codescout-fe`'s finding
+
+Their error was **not** memory, and the real mechanism is a designed trade-off.
+
+The SKILL.md § Phase 1 bullet that *does* carry the positive-control instruction ends with a
+lineage anchor: `(R-3 → R-113 → R-77 → R-79 → R-104 …)`. They read a lineage anchor as
+per-clause attribution.
+
+That reading is wrong and the design invites it. **Verified in `R-3`'s own `Promoted-to`
+field**, which states the back-citation was chosen *over a verbatim quote* because *"the
+bullet has been rewritten and extended repeatedly since 2026-05 and the anchor still
+resolves — a verbatim quote would have needed re-syncing each time."* So the anchor survives
+rewrites **by not tracking which clause came from where.** Per-clause precision is the price
+paid for durability, deliberately.
+
+> **An anchor on a composite names lineage, not authorship.** *"`R-3` says X"* can be false
+> while *"the bullet `R-3` anchors says X"* is true — and **nothing in the citation's
+> surface distinguishes them.**
+
+So the remedy is not "check ids" in general. A reader who wants a *clause* must open the
+entry, because the anchor was never a promise about clauses.
+
+### The remedy is unconditional, because vigilance demonstrably is not
+
+Per `R-139`'s *do not budget for vigilance*: **all three sessions were, at the time, actively
+writing about unverified relaying.** Knowing the class prevented nothing — which is the same
+result R-139 measured across four instances that evening.
+
+- Before relaying an **instruction**: run it. Not the descriptive claims around it — the
+  thing the reader will execute.
+- Before citing an **id** onward: open it. Every time, not when something feels off.
+- Citing an id for a **specific clause** of a composite: open it *and* check the clause is in
+  the entry rather than in the thing the entry anchors.
+
+### The related law kept separate, and whose it is
+
+`git-travel-augmentation-shape`'s **verify the ACTIONABLE half of a report, not the
+descriptive half** — descriptive claims are what a reader evaluates, the prescription is what
+a reader executes — is the general form and is theirs. Recorded here as attribution, not
+absorption; if they write it, this entry should cite it rather than duplicate.
+
+### Sourcing note, per `R-140`
+
+Two instances are sourced first-hand: one stated by the session that made it, one verified
+here at the bytes by opening `R-3`. A peer reports **three** sessions handing over a
+confident id that evening; the third is **not sourced here** and is deliberately not counted.
+
+**Promote-when:** a third first-hand instance, or one where an unopened composite anchor
+reaches a shipped artifact rather than a message.
 
 ## Template for new entries
 
