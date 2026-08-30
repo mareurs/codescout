@@ -279,8 +279,17 @@ impl RetrievalClient {
     /// Select and build the query-side embedder from `config`: a configured
     /// url selects the HTTP backend for any model that does not name a local
     /// backend — `create_embedder_with_config` would resolve `RemoteEmbedder`
-    /// for a url too, but routing through `EmbedderHttp` here keeps the
-    /// connect-error marker `src/tools/semantic/semantic_search.rs` matches on.
+    /// for a url too, but `EmbedderHttp` is the **hybrid** path, and the sparse
+    /// leg has no crate equivalent.
+    ///
+    /// That is the whole of the reason now. This comment used to add "routing
+    /// through `EmbedderHttp` here keeps the connect-error marker
+    /// `src/tools/semantic/semantic_search.rs` matches on", and that constraint is
+    /// gone: `EmbedError::Connect`/`::Status` render published markers the
+    /// classifier imports (T4, T6 step A/B), and since T6 step D `EmbedderHttp`'s
+    /// dense leg *is* `RemoteEmbedder` — so the two producers cannot diverge in
+    /// the way the sentence was guarding against. It is recorded rather than
+    /// merely deleted because it is what deferred the swap for a month.
     /// No url means the model names the backend: the codescout-embed resolver
     /// picks `local-dir:` / `local:` / `ollama:` / `openai:`.
     ///

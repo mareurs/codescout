@@ -587,9 +587,10 @@ order above is derived from what gates what, not from stage numbering.
 order, what gates what); this holds the *state*. Strike rows here as they land;
 do not restate the rationale.
 
-**Status:** open — 4 tasks, **none blocked**. D1 was answered 2026-08-30 and T3
-landed on it. **T6 is the head of the queue**; T7–T9 chain behind it. T11 is
-**done** (`4b7cd31e`).
+**Status:** open — **2 tasks**, none blocked. T6 landed 2026-08-30 (four commits,
+row below) and took T8 with it. **T7 is the head of the queue**; T9 chains behind
+it and is **blocked by surfaces outside this stream** — see `ET-10` finding 3, and
+do not pick it up expecting the −48 crates, which `ET-2` already banked.
 
 **Both stale rows are now struck by their owner**, resolving the hand-off the
 previous session left here — and there were **two**, not one. That session
@@ -616,9 +617,9 @@ failure this board exists to prevent.
 | ~~T3~~ | B2 | Three-state query prefix on `RemoteEmbedder` — *derive* / *explicit* / *suppressed* | **done** `64c65248`, patch-id `72781e6b15e10b4edb56e8af39773db230555b5f`. `QueryPrefix` enum + `with_query_prefix`; constructors keep `Derive` so nothing observable changed yet. Two mutations run: `Suppressed` falling through to `derive_for` dies (the failure prints the offending wire body — literally the 34-point config), and `embed_query` ignoring the policy dies. **The pure resolver unit test survived the second mutation** — policy and its use are separate claims | — |
 | ~~T4~~ | B3 | Typed `EmbedError::Connect { url }` replacing the `"embed connect failed"` substring contract (`ET-5`) | **done** `6be58840`, patch-id `07a8ea7c676e197bc862da3639bf63c19787d248`. Closes `ET-5`. Reproducing first showed the risk was **already realised**: `RemoteEmbedder` surfaced connect failures as reqwest's own `error sending request for url (…)`, which matched no arm of `classify_search_error` and fell through to the generic Qdrant fallback — live on the `ollama:`/`openai:` resolver path. Mutating `CONNECT_FAILED_MARKER` now fails root's two tests while the crate's pass, which is ET-5's "nothing makes the two fail together" turned false | — |
 | ~~T5~~ | B4 | Export `is_https_or_loopback` (and whatever else Phase D needs) as `pub` | **done** `16dc28a5`, patch-id `dcf74187a08c2cf01399481c8a201f31a0ec2196`. `QueryPrefix::derive_for` shipped `pub` with T3. **`http_client` is NOT needed** — `ET-8`'s table assumed root's `transport.rs` dies in Phase D, but `reranker.rs` uses it at `:67`, `:83`, `:99` and the reranker is outside this consolidation, so **T8 should be re-scoped to the wire structs only**. Carries a differential pinning root's copy against the crate's on 16 urls, six named by neither fixed-expectation test; delete it with root's copy in T7 | — |
-| T6 | C | Swap root's dense leg to `RemoteEmbedder`; hold batch size at 8 so it stays behaviour-preserving (`ET-3`). **Carries D1's root-side half**: map unset `CODESCOUT_QUERY_PREFIX` → `QueryPrefix::Suppressed`, a set value → `Explicit`, and expose `Derive` as an opt-in sentinel | ready after B | T4, T5 |
+| ~~T6~~ | C | Swap root's dense leg to `RemoteEmbedder` | **done** in four commits — A `8097c2d6` / `18922aa3cc9f4be601e26f53ee68c9c483fec01b`, B `4fd4e5f4` / `d377f8ab6086f9d7137b4f4fc10d4628a26aa01c`, C `f9a205a9` / `469480c898f8db59c3a2e49acd12b628d9d824af`, D `797dd023` / `095ae63248a236e74a2135f101fa416cffb643dc`. **The seam is `dense_batch`, not the call site** — `RemoteEmbedder` is dense-only and root's two legs are fused per sub-batch, so a call-site swap reaches only the lite stack (`ET-10`). Root keeps chunking, both escape hatches, the concurrent sparse leg and the positional alignment; the crate owns the wire. D1's mapping landed **load-bearing**: `dense_query` prefixes via the crate's `embed_query`, so omitting `with_query_prefix` kills a test — root-side concatenation would have left that setting unfalsifiable. Root's empty predicate moved to `trim().is_empty()` to match the crate's, without which a whitespace-only chunk becomes a hard arity error. Two defects fixed en route, both the same shape (a hazard handled on root's side of the pair and never on the crate's): the collection-bucket hijack, and an index-out-of-bounds **panic** on a truncating server | — |
 | T7 | D1 | Delete root's `is_https_or_loopback`; **re-point** T1's test at the crate's, do not delete it | ready after C | T6 |
-| T8 | D2 | Delete root's `src/retrieval/transport.rs` and the duplicated wire structs | ready after C | T6 |
+| ~~T8~~ | D2 | Delete the duplicated **dense wire structs** — NOT `transport.rs`, which `reranker.rs` keeps alive (`ET-5`) | **already done** by T6 step D (`797dd023`): `OpenAiEmbedReq` / `OpenAiEmbedResp` / `OpenAiEmbedItem` deleted, confirmed dead by the compiler rather than by inspection. `EmbedReq` + `SparseEntry` stay — those are the sparse wire | — |
 | T9 | D3 | Drop `reqwest` / `rustls` from the **root** manifest; re-measure the crate delta and record it | ready after D1/D2 | T7, T8 |
 
 Phase D is *audit each pair, then delete* — not delete-root's-copy. `ET-4` has the
@@ -986,6 +987,26 @@ derives its batch cap from the sparse server's `/info`
 (`resolve_batch_size`, `src/retrieval/embedder.rs:756`, `FALLBACK = 8`) while the
 **dense-only** path never probes and uses 32. Splitting the legs means deciding
 whether dense keeps honouring a cap the sparse server advertises.
+
+**Resolved 2026-08-30 — branch B, at a seam neither branch named.** The operator
+chose B. Executing it moved the seam again: root's dense and sparse legs are fused
+*per sub-batch* (one batch size drives both, they run concurrently under
+`try_join!`, outputs are positionally re-aligned), so "extract the sparse leg" is
+not available either — the legs are not independently composable at the
+`CodeEmbedder` level. The seam that **is** available is one function lower,
+`EmbedderHttp::dense_batch`: root keeps the orchestration, the crate takes the
+wire. Same outcome B wanted — one dense implementation — with `EmbedderHttp`
+surviving as a hybrid orchestrator rather than being deleted.
+
+Landed as A–D; SHAs and patch-ids on `ET-9`'s T6 row. Findings 1 and 2 of this
+entry are discharged. **Finding 3 stands unchanged**: T9 is still blocked by the
+sparse leg and the reranker, and T6 did not touch either.
+
+One correction to this entry's own *Next*, worth keeping because the reasoning
+recurs: it proposed "split on `dense_only`" and "extract the sparse leg" as the
+fork, and both were framed at the `CodeEmbedder` boundary because that is where
+`build_embedder_for_url` chooses. The choice point and the seam were different
+places, and reading only the call site is what hid that.
 
 **Rests on:** `ET-4` (why Phase D audits rather than deletes) and `ET-8` (the
 ordering argument). Finding 3 contradicts `ET-8`'s implied terminal state, so
