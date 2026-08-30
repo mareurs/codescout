@@ -409,8 +409,10 @@ fn names_tracker_path(result: &Value) -> bool {
 /// Ordered deliberately, because `truncate_compact` cuts from the **tail**: anything
 /// below can be lost, so incompleteness signals lead.
 ///
-/// 1. **Incompleteness.** The `artifact(get)` body cap (`$.overflow.shown_lines`), then
-///    any other action's own `$.overflow.hint`. A body large enough to trip the cap also
+/// 1. **Incompleteness.** First any **cut finding array** (`counts.truncated`), named as
+///    `name[shown of total]` — see [`finding_truncation_summary`] for why the warning
+///    cannot live in the emitting tool's own `hint`. Then the `artifact(get)` body cap
+///    (`$.overflow.shown_lines`), then any other action's own `$.overflow.hint`. A body large enough to trip the cap also
 ///    exceeds the inline budget, so without promotion the warning is buffered away and an
 ///    agent extracts `$.body`, sees ~500 lines and never learns it was truncated — that
 ///    silent loss caused duplicate sections written from a short-read line count
@@ -434,6 +436,14 @@ fn names_tracker_path(result: &Value) -> bool {
 fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String> {
     let is_artifact = inner_name == "artifact";
     let mut lines: Vec<String> = Vec::new();
+
+    // Leads, per the ordering rule above: a cut finding array is the strongest
+    // incompleteness signal a librarian result carries, because absence from a
+    // truncated bucket reads as a clean answer rather than as a missing one.
+    // Keyed on shape, not tool, so it is inert for artifact-shaped results.
+    if let Some(cut) = finding_truncation_summary(result) {
+        lines.push(cut);
+    }
 
     // Artifact-shaped messages stay gated on the tool, so another librarian action
     // carrying a similar-looking field is never described as an artifact body.
@@ -495,6 +505,65 @@ fn overflow_hint(result: &Value) -> Option<String> {
     }
     let hint = overflow.get("hint")?.as_str()?;
     Some(format!("INCOMPLETE — {hint}"))
+}
+
+/// Name every finding array that was **cut**, as `name[shown of total]`.
+///
+/// `link_scan` caps each finding array at 50, records the true totals in `counts`, and
+/// keeps an accurate per-array `counts.truncated` map beside them. All three are correct
+/// and none of them reaches the caller: once the payload overflows it is buffered, and
+/// the envelope carries only the generic shape line, which renders every array as
+/// `dangling[50]` — indistinguishable from fifty findings.
+///
+/// So a reader who searches a bucket for a token and does not find it has searched
+/// **7.8%** of the population with nothing on the surface saying so. Measured 2026-08-30
+/// on this repo: `dangling` 50 of 637, `ambiguous` 50 of 551 — the two buckets a reader
+/// is most likely to interrogate are the two truncated hardest.
+/// `docs/issues/2026-08-30-link-scan-truncation-is-accurate-and-unreachable.md`.
+///
+/// **Why here and not in `link_scan`'s own `hint`,** which the bug file proposed as the
+/// cheapest fix: that `hint` is a key *inside* the payload (`link_scan/mod.rs`), so it is
+/// buffered away by the very overflow that creates the defect. Writing the warning there
+/// would place it in the one location the caller demonstrably does not read — and a test
+/// asserting on it would pass while the bug stayed live, which is the same shape as
+/// asserting on `counts`.
+///
+/// Keyed on the **shape** rather than the tool name, so any librarian action adopting the
+/// `counts.truncated` convention is covered without a second edit here. The shape is
+/// specific enough not to collide: a `counts.truncated` object of booleans whose keys name
+/// sibling arrays.
+///
+/// Reports only arrays flagged `true`. Naming untruncated ones too would teach the reader
+/// that this line means *every* array, and the next genuinely cut bucket would read as
+/// already accounted for.
+fn finding_truncation_summary(result: &Value) -> Option<String> {
+    let counts = result.get("counts")?.as_object()?;
+    let truncated = counts.get("truncated")?.as_object()?;
+
+    let mut cut: Vec<String> = Vec::new();
+    for (name, was_cut) in truncated {
+        if was_cut.as_bool() != Some(true) {
+            continue;
+        }
+        // A flag without its pair is not reportable as `N of M`. Skip rather than
+        // abandon the whole summary: one malformed entry must not suppress the
+        // warning for its siblings, which would be this defect again.
+        let Some(shown) = result.get(name).and_then(Value::as_array).map(Vec::len) else {
+            continue;
+        };
+        let Some(total) = counts.get(name).and_then(Value::as_u64) else {
+            continue;
+        };
+        cut.push(format!("{name}[{shown} of {total}]"));
+    }
+
+    if cut.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "TRUNCATED: {} — absence from a cut list is not evidence.",
+        cut.join(", ")
+    ))
 }
 
 /// The largest string field, previewed by its head.
@@ -819,6 +888,87 @@ mod tests {
             summary.matches("500").count(),
             1,
             "the body-cap case must be announced once, not twice: {summary}"
+        );
+    }
+
+    /// `link_scan` caps every finding array at 50 and records the real totals in
+    /// `counts`, with an accurate per-array `counts.truncated` map beside them. All of
+    /// that is correct and none of it reaches the caller: on overflow the payload is
+    /// buffered and the envelope shows the generic shape line, which renders every array
+    /// as `dangling[50]` — indistinguishable from fifty findings.
+    ///
+    /// So a reader who searches a bucket for a token and does not find it has searched
+    /// **7.8%** of the population with nothing on the surface saying so. Measured
+    /// 2026-08-30 on this repo: `dangling` 50 of 637, `ambiguous` 50 of 551.
+    ///
+    /// Asserting on the SUMMARY STRING is the whole point of this test. The information
+    /// already exists in the payload, so an assertion aimed at `result["counts"]` — or at
+    /// `link_scan`'s own `hint` key, which is *inside* the buffered payload — passes while
+    /// the caller still sees nothing. That is the defect, not a weaker form of it.
+    #[test]
+    fn compact_summary_names_the_real_total_for_a_truncated_finding_array() {
+        let rows = |n: usize| -> Vec<Value> {
+            (0..n)
+                .map(|i| json!({ "token": format!("R-{i}") }))
+                .collect()
+        };
+        // `ambiguous` is PRESENT and complete, so the truncated flag is the only thing
+        // that can exclude it. An absent array would be skipped by the missing-array
+        // guard instead, and the exclusion assertion below could never fire — it would
+        // pass under the very mutation it exists to catch.
+        let result = json!({
+            "scope": "project",
+            "dangling": rows(50),
+            "ambiguous": rows(12),
+            "counts": {
+                "dangling": 637,
+                "ambiguous": 12,
+                "truncated": { "dangling": true, "ambiguous": false },
+            },
+        });
+
+        let summary = librarian_compact_summary("librarian", &result)
+            .expect("a truncated finding array is an incompleteness signal and must surface");
+
+        assert!(
+            summary.contains("50 of 637"),
+            "the shown count is worthless without the total it is a fraction of: {summary}"
+        );
+        assert!(
+            summary.contains("dangling"),
+            "the truncated bucket must be named, since only some arrays are cut: {summary}"
+        );
+        let warning = summary
+            .lines()
+            .find(|l| l.contains("TRUNCATED"))
+            .unwrap_or_else(|| panic!("no truncation line at all: {summary}"));
+        assert!(
+            !warning.contains("ambiguous"),
+            "`ambiguous` is present and NOT flagged truncated, so naming it would teach \
+             the reader that this line means 'every array' — and the next genuinely cut \
+             bucket would read as already covered: {warning}"
+        );
+    }
+
+    /// The sibling direction, and the one that keeps the message meaningful: a scan whose
+    /// arrays all fit must say nothing here. Without this, a summary that unconditionally
+    /// printed the counts would satisfy the test above while carrying no information —
+    /// the reader could not tell a complete result from a cut one, which is the same
+    /// conflation one level up.
+    #[test]
+    fn compact_summary_is_silent_when_no_finding_array_was_cut() {
+        let result = json!({
+            "scope": "project",
+            "dangling": [ { "token": "R-1" } ],
+            "counts": {
+                "dangling": 1,
+                "truncated": { "dangling": false, "ambiguous": false },
+            },
+        });
+
+        assert!(
+            librarian_compact_summary("librarian", &result).is_none(),
+            "an untruncated scan must leave the slot to the generic describer"
         );
     }
 
