@@ -97,7 +97,8 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
 | BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | investigating (cross-ref) | `c752708c2757e139` |
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
-| BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | open | `73158c500ff6b293` |
+| BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | **zombie 2026-08-30** — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code + live measurement, plus a newly-found 9 (→ BL-64) acquitted twice. Survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger in frontmatter | `73158c500ff6b293` |
+| BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | open — no `%` in the LIKE so it matches zero rows, and the fn is `#[cfg(test)]` with no `reindex` subcommand in the CLI. Harmless today; reads as a missing-`%` typo whose repair restores the cascade-delete | `d5c8f2e8ca951ddc` |
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **blocked** — harness, not this repo. Caused 6 misattributions across 4 sessions in one afternoon; real population ≥ 6 while both sides report "Peer sessions (2)" over disjoint sets. Mitigation in the bug file works today | `4266d09da90acb5e` |
 | BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `6411eb594cd7231d` |
@@ -413,6 +414,63 @@ actual work here, and this bug is the reference case for the former.
 gitignored, so a vanished row is unrecoverable rather than merely stale — which is what makes a
 root cause worth more than a re-create. Phase 1 on that basis alone.
 
+**Worked 2026-08-30 — closed as `zombie`, which is what its own Resume asked for.**
+
+There was no reproduction to run (*"the loss was noticed on resuming after a compaction,
+with no session running to observe the deletion"*), so the work was to settle the named
+hypotheses. Three of four are now closed:
+
+- **6 (concurrent writers) — acquitted** by the file's own criterion. `journal_mode` is
+  `wal` on the live catalog; `Catalog::open` sets `busy_timeout = 5000` at both sites,
+  pinned by `open_sets_busy_timeout_for_cross_process_writers`; `append_entry` runs in one
+  `IMMEDIATE` transaction; migrations use `BEGIN IMMEDIATE` explicitly for the
+  two-instances case.
+- **4 (`prune_missing` dead-root) — rejected from the code.** `derive_dead_roots` skips
+  any path that exists, and the record's own Symptom says both files were still on disk.
+  The guard fires before the dead-root climb starts.
+- **9 (a `force` reindex DELETE) — new, and rejected twice.** Found while chasing 4;
+  filed as **BL-64**.
+
+**The Resume's own step 2 was broken, and that is worth more than the acquittal.** It
+prescribed reading `PRAGMA busy_timeout` from `sqlite3`. That pragma is per-connection,
+so a fresh CLI connection reports its own default — measured `0`, against `5000` in the
+code. Followed literally the recipe returns *"no timeout → largely convicts
+concurrency"*, and no other answer was obtainable from it. A textbook member of
+`docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`.
+
+**Why it closes as zombie rather than fixed.** The survivor — a foreign `codex` client
+writing to the shared machine-local catalog — is not merely untested, it is
+**unfalsifiable after the fact**: nothing records which process mutated a row. The
+incident is undiagnosed because the evidence was never captured, not because the search
+stopped early, and a recurrence would be exactly as opaque. If it recurs, propose a write
+audit trail *first*; re-running the hypothesis list would repeat a search whose outcome is
+already known.
+
+### BL-64 — `reindex_cli` carries a broken copy of a deliberately removed DELETE
+
+**Status:** open — in-repo, low severity, unowned. **Valid:** dated 2026-08-30
+
+`docs/issues/2026-08-30-reindex-cli-carries-a-broken-copy-of-a-deliberately-removed-delete.md`.
+
+`src/librarian/mod.rs:392-398` still holds the pre-walk
+`DELETE FROM artifact WHERE abs_path LIKE ?1` that `reindex.rs` removed from the real path
+in `d482ca8a` for cascade-wiping augmentations through `ON DELETE CASCADE`. Its copy has
+**no `%`**, and `LIKE` without a wildcard is equality — verified against SQLite directly —
+so it matches zero rows. `force` reaches nothing else: `index_repo` takes no force
+argument and hardcodes `index_repo_sync(…, false, false)`.
+
+Harmless today, because the function is `#[cfg(test)]` and `codescout --help` lists no
+`reindex` subcommand — checked against the shipped binary, not inferred from the source.
+
+The hazard is what a future reader does to it. The block reads as an obvious missing-`%`
+typo, and repairing the typo restores a cascade-delete of every augmentation under the
+root. `reindex.rs`'s own comment records that arc — destructive DELETE, removed in
+`d482ca8a`, then properly re-plumbed as `force_rewalk`. The CLI-named twin never left
+stage one.
+
+Fix is (a) delete the block and the parameter, matching what the sibling actually did, or
+(b) plumb `force_rewalk`/`force_embed` through `index_repo` — only 2 call sites. Not (c),
+restoring the `%`.
 ### BL-57 — `@tool_*` buffer grep returns the JSON envelope, not the stdout
 
 **Status:** done-archived — fixed and archived by the owning session 2026-08-30.

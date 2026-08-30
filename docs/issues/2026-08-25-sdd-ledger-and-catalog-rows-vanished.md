@@ -1,7 +1,7 @@
 ---
 id: '73158c500ff6b293'
 kind: bug
-status: open
+status: zombie
 title: SDD ledger directory and this work-stream's catalog rows both vanished between sessions
 tags:
 - librarian
@@ -9,13 +9,15 @@ tags:
 - sdd
 - data-loss
 closed: null
+last_observed: 2026-08-25
 opened: 2026-08-25
 owner: marius
 related:
 - docs/issues/archive/2026-08-23-research-index-tracker-has-no-augmentation.md
 - docs/issues/archive/2026-05-17-reindex-cascade-delete-data-loss.md
+reopen_trigger: Catalog rows disappear for files that are STILL ON DISK — i.e. a find(scope=umbrella, include_archived=true) reports count 0 for a path that exists, and the response's own unindexed_files hint is non-zero, with no artifact(move) or archive in the window.
 severity: high
-unverified: Root cause undetermined — the loss was detected after the fact, with no session running to observe it.
+unverified: 'Root cause still undetermined, and now believed UNDETERMINABLE after the fact: the catalog keeps no write audit trail, so "which process deleted these rows" has no answer once the window closes. Hypotheses 4 and 6 are acquitted (2026-08-30); 8 is unfalsifiable rather than untested. Re-open trigger is in the Resume section.'
 ---
 
 # BUG: SDD ledger directory and this work-stream's catalog rows both vanished between sessions
@@ -81,8 +83,17 @@ session running to observe the deletion. Best leads are under **Hypotheses tried
 
 ## Root cause
 
-Unknown — see **Hypotheses tried**. Not measured; no session observed the deletion.
+Undetermined, and — as of 2026-08-30 — believed **undeterminable after the fact**.
 
+Of the four named candidates, three are now acquitted from code and live measurement
+(4, 6, and the newly-found 9; see *Hypotheses tried*). The survivor is hypothesis 8, a
+foreign non-codescout writer against the shared machine-local catalog, and it is
+unfalsifiable rather than merely untested: nothing records which process wrote or deleted
+a catalog row.
+
+That is the durable finding here. The incident is not undiagnosed because the
+investigation stopped early; it is undiagnosed because the catalog cannot say who wrote
+to it, and a recurrence would be exactly as opaque.
 ## Evidence
 
 ### Reindex re-minted the same ids, so the paths never moved
@@ -223,6 +234,77 @@ to a shared tracker. No content was lost — only provenance — but it is direc
 two sessions share one working tree with no isolation, which is the same substrate
 hypothesis 6 indicts.
 
+### 2026-08-30 — hypotheses 4 and 6 both acquitted, and the prescribed test for 6 was itself broken
+
+**Hypothesis 6 — ACQUITTED, by this file's own criterion.** The Resume states *"WAL plus
+a non-zero busy timeout would largely acquit concurrency."* Both hold:
+
+| check | result |
+|---|---|
+| `PRAGMA journal_mode` on the live catalog | **`wal`** (WAL sidecars present on disk) |
+| `Catalog::open`, `src/librarian/catalog/mod.rs:422` and `:459` | `foreign_keys = ON; journal_mode = WAL; busy_timeout = 5000` |
+| pinned by | `open_sets_busy_timeout_for_cross_process_writers`, asserts `5000` |
+| the read-max-write path | `append_entry` runs in one `IMMEDIATE` transaction, doc-commented as safe under cross-process concurrency |
+| migrations | `BEGIN IMMEDIATE`, with a comment naming "two codescout instances open a shared catalog" as the case it exists for |
+
+**And the Resume's step 2 would have convicted the wrong suspect.** It prescribes
+`sqlite3 <db> 'PRAGMA journal_mode; PRAGMA busy_timeout;'`. `busy_timeout` is a
+**per-connection** setting, so a fresh `sqlite3` CLI connection reports its own default
+forever, regardless of what codescout sets. Measured: **`0` from the CLI, `5000` in the
+code.** Read literally, the recipe returns *"delete-or-WAL with no timeout → largely
+convicts concurrency"* — and no other reading was available from that command. Only
+`journal_mode` is persistent and therefore answerable from outside the process.
+
+*(That is an instance of
+`docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`: an instrument that
+answers a neighbouring question, consulted precisely because someone was being careful.)*
+
+**Hypothesis 4 — REJECTED, from the code rather than deferred.** `derive_dead_roots`
+(`src/librarian/tools/doctor.rs:1078`) opens with two guards:
+
+```rust
+if path.exists() { continue; }                       // not a missing row
+match path.parent() {
+    Some(parent) if parent.exists() => continue,     // single file under a live dir
+```
+
+This file's own Symptom section records that **the plan and spec were still on disk**.
+The first guard therefore disqualifies them before the dead-root climb begins, so batch
+`prune_missing` could not have selected them however its root derivation behaves. Case
+(b) is pinned by `derive_dead_roots_groups_gone_subtrees_and_skips_live_dir_files`.
+
+This also removes the shape argument that made 4 plausible: a dead-root prune takes a
+contiguous subtree, and the 12 lost rows were the most recently written ones.
+
+### 9. Hypothesis: the `force` reindex path issued a destructive DELETE — REJECTED, twice
+
+Found while chasing 4. `src/librarian/mod.rs:392-398` (`reindex_cli`) still holds a
+`DELETE FROM artifact WHERE abs_path LIKE ?1` that `reindex.rs` removed from the real
+path in `d482ca8a` for cascade-wiping augmentations. It cannot be the cause, for two
+independent reasons:
+
+- The pattern is `format!("{}/", root)` — **no `%`**. `LIKE` without a wildcard is
+  equality, and no `abs_path` equals `<root>/`. Measured against SQLite directly: the
+  no-wildcard form matches only a literal row, the `%` form matches the subtree.
+- `reindex_cli` is `#[cfg(test)]`, and `codescout --help` lists no `reindex` subcommand.
+  Nothing user-facing reaches it.
+
+Filed separately as
+`docs/issues/2026-08-30-reindex-cli-carries-a-broken-copy-of-a-deliberately-removed-delete.md`
+— harmless today, and one character from being the data-loss path it descends from.
+
+### What remains: hypothesis 8, and it is unfalsifiable rather than untested
+
+Acquitting 6 acquits **SQLite concurrency mechanics** — lost updates, `SQLITE_BUSY`,
+interleaved writers. It does not acquit hypothesis 8, which is a different claim: that a
+**foreign agent** (the `codex` client observed in-window) issued its own writes against
+the shared machine-local catalog. No pragma prevents a third party from running a DELETE.
+
+That hypothesis cannot be tested after the fact, and the reason is structural: **the
+catalog keeps no write audit trail.** Nothing records which process wrote or deleted a
+row, so "who dropped these 12" has no answer once the window closes. This is why the
+incident stays undiagnosed — not for want of effort, but because the evidence was never
+recorded. Any future recurrence will be equally opaque unless that changes.
 ## Fix
 
 None yet — the incident is recorded, not diagnosed. Recovery is documented below.
@@ -260,27 +342,25 @@ header. The scripts are in this session's scratchpad (`recover_ledger.py`,
 
 ## Resume
 
-Test hypothesis 6 before hypothesis 4 — it is now the stronger lead and it is cheaper to
-check.
+**Closed as `zombie` 2026-08-30** — the disposition this section itself prescribed:
+*"If both are acquitted, close as `zombie` with a re-open trigger rather than leaving it
+open."* Both were. Steps 1–3 below are done and their results are in *Hypotheses tried*;
+they are kept because step 2 was **wrong in a way worth preserving** — `PRAGMA
+busy_timeout` is per-connection, so the command as written could only ever have returned
+`0`, and reading it literally convicts concurrency on evidence that carries no
+information.
 
-1. Read the codescout memory `catalog-sql-hazards`; it may already document the
-   concurrent-writer contract and make this a rediscovery rather than a finding.
-   **Checked 2026-08-25 (unrelated session, prompted by this file's own step 1):** it
-   does not — the memory covers table-copy migrations dropping later-added columns and
-   unescaped `LIKE` wildcards only, nothing about multi-process write contention or
-   journal mode. Step 2 (`PRAGMA journal_mode`/`busy_timeout`) is still the next real test.
-2. `sqlite3 /home/marius/.local/share/librarian/catalog.db 'PRAGMA journal_mode; PRAGMA
-   busy_timeout;'` — WAL plus a non-zero busy timeout would largely acquit concurrency;
-   `delete` journal mode with no timeout would largely convict it.
-3. Establish whether the writer path wraps artifact upserts in a transaction, and whether
-   a `reindex` from one process can delete rows another process just wrote.
+**Re-open trigger** (also in frontmatter, so a query can reach it): catalog rows
+disappear for files that are **still on disk** — a `find(scope="umbrella",
+include_archived=true)` returning `count: 0` for a path that exists, with a non-zero
+`unindexed_files` hint in the same response, and no `artifact(move)` or archive in the
+window.
 
-Only if hypothesis 6 is acquitted, fall back to hypothesis 4: read `derive_dead_roots` and
-`count_dead_root` (`docs/superpowers/plans/2026-07-18-catalog-hygiene-prevention-cleanup.md`
-Task 5) and decide whether batch `prune_missing`'s dead-root derivation can select a root
-whose subtree is present.
-
-If both are acquitted, close as `zombie` with a re-open trigger rather than leaving it open.
+**If it does re-open, do not re-run the hypothesis list.** Three of four are closed and
+the fourth cannot be settled by inspection. The only thing that would answer it is
+evidence captured *while it happens*: a write audit trail on the catalog, or at minimum
+recording the writing process on `artifact` mutations. Propose that first; investigating
+again without it repeats a search whose outcome is already known.
 ## References
 
 - `docs/superpowers/plans/2026-08-23-hidden-information-eval.md` — the plan whose
