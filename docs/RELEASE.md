@@ -236,6 +236,10 @@ The patch-id survives rebase **and** cherry-pick, because it hashes the change r
 
 **There is no promotion path to check and nothing owed later.** Both paths stay available; recording the pair once replaces the old "capture the master SHA afterwards" follow-up.
 
+**A merge commit has no patch-id.** `git show <merge>` emits no diff (a merge has several parents, so "the diff" is ambiguous), and `git patch-id` given no patch prints nothing and exits **0** — empty output, no error, exactly where the durable half is most needed. Cite the merged branch's **constituent commits** by SHA + patch-id instead; each has an ordinary one. Never record an empty patch-id, never substitute the SHA, and do not manufacture one from `git diff <first-parent>..<merge>` — it hashes, but not to the object a cherry-pick would reproduce.
+
+Verified 2026-08-30 across the whole corpus: 19 merge commits in the repo, **none** cited as a fix in `docs/issues/`; 163 distinct cited patch-id values, **none** resolving under `git cat-file -t` (a real patch-id must not be an object, so a SHA in that field would). The rule below codifies existing practice rather than correcting a mess.
+
 If a cited SHA has already been orphaned, recover the commit by its patch-id. Use
 redirects, not pipes — Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
 

@@ -97,6 +97,23 @@ git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt
 grep <first-12-of-patch-id> /tmp/patch-ids.txt
 ```
 
+**A merge commit has no patch-id, and the tool reports that by staying silent.**
+`git show <merge>` emits the message with no diff — a merge has more than one parent, so
+"the diff" is ambiguous — and `git patch-id` given no patch prints **nothing and exits
+0**. The prescribed pipeline therefore returns empty, with no error, exactly where the
+rule matters most. Cite the merged branch's **constituent commits** by SHA + patch-id
+instead; each has an ordinary patch-id that survives rebase normally. Never record an
+empty patch-id field, and never substitute the SHA for it.
+
+Do not reach for `git diff <first-parent>..<merge>` to manufacture one: it hashes, but
+not to the object a cherry-pick would reproduce, so it is a plausible value in a field
+that means something else.
+
+Already the practice in this repo before it was a rule —
+`docs/issues/archive/2026-08-13-url-silently-overrides-local-dir-model.md` reads *"Fixed
+at `38e0980b`, merged to `experiments` at `e6484b16`"*: the fix commit carries the
+citation, the merge is named separately as an event.
+
 **There is no promotion path to check and no pending-master-SHA `## Resume` line.**
 Recording the SHA *and* its patch-id replaces both. Whichever way the fix reaches
 `master` — fast-forward or cherry-pick — the pair stays resolvable, so nothing is owed
