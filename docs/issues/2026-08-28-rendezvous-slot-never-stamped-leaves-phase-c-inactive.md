@@ -1,13 +1,14 @@
 ---
 id: e6c0ddb91fe28228
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: a rendezvous slot that misses its SessionStart stamp can never be stamped again, so Phase C stays inactive for the life of that server'
 tags:
 - rendezvous
 - companion-plugin
 - guide-ledger
 - phase-c
+closed: 2026-08-30
 opened: 2026-08-28
 owner: marius
 related:
@@ -214,6 +215,32 @@ not in the refresh.
 3. Do **not** "fix" this by having the server stamp its own slot. That makes the flag mean
    "a server exists", which it already knows, and destroys the only thing the flag is for.
 
+**WONTFIX 2026-08-30**, set by a verify-open sweep that found this file's status
+lagging two independent dispositions that both already said so.
+
+1. This file's own `unverified:` — *"REFUTED 2026-08-28, both by measurement"*,
+   and *"No fix is implemented and none is currently warranted — the failure
+   direction is forgiving and the exposure self-heals."*
+2. `open-issue-work-queue:BL-51`, which records it as **dropped**, both claims
+   refuted.
+
+Both headline claims are refuted by their own author's measurements: a `/mcp`
+reconnect *does* inherit the predecessor stamp, and a missed stamp is *not*
+permanent — the one measured instance was stamped by a later SessionStart-class
+event. `severity` was already `informational`.
+
+`wontfix` rather than `fixed`, deliberately: nothing was fixed. The claim was
+wrong, and the vocabulary's `wontfix` — "intentionally not fixing; justification
+in the file" — is the honest slot for a report whose defect turned out not to
+exist in the form described.
+
+**One observation survives and is NOT closed by this**, recorded so the status
+change does not bury it: that server served calls for ~8 hours with a null slot,
+and no one has explained why. It is an unexplained observation, not an open
+defect — which is exactly why it should not have kept a `status: open` row in the
+triage queue, where it read as available work for anyone who did not open the
+file. Re-open if the null-slot state is seen again with a session that Phase C
+measurably failed to serve.
 ## Workarounds
 
 Restart the affected session's MCP server *with* a `SessionStart` — i.e. a new conversation

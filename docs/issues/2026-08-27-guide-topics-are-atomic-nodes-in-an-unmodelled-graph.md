@@ -9,6 +9,7 @@ tags:
 - get_guide
 - progressive-disclosure
 - proposal
+unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27 on branch sdd/get-guide-section-grain, and the USE probe this file''s own `Not yet done` asked for RAN the same day, resolving the delivered-vs-used gap it was blocked on. What remains is proposal work, not a defect: directions (b) and (c) are gated on a DISTRIBUTION probe -- which sections of tracker-conventions are cited back or acted on across a real sample -- because the two sessions measured so far were selected by talking to each other, not by any sampling rule, and both arms would survive a bad sampling design. Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that reads as settled because someone who knows the file stated it, and it needs re-costing before anyone builds on it. Added 2026-08-30 by a verify-open sweep: this was the only one of twelve open bugs with no queryable disposition.'
 ---
 
 ## Symptom

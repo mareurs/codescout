@@ -12,7 +12,7 @@
 //! BL-40 / BL-42 closed. A restored augmentation starts with empty params and refills from
 //! use.
 //!
-//! docs/issues/2026-08-28-augmentation-declaration-records-existence-not-shape.md
+//! docs/issues/archive/2026-08-28-augmentation-declaration-records-existence-not-shape.md
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

@@ -1,7 +1,7 @@
 ---
-id: '19f44bead56b56cc'
+id: '11dec5e144ba0482'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: expects_augmentation is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was — CLAUDE.md''s documented entry_filter workflow breaks on every new machine with no recovery path'
 owners:
 - marius
@@ -10,6 +10,8 @@ tags:
 - augmentation
 - cross-machine
 - claude-md-drift
+closed: 2026-08-30
+unverified: 'MECHANISM shipped and tested; LOCAL export done; ONE item this machine cannot close. `librarian(doctor)` reports augmentation_declared_but_absent: 13 -- trackers that DECLARE an augmentation and have none here. Their only copy is another machine''s gitignored, unbacked catalog, so `export_augmentations` run HERE cannot recover them; it must be run THERE. Also open, non-blocking: `artifact_augment` does not write through on shape change (the export is idempotent, so this costs a re-run rather than correctness). Matches open-issue-work-queue:BL-50, which carries the same disposition.'
 ---
 
 # BUG: `expects_augmentation` records existence, not shape
@@ -179,6 +181,67 @@ Smallest useful version: let `expects_augmentation` take a **map** instead of a
 bool, holding `entry_collection` + `params_schema`. Backward compatible — `true`
 keeps today's meaning.
 
+**FIXED 2026-08-30.** Shape now travels in git as a committed sidecar, and the
+reader half restores it on `reindex`.
+
+| what | where |
+|---|---|
+| sidecar reader/writer | `src/librarian/augmentation_sidecar.rs` |
+| exporter | `librarian(action="doctor", fix="export_augmentations")` |
+| restore signal | `reindex` now returns `augmentations_restored` |
+| the committed shapes | `docs/augmentations/*.yaml` (`c2039a16`) |
+| round-trip regression test | `1ad9af66` — "the cross-machine round trip, in one test" |
+| the three docs that said otherwise | `e1b91221` |
+| sidecar keyed on path, not file stem | `f565504a` |
+
+**Coverage verified 2026-08-30, not assumed — and this was the check worth
+running**, because a partial export would look identical to a complete one from
+the commit log. `artifact(action="find", augmented=true, scope="repo")` returns
+**9** artifacts; `docs/augmentations/` holds **9** sidecars; the names correspond
+one-to-one:
+
+```
+open-issue-work-queue  prompt-hamsa-audit-log  provenance-subsystem
+tool-usage-patterns    legibility-backlog      fable-tuning-findings
+windows-platform-support  fable-tuning-tasks   docs/research/README
+```
+
+So every augmented artifact in this repo has its shape committed. The three
+CLAUDE.md names append/query recipes for — `tool-usage-patterns`,
+`open-issue-work-queue`, `legibility-backlog` — are all present, which is what
+closed the specific breakage this file was opened for.
+
+**That 9/9 does NOT mean complete, and reading it that way was an error made
+here before it was caught.** The sweep that closed this file first measured
+`artifact(find, augmented=true)` — rows that **have** an augmentation — got 9,
+matched it against 9 sidecars, and concluded full coverage. But this bug is about
+rows that **expect** one and lack it, which is a different set and one that query
+cannot see. `librarian(action="doctor")` reports the right number:
+**`augmentation_declared_but_absent: 13`**.
+
+Those 13 declare an augmentation and have none on this machine. Their only copy
+is another machine's gitignored, unbacked catalog, so running
+`export_augmentations` **here** cannot recover them — it exports only rows this
+catalog holds, which is the mechanism's documented limit rather than a defect.
+The export has to be run **there**. `open-issue-work-queue:BL-50` carries the same
+disposition and its count was exact.
+
+The measurement was true and the inference was not: 9 augmented rows all have
+sidecars, and that says nothing about rows with no augmentation to export. Same
+shape as the day's other slips — the arithmetic was right and the subject was
+misidentified.
+
+**One inherent limit, documented rather than outstanding.** `export_augmentations`
+can only export rows *this* catalog holds, so an augmentation that exists solely
+on another machine is not exported by running it here. That is a property of the
+mechanism, not a gap in the fix — the doctor's own parameter doc states it — and
+the remedy is to run the export on any machine holding augmentations the repo has
+not yet seen.
+
+**Not fixed here (and not this bug):** `expects_augmentation` remains a boolean.
+The sidecar is what carries shape; the flag still only says one is expected. That
+is now a correct division of labour rather than the defect this file described,
+since the thing it could not name is recorded next to it.
 ## Tests added
 
 None yet. The regression test that matters is the one the 2026-07 fix did not

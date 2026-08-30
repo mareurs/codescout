@@ -108,6 +108,6 @@ under **Fix** — they are different bets and the test is the one that scales.
 
 - `docs/issues/archive/2026-08-30-cli-artifact-update-has-no-force-escape-for-the-shrink-guard.md`
   — same mechanism, fixed at `19289b1f`; its `build_update_tool_args` is the seam to copy
-- `docs/issues/2026-08-28-augmentation-declaration-records-existence-not-shape.md` — BL-50,
+- `docs/issues/archive/2026-08-28-augmentation-declaration-records-existence-not-shape.md` — BL-50,
   whose `export_augmentations` is the fix this gap strands
 - `src/librarian/tools/librarian.rs` — the `fix` enum the CLI does not expose
