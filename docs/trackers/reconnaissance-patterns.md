@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 126
+entry_high_water_R: 127
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-127 | 2026-08-30 | miss (self-caught in-turn) → confirms [[R-125]] | **I broke R-125's clause verifying R-125's own release, minutes after promoting it.** Checking whether `codescout-companion` 1.19.8 had propagated to the plugin caches, I ran `find … -path "*reconnaissance/SKILL.md" | head -1`, grepped the clause out of the one path it returned, got `0` in all three profiles, and reported *"that's the drift, caught live"* — citing `claude-plugins`' own stale-cache tracker entry as corroboration. **False.** Every profile holds TWO version-keyed cache dirs, `1.19.7/` and `1.19.8/`; `head -1` returned the stale one each time, and all three `1.19.8/` copies contain the clause. `head -1` answers *"the first path the walk yielded"*, never *"the path that loads"* — and a version-keyed cache holding two versions is the normal state, not an edge case. Two separable aggravators: **the zero AGREED with me** (law C's usual framing assumes a surprising zero prompts a re-check; agreement suppresses it, so a confirming negative needs the scrutiny a contradicting one gets for free), and **authorship is not activation** — having written, argued and shipped the clause minutes earlier did not make it fire. Caught only by re-reading my own command inside the sentence I was about to publish, which is exactly where R-125 placed it (Phase 3, the act of writing). That makes the placement argument tested rather than reasoned | severity low — self-caught in one turn, retracted in the same message, nothing built on the false reading; violates `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md` Decision clause 1 verbatim; no promotion owed, the clause it confirms is already shipped |
 | R-126 | 2026-08-30 | miss (found by dry run) | **An agreement assertion cannot see a shared convention being wrong.** `path_for` and `rel_path_for` were tested against EACH OTHER and agreed — both stem-keyed, both unsound, since a stem is not unique and `docs/research/README.md` is really augmented here. Gate green 4833/0 on a defect the test was positioned to catch. Tell, available at write time: ask what the assertion RANGES OVER — one input and two implementations, or the input space. Write the property (injective? round-trips? unique across the corpus?) and keep the agreement as a second assertion. Distinct from law C: no zero, no error, just two functions quietly agreeing on one file (`f565504a`, `bug-fix-session-log:W-76`) |
 | R-125 | 2026-08-29 | miss (self-correcting) → promote-ready | **Law C is stated only for the EMPTY result — and the remedy I first proposed for that gap was law C again.** A keyword count in a peer's diff (19 × "timeout" across +137 lines) was read as causation and the peer was pointed at their own uncommitted work; the real defect was a `tokio::try_join!` race inside the test itself, racy since `9f4debc3`, fixed in `21174425`. The first draft of this entry prescribed *"run the failing test in isolation"* as the cheap decisive check — but it **passes** in isolation, so that green confirms the flake reading wrongly, which is law C's original form committed while writing the entry about law C. Before calling any check decisive, ask whether it can EXPRESS the failure | `bug-fix-session-log:F-78`; mechanism re-verified here at `embedder.rs:606-617` (`try_join!`) and `:540`/`:806` (`dense_only` never consulted by `embed_one_batch`); cost was one `symbols()` read rather than a bisect, because the report carried the failing assertion text verbatim; **second datapoint, volunteered by the fix's own author**: it verified the fix with 10/10 isolated runs — the same instrument, same blind spot, that had already acquitted the bug twice; the structural fact (`dense_batch`, one leg, no `try_join!`, verified at `:992-996`) is what carries it. Three passes of one instrument in one afternoon, each green read as proof of a different proposition. Threshold **fired**. Disposition **corrected from case 2 to case 3**: both datapoints occurred with the skill LOADED and law C's text already covers both errors, so this is not a wording gap and a sixth mechanism on the file's longest bullet is the accretion the audit section forbids — loaded is not reached, and the remedy is placement (a trigger-shaped clause attached to the act of citing a green) not rewording. Promotion owed as a SKILL.md PR, not yet raised; kin [[R-3]]/[[R-113]]/[[R-77]]/[[R-79]]/[[R-104]] — all five of law C's recurrences are the empty form |
 | R-124 | 2026-08-27 | miss (paired hit) | **One law, hit where the skill was invoked and never fetched where it was not.** The prohibition form of *"a fix — and equally a prohibition — is a claim about CURRENT STATE"* went unchecked: CLAUDE.md's "all native `Bash` are hard-denied" was acted on unverified and used to tell the user the mandated gate was unrunnable. The same law's request form had fired correctly hours earlier, stopping a deliberately-deleted `shell_enabled` switch from being re-added. Reading the hook SOURCE would have confirmed the wrong answer — `pre-tool-guard.mjs:177` is `enforce("This call is blocked...")` — and one positive control refuted it | `shell-gating-session-log:F-1` (miss) + `shell-gating-session-log:W-1` (hit); `cat src/main.rs` matched the guard's own block branch at `:165` and executed anyway, PostToolUse hint only; `BREAKER_THRESHOLD = 3` stands the guard down by design, so "hard" is wrong even as intent; audit verdict mode 3 **Unreachable** (placement, not wording) — no law added, base arm owed; kin [[R-19]] (same law, assert-a-checkable-fact form, already quoted in SKILL.md § When NOT to Use), [[R-89]] (recurred for the same placement reason) |
@@ -4246,6 +4247,66 @@ the practice.
 as an answer. This is about an ASSERTION whose form excludes the defect from its range.
 They compose badly — a stem collision produces no zero and no error, just two artifacts
 quietly agreeing on one file.
+
+## R-127 — Miss: I broke R-125's clause verifying R-125's own release, minutes after promoting it
+
+**Verdict:** miss, self-caught within the turn. The strongest confirming instance
+[[R-125]] has, because the author of its clause committed its exact error while checking
+that the clause had shipped.
+
+**Evidence:** 2026-08-30, immediately after `ea90d80` merged and `codescout-companion`
+released as 1.19.8. The check was whether the new Phase-3 clause had propagated from the
+repo into the plugin caches all three profiles load from. I ran:
+
+```
+find ~/.claude/plugins -path "*reconnaissance/SKILL.md" | head -1
+```
+
+then grepped the clause out of the single path it returned — `0` in each of the three
+profiles. I reported *"that's the drift, caught live"*, citing `claude-plugins`' own
+tracker entry about stale plugin-cache drift on this host as corroboration.
+
+**It was false.** Every profile holds **two** version-keyed cache directories, `1.19.7/`
+and `1.19.8/`, and `head -1` returned the stale `1.19.7` copy each time. Enumerating all
+six copies instead of sampling one shows `clause=1` in every `1.19.8/`. The release was
+correct and complete, in all three profiles, and had been the whole time.
+
+**Why the instrument lied in R-125's exact shape.** `head -1` answers *"the first path this
+walk happened to yield"*. The question was *"what does the loaded copy contain"*. Those
+differ whenever more than one copy exists — which is the normal state of a version-keyed
+cache, not an edge case. The `0` was true of the file it read and said nothing about the
+proposition it was cited for, and a count reads as a measurement rather than as a sample.
+
+**Two aggravating factors, and they are separable.**
+
+- **The zero agreed with me.** `claude-plugins` documents stale-cache drift on this host,
+  so `0` confirmed a hypothesis already held. Law C's usual framing assumes a surprising
+  zero prompts a re-check; this is the inverse case, where agreement *suppresses* the
+  re-check. A confirming negative deserves the scrutiny a contradicting one gets
+  automatically.
+- **Having just written the rule did not make it fire.** The clause had been merged,
+  released, and propagated minutes earlier, and I had argued its placement at length.
+  Authorship is not activation.
+
+**What actually caught it:** re-reading my own command while composing the write-up, and
+noticing `head -1` inside the sentence I was about to publish. That is precisely where
+[[R-125]] placed the clause — Phase 3, the act of writing — and it is the only reason the
+claim was retracted before anything was built on it. The placement argument is now tested
+rather than merely reasoned: the clause fires at write-up time because that is where the
+author is forced to state the proposition out loud.
+
+**Severity:** low. Self-caught in one turn, retracted in the same message, no decision
+taken on the false reading. The value is entirely in the provenance.
+
+**Status:** validated — a confirming instance of [[R-125]], not a new law. No promotion
+owed; the clause it confirms is already shipped.
+
+**Valid:** dated 2026-08-30
+
+**Rests on:** the six cache paths enumerated under
+`~/.claude*/plugins/cache/sdd-misc-plugins/codescout-companion/{1.19.7,1.19.8}/`, and
+`docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`, whose Decision clause 1
+this violates verbatim.
 
 ## Template for new entries
 

@@ -91,7 +91,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
 | BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | **partial** — hint + manual fixed; diagnosis corrected in 3 places. Its prescribed fix (a) was a NO-OP for its own Rust repro (`PREWARM_LANGUAGES` is JVM-only), and a mux keyed by workspace keeps the server warm across sessions, so the cold window is far narrower than filed. The actually-false sentence is cross-repo (`session-start.mjs:339`) and still emitting — stays open for that | `caa8bc1df0e8c0d8` |
-| BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | **mechanism shipped, operational half open** — `e799f29d` + `1ad9af66` + `f565504a` + `e1b91221`, gate green 4833/0. Shape travels in `docs/augmentations/<flattened-path>.yaml`; `reindex` re-attaches when the row is ABSENT and never overwrites a live one; `params` do not travel. Left: the export has not been RUN here (9 artifacts, needs `/mcp`); `artifact_augment` does not write through on shape change; and the 13 declared-but-absent trackers on this machine have no recoverable shape — their only copy is another machine's gitignored, unbacked catalog | `19f44bead56b56cc` |
+| BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | **mechanism shipped, local export DONE, one item left that this machine cannot close** — `e799f29d` + `1ad9af66` + `f565504a` + `e1b91221` + `c2039a16` (patch-id `63a943ba8e2a1a9b`), gate green 4834/0 full, 3360/0 lean. Shape travels in `docs/augmentations/<flattened-path>.yaml`; `reindex` re-attaches when the row is ABSENT and never overwrites a live one; `params` do not travel. The 9 shapes here are exported and committed, declarations upgraded to paths, verified live (0 `augmentation_declaration_unparseable`). Left: `artifact_augment` does not write through on shape change (not blocking — the export is idempotent); and the 13 declared-but-absent trackers here have no recoverable shape, their only copy being another machine's gitignored, unbacked catalog — run the export THERE | `19f44bead56b56cc` |
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `e6c0ddb91fe28228` |
 | BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `54a70b49f6f26681` |
 | BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
@@ -340,15 +340,38 @@ dates a restore burst on 2026-08-28 09:16–10:11 — the CM-N stream. So 22 los
 
 **Remaining:**
 
-1. **Run the export here.** 9 artifacts, dry-run verified clean. Needs `/mcp` on the
-   13:34:59 binary — the live server predates `f565504a` and would write the colliding
-   stem-keyed names.
+1. ~~**Run the export here.**~~ **DONE 2026-08-30** — `c2039a16`, patch-id
+   `63a943ba8e2a1a9b`. 9 sidecars under `docs/augmentations/`, 9 declarations upgraded
+   from `true` to the path they name.
 2. **`artifact_augment` write-through.** A sidecar goes stale when shape changes until
    someone re-exports. Export covers backfill and is idempotent, so this is not blocking.
 3. **The 13, and this one has a deadline.** Their shape is already gone here. It survives
    only in the catalog of a machine that has not lost it — gitignored, unbacked, one `rm`
    from unrecoverable. Run `fix=export_augmentations` THERE and commit the result. Blocked
    only by BL-65 in the sense that the CLI cannot invoke it; MCP on that host can.
+
+**Update 2026-08-30 (later) — the export ran, and two claims were verified rather than
+assumed.**
+
+First, that the running server actually carried `f565504a`. The dry run's *names* are the
+evidence, not the binary's mtime: `docs-research-README.yaml` rather than `README.yaml`
+means path-keyed code is the code executing. A rebuild on disk does not change a running
+process's image, so mtime is the wrong instrument here — it would have said yes an hour
+before the answer was yes.
+
+Second, that the new path-valued declarations parse. `doctor` reports **zero**
+`augmentation_declaration_unparseable` across all 9, which is what distinguishes "declared,
+with a sidecar" from the silent `declares_true` failure described above.
+`augmentation_declared_but_absent` stays at 13 and that is correct — those never had rows
+here, so they were never exportable from this machine, and the check's detail now names the
+remedy instead of only the symptom.
+
+A corpus test shipped with it: `every_committed_sidecar_parses_and_carries_no_params` reads
+every committed sidecar through the same deserializer the restore path uses. Under a
+hand-added `params:` key the sibling unit test `a_written_sidecar_carries_no_params_key`
+**stayed green** — it asserts the *writer* never emits one and is structurally blind to a
+file that already carries it. That producer-vs-consumer gap is the test's whole reason to
+exist, and it is the same shape as the memory `tests-that-cannot-fail` records.
 ### BL-51 — A rendezvous slot that misses its SessionStart stamp can never be stamped again
 
 **Status:** open

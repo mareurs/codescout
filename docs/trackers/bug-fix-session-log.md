@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 80
-entry_high_water_W: 76
+entry_high_water_W: 77
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -210,6 +210,7 @@ entry_high_water_W: 76
 | W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` — **amended 2026-08-30: necessary, not sufficient.** The pre-add diff and the add are not atomic and the window is raceable; the guard that closes is a post-stage `git diff --cached`, and it must be a CONTENT diff. `--cached --stat` is NOT a check | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 | W-73 | 2026-08-29 | med | "Compile-error → green" is the trigger for spending a mutation: a test whose only observed RED was a compile error has never run its assertions against a wrong world. In statically typed languages that is the NORMAL TDD cycle, so the shape is common rather than rare | `guard_stale_binary`'s wiring test would have shipped looking like proof. The policy unit tests (`Some(true)` refuses, `Some(false)`/`None` do not) still pass when the guard is written, tested and never called — five green tests, defect 100% present, and nothing else in 4642 tests notices. Mutating the call to `let _ = ...` failed with the exact symptom its doc comment predicts. Second datapoint the same afternoon in `read_file.rs`, where two pre-existing tests assert the identical property and stay green because their 1200-short-line fixture can never reach the valve | **validated — promoted 2026-08-30** → memory `test-design-discipline` § The mechanical backstop |
+| W-77 | 2026-08-30 | high | A remedy that closes the COMPILE half of a class reads as the fix, and the runtime half then stays open **and green**. The win is a refusal: declining to promote the lean-build gate change until an instance arrived that the EXISTING remedy provably could not reach | T12's remedy (add `--all-targets` to the lean check) was correct, sufficient for its instance, and closes compiling only. Promoting at T12 — the obvious moment, two datapoints in hand — would have added `--all-targets` to a `check`, the one remedy that cannot see a runtime failure, and marked the class closed. Then `2c6f2677` reddened the lean lane for **over a day** while ≥3 sessions ran the full documented gate green (mine 4×), because `check --all-targets` compiles the lean test targets and never runs them. Fourth instance arrived INSIDE the fix for the third: an `expect_err` that compiled clean by default and failed to compile lean (`Arc<dyn CodeEmbedder>` is not `Debug`). Shipped `6764eb18` as a substitution, not an addition — `cargo test --workspace --no-default-features` strictly dominates the `check` it replaces, list stays 4 commands, ~10s → ~20s — and closed a second gap found while writing it: the canonical list omitted `--all-targets` entirely, so T12's remedy had reached the practice and never the list | validated |
 | W-74 | 2026-08-30 | med | When the closure step IS the broken operation, run it rather than routing around it — the write is mandatory, so the reproduction costs nothing and is the one moment the broken path runs against a known-correct expected answer. Distinct from CLAUDE.md's reproduce-before-the-fix-plan rule, which governs the START of a fix and weighs a real cost | Closing BL-48 required the exact `edit_markdown(frontmatter={set:{status:…}})` call BL-48 describes as broken; `artifact(update)` was the known, faster workaround. Writing the prediction down and then using the broken call yielded three findings unreachable by re-reading: the fix is not live in this server, so every catalog measurement in the window is of old code and no tool response says so; the desync is field-SELECTIVE (`get.rs:335` serves `status` from the catalog column, `:525-533` re-parses `extra` from disk), so one payload mixes two epochs and self-contradicts only when `extra` happens to be populated — a bug with none returns a stale status looking perfectly consistent; and chasing that to `/proc/<pid>/exe` found an UNLINKED binary, BL-45's own condition, which corrected a claim I had already written into the record (I cited the on-disk mtime as the running build; the process predates it) | open |
 | W-76 | 2026-08-30 | high | Dry-run a writing `fix=` against the REAL corpus and read its output before the first confirmed run — a real corpus contains the input that breaks the convention | BL-50's sidecar name was keyed on the artifact's file stem; two unit tests covered it, gate green 4833/0, design reviewed. The export's dry run printed `docs/research/README.md -> docs/augmentations/README.yaml` on its first line. `README` is not a unique stem, so a second augmented README would have shared the sidecar, the second export overwriting the first's shape and both artifacts restoring to one prompt — the silent shape-loss the feature exists to prevent, reintroduced by its own naming. Invisible in code, tests and review; visible in one line of real output (`f565504a`) | validated |
 | W-75 | 2026-08-30 | high | Reproduce before AND after each round of a fix, checking a wedge listener's own hit count, not just wall-clock time or a green test run | A round-1 isolation fix that passed all 77 memory tests still left 2 wedge hits (6.35s) from a third resolution path (`create_semantic_anchors`'s own `RetrievalClient::from_env`) that a concurrent session was independently fixing in the same live working tree mid-investigation — caught only by re-running the reproduction, not by trusting the passing suite | validated |
@@ -7350,6 +7351,64 @@ profile-scoped or otherwise partial population read as complete. Two exist now (
 the buddy banner in BL-59). At three, the rule belongs in CLAUDE.md: never close an
 authorship question by elimination; identify positively from write history, across every
 profile.
+
+## W-77 — A remedy that closes the COMPILE half of a class reads as the fix — the runtime half then stays open and green
+
+**Valid:** dated 2026-08-30
+
+**Category:** gate-design · **Status:** validated
+
+**Observed (2026-08-30).** The lean-build blind spot has now produced **four** instances.
+After the second (T12), the remedy adopted was *"add `--all-targets` to the lean check"* —
+which is correct, sufficient for that instance, and was reasonably read as closing the
+class. It closes the **compile** half only.
+
+`2c6f2677` (2026-08-29) added a `remote-embed` transport bail and turned three
+pre-existing **ungated** tests red under `--no-default-features`. The lane stayed red for
+**over a day**. During that window at least three sessions ran the full documented gate
+green — I ran it four times myself — because `cargo check --no-default-features
+--all-targets` **compiles** the lean test targets and never **runs** them. Only CI sees
+it, at `ci.yml:174`, on the slow three-OS job.
+
+**Counterfactual, and it is the point.** Had the gate been changed at T12 — the obvious
+moment, with two datapoints already in hand — the change would have been to add
+`--all-targets` to a `check`. That is *precisely the remedy that cannot see this class of
+failure*, and the class would have been marked closed with the runtime half untouched.
+Promoting earlier would have been worse than not promoting, because it would have
+manufactured a false all-clear over the half that was still open.
+
+**What made the difference was a refusal, not an insight:** declining to promote until an
+instance arrived that the *existing* remedy provably could not reach. A runtime failure is
+that instance — `check --all-targets` stays green whichever way it is fixed, so no version
+of the old remedy could ever have caught it.
+
+**The fourth instance arrived inside the fix for the third.** The peer's first draft used
+`expect_err`, which compiled clean by default and failed to compile **lean**, because
+`Arc<dyn CodeEmbedder>` is not `Debug`. So the blind spot has a floor below the one being
+closed: a lean-only *compile* failure introduced by the patch repairing a lean-only
+*runtime* failure.
+
+**Shipped `6764eb18`.** One substitution in CLAUDE.md's gate list —
+`cargo check --no-default-features` → `cargo test --workspace --no-default-features`. A
+replacement rather than an addition: the new command compiles every target under
+no-default-features *and* runs them, so it strictly dominates, the list stays four
+commands long, and the cost goes ~10s → ~20s (the test phase measured 6.96s on top).
+
+**A second gap fell out of writing it**, which nobody had noticed in four instances: the
+canonical list said `cargo check --no-default-features` with **no `--all-targets`**, so it
+did not even compile the lean test targets. T12's remedy had reached the *practice* and
+never the *list*. `cargo test` builds all targets by construction, so one substitution
+closed both.
+
+**Corroboration worth recording:** both peer sessions reached the same conclusion
+independently and neither edited CLAUDE.md; one wrote *"put my half in your raise however
+you like."* Three sessions converging on a documentation change none made unilaterally is
+a stronger signal than any one session's argument.
+
+**Promote-when:** already promoted (CLAUDE.md § Development Commands, `6764eb18`). Re-open
+if a fifth instance appears that `cargo test --workspace --no-default-features` also cannot
+see — that would mean the class is about *feature-combination* coverage generally, not the
+lean lane, and the remedy would be a matrix rather than a command.
 
 ## Template for new entries
 

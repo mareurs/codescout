@@ -217,6 +217,29 @@ not sought; it was noticed because the same shape kept producing the same kind o
 confident mistake. What is *not* established is the base rate — these nine come from one
 unusually concurrent day, and a quieter session may meet the class far less often.
 
+**A tenth instance arrived the same afternoon, and its value is entirely in who produced
+it.** Within minutes of this ADR's craft-shaped half being merged into
+`codescout-companion`'s reconnaissance skill as a write-time clause, its author ran
+`find … -path "*reconnaissance/SKILL.md" | head -1` to check whether that very release had
+propagated to the plugin caches, read the resulting `0` as evidence of stale-cache drift,
+and reported it. Every profile held **two** version-keyed cache directories; `head -1`
+returned the stale one. The release had been correct and complete throughout.
+
+Two things that instance establishes which the other nine do not:
+
+- **A confirming negative is scrutinised less than a contradicting one.** The `0` matched
+  a stale-cache problem that host's own tracker documents, so agreement is what suppressed
+  the re-check. Clause 1 assumes the reader is willing to interrogate the result; a result
+  that flatters an existing hypothesis is where that willingness is weakest.
+- **Authorship is not activation.** Having written the rule, argued its placement at
+  length, and shipped it minutes earlier did not make it fire. It was caught at the moment
+  of writing the claim down — which is precisely where the skill clause was placed, and is
+  the only reason the claim was retracted before anything rested on it.
+
+Recorded as `codescout:R-127`. It is deliberately **not** added to the census table above:
+the instrument class (`head -1` as a sampler, read as a measurement) adds nothing to the
+nine, and the provenance is the whole contribution.
+
 ## Alternatives considered
 
 1. **Fold it into the existing negative-results ADR.** Rejected. That ADR's Decision is
