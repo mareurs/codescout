@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 137
+entry_high_water_R: 138
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-138 | 2026-08-30 | miss → rule | **A sweep that searches by SHAPE returns a confident wrong COUNT — and two agreeing sweeps are one sweep.** Two sessions independently enumerated every site transcribing the four-command gate, to deduplicate them; both returned **four**, the real count was **five**, and the agreement raised confidence in the wrong number instead of exposing it. Both had searched for the gate's shape — a fenced block containing `cargo test` — while `docs/ROADMAP.md:93` states the same proposition inline in parentheses mid-sentence, invisible to that query and to every refinement of it. Escalates law C from a zero to a **plausible positive integer**, which is worse: a sweep that missed a site is byte-identical in output to a sweep over a corpus that has none, and unlike a zero it never invites suspicion. **Corollary, causal not coincidental:** the evading site was also the STALEST (three commands, unrevised since 2026-08-06) — a site that evades one sweep evades every later maintenance pass for the same reason, so it accrues all the drift the found sites had corrected; expect prose restatements to be the worst copies and look there FIRST. It compounded through the reference graph: that paragraph pointed at the weakest of the five as "the full gate definition", so a reader distrusting local prose and following the canonical pointer landed on the copy linting neither `codescout-embed` nor the `local-embed` module — the label discharged the scrutiny. Tells: query units differ from question units (fenced-blocks vs statements-of-X); independence of authorship is not independence of METHOD. Do: search the narrowest token (`cargo clippy`), not the construct; read one whole file end-to-end before trusting a corpus count; report the count AND the form searched for | this session + `codescout-ae` (`bdfd7a62`); `docs/trackers/gate-contract-consolidation.md`; kin R-4, R-3, law C |
 | R-137 | 2026-08-30 | miss → rule | **After compaction, a peer is a better witness to your past than you are.** `codescout-ae` asserted a hand-edit was theirs; I relayed it unchecked; they later checked their commit list, found the SHA absent, and corrected the record — including the claim they had never said it. I still held the message and quoted it verbatim; their context had been compacted between the two, and they had offered exactly that bound themselves. Three claims resolving differently: the hand-edit happened (true, by diff), they authored it (false, by their commit check), they never said so (false, by my transcript). **The session was right where it re-derived and wrong where it recalled**, and only the transcript-holder could separate those. Inverts the usual default that first-person testimony outranks a bystander's — here the bystander holds the bytes and the first person holds a summary, and the loss is invisible from the inside. Rules: never relay a peer's claim about their own authorship unchecked; if you hold the transcript, quote it rather than contradict; prefer a re-derivable instrument to anyone's memory. Tell: a reconstructed memory carries a detail that does not fit — this one said "this morning" of a **16:50** SHA, in plain text both of us read | kin R-134 |
 | R-136 | 2026-08-30 | technique (parent generalisation from `codescout-ae`) | **Adjacent-proposition errors come in THREE kinds, and each needs a DIFFERENT check.** Nine confident wrong answers in one day were all real measurements, faithfully reported, of a proposition next to the one asked — but the remedies diverge, and running the wrong check leaves the error standing while feeling rigorous. *Propositional* (the probe answers a different question: `du` for absence, a build's exit code for "the binary carries the subcommands") needs a **positive control**. *Temporal* (right about an instant, read as standing: `fmt` reporting a reverted mutation) needs **bracketing** — and a control does nothing, because the probe was working perfectly. *Sampling* (right for this observer: one session's `ListAgents` skew) needs a **second observer**, which neither of the others touches. Counterexample kept inside the statement, so it is never written as *every*: the mutual-deference deletion misread no measurement at all — two correct reads, two correct acts, composing badly — the one class instrument discipline cannot reach. Operational half: **a caveat should name its sub-kind**, since *"two readings is not a measurement"* tells a reader to go find a second observer rather than run a control. |
 | R-135 | 2026-08-30 | miss | **A `du` proves size, never absence — a TRUE measurement written up in the past tense.** An archived bug file is `status: fixed` and closes *"174 MB reclaimed, 163 MB of it regenerable `.codescout` index state"*; 14 days later `.worktrees/bench` is still on disk at exactly 174M/163M, dir mtime **2026-05-12** (three months BEFORE the closure) and a gitdir still naming the pre-rename `code-explorer` path, which rules out delete-then-recreate since the file's own rebuild command would name `codescout`. The `du` ran before the removal and was written up as its result. Distinct from R-125 (abundant vs empty) and from the self-validating-gate class: this is a **correct positive number transferred to a proposition it does not support**. Audit verdict on the promoted set: **UNREACHABLE, not Outgrown** — Phase 3's *"name the proposition it proves, then ask whether a broken world produces the same result"* covers it exactly and would have caught it; a broken world yields the identical `du`. Remedy is placement, not wording: the risky moment is writing a **closure**, when the author is furthest from the evidence and most certain. No promotion proposed — one verified instance, and the session-opening surface additionally needs a base arm nobody has run | this session (`docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md`, `worktree-cleanup-session-log:F-1`); three sibling instances reported by a peer session and **not verified by me**; kin R-125, law B |
@@ -5195,11 +5196,37 @@ compacted, since I no longer hold that transcript"* — and it is what happened.
 | claim | verdict | best instrument |
 |---|---|---|
 | the sidecar was hand-edited | **true** | the file and its diff |
-| `codescout-ae` authored it | **false** | their commit-list check |
+| `codescout-ae` authored the hand-edit | **UNDETERMINED** | no instrument either of us holds — see below |
 | `codescout-ae` never said they did | **false** | *my* retained transcript |
 
 The session was right about the fact it re-derived and wrong about the fact it remembered —
 and the peer holding the transcript was the only party who could tell those apart.
+
+**Corrected within the hour, by `codescout-ae`, and it is the operational half.** I first
+recorded that middle row as **false**, on the strength of their commit-list check. That check
+answers *"did you COMMIT this"*; the claim was about a **hand-edit**. In this checkout those
+come apart routinely — whoever runs `git add` owns the SHA regardless of who typed the change,
+and there is a documented instance from the same day of a peer committing a bug file and
+attributing it to the wrong session. So `codescout-ae` may well have hand-edited that sidecar
+and had it committed by someone else, which would make their **original** statement true and
+their retraction false. Nothing available to either of us distinguishes those, and recording
+"false" was me accepting a refutation that did not reach the claim.
+
+> **A check that answers an adjacent question refutes nothing, however cleanly it runs.**
+> "A compacted session's self-claims are weak" tells you to distrust. *"Check whether your
+> check answers the question you asked"* tells you what to do instead.
+
+**And the check itself was a compacted artefact.** The commit list came from their compaction
+summary, not from a retained transcript — so a post-compaction artefact was used to adjudicate
+a dispute about post-compaction reliability, and presented as primary evidence. A list of hex
+strings is far more robust than prose recollection, but it is still a reconstruction.
+
+That yields the sharper law, and it is theirs: **a compacted session may not be able to tell
+which of its own instruments are themselves compacted.** The SHA list *felt* like ground truth
+in a way the prose memory did not, and that felt-difference was tracking nothing real. Which
+is the same defect as everything else measured today — an instrument that runs cleanly and
+answers a neighbouring question — arriving this time as the sensation of certainty rather than
+as a number.
 
 **The law.** After compaction a session's claim about **its own past** is weaker evidence than
 a peer's retained transcript. This inverts the usual default, where first-person testimony
@@ -5238,6 +5265,36 @@ alongside R-134, not the testing discipline — this is about who can testify to
 context. If transcripts ever become shared or durably queryable by their author, the asymmetry
 disappears and this stops being a law about witnesses — though the instrument-over-memory half
 survives regardless.
+
+## R-138 — a sweep that searches by shape returns a confident wrong count
+
+**Valid:** invariant
+
+**Rests on:** the search is over *propositions* (places that state X), but every cheap query is over *forms* (places matching a pattern). The gap between those two sets is invisible to the query by construction, so no refinement of the query closes it.
+
+**Status:** validated — 2 independent sessions, same defect, same run
+
+**Observed (2026-08-30).** Two sessions independently enumerated every place the four-command gate is transcribed, in order to deduplicate them. Both returned **four**. The real count was **five**. The agreement between two independent sweeps was not corroboration — it was the same defect run twice, and it raised confidence in a wrong number rather than exposing it.
+
+**The miss.** Both sweeps searched for the gate's **shape**: a fenced code block containing `cargo test`. The fifth site, `docs/ROADMAP.md:93`, states the same proposition inline, in parentheses, mid-sentence:
+
+> ``CLAUDE.md's pre-commit line (`cargo fmt`, `cargo clippy -- -D warnings`, `cargo test`) covers **one of nine** CI test cells``
+
+It is invisible to that search and to every refinement of it — a better regex over fenced blocks still never reaches a parenthetical. It was found only when a third pass read the *file* rather than querying the corpus.
+
+**Why it is dangerous rather than merely wrong.** The failure returns a **clean count with nothing marking the omission**. A sweep that missed a site is byte-identical in its output to a sweep over a corpus that has none. There is no partial result, no warning, no `truncated` flag — the same property that makes a zero from a mis-scoped `grep` unsafe, one level up: here it is not a zero but a plausible positive integer, which is worse, because a zero at least invites suspicion.
+
+> **Enumerate by proposition, not by shape.** "Every place that states the gate" and "every fenced block listing cargo commands" are different queries with different answers, and only the second one is easy to write. When you cannot express the first, say so in the finding — report the count *and the form you searched for*, so the reader can see what it could not have found.
+
+**Corollary, and it is the actionable half: the site that evades the search is the worst copy.** `ROADMAP.md:93` was the **stalest** of the five — three commands, unrevised since 2026-08-06, predating both the wide clippy form and the lean lane. This is causal, not coincidental: a site that evades one sweep evades every subsequent maintenance pass for the same reason, so it accumulates all the drift the found sites had corrected. **Expect prose restatements to be the worst copies, and go looking for them first rather than last.**
+
+**It compounded through the reference graph.** That same paragraph pointed readers at `docs/RELEASE.md` § *Large-Cohort Promotion* as "the full gate definition" — which was the weakest of the five, running `cargo clippy --all-targets -- -D warnings` and so reaching neither `crates/codescout-embed` nor the `local-embed`-gated module. So a reader who did the **right** thing — distrusting the local prose, following the canonical pointer — landed on the least complete list and stopped. A stale pointer is worse than a stale copy: it converts the careful reader's correct instinct into the wrong destination, and the label *"full gate definition"* discharges the scrutiny that would have caught it.
+
+**Detection, for next time.** Three cheap moves, in order of payoff:
+
+1. **Read one whole file end-to-end** before trusting a corpus-wide count. The sweep that found site five was `git show HEAD:<file>` piped to a grep for the *individual command names*, not the block.
+2. **Search for the narrowest token, not the construct** — `cargo clippy` rather than a fenced block containing it. A token appears in every form the proposition can take.
+3. **Treat two agreeing sweeps as one sweep** unless they used different *query shapes*. Independence of authorship is not independence of method, and the second sweep here inherited the first's blind spot without either session sharing a query.
 
 ## Template for new entries
 
