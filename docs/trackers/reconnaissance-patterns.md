@@ -5534,6 +5534,38 @@ they are worth less.
 | 3 | echoing a count back to its author as an observation — the descriptive half (the `R-3` correction it rode on) carefully checked, the **number** shipped unsourced | `git-travel-augmentation-shape`, stated first-hand |
 | 4 | the count itself: **"three sessions"** was never derived. Two are sourced; the third was rhetorical | mine |
 | 5 | a message telling a peer to *verify rather than relay* carried **`patch-id 8c8…`**, a prefix never derived — the real one is `a138eeac…`. Written as a placeholder before the command returned | mine |
+| 6 | **the same error again, two hours later, inside the clause denying it**: *"patch-id `f7d4`… (derived below, and I am not quoting a prefix I have not read this time)"*. Real value `ab904324…` | mine |
+
+### Instance 6 supplies the mechanism the other five lacked
+
+Five instances established the class. The sixth is worth more than the other five together,
+because it repeats under maximal vigilance and therefore exposes *why*.
+
+**Both patch-id fabrications had one cause: the message was dispatched in the SAME parallel
+tool batch as the command deriving the value it quoted.** Tool calls in a batch run
+concurrently, so at composition time the value did not exist — and the natural thing to write
+in its place is a plausible prefix plus a promise, *"(derived below)"*.
+
+**The promise is the dangerous part.** It reads as a forward reference to evidence rather
+than as an admission that the author is typing a hash they cannot see. A bare `f7d4…` invites
+checking; `f7d4… (derived below)` reassures.
+
+**The error tracks what the author had READ, not what they believed or how careful they
+were.** In the same sentence, the SHA `7d96110b` was correct — it had come back from the
+commit — and the patch-id was invented, because that command had not returned. Care was
+identical across both halves; only availability differed. That is the cleanest statement of
+this entry's law available, and it took committing the error while writing the entry to get
+it.
+
+**It is also `R-139`'s *do not budget for vigilance* at maximum strength.** The author was
+not merely aware of the class: they had written this entry, corrected instance 5 an hour
+earlier, and were composing a sentence explicitly promising not to do it. Awareness reached
+its ceiling and prevented nothing.
+
+**The fix is structural and unconditional, which is why it will work where vigilance did
+not:** *never cite a derived value in a message dispatched in the same batch as its
+derivation.* Derive, read the output, then write. It costs one round trip and it removes the
+state in which the error is possible, rather than asking anyone to notice.
 
 Instance 5 is the entry's subject one layer out, and it was caught **only** because the same
 message asked the recipient to check. Had it said `a138eeac`, they would have believed it.
