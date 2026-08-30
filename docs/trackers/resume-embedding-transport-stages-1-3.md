@@ -587,8 +587,10 @@ order above is derived from what gates what, not from stage numbering.
 order, what gates what); this holds the *state*. Strike rows here as they land;
 do not restate the rationale.
 
-**Status:** open — 8 tasks. **T3 is blocked on decision D1 and T4–T9 sit behind
-it**, so `T11` is the only item any session can pick up today.
+**Status:** open — 7 tasks, **none blocked**. D1 was answered 2026-08-30 and T3
+landed on it. T4 and T5 are ready now and are independent of each other; T11 is
+being worked by a concurrent session (an uncommitted `UnknownDimEmbedder`
+retrofit in `src/retrieval/search.rs`).
 
 **Valid:** dated 2026-08-29
 
@@ -598,10 +600,10 @@ it**, so `T11` is the only item any session can pick up today.
 |---|---|---|---|---|
 | ~~T1~~ | A | Port the 11 host-spoofing assertions to root's `is_https_or_loopback` | **done** `28bb6e8a` | — |
 | ~~T2~~ | B1 | Port `read_timeout` into `RemoteEmbedder::http_client` | **done** `ffdf1b09` | — |
-| T3 | B2 | Three-state query prefix on `RemoteEmbedder` — *derive* / *explicit* / *suppressed* | **BLOCKED** | decision D1 |
-| T4 | B3 | Typed `EmbedError::Connect { url }` replacing the `"embed connect failed"` substring contract (`ET-5`) | ready after T3 | T3 |
-| T5 | B4 | Export `is_https_or_loopback` (and whatever else Phase D needs) as `pub` | ready after T3 | T3 |
-| T6 | C | Swap root's dense leg to `RemoteEmbedder`; hold batch size at 8 so it stays behaviour-preserving (`ET-3`) | ready after B | T3, T4, T5 |
+| ~~T3~~ | B2 | Three-state query prefix on `RemoteEmbedder` — *derive* / *explicit* / *suppressed* | **done** `64c65248`, patch-id `72781e6b15e10b4edb56e8af39773db230555b5f`. `QueryPrefix` enum + `with_query_prefix`; constructors keep `Derive` so nothing observable changed yet. Two mutations run: `Suppressed` falling through to `derive_for` dies (the failure prints the offending wire body — literally the 34-point config), and `embed_query` ignoring the policy dies. **The pure resolver unit test survived the second mutation** — policy and its use are separate claims | — |
+| T4 | B3 | Typed `EmbedError::Connect { url }` replacing the `"embed connect failed"` substring contract (`ET-5`) | **ready now** | — |
+| T5 | B4 | Export `is_https_or_loopback` (and whatever else Phase D needs) as `pub` | **ready now**. `QueryPrefix::derive_for` is already `pub` as of T3 | — |
+| T6 | C | Swap root's dense leg to `RemoteEmbedder`; hold batch size at 8 so it stays behaviour-preserving (`ET-3`). **Carries D1's root-side half**: map unset `CODESCOUT_QUERY_PREFIX` → `QueryPrefix::Suppressed`, a set value → `Explicit`, and expose `Derive` as an opt-in sentinel | ready after B | T4, T5 |
 | T7 | D1 | Delete root's `is_https_or_loopback`; **re-point** T1's test at the crate's, do not delete it | ready after C | T6 |
 | T8 | D2 | Delete root's `src/retrieval/transport.rs` and the duplicated wire structs | ready after C | T6 |
 | T9 | D3 | Drop `reqwest` / `rustls` from the **root** manifest; re-measure the crate delta and record it | ready after D1/D2 | T7, T8 |
@@ -637,12 +639,17 @@ instead of never, not that the container heals itself.
 
 | # | Question | Blocks |
 |---|---|---|
-| **D1** | Does an unset `CODESCOUT_QUERY_PREFIX` mean **suppressed**, or *derive from the model name*? `ET-3`'s table says suppressed | **T3**, and therefore T4-T9 |
+| ~~D1~~ | **ANSWERED 2026-08-30 — suppressed**, with `Derive` kept as an explicit opt-in rather than a default. Upholds the ADR § *The three contracts*. The deciding evidence: `derive_for` matches on `coderank` but is **quantization-blind**, and quantization is the axis that decides — `CodeRankEmbed-Q4_K_M.gguf` carries the answer in the same string it matches on and matches the wrong half, so deriving yields the 34-point config on the champion 37-point deployment | unblocked T3, and with it T4–T9 |
 | D2 | `~/.claude/settings.json` sets the prefix while the running model is `CodeRankEmbed-Q4_K_M`, for which the repo's `.env` records "NO query prefix (37, champion) … forcing the prefix drops to 34". Remove it to match, or was it deliberate? | nothing — separable from D1 |
 | D3 | 28 unpushed commits on `experiments`. Push? | nothing |
 
-D1 is the only one gating work. D2 is a live retrieval-quality question
-regardless of whether T3 is ever built.
+D1 is answered, so **nothing on this board is blocked**. D2 remains a live
+retrieval-quality question and is now the sharper of the two: the running shell
+sets the prefix while serving Q4_K_M, which is the 34-point configuration rather
+than the 37-point champion. Post-fix, documents are stored unprefixed either way
+(`docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md`), so
+flipping it moves only the query side — no re-index required, which makes it
+cheap to test both ways.
 
 **Rests on:** `ET-8` for the ordering argument and `ET-4` for why Phase D audits
 rather than deletes. If either is revised, re-derive this board rather than
