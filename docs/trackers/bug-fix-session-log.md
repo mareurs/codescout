@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 80
-entry_high_water_W: 82
+entry_high_water_W: 83
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -216,6 +216,7 @@ entry_high_water_W: 82
 | W-75 | 2026-08-30 | high | Reproduce before AND after each round of a fix, checking a wedge listener's own hit count, not just wall-clock time or a green test run | A round-1 isolation fix that passed all 77 memory tests still left 2 wedge hits (6.35s) from a third resolution path (`create_semantic_anchors`'s own `RetrievalClient::from_env`) that a concurrent session was independently fixing in the same live working tree mid-investigation — caught only by re-running the reproduction, not by trusting the passing suite | validated |
 | W-78 | 2026-08-30 | high | Before attributing a test failure to the change under test, re-run the same failing tests IN THE SAME ENVIRONMENT at the unmodified base. The prompt to do so is a failure in a subsystem the change does not touch | A merge probe returned `4706 passed; 3 failed`; all three were `librarian` temp-guard tests and the branch touches `operator_rules`/`tools::core`/`prompts`, nothing near librarian. The control — same `/tmp` worktree, `checkout --detach experiments`, merge NOT applied — reproduced all three identically, so the failures were the probe's LOCATION, not the merge. Each test builds its "outside-temp" catalog via `TempDir::new_in(current_dir())`, which is inside temp when the checkout is; the assumption sits in a code comment and is enforced by nothing. Without the control the two readings were block-a-clean-merge or bisect-a-working-guard. The failing configuration is the SANCTIONED one — this project points its scratchpad at `/tmp` | validated |
 | W-79 | 2026-08-30 | med | Verify a merged branch's imported bug files AT THE DOOR, in the landing session — and mark attribution as inference when nobody bisected | `03b3fb5c` imported five bug files, all `status: open`, authored against a base 103 commits back. One was already fixed: a severity-**high** futex-deadlock report whose own reproduction now runs 77 passed, no hang. It would have entered `experiments` describing a hang that does not happen and sat in every triage query until someone spent a session on it. Four were correctly open and confirmed at the bytes, which is the half that makes it a check rather than a rubber stamp. The flip names `fd638c76` as closer but records the non-reproduction as measured and the cause as NOT — the file already carried one careful negative, and a confident wrong attribution would have undone it | validated |
+| W-83 | 2026-08-30 | high | **Measure the objection that got a task deferred, instead of accepting it or overriding it.** `BL-44` was dropped twice on a stated technical reason — a status comparison is "fragile, and a separate decision" — which was accurate and not decisive. A dry run over the real corpus before any Rust found the fragility is **one convention**: 20 of 26 naive findings are `**done, archived**` against a params value of `done-archived`. Absorbing that left 6 findings on 101 rows and a check worth having. The dry run then reshaped the design three more times — coverage 4 of 9 not 6 (I had read the schema and assumed the rendering, missing 30 of 131 entries), a boundary-anchored predicate instead of the obvious strip-punctuation one, and a `Status:`-line region instead of the whole section. Counterfactual: shipping from the plan gives 77% noise, half the coverage while looking complete, and `done` matching inside `abandoned`. |
 | W-82 | 2026-08-30 | high | **A positive control turned a correct conclusion supported by a meaningless number into a real one.** Verifying BL-64's `#[cfg(test)]` fix is absent from the release binary: `nm -C … \| grep -c reindex_cli` → **0**, the expected answer from a real check. Meaningless — the binary is stripped and `nm` reported **zero symbols total**. Caught by the positive control run in the same breath (a symbol known to be compiled in *also* returned 0). `strings` then discriminated: controls 2 and 6, targets 0 and 0. The valuable direction of the *plausible-value* class — its ~11 prior instances are post-hoc, this one was **prevented at the cost of one extra line**. The honest part: the conclusion was RIGHT either way, so stopping at `nm` would have published a true statement on a false basis and never taught me otherwise — method failed, conclusion survived, which is the configuration in which nothing ever corrects you. Now shipped as practice in `probe_augmentation_restore.py` and `packaged_includes.rs` | validated |
 | W-81 | 2026-08-30 | high | **Choose a gate's surface by measuring its feedback latency, not by what kind of check it is.** `F-14` proposed "add a CI step" and it went unbuilt for months while its own prediction came true on the next escaping `include_str!`. The reading is not inertia — "CI gate" was the wrong half of the sentence to act on. Two measurements decided it: `cargo package --list` **does not build** (0.21s/package, so the cost objection died at the stopwatch), and the repo was **119 commits ahead of origin across two days**, so a CI-only gate would not have run once in that window. A gate's value is not *does it catch the defect* but *how long until it tells someone*, and that latency is a property of the workflow, not the check — here CI was a weekly signal in a per-commit costume. Put it on the fastest surface that can host it and let slower ones inherit it (`cargo test` is run by both the gate commands and CI). Sibling call: when a check must predict a tool's behaviour, **call the tool** — reimplementing `exclude`'s matching would have been the two-implementations defect deleted from `reindex_cli` two hours earlier | validated |
 | W-80 | 2026-08-30 | high | When a fix is "introduce a shared constant so two sides cannot drift", a test that builds its fixture FROM that constant tests one side twice — drive the real producer into the real consumer instead | Written and deleted before committing. It asserted `classify_search_error` matches `SPARSE_MARKER` using a fixture formatted from `SPARSE_MARKER`, so reverting the producer's wording — the exact regression — moved it not at all: a guard for the bug that the bug would pass. Shipped, it would have read as coverage in every later review and the bug file would have cited it. The end-to-end replacement dies on that mutation, printing the original defect verbatim, while both constant-built tests stay green | validated |
@@ -7761,6 +7762,67 @@ teaches you.**
 `scripts/probe_augmentation_restore.py`'s blind-spot list and `tests/packaged_includes.rs`'s
 control test, both of which ship a "the scan actually found something" assertion beside the
 invariant. Cite this entry when someone proposes deleting one as ceremony.
+
+## W-83 — Measure the objection that got a task deferred, instead of accepting it or overriding it
+
+**Status:** validated — the measurement changed the answer, and then changed the design three more times.
+**Valid:** invariant
+**Rests on:** `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`; `BL-44`; `docs/issues/archive/2026-08-18-no-check-detects-a-params-row-stale-relative-to-its-body.md`.
+
+**Observed.** `BL-44` had been dropped twice, both times on a stated technical objection
+rather than on priority. `scan_params_behind_body`'s own doc comment carried it:
+
+> *"Ids only, never statuses. A status mismatch between a params row and a rendered table
+> cell needs a text comparison against a column whose format is each tracker's own choice
+> — fragile, and a separate decision."*
+
+That is a good objection, written by someone who had the code open. The two available
+moves both look reasonable and are both wrong: **accept it** and the task stays dropped
+forever, or **override it** and you ship the fragile thing they warned about.
+
+**The third move is to measure the objection.** A dry run over the real corpus, before any
+Rust:
+
+| what the measurement showed | consequence |
+|---|---|
+| 26 findings on a naive comparison, **20 of them `**done, archived**` vs `done-archived`** | the "each tracker's own format" fragility is **one convention**, and absorbing it leaves 6 findings on 101 rows |
+| a closed `status` enum in `params_schema` exists on 4 ledgers | no column ever has to be identified — any enum token in the region is evidence |
+| 91.4% sensitivity over 536 simulated drifts | the check detects things, which six findings alone could never have shown |
+
+The objection was **accurate and not decisive**. Fragility concentrated in a single
+comma-vs-hyphen rendering is a different fact from fragility spread across nine bespoke
+formats, and nothing but measurement separates them.
+
+**Then the dry run kept paying, which is the part that argues for doing it before the
+code rather than after.** It reshaped the design three more times:
+
+- Coverage was **4 of 9 ledgers, not 6**. My first count read `params_schema` and assumed
+  the rendering. Two ledgers render entries as a heading plus a `**Status:**` line, and a
+  table-row-only locator — which the first draft was — skipped **30 of 131** exposed
+  entries while reporting nothing amiss about them.
+- The obvious fix for the comma case (strip punctuation, then compare) makes `done` a
+  substring of `abandoned` and `open` of `re-opened`, both present in this repo's real
+  status prose. The predicate became a boundary-anchored regex instead.
+- Restricting the heading locator to the `Status:` line, not the section, came from seeing
+  what section prose actually contains: *"was dropped as a design decision"*, *"local
+  export DONE"*.
+
+**Counterfactual.** Writing the check straight from the plan would have shipped something
+that reported 26 findings of which 20 were noise, covered half the exposed entries while
+looking complete, and matched status words inside longer words. It would have been turned
+off within a week and `BL-44` would have been dropped a third time — with better evidence.
+
+**And the measurement was itself wrong twice, which is why the instrument needs the same
+scrutiny as the code.** The Python probe that specified the design reported `BL-46`'s row
+as stating `done`; the shipped Rust says *"no enum value"*, correctly, because the probe
+used the substring matching the Rust rejects. The implementation ended up **strictly
+better than the instrument that specified it** — and that only surfaced by running both on
+the same real data and diffing.
+
+**Promote-when:** a second task is un-deferred this way. The candidate shape for CLAUDE.md
+is a sentence beside *run the reproduction before reading the fix plan* — that rule says a
+plan is a hypothesis about a reproduction; this one says **a deferral is a hypothesis about
+a cost**, and both are checked the same way.
 
 ## Template for new entries
 

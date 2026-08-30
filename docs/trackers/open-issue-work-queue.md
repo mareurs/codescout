@@ -101,6 +101,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | **open** — third instance of one mechanism in a day (after `19289b1f` and BL-60); strands `fix=export_augmentations`, which exists to run on the OTHER machine. Root cause INFERRED from `--help`. Two findings now argue for a key-set coverage test over a fourth round of flags | `2f2409074ee2319d` |
 | BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | **done** — `9f743091`, patch-id `92db5adf65b7a748`. Took (a) delete-the-block over (b) plumb-`force`: **both** `index_repo` call sites are test-only while `index_repo` is public API, so (b) was a semver break serving only tests, building a reference implementation nothing references. A comment now stands where the block was — that is the remedy, the hazard being a reader "fixing" the missing `%`. Regression test mutation-verified: **with** `%` FAILS, **without** `%` passes | `6ff4394bb3b18d86` |
 | BL-66 | 3 | `probe_ollama` is the one TLS construction site in either tree that installs no crypto provider, and its failure is reported as "Ollama is not reachable" | **open** — third instance of the root/crate asymmetry, found by auditing the class. Skips `install_default_crypto_provider` by bypassing `build_client`; with `rustls-no-provider` an `https://` `OLLAMA_HOST` fails the handshake and is reported as a down server with "Start Ollama" as the remedy. Not reachable in codescout's binary — `main.rs:253` installs it process-globally first, which is precisely what masks the gap — but reachable for any external consumer, the installer being private and unexported. Fix is (a) install it there + (b) stop calling a TLS-setup failure unreachability | `ac9aa2f9b38eab9b` |
+| BL-67 | 2 | `export_augmentations` will not rewrite a sidecar whose shape changed, so a `params_schema` edit silently does not travel | **open** — split out of BL-50's item (2) when it acquired a live instance. Widening this queue's own status enum updated the catalog immediately while `fix=export_augmentations` reported `exported: 0` and the committed sidecar kept the seven-value list; a fresh clone would have re-attached the stale shape and restored the old vocabulary. Filed separately because the remedies differ — BL-50's remaining item is blocked on another machine, this is reproducible here. Root cause not yet read at the bytes. The open question: re-export on divergence, or refuse and report — a sidecar can legitimately be AHEAD of a catalog, so the two directions are not symmetric and only catalog-ahead is a defect | `eab3cb7631fd2689` |
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **blocked** — harness, not this repo. Caused 6 misattributions across 4 sessions in one afternoon; real population ≥ 6 while both sides report "Peer sessions (2)" over disjoint sets. Mitigation in the bug file works today | `4266d09da90acb5e` |
 | BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `6411eb594cd7231d` |
@@ -801,6 +802,41 @@ of it rather than a footnote.
 **Next:** run the reproduction (a consumer binary depending only on the crate, no provider
 install of its own, `OLLAMA_HOST=https://…`) before choosing between (a), (b) and (c) — it
 decides whether rustls surfaces a distinguishable provider error at all.
+
+### BL-67 — `export_augmentations` will not rewrite a sidecar whose shape changed
+
+**Status:** open — filed 2026-08-30, not started.
+**Valid:** dated 2026-08-30
+**Rests on:** `docs/issues/2026-08-30-export-augmentations-will-not-rewrite-a-sidecar-whose-shape-changed.md` (`eab3cb7631fd2689`); `BL-50` item (2), where this was first recorded as a known consequence.
+
+BL-50 recorded this as non-blocking on the reasoning that "the export is idempotent".
+Idempotent is exactly the problem: the export satisfies a sidecar's **existence**, and
+re-running it on a changed shape is a no-op that reports success.
+
+Found while widening this queue's own `status` enum from 7 values to 10 (`2a8decc5`). The
+catalog took the change immediately — `artifact(get)` and `doctor` both saw the new enum,
+and `params_status_drift` went 6 → 1 on the strength of it. `fix=export_augmentations`
+then reported `exported: 0`, and the committed YAML still carried the seven-value list at
+line 68 along with a prose prompt restating the old vocabulary. Had that shipped, the next
+machine's `reindex` would have re-attached the stale shape and silently invalidated every
+row written under the new one.
+
+The reason it is split from BL-50 rather than folded into it: BL-50's remaining item is
+**structurally unclosable from this machine** (a shape whose only copy is another
+machine's gitignored catalog), while this is a write-path defect with a cheap local
+reproduction. Two items with the same origin and unrelated remedies do not belong on one
+row.
+
+**The fix is a design question, not a one-liner, and the obvious answer is probably
+wrong.** Unconditional re-export would clobber a sidecar that is legitimately ahead of the
+catalog — which is precisely BL-50's restore path, where the committed shape is the only
+surviving copy. Catalog-ahead means an edit did not travel; sidecar-ahead means another
+machine's shape has not been adopted yet. Only the first is a defect, so the primitive is
+probably a `doctor` check reporting divergence in both directions with the write behind an
+explicit fix.
+
+**Next:** run the reproduction — it distinguishes an existence check from a broken
+content comparison from a deliberate no-clobber guard, and those need different fixes.
 
 ### BL-45 — Decision 1: may a process on an unlinked binary re-index?
 
