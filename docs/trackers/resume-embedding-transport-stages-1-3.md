@@ -631,11 +631,25 @@ deficient side. That is an argument for auditing the remaining pairs — which
 `codescout-ae` did on 2026-08-30, finding them clean plus one non-pair instance
 (`probe_ollama`, `BL-66`) — rather than for grinding out T9.
 
-**One open bug from this stream is unrelated to T9 and worth more than it:**
-`docs/issues/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`.
-Root's sparse leg emits `embed_batch sparse status …` while the classifier matches
-`embed sparse`; the underscore breaks it, so every sparse HTTP failure is routed to
-the generic Qdrant bucket today. T16 moves that leg and will meet it.
+**That bug is now fixed, and its filing was wrong in a way worth keeping** —
+`docs/issues/archive/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`,
+fixed in `5dfa5051`, patch-id `189e55a8656e357ea80186eeeb372de277a1b08e`.
+
+The wording mismatch was real; the impact claim on this board ("every sparse HTTP
+failure is routed to the generic Qdrant bucket") was **not**.
+`classify_search_error` is reached from `semantic_search.rs` only, and search embeds
+its query through `EmbedderHttp::embed`, whose wording *did* match — the mismatched
+producer was `embed_one_batch`, on the indexing path, which never reaches that
+classifier. Filed from one producer grepped against one consumer, without asking
+which producer the consumer sees.
+
+What was actually broken on the path the classifier *does* see is worse and was not
+filed at all: `error_for_status()` discarded the sparse server's response body, so a
+422 read `422 Unprocessable Entity` instead of `batch size 40 > maximum allowed 32`.
+The identical defect had been fixed for the **dense** leg in the same function
+(`2026-08-26-dense-embedder-slot-context-drops-large-embeds`), and the sparse leg
+beside it was left — a fourth instance of the one-side-of-a-pair shape `ET-4` now
+records.
 
 **Both stale rows are now struck by their owner**, resolving the hand-off the
 previous session left here — and there were **two**, not one. That session
@@ -944,8 +958,9 @@ The hazard was identified and fixed for one of two producers. It *was* live on t
 leg. Filed by a concurrent session as
 `docs/issues/archive/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`;
 its sibling,
-`docs/issues/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`,
-covers root's sparse leg and matters to fork branch B, which moves that leg.
+`docs/issues/archive/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`,
+covers root's sparse leg — **also fixed 2026-08-30** (`5dfa5051`), and its filed
+impact claim corrected in the same pass; see the ET-9 status block.
 
 **Closed 2026-08-30 by T6 steps A and B** — `8097c2d6` (patch-id
 `18922aa3cc9f4be601e26f53ee68c9c483fec01b`) publishes `EmbedError::Status` +
