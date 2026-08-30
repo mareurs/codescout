@@ -349,7 +349,7 @@ pub(crate) fn import_codescout(
 }
 
 #[cfg(test)]
-pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>, force: bool) -> Result<()> {
+pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Result<()> {
     use std::path::PathBuf;
 
     let cfg_path = match env.workspace.clone() {
@@ -389,14 +389,24 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>, force: b
         anyhow::bail!("no matching roots");
     }
 
-    if force {
-        for root in &roots {
-            cat.conn.execute(
-                "DELETE FROM artifact WHERE abs_path LIKE ?1",
-                rusqlite::params![format!("{}/", crate::util::fs::RepoPath::from(&root.path))],
-            )?;
-        }
-    }
+    // There is deliberately NO force/wipe step here, and re-adding one is a
+    // data-loss bug rather than a feature.
+    //
+    // A `DELETE FROM artifact WHERE abs_path LIKE '<root>/%'` before the re-walk
+    // destroys more than artifact rows: `artifact_augmentation` is declared
+    // `REFERENCES artifact(id) ON DELETE CASCADE` and `Catalog::open` sets
+    // `PRAGMA foreign_keys = ON`, so the DELETE silently wipes every
+    // augmentation under the root — prompt, params_schema, render_template,
+    // entry_collection. The real MCP path removed exactly that block in
+    // `d482ca8a` and records the reasoning at `tools/reindex.rs`; forced re-walk
+    // now lives where it belongs, as `index_repo_sync`'s `force_rewalk` /
+    // `force_embed`.
+    //
+    // This function carried a copy of the DELETE that was never correct: its
+    // `LIKE` had no `%`, so it matched only an `abs_path` exactly equal to
+    // `<root>/` and removed zero rows. Removed 2026-08-30. It is recorded here
+    // because the shape reads as an obvious missing-`%` typo, and "fixing" the
+    // typo is what restores the cascade.
 
     // Whole-workspace reindex: drop rows for repos no longer in workspace.toml.
     if repo.is_none() {
@@ -544,9 +554,9 @@ kind = "spec"
             ..Default::default()
         };
 
-        reindex_cli(&env, None, false).await.unwrap();
+        reindex_cli(&env, None).await.unwrap();
         // Second call is idempotent.
-        reindex_cli(&env, None, false).await.unwrap();
+        reindex_cli(&env, None).await.unwrap();
 
         // Verify catalog contents: 1 artifact indexed.
         let cat = catalog::Catalog::open(&db_path).unwrap();
@@ -555,5 +565,100 @@ kind = "spec"
             .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    /// `reindex_cli` must never delete artifact rows under the root before its
+    /// re-walk.
+    ///
+    /// The artifact row itself would come back — `id = sha256(abs_path)`, so the
+    /// walk re-inserts the same id — and that is precisely what makes the loss
+    /// quiet. What does not come back is the **augmentation**:
+    /// `artifact_augmentation` is `REFERENCES artifact(id) ON DELETE CASCADE`
+    /// and `Catalog::open` sets `PRAGMA foreign_keys = ON`, so a wipe-then-rewalk
+    /// destroys shape that lives nowhere but this machine-local, gitignored
+    /// catalog.
+    ///
+    /// The mutation this exists to kill is re-adding
+    /// `DELETE FROM artifact WHERE abs_path LIKE '<root>/%'`. Until 2026-08-30
+    /// that statement sat in this function with no `%`, matching zero rows — one
+    /// character from the data-loss path `d482ca8a` removed from the MCP side,
+    /// and shaped exactly like a typo someone would helpfully "fix".
+    ///
+    /// Asserting the artifact COUNT cannot catch that repair, because the count
+    /// is 1 either way. Only the augmentation discriminates.
+    #[tokio::test]
+    async fn reindex_cli_never_wipes_augmentations_under_the_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let repo_root = tmp.path().join("repo_a");
+        std::fs::create_dir_all(repo_root.join("docs/specs")).unwrap();
+        std::fs::write(repo_root.join("docs/specs/a.md"), "# a\n").unwrap();
+
+        let ws_path = tmp.path().join("workspace.toml");
+        let ws_content = format!(
+            r#"
+[[roots]]
+name = "repo_a"
+path = "{}"
+
+[[rule]]
+glob = "**/docs/specs/*.md"
+kind = "spec"
+"#,
+            crate::util::fs::RepoPath::from(&repo_root)
+        );
+        std::fs::write(&ws_path, ws_content).unwrap();
+
+        let db_path = tmp.path().join("catalog.db");
+        let env = LibrarianEnv {
+            workspace: Some(ws_path.clone()),
+            db: Some(db_path.clone()),
+            ..Default::default()
+        };
+
+        reindex_cli(&env, None).await.unwrap();
+
+        // Attach an augmentation to the freshly indexed artifact.
+        let id: String = {
+            let cat = catalog::Catalog::open(&db_path).unwrap();
+            let id: String = cat
+                .conn
+                .query_row("SELECT id FROM artifact", [], |r| r.get(0))
+                .unwrap();
+            catalog::augmentation::upsert(
+                &cat,
+                &catalog::augmentation::AugmentationRow {
+                    artifact_id: id.clone(),
+                    prompt: "maintain the T-N table".into(),
+                    params: "{}".into(),
+                    last_refreshed_at: None,
+                    refresh_count: 0,
+                    created_at: "0".into(),
+                    updated_at: "0".into(),
+                    render_template: None,
+                    params_schema: None,
+                    append_mode: false,
+                    history_cap: None,
+                    entry_collection: None,
+                    refreshed_at_commit: None,
+                },
+            )
+            .unwrap();
+            id
+        };
+
+        reindex_cli(&env, None).await.unwrap();
+
+        let cat = catalog::Catalog::open(&db_path).unwrap();
+        let count: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "the re-walk still indexes the one spec");
+
+        let aug = catalog::augmentation::get(&cat, &id).unwrap().expect(
+            "augmentation must survive reindex_cli — a wipe-then-rewalk \
+                     cascade-deletes it while the artifact row silently returns",
+        );
+        assert_eq!(aug.prompt, "maintain the T-N table");
     }
 }
