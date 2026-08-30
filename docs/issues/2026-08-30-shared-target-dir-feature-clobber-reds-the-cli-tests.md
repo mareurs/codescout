@@ -146,7 +146,8 @@ EXIT=0
 11/11, with a recompile in front of it. Nothing in the source tree changed between the two
 runs. A full re-run of `cargo test --workspace` minutes later reproduced none of the ten
 failures (4712 passed / 1 failed, that one unrelated —
-`docs/issues/2026-08-30-concurrency-timing-test-flakes-under-full-suite-load.md`).
+the wall-clock flake, since fixed and archived at
+`docs/issues/archive/2026-08-30-concurrency-timing-test-flakes-as-its-own-regression-signature.md`).
 
 ### Why the timestamp in the panic is not evidence of a stale run
 
@@ -223,4 +224,3 @@ appears instead of `unrecognized subcommand`.
   — the neighbouring class, about `target/debug/codescout`'s **existence**. This one is about
   its **feature set**, which fails in the opposite direction: those tests self-skip when the
   binary is missing, this one runs and reports a defect.
-

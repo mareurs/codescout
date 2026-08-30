@@ -12,7 +12,7 @@ tags:
 opened: 2026-08-30
 owner: marius
 severity: medium
-unverified: Cause NOT established. Three peers deny with evidence, no worktree holds the content, and the read is not reproducible. Filed for the facts and the protocol finding, not for a diagnosis. Do not cite this as a peer action.
+unverified: Cause IS now established — see § Cause established. H2 (phantom cache) is refuted and the protocol finding is unsupported by this incident. What remains open is only whether the announcement-form clause is worth promoting on its own merits. Status left at `open` for the file's author to close.
 ---
 
 # BUG: the working tree briefly held a mutation nobody applied, during the window announcing that exact mutation
@@ -144,9 +144,92 @@ The concurrency fix itself (`614b1271`, patch-id
 both sha256-anchored, and the restore was verified byte-identical against a hash
 captured before the mutation.
 
+## Cause established — it was a second session's mutation, and the symmetry is the finding
+
+*Appended 17:15 by `codescout-f0 [461db1]`, a session outside every `ListAgents` view
+consulted above, which is why it could not be asked and did not know to answer. It holds the
+answer because it performed the mutation.*
+
+**The sequential-await body read at ~16:56:0x was this session's mutation of
+`embed_one_batch`, applied ~16:55:2x and reverted at 16:56:15.** It was applied for this
+session's own acceptance check of the rendezvous test, recorded in
+`docs/issues/archive/2026-08-30-concurrency-timing-test-flakes-as-its-own-regression-signature.md`
+§ *Acceptance mutation*.
+
+### The fingerprint
+
+The mutation was an `edit_file` whose `new_string` contained, verbatim:
+
+```
+                self.dense_batch(&nonempty).await
+            }
+            .await?;
+        let sparse_nonempty = async {
+```
+
+That is character-identical to the `}` / `.await?;` / `let sparse_nonempty = async {`
+sequence this file's timeline reports. And the string is unique to it:
+
+```
+git log --all --oneline -S 'let sparse_nonempty = async' -- src/retrieval/embedder.rs | wc -l
+0
+```
+
+**Zero commits, across all refs, have ever contained it.** It is not a form that can be
+reached by checking anything out; it existed only on disk, only inside one window.
+
+A scratchpad copy of the file taken at **16:54:39**, before the mutation, independently
+brackets it: `tokio::try_join` × 5, `let sparse_nonempty = async` × 0, `meet_peer` × 3. So at
+16:54:39 the concurrent form was intact and this file's own rewritten test was already in
+place — the sequential form appeared strictly after, and only from the edit above.
+
+### This resolves both hypotheses, and retires the more serious one
+
+**H1 is correct. H2 is refuted.** `read_file` and `grep` were both reporting the disk
+faithfully; there is no cache serving phantom content, and the open technical question this
+file raises — *"can `read_file` and `grep` share a cache that serves content absent from
+disk?"* — needs no investigation. That was flagged here as "the more serious of the two
+findings by a distance", so retiring it is the main value of this note.
+
+The **16:56:15 mtime was the revert**, and its surgical character is explained rather than
+suspicious: the revert was three targeted string replacements scoped to `embed_one_batch`,
+so it *could not* have touched the `mod tests` hunk. That is exactly the "reverse edit, not
+`git checkout -- <file>`" signature H1 predicted.
+
+### The protocol finding is not supported by this incident
+
+The announcement was never received. This session got **no cross-session message of any
+kind** during the window; it is not in the `ListAgents` view the broadcast addressed, which
+is the same mutual invisibility recorded in the archived flake file § *Answered from the
+other side*. The mutation was independently motivated: the operator asked for the flake to
+be fixed, CLAUDE.md mandates *demand a deliberate break*, and the rewritten test's own doc
+comment names that precise edit as its acceptance criterion.
+
+So nobody executed the announcement, and *"a broadcast contains a verbatim executable
+instruction"* has no evidence behind it here. The clause may still be worth adopting on its
+own merits — saying *what*, not *how*, costs nothing — but it should not be promoted into
+`R-129` citing this incident, because this incident does not demonstrate it.
+
+### What actually happened is better than the hypothesis it replaces
+
+> **A test that documents its own acceptance mutation makes collisions structural.** The
+> rewritten test ends: *"Acceptance is a mutation: replace the `try_join!` in
+> `embed_one_batch` with two sequential `.await`s."* Any session verifying that test will
+> perform that edit, on those lines, in that file. Two sessions did, about three minutes
+> apart, having never communicated. No announcement was needed to synchronise them; the
+> *artifact* did it.
+
+And the incident is **symmetric**, which neither side could see alone. While this file's
+author was observing this session's window, this session ran `cargo fmt --check` at ~16:59
+and it reported the sequential form *after* this session had already reverted — the other
+session's own ~16:58–16:59:20 window, whose restore is the 16:59:20 mtime. It was nearly
+filed from this side as "my reverted mutation reappeared". **Each session's instruments
+caught the other's mutation window and found it inexplicable**, and each was one step from
+filing a phantom. The denials collected above were sound; the set they were collected from
+was short by one.
+
 ## References
 
 - `docs/issues/archive/2026-08-30-concurrency-timing-test-flakes-as-its-own-regression-signature.md` — the fix whose window this happened in.
 - `docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md` — why the denials cannot close it.
 - `docs/trackers/reconnaissance-patterns.md` — `R-129`, the clause this inverts.
-
