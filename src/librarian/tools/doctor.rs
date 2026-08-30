@@ -7545,6 +7545,13 @@ mod tests {
             &cat,
             "widen",
             tmp.path(),
+            // LOAD-BEARING, and invisible in the assertion below: the word `open` in
+            // the prose line is what makes this fixture discriminating. It must be a
+            // status the enum declares, it must differ from the `Status:` line, and it
+            // must equal the `params` value — only then does a section-swallowing
+            // region find agreement where there is none. Tidy the prose to "held for a
+            // week" and this test keeps passing while detecting nothing, because that
+            // edit is monotone under the assertion and no assertion can catch it.
             "# T\n\n## FT-2 — closed after the review\n\n**Status:** done\n\n\
              Left open for a week while the review ran.\n",
             &[("FT-2", "open")],
