@@ -7940,7 +7940,21 @@ The third is the nastiest, because both earlier remedies pass it. The assertion 
 **The cheap general move:** when a test covers a path guarded by process-global state — a `OnceLock`, a `set_default`, an env var, a static registry, an installed provider — run it with `--exact` before believing it. One command, no code change. A suite-green result is silent about which of the two states you are in, and the two are indistinguishable from every other vantage point.
 
 **Status:** validated
-**Promote-when:** a second instance of process-global contamination disarming a test → promote to memory `test-design-discipline` and to `docs/conventions/test-env-isolation.md`, which already covers env isolation but not the process-global-singleton case that this one turns on.
+**Promote-when:** a second instance of process-global contamination disarming a test → `docs/conventions/test-env-isolation.md`, which already covers env isolation but not the process-global-singleton case this one turns on.
+
+**Promote it as a PROCEDURE, not as a fact — corrected same-day.** The original criterion said "promote to memory `test-design-discipline`", and a peer's closing observation argues that is the form which will not fire: *knowing a class does not activate at the moment of use; what activates is a mechanical tell external to the reasoning.* Their evidence was against themselves — two scope errors committed **after** writing the entry warning about that exact class, each caught by something outside the thinking (`exit_code` surviving `2>/dev/null`; a peer re-running the number).
+
+It indicts this ledger's own shape. Checked across the day's wins, all three are **procedures**:
+
+| entry | the thing that actually fires |
+|---|---|
+| `W-82` | run a positive control in the same breath |
+| `W-84` | mutate once per call site |
+| `W-85` | run it with `--exact` |
+
+None is a fact to recall; each is a command to execute. A memory is read at session start and is silent at the moment of use, which is the only moment that matters here — so filing these as things to *know* predicts they will be known and not done. They belong where they execute: a gate step, a checklist line, a doc-comment on the test itself. This entry's fix already took that form without naming it — the added regression test carries its own warning in its header, at the place someone would have to edit to break it.
+
+Worth pairing with `F-81`'s shape: both are cases where the remedy is structural placement rather than better knowledge.
 
 ## Template for new entries
 
