@@ -250,6 +250,42 @@ pub fn write_through(
     Ok(Some(rel))
 }
 
+/// The shape fields on which a committed sidecar disagrees with the catalog's live row.
+///
+/// Empty means they agree. Compared **structurally, never byte-wise**: a hand-formatted or
+/// comment-carrying sidecar that says the same thing is not drift, and reporting it as such
+/// would train readers to ignore the check.
+///
+/// `schema_version` is deliberately excluded. A sidecar written before a field existed still
+/// parses (every field carries `#[serde(default)]`), so a version difference is a statement
+/// about when the file was written, not about what it says.
+pub fn drifting_fields(
+    row: &AugmentationRow,
+    committed: &AugmentationSidecar,
+) -> Vec<&'static str> {
+    let live = AugmentationSidecar::from_row(row);
+    let mut out = Vec::new();
+    if live.prompt != committed.prompt {
+        out.push("prompt");
+    }
+    if live.entry_collection != committed.entry_collection {
+        out.push("entry_collection");
+    }
+    if live.params_schema != committed.params_schema {
+        out.push("params_schema");
+    }
+    if live.render_template != committed.render_template {
+        out.push("render_template");
+    }
+    if live.append_mode != committed.append_mode {
+        out.push("append_mode");
+    }
+    if live.history_cap != committed.history_cap {
+        out.push("history_cap");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

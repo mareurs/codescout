@@ -68,7 +68,16 @@ pub fn upsert(cat: &Catalog, row: &AugmentationRow) -> Result<()> {
 }
 
 pub fn get(cat: &Catalog, artifact_id: &str) -> Result<Option<AugmentationRow>> {
-    let mut stmt = cat.conn.prepare(
+    get_by_conn(&cat.conn, artifact_id)
+}
+
+/// `get` against a bare connection, for callers that hold one rather than a `Catalog` —
+/// notably `doctor`'s scan family, whose functions all take `&rusqlite::Connection`.
+pub fn get_by_conn(
+    conn: &rusqlite::Connection,
+    artifact_id: &str,
+) -> Result<Option<AugmentationRow>> {
+    let mut stmt = conn.prepare(
         "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
                 created_at, updated_at, render_template, params_schema,
                 append_mode, history_cap, entry_collection, refreshed_at_commit

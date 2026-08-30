@@ -242,6 +242,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `extra`, which is not catalog-indexed — but narrows via LEFT JOIN first, so only
     // artifacts that could violate are ever opened.
     all_violations.extend(scan_augmentation_declared_but_absent(&cat.conn)?);
+    // The inverse population of the check above: artifacts that DO have a row, whose
+    // committed sidecar may nonetheless disagree with it. Reports only — drift has a
+    // direction this cannot determine, and guessing it would overwrite a pulled shape.
+    all_violations.extend(scan_sidecar_shape_drift(&cat.conn)?);
     // Per-entry cross-file citation exposure, computed once and shared by every check
     // in the validity-decay family (Tasks 5-7) so each prices its worklist against the
     // same population rather than recomputing it. Stays GLOBAL/unscoped — Ruling 17 —
@@ -4136,6 +4140,126 @@ fn scan_augmentation_declared_but_absent(conn: &rusqlite::Connection) -> Result<
             Some(id.clone()),
             abs_path.clone(),
             detail,
+        ));
+    }
+    Ok(out)
+}
+
+/// `sidecar_shape_drift`: the artifact HAS an augmentation row, declares a sidecar, that
+/// sidecar exists on disk — and the two disagree about the shape.
+///
+/// **This is the safety net for `artifact_augment`'s write-through, and it is why that
+/// write-through is trustworthy.** Write-through can only ever cover the call sites someone
+/// remembered to sweep; this check covers the invariant regardless of how the disagreement
+/// arose — a hand-edit, a graft, a worktree merge, a future writer nobody swept. The failure
+/// it guards is one this mechanism has already produced once: the export skips an artifact
+/// whose sidecar exists, `reindex` attaches only when a row is absent, so before the
+/// write-through landed nothing could update a committed sidecar, and a fresh clone restored
+/// the superseded shape reporting `augmentations_restored: 1` — success. A stale sidecar is
+/// worse than an absent one, because absence is loud and staleness restores clean.
+///
+/// **Reports only, and deliberately has no `fix=` — because drift has a DIRECTION this check
+/// cannot determine.** If the catalog is newer (a local shape change not yet exported),
+/// re-exporting is right. If the *sidecar* is newer — someone pulled a teammate's shape change
+/// and has not reindexed, so the local row is the stale one — re-exporting destroys the
+/// committed shape and replaces it with the stale local row, which is the very data loss this
+/// family of checks exists to prevent. mtime cannot discriminate: a git checkout stamps the
+/// file with checkout time regardless of semantic age, so the newer-looking file is routinely
+/// the older shape. The remedy therefore requires a human judgement about which side is right,
+/// exactly as `augmentation_declared_but_absent` concluded for its own case.
+///
+/// A sidecar that exists but does not parse is reported separately as `sidecar_unparseable`,
+/// because **nothing else can see it**: `reindex` skips the artifact entirely once a row is
+/// present, so a corrupt committed shape would otherwise sit unread until the machine that
+/// holds the row loses it — which is the one moment it is needed and the one moment it fails.
+fn scan_sidecar_shape_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    use crate::librarian::augmentation_sidecar as sidecar;
+
+    // The inverse JOIN of the sibling check: only AUGMENTED artifacts can drift, so an
+    // unaugmented one is never opened. Ordered by abs_path so two runs can be diffed.
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.abs_path FROM artifact a \
+         JOIN artifact_augmentation g ON g.artifact_id = a.id \
+         WHERE a.missing_since IS NULL \
+         ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path) in &rows {
+        let Ok(content) = std::fs::read_to_string(abs_path) else {
+            continue;
+        };
+        let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
+            continue;
+        };
+        let Some(raw) = fm.extra.get("expects_augmentation") else {
+            continue;
+        };
+        // `true` declares no sidecar and an unparseable value is the sibling check's finding.
+        let Declaration::Declared { sidecar: Some(rel) } = parse_declaration(raw) else {
+            continue;
+        };
+        let Some(root) =
+            crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))
+        else {
+            continue;
+        };
+        let path = root.join(&rel);
+        // Declared-but-absent with a row present is not this check's case and is not silent:
+        // the artifact simply has no committed shape yet, which the export exists to fix.
+        if !path.is_file() {
+            continue;
+        }
+
+        let committed = match sidecar::read(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                out.push(Violation::new(
+                    "sidecar_unparseable",
+                    Some(id.clone()),
+                    abs_path.clone(),
+                    format!(
+                        "`{rel}` is declared and present but does not parse: {e:#}. Nothing else \
+                         reports this — `reindex` skips an artifact that already has a row, so a \
+                         corrupt committed shape stays unread until the machine holding the row \
+                         loses it, which is the one moment it is needed. Repair the YAML by hand, \
+                         or delete it and re-run librarian(action=\"doctor\", \
+                         fix=\"export_augmentations\") on a machine whose row is correct."
+                    ),
+                ));
+                continue;
+            }
+        };
+
+        let Ok(Some(row)) = crate::librarian::catalog::augmentation::get_by_conn(conn, id) else {
+            continue;
+        };
+        let fields = sidecar::drifting_fields(&row, &committed);
+        if fields.is_empty() {
+            continue;
+        }
+
+        out.push(Violation::new(
+            "sidecar_shape_drift",
+            Some(id.clone()),
+            abs_path.clone(),
+            format!(
+                "the committed sidecar `{rel}` and this catalog's augmentation disagree on: {}. \
+                 One of them is stale and THIS CHECK CANNOT TELL WHICH — mtime does not \
+                 discriminate, because a git checkout stamps the file with checkout time \
+                 whatever its shape's age. Read the difference before acting. If your catalog is \
+                 right (you changed the shape here and it has not been published), re-export it: \
+                 librarian(action=\"doctor\", fix=\"export_augmentations\"). If the SIDECAR is \
+                 right (you pulled someone else's shape change), do NOT export — that would \
+                 overwrite their shape with your stale row; apply the committed values with \
+                 artifact_augment instead, which also rewrites the file and so leaves the two \
+                 agreeing. Until this is resolved, a fresh clone restores whatever the sidecar \
+                 says and reports success.",
+                fields.join(", ")
+            ),
         ));
     }
     Ok(out)
@@ -11387,6 +11511,135 @@ root = "work/elsewhere/ghost"
         assert!(
             text.contains("root="),
             "the refusal must name the way out: {text}"
+        );
+    }
+
+    /// Seeds an augmented artifact that declares its sidecar, plus the sidecar itself holding
+    /// `prompt`. Returns the sidecar's path. The catalog row's prompt is `seed_declared`'s
+    /// `"p"`, so passing anything else here creates drift on exactly one field.
+    ///
+    /// FIXTURE NOTE — `.git` is load-bearing and no assertion can say so.
+    /// `scan_sidecar_shape_drift` resolves the sidecar through the artifact's git root; with
+    /// no `.git` the scan skips every artifact and returns empty, so the silence tests below
+    /// would pass for the wrong reason and the drift test would fail confusingly. If this line
+    /// is ever removed as tidy-up, two of the four tests stop discriminating while still
+    /// passing.
+    fn seed_with_sidecar(
+        cat: &Catalog,
+        root: &std::path::Path,
+        name: &str,
+        prompt: &str,
+    ) -> std::path::PathBuf {
+        use crate::librarian::augmentation_sidecar as sc;
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let art = root.join(format!("{name}.md"));
+        let rel = sc::rel_path_for(root, &art);
+        seed_declared(cat, root, name, Some(&rel), true);
+        let path = root.join(&rel);
+        sc::write(
+            &path,
+            &sc::AugmentationSidecar {
+                schema_version: sc::SCHEMA_VERSION,
+                prompt: prompt.to_string(),
+                entry_collection: None,
+                params_schema: None,
+                render_template: None,
+                append_mode: false,
+                history_cap: None,
+            },
+        )
+        .unwrap();
+        path
+    }
+
+    /// The safety net for `artifact_augment`'s write-through, which can only ever cover the
+    /// call sites someone remembered to sweep.
+    ///
+    /// PAIRING NOTE — this test and `..._is_silent_when_the_two_agree` are monotone in
+    /// OPPOSITE directions, and that is the whole reason the pair is coverage rather than
+    /// decoration. This one asserts a violation IS produced, which is monotone under
+    /// over-reporting: a check that flagged every augmented artifact would pass it. Its
+    /// sibling asserts silence when they agree, which is monotone under the check being dead.
+    /// Either alone leaves a direction unguarded. See reconnaissance-patterns R-132.
+    #[test]
+    fn sidecar_shape_drift_reports_the_fields_that_disagree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_with_sidecar(&cat, tmp.path(), "t", "the superseded prompt");
+
+        let v = scan_sidecar_shape_drift(&cat.conn).unwrap();
+
+        assert_eq!(v.len(), 1, "exactly the drifted artifact must fire: {v:#?}");
+        assert_eq!(v[0].check, "sidecar_shape_drift");
+        assert!(
+            v[0].detail.contains("prompt"),
+            "the detail must NAME the drifting field — a reader cannot act on \"they differ\": {}",
+            v[0].detail
+        );
+        assert!(
+            v[0].detail.contains("CANNOT TELL WHICH"),
+            "the detail must refuse to guess the direction; prescribing a re-export blindly \
+             would overwrite a pulled shape with a stale local row: {}",
+            v[0].detail
+        );
+    }
+
+    /// The other direction of the pair above.
+    #[test]
+    fn sidecar_shape_drift_is_silent_when_the_two_agree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // "p" is exactly what `seed_declared` puts in the catalog row.
+        seed_with_sidecar(&cat, tmp.path(), "t", "p");
+
+        let v = scan_sidecar_shape_drift(&cat.conn).unwrap();
+
+        assert!(v.is_empty(), "an in-sync pair must not fire: {v:#?}");
+    }
+
+    /// Comparison is STRUCTURAL, never byte-wise. A real committed sidecar in this repo was
+    /// hand-edited (`2a8decc5`) because nothing could refresh it, so byte comparison would
+    /// have fired on a file that says exactly the right thing — and a check that cries wolf on
+    /// correct files trains its readers to skip it.
+    #[test]
+    fn a_hand_formatted_sidecar_saying_the_same_thing_is_not_drift() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let path = seed_with_sidecar(&cat, tmp.path(), "t", "p");
+
+        // A YAML comment no serializer emits: byte-different, semantically identical.
+        let hand = std::fs::read_to_string(&path).unwrap() + "# hand-edited, and still correct\n";
+        std::fs::write(&path, &hand).unwrap();
+
+        let v = scan_sidecar_shape_drift(&cat.conn).unwrap();
+
+        assert!(
+            v.is_empty(),
+            "a byte-different but semantically identical sidecar must not fire: {v:#?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            hand,
+            "and a read-only scan must not rewrite the file it inspected"
+        );
+    }
+
+    /// Reported separately because NOTHING else can see it: `reindex` skips an artifact that
+    /// already has a row, so a corrupt committed shape sits unread until the machine holding
+    /// the row loses it — the one moment it is needed. R-133: an alarm on a path nobody walks.
+    #[test]
+    fn a_corrupt_sidecar_is_reported_rather_than_read_as_agreement() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let path = seed_with_sidecar(&cat, tmp.path(), "t", "p");
+        std::fs::write(&path, "prompt: [unterminated\n\t\tnonsense: {{{\n").unwrap();
+
+        let v = scan_sidecar_shape_drift(&cat.conn).unwrap();
+
+        assert_eq!(v.len(), 1, "the corrupt sidecar must fire: {v:#?}");
+        assert_eq!(
+            v[0].check, "sidecar_unparseable",
+            "a corrupt sidecar is a different finding from drift, and needs different advice"
         );
     }
 
