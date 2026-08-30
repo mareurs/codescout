@@ -3,6 +3,7 @@
 //! Works with OpenAI, Ollama, LM Studio, and any other server that
 //! implements the `/v1/embeddings` endpoint.
 
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -21,8 +22,9 @@ pub struct RemoteEmbedder {
     /// after which it is set to the length of the returned vectors. Using `Arc<AtomicUsize>`
     /// so clones of this embedder share the cached value.
     cached_dims: Arc<AtomicUsize>,
-    /// Query prefix for asymmetric models (e.g. CodeRankEmbed). `None` for most models.
-    query_prefix: Option<String>,
+    /// Query-prefix policy for asymmetric models. See [`QueryPrefix`] for why
+    /// this is three-state rather than `Option<String>`.
+    query_prefix: QueryPrefix,
 }
 
 #[derive(Serialize)]
@@ -74,6 +76,70 @@ fn is_https_or_loopback(url: &str) -> bool {
             .parse::<std::net::IpAddr>()
             .map(|ip| ip.is_loopback())
             .unwrap_or(false)
+}
+
+/// How a [`RemoteEmbedder`] decides the query-side prefix for asymmetric models.
+///
+/// Three states rather than `Option<String>`, because that type cannot
+/// distinguish *"nothing configured, work it out from the model"* from
+/// *"definitely no prefix"* — and on this project's default model those want
+/// **opposite** behaviour.
+///
+/// `docs/manual/src/concepts/retrieval-stack.md` benchmarks CodeRankEmbed
+/// **Q4_K_M with no prefix at 37 (champion)** against **f16 with the required
+/// prefix at 34**: *"Q4 loses asymmetric subspace if a prefix is forced."* So a
+/// model name containing `coderank` is NOT sufficient evidence that a prefix is
+/// wanted — the quantization decides, and [`QueryPrefix::derive_for`]'s
+/// name-matching cannot see it. `CodeRankEmbed-Q4_K_M.gguf` carries the answer
+/// in the same string it matches on, and matches the wrong half.
+///
+/// Decided 2026-08-30 (`resume-embedding-transport-stages-1-3:ET-9` D1),
+/// upholding `docs/adrs/2026-07-25-embedding-transport-boundary.md`
+/// § *The three contracts*: an unset `CODESCOUT_QUERY_PREFIX` maps to
+/// [`QueryPrefix::Suppressed`], never to [`QueryPrefix::Derive`]. Deriving there
+/// would silently cost ~3 benchmark points on the default deployment.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum QueryPrefix {
+    /// Infer from the model name. The crate's historical behaviour, kept as the
+    /// default for its own constructors so standalone consumers are unaffected
+    /// by the addition of the other two states.
+    #[default]
+    Derive,
+    /// Prepend exactly this string. Wins over anything the model name implies.
+    Explicit(String),
+    /// Never prefix, whatever the model name suggests. This is the state
+    /// `Option<String>` could not express, and the one the default deployment
+    /// needs.
+    Suppressed,
+}
+
+impl QueryPrefix {
+    /// The prefix to prepend to query text, or `None` for none.
+    ///
+    /// Borrowed for [`Self::Explicit`] — the common configured path — and owned
+    /// only when a prefix is actually derived.
+    pub fn resolve<'a>(&'a self, model: &str) -> Option<Cow<'a, str>> {
+        match self {
+            Self::Suppressed => None,
+            Self::Explicit(prefix) => Some(Cow::Borrowed(prefix.as_str())),
+            Self::Derive => Self::derive_for(model).map(Cow::Owned),
+        }
+    }
+
+    /// The prefix a model name implies, if any. Only the CodeRank family is
+    /// known to need one.
+    ///
+    /// Deliberately NOT quantization-aware. Making it so would be a second
+    /// fragile substring match layered on the first; the type's doc comment
+    /// explains why that is the wrong direction and why `Derive` is therefore
+    /// the wrong default for this project.
+    pub fn derive_for(model: &str) -> Option<String> {
+        if model.to_lowercase().contains("coderank") {
+            Some("Represent this query for searching relevant code: ".into())
+        } else {
+            None
+        }
+    }
 }
 
 impl RemoteEmbedder {
@@ -170,14 +236,15 @@ impl RemoteEmbedder {
         self
     }
 
-    /// Returns the query prefix for models that require asymmetric embedding.
-    /// Currently only CodeRankEmbed models need a prefix on query side.
-    fn query_prefix_for(model: &str) -> Option<String> {
-        if model.to_lowercase().contains("coderank") {
-            Some("Represent this query for searching relevant code: ".into())
-        } else {
-            None
-        }
+    /// Set the query-prefix policy, replacing the constructor default of
+    /// [`QueryPrefix::Derive`].
+    ///
+    /// This is how a caller expresses *explicitly no prefix* — the state that did
+    /// not exist before 2026-08-30 and the one this project's default deployment
+    /// needs. See [`QueryPrefix`] for the benchmark that makes it load-bearing.
+    pub fn with_query_prefix(mut self, query_prefix: QueryPrefix) -> Self {
+        self.query_prefix = query_prefix;
+        self
     }
 
     pub fn openai(model: &str, api_key: Option<String>) -> Result<Self> {
@@ -194,7 +261,7 @@ impl RemoteEmbedder {
             model: model.to_string(),
             api_key: Some(api_key),
             cached_dims: Arc::new(AtomicUsize::new(0)),
-            query_prefix: Self::query_prefix_for(model),
+            query_prefix: QueryPrefix::Derive,
         })
     }
 
@@ -206,7 +273,7 @@ impl RemoteEmbedder {
             model: model.to_string(),
             api_key: None,
             cached_dims: Arc::new(AtomicUsize::new(0)),
-            query_prefix: Self::query_prefix_for(model),
+            query_prefix: QueryPrefix::Derive,
         })
     }
 
@@ -226,7 +293,7 @@ impl RemoteEmbedder {
             model: model.to_string(),
             api_key,
             cached_dims: Arc::new(AtomicUsize::new(0)),
-            query_prefix: Self::query_prefix_for(model),
+            query_prefix: QueryPrefix::Derive,
         })
     }
 
@@ -271,7 +338,7 @@ impl RemoteEmbedder {
             model: model.to_string(),
             api_key,
             cached_dims: Arc::new(AtomicUsize::new(0)),
-            query_prefix: Self::query_prefix_for(model),
+            query_prefix: QueryPrefix::Derive,
         })
     }
 }
@@ -411,18 +478,25 @@ impl Embedder for RemoteEmbedder {
         Ok(all)
     }
 
+    /// Embed a single **query**, applying the configured [`QueryPrefix`].
+    ///
+    /// The document side ([`Embedder::embed`]) never prefixes — that asymmetry is
+    /// the entire point of an asymmetric model, and getting it backwards strands
+    /// stored vectors in query-space. See
+    /// `docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md`.
     async fn embed_query(&self, text: &str) -> Result<Embedding> {
         let prefixed;
-        let input: &str = if let Some(prefix) = &self.query_prefix {
-            prefixed = format!("{}{}", prefix, text);
-            &prefixed
-        } else {
-            text
+        let input: &str = match self.query_prefix.resolve(&self.model) {
+            Some(prefix) => {
+                prefixed = format!("{prefix}{text}");
+                &prefixed
+            }
+            None => text,
         };
         let mut batch = self.embed(&[input]).await?;
         batch
             .pop()
-            .ok_or_else(|| anyhow::anyhow!("Embedder returned empty batch"))
+            .ok_or_else(|| anyhow::anyhow!("embed_query: empty response"))
     }
 }
 
@@ -731,6 +805,192 @@ mod tests {
         assert!(
             msg.contains("all 3 text(s) are empty"),
             "expected error message naming the empty count, got: {msg}"
+        );
+    }
+
+    /// One-shot HTTP server that captures the request body and answers with a
+    /// valid embeddings response.
+    ///
+    /// The wire is the only place the prefix decision is observable: `resolve()`
+    /// can be unit-tested in isolation, but that proves nothing about whether
+    /// `embed_query` still calls it. Without a wire assertion, deleting the
+    /// `resolve` call from `embed_query` leaves every prefix test green.
+    async fn capture_one_request() -> (String, tokio::task::JoinHandle<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            loop {
+                let mut chunk = [0u8; 4096];
+                let n = stream.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&buf).into_owned();
+                let Some(head_end) = text.find("\r\n\r\n") else {
+                    continue;
+                };
+                let declared = text[..head_end]
+                    .lines()
+                    .find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        k.eq_ignore_ascii_case("content-length")
+                            .then(|| v.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                if buf.len() - (head_end + 4) >= declared {
+                    break;
+                }
+            }
+            let text = String::from_utf8_lossy(&buf).into_owned();
+            let body = text
+                .split_once("\r\n\r\n")
+                .map(|(_, b)| b.to_string())
+                .unwrap_or_default();
+
+            let payload = r#"{"data":[{"embedding":[0.1,0.2],"index":0}]}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                payload.len(),
+                payload
+            );
+            stream.write_all(resp.as_bytes()).await.unwrap();
+            stream.flush().await.unwrap();
+            body
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    const CODERANK: &str = "CodeRankEmbed-Q4_K_M.gguf";
+    const DERIVED: &str = "Represent this query for searching relevant code: ";
+
+    /// The state that did not exist before 2026-08-30, and the reason the whole
+    /// three-state change happened: a model name that WOULD derive a prefix, told
+    /// not to.
+    ///
+    /// `CODERANK` is deliberately the real default filename. It contains both
+    /// `CodeRank` (which `derive_for` matches) and `Q4_K_M` (the quantization the
+    /// benchmark says wants NO prefix, and which `derive_for` cannot see). If
+    /// `Suppressed` ever collapses back into `Derive`, this is the configuration
+    /// that silently drops from 37 to 34.
+    ///
+    /// Mutation that must kill it: change `Self::Suppressed => None` in
+    /// `QueryPrefix::resolve` to fall through to `derive_for`.
+    #[tokio::test]
+    async fn suppressed_sends_no_prefix_even_for_a_model_that_would_derive_one() {
+        let (url, server) = capture_one_request().await;
+        let embedder = RemoteEmbedder::from_url(&url, CODERANK, None)
+            .unwrap()
+            .with_query_prefix(QueryPrefix::Suppressed);
+
+        embedder.embed_query("fn main").await.unwrap();
+        let body = server.await.unwrap();
+
+        assert!(
+            !body.contains("Represent this query"),
+            "Suppressed must beat the model name; the wire carried a derived \
+             prefix, which is the 34-point configuration. body: {body}"
+        );
+        assert!(
+            body.contains("fn main"),
+            "the query text itself must still be sent. body: {body}"
+        );
+    }
+
+    /// An explicit prefix wins over whatever the model name implies — the Nomic
+    /// case (`search_query: `) pointed at a CodeRank-named endpoint.
+    ///
+    /// Mutation that must kill it: reorder `resolve` so `Derive` is consulted
+    /// before `Explicit`.
+    #[tokio::test]
+    async fn an_explicit_prefix_overrides_the_one_the_model_name_implies() {
+        let (url, server) = capture_one_request().await;
+        let embedder = RemoteEmbedder::from_url(&url, CODERANK, None)
+            .unwrap()
+            .with_query_prefix(QueryPrefix::Explicit("search_query: ".into()));
+
+        embedder.embed_query("fn main").await.unwrap();
+        let body = server.await.unwrap();
+
+        assert!(
+            body.contains("search_query: fn main"),
+            "the explicit prefix must reach the wire. body: {body}"
+        );
+        assert!(
+            !body.contains("Represent this query"),
+            "the model-derived prefix must not also be applied. body: {body}"
+        );
+    }
+
+    /// `Derive` is unchanged and remains the constructor default, so standalone
+    /// consumers of this crate see no behaviour change from the other two states
+    /// being added.
+    ///
+    /// Mutation that must kill it: make `QueryPrefix::default()` return
+    /// `Suppressed`, or drop the `resolve` call from `embed_query`.
+    #[tokio::test]
+    async fn derive_is_still_the_constructor_default_and_still_prefixes_coderank() {
+        let (url, server) = capture_one_request().await;
+        let embedder = RemoteEmbedder::from_url(&url, CODERANK, None).unwrap();
+        assert_eq!(
+            embedder.query_prefix,
+            QueryPrefix::Derive,
+            "constructors must keep deriving, or every standalone consumer changes behaviour"
+        );
+
+        embedder.embed_query("fn main").await.unwrap();
+        let body = server.await.unwrap();
+
+        assert!(
+            body.contains(&format!("{DERIVED}fn main")),
+            "Derive must still apply the model-derived prefix. body: {body}"
+        );
+    }
+
+    /// The document side never prefixes, under any policy. Getting this backwards
+    /// strands stored vectors in query-space —
+    /// docs/issues/archive/2026-08-11-memory-documents-stored-query-prefixed.md.
+    #[tokio::test]
+    async fn the_document_path_never_prefixes_even_under_derive() {
+        let (url, server) = capture_one_request().await;
+        let embedder = RemoteEmbedder::from_url(&url, CODERANK, None).unwrap();
+
+        embedder.embed(&["fn main"]).await.unwrap();
+        let body = server.await.unwrap();
+
+        assert!(
+            !body.contains("Represent this query"),
+            "embed() is the document path and must never carry a query prefix. body: {body}"
+        );
+    }
+
+    /// `derive_for` recognises only the CodeRank family. Pinned separately from
+    /// the wire tests because it is the half a future model would extend.
+    #[test]
+    fn derive_for_matches_the_coderank_family_and_nothing_else() {
+        assert_eq!(
+            QueryPrefix::derive_for("CodeRankEmbed"),
+            Some(DERIVED.into())
+        );
+        assert_eq!(
+            QueryPrefix::derive_for("coderankembed-q4_k_m.gguf"),
+            Some(DERIVED.into()),
+            "matching is case-insensitive"
+        );
+        assert_eq!(QueryPrefix::derive_for("nomic-embed-text"), None);
+        assert_eq!(QueryPrefix::derive_for(""), None);
+
+        // Suppressed and Explicit do not consult the model at all.
+        assert_eq!(QueryPrefix::Suppressed.resolve("CodeRankEmbed"), None);
+        assert_eq!(
+            QueryPrefix::Explicit("x: ".into())
+                .resolve("CodeRankEmbed")
+                .as_deref(),
+            Some("x: ")
         );
     }
 }
