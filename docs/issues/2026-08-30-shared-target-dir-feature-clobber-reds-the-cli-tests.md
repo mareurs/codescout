@@ -192,6 +192,59 @@ None yet — the bug is in the test harness's own isolation, so a regression tes
 to build a lean binary into the shared path and assert the preflight message fires. Worth
 writing alongside whichever fix is chosen; recording the absence rather than excusing it.
 
+## The documented gate ENDS in the hazard state
+
+*Added 20:2x. The observation is `git-travel-augmentation-shape`'s, who hit it from the
+producing side thirty seconds before reading about it: their gate runs the lean lane last, so
+`target/debug/codescout` was sitting librarian-less while they committed and walked away.
+The generalisation below is what their observation implies once checked against CLAUDE.md.*
+
+This is not an accident of two sessions happening to overlap. CLAUDE.md § *Development
+Commands* specifies the gate in this order:
+
+```
+cargo fmt
+cargo clippy --workspace --all-targets --features local-embed -- -D warnings
+cargo test --workspace
+cargo test --workspace --no-default-features        <- LAST
+```
+
+The lean lane is **terminal**. So a session that runs the documented gate correctly, passes
+it, and stops, leaves the shared `target/debug/codescout` without the `librarian` feature —
+every time, by following instructions. **The hazard state is the gate's exit state**, not a
+deviation from it.
+
+That changes the shape of the problem in three ways:
+
+- **It is the diligent sessions that arm it.** A session that skips the lean lane never
+  creates it. The more faithfully the project's own gate is followed, the more reliably the
+  trap is left behind — the same inversion `reconnaissance-patterns:R-129` names for
+  announcements, arriving here through a build artifact instead of a message.
+- **The arming session never observes the consequence.** Its own gate passed; the failure
+  lands on whoever next runs a default-features test without an intervening default build.
+  So the producer gets no signal at all, which is why this went unnoticed long enough to be
+  filed as a suspected feature-gating regression.
+- **It is not self-healing across sessions, only within one.** A later `cargo test
+  --workspace` in the *same* invocation rebuilds the bin and repairs it. The window is
+  between a lean build finishing and any default-features build completing — which is
+  exactly where a concurrent session's already-built test binary execs the wrong file.
+
+### The cheap mitigation, and where it belongs
+
+`cargo build --bin codescout` after the lean lane closes the class from the producing side
+entirely, and costs one incremental build. Both sessions that have hit this are now doing it.
+
+Verify it positively rather than assuming the build fixed it —
+`./target/debug/codescout artifact --help` resolving is the check;
+`./target/debug/codescout --help | grep -c artifact` returning 4 is the same check in one
+line. A `cargo build` that no-ops because nothing changed looks identical to one that
+repaired the binary.
+
+The natural home for the mitigation is the gate line in CLAUDE.md itself, as a fifth step or
+as a reordering that does not end on the lean lane. **Not applied here — CLAUDE.md is an
+operator-owned surface and the gate's composition has been argued at length in that section;
+changing it is the operator's call, not a drive-by from a bug file.**
+
 ## Workarounds
 
 Right now, if `cli_artifact` tests fail with `unrecognized subcommand 'artifact'`:
