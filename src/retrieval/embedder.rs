@@ -521,6 +521,18 @@ impl EmbedderHttp {
     /// one document at a time and never ranks on sparse, so routing it through
     /// `embed_batch` would buy a wasted sparse round trip per write.
     pub async fn dense_document(&self, text: &str) -> Result<Vec<f32>> {
+        // The n=1 case of the empty-input policy [`Self::embed_one_batch`]
+        // documents. Not merely for symmetry: an OpenAI-compatible server answers
+        // 400 to an empty input, and the crate this leg delegates to refuses a
+        // wholly-empty batch by contract — so without this branch the single-item
+        // path would be the one place `""` still reached the wire.
+        //
+        // Callers should not be embedding empty text; a zero vector is a junk
+        // index entry either way. This makes it a *predictable* junk entry rather
+        // than whatever the server chose to return for `""`.
+        if text.is_empty() {
+            return Ok(vec![0.0; self.expected_dim]);
+        }
         let dense = self
             .dense_batch(&[text])
             .await?
@@ -607,103 +619,133 @@ impl EmbedderHttp {
     async fn embed_one_batch(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>> {
         let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
         let sparse_url = format!("{}/embed_sparse", self.sparse_base);
-        let mut out = Vec::with_capacity(inputs.len());
+        // ONE empty-input policy, applied to BOTH legs.
+        //
         // The sparse (SPLADE/TEI) server rejects empty strings with HTTP 400,
-        // which would abort the whole batch. An empty chunk has no terms, so
-        // omit it from the sparse request and re-expand to an empty vector at
-        // its original position to stay aligned with the dense response.
+        // which would abort the whole batch — so the sparse leg has always
+        // filtered them. The dense leg did not, until 2026-08-30: it sent `""`
+        // through and relied on llama-server tolerating what OpenAI proper
+        // refuses with the same 400. That asymmetry was an oversight, not a
+        // decision, and root's OTHER dense path already disagreed with it —
+        // `CodeEmbedderAdapter` -> `RemoteEmbedder` (the no-url resolver path)
+        // has always filtered empties and zero-filled their positions. This
+        // makes the two agree, and is the precondition for the dense leg
+        // delegating to that same crate.
+        //
+        // Empty positions are re-expanded below: an empty sparse vector and a
+        // zero dense vector, both at their original index.
         let nonempty: Vec<&str> = inputs.iter().copied().filter(|s| !s.is_empty()).collect();
         let sparse_body = serde_json::json!({ "inputs": &nonempty });
 
-        let (dense_batch, sparse_nonempty) = tokio::try_join!(self.dense_batch(&inputs), async {
-            if nonempty.is_empty() {
-                return Ok(Vec::<Vec<SparseEntry>>::new());
-            }
-            let mut attempt: u32 = 0;
-            loop {
-                let resp = self
-                    .client
-                    .post(&sparse_url)
-                    .json(&sparse_body)
-                    .send()
-                    .await
-                    .context("embed_batch sparse send")?;
-                let status = resp.status();
-                if status.is_success() {
-                    return resp
-                        .json::<Vec<Vec<SparseEntry>>>()
+        let (dense_nonempty, sparse_nonempty) = tokio::try_join!(
+            async {
+                // Skipping the request entirely for an all-empty chunk is the
+                // dense mirror of what the sparse leg below already does. It is
+                // also what makes the all-empty case survive the delegation:
+                // the crate's `embed` refuses a wholly-empty batch by contract.
+                if nonempty.is_empty() {
+                    return Ok(Vec::<Vec<f32>>::new());
+                }
+                self.dense_batch(&nonempty).await
+            },
+            async {
+                if nonempty.is_empty() {
+                    return Ok(Vec::<Vec<SparseEntry>>::new());
+                }
+                let mut attempt: u32 = 0;
+                loop {
+                    let resp = self
+                        .client
+                        .post(&sparse_url)
+                        .json(&sparse_body)
+                        .send()
                         .await
-                        .context("embed_batch sparse json");
+                        .context("embed_batch sparse send")?;
+                    let status = resp.status();
+                    if status.is_success() {
+                        return resp
+                            .json::<Vec<Vec<SparseEntry>>>()
+                            .await
+                            .context("embed_batch sparse json");
+                    }
+                    // The shared sparse server returns 424/429/5xx when momentarily
+                    // overloaded by concurrent callers; retry those with backoff
+                    // before surfacing a detailed error.
+                    let code = status.as_u16();
+                    let retryable = code == 424 || code == 429 || status.is_server_error();
+                    attempt += 1;
+                    if !retryable || attempt >= 8 {
+                        let body = resp.text().await.unwrap_or_default();
+                        return Err(anyhow!(
+                            "embed_batch sparse status {} (inputs={}, nonempty={}): {}. \
+                             If this is 413 or 422, the server's max_client_batch_size is \
+                             below the resolved batch size — set CODESCOUT_EMBED_BATCH \
+                             to override discovery.",
+                            status,
+                            inputs.len(),
+                            nonempty.len(),
+                            body.chars().take(200).collect::<String>()
+                        ));
+                    }
+                    let backoff =
+                        std::time::Duration::from_millis(100u64 * (1u64 << attempt.min(6)));
+                    tokio::time::sleep(backoff).await;
                 }
-                // The shared sparse server returns 424/429/5xx when momentarily
-                // overloaded by concurrent callers; retry those with backoff
-                // before surfacing a detailed error.
-                let code = status.as_u16();
-                let retryable = code == 424 || code == 429 || status.is_server_error();
-                attempt += 1;
-                if !retryable || attempt >= 8 {
-                    let body = resp.text().await.unwrap_or_default();
-                    return Err(anyhow!(
-                        "embed_batch sparse status {} (inputs={}, nonempty={}): {}. \
-                         If this is 413 or 422, the server's max_client_batch_size is \
-                         below the resolved batch size — set CODESCOUT_EMBED_BATCH \
-                         to override discovery.",
-                        status,
-                        inputs.len(),
-                        nonempty.len(),
-                        body.chars().take(200).collect::<String>()
-                    ));
-                }
-                let backoff = std::time::Duration::from_millis(100u64 * (1u64 << attempt.min(6)));
-                tokio::time::sleep(backoff).await;
             }
-        })?;
+        )?;
 
-        // The dense leg must return exactly one embedding per input. A gateway
-        // that silently truncates an oversize request (rather than erroring)
-        // would otherwise let a short response through: `embed_chunks_ordered`
-        // flattens sub-batches, so a short one shifts every later sub-batch's
-        // outputs onto the wrong payload downstream in `flush_pending`'s
-        // positional zip, dropping the tail chunks with no error at all.
-        if dense_batch.len() != inputs.len() {
+        // The dense leg must return exactly one embedding per NON-EMPTY input. A
+        // gateway that silently truncates an oversize request (rather than
+        // erroring) would otherwise let a short response through:
+        // `embed_chunks_ordered` flattens sub-batches, so a short one shifts every
+        // later sub-batch's outputs onto the wrong payload downstream in
+        // `flush_pending`'s positional zip, dropping the tail chunks with no error
+        // at all.
+        if dense_nonempty.len() != nonempty.len() {
             return Err(anyhow!(
                 "embed_batch dense response length mismatch: got {} embeddings for {} inputs \
                  — the dense embedder may be silently truncating an oversize request instead \
                  of erroring. Try a smaller CODESCOUT_EMBED_BATCH.",
-                dense_batch.len(),
-                inputs.len()
+                dense_nonempty.len(),
+                nonempty.len()
             ));
         }
 
-        // Re-expand sparse rows back onto their original (possibly-empty)
-        // positions. Exhausting `sparse_nonempty` while a non-empty input still
-        // needs a row is a server contract violation (fewer rows than
-        // requested), not the deliberate "this input was empty" case — that
-        // case is tracked positionally via `s.is_empty()`, never by iterator
-        // exhaustion. Substituting a silent empty vector here would let a
-        // chunk land in the index with no sparse vector, invisible to
-        // sparse/hybrid retrieval with no error raised anywhere.
-        let mut sparse_nonempty = sparse_nonempty.into_iter();
-        let mut sparse_resp: Vec<Vec<SparseEntry>> = Vec::with_capacity(inputs.len());
+        // Re-expand both legs onto their original (possibly-empty) positions in a
+        // single walk, so the two can never disagree about which index an empty
+        // input occupied.
+        //
+        // Exhausting either iterator while a non-empty input still needs a row is
+        // a server contract violation (fewer rows than requested), not the
+        // deliberate "this input was empty" case — that case is tracked
+        // positionally via `s.is_empty()`, never by iterator exhaustion.
+        // Substituting a silent empty vector here would let a chunk land in the
+        // index with no sparse vector, invisible to sparse/hybrid retrieval with
+        // no error raised anywhere.
+        let mut dense_iter = dense_nonempty.into_iter();
+        let mut sparse_iter = sparse_nonempty.into_iter();
+        let mut out = Vec::with_capacity(inputs.len());
         for s in &inputs {
             if s.is_empty() {
-                sparse_resp.push(Vec::new());
-            } else {
-                match sparse_nonempty.next() {
-                    Some(v) => sparse_resp.push(v),
-                    None => {
-                        return Err(anyhow!(
-                            "embed_batch sparse response exhausted: expected {} non-empty rows \
-                             for {} inputs, server returned fewer",
-                            nonempty.len(),
-                            inputs.len()
-                        ));
-                    }
-                }
+                out.push(EmbedOutput {
+                    dense: vec![0.0; self.expected_dim],
+                    sparse: SparseVector {
+                        indices: vec![],
+                        values: vec![],
+                    },
+                });
+                continue;
             }
-        }
-
-        for (dense, sparse_vec) in dense_batch.into_iter().zip(sparse_resp) {
+            // Cannot be short: the arity check above proved `dense_iter` holds
+            // exactly `nonempty.len()` entries, which is how many times this
+            // branch runs. Kept as the same error rather than an `unwrap` so that
+            // removing that check degrades to an error instead of a panic.
+            let dense = dense_iter.next().ok_or_else(|| {
+                anyhow!(
+                    "embed_batch dense response length mismatch: fewer embeddings than \
+                     non-empty inputs"
+                )
+            })?;
             if dense.len() != self.expected_dim {
                 return Err(anyhow!(
                     "embed dim mismatch: got {}, expected {}",
@@ -711,6 +753,14 @@ impl EmbedderHttp {
                     self.expected_dim
                 ));
             }
+            let sparse_vec = sparse_iter.next().ok_or_else(|| {
+                anyhow!(
+                    "embed_batch sparse response exhausted: expected {} non-empty rows \
+                     for {} inputs, server returned fewer",
+                    nonempty.len(),
+                    inputs.len()
+                )
+            })?;
             let (indices, values): (Vec<u32>, Vec<f32>) =
                 sparse_vec.into_iter().map(|e| (e.index, e.value)).unzip();
             out.push(EmbedOutput {
@@ -722,10 +772,48 @@ impl EmbedderHttp {
     }
 
     /// Dense-only sub-batch (lite stack: no sparse server contacted).
+    ///
+    /// Applies the same empty-input policy as [`Self::embed_one_batch`] — see the
+    /// comment there for why. Having the lite path disagree with the hybrid one
+    /// about what `""` means would be the same asymmetry one level down.
     async fn embed_one_batch_dense(&self, chunk: Vec<String>) -> Result<Vec<EmbedOutput>> {
         let inputs: Vec<&str> = chunk.iter().map(String::as_str).collect();
+        let nonempty: Vec<&str> = inputs.iter().copied().filter(|s| !s.is_empty()).collect();
+
+        let dense_nonempty = if nonempty.is_empty() {
+            Vec::new()
+        } else {
+            self.dense_batch(&nonempty).await?
+        };
+
+        // Newly checked here, not merely moved: this path previously pushed
+        // whatever the server returned and let a short response shorten the
+        // output silently. `embed_chunks_ordered` flattens sub-batches, so that
+        // shifts every later sub-batch onto the wrong payload — the corruption
+        // the hybrid path's identical check exists to prevent.
+        if dense_nonempty.len() != nonempty.len() {
+            return Err(anyhow!(
+                "embed_batch dense response length mismatch: got {} embeddings for {} inputs \
+                 — the dense embedder may be silently truncating an oversize request instead \
+                 of erroring. Try a smaller CODESCOUT_EMBED_BATCH.",
+                dense_nonempty.len(),
+                nonempty.len()
+            ));
+        }
+
+        let mut dense_iter = dense_nonempty.into_iter();
         let mut out = Vec::with_capacity(inputs.len());
-        for dense in self.dense_batch(&inputs).await? {
+        for s in &inputs {
+            let dense = if s.is_empty() {
+                vec![0.0; self.expected_dim]
+            } else {
+                dense_iter.next().ok_or_else(|| {
+                    anyhow!(
+                        "embed_batch dense response length mismatch: fewer embeddings than \
+                         non-empty inputs"
+                    )
+                })?
+            };
             if dense.len() != self.expected_dim {
                 return Err(anyhow!(
                     "embed dim mismatch: got {}, expected {}",
@@ -1232,27 +1320,38 @@ mod tests {
         assert_eq!(q, d);
     }
 
-    /// Mid-chunk empties must not shift sparse vectors onto the wrong dense
-    /// position — the re-expansion iterator has to skip exactly the empty
-    /// slots and nothing else. Each non-empty input gets a uniquely
-    /// identifiable sparse vector so a shifted alignment cannot be mistaken
-    /// for the right answer; a length-only assertion would miss this.
+    /// Mid-chunk empties must not shift either leg's vectors onto the wrong
+    /// position — the re-expansion has to skip exactly the empty slots and nothing
+    /// else. Each non-empty input gets a uniquely identifiable dense **and** sparse
+    /// vector so a shifted alignment cannot be mistaken for the right answer; a
+    /// length-only assertion would miss this.
+    ///
+    /// Updated 2026-08-30, when the dense leg adopted the sparse leg's empty-input
+    /// policy. The body matcher is the assertion that carries the change: the dense
+    /// server is sent **three** inputs, not five, and the empty positions are
+    /// zero-filled locally. Before, `""` went to the wire and whatever the server
+    /// returned for it was indexed.
     #[tokio::test]
-    async fn mid_chunk_empty_strings_keep_sparse_alignment() {
+    async fn mid_chunk_empty_strings_keep_both_legs_aligned() {
         let mut dense_server = mockito::Server::new_async().await;
         let mut sparse_server = mockito::Server::new_async().await;
         let dense_mock = dense_server
             .mock("POST", "/v1/embeddings")
+            // The empties must never reach the wire — this is what fails if the
+            // filter is dropped, rather than an output assertion that could be
+            // satisfied by a coincidentally-shaped response.
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "input": ["a", "b", "c"]
+            })))
             .with_status(200)
             .with_body(
                 r#"{"data":[
-                    {"embedding":[0.0,0.0,0.0],"index":0},
-                    {"embedding":[1.0,0.0,0.0],"index":1},
-                    {"embedding":[2.0,0.0,0.0],"index":2},
-                    {"embedding":[3.0,0.0,0.0],"index":3},
-                    {"embedding":[4.0,0.0,0.0],"index":4}
+                    {"embedding":[1.0,0.0,0.0],"index":0},
+                    {"embedding":[2.0,0.0,0.0],"index":1},
+                    {"embedding":[3.0,0.0,0.0],"index":2}
                 ]}"#,
             )
+            .expect(1)
             .create_async()
             .await;
         // Three non-empty inputs ("a","b","c" at positions 0,2,4) each get a
@@ -1293,34 +1392,42 @@ mod tests {
         assert!(out[3].sparse.values.is_empty());
         assert_eq!(out[4].sparse.indices, vec![30u32]);
         assert!((out[4].sparse.values[0] - 0.3_f32).abs() < 1e-6);
-        // Dense stays aligned to the original position too, not just sparse.
-        assert_eq!(out[0].dense, vec![0.0_f32, 0.0, 0.0]);
+        // Dense stays aligned to the original position too, not just sparse. The
+        // three distinct values are what makes an off-by-one visible: with the
+        // response consumed in order, a re-expansion that failed to skip the empty
+        // slots would put 2.0 at position 1 rather than 2.
+        assert_eq!(out[0].dense, vec![1.0_f32, 0.0, 0.0]);
         assert_eq!(out[2].dense, vec![2.0_f32, 0.0, 0.0]);
-        assert_eq!(out[4].dense, vec![4.0_f32, 0.0, 0.0]);
+        assert_eq!(out[4].dense, vec![3.0_f32, 0.0, 0.0]);
+        // Empty positions are zero-filled locally, at the configured dimension —
+        // never left short, which would fail the dim guard downstream.
+        assert_eq!(out[1].dense, vec![0.0_f32, 0.0, 0.0]);
+        assert_eq!(out[3].dense, vec![0.0_f32, 0.0, 0.0]);
 
         dense_mock.assert_async().await;
         sparse_mock.assert_async().await;
     }
 
-    /// An all-empty chunk must not send an empty-array sparse request — the
-    /// real SPLADE/TEI server answers HTTP 400 to `{"inputs": []}`, which
-    /// would abort the whole batch. This asserts zero sparse invocations,
-    /// which is stronger than merely accepting a `[]` sparse response.
+    /// An all-empty chunk must reach **neither** server. The real SPLADE/TEI server
+    /// answers HTTP 400 to `{"inputs": []}`, and an OpenAI-compatible server answers
+    /// 400 to an empty input — either would abort the whole batch. Asserting zero
+    /// invocations is stronger than accepting an empty response, which a server that
+    /// tolerates the request would also produce.
+    ///
+    /// The **dense** half of that is new as of 2026-08-30; this test previously
+    /// asserted the dense mock was hit exactly once. Two independent reasons to
+    /// change it: llama-server's tolerance of `""` is not shared by OpenAI proper,
+    /// and the crate this leg now delegates to refuses a wholly-empty batch by
+    /// contract, so the request had to stop being made rather than be made and fail.
     #[tokio::test]
-    async fn all_empty_chunk_sends_zero_sparse_requests() {
+    async fn all_empty_chunk_sends_no_requests_at_all() {
         let mut dense_server = mockito::Server::new_async().await;
         let mut sparse_server = mockito::Server::new_async().await;
         let dense_mock = dense_server
             .mock("POST", "/v1/embeddings")
             .with_status(200)
-            .with_body(
-                r#"{"data":[
-                    {"embedding":[0.0,0.0,0.0],"index":0},
-                    {"embedding":[0.0,0.0,0.0],"index":1},
-                    {"embedding":[0.0,0.0,0.0],"index":2}
-                ]}"#,
-            )
-            .expect(1)
+            .with_body(r#"{"data":[]}"#)
+            .expect(0)
             .create_async()
             .await;
         let sparse_mock = sparse_server
@@ -1335,13 +1442,104 @@ mod tests {
         let chunk = vec!["".to_string(), "".to_string(), "".to_string()];
         let out = e.embed_one_batch(chunk).await.expect("embed_one_batch");
 
-        assert_eq!(out.len(), 3);
+        assert_eq!(
+            out.len(),
+            3,
+            "arity is preserved without any request at all"
+        );
         for o in &out {
             assert!(o.sparse.indices.is_empty());
             assert!(o.sparse.values.is_empty());
+            assert_eq!(
+                o.dense,
+                vec![0.0_f32, 0.0, 0.0],
+                "an empty input is zero-filled at the configured dim, locally — not \
+                 left short, which would trip the dim guard downstream"
+            );
         }
         dense_mock.assert_async().await;
         sparse_mock.assert_async().await;
+    }
+
+    /// The lite (dense-only) path applies the same empty-input policy as the hybrid
+    /// one, and needs its own test because it is a separate function with its own
+    /// re-expansion — a fix applied to one would not reach the other.
+    ///
+    /// `embed_one_batch_dense` also gained an arity check here. It had none: it
+    /// pushed whatever the server returned, so a short response silently shortened
+    /// the output, and `embed_chunks_ordered` flattens sub-batches — the exact
+    /// corruption the hybrid path's identical check was added to prevent.
+    #[tokio::test]
+    async fn the_dense_only_path_skips_empties_and_zero_fills_them() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "input": ["x", "y"]
+            })))
+            .with_status(200)
+            .with_body(
+                r#"{"data":[
+                    {"embedding":[7.0,0.0,0.0],"index":0},
+                    {"embedding":[8.0,0.0,0.0],"index":1}
+                ]}"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        // The sparse base is deliberately unroutable: if `dense_only` ever stopped
+        // suppressing the sparse leg, this test would fail loudly rather than
+        // quietly contacting a real service.
+        let e = EmbedderHttp::new(dense_server.url(), "http://sparse.invalid", 3).dense_only(true);
+        let out = e
+            .embed_batch(&[
+                "".to_string(),
+                "x".to_string(),
+                "".to_string(),
+                "y".to_string(),
+            ])
+            .await
+            .expect("embed_batch");
+
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].dense, vec![0.0_f32, 0.0, 0.0]);
+        assert_eq!(out[1].dense, vec![7.0_f32, 0.0, 0.0]);
+        assert_eq!(out[2].dense, vec![0.0_f32, 0.0, 0.0]);
+        assert_eq!(out[3].dense, vec![8.0_f32, 0.0, 0.0]);
+        dense_mock.assert_async().await;
+    }
+
+    /// The n=1 case of the same policy, on the single-document path the memory
+    /// store uses. It bypasses `embed_batch` entirely, so it is the one place `""`
+    /// would still have reached the wire.
+    ///
+    /// The mock returns a recognisable non-zero vector on purpose: if the request
+    /// were made after all, the assertion fails on `9.0` rather than passing by
+    /// coincidence on a zero the server happened to return.
+    #[tokio::test]
+    async fn an_empty_document_is_zero_filled_without_a_request() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let dense_mock = dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[9.0,9.0,9.0],"index":0}]}"#)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), "http://sparse.invalid", 3);
+        let v = e
+            .dense_document("")
+            .await
+            .expect("an empty document is not an error");
+
+        assert_eq!(
+            v,
+            vec![0.0_f32, 0.0, 0.0],
+            "an empty document is zero-filled locally, at the configured dim"
+        );
+        dense_mock.assert_async().await;
     }
 
     /// A dense leg that returns fewer embeddings than inputs must fail loudly,
