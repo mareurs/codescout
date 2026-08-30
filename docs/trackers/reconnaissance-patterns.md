@@ -4445,6 +4445,29 @@ stated cause a guess. They had restored a mutation, not fixed a defect. A green 
 you the state now; it does not tell you why, and this entry is about how expensive that gap
 is when several sessions edit one tree.
 
+**Instance 4, and it widens the entry: the break does not have to be deliberate.**
+`swap-dense-leg` reported `tests/packaged_includes.rs` failing `cargo fmt --check` and
+correctly declined to touch a file they had not written. It was mine, and it was real — for
+about three minutes, between my writing the file and my running `cargo fmt` before
+committing. Verified after the fact from two directions: `cargo fmt --check` on the tree
+exits 0, and `rustfmt --check` on the **committed blob** from `188cf9f0` exits 0, so the
+file has never been unformatted in any committed state.
+
+So the population is not "deliberate breaks". It is **every intermediate state of every
+session's work**, and ordinary in-progress files produce the same false report as a mutation
+does. A peer's gate samples the tree at an arbitrary instant; nothing marks which files are
+mid-edit, and `cargo` consults the filesystem rather than git. Deliberate breaks are merely
+the subset an author can *predict* and therefore announce — which is why the announcement
+rule is worth having and also why it cannot be the whole remedy.
+
+**The two-sided protocol,** which is `codescout-ae`'s formulation and the durable output of
+the day. Mine: *announce the window before opening it, not after closing it* — prevents the
+alarm. `swap-dense-leg`'s: *an instrument that cannot see the tree's intent supports
+"something is red", never "this ships" — so ask the owner before filing* — prevents the
+misfiling when the announcement is missed or, as in instance 4, was never possible. Either
+alone leaves the gap open. Note both halves are the same shape as this file's recurring law:
+an under-reporting instrument supports the weaker claim, never the stronger one.
+
 **The rule.** *Announce a mutation window before opening it, not after closing it.* It costs
 one message and converts a false alarm into a no-op. It generalises past mutation testing to
 any deliberate break left on disk: a RED-first commit not yet made, a temporarily stubbed
