@@ -202,13 +202,42 @@ correctness item, not trailing cleanup.**
 > |---|---|---|
 > | status-error hoisted above the collection bucket | root | **crate** |
 > | dense-response arity check (a **panic**, not an error) | root | **crate** |
-> | crypto-provider install before a TLS handshake (`probe_ollama`) | root | **crate** |
+> | crypto-provider install — an eager **panic** in `ClientBuilder::build()`, at any scheme (`probe_ollama`) | root | **crate** |
 >
 > The first two surfaced during T6 and are archived under `docs/issues/archive/`;
 > the third was found by `codescout-ae` enumerating call sites of
 > `install_default_crypto_provider` and noticing which client-builder was absent
 > — a **pairwise** audit nearly missed it, because `probe_ollama` has no root
 > twin to be compared against.
+>
+> **The third row above was understated until 2026-08-30, and the correction is
+> the point.** It read "crypto-provider install before a TLS handshake", which is
+> what the bug file claimed and why it was filed **severity low** — seemingly
+> needing an operator with a TLS Ollama host. `codescout-ae`'s reproduction
+> inverted both halves: `reqwest` is built with `rustls-no-provider`, so
+> `default_rustls_crypto_provider()` is a literal `panic!("No provider set")` that
+> runs **eagerly inside `ClientBuilder::build()`**, before any request and
+> **regardless of scheme**. So it *panics* rather than returning `Err`, which means
+> the "Ollama is not reachable" branch the bug file blamed never executes and that
+> message is never printed — and it fires on plain `http://localhost:11434`, the
+> zero-configuration default. Not an operator edge case: **every external consumer
+> calling `create_embedder("ollama:…")`, with no configuration at all.**
+>
+> That is `CLAUDE.md`'s *run the reproduction before reading the fix plan* rule
+> paying out again — the filing was a hypothesis about the reproduction, and the
+> reproduction moved both the mechanism and the severity.
+>
+> It also sharpens what this class *is*. Root's `main.rs:253` installs the provider
+> at startup, so **codescout itself is shielded and the crate ships the defect to
+> everyone else** — which is why no root-side test could ever have caught it. And
+> root's `transport.rs` states the invariant as already holding at *"every
+> construction site"*: true of root, false of the crate, in a comment that reads as
+> a repo-wide guarantee. A doc-vs-code drift whose scope claim is the drift.
+>
+> Verified with a positive control in a separate process — two `tests/` files,
+> because the install is process-global and nothing weaker isolates it. Same three
+> probes with the provider installed: `Err(connection refused)`, `Ok`, `Ok`. The
+> provider is the discriminator, not a harness artefact.
 >
 > So the sentence to carry forward is the one this entry files as a caveat:
 > **audit each pair before deleting; root's copy is not always the stale one.**
