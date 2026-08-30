@@ -4468,6 +4468,24 @@ misfiling when the announcement is missed or, as in instance 4, was never possib
 alone leaves the gap open. Note both halves are the same shape as this file's recurring law:
 an under-reporting instrument supports the weaker claim, never the stronger one.
 
+**Why it has to be two-sided — `codescout-ae`'s formulation, sharper than the tidy version.**
+The tempting summary is "three sessions each caught one of the others' errors and none
+caught their own." That is nearly right, and the imprecision matters. They *did* self-catch
+twice today, both **method** failures: a `strings` discriminator that predated the fix
+(caught by running the positive control) and a scope error where the "before" check read one
+file while the binary contains every file (caught by widening). What no one self-caught were
+the **conclusions** — the misrouting and the mutation misdiagnosis — and both came from a
+peer.
+
+> **Self-catching works on your method and fails on your conclusion.** A method error has a
+> check you can run; a conclusion error is invisible from inside, because the evidence
+> supporting it is real.
+
+Same shape as instance 4: the population is not "errors people were careless about", it is
+**errors whose evidence looks correct from where the author stands**. No amount of care
+reaches those, which is exactly why the remedy is another session rather than a stricter
+personal discipline.
+
 **The rule.** *Announce a mutation window before opening it, not after closing it.* It costs
 one message and converts a false alarm into a no-op. It generalises past mutation testing to
 any deliberate break left on disk: a RED-first commit not yet made, a temporarily stubbed
@@ -4496,9 +4514,29 @@ are mutating, say so before they diagnose it.**
 Holding the promotion for an operator decision rather than applying it, on `R-90`'s own
 lesson: that entry's Promote-when has been FIRED and unapplied across four instances because
 its target is a workflow change (per-session worktrees) that only the operator can take.
-This one's target is a CLAUDE.md edit and is cheaper — but the honest framing is that
-**per-session worktrees would dissolve `R-90` and `R-129` together**, and adding a rule to
-CLAUDE.md is the smaller move that makes the larger one feel less urgent.
+**Correcting my own framing of that trade, on evidence from `codescout-ae` that I verified
+in code.** I wrote that *per-session worktrees would dissolve `R-90` and `R-129` together*,
+as though the structural fix were a clean win deferred out of inertia. It is not free, and
+the cost falls on exactly the surface these entries live in.
+
+`append_entry` **refuses id allocation from a worktree checkout** —
+`src/librarian/tools/append_entry.rs:93-103`, a `RecoverableError` whose hint prescribes
+"record the entry in a worktree-local file and fold it into the ledger after the merge". The
+refusal is not fussiness: its own comment explains the alternative is **unrepairable**,
+because `merge_worktree`'s renumber runs only over params rows — two prose `## PREFIX-N`
+sections merge into one file and the token acquires two active definers.
+
+So under per-session worktrees, every `F-N` / `W-N` / `R-N` / `BL-N` / `ET-N` append becomes
+two steps with a merge between them. **Today alone that is `R-127`, `R-128`, `R-129`,
+`W-78`, `W-79`, `F-80`, `BL-66`, `ET-10` and several bug files, across three sessions.**
+`codescout-ae` recommended a worktree to their operator for `BL-44` and withdrew it for this
+reason: a worktree cleans up the gate signal while complicating the half that records what
+you learned.
+
+That does not settle the question, it reframes it. Worktrees are a structural fix with a
+**known cost in ledger friction**, not an obviously-better fix that keeps being deferred out
+of inertia — and the operator should have both numbers. The CLAUDE.md rule remains the
+cheaper move, and it is now cheaper for a stated reason rather than by assumption.
 
 ## Template for new entries
 
