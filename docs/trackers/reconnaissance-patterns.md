@@ -4814,7 +4814,7 @@ mutation run is not coverage of the sites.
 
 **Promote-when:** **FIRED 2026-08-30** at two independent instances — this session's
 write-through pair (different tests died per site) and `codescout-ae`'s `entry_status_region`
-(both sites already guarded). Held for an operator decision rather than self-promoted. The
+(both sites already guarded). **PROMOTED 2026-08-31** by operator decision, in `4f79909d`. The
 target is CLAUDE.md's testing discipline beside *demand a deliberate break*, and it should
 land **as a pair with its limit**: a per-site mutation rule that does not mention absence
 tests would licence exactly the kind of clean kill that proves nothing.
@@ -4880,6 +4880,17 @@ is "nothing", the guard is decoration regardless of how loudly it is written.
 **Promote-when:** a fourth instance, or one where the reachability question is asked *before*
 the guard ships rather than after. Then promote alongside R-132 — they are one rule about
 what a green suite is evidence for, and splitting them across CLAUDE.md would lose that.
+
+**PROMOTED 2026-08-31** in `4f79909d`, and **both** branches of the criterion had fired, not
+just one. The fourth instance: `drifting_fields` enumerated the six shape fields by hand, so a
+seventh added later would travel, restore, and be silently exempt from drift-checking — an
+alarm that fires only for the fields someone remembered, inside the safety net built to end
+that class (fixed by an exhaustive destructure in `f4c52a24`). And the *asked-before-shipping*
+branch fired too: `sidecar_shape_drift` named its observer (whoever runs `librarian(doctor)`)
+at design time rather than after. Landed beside R-132 as its promote-when required, under a
+heading scoped to every test rather than to multi-agent runs — § SDD Rulings, where the
+family's earlier instances live, is framed "before your next multi-agent run" and would have
+under-scoped both laws.
 
 **Rests on:** the decision that `install_default_crypto_provider` is called at every
 construction site rather than once at a single entry point. If that ever centralises, (3)'s
