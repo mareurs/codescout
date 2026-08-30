@@ -89,7 +89,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `39af18d5a73dadc0` |
 | BL-46 | 2 | Decision 2: the write-root split — unpinned WRITES resolve to the last writable root, unpinned READS keep resolving to the activated one | **not started** — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive | — |
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `239227f3228b3460` |
-| BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | open | `92d619d7a115617b` |
+| BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing | `92d619d7a115617b` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | open | `caa8bc1df0e8c0d8` |
 | BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | open | `19f44bead56b56cc` |
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `e6c0ddb91fe28228` |
@@ -206,6 +206,49 @@ session after two independent hits on one afternoon, one of them mine: a bug arc
 through whose row then lies. Corrupts the canonical triage query CLAUDE.md and the activation
 bootstrap both prescribe.
 
+**Fixed 2026-08-30 — `518549d6` on `experiments`**, patch-id
+`c424f89f8aeb67eaa692eeda4a9812a13820041c`. Gate green: `fmt`, `clippy --workspace
+--all-targets --features local-embed -D warnings`, `check --no-default-features
+--all-targets`, full suite **4809 / 0**.
+
+**Shape: option 1, via a hook rather than a call.** `edit_markdown` is a core tool and the
+catalog lives behind `#[cfg(feature = "librarian")]`, so a direct call would compile locally and
+fail CI's lean lane — the failure CLAUDE.md names explicitly. `src/util/librarian_sync.rs`
+mirrors `librarian_guard`'s oracle: trait, process-wide slot, last-writer-wins for `F-51`'s
+reason, no-op when unset. The two are siblings on purpose — the guard reads the catalog to
+**refuse** a write; this writes the catalog after one it **allowed**.
+
+**Why the exposed population is what it is.** The guard lets a plain catalogued file through
+deliberately (`a_catalogued_but_unaugmented_file_stays_directly_editable`). Measured: **4 of 19**
+live files under `docs/issues/` carry a stamped `id:`, so 15 were editable and every one could
+desync. The protection was **accidental** — which is why "stamp them all" is not the fix:
+`tracker-conventions` forbids stamping `id:` to guard a file, and it was tried and reverted in
+`bb9a94d7`.
+
+**Eight tests, and the ones that mattered were mutation-checked.** Four on the module core with
+the hook passed explicitly; three against a real `Catalog` (status adopted, no row invented for
+an uncatalogued path, silent fields preserved); one integration test in its own binary, because
+the slot is process-wide and the unit-test binary contests it — server helpers install the real
+syncer and would replace a recorder mid-run. Every one went straight to green, so each
+load-bearing claim got a deliberate break: `status: fm.status…` → `status: row.status` fails 2 of
+3 with `left: "open"`, the bug's own symptom; removing the `frontmatter_changed` gate yields
+`["bug.md", "notes.md"]`; removing the call yields `[]`.
+
+**Measured residual, stated rather than papered over.** The chain has four links and only three
+are covered:
+
+| link | covered? |
+|---|---|
+| `server.rs:374` installs the syncer | **no** |
+| `edit_markdown` calls the sync when frontmatter changed | yes — two mutations |
+| `sync_after_frontmatter_write` reaches the installed hook | yes — integration test, real global path |
+| the syncer moves the catalog row | yes — real `Catalog`, mutation-checked |
+
+Commenting out the install leaves **all eight tests green** — verified by running it, not
+inferred. Closing that link needs a test that builds a real server and inspects the slot, which
+is the same contested-slot problem, and it is the link `librarian_guard`'s own install has never
+covered either. Suggested by `fix-embedding-transport-stage-1`, whose mutation proved the gap
+rather than closing it.
 ### BL-49 — `workspace(post_compact)` flushes LSP without prewarming
 
 **Status:** open

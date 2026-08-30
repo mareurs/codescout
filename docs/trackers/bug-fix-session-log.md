@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 78
+entry_high_water_F: 79
 entry_high_water_W: 73
 ---
 
@@ -127,6 +127,7 @@ entry_high_water_W: 73
 | F-70 | 2026-08-26 | med | process | fixed-verified | A dead citation that was wrong when written is indistinguishable from one that decayed — 0 of 6 in a 321-citation sweep were decay, and three independent artifacts misread it from the prose; the `--diff-filter=AD` probe is the only discriminator |
 | F-76 | 2026-08-29 | med | plan-prose | fixed-verified | A bug file's own evidence table cited `sync.rs:904` for the main sync path — that line is a `flush_pending` inside `sync_worktree`, the very call site the section exists to distinguish. On `sync_project` the vectors land inside `stream_index` (`:620`/`:626`, invoked at `:1017`). Conclusion unchanged, but a reader verifying it at that line is led straight back to the inverted fix |
 | F-77 | 2026-08-29 | med | cross-session | mitigated | A peer's hazard report was accurate when written and false when read — eleven correct filenames described work committed eight hours earlier (`45a88531`); a second peer credited this session with an edit it never made. Cross-session messages carry a send time, never an observation time |
+| F-79 | 2026-08-30 | low | cross-session | mitigated | Told a peer a shared file was clean, kept editing it, and their explicit-path `git add` swept my BL-51/BL-52 re-statusing into a commit about archiving a different bug. Not `W-69`'s committer-side check but its missing sender-side half: "clean" is a claim with an expiry only the sender can see, so an all-clear should name a SHA or be retracted the moment you touch the file again |
 | F-78 | 2026-08-29 | low | self-friction | fixed-verified | Attributed a test failure to a peer's uncommitted file from a keyword count in its diff (19 × "timeout" across +137 lines). Wrong twice: the real cause was a `tokio::try_join!` race inside the test itself (`21174425`), and the "cheap decisive check" I first proposed — run it in isolation — PASSES, so it confirms the flake reading wrongly. The instrument whose subject was the failure was reading `embed_one_batch` |
 
 ## Wins Index
@@ -6986,6 +6987,93 @@ no attribution check was looking for. Neither of us predicted that when we agree
 both framed it as an accuracy courtesy about *my* work. **Having the source check a write-up of
 their own work is worth doing for what it forces the author to re-derive, not for the attribution
 it confirms.**
+## F-79 — I told a peer a file was clean, kept working on it, and their commit swept my changes
+
+**Observed:** 2026-08-30, shared checkout, two live sessions.
+
+**When:** After committing my own work and explicitly messaging a peer that
+`docs/trackers/open-issue-work-queue.md` was clean so they could perform an archive move plus
+citation re-points, which `get_guide("tracker-conventions")` requires to land in one commit.
+
+**Expected:** their commit `a38ef4d1` contains the archive move and the re-points, and nothing
+else.
+
+**Got:** it also contains my re-statusing of `BL-51` (dropped) and `BL-52` (blocked), written
+*after* I sent the all-clear. Verified in the commit's own diff: 5 `BL-51` hits, 5 `BL-52` hits,
+and my distinctive phrasing (*"both claims refuted"*, *"sketched fix refuted"*). No data lost;
+`git log` simply now answers *"why was BL-51 dropped?"* with a commit titled *"archive the
+buffer-read bug"*.
+
+**Probable cause:** mine, not theirs. My message *"open-issue-work-queue.md is clean"* was true
+when sent. I then scouted BL-51/BL-52, re-statused both in that same file, and never re-notified.
+They staged an explicit path — the correct discipline — and picked up my working-tree changes
+because that is what `git add <path>` does.
+
+**Not a duplicate of `W-69`, and that is the point.** `W-69` prescribes `git diff -- <path>`
+before `git add <path>`. That is the **committer's** check and would indeed have caught this. The
+half nobody had written down is the **notifier's** obligation:
+
+> "Clean" is a statement about an **instant**. Having told a peer a file is clear, you own
+> re-notifying them if you dirty it again — because a clearance handshake decays the moment its
+> sender keeps working, and its receiver has no way to detect that.
+
+The two are complementary and fail independently: the committer's check catches it at write time,
+the notifier's discipline prevents the race from existing. `W-70` already found that a wire
+handshake — *"file is clear as of `<sha>`, write freely"* — is the only thing that **prevents**
+rather than repairs here. This entry is that handshake's missing second half: clearance is not a
+state, it is a claim with a timestamp, and only the sender knows when it expires.
+
+**Severity:** low — no loss, no rework, and the peer behaved correctly throughout. Recorded
+because the cost is legibility, which is the failure mode this project's whole tracker discipline
+exists to prevent, and because it is the fourth cross-session provenance error in two days, all
+of them resolved by a check somebody could have run and nobody owned.
+
+**Status:** mitigated — peer informed, entry filed. History deliberately NOT rewritten: amending
+a shared commit to repair a provenance line is a worse trade than leaving it and recording what
+happened.
+
+**Valid:** invariant
+
+The mechanism is a property of `git add <path>` plus asynchronous messaging, not of this repo or
+this pair of sessions.
+
+**Rests on:** `W-69` (explicit-path staging, and its `git diff` covering check) and `W-70` (the
+clearance handshake as the only preventive measure). This entry supplies the sender-side
+obligation neither states.
+
+**Fix idea / Pointer:** When you send an all-clear on a shared file, either stop editing it until
+the peer confirms, or send a retraction the moment you touch it again. Cheapest durable form:
+name a SHA in the all-clear — *"clear as of `<sha>`"* — so the receiver can detect divergence
+themselves instead of trusting a claim whose expiry only you can see.
+
+**The committer's half, from the committer (added 2026-08-30, their words, their analysis).**
+The session that made the commit declined to file its own entry — correctly, citing the
+reconnaissance rule that a recurrence of an already-promoted law is a defect in the promoted
+text, not a new datapoint — but pushed back on my taking all of the fault, and supplied the
+sharper finding:
+
+> I used `git add -- <explicit paths>`, not `git add -A`. That is the careful form, and I think
+> it is precisely what **suppressed** the check — naming the paths FELT like the guard, so
+> looking inside them seemed redundant. The explicit-path form protects against sweeping up
+> files you never thought about; it does nothing about a file you did think about and were
+> **wrong** about. **Naming a path you believe is yours is not evidence that it is.**
+
+That is a defect in `W-69`'s wording, not a second instance of it. `W-69` currently leads with
+explicit-path staging and carries `git diff -- <path>` as its covering check; the ordering
+implies the first is the protection and the second the belt-and-braces, when the measured
+failure is that the first **induces skipping** the second. Their recommendation, which I agree
+with: put the diff check **above** the path discipline rather than beside it. A precaution that
+feels like the guard is worse than no precaution, because it spends the vigilance the real check
+needed.
+
+Recorded here rather than as a `W-69` rewrite because two sessions should not both edit that
+entry in the same hour — which is this very entry's subject. Flagged for the next reader of
+`W-69` to fold in.
+
+Their closing observation, worth keeping verbatim because it is the honest shape of the failure
+and not a flourish: *"I wrote 'knowing a rule and executing it are different acts' to my user
+about the paths-and-ids sweep, in the same breath as a commit where I had done exactly that to a
+different rule."*
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
