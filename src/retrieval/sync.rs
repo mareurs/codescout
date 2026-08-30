@@ -80,7 +80,7 @@ pub struct SyncReport {
 /// `sync_project`: the vectors are already in the store by then, so declining the
 /// write destroys the honest record of what happened while keeping the damage
 /// itself. Declining to re-index at all is the only placement that helps. See
-/// `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
+/// `docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
 /// § *Re-costed 2026-08-28*, and `open-issue-work-queue:BL-45`.
 ///
 /// `exe_deleted` is `Option<bool>` and the `Some(true)` test is exact on purpose.
@@ -3219,7 +3219,7 @@ mod tests {
     /// Refusing the sidecar write is inverted at this call site: by the time that
     /// write runs the vectors are already in the store, so declining only the
     /// record destroys the evidence and keeps the damage. See
-    /// `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
+    /// `docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
     /// § *Re-costed 2026-08-28 — direction 2 is INVERTED at one of its two call
     /// sites*, and `open-issue-work-queue:BL-45`.
     ///

@@ -1,17 +1,17 @@
 ---
 kind: bug
-status: investigating
+status: fixed
 tags:
 - process-lifetime
 - config-staleness
 - index-state
 - concurrency
+closed: 2026-08-30
 opened: 2026-08-26
 owner: marius
 related:
 - docs/issues/2026-08-26-index-status-model-fields-dropped-but-still-documented.md
 severity: high
-unverified: 'AWAITING A DECISION, not work. Every direction buildable without one is shipped: 0'' (ca2b0226), 1 (74dfbfca, live-verified), 3 (fbd7f348). Direction 2 must NOT be built as drafted - it is inverted at the main sync path, where the sidecar write FOLLOWS the vector write, so refusing it destroys the evidence and keeps the damage. The corrected shape - refuse before the embed pass, i.e. decline to re-index from an unlinked binary - would stop 6 of 8 servers on this host from indexing, so it needs the operator''s call. Status stays open rather than mitigated precisely so the canonical triage query keeps surfacing that decision.'
 ---
 
 # BUG: server processes on deleted binaries write their stale config into the live project sidecar
@@ -569,6 +569,60 @@ Direction 1 is unaffected and already shipped: recording *who* wrote the sidecar
 additive, and it is what makes a zombie's write legible instead of silent — which is the
 value the refusal was reaching for, without the evidence loss.
 
+### Done 2026-08-30 — direction 2 shipped, and the decision this file was held open for was taken
+
+**SHA:** `22f8b8d5941354a2aa4c454c332630bec03ccf59` (`experiments`). **patch-id:**
+`fd2c453bfd381f63cd8fb6f773efdab30551feed`.
+
+This file's `unverified:` key said *"AWAITING A DECISION, not work … Status stays open
+rather than mitigated precisely so the canonical triage query keeps surfacing that
+decision."* The mechanism worked — and then outlived its purpose. The decision was taken
+on 2026-08-30 and recorded in `22f8b8d5`'s own commit body:
+
+> **Operator decision, taken explicitly:** the refusal is hard rather than gated on config
+> divergence. On this host that stops 6 of 8 running servers from indexing, and because a
+> rebuild invalidates every running server instantly the cost lands on every `cargo rb`.
+
+The file was never released, so for the rest of that day it kept surfacing a decision that
+had already been made — a **zombie-open of a second kind**: not a fix that shipped under a
+subject naming no bug (that is the `2026-08-28-tags-in-filter-returns-zero` case), but a
+record deliberately held open as a signal, whose signal had gone stale. The deliberate
+hold is what made it invisible: `unverified:` reads as a considered decision, so a triage
+pass skims past it rather than re-checking its premise.
+
+**Shipped in the corrected shape, not as drafted.** `guard_stale_binary` sits *before* the
+embed pass rather than at the sidecar write, so a stale process declines to re-index at
+all instead of declining to record that it did — exactly the inversion the *Re-costed
+2026-08-28* subsection above argued for.
+
+**Verified at the bytes on 2026-08-30 before closing**, rather than read off the commit
+message:
+
+| Check | Result |
+|---|---|
+| `guard_stale_binary` exists | `src/retrieval/sync.rs:94`, returns `RecoverableError` naming `/mcp` |
+| wired into both indexing paths | `references` → production call sites at `:765` (`sync_worktree`) and `:1010` (`sync_project`) |
+| the guard precedes the work | call-site comment: *"ahead of the index lock, the dirty-set sidecar and the embed pass"* |
+| tests green | 3 test functions, all passing — `an_unlinked_binary_is_refused_with_a_recoverable_error_naming_the_restart` (covering `Some(true)` / `Some(false)` / `None`) plus one wiring proof per path |
+
+A wired-nowhere guard is the failure mode this check exists for; `references` answers it
+and a grep would not have.
+
+**All four directions are now shipped**, which is what makes this file terminal:
+
+| Direction | Shipped | SHA | patch-id |
+|---|---|---|---|
+| 0' bound the LSP shutdown to a deadline | 2026-08-26 | `ca2b0226` | `fd44c45488695a8870ddc6080520ee8a3b5a7119` |
+| 1 make the writer identify itself | 2026-08-28 | `74dfbfca` | `e9d6780b06fb9004067a0e573c80195b719b9d11` |
+| 3 let a response declare its binary | 2026-08-28 | `fbd7f348` | `3b7974495dc3db1edf6c08a4a8ac3f0cfbb4b919` |
+| 2 decline to re-index from an unlinked binary | 2026-08-30 | `22f8b8d5` | `fd2c453bfd381f63cd8fb6f773efdab30551feed` |
+
+**What was deliberately NOT built, so absence is not an oversight.** Direction 3 shipped
+the minimal form its own text offered — *"or at minimum on `workspace(action="status")`"*
+— not the broader stamp-every-response form. The two questions that section raises (what
+triggers the stamp, and whether "differs" is even the right predicate given a peer's
+unrelated rebuild) were never answered because the minimal form does not need them. No
+`unverified:` key is left behind for this: the scope was chosen, not skipped.
 ## Tests added
 
 For the 2026-08-26 `shutdown_with_deadline` fix (`ca2b0226`), two unit tests in

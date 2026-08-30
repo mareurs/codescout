@@ -1735,7 +1735,7 @@ fn idle_shutdown_from_env() -> Option<std::time::Duration> {
 ///
 /// A shutdown step that hangs (a wedged LSP client, a stuck lock) must never keep this
 /// process alive past a signal that asked it to exit — see
-/// `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`:
+/// `docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`:
 /// a correctly-installed `SIGTERM` handler is worthless if the code it hands off to can
 /// block forever. `what` names the step in the warning log so a timed-out shutdown is
 /// diagnosable after the fact.

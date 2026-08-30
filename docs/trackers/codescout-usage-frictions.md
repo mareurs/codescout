@@ -2234,7 +2234,7 @@ Its own Stale-when says archive when Option A, B or C ships, or when concurrent 
 
 - `docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md`
 - `docs/issues/archive/2026-08-16-usage-db-attributes-calls-to-a-shared-session-id-file.md`
-- `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md` (open)
+- `docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md` (fixed 2026-08-30 — all four directions shipped)
 - `append_entry`'s refusal to allocate ids from a worktree, documented in `get_guide("tracker-conventions")` — itself a per-resource mitigation on this line
 
 **Nobody has checked whether these actually collapse into one fix.** Counting and classifying that set is the first task of any promotion, not an assumption to build on: a fix that names a population asserts the population is non-empty and homogeneous, and this one is so far only eyeballed.

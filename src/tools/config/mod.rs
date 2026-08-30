@@ -422,7 +422,7 @@ impl Tool for ProjectStatus {
         // Same four facts `write_index_state_with_dirty` stamps into the
         // sidecar, from the same constructor, so what ANSWERED and what WROTE
         // are directly comparable without a /proc walk on either side.
-        // docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
+        // docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
         {
             let w = crate::retrieval::index_state::current_writer();
             result["server"] = json!({

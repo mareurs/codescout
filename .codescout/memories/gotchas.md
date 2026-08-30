@@ -300,7 +300,7 @@ both sides have it, it cannot be the discriminator. Re-checked across 7 live
 `codescout start` processes: three carry `CODESCOUT_EMBED_URL=…:48081/v1`, four
 lack the var, and **none carries `48080/v1`**. The reading cannot be reproduced;
 the likeliest source is a zombie server predating the `.claude.json` block
-(`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`).
+(`docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`).
 The name was on both sides. The value never was. Also checked and excluded: `XDG_CONFIG_HOME` and `CODESCOUT_ENV_FILE` are
 unset, no shell profile sets `CODESCOUT_EMBEDDER_URL`, and `48080` appears as a
 literal nowhere in `src/`. Note `/proc/<pid>/environ` shows only the exec-time

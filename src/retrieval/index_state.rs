@@ -103,7 +103,7 @@ pub struct IndexState {
     /// `None` means a sidecar written before this field existed. Absence is "not
     /// recorded", never "written by the current build" -- the same rule
     /// `indexed_with_model` states above.
-    /// docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
+    /// docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
     #[serde(default)]
     pub written_by: Option<WriterProvenance>,
 }

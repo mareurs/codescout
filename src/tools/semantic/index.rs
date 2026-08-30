@@ -734,7 +734,7 @@ impl Tool for IndexStatus {
                     //
                     // `None` is silent by design: a pre-field sidecar is "not recorded",
                     // never "written by the current build".
-                    // docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
+                    // docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md
                     if let Some(w) = st.written_by.as_ref() {
                         if w.git_sha != env!("CODESCOUT_GIT_SHA") {
                             result["written_by"] = json!({
