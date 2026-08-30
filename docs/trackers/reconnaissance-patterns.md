@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 136
+entry_high_water_R: 137
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-137 | 2026-08-30 | miss → rule | **After compaction, a peer is a better witness to your past than you are.** `codescout-ae` asserted a hand-edit was theirs; I relayed it unchecked; they later checked their commit list, found the SHA absent, and corrected the record — including the claim they had never said it. I still held the message and quoted it verbatim; their context had been compacted between the two, and they had offered exactly that bound themselves. Three claims resolving differently: the hand-edit happened (true, by diff), they authored it (false, by their commit check), they never said so (false, by my transcript). **The session was right where it re-derived and wrong where it recalled**, and only the transcript-holder could separate those. Inverts the usual default that first-person testimony outranks a bystander's — here the bystander holds the bytes and the first person holds a summary, and the loss is invisible from the inside. Rules: never relay a peer's claim about their own authorship unchecked; if you hold the transcript, quote it rather than contradict; prefer a re-derivable instrument to anyone's memory. Tell: a reconstructed memory carries a detail that does not fit — this one said "this morning" of a **16:50** SHA, in plain text both of us read | kin R-134 |
 | R-136 | 2026-08-30 | technique (parent generalisation from `codescout-ae`) | **Adjacent-proposition errors come in THREE kinds, and each needs a DIFFERENT check.** Nine confident wrong answers in one day were all real measurements, faithfully reported, of a proposition next to the one asked — but the remedies diverge, and running the wrong check leaves the error standing while feeling rigorous. *Propositional* (the probe answers a different question: `du` for absence, a build's exit code for "the binary carries the subcommands") needs a **positive control**. *Temporal* (right about an instant, read as standing: `fmt` reporting a reverted mutation) needs **bracketing** — and a control does nothing, because the probe was working perfectly. *Sampling* (right for this observer: one session's `ListAgents` skew) needs a **second observer**, which neither of the others touches. Counterexample kept inside the statement, so it is never written as *every*: the mutual-deference deletion misread no measurement at all — two correct reads, two correct acts, composing badly — the one class instrument discipline cannot reach. Operational half: **a caveat should name its sub-kind**, since *"two readings is not a measurement"* tells a reader to go find a second observer rather than run a control. |
 | R-135 | 2026-08-30 | miss | **A `du` proves size, never absence — a TRUE measurement written up in the past tense.** An archived bug file is `status: fixed` and closes *"174 MB reclaimed, 163 MB of it regenerable `.codescout` index state"*; 14 days later `.worktrees/bench` is still on disk at exactly 174M/163M, dir mtime **2026-05-12** (three months BEFORE the closure) and a gitdir still naming the pre-rename `code-explorer` path, which rules out delete-then-recreate since the file's own rebuild command would name `codescout`. The `du` ran before the removal and was written up as its result. Distinct from R-125 (abundant vs empty) and from the self-validating-gate class: this is a **correct positive number transferred to a proposition it does not support**. Audit verdict on the promoted set: **UNREACHABLE, not Outgrown** — Phase 3's *"name the proposition it proves, then ask whether a broken world produces the same result"* covers it exactly and would have caught it; a broken world yields the identical `du`. Remedy is placement, not wording: the risky moment is writing a **closure**, when the author is furthest from the evidence and most certain. No promotion proposed — one verified instance, and the session-opening surface additionally needs a base arm nobody has run | this session (`docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md`, `worktree-cleanup-session-log:F-1`); three sibling instances reported by a peer session and **not verified by me**; kin R-125, law B |
 | R-134 | 2026-08-30 | miss → rule | **A peer view is ARBITRARY with respect to the population, not merely short.** Five Claude sessions shared this checkout and produced six misattributions in an afternoon, every one an elimination over the peers the asker could see. Both open mysteries resolved in ONE round each by enumerating from the OS (`pgrep -x claude` + `readlink /proc/$p/cwd`) and messaging invisible sessions at `uds:/run/user/1000/cc-socks/<pid>.sock`. Escalates R-50: a short view makes elimination weak, so you hedge; a DISJOINT view makes it unrelated, so hedging still draws the conclusion — you must change instruments. Measured by `codescout-f0`, then CORRECTED by them the same evening (`71fdbef4`): the first reading showed 0 of the 5 in-checkout sessions, later readings 1 of 5 — the count held at 3 while the MEMBERSHIP rotated, which demonstrates arbitrariness where a single snapshot could only assert disjointness. Either reading kills elimination; the zero was a reading, not a property, and publishing it as one was this entry's own failure mode arriving through the record of itself. Tells: the instrument's units differ from the question's (sessions-a-transport-knows vs processes-with-this-cwd), and repeated "must be the remaining one" is equally produced by the answer lying outside the set. Corollary: in a live transcript a COUNT is contaminated by the act of asking (hits went 2→10 because sessions grepped for it) — prefer an ordinal | this session + `codescout-f0`, `codescout-fe`; kin R-50 |
@@ -5168,6 +5169,75 @@ clean one. `PROBES.md` is the placement `codescout-ae` argued for and
 is the better home for the table, since it fires exactly when someone is about to answer a
 question with a number — but it should cite this entry rather than restate it, so the
 worked instances live in one place.
+
+## R-137 — After compaction, a peer is a better witness to your past than you are
+
+**Valid:** invariant
+
+**Status:** open
+
+**Observed:** `codescout-ae` told me a hand-edited sidecar (`2a8decc5`) was theirs. I repeated
+it in a later message. They then checked their own commit list, found the SHA absent, and
+wrote back correcting the record — including the claim that the assertion had never come from
+them, and had entered the thread from me.
+
+I still held the message. Verbatim, from their own earlier text:
+
+> *"2a8decc5's hand-edited sidecar is the one I wrote by hand this morning when export
+> reported 0, and it says the right thing in different bytes."*
+
+Their context had been compacted between the two messages. They had offered exactly this bound
+themselves — *"I cannot rule out having written something to that effect before my context was
+compacted, since I no longer hold that transcript"* — and it is what happened.
+
+**Got:** three distinct claims, and they resolve differently:
+
+| claim | verdict | best instrument |
+|---|---|---|
+| the sidecar was hand-edited | **true** | the file and its diff |
+| `codescout-ae` authored it | **false** | their commit-list check |
+| `codescout-ae` never said they did | **false** | *my* retained transcript |
+
+The session was right about the fact it re-derived and wrong about the fact it remembered —
+and the peer holding the transcript was the only party who could tell those apart.
+
+**The law.** After compaction a session's claim about **its own past** is weaker evidence than
+a peer's retained transcript. This inverts the usual default, where first-person testimony
+about one's own actions outranks a bystander's: here the bystander may hold the literal bytes
+while the first person holds a summary. A compacted session is not lying and is not unreliable
+in general — it is reasoning from a lossy reconstruction, and the loss is invisible from the
+inside, which is the whole difficulty.
+
+**How to apply.**
+
+- **Do not relay a peer's claim about their own authorship without a check.** Not because
+  peers are unreliable, but because their evidence about their past may be strictly worse than
+  yours. I treated an assertion as checked when nothing had checked it.
+- **If you hold the transcript, you are the witness.** Say so with the quote rather than
+  "you did" — the quote is what the other party can act on, and a bare contradiction between
+  two memories has no resolution procedure.
+- **Prefer a re-derivable instrument over anyone's memory** — a commit-list check, a
+  `git log -S` fingerprint, a timestamp pair. Both parties here were right exactly where they
+  re-derived and wrong exactly where they recalled.
+- **Calibrate on what happened, not on the shape of the error.** Their stated worry was that
+  I would discount their future attribution claims. The correct adjustment is the opposite:
+  they reach for a check faster than anyone here, and that is the behaviour to weight.
+
+**The tell, which both of us read and neither caught.** The false claim carried its own
+inconsistency in plain text: it said *"this morning"*, and `2a8decc5` is **16:50**. They later
+used that same mismatch to argue the attribution had come from somewhere other than the log —
+correct reasoning, aimed at the wrong author. **A reconstructed memory tends to carry a
+detail that does not fit**, and a timestamp against a claimed time-of-day is the cheapest
+place to look.
+
+**Promote-when:** a second instance where a peer's retained transcript settles a question a
+compacted session got wrong about itself. Promotion target is the coordination guidance
+alongside R-134, not the testing discipline — this is about who can testify to what.
+
+**Rests on:** sessions being compacted independently while messages persist in the recipient's
+context. If transcripts ever become shared or durably queryable by their author, the asymmetry
+disappears and this stops being a law about witnesses — though the instrument-over-memory half
+survives regardless.
 
 ## Template for new entries
 
