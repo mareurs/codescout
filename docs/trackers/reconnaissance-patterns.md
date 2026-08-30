@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 132
+entry_high_water_R: 133
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-133 | 2026-08-30 | miss → rule | **Loudness is a property of a PATH, not of a failure.** Three failures in one afternoon across three subsystems: a stale sidecar restores clean reporting success; a widened status region silently discharges the disagreement the scan exists to report; and BL-66, which *aborts the process* — maximally loud — and survived anyway because nothing in-tree reaches it (verified here: `install_default_crypto_provider()` is called unconditionally at every construction site, `main.rs:253` / `agent/mod.rs:448` / `reranker.rs:80` / `embedder.rs:339`, and `transport.rs:34` states the invariant as a reason not to handle the error). So the axis is not loud-vs-silent output but whether any TRAVERSED path observes the failure. When adding a guard, name the path that reaches it and the observer who acts on it; "an external consumer we do not have" is a legitimate reason to keep it and is not coverage of our own risk. Reachability twin of R-132's monotonicity. Tell: ask what an observer would SEE differently if this were broken right now | this session + `codescout-ae` (`e6414362`, BL-66); kin R-131, R-132 |
 | R-132 | 2026-08-30 | technique | **Mutate once per guarded SITE, not once per feature.** A mutation run answers a question about one LINE, not about a feature; where a law is implemented at N call sites, one kill proves exactly one site is guarded and says nothing about the other N−1. `artifact_augment` had two shape-writing paths (`merge=false`, and the sibling patch inside `merge=true`); mutating each separately killed DIFFERENT tests, neither failing under the other's mutation — a single mutation would have yielded the reasonable conclusion "the write-through is covered" with the second site unguarded. Pairs with R-130 (read which assertion died) and R-131 (its transitions-side twin) **Limit (general form):** *a test cannot detect a change its assertion is MONOTONE under* — absence assertions are monotone under removal, existence assertions under widening, so a property held by one of each is covered ZERO times, not weakly. Pairing an absence test with a positive one does NOT rescue it (my first fix, falsified by `codescout-ae` in `e6414362`: the violation mutation killed none of six tests, the positive one surviving because "a region CONTAINING the drift" is monotone under widening). Ask which direction each assertion is monotone under, and mutate the other way | this session's 4-mutation matrix; `codescout-ae`'s `entry_status_region` (both sites guarded) = datapoint 2; Promote-when FIRED |
 | R-131 | 2026-08-30 | miss → rule | **Individually correct guards can compose into a door nobody can open.** Three sidecar write paths each carried a defensible, test-pinned guard — export skips an existing sidecar (idempotence), `reindex` attaches only when a row is absent (repair not sync), `artifact_augment` did not touch the file — and together left NO path that updates a sidecar after the first export. Invisible in every individual diff, because each guard is right. Fired within a day: a shape edit reported `exported: 0` while the committed YAML held the superseded enum, and a fresh clone would have restored the old shape reporting `augmentations_restored: 1` — **a stale sidecar is strictly worse than an absent one**, absence being loud and staleness restoring clean. Rule: enumerate a state's TRANSITIONS (create/restore/update) and map sites onto them; a transition with no owner is the defect. Tell: a skip justified by "idempotent", which is a property of repeated identical calls and says nothing about changed input | BL-50 item (2); peer repair `2a8decc5`; kin R-132, R-47 |
 | R-130 | 2026-08-30 | technique (found by a peer, checked against my own matrices) | **A mutation kill is not evidence that the named guard fired.** One level below [[tests-that-cannot-fail]]: a test can die under your mutation for a reason unrelated to the clause its name claims, and the matrix records `KILLED` either way. `codescout-ae`'s `status_token_present_does_not_match_a_status_word_inside_a_longer_word` died on its **first** assertion (the positive separator one) and never reached the boundary assertions it is named for — a tick for a guard that never ran. Fixed by splitting, with the discriminating evidence coming from a **second** mutation (strip-punctuation normalisation, the obvious alternative implementation) that the separator clause survives: two mutations, two disjoint kills, each test provably guarding its own clause. Rules: read which ASSERTION died, not the test name; one mutation is never enough for a multi-clause test; `positive`-then-`negative` ordering is the risky shape because the positive clause absorbs the kill. Re-checked both matrices I published today — both died for their named reason, but by luck (each had one load-bearing assertion, so no earlier clause was available to absorb it) |
@@ -4785,6 +4786,18 @@ fixture (params `open`, Status line `done`, the word `open` in the prose below),
 both directions: passes clean, and under the mutation it is the only one of seven that
 fails, on its own assertion.
 
+**A discriminating fixture has a load-bearing SETUP detail, and no assertion can name it**
+(`codescout-ae`). The assertion states what must be true; nothing states which part of the
+*setup* is what makes the test able to tell the difference. Their case: the fixture
+discriminates only because the word `open` appears in prose below a `done` status line — tidy
+the prose and the test silently stops discriminating, and no assertion can catch it, because
+that change is monotone too. Mine:
+`a_params_only_merge_leaves_the_committed_sidecar_byte_identical` works only because a
+trailing YAML comment no serializer emits is appended to the fixture; without it the
+assertion passes for an unconditional rewrite, `params` not being part of the rendering.
+Put the reason **on the fixture line**, stating what breaks if the detail goes — not in the
+test name, not in the assertion message, and never as a bare "do not edit".
+
 **Superseded note (kept, because the prediction is the point):** `codescout-ae` reported having mutation-tested the same
 function twice today along a *different* axis (its predicate), been satisfied, and only then
 found `entry_status_region` had two locators behind one rule. If that run confirms one
@@ -4799,6 +4812,72 @@ write-through pair (different tests died per site) and `codescout-ae`'s `entry_s
 target is CLAUDE.md's testing discipline beside *demand a deliberate break*, and it should
 land **as a pair with its limit**: a per-site mutation rule that does not mention absence
 tests would licence exactly the kind of clean kill that proves nothing.
+
+## R-133 — Loudness is a property of a path, not of a failure
+
+**Valid:** invariant
+
+**Status:** open
+
+**Observed:** three failures found in one afternoon across three unrelated subsystems, by
+three sessions. The first two look like one lesson and the third breaks it open.
+
+1. **A stale augmentation sidecar** (this session). A fresh clone's `reindex` attaches the
+   superseded shape and reports `augmentations_restored: 1` — success. The absence it
+   replaced was loud: `augmentation_declared_but_absent` reports it by design.
+2. **A widened status region** (`codescout-ae`, `e6414362`). Swallowing a whole section
+   makes the params status *more* likely to be found, so the scan silently **discharges**
+   the disagreement it exists to report. A false negative in machinery built to report.
+3. **BL-66** (`codescout-ae`, reported; the mechanism verified here). A missing rustls crypto
+   provider **aborts the process** — maximally loud, no silence anywhere — and the defect
+   survived anyway, because nothing in this tree ever reaches it.
+
+**Got:** the obvious synthesis from (1) and (2) is *"a silent wrong answer is worse than a
+loud missing one."* True, and (3) shows it is the wrong axis. Loud output did not help,
+because **no traversed path observes it.**
+
+**Verified here, and stronger than reported.** `codescout-ae` framed (3) as "the one caller
+who would have heard it installs the provider at startup". It is not one caller:
+`install_default_crypto_provider()` is called unconditionally at **every** in-tree
+construction site — `src/main.rs:253`, `src/agent/mod.rs:448`, `src/retrieval/reranker.rs:80`,
+`src/retrieval/embedder.rs:339` — and `src/retrieval/transport.rs:34-38` carries a comment
+*stating the invariant as a reason not to handle the error*: "the only documented failure is
+TLS backend initialisation, which `crate::install_default_crypto_provider` has already
+performed at every construction site." So the abort is not merely unreached by accident; it
+is unreachable **by design, deliberately, at every site**, and a comment says so. The alarm
+is in perfect working order and is wired to a door that is welded shut.
+
+**The law.** Loudness is a property of a **path**, not of a failure. An alarm nobody
+traverses is exactly as informative as no alarm. The axis is not loud-vs-silent output; it
+is *whether any path an observer actually walks reaches the failure*. (1) and (2) fail on
+output; (3) fails on reachability; all three are the same defect class — **nothing anyone
+sees is different when the thing is broken.**
+
+**How to apply.** When adding or reviewing a guard, an alarm, an error return, or a
+`panic!`, name two things and write them down:
+
+- the **path** that reaches it — a concrete caller, not "a caller";
+- the **observer** who acts on what it emits.
+
+If the honest answer is "an external consumer of this crate, which we do not have in-tree",
+that is a legitimate reason to keep it — but it is **not coverage of our own risk**, and a
+test asserting the alarm fires is testing a path no in-tree execution takes. Say so at the
+test, or the green tick will later be read as protection.
+
+**Corollary for tests, and the tell.** This is the reachability twin of R-132's
+monotonicity: there, a test cannot see a change its assertion is monotone under; here, a
+test cannot protect a path nothing executes. Both look like guards, both are green, and
+neither is reached by the failure it names. The tell is common to all three cases above —
+**ask what an observer would SEE differently if this were broken right now.** If the answer
+is "nothing", the guard is decoration regardless of how loudly it is written.
+
+**Promote-when:** a fourth instance, or one where the reachability question is asked *before*
+the guard ships rather than after. Then promote alongside R-132 — they are one rule about
+what a green suite is evidence for, and splitting them across CLAUDE.md would lose that.
+
+**Rests on:** the decision that `install_default_crypto_provider` is called at every
+construction site rather than once at a single entry point. If that ever centralises, (3)'s
+reachability changes and this entry's third datapoint needs re-reading — the law does not.
 
 ## Template for new entries
 
