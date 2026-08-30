@@ -9,6 +9,7 @@ tags:
 - measurement-validity
 - stale-ground-truth
 closed: 2026-08-16
+unverified: 'The `## Fix` section''s deletion did NOT take effect on this machine. Verified 2026-08-30: `.worktrees/bench` is still present at exactly the 174M/163M this file records as reclaimed, with dir mtime 2026-05-12 (three months BEFORE this closure) and a gitdir still naming the pre-rename `code-explorer` path — so it is the original directory, never removed and never recreated. The orphaned-gitdir defect this file describes therefore remains live for `bench`. Successor owns the lifecycle: docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md'
 ---
 
 ## Summary
@@ -89,6 +90,23 @@ $ git cat-file -e ede25e694b63219e1382f359d7ba242f66a516a5:docs/FEATURES.md   # 
    not the one you happen to be standing in.**
 
 ## Fix
+
+> **CORRECTION, 2026-08-30 — the deletion below did not take effect.** `.worktrees/bench`
+> is still on disk at exactly the sizes this section claims to have reclaimed (174M total,
+> 163M `.codescout`). Its dir mtime is 2026-05-12, three months *before* this closure, and
+> its `.git` still names the pre-rename `code-explorer` path — which rules out
+> delete-then-recreate, since the rebuild command below would have written a gitdir naming
+> `codescout`. The figures appear to have been measured and then written up as a past-tense
+> reclaim without a confirming `ls`. Everything below is retained as originally written.
+> Live lifecycle now owned by
+> `docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md`.
+>
+> Two sibling worktrees named in that successor — `.worktrees/bench-legacy` (173M) and
+> `.worktrees/no-local-embedding` (12M), both carrying the same pre-rename gitdir — *were*
+> deleted on 2026-08-30, with 184M reclaimed and verified by `du` before and after.
+> `.worktrees/bench` was deliberately KEPT: `scripts/run-tc-benchmark.sh:18`,
+> `scripts/sweep-bm25-boost.sh` and `docs/PROBES.md:116` all resolve against it as the
+> pinned corpus.
 
 **Resolved by deletion, 2026-08-16.** The worktree was not repairable in place —
 `git worktree repair` requires the referenced repository to exist, and

@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: mitigated
 opened: 2026-08-30
 closed:
 severity: medium
@@ -110,17 +110,51 @@ because `.worktrees/` is not tracked. Nothing routine surfaces them.
 
 ## Fix
 
-Not yet decided. Two independent things need fixing:
+**Partially resolved 2026-08-30**, with the user choosing the scope after being shown
+that `bench` is load-bearing.
 
-1. **The disk state.** 358 MB of unreachable directories. Because no git registration
-   exists, `git worktree remove` is not the tool — plain `rm -rf` is, which is precisely
-   why it needs explicit human authorisation rather than a drive-by cleanup.
-2. **The record.** The archived file asserts a completed deletion. Any future reader
-   sizing disk usage or auditing worktrees will believe it. Its `## Fix` section needs a
-   correction noting the removal did not take effect on this machine, and the file
-   arguably needs `unverified:` set — the field exists for exactly this, a terminal
-   status whose claim was not re-checked.
+**Disk state — done, 184 MB reclaimed** (`du` before and after: 358M → 174M).
+Deleted with `rm -rf`, not `git worktree remove`, because no git registration exists for
+any of them:
 
+- `.worktrees/bench-legacy` (173M) — cited only at `docs/trackers/retrieval-benchmark.md:827`
+  as a historical comparison arm (pinned binary at `0795b208`) whose results are already
+  recorded in that tracker. No script resolves against it.
+- `.worktrees/no-local-embedding` (12M) — cited nowhere in the repo.
+- The five empty shells (`feat`, `github-slim`, `output-buffer-threshold`,
+  `rich-tool-output`, `workspace-onboarding`), each holding only a `.code-explorer` or
+  `.codescout` marker file.
+
+**`.worktrees/bench` (174M) was deliberately KEPT.** The 2026-08-16 closure judged the
+corpus to have "nothing worth keeping", but three live surfaces resolve against it:
+
+- `scripts/run-tc-benchmark.sh:18` — `PROJECT_PATH="${CODESCOUT_PROJECT_PATH:-${REPO_ROOT}/.worktrees/bench}"`
+- `scripts/sweep-bm25-boost.sh:10` and `docs/PROBES.md:116` — the expected-file lists are
+  relative to this pinned corpus, not to HEAD
+- `docs/trackers/retrieval-benchmark.md` — 8 references, including the corpus definition
+
+**The record — done.** The archived file's `## Fix` now opens with a dated correction
+block, and its frontmatter carries `unverified:` naming the contradiction, so the
+canonical bug triage query can reach it.
+
+## Residual — still open
+
+`.worktrees/bench` retains the orphaned gitdir this bug's predecessor was filed about:
+`.git` reads `gitdir: /home/marius/work/claude/code-explorer/.git/worktrees/bench`, and
+that repository does not exist. Consequences, unchanged:
+
+- `git worktree list` will never report it; `git worktree prune` will never clean it
+- any `git -C .worktrees/bench <cmd>` fails
+- it is invisible to every git-based hygiene check, which is how it survived a closure
+  that believed it deleted
+
+`git worktree repair` cannot fix this — it requires the referenced repository to exist.
+The options are to re-register it against this repo
+(`git worktree add --detach .worktrees/bench ede25e694b63219e1382f359d7ba242f66a516a5`
+after moving the existing directory aside, which costs a 163M re-index), or to accept it
+as a plain untracked directory and note that in `docs/trackers/retrieval-benchmark.md`
+so the next reader does not run `git worktree list` and conclude the corpus is missing.
+Not decided.
 ## Workarounds
 
 Treat `.worktrees/` as filesystem state that git cannot see. Audit with `du`/`ls` and by
@@ -128,13 +162,12 @@ reading each `.git` pointer, never with `git worktree list` alone.
 
 ## Resume
 
-Get authorisation for the 358 MB deletion, then correct the archived file's `## Fix`
-section and set `unverified:` on it. Before deleting, confirm nothing still cites
-`.worktrees/bench` as a benchmark corpus — `docs/trackers/retrieval-benchmark.md` is
-named by the archived file as documenting its divergence, and the recreation command
-`git worktree add --detach .worktrees/bench ede25e694b63219e1382f359d7ba242f66a516a5`
-is the stated way to rebuild it if it is still wanted.
-
+The disk cleanup and the record correction are both done (see `## Fix`). What remains is
+the single decision in `## Residual`: whether to re-register `.worktrees/bench` against
+this repo — costing a 163M re-index — or to accept it as a plain untracked directory and
+say so in `docs/trackers/retrieval-benchmark.md:76`, which currently tells the reader to
+check for it with `git worktree list | grep .worktrees/bench`. That check returns nothing
+today and always will, which is the trap that produced this bug.
 ## References
 
 - `docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md` — the closure this contradicts
