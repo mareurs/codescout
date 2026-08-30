@@ -727,14 +727,30 @@ board is a claim about the past.
 > validation, not inheriting it — and it is operator-facing, since a url-set /
 > model-unset deployment works today.
 >
-> **(c) A real contract this block does not name: the retry ladder doubles.**
-> `RemoteEmbedder::embed` carries its own `MAX_RETRIES = 3` with a 500 ms
-> doubling backoff (`remote.rs:385-395`), and root drives the dense leg through
-> `embed_chunks_ordered`'s batch/inflight machinery
-> (`DEFAULT_INFLIGHT = 1`). Stacking them makes a dead endpoint cost
-> retries × sub-batches before it reports, where today it is sub-batches alone.
-> Decide which layer owns retry **during** the swap; it is the one genuine
-> behaviour change of the three, and unlike (a) and (b) it has no correct default.
+> **(c) A real contract this block does not name: the swap ADDS retry to a
+> dense leg that has none.** Root's `EmbedderHttp::dense_batch`
+> (`src/retrieval/embedder.rs:441`) issues a single `req.send().await` — no
+> attempt counter, no backoff. A dead dense endpoint fails on the first try
+> today. `RemoteEmbedder::embed` carries `MAX_RETRIES = 3` with a 500 ms doubling
+> backoff (`remote.rs:384-395`), so the swap introduces ~1.5 s of retry per
+> sub-batch where there was none.
+>
+> *Corrected 2026-08-30, same day, by the session that wrote this block's first
+> version: it said "the retry ladder **doubles**", which is false. Root's
+> 8-attempt `100ms * 2^min(attempt,6)` ladder is on the **sparse** leg only —
+> every match for `retry` in `embedder.rs` is `/embed_sparse` — and the sparse
+> leg stays in root, untouched by this swap. "Doubles" implies removing
+> redundancy; the true finding asks whether the dense leg should retry **at
+> all**, which is a different question with a different answer.*
+>
+> And this project has a prior on it, which is why the question is not
+> rhetorical: the sparse ladder's cap is documented as "the only thing standing
+> between a sparse server stuck returning a retryable status and an unbounded
+> retry — and since Stage 1, that loop now runs while the per-project index lock
+> is held for the whole `sync_project` pass: unbounded retry there means the lock
+> never releases, wedging every subsequent index for that project"
+> (`embedder.rs:1481-1487`). Dense retry would run under that same lock. Decide
+> **during** the swap; unlike (a) and (b) this one has no correct default.
 >
 > Contract 1 (query prefix) is unaffected and still exactly right — confirmed at
 > the bytes: both `from_url` and `custom` hardcode
