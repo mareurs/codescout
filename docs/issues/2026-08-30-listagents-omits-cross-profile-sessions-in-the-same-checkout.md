@@ -1,7 +1,7 @@
 ---
 id: '4266d09da90acb5e'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: ListAgents omits live cross-profile sessions writing the same checkout, and reports the short count as complete'
 tags:
 - harness
@@ -9,11 +9,11 @@ tags:
 - cross-session
 - misleading-completeness
 - not-codescout-source
-closed: null
+closed: 2026-08-30
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: Root cause CONFIRMED bidirectionally and the population is now MEASURED rather than inferred (see § The population, measured). What remains unread is the harness source, which is not in this repo, so the mechanism (profile-scoped registry) is still named from behaviour rather than from code.
+unverified: Root cause UNFIXED and unfixable here — ListAgents' profile-scoped registry is a harness defect. Only the local mitigation shipped (scripts/peer-sessions.sh + PROBES.md row). Nothing prevents a session from trusting ListAgents' count instead of running the probe; the placement makes it reachable, not mandatory. Re-open if the harness changes, or if a seventh misattribution occurs despite the probe existing — that would mean placement was not enough and the count needs to be wrong LOUDLY rather than quietly.
 ---
 
 > **Not a codescout bug.** `ListAgents` is a Claude Code harness tool; its source
@@ -31,6 +31,42 @@ with a definite count: *"Peer sessions (2)"*.
 Nothing marks it as partial. It is not a suspicious zero that invites a second look;
 it is a confident small number, which is worse.
 
+
+### Mitigated 2026-08-30 — measured, and the mitigation made runnable
+
+**The count was worse than this file assumed.** `ListAgents` reported **3** sessions in the
+codescout checkout (self + 2 peers). Enumerating `/run/user/$UID/cc-socks/*.sock` →
+`/proc/<pid>/{comm,cwd}` found **five**:
+
+| pid | started | visible to `ListAgents`? |
+|---|---|---|
+| `801487` | 11:09:44 | yes |
+| `803654` | 11:10:09 | yes (self) |
+| `807989` | **11:10:52** | **no** |
+| `810953` | 11:11:19 | yes |
+| `3954769` | 17:39:22 | **no** |
+
+`807989` had been running since **before any inter-session message that day** and was
+invisible to every participant for the entire day. So the afternoon's six authorship
+misattributions were eliminations over a population short by **two** — not by the one
+suspected, and not symmetric-but-small as this file's "real population ≥ 6" estimate
+implied for the machine as a whole.
+
+**What changed in this repo.** The root cause is in the harness and stays blocked. But the
+mitigation described below existed only as prose *here*, so it fired when someone opened this
+bug — never when someone was about to attribute a write. It is now
+[`scripts/peer-sessions.sh`](../../scripts/peer-sessions.sh), listed in
+[`docs/PROBES.md`](../PROBES.md), whose header reads *start here before answering a question
+with a number*. That is the placement argument from `bug-fix-session-log:W-85`: a procedure
+filed as a fact predicts it will be known and not done, which is precisely what happened all
+day while the answer sat two paragraphs down in this file.
+
+**Two limits the script states in its own output, because neither is obvious.** It bounds the
+**population** and does not **attribute** a write — elimination over a complete set is still
+elimination. And identifying yourself with `pgrep … | head -1` is unsafe: several codescout
+servers run at once, and on 2026-08-30 that sampled a chain terminating at a *peer*, naming
+the caller as a session that sends it messages. The script walks up from its own shell, which
+is a child of its own server by construction.
 ## Symptom (Effect)
 
 2026-08-30, four sessions live in `/home/marius/work/claude/codescout`. `ListAgents`
@@ -193,15 +229,43 @@ ended in "unidentified", that is now the *correct* answer rather than a shrug.
 #### Invisible is NOT unreachable — and that is the practical remedy
 
 A session absent from every `ListAgents` is still addressable by its socket path:
-`SendMessage(to="uds:/run/user/1000/cc-socks/<pid>.sock")`. Verified 2026-08-30 — sends
-to both invisible pids were accepted by the transport. (Accepted is not the same as
-read; a reply is what would prove delivery, and that is pending.)
+`SendMessage(to="uds:/run/user/1000/cc-socks/<pid>.sock")`. **CONFIRMED 2026-08-30, end to end.** Sends to both invisible pids were accepted by
+the transport, and `3954769` — which appears in no session's `ListAgents` — **replied**,
+opening with *"your hypothesis is confirmed: invisible sessions are addressable, your
+message arrived intact."* It named itself `codescout-fe`, answered the ownership
+question the three visible sessions could not resolve between them, and corrected a
+claim in the message that reached it. Delivered, read, and acted on — not merely
+accepted.
 
 So the defect is **discovery, not connectivity**. The enumeration above reconstructs
 what `ListAgents` should have returned, from a directory every session can read, in
 one command. Anyone blocked on "who else is in this tree?" should run it rather than
 trust the tool.
 
+##### What the reply settled, which three visible sessions could not
+
+The test case was ownership of an untracked file that had been misattributed twice.
+`codescout-ae` was asked and checked and refused it; `git-travel-augmentation-shape`
+was asked and refused it, supplying mtimes showing the file had been **written four
+minutes earlier** — positive evidence of an author active *right now* who was none of
+the three. One socket message resolved it: the file belongs to `codescout-fe`
+(`3954769`), created around 19:55.
+
+So the practical sequence, when authorship is genuinely in question, is:
+
+1. enumerate the sockets — do not trust `ListAgents` for the population;
+2. check mtimes — a recently-written file has a *live* author, which converts an
+   archaeology problem into a conversation;
+3. **ask the invisible sessions directly.** They answer.
+
+**And it corrected me in the same breath**, which is the part worth recording. My
+message guessed the file was *not* theirs because it predated their 17:39 start. It
+did not — I had conflated it with `docs/trackers/worktree-cleanup-session-log.md`
+(mtime 18:21), a *different* untracked file from the same work stream that appeared in
+my `git status` first. Two files, one stream, one session, and I reasoned about the
+wrong one's timeline. Seventh misattribution of the day, and the first that an
+*invisible* session was able to correct — which is precisely the correction the tool's
+blind spot had been preventing all day.
 #### A method note: identifying YOURSELF is its own trap
 
 `codescout-ae` first identified themselves with `pgrep -f 'release/codescout' | head -1`
