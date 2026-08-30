@@ -69,6 +69,19 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     // (2) That message now carries the embedder's RESPONSE BODY, which is arbitrary
     //     remote text. A body containing "not found" or "Collection" would hijack the
     //     collection bucket. Specificity first, per this function's own contract.
+    //
+    // (3) `STATUS_FAILED_MARKER` joins them for reason (2) exactly, and it was LIVE,
+    //     not prospective. `RemoteEmbedder` reported a non-2xx as "HTTP {status} from
+    //     embedding server: {body}", which matches only the `embedding server` arm far
+    //     below the collection bucket — so an embedder 404 whose body read `model
+    //     'coderank' not found` was already being reported as a missing Qdrant
+    //     collection on the `ollama:`/`openai:` resolver path. The fix for root's own
+    //     producer had never been extended to the crate's.
+    //     docs/issues/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md
+    //
+    //     Matching the imported constant rather than a literal is what survives T6:
+    //     once the dense leg delegates to the crate, `dense openai status` has no
+    //     producer left and this arm would otherwise go quietly dead.
     if err_str.contains("larger than the max context size")
         || err_str.contains("exceed_context_size")
         || err_str.contains("input is too large")
@@ -102,7 +115,10 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
          listed as `skipped` in the index status and the index is INCOMPLETE until \
          they embed."
             .to_string()
-    } else if err_str.contains("dense openai status") || err_str.contains("sparse openai status") {
+    } else if err_str.contains("dense openai status")
+        || err_str.contains("sparse openai status")
+        || err_str.contains(codescout_embed::STATUS_FAILED_MARKER)
+    {
         "The dense embedder returned an error status. This is an embedder problem, \
          NOT a Qdrant issue (don't check qdrant logs). The embedder's own response \
          body is included in the error above — read it first; it usually names the \
@@ -1153,6 +1169,77 @@ mod classify_search_error_tests {
         );
     }
 
+    /// The sibling of the test above, for the other half of the failure space.
+    ///
+    /// Root's `dense openai status` and the crate's `EmbedError::Status` describe the
+    /// same event — the server was reached and answered unusably — so they must reach
+    /// the same operator. After T6 the crate's producer is the *only* one, and this is
+    /// what will notice if the arm stops matching it.
+    #[test]
+    fn the_crates_own_status_error_routes_where_roots_does() {
+        let produced = codescout_embed::EmbedError::Status {
+            url: "http://127.0.0.1:48081/v1/embeddings".into(),
+            // Deliberately bland. A body of "input is too large" would be routed by
+            // the payload-size arm above — correctly, since that is more specific —
+            // and this test would then be comparing two buckets neither producer
+            // reached. The fixture has to avoid every earlier arm to test this one.
+            status: 500,
+            body: "internal server error".into(),
+        }
+        .to_string();
+
+        let from_crate =
+            classify_search_error(&format!("stack search failed: {produced}"), "codescout");
+        let from_root = classify_search_error(
+            "stack search failed: dense openai status 500: something went wrong",
+            "codescout",
+        );
+
+        assert_eq!(
+            from_crate, from_root,
+            "root's producer and the crate's must land in the SAME bucket, or the swap \
+             silently changes which hint an operator sees.\nproduced: {produced}"
+        );
+    }
+
+    /// The regression that motivated typing this at all: a status body is untrusted
+    /// text, and it must not be able to impersonate another arm.
+    ///
+    /// `model 'coderank' not found` is the ordinary shape of an embedder 404. Before
+    /// `STATUS_FAILED_MARKER`, its `not found` reached the collection arm — which
+    /// precedes the `embedding server` arm — and the operator was told to re-index a
+    /// Qdrant collection that was perfectly healthy. Live on the `ollama:`/`openai:`
+    /// resolver path, not a hazard the swap would have introduced.
+    ///
+    /// Asserting the *negative* is the point. A test that only checked the right hint
+    /// appears would pass on an arm ordered after the collection bucket, because both
+    /// hints mention the embedder.
+    #[test]
+    fn a_status_body_saying_not_found_is_not_reported_as_a_missing_collection() {
+        let produced = codescout_embed::EmbedError::Status {
+            url: "http://127.0.0.1:48081/v1/embeddings".into(),
+            status: 404,
+            body: "model 'coderank' not found".into(),
+        }
+        .to_string();
+
+        let hint = classify_search_error(&format!("stack search failed: {produced}"), "codescout");
+
+        assert!(
+            !hint.contains("collection is missing"),
+            "an embedder 404 must not be reported as a missing Qdrant collection — the \
+             body is the server's text, not a statement about the store.\nhint: {hint}"
+        );
+        assert!(
+            !hint.contains("sync_project"),
+            "and it must not tell the operator to re-index a healthy store.\nhint: {hint}"
+        );
+        assert!(
+            hint.contains("embedder"),
+            "it must reach the embedder bucket.\nhint: {hint}"
+        );
+    }
+
     #[test]
     fn openai_send_does_not_hit_generic_qdrant_fallback() {
         let err = "stack search failed: dense openai send";
@@ -1282,11 +1369,27 @@ mod classify_search_error_tests {
         );
     }
 
+    /// Rewritten 2026-08-30 to render the crate's real error rather than a literal.
+    ///
+    /// The hand-written string it used — `HTTP 401 from embedding server: invalid api
+    /// key` — stopped being a wording any producer emits when `EmbedError::Status`
+    /// landed, so the test was pinning a shape that could no longer occur. It still
+    /// passed, which is the whole problem with a literal standing in for a producer.
+    ///
+    /// Its assertion is unchanged and still its own: a 401 must not reach the generic
+    /// Qdrant fallback. Which embedder bucket it lands in is the differential test's
+    /// question, not this one's.
     #[test]
     fn resolver_path_http_status_failure_does_not_hit_generic_fallback() {
-        let err = "could not build the 'openai:text-embedding-3-small' embedder: \
-                   HTTP 401 from embedding server: invalid api key";
-        let hint = classify_search_error(err, "codescout");
+        let produced = codescout_embed::EmbedError::Status {
+            url: "https://api.openai.com/v1/embeddings".into(),
+            status: 401,
+            body: "invalid api key".into(),
+        }
+        .to_string();
+        let err =
+            format!("could not build the 'openai:text-embedding-3-small' embedder: {produced}");
+        let hint = classify_search_error(&err, "codescout");
         assert!(
             !hint.contains("Stack reachable but query failed"),
             "an embedding-server HTTP failure must route to the resolver-path \
