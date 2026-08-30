@@ -55,6 +55,12 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:a04923d31b4ca0d95bd772a4b80c9112f29121014df64d3d80a16a136ca19672
     container_name: codescout-dense-gpu
     restart: unless-stopped
+    # tini as PID 1, so an exited server is reaped rather than left <defunct>.
+    # Docker's own kill path recommends it by name when it hits a Z-state PID.
+    # NOT a proven fix for F-2: that zombie still held 394 MiB of VRAM, which a
+    # reaped process cannot, so the driver's fd release was stuck and wait(2)
+    # would have blocked too. Cheap and correct hygiene; not a remedy.
+    init: true
     command:
       - --model
       - /models/CodeRankEmbed-Q4_K_M.gguf
@@ -81,10 +87,21 @@ services:
       - "127.0.0.1:48081:8080"
     volumes:
       - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    # Probes the embedding path, NOT /health. /health answers from a latch set
+    # once at model load and never touches CUDA, so it reported green through
+    # the 15h outage in F-2 while every request hung. Measured 2026-08-30 on
+    # this host: /health 0.8ms, /v1/embeddings 23ms - a 29x gap, which is the
+    # forward pass /health never runs.
+    # curl's -m must stay BELOW `timeout` so docker reports our failure, not its own.
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 10 -X POST http://127.0.0.1:8080/v1/embeddings
+          -H 'Content-Type: application/json'
+          -d '{"input":"health"}' -o /dev/null || exit 1
       interval: 15s
-      timeout: 5s
+      timeout: 15s
       retries: 10
       start_period: 60s
     deploy:
@@ -139,15 +156,22 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:turing-1.8@sha256:bd102b08fbdb23fa2a0c747c8b2d154c521e3fce20441266c005ad7a101143a0
     container_name: codescout-sparse-gpu
     restart: unless-stopped
+    init: true  # see dense-gpu; this container was equally unkillable in F-2
     command: ["--model-id", "prithivida/Splade_PP_en_v1", "--pooling", "splade", "--dtype", "float16", "--auto-truncate"]
     ports:
       - "127.0.0.1:48084:80"
     volumes:
       - model_cache:/data
+    # SPLADE path, not /health - see dense-gpu. TEI listens on 80 in-container.
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/health || exit 1"]
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 10 -X POST http://127.0.0.1/embed_sparse
+          -H 'Content-Type: application/json'
+          -d '{"inputs":"health"}' -o /dev/null || exit 1
       interval: 15s
-      timeout: 5s
+      timeout: 15s
       retries: 10
       start_period: 30s
     deploy:
@@ -185,6 +209,7 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:a04923d31b4ca0d95bd772a4b80c9112f29121014df64d3d80a16a136ca19672
     container_name: codescout-reranker-gpu
     restart: unless-stopped
+    init: true  # see dense-gpu
     command:
       - --model
       - /models/bge-reranker-v2-m3-Q4_K_M.gguf
@@ -211,10 +236,17 @@ services:
       - "127.0.0.1:48083:8080"
     volumes:
       - ${CODESCOUT_MODEL_DIR:-./models}:/models:ro
+    # Rerank path, not /health - see dense-gpu. This server was ALSO dead and
+    # ALSO green during F-2; it was checked as a control and failed the same way.
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 10 -X POST http://127.0.0.1:8080/v1/rerank
+          -H 'Content-Type: application/json'
+          -d '{"query":"health","documents":["health"]}' -o /dev/null || exit 1
       interval: 15s
-      timeout: 5s
+      timeout: 15s
       retries: 10
       start_period: 60s
     deploy:
