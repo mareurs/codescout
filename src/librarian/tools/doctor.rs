@@ -760,7 +760,7 @@ fn export_augmentation_sidecars(
             continue;
         }
         let sidecar_abs = sidecar::path_for(scope_root, art);
-        let sidecar_rel = sidecar::rel_path_for(art);
+        let sidecar_rel = sidecar::rel_path_for(scope_root, art);
 
         let Ok(content) = std::fs::read_to_string(art) else {
             failed.push(json!({ "path": abs_path, "error": "unreadable" }));

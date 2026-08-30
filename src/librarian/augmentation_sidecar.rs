@@ -63,26 +63,44 @@ pub struct AugmentationSidecar {
     pub history_cap: Option<i64>,
 }
 
-/// Where an artifact's sidecar lives, given the artifact's path.
+/// Where an artifact's sidecar lives by default.
 ///
-/// Keyed on the file STEM rather than the 16-hex artifact id, deliberately: the id is
-/// `sha256(abs_path)` and is re-minted by every `artifact(action="move")`, so an
-/// id-named sidecar would be orphaned by the archive flow — the single most common
-/// thing that happens to these files.
+/// Derived from the artifact's whole repo-relative path with separators flattened to `-`,
+/// NOT from its file stem. A stem is not unique: `docs/research/README.md` is a real
+/// augmented artifact in this repo, and any second augmented `README.md` would have shared
+/// its sidecar — the second export silently overwriting the first's shape, then both
+/// artifacts restoring to it. That is the data-loss class this whole mechanism exists to
+/// prevent, and it was visible only in the export's dry run, never in the code.
+///
+/// Keyed on path rather than on the 16-hex artifact id because the id is `sha256(abs_path)`
+/// and is re-minted by every `artifact(action="move")` — archiving is the most common thing
+/// that happens to these files. A move re-derives this name too, but the declaration lives
+/// in frontmatter and travels with the file, so the pair cannot drift apart.
 pub fn path_for(repo_root: &Path, artifact_abs_path: &Path) -> PathBuf {
-    let stem = artifact_abs_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unnamed".to_string());
-    repo_root.join(SIDECAR_DIR).join(format!("{stem}.yaml"))
+    repo_root.join(rel_path_for(repo_root, artifact_abs_path))
 }
 
 /// The repo-relative form written into the artifact's `expects_augmentation:` declaration.
-pub fn rel_path_for(artifact_abs_path: &Path) -> String {
-    let stem = artifact_abs_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unnamed".to_string());
+///
+/// `docs/trackers/tool-usage-patterns.md` -> `docs/augmentations/docs-trackers-tool-usage-patterns.yaml`.
+/// Verbose, and deliberately so: the mapping is injective because repo-relative paths are,
+/// and it is reversible by eye. An artifact outside the repo root (which should not happen,
+/// but the catalog spans machines) falls back to the file name alone.
+pub fn rel_path_for(repo_root: &Path, artifact_abs_path: &Path) -> String {
+    let rel = artifact_abs_path
+        .strip_prefix(repo_root)
+        .unwrap_or(artifact_abs_path);
+    let stem: String = rel
+        .with_extension("")
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>()
+        .join("-");
+    let stem = if stem.is_empty() {
+        "unnamed".to_string()
+    } else {
+        stem
+    };
     format!("{SIDECAR_DIR}/{stem}.yaml")
 }
 
@@ -271,17 +289,38 @@ mod tests {
         );
     }
 
+    /// The default sidecar name must be injective over artifacts. It is derived from the
+    /// whole repo-relative path, so two files sharing a stem in different directories get
+    /// different sidecars.
+    ///
+    /// The `README.md` pair is not hypothetical: `docs/research/README.md` is augmented in
+    /// this repo today, and a stem-keyed name gave it `README.yaml` — which the next
+    /// augmented README anywhere in the tree would have silently taken over.
     #[test]
-    fn path_is_keyed_on_the_file_stem_not_the_artifact_id() {
+    fn the_default_sidecar_name_is_injective_over_paths() {
         let root = Path::new("/repo");
-        let art = Path::new("/repo/docs/trackers/tool-usage-patterns.md");
+
         assert_eq!(
-            path_for(root, art),
-            Path::new("/repo/docs/augmentations/tool-usage-patterns.yaml")
+            rel_path_for(
+                root,
+                Path::new("/repo/docs/trackers/tool-usage-patterns.md")
+            ),
+            "docs/augmentations/docs-trackers-tool-usage-patterns.yaml"
         );
         assert_eq!(
-            rel_path_for(art),
-            "docs/augmentations/tool-usage-patterns.yaml"
+            path_for(
+                root,
+                Path::new("/repo/docs/trackers/tool-usage-patterns.md")
+            ),
+            Path::new("/repo/docs/augmentations/docs-trackers-tool-usage-patterns.yaml"),
+            "path_for and rel_path_for must agree — the export writes one and stamps the \
+             other, so a disagreement writes a file nothing can find"
         );
+
+        // Same stem, different directories: the collision that motivated this.
+        let a = rel_path_for(root, Path::new("/repo/docs/research/README.md"));
+        let b = rel_path_for(root, Path::new("/repo/docs/manual/README.md"));
+        assert_ne!(a, b, "two READMEs must not share a sidecar");
+        assert_eq!(a, "docs/augmentations/docs-research-README.yaml");
     }
 }

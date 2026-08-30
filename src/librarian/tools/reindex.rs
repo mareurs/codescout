@@ -922,7 +922,7 @@ mod tests {
     /// only test that fails if two of them agree with their own unit test and not with each
     /// other. It is deliberately NOT claimed that some specific mutation escapes the unit
     /// suite and dies here — the path helpers are pinned together by
-    /// `path_is_keyed_on_the_file_stem_not_the_artifact_id`, so the obvious candidate does
+    /// `the_default_sidecar_name_is_injective_over_paths`, so the obvious candidate does
     /// not, and an unverified claim about one's own coverage is the failure this comment
     /// would otherwise be an example of.
     #[tokio::test]
