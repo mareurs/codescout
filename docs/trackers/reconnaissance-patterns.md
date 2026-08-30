@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 130
+entry_high_water_R: 132
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,8 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-132 | 2026-08-30 | technique | **Mutate once per guarded SITE, not once per feature.** A mutation run answers a question about one LINE, not about a feature; where a law is implemented at N call sites, one kill proves exactly one site is guarded and says nothing about the other N−1. `artifact_augment` had two shape-writing paths (`merge=false`, and the sibling patch inside `merge=true`); mutating each separately killed DIFFERENT tests, neither failing under the other's mutation — a single mutation would have yielded the reasonable conclusion "the write-through is covered" with the second site unguarded. Pairs with R-130 (read which assertion died) and R-131 (its transitions-side twin) **Limit:** an absence assertion (`is_empty()`, `!exists()`) is satisfied by the mechanism being DEAD, and cannot be tightened — pair it with a positive test or it is decoration (measured: mutation 4 left the never-creates test passing with `write_through` fully disabled) | this session's 4-mutation matrix; `codescout-ae`'s `entry_status_region` (both sites guarded) = datapoint 2; Promote-when FIRED |
+| R-131 | 2026-08-30 | miss → rule | **Individually correct guards can compose into a door nobody can open.** Three sidecar write paths each carried a defensible, test-pinned guard — export skips an existing sidecar (idempotence), `reindex` attaches only when a row is absent (repair not sync), `artifact_augment` did not touch the file — and together left NO path that updates a sidecar after the first export. Invisible in every individual diff, because each guard is right. Fired within a day: a shape edit reported `exported: 0` while the committed YAML held the superseded enum, and a fresh clone would have restored the old shape reporting `augmentations_restored: 1` — **a stale sidecar is strictly worse than an absent one**, absence being loud and staleness restoring clean. Rule: enumerate a state's TRANSITIONS (create/restore/update) and map sites onto them; a transition with no owner is the defect. Tell: a skip justified by "idempotent", which is a property of repeated identical calls and says nothing about changed input | BL-50 item (2); peer repair `2a8decc5`; kin R-132, R-47 |
 | R-130 | 2026-08-30 | technique (found by a peer, checked against my own matrices) | **A mutation kill is not evidence that the named guard fired.** One level below [[tests-that-cannot-fail]]: a test can die under your mutation for a reason unrelated to the clause its name claims, and the matrix records `KILLED` either way. `codescout-ae`'s `status_token_present_does_not_match_a_status_word_inside_a_longer_word` died on its **first** assertion (the positive separator one) and never reached the boundary assertions it is named for — a tick for a guard that never ran. Fixed by splitting, with the discriminating evidence coming from a **second** mutation (strip-punctuation normalisation, the obvious alternative implementation) that the separator clause survives: two mutations, two disjoint kills, each test provably guarding its own clause. Rules: read which ASSERTION died, not the test name; one mutation is never enough for a multi-clause test; `positive`-then-`negative` ordering is the risky shape because the positive clause absorbs the kill. Re-checked both matrices I published today — both died for their named reason, but by luck (each had one load-bearing assertion, so no earlier clause was available to absorb it) |
 | R-129 | 2026-08-30 | miss (×1, reported + relayed) + near-miss (×2) — **promote-when FIRED same day** | **In a shared checkout, the deliberate break this project mandates is indistinguishable from a defect.** CLAUDE.md and `sdd-ruling-log` require *demand a deliberate break* — break the thing, watch the specific test die. Nothing in a shared tree distinguishes that from a real failure. Mutation-verifying a packaging gate, I removed a `Cargo.toml` `exclude` negation; an IL-3 refusal killed the chained restore and the window stayed open for minutes. `codescout-ae`: *"had my gate landed inside your window, I'd have seen a red packaging test and no way to know it was deliberate — I'd very likely have reported it, and on today's form at the wrong person."* Worse, no `git add` is needed for the break to reach them: `cargo test` compiles the WORKING TREE and cargo does not consult git, so their "4862 passed" silently included my untracked test and a third session's dirty files, under a "HEAD is green" claim. **Rule: announce a mutation window BEFORE opening it, not after closing it** — one message, false alarm becomes a no-op. Distinct from [[R-90]], which is about writes crossing between sessions; here nothing crosses and the harm is entirely in the other session's reading, so no git discipline reaches it. Sub-lesson: a cleanup step chained AHEAD of a blockable step is not protected by being first — the block takes the whole command. **Instance 3 fired both promote conditions within minutes of the entry being written:** `codescout-ae` measured a lean-lane failure, checked attribution, and reported it as the documented feature-gating class; I verified it was not mine and relayed it to its owner citing that class. All three of us were careful and all three were wrong — there was no defect. `swap-dense-leg` was mutation-checking, and the deletion of `\|\| err_str.contains(SPARSE_STATUS_MARKER)` landed BETWEEN the gate's `cargo test` and its lean lane; the "full passes / lean fails" shape had nothing to do with feature gating. Their framing, sharper than mine: the working-tree hazards make **numbers** unreliable, this one makes a peer confidently report a **specific defect** with correct evidence and a wrong conclusion — **the hazard where being careful and being wrong are most compatible**, and attribution discipline does not touch it. Target: CLAUDE.md beside *demand a deliberate break*. Held for an operator call, because per-session worktrees would dissolve [[R-90]] and this together |
 | R-128 | 2026-08-30 | technique (validated on first use) | **Enumerate the call sites of a must-call function and look for the absentee.** Asked to audit root/crate *pairs* for a named defect class, the pair-shaped sweep came back clean — correctly, and that clean result was the confirming-negative worth doubting. Inverting the question from "which functions are duplicated?" to "which stated invariant does a site break?" found `BL-66`: root's `transport.rs` asserts `install_default_crypto_provider` runs "at every construction site", five call sites exist, and one crate client-builder is absent from the list. The pairwise diff **structurally** could not find it — the defective function has no twin, and an absentee is defined by there being one place it should be and isn't. Blind spot: only finds violations of invariants someone has *stated*. |
@@ -4619,6 +4621,158 @@ assertions would not have been so forgiving, and neither matrix would have shown
 that never ran. Then it belongs beside *demand a deliberate break* in CLAUDE.md, as its
 qualifier — that rule as written says break it and watch the test die, and this says
 watching it die is not enough.
+
+## R-131 — Three individually correct guards composed into a door nobody could open
+
+**Valid:** invariant
+
+**Status:** open
+
+**Observed:** BL-50 shipped the mechanism that makes augmentation *shape* travel in git.
+Three sites touch a sidecar, and each carried a deliberate, defensible guard, each pinned
+by its own test:
+
+- `doctor(fix="export_augmentations")` **skips an artifact whose sidecar already exists** —
+  that is precisely what makes it idempotent, and its test says so in as many words:
+  `"already-exported artifacts must be skipped, not rewritten"`.
+- `reindex` **attaches only when no augmentation row exists** — repair, never sync, so a
+  live augmentation whose params have moved on can never be clobbered by a stale committed
+  file.
+- `artifact_augment` **did not touch the sidecar at all** — it is a catalog tool.
+
+Every one of those is correct in isolation, and I wrote or reviewed all three.
+
+**Got:** after the first export, **no path could update a sidecar.** The composition was a
+one-way door, and no reviewer of any single guard could see it, because each guard is
+right. It fired within a day of shipping: a peer widened a tracker's `params_schema` enum,
+ran the export, and got `exported: 0` while the committed YAML still held the superseded
+seven-value list. They hand-edited the YAML (`2a8decc5`). Had they read that `0` as
+"nothing to do" rather than interrogating it, a fresh clone's `reindex` would have attached
+the **old** shape and reported `augmentations_restored: 1` — success.
+
+**A stale sidecar is strictly worse than an absent one.** Absence is loud:
+`augmentation_declared_but_absent` reports it and the whole `expects_augmentation`
+mechanism exists to make it loud. Staleness restores clean and reports success. So the
+feature converted a reported failure into a silent wrong answer for the update case — a
+regression in *kind*, not degree, shipped by three correct changes.
+
+**The pattern.** When an invariant is maintained at more than one site, reviewing each
+site's guard against its own local correctness cannot find this class. The question that
+finds it is not *"is this guard right?"* but *"for each transition of the state this guard
+protects, which site owns it?"* Here the transitions were **create / restore / update**,
+and `update` had no owner. Enumerate the transitions, then map sites onto them; a
+transition with no site is the defect, and it is invisible in every individual diff.
+
+**Cheap tell: a skip condition justified by the word "idempotent."** Idempotence is a
+property of repeated *identical* calls. It says nothing about a call whose input has
+changed — and "the input changed" is exactly the update transition. Any guard whose
+rationale is idempotence is worth checking for a missing update owner.
+
+**Second tell, from my own record:** I wrote in BL-50 that item (2) was *"not blocking,
+since the export is idempotent."* That sentence names the mechanism of the bug and
+concludes it is safe. When a risk assessment's justification restates the risky behaviour,
+it is not an argument.
+
+**Promote-when:** a second instance of individually-correct guards leaving a transition
+unowned is recorded here — then promote to CLAUDE.md beside *demand a deliberate break*,
+as an enumerate-the-transitions rule for any invariant with more than one write site.
+
+**Rests on:** the `docs/augmentations/` sidecar design (BL-50) and the decision that the
+catalog is authoritative while the sidecar is its committed projection. If that direction
+ever inverts — sidecar authoritative, catalog derived — the analysis changes but the
+transition-enumeration lesson does not.
+
+## R-132 — Mutate once per guarded SITE, not once per feature
+
+**Valid:** invariant
+
+**Status:** open
+
+**Observed:** closing R-131's gap meant hooking a sidecar write-through into
+`artifact_augment`, which turned out to have **two** shape-writing paths, not one:
+`create_or_replace_augmentation` (`merge=false`) and the sibling-field patch inside the
+`merge=true` branch. I wrote a test for each and, out of habit rather than design, mutated
+each hook separately instead of mutating "the feature" once.
+
+**Got:** the two mutations killed **different** tests, and neither test failed under the
+other's mutation.
+
+| mutation | test that died | failure text |
+|---|---|---|
+| `merge=false` hook removed | `a_shape_change_writes_through_to_the_committed_sidecar` | `left: "before", right: "after"` |
+| `merge=true` hook removed | `a_merge_true_sibling_change_writes_through_too` | `left: None, right: Some("rows")` |
+| never-creates guard removed | `write_through_never_creates_a_sidecar_that_does_not_exist` | the forbidden file existed |
+
+A single mutation would have produced one kill and the entirely reasonable conclusion
+*"the write-through is covered."* The second site would have been unguarded, and the gap
+would have been the same one R-131 describes — reopened one layer down, inside the fix for
+it.
+
+**The pattern.** A mutation run answers a question about **one line**, not about a feature.
+Where a law is implemented at N call sites, N mutations are needed; one kill proves exactly
+one site is guarded and says nothing about the other N−1. This is the testing-side twin of
+R-131: there, enumerate the *transitions* of a state; here, enumerate the *sites* that
+implement a law, and mutate each.
+
+**Sharpening (credit: `codescout-ae`, this session).** The kill is only worth what its
+*message* says. "Does the test die?" is weaker than **"does it die for the reason the test
+names?"** — an `assert!(sidecar.exists())` would have died under mutation 1 too, but for
+"file missing" rather than for the real defect. All three assertions above are equality
+against a specific expected value, so mutation 1's `left: "before"` shows the sidecar
+holding the **superseded** shape — the exact production failure, not an incidental one.
+Their independent case: a sequential-await mutation produced `left: 1, right: 2`, so a
+laxer `assert!(n > 0)` would have **passed** under the very bug the test existed to catch.
+
+**Datapoint 2, MEASURED (credit: `codescout-ae`).** They ran the per-site check on
+`entry_status_region`, a scan they had already mutation-tested twice today along a
+*different* axis (its predicate) and been satisfied with. Result: **both sites independently
+guarded** — mutation A (table-row locator) killed only the table test, mutation B (heading
+locator) only the heading test, disjoint kills. A boring outcome, and that is the honest
+cost side: the check is cheap and often confirms what you hoped.
+
+**The LIMIT of this law — an absence test is satisfied by the mechanism being dead.** Also
+`codescout-ae`'s, and measured against this suite rather than assumed. `assert!(x.is_empty())`
+or `assert!(!file.exists())` states that nothing happened; a dead mechanism also produces
+nothing. Unlike a too-lax assertion this cannot be tightened — `is_empty()` is already
+maximal, and **the expected value of an absence test simply IS the failure mode's output.**
+Measured here as **mutation 4**: making `write_through` return `Ok(None)` immediately, the
+whole mechanism dead, left `write_through_never_creates_a_sidecar_that_does_not_exist`
+**passing**, while both positive tests died. So its per-site kill in the table above was
+real, but the test is evidence *only* because a positive test on the same mechanism is
+paired with it. **The rule, in three pieces** — final form owed to `codescout-ae`, who corrected the
+two-piece version I first wrote here:
+
+- For a **positive** test, the informative mutation REMOVES the mechanism.
+- For an **absence** test, removing the mechanism *produces the asserted outcome*, so that
+  mutation is uninformative by construction.
+- For an absence test, the informative mutation is the one that makes the mechanism
+  **perform the forbidden act**.
+
+Pairing with a positive test establishes only that the mechanism is ALIVE. It does **not**
+establish that the absence test can SEE a violation — that was the gap in my first
+formulation, and both checks are needed. Measured on this ledger's own suite, on both axes:
+mutation 4 (mechanism dead) left the never-creates test passing, confirming vacuity under a
+dead mechanism; **mutation 3** made `write_through` commit the forbidden act — guard
+deleted, parent directories created so the write would actually land — and the test died on
+its own assertion. So the absence test here is verified in both directions. `codescout-ae`
+reports their two `is_empty()` silence tests have live-mechanism pairing but no violation
+mutation, which by this rule leaves their detection ability **unknown rather than
+established** — the distinction the third piece exists to make.
+
+**Superseded note (kept, because the prediction is the point):** `codescout-ae` reported having mutation-tested the same
+function twice today along a *different* axis (its predicate), been satisfied, and only then
+found `entry_status_region` had two locators behind one rule. If that run confirms one
+locator unguarded, this entry has its second datapoint from an independent tracker. Their
+framing is worth keeping either way: *a suite can be mutation-tested, honestly and
+carefully, along an axis that is not the one with two call sites on it.* Satisfaction with a
+mutation run is not coverage of the sites.
+
+**Promote-when:** **FIRED 2026-08-30** at two independent instances — this session's
+write-through pair (different tests died per site) and `codescout-ae`'s `entry_status_region`
+(both sites already guarded). Held for an operator decision rather than self-promoted. The
+target is CLAUDE.md's testing discipline beside *demand a deliberate break*, and it should
+land **as a pair with its limit**: a per-site mutation rule that does not mention absence
+tests would licence exactly the kind of clean kill that proves nothing.
 
 ## Template for new entries
 
