@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 3
+entry_high_water_OB: 4
 entry_prefix: OB
 ---
 
@@ -126,6 +126,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-4 | 2026-08-31 | a liveness marker with a good hit rate (2/3) is trusted, then spends that trust | the session doing cleanup | wrong instrument | **none yet** — worklist |
 | OB-3 | 2026-08-31 | a peer/agent listing is arbitrary w.r.t. the real population | the session reading the listing | wrong instrument | shipped (OS enumeration) |
 | OB-2 | 2026-08-31 | shared `target/` left in a feature-clobbered state | the session that arms it | wrong instrument | **shipped** (gate ends safe) |
 | OB-1 | 2026-08-31 | a published claim omits the parameter its author's context supplied | the author, specifically | wrong instrument | partial (derivation + one policy) |
@@ -267,6 +268,64 @@ lying outside the set entirely.
 **Status:** validated — measured twice, by two sessions, with the membership rotating
 between readings (which demonstrates arbitrariness where one snapshot could only show
 disjointness)
+
+## OB-4 — a liveness marker with a good hit rate is more dangerous than a bad one
+
+**Valid:** conditional — closes when `.worktrees/bench`'s gitdir is repointed or the corpus is re-created under `codescout`'s own `.git`
+
+**Rests on:** `docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md` § Residual; reported by `codescout-fe`, verified here 2026-08-31.
+
+**Class:** a structural marker read as a liveness signal, when what determines liveness is *reference from elsewhere*.
+
+**Blind party:** the session doing cleanup. `.worktrees/bench/.git` contains
+`gitdir: /home/marius/work/claude/code-explorer/.git/worktrees/bench`, and that path has
+not existed for months. Every locally available signal says orphan debris: a dangling
+pointer, a pre-rename path, 174M, and **a bug already filed and archived about exactly
+this pointer** (`docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md`),
+which reads as confirmation that the thing is known residue.
+
+**Who can see it:** a citation sweep across the surfaces that *consume* it —
+`grep -rn 'worktrees/bench' scripts/ docs/ --include='*.toml'`. Verified 2026-08-31: **16
+files, 84 references**, including two live scripts (`scripts/run-tc-benchmark.sh:18`,
+`scripts/sweep-bm25-boost.sh:10`), `docs/PROBES.md:116`, and `docs/trackers/retrieval-benchmark.md`,
+which holds the corpus definition. It is the pinned retrieval-benchmark corpus, detached at
+`ede25e69`; rebuilding costs a `git worktree add --detach` plus a 163M re-index.
+
+**Plausible-answer property:** you get a confident *"this is dead"* reading supported by a
+real, verifiable dangling pointer. The evidence is genuinely true — it simply answers a
+different question (*what does this directory's git metadata point at?*) than the one being
+asked (*does anything still depend on this directory?*). Kin to the `du`-proves-size-never-absence
+finding, `reconnaissance-patterns:R-135`.
+
+**Vigilance:** wrong instrument, and this entry is here for *why*. The marker had a **2/3
+hit rate on the local sample**: three sibling directories shared the same dangling gitdir,
+and two of them (`bench-legacy` 173M, `no-local-embedding` 12M) genuinely were dead and were
+correctly deleted. So the heuristic had a track record before it failed, and a more careful
+reading of the pointer still returns "orphan" — care applied to the *wrong instrument* only
+sharpens a wrong answer.
+
+> **Generalisation worth mining: a predictor that is usually right is more dangerous than
+> one that is usually wrong, because it earns the trust it later spends.** A marker that
+> mispredicted every time would have been discarded; one at 2/3 gets promoted to a rule of
+> thumb, and the third case is deleted with confidence. When a heuristic's accuracy is what
+> justifies skipping the direct check, its accuracy is the hazard.
+
+**Mechanism status:** none yet — this is the open worklist row.
+
+- **Practice, effective immediately:** before deleting anything large, grep for **citations**
+  rather than inspecting the thing itself. Liveness is a property of the reference graph.
+- **Candidate `H-N`:** a pre-delete hook on `rm -rf`/`git worktree remove` targeting a path
+  cited from `scripts/`, `docs/` or `*.toml` — warn with the citation list. The citation grep
+  already exists as a one-liner; nothing runs it unprompted, which is the entire gap.
+- **Cheapest structural fix, and it removes the class rather than guarding it:** repoint or
+  re-create the worktree under `codescout`'s own `.git` so the marker stops lying. Then the
+  pointer and the reference graph agree, and no check is needed.
+
+**Instances:** `.worktrees/bench` (live, nearly deleted twice); `bench-legacy` and
+`no-local-embedding` (correctly deleted, and the source of the marker's false credibility).
+
+**Status:** validated — reported by `codescout-fe`, independently verified here (directory
+present at 174M, gitdir target absent, 84 citations across 16 files)
 
 ## Template for new entries
 
