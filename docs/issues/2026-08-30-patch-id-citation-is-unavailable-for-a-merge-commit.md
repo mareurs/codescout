@@ -135,6 +135,51 @@ single anchor is wanted, `git patch-id` over `git diff <first-parent>..<merge>`
 produces a hash — but it is not the same object a cherry-pick would reproduce, so
 it should not be recorded in the field the convention means.
 
+## Audit of the existing corpus — done 2026-08-30, nothing to clean up
+
+The Resume's second item ran. **No existing citation is corrupted**, so the remaining
+work is purely the prose addition.
+
+**1 — Does any archived bug file cite a merge commit as its fix?** No. The repo has
+**19** merge commits; searched all of `docs/` (hidden included) for each at 7-char
+prefix, which matches any longer form. Three appear under `docs/issues/archive/`, and
+all three are sound:
+
+| file | how the merge SHA is used |
+|---|---|
+| `2026-08-08-edit-file-out-of-project-ack-handle-unresolvable.md` | environment marker — *"`experiments` @ `8f724171`"*; separately names `9cbe4002` as the binary's build commit |
+| `2026-08-08-doctor-outside-roots-sample-is-unranked-and-unreachable.md` | environment marker — *"branch `experiments` at `9be2ede4`"* |
+| `2026-08-13-url-silently-overrides-local-dir-model.md` | **already the recommended pattern**: *"Fixed at `38e0980b`, merged to `experiments` at `e6484b16`"* |
+
+The third is worth noting for the fix: **the repo already contains a worked instance
+of the proposed rule**, written before the rule existed. The wording below codifies
+existing good practice rather than inventing a convention.
+
+**2 — Any patch-id that is really a SHA?** No. Extracted **163** distinct cited
+patch-id values from `docs/issues/` and tested each with `git cat-file -t`. **Zero
+resolve as a git object** — which is the decisive form of this check, since a patch-id
+is a content hash and must *not* be an object, while a duplicated SHA would be.
+
+**3 — Any empty patch-id passing as compliance?** No. Every absence in the corpus
+**states its reason**: `patch-id: N/A (not fixed)`, `not computable from this repo
+(fix lives in codescout-companion)`, `SHA / patch-id: N/A — .env is gitignored`,
+`no_fix_commit: Machine-local config change`. That is the *opposite* of the failure
+this file predicted — "recording an empty patch-id … looks like compliance" — and it
+means the convention's authors have consistently written the reason rather than the
+blank.
+
+**Scope of these negatives**, since two of the three are zeros: search 1 covers all of
+`docs/**` including hidden files; searches 2 and 3 cover `docs/issues/**` only, which
+is where fix citations live. Not covered: citations in commit messages, and any file
+outside `docs/`.
+
+**One badly-built instrument, recorded because it failed the good way.** The first
+attempt at check 3 used `patch-id[^0-9a-f]{0,12}$`, which matched the boilerplate
+recovery recipe `git patch-id --stable < /tmp/all.patch > /tmp/patch-ids.txt` present
+in ~40 archived files — 160 hits, all false. It failed *loudly*, which is the good
+direction: an over-broad predicate floods, an over-narrow one returns a clean zero and
+is believed. See `docs/PROBES.md` rule 4.
+
 ## Resume
 
 Decide whether the one-sentence addition goes in all three surfaces or only in
