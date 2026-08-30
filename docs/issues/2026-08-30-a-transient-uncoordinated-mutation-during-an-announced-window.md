@@ -17,7 +17,17 @@ unverified: Cause IS now established — see § Cause established. H2 (phantom c
 
 # BUG: the working tree briefly held a mutation nobody applied, during the window announcing that exact mutation
 
-> **Cause not established.** This file records timestamped observations, the
+> **RESOLVED 17:15 — see § *Cause established*, at the bottom, which post-dates every
+> section above it.** The 16:56 write was a second session's acceptance mutation of
+> `embed_one_batch`, claimed by its author and carrying a byte-fingerprint that has never
+> existed in any commit. Sections above that reason toward *"author still unnamed"* were
+> written without that section in view; they are superseded **on that point only**, and
+> their inductive-caution lesson stands on its own merits.
+>
+> The original note follows, kept because the reasoning it guards is still correct and
+> because it is the record of what was believed before the claim arrived.
+
+> **Cause not established** *(as of filing)*. This file records timestamped observations, the
 > hypotheses ruled out, and one protocol finding that stands regardless of cause.
 > It deliberately does **not** name an author. Today already produced four
 > misattributions in this checkout, three of them from reasoning about peers over
@@ -31,7 +41,11 @@ three peer sessions saying I was about to replace `tokio::try_join!` in
 
 Roughly 60 seconds later — and **before I had made any edit to that region** —
 `src/retrieval/embedder.rs` on disk contained exactly that mutation. It reverted
-within ~15 seconds. No session claims it.
+within ~15 seconds.
+
+*"No session claims it"* was true at filing. **It has since been claimed** — by a session
+outside the `ListAgents` view this broadcast addressed, which is why it could not be polled
+and did not know to answer. See § *Cause established*.
 
 ## Timeline (all 2026-08-30, local)
 
@@ -192,6 +206,17 @@ whatever made it — any weaker than it was when it outranked the alternatives.
 
 So: prior raised, class still open, author still unnamed. The ranked branches in
 § *The two live hypotheses* stand unchanged.
+
+> **Superseded on the final clause, 17:15.** The author is named, and the claim is not the
+> inductive one this paragraph rightly refuses. What retires it is not a third event of
+> similar shape — that would indeed only raise a prior — but a different *kind* of evidence:
+> a byte-fingerprint absent from every commit in the repository, plus the actor claiming the
+> edit. See § *Cause established*.
+>
+> Everything else here survives, and the retraction that produced this paragraph was right on
+> its own terms. "Two confirmed gaps raise a prior, they do not establish a class" is the
+> durable lesson and is unaffected — it was simply overtaken by direct evidence rather than
+> by more induction.
 
 ### Mitigations, now two
 
