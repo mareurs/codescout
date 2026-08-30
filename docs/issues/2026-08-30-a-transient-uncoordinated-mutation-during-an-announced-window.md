@@ -171,8 +171,27 @@ single-observer instrument.
 nothing here should be read as doing so. But it removes the last reason to treat
 that event as exotic: an uncoordinated concurrent edit during someone else's
 announced window is now a *measured* occurrence in this checkout, twice in one
-afternoon, rather than a hypothesis. The undetermined part is narrower than it was
-— not "what could possibly have done this", but "which session".
+afternoon, rather than a hypothesis.
+
+**But it does NOT narrow the question to "which session", and an earlier version of
+this paragraph said exactly that.** Retracted the same day, on
+`git-travel-augmentation-shape`'s objection:
+
+> That is also a reason to hold the 16:56 case open rather than close it on the
+> phantom-session reading — an explanation of that shape has now been produced
+> twice in one afternoon by ordinary coordination gaps.
+
+The error is inductive and worth naming, because it is the *same* error the section
+above diagnoses, committed while writing the diagnosis. Two confirmed coordination
+gaps raise the prior on a third event of similar shape; they do not establish its
+class. "Which session" presupposes a session, and what is actually established at
+16:56 is narrower: **something wrote at 16:56:15.** That a peer write is now a
+measured phenomenon here makes it a better hypothesis than it was; it does not make
+the interleaving branch — a read and a grep straddling one write, whoever or
+whatever made it — any weaker than it was when it outranked the alternatives.
+
+So: prior raised, class still open, author still unnamed. The ranked branches in
+§ *The two live hypotheses* stand unchanged.
 
 ### Mitigations, now two
 
