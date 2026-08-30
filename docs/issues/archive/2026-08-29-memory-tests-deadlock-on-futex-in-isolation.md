@@ -1,12 +1,18 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cargo-test
+- memory
+- deadlock
+- flaky
+- embedder
+closed: 2026-08-30
 opened: 2026-08-29
-closed:
-severity: high
 owner: marius
 related: []
-tags: [cargo-test, memory, deadlock, flaky, embedder]
-kind: bug
+severity: high
+unverified: 'NON-REPRODUCTION is measured; the CAUSAL ATTRIBUTION to fd638c76 is inference. This file''s own reproduction (`cargo test --lib tools::memory::tests:: -- --test-threads=1`) now runs 77 passed, 0 failed, no hang -- run on the merge of this branch into experiments, 2026-08-30. What is NOT established is that fd638c76 is what closed it: no one bisected, and the branch this file arrived on sat 103 commits behind, so any of those commits could in principle be the closer. fd638c76 is named because its subject is exactly this mechanism and two of the tests listed here are among the five fixtures it isolated -- strong, not proven. Re-open if a hang is seen again, and bisect rather than re-attributing.'
 ---
 
 # `tools::memory::tests::*` deadlock on a futex, reproducibly, even in total isolation
@@ -30,6 +36,34 @@ It reproduces in complete isolation: a single-threaded run of only this module
 (`cargo test tools::memory::tests:: -- --test-threads=1`), with no other
 `cargo test` process alive on the machine, still hangs on `delete_removes_entry`.
 
+
+> **FIXED — verified 2026-08-30 by a verify-open pass while merging this branch
+> into `experiments`.** This file's own reproduction no longer reproduces:
+>
+> ```
+> $ cargo test --lib tools::memory::tests:: -- --test-threads=1
+> test result: ok. 77 passed; 0 failed; 0 ignored
+> ```
+>
+> No hang, on the exact single-threaded module-scoped invocation this Summary
+> names as still hanging "in complete isolation".
+>
+> **The closer is almost certainly `fd638c76` (ET-9 T10, patch-id
+> `2afe9f1378e8dece47fea600ecf840c57a215ab0`), which stopped
+> `tools::memory::tests` resolving the retrieval stack from ambient config.**
+> Two of the tests listed above — `memory_write_routes_to_project_dir` and
+> `memory_write_accepts_project_alias_for_project_id` — are among the five
+> fixtures that fix isolated, and a test blocking on a live-but-unresponsive
+> embedder is exactly a silent indefinite wait with no panic and no output.
+>
+> **But say what is measured and what is inferred.** The non-reproduction is
+> measured. The attribution is not: nobody bisected, and this branch sat 103
+> commits behind `experiments`, so the closer could in principle be another of
+> those commits. The distinction matters here more than usual, because this file
+> already carries one careful negative — it explicitly rules out the archived
+> "wrong embedder port" misconfiguration — and a confident wrong attribution
+> would undo that care. If a hang is ever seen again, bisect; do not re-argue
+> from this note.
 ## Symptom
 
 Running `cargo test` (via `mcp__codescout__run_command`, the tool this project's
