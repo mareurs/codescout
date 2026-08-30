@@ -6091,6 +6091,25 @@ as evidence by a `touch` run to bust a clippy fingerprint; a cached clippy
 (`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`).
 The last is the worst — the others misdescribe artifacts, that one misdescribes who
 else is writing to your tree, which is the premise this whole entry rests on.
+### Promoted 2026-08-30 → `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`
+
+The amendment above turned out to be one instance of a wider class, and the class was
+promoted rather than this entry. Nine instruments observed the same day across four
+concurrent sessions, each returning a plausible value where an error would have been
+safe, each consulted **precisely because** its user was being careful: `--stat`, file
+mtimes destroyed by the prober's own `touch`, a cached clippy green, a green
+`cargo test` on a tree failing `-D warnings`, a mid-run log total, a filter that matched
+no test, a page cap, a unit test passing while its caller ignored the policy, and
+`ListAgents` reporting `Peer sessions (2)` with four sessions live.
+
+The ADR keeps what this entry could not carry: that **the failure is proportional to
+diligence** — skipping a check leaves you appropriately uncertain, running a `--stat`
+leaves you confidently wrong — and that two instruments can *agree* while both are
+wrong, which is what made the `ListAgents` case worse than under-reporting.
+
+This entry stays as the staging-specific rule and the datapoint that found it. Five of
+the nine instances have nothing to do with git, which is why the ADR and not this log is
+the right home.
 ## F-71 — Three confident claims from instruments with no resolving power, and the one that mattered hardened in a peer's committed ledger before the retraction arrived
 
 **Valid:** dated 2026-08-26

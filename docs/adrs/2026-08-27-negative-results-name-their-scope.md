@@ -185,3 +185,13 @@ right; the ADR's contribution is the name and the third clause.
 - `docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md` — still open for the
   structural half.
 
+
+- `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md` — **the sibling,
+  written later and generalising this one.** This ADR governs a *negative* result; that
+  one governs the case this Decision does not reach, a confident non-empty value that is
+  plausible and wrong. The distinction is load-bearing in both directions: a zero invites
+  a second look, which is why clause 2 here can afford silence on a trustworthy one; a
+  plausible value **suppresses** the second look, so it gets no equivalent exemption.
+  Clause 3 here — *claim only what is proven* — reappears there as the tie-breaking
+  corollary read from the caller's side: prefer the instrument that can return an error
+  over the one that returns a value.
