@@ -202,9 +202,9 @@ impl RetrievalClient {
     /// Whether `[embeddings].api_key` should be forwarded to the dense
     /// endpoint — only over HTTPS or loopback, exactly like `EmbedderHttp::new`
     /// already guards its own `EMBED_API_KEY` env read
-    /// (`crate::retrieval::embedder::is_https_or_loopback`). Without this, a
-    /// key arriving from project.toml would leak over cleartext HTTP where the
-    /// env-var path does not.
+    /// (`codescout_embed::remote::is_https_or_loopback` — both callers share the
+    /// crate's copy since T7 deleted root's). Without this, a key arriving from
+    /// project.toml would leak over cleartext HTTP where the env-var path does not.
     #[cfg(feature = "remote-embed")]
     pub(crate) fn guarded_api_key(url: &str, api_key: Option<&str>) -> Option<String> {
         let key = api_key?;

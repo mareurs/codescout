@@ -63,8 +63,13 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     //     carries "openai send" but not "openai status", so every dense-embedder HTTP
     //     failure fell through to the generic fallback and sent operators to qdrant
     //     logs — the exact misrouting class this function's doc comment exists to
-    //     prevent. (The sparse path was fine: "embed sparse status" contains
-    //     "embed sparse", which the embedder arm already matches.)
+    //     prevent. (This comment used to add "the sparse path was fine: 'embed
+    //     sparse status' contains 'embed sparse', which the embedder arm already
+    //     matches". That was true of ONE of the two sparse producers and false of
+    //     the other: `EmbedderHttp::embed` says `embed sparse …`, but
+    //     `embed_one_batch` said `embed_batch sparse …`, which contains no `embed
+    //     sparse` at all. Both now render SPARSE_MARKER, and the claim is enforced
+    //     by a constant instead of asserted by a comment.)
     //
     // (2) That message now carries the embedder's RESPONSE BODY, which is arbitrary
     //     remote text. A body containing "not found" or "Collection" would hijack the
@@ -118,8 +123,14 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     } else if err_str.contains("dense openai status")
         || err_str.contains("sparse openai status")
         || err_str.contains(codescout_embed::STATUS_FAILED_MARKER)
+        // The sparse leg joins them because it now carries the server's body too.
+        // Until 2026-08-30 it used `error_for_status()`, which discards the body —
+        // so it had nothing to hijack with, and nothing useful to say either. The
+        // arm and the body-restoring fix have to land together: either alone is a
+        // regression.
+        || err_str.contains(crate::retrieval::embedder::SPARSE_STATUS_MARKER)
     {
-        "The dense embedder returned an error status. This is an embedder problem, \
+        "The embedder returned an error status. This is an embedder problem, \
          NOT a Qdrant issue (don't check qdrant logs). The embedder's own response \
          body is included in the error above — read it first; it usually names the \
          cause exactly. Then `./scripts/retrieval-stack.sh ps`."
@@ -158,7 +169,7 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     // the same compile.
     } else if err_str.contains(codescout_embed::CONNECT_FAILED_MARKER)
         || err_str.contains("openai send")
-        || err_str.contains("embed sparse")
+        || err_str.contains(crate::retrieval::embedder::SPARSE_MARKER)
     {
         // Client-side: the query could not be embedded because the embedder
         // endpoint is unreachable/erroring. Distinct from a Qdrant fault —
@@ -1237,6 +1248,102 @@ mod classify_search_error_tests {
         assert!(
             hint.contains("embedder"),
             "it must reach the embedder bucket.\nhint: {hint}"
+        );
+    }
+
+    /// The sparse leg's twin of the test above, and it became necessary the moment
+    /// the sparse path started carrying the server's body.
+    ///
+    /// Until 2026-08-30 that path used `error_for_status()`, so it had no body to be
+    /// hijacked by — and nothing useful to tell an operator either. Restoring the
+    /// body without hoisting this arm above the collection bucket would have traded
+    /// one defect for the other, which is why both landed together.
+    #[test]
+    fn a_sparse_status_body_saying_not_found_is_not_reported_as_a_missing_collection() {
+        let err = format!(
+            "stack search failed: {} 404: model 'splade' not found",
+            crate::retrieval::embedder::SPARSE_STATUS_MARKER
+        );
+
+        let hint = classify_search_error(&err, "codescout");
+
+        assert!(
+            !hint.contains("collection is missing"),
+            "a sparse 404 must not be reported as a missing Qdrant collection — the \
+             body is the server's text, not a statement about the store.\nhint: {hint}"
+        );
+        assert!(
+            !hint.contains("sync_project"),
+            "and it must not tell the operator to re-index a healthy store.\nhint: {hint}"
+        );
+        assert!(
+            hint.contains("embedder"),
+            "it must reach the embedder bucket.\nhint: {hint}"
+        );
+    }
+
+    /// End-to-end: the **real** batch producer's error, through the **real**
+    /// classifier.
+    ///
+    /// This is the test that would have caught the original defect, and the reason
+    /// it drives `EmbedderHttp` rather than formatting a string. Every other test in
+    /// this module builds its input from a literal or from `SPARSE_MARKER`, and
+    /// therefore cannot notice a producer that has stopped rendering the marker —
+    /// which is exactly what had happened. `embed_one_batch` said `embed_batch
+    /// sparse …`, which shares no substring with the `embed sparse` matched here
+    /// (`embed` is followed by `_`, not a space), while this function's own comment
+    /// asserted that it did. Both sides were individually covered; nothing joined
+    /// them, so nothing failed.
+    ///
+    /// Mutating the producer's wording back turns this red and moves nothing else.
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn the_batch_sparse_producers_real_error_reaches_an_embedder_bucket() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+            .create_async()
+            .await;
+        // 400 is non-retryable, so this terminates on the first attempt rather than
+        // walking the eight-step backoff ladder.
+        sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(400)
+            .with_body("bad input")
+            .create_async()
+            .await;
+
+        let e = crate::retrieval::embedder::EmbedderHttp::new(
+            dense_server.url(),
+            sparse_server.url(),
+            3,
+        );
+        // `embed_batch` rather than the private per-sub-batch unit: it is the entry
+        // point production actually calls, so this exercises the chunking driver and
+        // the `/info` probe (which the mock refuses, falling back to 8) on the way.
+        let err = e
+            .embed_batch(&["x".to_string()])
+            .await
+            .expect_err("a 400 from the sparse server cannot produce an embedding")
+            .to_string();
+
+        let hint = classify_search_error(&err, "codescout");
+
+        assert!(
+            hint.contains("embedder"),
+            "the batch sparse producer's real error must reach an embedder bucket, \
+             not the generic fallback that sends operators to `docker logs \
+             codescout-qdrant` for an embedder fault.\nerr:  {err}\nhint: {hint}"
+        );
+        // Match the fallback's OWN opening words, not "qdrant logs" — the correct
+        // hint contains that phrase too, in "don't check qdrant logs". A negative
+        // assertion has to name something only the wrong answer says.
+        assert!(
+            !hint.starts_with("Stack reachable but query failed"),
+            "and specifically not the generic fallback.\nerr:  {err}\nhint: {hint}"
         );
     }
 

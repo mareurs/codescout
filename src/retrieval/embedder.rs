@@ -5,6 +5,30 @@ use futures::stream::{StreamExt, TryStreamExt};
 #[cfg(feature = "remote-embed")]
 use serde::{Deserialize, Serialize};
 
+/// The stable substring every sparse-leg failure renders.
+///
+/// The dense side's equivalents live in `codescout-embed` because that producer is
+/// across a crate boundary; the sparse leg has no crate twin, so these live beside
+/// their producer. The reason for naming them is the same either way: nothing makes
+/// a literal and a consumer's copy of it fail together, and this pair had already
+/// drifted. `EmbedderHttp::embed` said `embed sparse …` while `embed_one_batch` said
+/// `embed_batch sparse …`, which shares no substring with it — `embed` is followed
+/// by `_`, not a space — so one path matched `classify_search_error` and the other
+/// could not. The classifier's own comment asserted that both did.
+///
+/// **Ungated on purpose.** `classify_search_error` is compiled in a lean build and
+/// must be able to name what it looks for even where no HTTP transport exists.
+pub(crate) const SPARSE_MARKER: &str = "embed sparse";
+
+/// The subset of sparse failures that carry the **server's response body**.
+///
+/// Load-bearing for arm ORDER, not merely for wording — exactly as
+/// `codescout_embed::STATUS_FAILED_MARKER` is on the dense side. The body is
+/// arbitrary remote text, so a consumer must match this before it tests for
+/// anything a body might coincidentally contain: a sparse 404 whose body reads
+/// `model not found` is not a missing Qdrant collection.
+pub(crate) const SPARSE_STATUS_MARKER: &str = "embed sparse status";
+
 #[derive(Debug, Clone)]
 pub struct SparseVector {
     pub indices: Vec<u32>,
@@ -574,17 +598,37 @@ impl EmbedderHttp {
                 if text.is_empty() {
                     return Ok(Vec::<Vec<SparseEntry>>::new());
                 }
-                self.client
+                let resp = self
+                    .client
                     .post(&sparse_url)
                     .json(&sparse_body)
                     .send()
                     .await
-                    .context("embed sparse")?
-                    .error_for_status()
-                    .context("embed sparse status")?
-                    .json::<Vec<Vec<SparseEntry>>>()
+                    .with_context(|| format!("{SPARSE_MARKER} send"))?;
+                let status = resp.status();
+                if !status.is_success() {
+                    // `error_for_status()` keeps the status code and DISCARDS the
+                    // response body — and for this backend the body is the only
+                    // place the actionable cause appears. That is the identical
+                    // defect fixed on the DENSE leg in
+                    // docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md,
+                    // where the operator saw a bare "400 Bad Request" for a body
+                    // that named the real limit. The fix landed on one of the two
+                    // legs in this same function; this is the other one.
+                    let body_raw = resp.text().await.unwrap_or_default();
+                    let trimmed = body_raw.trim();
+                    // Bounded, for the same reason the dense side is: an HTML
+                    // error page would otherwise flood every surface that renders
+                    // this, `SyncReport.skipped` included.
+                    let mut body: String = trimmed.chars().take(400).collect();
+                    if body.is_empty() {
+                        body = "<empty response body>".to_string();
+                    }
+                    anyhow::bail!("{SPARSE_STATUS_MARKER} {}: {body}", status.as_u16());
+                }
+                resp.json::<Vec<Vec<SparseEntry>>>()
                     .await
-                    .context("embed sparse json")
+                    .with_context(|| format!("{SPARSE_MARKER} json"))
             })?;
 
         let dense = dense_batch
@@ -659,13 +703,13 @@ impl EmbedderHttp {
                         .json(&sparse_body)
                         .send()
                         .await
-                        .context("embed_batch sparse send")?;
+                        .with_context(|| format!("{SPARSE_MARKER} send"))?;
                     let status = resp.status();
                     if status.is_success() {
                         return resp
                             .json::<Vec<Vec<SparseEntry>>>()
                             .await
-                            .context("embed_batch sparse json");
+                            .with_context(|| format!("{SPARSE_MARKER} json"));
                     }
                     // The shared sparse server returns 424/429/5xx when momentarily
                     // overloaded by concurrent callers; retry those with backoff
@@ -676,7 +720,7 @@ impl EmbedderHttp {
                     if !retryable || attempt >= 8 {
                         let body = resp.text().await.unwrap_or_default();
                         return Err(anyhow!(
-                            "embed_batch sparse status {} (inputs={}, nonempty={}): {}. \
+                            "{SPARSE_STATUS_MARKER} {} (inputs={}, nonempty={}): {}. \
                              If this is 413 or 422, the server's max_client_batch_size is \
                              below the resolved batch size — set CODESCOUT_EMBED_BATCH \
                              to override discovery.",
@@ -754,7 +798,7 @@ impl EmbedderHttp {
             }
             let sparse_vec = sparse_iter.next().ok_or_else(|| {
                 anyhow!(
-                    "embed_batch sparse response exhausted: expected {} non-empty rows \
+                    "{SPARSE_MARKER} response exhausted: expected {} non-empty rows \
                      for {} inputs, server returned fewer",
                     nonempty.len(),
                     inputs.len()
@@ -1777,6 +1821,89 @@ mod tests {
             );
             bad_request.assert_async().await;
         }
+    }
+
+    /// A sparse error status must surface the **server's response body**.
+    ///
+    /// The query path used `error_for_status()`, which keeps the status code and
+    /// discards the body — and for this backend the body is the only place the
+    /// actionable cause appears. That is the identical defect fixed on the DENSE
+    /// leg in
+    /// `docs/issues/archive/2026-08-26-dense-embedder-slot-context-drops-large-embeds.md`,
+    /// where an operator saw a bare `400 Bad Request` for a body that named the real
+    /// limit. The fix landed on one of the two legs in this same function; this
+    /// covers the other.
+    ///
+    /// The body used here is the real shape a TEI sparse server returns when a batch
+    /// exceeds its cap: the operator can act on it, and a bare
+    /// `422 Unprocessable Entity` tells them nothing.
+    #[tokio::test]
+    async fn a_sparse_error_status_surfaces_the_servers_body() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+            .create_async()
+            .await;
+        let sparse_mock = sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(422)
+            .with_body("batch size 40 > maximum allowed batch size 32")
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let err = e
+            .embed("a query")
+            .await
+            .expect_err("a 422 from the sparse server cannot produce an embedding");
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains("422"),
+            "the status code is half the diagnosis. got: {msg}"
+        );
+        assert!(
+            msg.contains("maximum allowed batch size"),
+            "the server's body is the OTHER half, and the half `error_for_status()` \
+             threw away. got: {msg}"
+        );
+        sparse_mock.assert_async().await;
+    }
+
+    /// An empty sparse body must not render as a dangling colon — same reasoning as
+    /// the dense side's `<empty response body>`, since a status with no body is
+    /// complete information rather than a truncated message.
+    #[tokio::test]
+    async fn a_sparse_error_status_with_no_body_says_so() {
+        let mut dense_server = mockito::Server::new_async().await;
+        let mut sparse_server = mockito::Server::new_async().await;
+        dense_server
+            .mock("POST", "/v1/embeddings")
+            .with_status(200)
+            .with_body(r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#)
+            .create_async()
+            .await;
+        sparse_server
+            .mock("POST", "/embed_sparse")
+            .with_status(400)
+            .with_body("")
+            .create_async()
+            .await;
+
+        let e = EmbedderHttp::new(dense_server.url(), sparse_server.url(), 3);
+        let msg = e
+            .embed("a query")
+            .await
+            .expect_err("a 400 cannot produce an embedding")
+            .to_string();
+
+        assert!(
+            msg.contains("<empty response body>"),
+            "an empty body must be named as empty. got: {msg}"
+        );
     }
 
     /// `tokio::try_join!` must run the dense and sparse legs concurrently — a
