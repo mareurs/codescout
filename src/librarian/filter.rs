@@ -172,37 +172,51 @@ fn compile_leaf(map: &serde_json::Map<String, Value>) -> Result<SqlFragment> {
         )
     })?;
 
+    // `tags` / `owners` are stored as JSON arrays, so EVERY membership op on
+    // them has to go through `json_each`. Comparing the column directly
+    // compares its raw JSON *text* (`["a","b"]`) against a scalar, which is
+    // never equal and fails silently: `in` returned nothing and `nin` returned
+    // everything. Gating this on the op was the bug (BL-47); it is now gated on
+    // the column, with the op selecting the shape.
     let is_array_col = matches!(field.as_str(), "tags" | "owners");
-    if op == LeafOp::Contains && is_array_col {
-        let lit = json_value_to_sql(value)?;
-        return Ok(SqlFragment {
-            sql: format!("EXISTS (SELECT 1 FROM json_each({sql_field}) WHERE value = ?)"),
-            params: vec![lit],
-        });
+    if is_array_col {
+        match op {
+            LeafOp::Contains => {
+                let lit = json_value_to_sql(value)?;
+                return Ok(SqlFragment {
+                    sql: format!("EXISTS (SELECT 1 FROM json_each({sql_field}) WHERE value = ?)"),
+                    params: vec![lit],
+                });
+            }
+            LeafOp::In | LeafOp::Nin => {
+                let params = in_list_params(value)?;
+                let placeholders = std::iter::repeat_n("?", params.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let exists = format!(
+                    "EXISTS (SELECT 1 FROM json_each({sql_field}) WHERE value IN ({placeholders}))"
+                );
+                return Ok(SqlFragment {
+                    sql: if op == LeafOp::In {
+                        exists
+                    } else {
+                        // Holding none of the listed values includes holding
+                        // none at all, so an empty array matches `nin`.
+                        format!("NOT {exists}")
+                    },
+                    params,
+                });
+            }
+            _ => {}
+        }
     }
 
     match op {
         LeafOp::In | LeafOp::Nin => {
-            let arr = value.as_array().ok_or_else(|| {
-                RecoverableError::with_hint(
-                    "`in` expects an array",
-                    "Provide a JSON array, e.g. `{\"in\": [\"a\", \"b\"]}`.",
-                )
-            })?;
-            if arr.is_empty() {
-                return Err(RecoverableError::with_hint(
-                    "`in` expects a non-empty array",
-                    "Provide at least one value, e.g. `{\"in\": [\"a\", \"b\"]}`.",
-                )
-                .into());
-            }
-            let placeholders = std::iter::repeat_n("?", arr.len())
+            let params = in_list_params(value)?;
+            let placeholders = std::iter::repeat_n("?", params.len())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let params = arr
-                .iter()
-                .map(json_value_to_sql)
-                .collect::<Result<Vec<_>>>()?;
             Ok(SqlFragment {
                 sql: format!("{sql_field} {} ({})", op.sql(), placeholders),
                 params,
@@ -430,7 +444,18 @@ fn eval_leaf(
                 )
                 .into());
             }
-            let hit = arr.iter().any(|v| json_eq(actual, v));
+            // Type-driven, mirroring the `Contains` arm below: an array field
+            // means membership ("holds any of these"), never whole-value
+            // equality. Without this, `{"tags": {"in": [...]}}` compares the
+            // entire array against each scalar and is always false — the eval
+            // twin of the SQL defect above (BL-47). The two engines answer the
+            // same AST and must not disagree.
+            let hit = match actual {
+                Value::Array(items) => items
+                    .iter()
+                    .any(|item| arr.iter().any(|v| json_eq(item, v))),
+                _ => arr.iter().any(|v| json_eq(actual, v)),
+            };
             if op == LeafOp::In {
                 hit
             } else {
@@ -491,6 +516,31 @@ fn json_cmp(a: &Value, b: &Value) -> Option<Ordering> {
         (Value::String(x), Value::String(y)) => Some(x.cmp(y)),
         _ => None,
     }
+}
+
+/// Validate an `in` / `nin` operand and lower it to SQL params.
+///
+/// Shared by the scalar and array-column paths deliberately: the defect this
+/// exists to prevent was a second `in` code path that never learned what the
+/// first one knew. `tags`/`owners` are JSON arrays, and `is_array_col` was
+/// consulted only on the `Contains` arm, so `in` fell through to
+/// `tags IN (?)` — comparing the column's raw JSON text against a scalar,
+/// which is never equal. See `open-issue-work-queue:BL-47`.
+fn in_list_params(value: &Value) -> Result<Vec<rusqlite::types::Value>> {
+    let arr = value.as_array().ok_or_else(|| {
+        RecoverableError::with_hint(
+            "`in` expects an array",
+            "Provide a JSON array, e.g. `{\"in\": [\"a\", \"b\"]}`.",
+        )
+    })?;
+    if arr.is_empty() {
+        return Err(RecoverableError::with_hint(
+            "`in` expects a non-empty array",
+            "Provide at least one value, e.g. `{\"in\": [\"a\", \"b\"]}`.",
+        )
+        .into());
+    }
+    arr.iter().map(json_value_to_sql).collect()
 }
 
 fn json_value_to_sql(v: &Value) -> Result<rusqlite::types::Value> {
@@ -580,6 +630,124 @@ mod tests {
         let f = compile(&node).unwrap();
         assert!(f.sql.contains("json_each(tags)"));
         assert_eq!(f.params.len(), 1);
+    }
+
+    /// `in` on an array column must mean "holds ANY of these", the same
+    /// membership `contains` already gets — not a comparison against the
+    /// column's raw JSON text.
+    ///
+    /// The defect this pins: `is_array_col` was consulted only on the
+    /// `Contains` arm, so `in` fell through to `tags IN (?)`, comparing
+    /// `["session-log","bug-fix"]` (the stored JSON *string*) against the
+    /// scalar `"session-log"`. Never equal, so the result was a silent zero —
+    /// and `get_guide("librarian")` § Filter Syntax teaches exactly this form.
+    /// `docs/issues/2026-08-28-tags-in-filter-returns-zero.md`,
+    /// `open-issue-work-queue:BL-47`.
+    ///
+    /// End-to-end against a real `json()` column rather than a compile-shape
+    /// assertion, because the shape assertion is what a wrong SQL string would
+    /// still satisfy. Note the sibling `eval_matches_compile_on_fixture` cannot
+    /// cover this: its fixture table has no array column at all, so it stays
+    /// green whatever the array branch does.
+    #[test]
+    fn tags_in_matches_a_row_holding_any_listed_tag() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE a (id TEXT, tags TEXT)", [])
+            .unwrap();
+        for (id, tags) in [
+            ("t1", r#"["session-log","bug-fix"]"#),
+            ("t2", r#"["research"]"#),
+            ("t3", "[]"),
+        ] {
+            conn.execute("INSERT INTO a (id, tags) VALUES (?1, ?2)", (id, tags))
+                .unwrap();
+        }
+
+        let node = parse(json!({"tags": {"in": ["session-log", "research"]}}));
+        let frag = compile(&node).unwrap();
+        let sql = format!("SELECT id FROM a WHERE {} ORDER BY id", frag.sql);
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let ids: Vec<String> = stmt
+            .query_map(rusqlite::params_from_iter(frag.params.iter()), |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert_eq!(
+            ids,
+            vec!["t1".to_string(), "t2".to_string()],
+            "`in` on an array column must match rows holding ANY listed tag; \
+             t3 holds none and must not match"
+        );
+    }
+
+    /// `nin` is the exact complement, and the empty-tags row is the case worth
+    /// pinning: holding none of the listed tags INCLUDES holding no tags at all.
+    /// Asserted explicitly so it is a decision rather than whatever the SQL
+    /// happened to do.
+    #[test]
+    fn tags_nin_excludes_only_rows_that_hold_a_listed_tag() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE a (id TEXT, tags TEXT)", [])
+            .unwrap();
+        for (id, tags) in [
+            ("t1", r#"["session-log","bug-fix"]"#),
+            ("t2", r#"["research"]"#),
+            ("t3", "[]"),
+        ] {
+            conn.execute("INSERT INTO a (id, tags) VALUES (?1, ?2)", (id, tags))
+                .unwrap();
+        }
+
+        let node = parse(json!({"tags": {"nin": ["session-log"]}}));
+        let frag = compile(&node).unwrap();
+        let sql = format!("SELECT id FROM a WHERE {} ORDER BY id", frag.sql);
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let ids: Vec<String> = stmt
+            .query_map(rusqlite::params_from_iter(frag.params.iter()), |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert_eq!(
+            ids,
+            vec!["t2".to_string(), "t3".to_string()],
+            "`nin` must exclude only rows holding a listed tag; the empty-tags \
+             row holds none of them and therefore matches"
+        );
+    }
+
+    /// Engine parity. `eval` is the in-memory twin used by `entry_filter`, and
+    /// its `Contains` arm already does type-driven array membership
+    /// (`Value::Array(items) => items.iter().any(...)`). `in`/`nin` must agree,
+    /// or the same filter means two different things depending on which engine
+    /// answers it.
+    #[test]
+    fn eval_in_on_an_array_field_means_membership_like_the_sql_side() {
+        let mut entry = serde_json::Map::new();
+        entry.insert("tags".into(), json!(["session-log", "bug-fix"]));
+
+        let hit = parse(json!({"tags": {"in": ["research", "session-log"]}}));
+        assert!(
+            eval(&hit, &entry).unwrap(),
+            "an array field holding a listed value must match `in`"
+        );
+
+        let miss = parse(json!({"tags": {"in": ["research"]}}));
+        assert!(
+            !eval(&miss, &entry).unwrap(),
+            "an array field holding none of the listed values must not match"
+        );
+
+        let nin = parse(json!({"tags": {"nin": ["research"]}}));
+        assert!(
+            eval(&nin, &entry).unwrap(),
+            "`nin` must be the complement of `in` on the same array field"
+        );
     }
 
     #[test]
