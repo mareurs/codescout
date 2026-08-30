@@ -372,6 +372,31 @@ hand-added `params:` key the sibling unit test `a_written_sidecar_carries_no_par
 **stayed green** — it asserts the *writer* never emits one and is structurally blind to a
 file that already carries it. That producer-vs-consumer gap is the test's whole reason to
 exist, and it is the same shape as the memory `tests-that-cannot-fail` records.
+
+**Update 2026-08-30 (later still) — the end-to-end claim is now proven on the real corpus,
+and it was never tested before.** The two halves each had a test and the *conjunction* had
+none: the unit tests round-trip a **synthetic** sidecar, and
+`every_committed_sidecar_parses_and_carries_no_params` proves the nine real files parse.
+Both pass in a world where the real corpus restores nothing.
+
+`scripts/probe_augmentation_restore.py` closes it — copies the nine artifacts and their
+sidecars into a throwaway git repo, points a server at a catalog that has never held them,
+runs one `reindex`. Result: **9 declared, 9 indexed, 9 restored, 0 errors, `params={}`
+throughout, 9 distinct prompts.** That is the bug reproduced and closed, not argued.
+
+**The first run of that probe said `restored: 0`** — and the feature was fine; the probe was
+wrong. `restore_declared_augmentations` resolves each sidecar against
+`current_project::lookup_git_root(path)` and `continue`s **silently** when there is none, and
+the temp corpus had no `.git`. So it reported `0 restored, 0 errors`, which is
+character-identical to "nothing needed restoring". Had I stopped there I would have filed a
+regression against working code. The probe now runs `git init`, and that caveat is the first
+line of its blind-spot list.
+
+Also worth keeping: the **count cannot see a collision**. Nine artifacts all restoring one
+sidecar still counts nine — which is exactly the `README` stem collision `f565504a` fixed. The
+discriminator is distinct *prompts*, so that is what the probe asserts. `entry_collection` is
+not one: two trackers legitimately share `tasks`, and an earlier draft of the probe printed
+`8 of 9` under a banner reading "must be distinct", i.e. a correct run described as a failure.
 ### BL-51 — A rendezvous slot that misses its SessionStart stamp can never be stamped again
 
 **Status:** open
