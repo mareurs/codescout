@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 128
+entry_high_water_R: 129
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-129 | 2026-08-30 | miss (×1, reported + relayed) + near-miss (×2) — **promote-when FIRED same day** | **In a shared checkout, the deliberate break this project mandates is indistinguishable from a defect.** CLAUDE.md and `sdd-ruling-log` require *demand a deliberate break* — break the thing, watch the specific test die. Nothing in a shared tree distinguishes that from a real failure. Mutation-verifying a packaging gate, I removed a `Cargo.toml` `exclude` negation; an IL-3 refusal killed the chained restore and the window stayed open for minutes. `codescout-ae`: *"had my gate landed inside your window, I'd have seen a red packaging test and no way to know it was deliberate — I'd very likely have reported it, and on today's form at the wrong person."* Worse, no `git add` is needed for the break to reach them: `cargo test` compiles the WORKING TREE and cargo does not consult git, so their "4862 passed" silently included my untracked test and a third session's dirty files, under a "HEAD is green" claim. **Rule: announce a mutation window BEFORE opening it, not after closing it** — one message, false alarm becomes a no-op. Distinct from [[R-90]], which is about writes crossing between sessions; here nothing crosses and the harm is entirely in the other session's reading, so no git discipline reaches it. Sub-lesson: a cleanup step chained AHEAD of a blockable step is not protected by being first — the block takes the whole command. **Instance 3 fired both promote conditions within minutes of the entry being written:** `codescout-ae` measured a lean-lane failure, checked attribution, and reported it as the documented feature-gating class; I verified it was not mine and relayed it to its owner citing that class. All three of us were careful and all three were wrong — there was no defect. `swap-dense-leg` was mutation-checking, and the deletion of `\|\| err_str.contains(SPARSE_STATUS_MARKER)` landed BETWEEN the gate's `cargo test` and its lean lane; the "full passes / lean fails" shape had nothing to do with feature gating. Their framing, sharper than mine: the working-tree hazards make **numbers** unreliable, this one makes a peer confidently report a **specific defect** with correct evidence and a wrong conclusion — **the hazard where being careful and being wrong are most compatible**, and attribution discipline does not touch it. Target: CLAUDE.md beside *demand a deliberate break*. Held for an operator call, because per-session worktrees would dissolve [[R-90]] and this together |
 | R-128 | 2026-08-30 | technique (validated on first use) | **Enumerate the call sites of a must-call function and look for the absentee.** Asked to audit root/crate *pairs* for a named defect class, the pair-shaped sweep came back clean — correctly, and that clean result was the confirming-negative worth doubting. Inverting the question from "which functions are duplicated?" to "which stated invariant does a site break?" found `BL-66`: root's `transport.rs` asserts `install_default_crypto_provider` runs "at every construction site", five call sites exist, and one crate client-builder is absent from the list. The pairwise diff **structurally** could not find it — the defective function has no twin, and an absentee is defined by there being one place it should be and isn't. Blind spot: only finds violations of invariants someone has *stated*. |
 | R-127 | 2026-08-30 | miss (self-caught in-turn) → confirms [[R-125]] | **I broke R-125's clause verifying R-125's own release, minutes after promoting it.** Checking whether `codescout-companion` 1.19.8 had propagated to the plugin caches, I ran `find … -path "*reconnaissance/SKILL.md" | head -1`, grepped the clause out of the one path it returned, got `0` in all three profiles, and reported *"that's the drift, caught live"* — citing `claude-plugins`' own stale-cache tracker entry as corroboration. **False.** Every profile holds TWO version-keyed cache dirs, `1.19.7/` and `1.19.8/`; `head -1` returned the stale one each time, and all three `1.19.8/` copies contain the clause. `head -1` answers *"the first path the walk yielded"*, never *"the path that loads"* — and a version-keyed cache holding two versions is the normal state, not an edge case. Two separable aggravators: **the zero AGREED with me** (law C's usual framing assumes a surprising zero prompts a re-check; agreement suppresses it, so a confirming negative needs the scrutiny a contradicting one gets for free), and **authorship is not activation** — having written, argued and shipped the clause minutes earlier did not make it fire. Caught only by re-reading my own command inside the sentence I was about to publish, which is exactly where R-125 placed it (Phase 3, the act of writing). That makes the placement argument tested rather than reasoned | severity low — self-caught in one turn, retracted in the same message, nothing built on the false reading; violates `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md` Decision clause 1 verbatim; no promotion owed, the clause it confirms is already shipped |
 | R-126 | 2026-08-30 | miss (found by dry run) | **An agreement assertion cannot see a shared convention being wrong.** `path_for` and `rel_path_for` were tested against EACH OTHER and agreed — both stem-keyed, both unsound, since a stem is not unique and `docs/research/README.md` is really augmented here. Gate green 4833/0 on a defect the test was positioned to catch. Tell, available at write time: ask what the assertion RANGES OVER — one input and two implementations, or the input space. Write the property (injective? round-trips? unique across the corpus?) and keep the agreement as a second assertion. Distinct from law C: no zero, no error, just two functions quietly agreeing on one file (`f565504a`, `bug-fix-session-log:W-76`) |
@@ -4384,6 +4385,97 @@ evidence about the other's territory.
 **Promote-when:** a second defect is found this way, or a session runs the enumeration and
 the set difference is empty on a surface later shown to be defective (which would bound the
 technique rather than confirm it).
+
+## R-129 — In a shared checkout, the deliberate break this project mandates is indistinguishable from a defect
+
+**Verdict:** miss (×1, reported and relayed) + near-miss (×2) · **Observed:** 2026-08-30, four sessions in one checkout
+
+**Valid:** invariant
+
+CLAUDE.md and `sdd-ruling-log` both mandate the practice: *demand a deliberate break* —
+never "add the check and re-run a green suite", but break the thing and watch the specific
+test die. This entry is about what that practice costs when the tree is shared, which no
+existing entry covers: **every other session sees the break as a defect, with nothing in
+the tree distinguishing it from one.**
+
+**Instance 1 (mine, the near-miss).** Mutation-verifying a new packaging gate, I removed
+`"!docs/trackers/operator-rules.md"` from `Cargo.toml`'s `exclude` so I could watch the
+gate fail. It did, correctly. An IL-3 refusal then killed my restore step mid-command —
+the restore was chained after a `sed` on a source file, which the guard blocks — so the
+mutation sat on disk several minutes longer than intended. `codescout-ae` ran the
+four-command gate in that window's vicinity. Their own words: *"had my gate landed inside
+your Cargo.toml mutation window, I'd have seen a red packaging test and had no way to know
+it was a deliberate mutation. I'd very likely have reported it as a defect — and, on
+today's form, at the wrong person."*
+
+**Instance 2 (the general form, same session).** `cargo test` in a shared checkout compiles
+the **working tree**, and cargo does not consult git. So an untracked file from another
+session is silently in your run: `codescout-ae`'s "4862 passed" included my uncommitted
+`tests/packaged_includes.rs` and a third session's three dirty source files, and they had
+told their user "HEAD is green" on the strength of it. A deliberate break needs no
+`git add` to reach a peer's gate.
+
+**Instance 3 — it actually happened, and it happened to this entry within minutes of the
+entry being written.** `codescout-ae` measured a lean-lane failure in a sparse-classifier
+test, checked attribution before sending, and reported it as the documented
+full-passes/lean-fails feature-gating class. I verified it was not mine, relayed it to
+`swap-dense-leg-remote-embedder` as theirs, and cited the CLAUDE.md class in doing so. All
+three of us were careful. **All three of us were wrong.**
+
+There was no lean-only defect. `swap-dense-leg` was mutation-checking: mutation 2 deleted
+`|| err_str.contains(SPARSE_STATUS_MARKER)` — exactly the arm the failing test depends on —
+ran the subset, and restored it. The quoted failure is character-identical to their expected
+output for that mutation. The "full passes, lean fails" shape had a duller cause than
+feature gating: **a four-command gate runs over several minutes, and the deletion landed
+between the `cargo test` and the lean lane.** Confirmed by me on the restored tree with the
+check this repo's own trap demands — `cargo test --workspace --no-default-features
+a_sparse_status_body` reports **`1 passed`**, not a filtered `0 passed`.
+
+Their framing is sharper than the one this entry opened with, and is the reason it earns a
+separate entry rather than a line under the working-tree hazards: *"the index/formatter/
+working-tree hazards make **numbers** unreliable. This one makes a peer confidently report a
+**specific defect** with correct evidence and a wrong conclusion — the failure is genuine,
+reproducible, and reads exactly like a real regression."* **It is the hazard where being
+careful and being wrong are most compatible.** Attribution discipline does not help: the
+report was routed correctly on the second try and was still about nothing.
+
+One more thing I got wrong in the same episode, smaller and the same shape. When my own lean
+run came back green I wrote *"the peer's failure resolved in the interim"* — outcome right,
+stated cause a guess. They had restored a mutation, not fixed a defect. A green re-run tells
+you the state now; it does not tell you why, and this entry is about how expensive that gap
+is when several sessions edit one tree.
+
+**The rule.** *Announce a mutation window before opening it, not after closing it.* It costs
+one message and converts a false alarm into a no-op. It generalises past mutation testing to
+any deliberate break left on disk: a RED-first commit not yet made, a temporarily stubbed
+function, a config edited to force a failure path.
+
+**What makes this different from `R-90`.** R-90 is about *writes* crossing between sessions
+— `git add`/`git commit` annexing a peer's work. This is about *reads*: nothing crosses, no
+file is claimed, and the harm is entirely in the other session's interpretation. The remedy
+is therefore not a flag or a readback but a message, and no git discipline reaches it.
+
+**Why the restore failed, worth keeping separately.** I chained `cp backup Cargo.toml && sed
+-i <source file> && cargo test` in one command. The `sed` on a source file is IL-3-blocked,
+and the block killed the **whole** command — including the restore that had been placed
+first for safety. *A cleanup step chained ahead of a blockable step is not protected by
+being first; the block takes the command, not the step.* Put restores in their own call.
+
+**Status:** promote-when **FIRED** on the day of writing — promotion not yet applied.
+
+**Promote-when (as written):** *a third instance, or one where the false alarm was actually
+reported rather than caught.* **Both** conditions fired within minutes, by instance 3. The
+target is CLAUDE.md, beside *demand a deliberate break* — that is the practice generating
+this, and in a shared checkout the two have to be read together. Wording to promote: **break
+deliberately, but announce the window first; and when a peer reports a failure in a tree you
+are mutating, say so before they diagnose it.**
+
+Holding the promotion for an operator decision rather than applying it, on `R-90`'s own
+lesson: that entry's Promote-when has been FIRED and unapplied across four instances because
+its target is a workflow change (per-session worktrees) that only the operator can take.
+This one's target is a CLAUDE.md edit and is cheaper — but the honest framing is that
+**per-session worktrees would dissolve `R-90` and `R-129` together**, and adding a rule to
+CLAUDE.md is the smaller move that makes the larger one feel less urgent.
 
 ## Template for new entries
 
