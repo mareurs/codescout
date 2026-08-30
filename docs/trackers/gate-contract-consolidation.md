@@ -89,39 +89,67 @@ correct instinct into the wrong destination.
 ## The clippy finding — a form that reaches neither the crate nor the gated module
 
 `docs/RELEASE.md:292` read `cargo clippy --all-targets -- -D warnings`. That is neither
-the bare form nor the gate form.
+the bare form nor the gate form. **Deleted by `bdfd7a62`** — the block now references
+`CLAUDE.md` instead of restating it, so the finding below is history, not open work.
 
 Verified at the bytes: `Cargo.toml` declares `members = [".", "crates/codescout-embed"]`,
 so the root is a real package and **default package selection is the root alone**.
 `--all-targets` selects target *kinds*, not packages. So that line lints the root
-package's test targets and **never reaches `crates/codescout-embed`** or the
+package's test targets and **never reached `crates/codescout-embed`** or the
 `local-embed`-gated `local` module — precisely the hole CLAUDE.md's *"the gate, not
-garnish"* paragraph exists to close. Sitting under a heading that calls itself the Full
+garnish"* paragraph exists to close. It sat under a heading that called itself the Full
 gate, on the promotion path.
 
 Also verified: `ci.yml`'s test matrix is **three** configs — `default` (flags `""`),
 `local-embed`, and `no-features` (`--no-default-features`). The lean lane mirrors the
 third exactly.
 
-**This heading used to say "a fourth variant", and that ordinal is withdrawn** rather
-than corrected — it was a count over a set nobody had enumerated. Enumerated now, there
-are **five** distinct clippy invocation forms in the repo, three of them inside CI:
+### Current state, and why it is stated as a property rather than a count
+
+This heading used to say *"a fourth variant"*. **The ordinal is withdrawn rather than
+corrected** — it was a count over a set nobody had enumerated, and it would have gone
+stale the moment anyone added another clippy line, with no edit touching it. `CLAUDE.md`
+already states the rule for the two test lanes: *"an ordinal is a positional reference,
+correct for exactly one arrangement and silently wrong after any reorder."*
+
+Enumerated and re-verified after `bdfd7a62`, live invocations only (comment lines
+excluded):
 
 | form | where |
 |---|---|
-| `cargo clippy -- -D warnings` | `ci.yml:50`, `CONTRIBUTING.md:111`, `docs/ROADMAP.md:93` + `:108` |
-| `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` | `ci.yml:61`, `CLAUDE.md:9`, `CONTRIBUTING.md:112` — **the gate form** |
-| `cargo clippy --all-targets -- -D warnings` | `docs/RELEASE.md:292` — the finding above |
-| `cargo clippy --features server-stack --all-targets -- -D warnings` | `ci.yml:213` — the server-stack lane |
-| `scripts/build-windows.sh clippy --all-targets -- -D warnings` | `ci.yml:284` — cross-compile |
+| `cargo clippy -- -D warnings` | `ci.yml:50` — bare |
+| `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` | `ci.yml:61` — **the gate form** |
+| `cargo clippy --features server-stack --all-targets -- -D warnings` | `ci.yml:213` — server-stack lane |
+| `scripts/build-windows.sh clippy --all-targets -- -D warnings` | `ci.yml:284` — cross-compile **wrapper** |
 
-The last two are legitimately different jobs, not drift, and are listed so the next
-reader does not "consolidate" them. **Name a form by what it does, never by its
-position in a list** — `CLAUDE.md` already states this rule for the two test lanes
-(*"an ordinal is a positional reference, correct for exactly one arrangement and
-silently wrong after any reorder"*), and an ordinal over an unenumerated set is the
-same defect one axis over: it would have gone stale the moment anyone added a sixth
-clippy line, with no edit touching it.
+> **Four distinct forms, and CI executes every one of them. No form exists only in
+> documentation.** That is the property worth holding, and unlike a count it is
+> checkable in one grep and says what actually matters — nothing a reader could mistake
+> for the gate lives anywhere unexecuted. The last two rows are legitimately different
+> jobs, not drift; they are listed so the next reader does not "consolidate" them.
+> `CONTRIBUTING.md:111-112` and `CLAUDE.md` carry the first two forms as instructions,
+> which is documentation of a form rather than a fifth form.
+
+**Two corrections landed on this section within an hour, both from the class this whole
+document is about.** The first: it read *"five distinct forms, three of them inside
+CI"* while listing four CI sites immediately below — a count contradicting its own
+enumeration, caught by `codescout-ae`. The second is theirs and supersedes it: `bdfd7a62`
+had already deleted `RELEASE.md`'s form, so five was stale before it was written.
+
+**And `ci.yml:284` was itself nearly missed the same way.** `codescout-ae` grepped
+`cargo clippy` to check this enumeration before disputing it, got three hits, and was
+one keystroke from replying that the fourth form did not exist. It is a **wrapper**
+invocation — `scripts/build-windows.sh clippy …` — so it contains no `cargo clippy`
+substring and is invisible to any audit keyed on one, which is every audit anyone would
+naturally write. Same structure as the `ROADMAP.md:93` miss, different surface: a query
+keyed on a token the site does not contain returns a clean count with nothing marking
+what the key excluded.
+
+What caught it was **not attention**. It was a policy — *verify before contradicting a
+peer* — which runs whether or not the reader suspects anything. That is the same lesson
+as the counting-rule relapse recorded under *Coordination state*: knowing the class did
+not prevent the instance in either case, and a procedure did. Two sessions, one evening,
+three instances of one class, every one committed while writing about it.
 ## The reframe, and why it is better than what both of us planned
 
 Both authorised diffs were *"add the missing lean lane"*. The operator's redirect was:
