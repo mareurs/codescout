@@ -1,5 +1,5 @@
 ---
-id: '2d546e0f7b8fcc0c'
+id: 4eea94e21203cd46
 kind: bug
 status: fixed
 title: 'BUG: grepping a @tool_* buffer that holds a run_command result returns the JSON envelope, and each re-read re-wraps — the stdout is unreachable'

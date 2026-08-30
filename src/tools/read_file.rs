@@ -410,7 +410,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
 /// Measured 2026-08-29: a `run_command` envelope pretty-prints to four lines, of
 /// which the third is the entire stdout as one JSON-escaped string 9998 bytes
 /// wide. Line-slicing could never address it. See
-/// `docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
+/// `docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
 fn clamp_over_budget_line(chunk: String, budget: usize) -> (String, bool) {
     if !crate::tools::exceeds_inline_limit(&chunk) {
         return (chunk, false);
@@ -2027,7 +2027,7 @@ mod tests {
     /// Real shape, measured 2026-08-29 on a live buffer: a `run_command`
     /// envelope pretty-prints to 4 lines, of which line 3 is the entire stdout
     /// as one JSON-escaped string, 9998 bytes wide. See
-    /// `docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
+    /// `docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
     #[tokio::test]
     async fn read_file_buffer_single_oversized_line_still_fits_the_threshold() {
         let stdout = (1..=1200)

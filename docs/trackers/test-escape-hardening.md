@@ -148,7 +148,7 @@ line exceeds the whole budget, and with short lines the budget always stops at a
 line boundary long before the safety valve is reached. Disabling the fix and
 running the whole `fits_the_threshold` family gave **2 passed / 1 failed**: both
 incumbents green with the defect present. Fix `61476cb5`; bug
-`docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
+`docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
 
 **A sibling instance the same afternoon — found by codescout-97 in
 `src/librarian/filter.rs` (BL-47), theirs not mine — is the worse shape.** A

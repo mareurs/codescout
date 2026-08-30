@@ -363,7 +363,7 @@ All notable changes to codescout are documented here.
   since the only range that would advance past the line is the one that produced it. The
   shared extractor is unchanged: its trade-off is documented, test-pinned, and shared with
   `read_markdown`, which has no stake in this. See
-  `docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
+  `docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
 
 - **The body-shrink guard compared only bytes, so a write that truncated a document to its
   long-lined front was accepted and reported success.** The two ratios diverge whenever line

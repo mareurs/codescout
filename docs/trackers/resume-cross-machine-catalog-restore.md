@@ -276,7 +276,7 @@ Bug file flipped to `investigating`.
 **Valid:** dated 2026-08-29
 
 **Observed.** Filed as
-`docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`. Six reads
+`docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`. Six reads
 across four handle kinds never reached the payload; escaped by redirecting to a
 file. Three reduction attempts had failed to reproduce.
 

@@ -92,13 +92,13 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | open | `92d619d7a115617b` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | open | `caa8bc1df0e8c0d8` |
 | BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | open | `19f44bead56b56cc` |
-| BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | open | `e6c0ddb91fe28228` |
-| BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again — sibling of BL-51, fix together | open | `54a70b49f6f26681` |
+| BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `e6c0ddb91fe28228` |
+| BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `54a70b49f6f26681` |
 | BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
 | BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | investigating (cross-ref) | `c752708c2757e139` |
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | open | `73158c500ff6b293` |
-| BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **fixed by a peer (`61476cb5`), row still reads `investigating` because of BL-48** | `2d546e0f7b8fcc0c` |
+| BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -240,6 +240,21 @@ inactive for the life of that server. Sibling of BL-52; both are rendezvous life
 failure modes are complementary (never-entered vs never-left), so fixing one without the other
 leaves the gate wrong in the opposite direction.
 
+**Dropped 2026-08-29 on a pre-work scout, before any code was written.** Both of the file's
+claims had already been refuted by its own author 90 minutes after filing: a `/mcp` reconnect
+DOES inherit the predecessor stamp (a new pid's `hook_at` predated its own start by three
+minutes), and the miss is not permanent — invariant 1 governs the *refresh* hook only and says
+nothing about the other writer, so a later SessionStart-class event stamps it. The population
+improved unaided, 3 of 8 unstamped → 1 of 6, and the survivor is `MRV-poc`, where the companion
+is inactive and gate-closed is correct.
+
+What remains is a frequency question with no known harm — the file's own words, *"not a defect
+with a fix"* — plus one unexplained instance that served calls for ~8 hours with a null slot. The
+code is JavaScript in `claude-plugins`, so it is not a codescout-repo change in any case.
+
+**Pairing BL-51 with BL-52 as one piece of work was my error, corrected by the scout.** They are
+opposite polarities of one mechanism, which made them look like a single fix; neither is a fix at
+all.
 ### BL-52 — The rendezvous gate latches open
 
 **Status:** open
@@ -250,6 +265,26 @@ leaves the gate wrong in the opposite direction.
 hook that goes quiet mid-process leaves `/clear` invisible again. See BL-51 — treat as one piece
 of work.
 
+**Blocked, not open — established on a pre-work scout 2026-08-29.** Three findings, all already
+in the bug file and none of them visible from its title:
+
+1. **The sketched fix is refuted in that form.** *"Treat the gate as open only while the last
+   `hook_at` is within some window"* cannot work: measured across five healthy hook-installed
+   sessions, `hook_at` ages span **0.6 h to 25.0 h**, and two of the five predate their own
+   process by 7.8 h and 24.4 h through deliberate reconnect inheritance. A window would have to
+   exceed ~25 h to avoid false-deactivating a healthy session, which detects nothing. Structural,
+   not a tuning problem — the companion stamps only on `SessionStart`, so `hook_at` measures
+   time-since-conversation-start and liveness is a different quantity.
+2. **The viable fix is cross-repo and a design decision.** It needs an existing recurring hook to
+   also stamp the slot, in `../claude-plugins/codescout-companion/`, at a real per-prompt write
+   cost. The file names it explicitly as *"a design decision rather than a defect repair — so it
+   is named here, not taken unilaterally."*
+3. **The next step is measurement, not code.** Frequency has a first number — **0 of 5** stamped
+   slots showed the latch-open-while-quiet state, joined against `usage.db` activity — but that is
+   one ~20-minute snapshot. The file's own instruction is *re-run the join before closing*.
+
+So the actionable item here is a longer-window frequency join, which is in-repo and cheap. Held
+for the operator: it is a measurement to commission, not a defect to repair.
 ### BL-53 — Guide topics are atomic nodes in an unmodelled graph
 
 **Status:** open — **cross-referenced, do not fix from here.**
@@ -298,18 +333,25 @@ root cause worth more than a re-create. Phase 1 on that basis alone.
 
 ### BL-57 — `@tool_*` buffer grep returns the JSON envelope, not the stdout
 
-**Status:** in-progress — **owned by another session; listed for completeness, not to pick up.**
+**Status:** done-archived — fixed and archived by the owning session 2026-08-30.
 
-**Valid:** conditional — until the owning session flips the bug file's status
+**Valid:** dated 2026-08-30
 
-`docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`, tracked there as
-`resume-cross-machine-catalog-restore:CM-7`. Reproduced and fixed by a peer this session
-(`61476cb5`): the buffer holds the whole envelope on one line, `read_file` addresses by line, and
-that line exceeds `INLINE_BYTE_BUDGET`, so every read overflows into a new buffer of the same
-shape — the smallest addressable unit is larger than the largest returnable one, so it cannot
-converge. The bug row still reads `investigating` because the status was set through
-`edit_markdown` frontmatter, which is **BL-48**. The two are worth reading together: BL-48 is why
-this row looks open.
+`docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`, tracked there as
+`resume-cross-machine-catalog-restore:CM-7`. Reproduced and fixed by a peer
+(`61476cb5`, patch-id `f459ee93c80aba7eab5c3f922d1a6982b0b02f24`): the buffer holds the whole
+envelope on one line, `read_file` addresses by line, and that line exceeds
+`INLINE_BYTE_BUDGET`, so every read overflows into a new buffer of the same shape — the
+smallest addressable unit is larger than the largest returnable one, so it cannot converge.
+
+**Correction 2026-08-30, by the owning session.** This entry previously said the bug row read
+`investigating` "because the status was set through `edit_markdown` frontmatter, which is
+**BL-48**". That was not true of this bug: its status was set through
+`artifact(action="update", patch={status})`, which does write the catalog, and the row read
+`fixed` from that point. **BL-48 is real and was hit — on a different artifact**, the
+capped-get round-trip bug, where the frontmatter genuinely was set via `edit_markdown` and the
+catalog row kept its old value until an `artifact(update)` repaired it. The two bugs were
+adjacent in one session and got conflated; BL-48's evidence should point at that one.
 ### BL-45 — Decision 1: may a process on an unlinked binary re-index?
 
 **Status:** open — awaiting an operator decision, not blocked on work.
