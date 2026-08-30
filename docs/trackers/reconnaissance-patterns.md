@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 133
+entry_high_water_R: 135
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,8 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-135 | 2026-08-30 | miss | **A `du` proves size, never absence — a TRUE measurement written up in the past tense.** An archived bug file is `status: fixed` and closes *"174 MB reclaimed, 163 MB of it regenerable `.codescout` index state"*; 14 days later `.worktrees/bench` is still on disk at exactly 174M/163M, dir mtime **2026-05-12** (three months BEFORE the closure) and a gitdir still naming the pre-rename `code-explorer` path, which rules out delete-then-recreate since the file's own rebuild command would name `codescout`. The `du` ran before the removal and was written up as its result. Distinct from R-125 (abundant vs empty) and from the self-validating-gate class: this is a **correct positive number transferred to a proposition it does not support**. Audit verdict on the promoted set: **UNREACHABLE, not Outgrown** — Phase 3's *"name the proposition it proves, then ask whether a broken world produces the same result"* covers it exactly and would have caught it; a broken world yields the identical `du`. Remedy is placement, not wording: the risky moment is writing a **closure**, when the author is furthest from the evidence and most certain. No promotion proposed — one verified instance, and the session-opening surface additionally needs a base arm nobody has run | this session (`docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md`, `worktree-cleanup-session-log:F-1`); three sibling instances reported by a peer session and **not verified by me**; kin R-125, law B |
+| R-134 | 2026-08-30 | miss → rule | **A peer view can be DISJOINT from the population, not merely short.** Five Claude sessions shared this checkout and produced six misattributions in an afternoon, every one an elimination over the peers the asker could see. Both open mysteries resolved in ONE round each by enumerating from the OS (`pgrep -x claude` + `readlink /proc/$p/cwd`) and messaging invisible sessions at `uds:/run/user/1000/cc-socks/<pid>.sock`. Escalates R-50: a short view makes elimination weak, so you hedge; a DISJOINT view makes it unrelated, so hedging still draws the conclusion — you must change instruments. Measured by `codescout-f0`: their ListAgents listed three peers, none of which was any of the five codescout sessions. Tells: the instrument's units differ from the question's (sessions-a-transport-knows vs processes-with-this-cwd), and repeated "must be the remaining one" is equally produced by the answer lying outside the set. Corollary: in a live transcript a COUNT is contaminated by the act of asking (hits went 2→10 because sessions grepped for it) — prefer an ordinal | this session + `codescout-f0`, `codescout-fe`; kin R-50 |
 | R-133 | 2026-08-30 | miss → rule | **Loudness is a property of a PATH, not of a failure.** Three failures in one afternoon across three subsystems: a stale sidecar restores clean reporting success; a widened status region silently discharges the disagreement the scan exists to report; and BL-66, which *aborts the process* — maximally loud — and survived anyway because nothing in-tree reaches it (verified here: `install_default_crypto_provider()` is called unconditionally at every construction site, `main.rs:253` / `agent/mod.rs:448` / `reranker.rs:80` / `embedder.rs:339`, and `transport.rs:34` states the invariant as a reason not to handle the error). So the axis is not loud-vs-silent output but whether any TRAVERSED path observes the failure. When adding a guard, name the path that reaches it and the observer who acts on it; "an external consumer we do not have" is a legitimate reason to keep it and is not coverage of our own risk. Reachability twin of R-132's monotonicity. Tell: ask what an observer would SEE differently if this were broken right now | this session + `codescout-ae` (`e6414362`, BL-66); kin R-131, R-132 |
 | R-132 | 2026-08-30 | technique | **Mutate once per guarded SITE, not once per feature.** A mutation run answers a question about one LINE, not about a feature; where a law is implemented at N call sites, one kill proves exactly one site is guarded and says nothing about the other N−1. `artifact_augment` had two shape-writing paths (`merge=false`, and the sibling patch inside `merge=true`); mutating each separately killed DIFFERENT tests, neither failing under the other's mutation — a single mutation would have yielded the reasonable conclusion "the write-through is covered" with the second site unguarded. Pairs with R-130 (read which assertion died) and R-131 (its transitions-side twin) **Limit (general form):** *a test cannot detect a change its assertion is MONOTONE under* — absence assertions are monotone under removal, existence assertions under widening, so a property held by one of each is covered ZERO times, not weakly. Pairing an absence test with a positive one does NOT rescue it (my first fix, falsified by `codescout-ae` in `e6414362`: the violation mutation killed none of six tests, the positive one surviving because "a region CONTAINING the drift" is monotone under widening). Ask which direction each assertion is monotone under, and mutate the other way | this session's 4-mutation matrix; `codescout-ae`'s `entry_status_region` (both sites guarded) = datapoint 2; Promote-when FIRED |
 | R-131 | 2026-08-30 | miss → rule | **Individually correct guards can compose into a door nobody can open.** Three sidecar write paths each carried a defensible, test-pinned guard — export skips an existing sidecar (idempotence), `reindex` attaches only when a row is absent (repair not sync), `artifact_augment` did not touch the file — and together left NO path that updates a sidecar after the first export. Invisible in every individual diff, because each guard is right. Fired within a day: a shape edit reported `exported: 0` while the committed YAML held the superseded enum, and a fresh clone would have restored the old shape reporting `augmentations_restored: 1` — **a stale sidecar is strictly worse than an absent one**, absence being loud and staleness restoring clean. Rule: enumerate a state's TRANSITIONS (create/restore/update) and map sites onto them; a transition with no owner is the defect. Tell: a skip justified by "idempotent", which is a property of repeated identical calls and says nothing about changed input | BL-50 item (2); peer repair `2a8decc5`; kin R-132, R-47 |
@@ -4878,6 +4880,129 @@ what a green suite is evidence for, and splitting them across CLAUDE.md would lo
 **Rests on:** the decision that `install_default_crypto_provider` is called at every
 construction site rather than once at a single entry point. If that ever centralises, (3)'s
 reachability changes and this entry's third datapoint needs re-reading — the law does not.
+
+## R-134 — A peer view can be disjoint from the population, not merely short
+
+**Valid:** invariant
+
+**Status:** open
+
+**Observed:** five Claude sessions shared this checkout on 2026-08-30 and spent the
+afternoon misattributing each other's writes — six times by one session's own count. Every
+attempt was an *elimination over the peers the asker could see*. Two mysteries stayed open
+for hours: an unexplained mutation in `embedder.rs` at 16:56, and three worktree documents
+nobody would claim.
+
+**Got:** both resolved in one round each, by **enumerating the population from the OS and
+messaging by socket path** instead of reasoning over `ListAgents`.
+
+```
+for p in $(pgrep -x claude); do
+  case "$(readlink /proc/$p/cwd)" in /path/to/repo*) echo "$p $(stat -c %y /proc/$p)";; esac
+done
+```
+
+Five pids with cwd here; `ListAgents` showed three. An invisible session is still
+addressable as `uds:/run/user/1000/cc-socks/<pid>.sock`, and both answered immediately —
+one claiming the worktree files, the other claiming the 16:56 mutation with a fingerprint
+argument (`git log --all -S` returning zero for a form that demonstrably compiled).
+
+**The escalation, and why this is not just R-50 again.** R-50 says *the view is not the
+set* — name what the view dropped. A sibling finding says the view is **time-varying**, so
+a count is stale the moment it is read. Both are claims about a view being **short**. The
+sharper fact (measured by `codescout-f0`, 2026-08-30): a view can be entirely **DISJOINT**
+from the population you care about. Their `ListAgents` listed three peers —
+`changelog-reader-d8`, `system-d9`, `claude-plugins-08` — **none of which was any of the
+five codescout sessions.** Zero overlap.
+
+That is a different kind of defect and it demands a different response. A short view makes
+elimination *weak*, so you widen it or hedge the conclusion. A disjoint view makes
+elimination **unrelated** to the question — no amount of care with the wrong instrument
+converges, and hedging a conclusion drawn from it is still drawing it. You must change
+instruments.
+
+**How to apply.** Before eliminating over a set, ask whether the enumerating instrument is
+*known* to cover the population, or merely *plausibly* covers it. `ListAgents` enumerates
+sessions a transport can see; "sessions writing to this working tree" is a filesystem-and-
+process fact. They are different populations that happen to overlap sometimes, and nothing
+in either name says so. When they diverge you get a well-formed answer to a question you did
+not ask.
+
+**Cheap tells, both seen here:** the instrument's units are not the question's units
+(sessions-a-transport-knows vs processes-with-this-cwd); and eliminating over a small set
+keeps yielding "must be the remaining one" — a shape that is equally produced by the true
+answer being outside the set entirely.
+
+**A second-order trap, worth its own line** (credit `codescout-f0`): in a live transcript, a
+**count** is contaminated by the act of asking. Their grep for a filename went from 2 hits
+to 10 because three sessions asking about it added mentions. Line *position* relative to the
+turn boundary is not contaminated. When the corpus you are measuring records your
+measurement, prefer an ordinal to a count.
+
+**Promote-when:** one more case where the right instrument was available and unused. The
+promotion target is the coordination guidance rather than CLAUDE.md's testing discipline —
+this is about who is in the tree, not about what a green suite proves.
+
+**Rests on:** sessions being OS processes with an inspectable cwd and a per-pid socket. If
+peers ever become remote or multiplexed behind one process, `pgrep` stops being the
+authoritative instrument and this needs re-deriving — the *lesson* survives, the recipe does
+not.
+
+## R-135 — Miss: a true measurement written up in the past tense — law B was promoted, correct, and never reached
+
+**Verdict:** miss — the scout did not run at the moment of need, and the law that would
+have caught it was already promoted and already correctly worded.
+
+**The instance.** `docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md`
+is `status: fixed`, `closed: 2026-08-16`, and its `## Fix` closes with *"174 MB reclaimed,
+163 MB of it regenerable `.codescout` index state."* On 2026-08-30 `.worktrees/bench` was
+still on disk at **exactly** 174M total and **exactly** 163M in `.codescout`, with dir mtime
+**2026-05-12** — three months *before* the closure — and a `.git` still naming the
+pre-rename `code-explorer` path, which rules out delete-then-recreate since the file's own
+documented rebuild command would have written a gitdir naming `codescout`.
+
+The `du` was real. It was run before the removal, and then written up as the removal's
+result. **A `du` proves size, never absence.**
+
+**Why this is law B and not a new law.** *The instrument decides the answer* — but the
+sharper form here is that the instrument answered a **true** question adjacent to the one
+the sentence claimed. Not an empty result (law C), not a green that certifies nothing, not a
+self-validating gate: a correct positive number, transferred to a proposition it does not
+support. The skill's Phase 3 already states the remedy exactly — *"name the proposition it
+proves, then ask whether a broken world produces the same result"* — and a broken world
+(removal failed) produces the identical `du`, because the `du` preceded it.
+
+**Diagnosis against the four-way promoted-set audit: UNREACHABLE, not Outgrown.** The
+promoted text needs no rewording; it covers this case cleanly. It was simply not fetched at
+the moment of writing a closure. Per the skill's own routing, the remedy for Unreachable is
+**placement, not wording** — and the placement question is whether a closure-writing step
+should carry the check, since that is the one moment the author is furthest from the
+evidence and most certain.
+
+**What this entry does NOT claim.** A peer session reports three sibling instances measured
+in this tree the same day — a `strings` grep on a stripped binary returning a plausible 0, a
+mutation kill crediting a guard that never ran, and an alarm wired to an unreachable code
+path. Those are **reported, not verified by me**, and are recorded here as leads rather than
+datapoints. One verified instance does not meet a promotion threshold, and promoting to the
+session-opening surface additionally requires a **base arm** — a measurement that an unaided
+agent does not already do this — which nobody has run. So: no promotion proposed. Verify the
+three before anyone counts to four.
+
+**Counterfactual.** The closure's reader inherits a false statement of fact with real
+numbers attached. It survived 14 days and was found only because an unrelated worktree audit
+happened to `ls` the directory. Nothing routine surfaces it: `git worktree list`,
+`git worktree prune --dry-run` and `git status` are all silent on `.worktrees/`, the first
+two because no registration exists and the third because the path is untracked.
+
+**Status:** open — filed as `docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md`; the disk half is resolved (184M reclaimed, `bench` deliberately kept), the placement question is not.
+
+**Valid:** dated 2026-08-30
+
+The `du` figures and mtime are true of this machine at that instant; the law is not time-bound.
+
+**Rests on:** law B (*The instrument decides the answer*) and the Phase 3 imperative in the
+reconnaissance SKILL.md; sibling `R-125` covers the abundant-vs-empty axis, which this is
+not.
 
 ## Template for new entries
 
