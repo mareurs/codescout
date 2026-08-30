@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 4
+entry_high_water_OB: 5
 entry_prefix: OB
 ---
 
@@ -126,6 +126,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-5 | 2026-08-31 | a summary keyed only by findings cannot say which checks RAN — absence reads as a clean bill of health | the reader of the report | wrong instrument | **none yet** — designed, 3 lines |
 | OB-4 | 2026-08-31 | a liveness marker with a good hit rate (2/3) spends the trust it earned — and three git-based instruments agreeing is **one** instrument | the session doing cleanup | wrong instrument | **none yet** — worklist |
 | OB-3 | 2026-08-31 | a peer/agent listing is arbitrary w.r.t. the real population | the session reading the listing | wrong instrument | shipped (OS enumeration) |
 | OB-2 | 2026-08-31 | shared `target/` left in a feature-clobbered state | the session that arms it | wrong instrument | **shipped** (gate ends safe) |
@@ -358,6 +359,47 @@ sharpens a wrong answer.
 here at each step (directory present at 174M; gitdir target absent; 84 citations across 16
 files; `git worktree list --porcelain` naming only the main checkout; `.gitignore:7` and
 `:117`; `ede25e69` reachable as a commit object)
+
+## OB-5 — a summary keyed only by findings cannot say which checks ran
+
+**Valid:** conditional — closes when `by_check` is seeded with every check name at zero
+
+**Rests on:** an instrument that reports *findings* rather than *coverage* answers "what did I find?" when the reader is asking "what was looked at?" — a many-to-one map from world-states onto one output.
+
+**Class:** state conflation inside a **single** instrument. Distinct from `OB-4`, which is several instruments sharing one substrate — see *Why this is not OB-4* below, because the distinction determines the remedy.
+
+**Blind party:** the reader of the report. `doctor`'s `summary.by_check` is built by iterating the violations that exist (`src/librarian/tools/doctor.rs:401-404`), so a check contributes a key **only if it found something**. Three different world-states collapse onto *absent key*:
+
+1. the check ran and found nothing — the happy case;
+2. the check was removed, commented out, or never wired in — the checks are a hardcoded straight-line sequence of `all_violations.extend(scan_*(…))` at `:196-307` with **no registry**, so a deleted line leaves no trace anywhere in the output;
+3. the check ran but was held back by its own gate — several are threshold-gated on citation volume *by design* (`:214-221`), which is correct behaviour that is nonetheless indistinguishable from (2).
+
+**Who can see it:** anyone holding the check inventory from a *different* source — reading `doctor.rs`, or querying the database directly. `codescout-fe` resolved a live instance by going to the database, which worked; the entry exists because that is a workaround, not the fix.
+
+**Plausible-answer property:** absence reads as **a clean bill of health**, which is the default happy interpretation. This is the worst available direction for a conflation to fail in: a missing check and a passing check both look like "fine", so the report is most reassuring exactly when it is least informative.
+
+**Vigilance:** wrong instrument. No amount of care reading the report recovers the missing state — the information is not in it. A reader would have to already know the full check inventory, in which case they did not need the summary.
+
+**Why this is not `OB-4`, and why that matters.** `codescout-fe` offered it as a third instance of *"instruments sharing a substrate are one instrument"*, using *substrate* to mean the shared summary object. Judged here as a **neighbouring class, not that one**, on the remedy test:
+
+| | `OB-4` — shared substrate | `OB-5` — state conflation |
+|---|---|---|
+| how many instruments | three, agreeing | one |
+| does the instrument *know*? | **no** — `git worktree list` has no access to the fact that `scripts/` cites the path | **yes** — the list of checks that ran is in the same function |
+| fix | add an instrument reading a **different substrate** | **emit the discriminator** from inside the existing one |
+| second substrate is… | the only fix | a workaround |
+
+Going to a second source happens to work for both, which is why they feel alike. But for `OB-4` there is no *"emit the discriminator"* option at all, and here there is — and it is three lines.
+
+**Mechanism status:** none yet — designed, unimplemented, cheap.
+
+- **Seed `by_check` with every check name at `0`** before counting. Then *absent* means "did not run" and `0` means "ran, found nothing", and states (1) and (2) separate. Cheapest correct fix; needs a name list, which is the same edit that would give the sequence a registry.
+- **Report gated checks as a third value** — `"threshold_not_met"` rather than `0` — to separate (3) from (1). Optional; (1)-vs-(2) is the load-bearing split.
+- **Generalisable rule for any reporting tool:** report **coverage alongside findings**. A report that enumerates only what it found cannot distinguish a clean subject from an unexamined one, and `docs/adrs/2026-08-27-negative-results-name-their-scope.md` already states the principle for negative results — this is the same rule applied to a *summary object* rather than to a single zero.
+
+**Instances:** `summary.by_check` (verified at `doctor.rs:401-404` + `:196-307`, 2026-08-31); reported by `codescout-fe` from a live encounter, resolved by them via the database.
+
+**Status:** validated — one instance, verified in source; promotion of the *class* awaits a second sighting outside `doctor`
 
 ## Template for new entries
 
