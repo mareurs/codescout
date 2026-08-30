@@ -127,6 +127,35 @@ registration ordering or a race. A reciprocal one, with each side seeing exactly
 own profile's sessions, is a **profile-scoped registry** — three profiles on this
 machine (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`, per CLAUDE.md), each with its
 own view, over a socket directory that is machine-global and shared by all of them.
+### The NAME is unusable as an address across the boundary, even where the socket works
+
+Reported 2026-08-30 by the omitted session itself, which is the only place this could be
+observed from. Attempting `SendMessage(to: "codescout-ae")` from the `~/.claude-sdd`
+session was **refused as unreachable**, while `SendMessage` to the raw
+`uds:/run/user/1000/cc-socks/803654.sock` delivered normally.
+
+This sharpens the disjoint-not-nested reading into something with a practical edge.
+Address resolution is not merely *incomplete* across the profile boundary — it is
+**absent**, while the transport underneath is fully functional. So the two halves fail
+differently:
+
+| layer | across profiles |
+|---|---|
+| enumeration (`ListAgents`) | omits the peer, and reports the short count as the population |
+| name resolution (`to: "<name>"`) | refuses with *unreachable* |
+| transport (`to: "uds:<socket>"`) | **works** |
+
+The practical consequence is that a cross-profile peer is reachable **only by a session
+that has already learned its socket path by other means** — `/proc` or the socket
+directory. Nothing in the tool surface would lead anyone there, because the tool that
+would name it is the one that omits it. Two sessions can hold a working channel and
+still be unable to hand that channel to a third by name.
+
+Worth noting the refusal here is *correct behaviour given the registry* and still
+misleading in effect: *unreachable* is true of the name and false of the session, and a
+reader has no way to tell those apart. Compare
+`docs/adrs/2026-08-27-negative-results-name-their-scope.md` clause 3 — the error claims
+more than it has established.
 ## Root cause
 
 **Inferred, not read** — the source is not in this repo. Discovery appears scoped to
