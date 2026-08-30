@@ -53,6 +53,39 @@ references(symbol=<any resolvable symbol>, path=<any file in a large crate>)
 Timing is the whole variable — a small crate, or a rust-analyzer that another
 session already warmed, will not show it. See *Resume* for what to capture.
 
+### Performed 2026-08-30 — and it did NOT reproduce, for a reason the record did not know
+
+Ran the protocol this file's *Resume* section prescribes, from a session that had
+called `workspace(post_compact=true)` as its first action and then made **zero** LSP
+calls for 18 minutes (`symbols` and `grep` are AST/ripgrep, not LSP, so the window
+stayed open).
+
+| step | result |
+|---|---|
+| `ps -C rust-analyzer` before | PID 1112731, alive **17m02s** |
+| `references("guard_stale_binary", "src/retrieval/sync.rs")` | returned immediately, 6 hits |
+| `ps -C rust-analyzer` after | **same PID**, 17m19s — no new process spawned |
+
+**There is a mux, and it changes the mechanism.** `rust-analyzer` does not run under
+the codescout server that uses it. It runs under
+`codescout mux --socket /run/user/1000/codescout-rust-mux-<workspace-hash>.sock
+--idle-timeout 180 -- rust-analyzer`, a separate process keyed by **workspace**, not by
+session. The mux serving my call (PID 1112714) is parented by server **801705 — a
+different session's**. Mine is 803849.
+
+So `shutdown_all()` drains *this server's* client map (`src/lsp/manager.rs:1306-1324`)
+and the language server itself survives untouched.
+
+**The Environment note above has its confound backwards.** It records *"Two other
+rust-analyzer instances and eight `codescout start` processes were live on the host, so
+lock/CPU contention is a confound not excluded"* — reading the peers as a source of
+**contention**. Through the mux they are the opposite: concurrent sessions are what keep
+the language server **warm**. The cold window only opens when the mux is genuinely down,
+which needs a single-session workspace idle past 180s.
+
+That does not refute the original timeout — it was observed. It relocates the trigger
+from "any flush" to "a flush with no live mux", which is a much narrower and much more
+testable claim.
 ## Environment
 
 Branch `experiments` @ `894a5e26`, linux, codescout 0.15.0, release build,
@@ -131,6 +164,49 @@ Not started. In preference order:
 
 (a) and (b) are not exclusive; (a) alone would make (b) unnecessary.
 
+### Correction 2026-08-30 — option (a) as written is a no-op for this bug's own reproduction
+
+Verified at `src/lsp/mod.rs:23-25`:
+
+```rust
+/// Languages whose LSP servers are pre-warmed on project activation.
+/// Hardcoded to JVM languages — Kotlin in particular takes 30–60 s to start.
+const PREWARM_LANGUAGES: &[&str] = &["java", "kotlin"];
+```
+
+`prewarm_lsp_background` filters on that list. So "make the flush path do what the
+activate path already does" would prewarm **Java and Kotlin only** — and the failure
+reported here is **Rust**, on a 1697-file crate, against rust-analyzer. Shipping (a)
+literally changes nothing observable about the reported symptom while closing the bug:
+the `bug-fix-session-log:W-66` shape, a fix that changes nothing and a live defect
+marked done.
+
+Any real version of (a) has to decide something (a) never states: **which** languages
+the flush path prewarms. Widening `PREWARM_LANGUAGES` is not free — it changes
+`workspace(activate)` for every project and starts rust-analyzer eagerly on activation.
+The conservative alternative is to prewarm exactly the languages that were **drained**
+by this flush: it can never start something that was not already running, needs no
+global policy change, and matches the intent ("restore what I just tore down"). That
+needs `shutdown_all` to report what it drained — it currently returns `()`, across a
+trait with 9 impls.
+
+### Correction — option (b) targets a sentence that is not in this repo
+
+The title and Summary say the tool's *"own hint promises no disruption"*. It does not.
+The hint is:
+
+> `LSP position caches cleared. Clients restart automatically on the next navigation
+> call (symbol_at, references).`
+
+which promises nothing about cost. The sentence *"LSP clients restart lazily — no
+disruption to the session"* comes from the **SessionStart injection**, and
+`grep -rn "no disruption"` finds it in exactly one executable place:
+`claude-plugins/codescout-companion/hooks/session-start.mjs:339` — **a different repo**.
+It is echoed in `docs/manual/src/concepts/post-compact-cache-flush.md:19` and `:33`.
+
+So (b) is a cross-repo change plus a manual fix, and the Summary here merges two
+surfaces into one quotation. Worth keeping straight, because the misleading half is the
+one this repo cannot fix by itself.
 ## Tests added
 
 None yet, and the honest note is that a *timing* assertion would be flaky. The
@@ -168,4 +244,3 @@ prewarm that the `activate` branch does. If it does not, (a) is a small change.
 - `docs/issues/archive/2026-04-24-find-symbol-cold-start-hang.md` — fixed; the same 60s cold-start shape on `find_symbol`
 - `docs/issues/archive/2026-07-10-lsp-shutdown-all-holds-clients-lock-across-await.md` — fixed; `post_compact` stalling navigation via a lock held during *shutdown*, which is the other half of this path
 - `get_guide("workspace-state")` § *What `activate_project` does*, step 3 — the prewarm the flush path lacks
-
