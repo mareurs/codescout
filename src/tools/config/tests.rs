@@ -1429,6 +1429,66 @@ async fn post_compact_flushes_lsp_clients_and_returns_flushed() {
     );
 }
 
+/// The `post_compact` hint must price the flush, not merely describe its mechanism.
+///
+/// `docs/issues/2026-08-28-post-compact-flush-leaves-first-nav-call-to-pay-cold-start.md`
+/// (`open-issue-work-queue:BL-49`). The restart is lazy, so the next navigation call
+/// pays the language-server start — on a 1697-file Rust crate that once exceeded the
+/// 60s tool timeout and returned nothing. The old hint read "Clients restart
+/// automatically on the next navigation call (symbol_at, references)": true about the
+/// mechanism, silent about who pays.
+///
+/// Measured 2026-08-30, and it is why this test does not simply demand the word
+/// "cold": the cost is real but NOT unconditional. `rust-analyzer` runs under a
+/// workspace-keyed `codescout mux` process (`--idle-timeout 180`), not under the
+/// codescout server that uses it, so `shutdown_all` drains this server's client map
+/// while the language server survives. A flush followed 18 minutes later by
+/// `references` returned immediately and spawned no new process — served by a mux a
+/// *different session's* server had started. A hint promising an unconditional cold
+/// start would be as wrong as one promising none.
+///
+/// Both assertions fail on a revert to the old text, which names neither the remedy
+/// nor the shared-server caveat. Lowercased because a sibling assertion in
+/// `src/retrieval/sync.rs` was written case-brittle and had to be repaired.
+#[tokio::test]
+async fn post_compact_hint_prices_the_flush_rather_than_only_describing_the_mechanism() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    let result = ProjectStatus
+        .call(json!({"post_compact": true}), &ctx)
+        .await
+        .unwrap();
+    let hint = result["hint"]
+        .as_str()
+        .expect("post_compact response must carry a hint")
+        .to_lowercase();
+
+    assert!(
+        hint.contains("re-run"),
+        "the hint must name the remedy for a first navigation call that stalls, \
+         since the caller otherwise cannot tell a slow start from a dead tool: {hint}"
+    );
+    assert!(
+        hint.contains("another session"),
+        "the hint must say the language server is shared across sessions in this \
+         workspace, so the cost is conditional rather than certain: {hint}"
+    );
+}
+
 /// docs/issues/archive/2026-08-15-worktree-memory-set-and-subproject-topology-diverge.md
 ///
 /// A worktree activation serves that commit's memories and, because

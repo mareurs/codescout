@@ -12,6 +12,7 @@ tags:
 - references
 - doc-vs-behavior
 - timeout
+unverified: 'PARTIAL. Shipped: the in-repo hint now prices the flush, plus the manual. NOT shipped: (a) the prewarm, deliberately deferred — its prescribed form is a no-op for this bug''s own Rust reproduction, and the mux makes the cold window much narrower than this record assumed. NOT shipped and still emitting: the actually-false sentence, which lives in claude-plugins/codescout-companion/hooks/session-start.mjs:339, a different repo. Status stays open because that last one is the half this file calls the worse one.'
 ---
 
 ## Summary
@@ -207,12 +208,57 @@ It is echoed in `docs/manual/src/concepts/post-compact-cache-flush.md:19` and `:
 So (b) is a cross-repo change plus a manual fix, and the Summary here merges two
 surfaces into one quotation. Worth keeping straight, because the misleading half is the
 one this repo cannot fix by itself.
+### Shipped 2026-08-30 — (b) in-repo only, and (a) deliberately deferred
+
+**Done, in this repo.** The `post_compact` hint no longer describes only the mechanism.
+It was:
+
+> `LSP position caches cleared. Clients restart automatically on the next navigation
+> call (symbol_at, references).`
+
+True about what happens, silent about who pays. It now names the cost, the condition
+that removes the cost, and the remedy — the condition being load-bearing, because the
+mux means an unconditional "expect a cold start" would be as wrong as the old silence.
+The manual's two stale passages are fixed in the same commit, and the section quoting
+the hook's output is left **verbatim** with a warning attached rather than silently
+corrected: a manual that quotes a hook has to match the hook.
+
+**Deferred, with reasons rather than by omission — (a), the prewarm.** Its prescribed
+form is a no-op for the reproduction in this very file (`PREWARM_LANGUAGES` is JVM-only;
+the repro is Rust). Any real version has to choose between widening that constant —
+which changes `workspace(activate)` for every project and starts rust-analyzer eagerly —
+and teaching `shutdown_all` to report what it drained, a signature change across a trait
+with 9 implementations. Both are large next to a window the mux has now shown to be
+narrow: single-session workspace, idle past 180s. Worth doing when someone reproduces
+the timeout *with the mux confirmed down*, which is the measurement this file still
+lacks and the `## Resume` protocol should now capture.
+
+**Outstanding, and it is the half this file calls the worse one.** The sentence that
+actually asserts something false — *"LSP clients restart lazily — no disruption to the
+session"* — is at `claude-plugins/codescout-companion/hooks/session-start.mjs:339`, in a
+different repository, and is still emitted at every post-compaction SessionStart. This
+repo cannot fix it. The exact replacement it needs is the hint's own wording: name the
+cost, name that a concurrent session in the same workspace may absorb it, name `re-run`
+as the remedy. Update `docs/manual/src/concepts/post-compact-cache-flush.md`'s quoted
+block in the same commit that lands there — the manual carries a marker saying so.
 ## Tests added
 
-None yet, and the honest note is that a *timing* assertion would be flaky. The
-testable claim is structural, not temporal: **after a `post_compact` flush, a
-prewarm is issued** — assert the call, not the latency.
+`post_compact_hint_prices_the_flush_rather_than_only_describing_the_mechanism`
+(`src/tools/config/tests.rs`). Written RED first and confirmed RED — it failed against
+the old hint, printing it verbatim in the panic message.
 
+It asserts two things a revert to the old text fails: that the hint names the **remedy**
+(`re-run`), and that it names the **shared-server caveat** (`another session`). The
+second is why the test does not simply demand the word "cold": the mux makes the cost
+conditional, so a hint promising an unconditional cold start would be a different wrong
+answer, and a test that accepted it would be worse than none.
+
+The original note above — *"a timing assertion would be flaky; the testable claim is
+structural"* — was right and is what this follows. Nothing here asserts a latency.
+
+The pre-existing `post_compact_flushes_lsp_clients_and_returns_flushed` asserts
+`result["hint"].is_string()`, which is satisfied by any string including the misleading
+one. It is left alone: it covers response *shape*, and the new test covers content.
 ## Workarounds
 
 **Re-run the call.** The second attempt succeeds. If a navigation call is the

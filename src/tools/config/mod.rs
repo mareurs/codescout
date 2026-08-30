@@ -368,7 +368,10 @@ impl Tool for ProjectStatus {
             tracing::info!("PostCompact: flushed all LSP clients; they will restart lazily.");
             return Ok(json!({
                 "flushed": true,
-                "hint": "LSP position caches cleared. Clients restart automatically on the next navigation call (symbol_at, references)."
+                "hint": "LSP position caches cleared. Clients restart on the next navigation call \
+                         (symbol_at, references), which pays the language-server start unless another \
+                         session in this workspace is already holding it warm — the server is shared \
+                         per workspace, not per session. If that first call stalls or times out, re-run it."
             }));
         }
 

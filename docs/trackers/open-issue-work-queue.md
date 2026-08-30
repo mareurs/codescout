@@ -90,7 +90,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-46 | 2 | Decision 2: the write-root split — unpinned WRITES resolve to the last writable root, unpinned READS keep resolving to the activated one | **not started** — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive | — |
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
 | BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
-| BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | open | `caa8bc1df0e8c0d8` |
+| BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | **partial** — hint + manual fixed; diagnosis corrected in 3 places. Its prescribed fix (a) was a NO-OP for its own Rust repro (`PREWARM_LANGUAGES` is JVM-only), and a mux keyed by workspace keeps the server warm across sessions, so the cold window is far narrower than filed. The actually-false sentence is cross-repo (`session-start.mjs:339`) and still emitting — stays open for that | `caa8bc1df0e8c0d8` |
 | BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | open | `19f44bead56b56cc` |
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `e6c0ddb91fe28228` |
 | BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `54a70b49f6f26681` |
@@ -265,6 +265,34 @@ navigation call pays cold start and can blow the 60s tool timeout, while the too
 promises no disruption. The misleading hint is the worse half: latency is survivable, a hint that
 rules out the real cause ends the search for it.
 
+**Worked 2026-08-30 — and the reproduction changed the fix, as the rule predicts.**
+Running the record's own `## Resume` protocol before reading its `## Fix` section found
+three independent defects in the diagnosis:
+
+1. **Fix (a) was a no-op for this bug's own reproduction.** `PREWARM_LANGUAGES`
+   (`src/lsp/mod.rs:25`) is `&["java", "kotlin"]`; the reported failure is Rust. "Make
+   the flush path do what the activate path already does" would have changed nothing
+   observable and closed the bug — the `bug-fix-session-log:W-66` shape.
+2. **A workspace-keyed mux relocates the trigger.** `rust-analyzer` runs under
+   `codescout mux --socket codescout-rust-mux-<hash>.sock --idle-timeout 180`, not under
+   the server that uses it, so `shutdown_all` drains this server's clients and the
+   language server survives. Measured: 18 minutes after a flush, with zero intervening
+   LSP calls, `references` returned immediately and spawned no new process — served by a
+   mux a *different session's* server had started. The record's Environment note reads
+   the concurrent sessions as **contention**; they are the opposite.
+3. **Fix (b) targets a sentence not in this repo.** The tool's hint promised nothing
+   about cost; *"no disruption to the session"* is
+   `claude-plugins/codescout-companion/hooks/session-start.mjs:339`.
+
+Shipped the cheap half: the hint now prices the flush (cost, the condition that removes
+it, and `re-run` as remedy), the manual's two stale passages are fixed, and the block
+quoting the hook is left verbatim under a warning — a manual that quotes a hook has to
+match the hook. One test, written and confirmed RED first, asserting the remedy and the
+shared-server caveat rather than a latency.
+
+Deferred the prewarm on stated grounds rather than by omission, and left the cross-repo
+sentence named with its exact replacement. **This entry stays open for that sentence**,
+which is the half this record itself calls the worse one.
 ### BL-50 — `expects_augmentation` records existence, not shape
 
 **Status:** open
