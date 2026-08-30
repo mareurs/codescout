@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
-# Standalone — intentionally not a workspace member of code-explorer.
+# Standalone — intentionally not a workspace member of codescout.
 # This crate exists only to give rust-analyzer something to attach to
 # when the nav-eval harness exercises navigation tools against
 # hand-authored ambiguity traps.

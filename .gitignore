@@ -7,7 +7,7 @@
 /.worktrees/
 /target
 /.mcp.json
-# code-explorer data dir: ignore generated/personal files, track shareable ones
+# codescout data dir: ignore generated/personal files, track shareable ones
 /.codescout/project.toml
 /.codescout/index-state.json
 /.codescout/embeddings.db

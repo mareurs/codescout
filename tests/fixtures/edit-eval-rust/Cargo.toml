@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
-# Standalone — intentionally not a workspace member of code-explorer.
+# Standalone — intentionally not a workspace member of codescout.
 # This crate is mutated in-place per eval case; isolation depends on
 # `git restore` between cases.
 [workspace]
