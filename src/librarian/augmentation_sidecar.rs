@@ -259,28 +259,46 @@ pub fn write_through(
 /// `schema_version` is deliberately excluded. A sidecar written before a field existed still
 /// parses (every field carries `#[serde(default)]`), so a version difference is a statement
 /// about when the file was written, not about what it says.
+///
+/// **The destructure below is exhaustive on purpose, and is the point of the function's
+/// shape.** Adding a field to `AugmentationSidecar` breaks compilation here until that field
+/// is compared. Without it a new shape field would travel in the sidecar, restore correctly,
+/// and silently never be drift-checked — `sidecar_shape_drift` would report healthy on the
+/// one field nobody wired up, which is the exact class of silent-clean-report this whole
+/// mechanism exists to end. The compiler is the only reviewer guaranteed to be present on the
+/// day that field is added.
 pub fn drifting_fields(
     row: &AugmentationRow,
     committed: &AugmentationSidecar,
 ) -> Vec<&'static str> {
+    let AugmentationSidecar {
+        schema_version: _,
+        prompt,
+        entry_collection,
+        params_schema,
+        render_template,
+        append_mode,
+        history_cap,
+    } = committed;
+
     let live = AugmentationSidecar::from_row(row);
     let mut out = Vec::new();
-    if live.prompt != committed.prompt {
+    if &live.prompt != prompt {
         out.push("prompt");
     }
-    if live.entry_collection != committed.entry_collection {
+    if &live.entry_collection != entry_collection {
         out.push("entry_collection");
     }
-    if live.params_schema != committed.params_schema {
+    if &live.params_schema != params_schema {
         out.push("params_schema");
     }
-    if live.render_template != committed.render_template {
+    if &live.render_template != render_template {
         out.push("render_template");
     }
-    if live.append_mode != committed.append_mode {
+    if &live.append_mode != append_mode {
         out.push("append_mode");
     }
-    if live.history_cap != committed.history_cap {
+    if &live.history_cap != history_cap {
         out.push("history_cap");
     }
     out
