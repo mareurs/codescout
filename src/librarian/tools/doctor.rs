@@ -115,6 +115,92 @@ use crate::librarian::{current_project, ids};
 
 use super::{RecoverableError, ToolContext};
 
+/// Declares every check `doctor` can emit, generating the enum and its `ALL`
+/// list from ONE list so the two cannot drift apart.
+///
+/// **The wire string is pinned beside its variant on purpose, never derived
+/// from the variant name.** These strings are this tool's public vocabulary:
+/// `docs/issues/`, the guides and `get_guide("tracker-conventions")` name
+/// checks like `augmentation_declared_but_absent` in prose, and readers match
+/// on them in `doctor`'s JSON. Deriving the string from the identifier would
+/// make a variant rename a silent breaking change to that vocabulary —
+/// compiler-clean, because nothing outside this crate is typed against it.
+/// Pinned, a rename is visible in the diff as a changed literal.
+macro_rules! declare_checks {
+    ($($variant:ident => $name:literal),+ $(,)?) => {
+        /// Every check name `doctor` can emit.
+        ///
+        /// This exists because a hand-maintained enumeration was tried here
+        /// before, in `Violation`'s own doc comment, and went stale by three of
+        /// eight with nobody noticing — see that comment. The lesson is not
+        /// "a list is wrong" but "a *hand-maintained* list is wrong": the
+        /// adjective is the whole finding, and this macro drops it by
+        /// generating `ALL` from the same arms as the variants.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Check {
+            $(
+                #[allow(missing_docs)]
+                $variant
+            ),+
+        }
+
+        impl Check {
+            /// Every variant, generated from the same macro arms as the enum
+            /// itself — adding a check adds it here with no second edit.
+            pub const ALL: &'static [Check] = &[$(Check::$variant),+];
+
+            /// The wire name, as it appears in `doctor`'s JSON.
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $(Check::$variant => $name),+
+                }
+            }
+
+            /// Resolve a wire name back to its variant. `None` means the name
+            /// is not a declared check — which `Violation::new` treats as a
+            /// programming error rather than data.
+            pub fn from_wire(name: &str) -> Option<Check> {
+                match name {
+                    $($name => Some(Check::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+declare_checks! {
+    AbsPathMustBeAbsolute => "abs_path_must_be_absolute",
+    AbsPathOutsideManagedRoots => "abs_path_outside_managed_roots",
+    AdsColonInAbsPath => "ads_colon_in_abs_path",
+    ArchivedFixShaUnresolvable => "archived_fix_sha_unresolvable",
+    AugmentationDeclarationUnparseable => "augmentation_declaration_unparseable",
+    AugmentationDeclaredButAbsent => "augmentation_declared_but_absent",
+    BackslashInAbsPath => "backslash_in_abs_path",
+    BackslashInGitRoot => "backslash_in_git_root",
+    CitedPrefixWithNoDefiner => "cited_prefix_with_no_definer",
+    DeclaredRootMissing => "declared_root_missing",
+    DotdotSegmentInAbsPath => "dotdot_segment_in_abs_path",
+    EntryCitedFromOutsideButUndeclared => "entry_cited_from_outside_but_undeclared",
+    EntryConditionalPastDue => "entry_conditional_past_due",
+    EntryDatedStale => "entry_dated_stale",
+    EntryWithoutDefinition => "entry_without_definition",
+    FrontmatterIdIsNotACatalogId => "frontmatter_id_is_not_a_catalog_id",
+    FrontmatterIdMismatch => "frontmatter_id_mismatch",
+    LedgerDefinesNothing => "ledger_defines_nothing",
+    MissingFile => "missing_file",
+    ParamsBehindBody => "params_behind_body",
+    ParamsStatusDrift => "params_status_drift",
+    PrematureArchiveCitation => "premature_archive_citation",
+    SidecarShapeDrift => "sidecar_shape_drift",
+    SidecarUnparseable => "sidecar_unparseable",
+    SnapshotDrift => "snapshot_drift",
+    TerminalStatusWithCaveat => "terminal_status_with_caveat",
+    TerminalStatusWithoutFixAnchor => "terminal_status_without_fix_anchor",
+    ValidityUnparseable => "validity_unparseable",
+    WorktreeScopedRow => "worktree_scoped_row",
+}
+
 /// One violation of a doctor invariant.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Violation {
@@ -145,6 +231,16 @@ impl Violation {
         path: impl Into<String>,
         detail: impl Into<String>,
     ) -> Self {
+        // A name no `Check` variant declares is a programming error, not data:
+        // it would be counted in `by_check` but absent from the seeded set, so
+        // the report would silently carry a check the registry does not know.
+        // Debug-only, so it fires across the test suite — every `scan_*` with a
+        // test that makes it fire is gated — and costs nothing in release.
+        debug_assert!(
+            Check::from_wire(check).is_some(),
+            "undeclared doctor check name {check:?} — add it to declare_checks! \
+             or by_check will not seed it"
+        );
         Self {
             check: check.into(),
             artifact_id,
@@ -398,7 +494,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // in the same `summary` object, with neither labelled as authoritative.
     // It is the same defect the audit-doc-refs counters shipped in
     // `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md`.
-    let mut by_check: std::collections::BTreeMap<String, usize> = Default::default();
+    // Seeded with every declared check at 0 BEFORE counting, so a check that
+    // ran and found nothing reports `0` instead of being absent. Absence was
+    // the only signal left for "this check did not run", and it collided with
+    // the happy case in the one direction that reads as a clean bill of
+    // health: a clean catalog produced `by_check: {}`, indistinguishable from
+    // a doctor with no checks at all.
+    //
+    // `total == by_check.values().sum()` still holds — zeros add nothing —
+    // which `summary_total_partitions_by_check` asserts.
+    let mut by_check: std::collections::BTreeMap<String, usize> = Check::ALL
+        .iter()
+        .map(|c| (c.as_str().to_string(), 0usize))
+        .collect();
     for v in &all_violations {
         *by_check.entry(v.check.clone()).or_insert(0) += 1;
     }
@@ -6781,6 +6889,45 @@ mod tests {
         );
     }
 
+    /// A check that RAN and found nothing must appear in `by_check` with `0`,
+    /// never be absent.
+    ///
+    /// `by_check` is built by iterating the violations that exist, so a check
+    /// contributes a key only if it fired. That makes absence carry three
+    /// different meanings at once — ran clean, never wired in, or held back by
+    /// its own threshold gate — and it resolves them in the one direction that
+    /// reads as a clean bill of health. The report is most reassuring exactly
+    /// when it is least informative.
+    ///
+    /// The fixture seeds a row whose file EXISTS, so `missing_file` genuinely
+    /// executes and genuinely finds nothing; an empty catalog would leave the
+    /// per-artifact loop unentered and prove only that a check nobody ran is
+    /// absent, which is the thing already true today.
+    ///
+    /// Mutation that must kill this: drop the zero-seeding of `by_check` and
+    /// the key disappears — the current behaviour.
+    #[tokio::test]
+    async fn by_check_names_a_clean_check_with_zero_rather_than_omitting_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("doc.md");
+        std::fs::write(&file, "---\nkind: tracker\nstatus: active\n---\n# doc\n").unwrap();
+        let path = crate::util::fs::RepoPath::from_path(&file).into_string();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "1111111111111111", &path);
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let report = call(&ctx, json!({})).await.unwrap();
+        let by_check = report["summary"]["by_check"].as_object().unwrap();
+
+        assert_eq!(
+            by_check.get("missing_file").and_then(|v| v.as_u64()),
+            Some(0),
+            "a check that ran and found nothing must report 0, not be omitted — \
+             absence is the only signal left for 'did not run'. by_check={by_check:?}"
+        );
+    }
+
     /// Seed an augmented tracker: a real file with `body`, plus an augmentation
     /// row whose `entry_collection` holds `ids`.
     fn seed_tracker(cat: &Catalog, id: &str, dir: &std::path::Path, body: &str, ids: &[&str]) {
@@ -11693,11 +11840,18 @@ root = "work/elsewhere/ghost"
         let ctx = ctx_rooted_at(cat, &active_root);
         let out = call(&ctx, json!({})).await.unwrap();
 
-        assert!(
-            out["summary"]["by_check"]
-                .get("entry_cited_from_outside_but_undeclared")
-                .is_none(),
-            "the scoped-out row must not appear in the report at all: {out:#?}"
+        // Asserted as `0`, not as an absent key. This test used to read
+        // absence as "the check found nothing here" — which was the OB-5
+        // ambiguity being load-bearing inside the suite itself, since
+        // absence equally meant "the check never ran". `by_check` is now
+        // seeded with every declared check at 0, so the intent is stated
+        // directly and the assertion is strictly sharper: it distinguishes
+        // ran-and-found-nothing from a check that is not there at all,
+        // which `is_none()` could not.
+        assert_eq!(
+            out["summary"]["by_check"]["entry_cited_from_outside_but_undeclared"].as_u64(),
+            Some(0),
+            "the scoped-out row must not be COUNTED for the active project: {out:#?}"
         );
         assert!(
             out["catalog_health"]["entry_validity_scoped_by_project"]
