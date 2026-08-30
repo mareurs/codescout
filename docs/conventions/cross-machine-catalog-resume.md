@@ -143,9 +143,29 @@ Only the 22 were in scope.*
 
 ### 7. Restore augmentations — tiered, not uniform
 
-This is the only step with no automated path, because **augmentation is the one
-artifact state with no on-disk form.** `expects_augmentation: true` in frontmatter
-records *that* one should exist; nothing records *what it was*.
+**Since `f565504a`, most of this step is automatic — check that first.** Augmentation
+shape now travels in git: an artifact can declare
+`expects_augmentation: docs/augmentations/<flattened-path>.yaml`, and step 2's `reindex`
+re-attaches any declared sidecar whose row is absent, reporting the count as
+`augmentations_restored`. It never overwrites a live row, so re-running it is safe.
+
+So run step 2, read `augmentations_restored`, and then run `doctor`. What remains under
+`augmentation_declared_but_absent` is the genuinely manual set: artifacts declaring
+`expects_augmentation: true` with **no sidecar**, whose shape was never exported and
+therefore survives only in some other machine's catalog. Everything below this line is
+about that set.
+
+If you are on a machine that still HOLDS augmentations, the useful move is the opposite
+one — export them so nobody has to do this again:
+`librarian(action="doctor", fix="export_augmentations", root=…, confirm=true)`, then
+commit `docs/augmentations/` and the stamped frontmatter together. It can only export
+rows that catalog has.
+
+The original problem, for the set that is still manual: **augmentation was the one
+artifact state with no on-disk form.** `expects_augmentation: true` records *that* one
+should exist; nothing recorded *what it was*. Note the boolean form is not deprecated —
+it still correctly means "declared, shape not recorded" — so a `true` here is a request
+for an export, not a defect.
 
 Precedent: `docs/issues/archive/2026-07-02-tool-usage-patterns-augmentation-lost.md`
 restored this same class by reconstructing from body prose, and states plainly that

@@ -233,37 +233,53 @@ id="<id>", new_rel_path="docs/trackers/archive/foo.md")` — never a bare
 
 ## Declaring an augmentation
 
-If an artifact is meant to carry an augmentation, say so in **frontmatter**:
+If an artifact is meant to carry an augmentation, say so in **frontmatter** — and name
+the committed sidecar holding its shape:
 
 ```yaml
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-tool-usage-patterns.yaml
 ```
 
-Augmentation is the one artifact state with **no on-disk form**. Rows, frontmatter and
-body all rebuild from disk on `reindex`; `prompt`, `params`, `params_schema`,
-`render_template` and `entry_collection` live only in the catalog, which is
-machine-local and git-ignored. Nothing else in the repo records that an artifact is
-*supposed* to have one — so a fresh clone, or any catalog rebuild, is
-indistinguishable from an artifact that never had one.
+`expects_augmentation: true` is still valid and still means "declared, shape not
+recorded". Anything else — a typo, an empty value, a bare word — is **reported** as
+`augmentation_declaration_unparseable` rather than read as absent, because a
+declaration that silently does not count is worse than none: its author believes they
+are covered.
 
-Its absence is silent in every direction that matters. `reindex` preserves
-augmentation keyed by id rather than regenerating it, so it reports healthy after a
-loss and repairs nothing. `artifact(get)` returns `augmentation: null` without
-comment. The documented `append_entry` / `update_entry` / `entry_filter` calls fail
-only at use, one caller at a time.
+**What travels and what does not.** The sidecar carries `prompt`, `params_schema`,
+`render_template`, `entry_collection`, `append_mode`, `history_cap` — the *shape*.
+`params` deliberately stay catalog-only: they are live state that churns, and
+committing them recreates the params-vs-body drift class BL-29/BL-40/BL-42 closed. So
+a restored tracker comes back **working and empty**, never holding another machine's
+rows.
 
-The declaration is what `librarian(action="doctor")`'s
-`augmentation_declared_but_absent` reads. It is the same remedy `entry_prefix` uses,
-in the same place and for the same reason, and like a ledger it is **declared, never
-inferred**: measured across 4,195 catalogued artifacts, 29 mention `[LIVE]` outside
-fenced code and 23 of those carry no augmentation — they are guides, specs, plans and
-bug files *describing* the mechanism. Intent is not recoverable from prose, so it has
-to be stated.
+Write the sidecar with `librarian(action="doctor", fix="export_augmentations")`, which
+also stamps the declaration. It can only export rows **this** catalog holds, so run it
+on a machine that still has them.
 
-Firing in a fresh clone is correct, not a false positive: that clone genuinely has no
-augmentation, and the check is how its owner finds out before an `append_entry` does.
-Re-attach with `artifact_augment(id=…, prompt=…, …)`.
+**Why any of this is needed.** Augmentation was the one artifact state with no on-disk
+form: rows, frontmatter and body all rebuild from disk on `reindex`, but the
+augmentation lived only in the catalog, which is machine-local and git-ignored. Its
+absence is silent in every direction — `reindex` preserves augmentation keyed by id
+rather than regenerating it, so it reports healthy after a loss and repairs nothing;
+`artifact(get)` returns `augmentation: null` without comment; the documented
+`append_entry` / `update_entry` / `entry_filter` calls fail only at use, one caller at
+a time.
 
+`reindex` now re-attaches a declared sidecar **whenever the row is absent, and never
+overwrites a live one** — repair, not sync, because params move on independently of
+the committed shape. It reports `augmentations_restored` so a run that repaired
+nothing is distinguishable from one with nothing to repair.
+
+The declaration is also what `doctor`'s `augmentation_declared_but_absent` reads. Like
+`entry_prefix` it is **declared, never inferred**: measured across 4,195 catalogued
+artifacts, 29 mention `[LIVE]` outside fenced code and 23 of those carry no
+augmentation — guides, specs, plans and bug files *describing* the mechanism. Intent is
+not recoverable from prose.
+
+The check now splits by remedy. A declared sidecar that exists means run `reindex`. No
+sidecar means the shape survives only in some other machine's catalog — export it
+there and commit the result, or re-author with `artifact_augment(id=…, prompt=…, …)`.
 ## Entry-level standard — the shape INSIDE a tracker
 
 The rules above govern the tracker *file*. These govern its **entries** (`F-3`,
