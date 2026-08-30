@@ -5056,7 +5056,16 @@ not.
 
 **Valid:** invariant
 
-**Status:** open — proposed as the operational form of law B
+**Status:** promote-when **FIRED** 2026-08-30, **partially applied the same day.**
+`swap-dense-leg-remote-embedder` wrote `PROBES.md` rule 6 (`83d9eee0`) citing this entry
+rather than restating it. The split they chose is deliberate and better than the one
+proposed here: the **three-way mapping** (kind → what the probe is right about → which
+check reaches it) lives in the page, because a reader at the moment of use must not need a
+second lookup to learn which check applies; the **worked instances and the counterexample**
+stay here, because those are what would drift if copied. Rule 6 is consequently the only
+rule on that page without its incident inline, and the row says so explicitly — the obvious
+future "fix" is to paste the examples in, which is the duplication the page exists to
+prevent.
 
 **Rests on:** law B (*the instrument decides the answer*), and on nine measured errors from
 2026-08-30 across five sessions in one checkout.
@@ -5124,8 +5133,38 @@ tells them where to aim.** Both of the day's caveats that were written this way 
 falsified within the hour, by the check they named — which is the system working, not
 failing.
 
-**Promote-when:** a sixth `PROBES.md` rule is written, or a session running a check from
-the wrong sub-kind is recorded. `PROBES.md` is the placement `codescout-ae` argued for and
+### An instance found while verifying this entry's own citation
+
+Recorded because it is the propositional row biting the person who wrote it, twice inside
+three minutes, on the check that seemed most obviously correct.
+
+To confirm rule 6's citation resolved, the natural move is `librarian(action="link_scan")`
+and a look for `R-136` in the `dangling` bucket. It was absent. **That is evidence of
+nothing:** the finding arrays are **capped** — `dangling` and `ambiguous` both returned
+exactly 50 entries with a `truncated` flag set — so absence from them is indistinguishable
+from being past the cap. A zero read off a truncated report is the same shape as a `du`
+read as absence.
+
+The second attempt looked better and was also wrong. `PROBES.md` does carry an outgoing
+`cites` edge to this tracker, which reads as confirmation — until you ask whether it
+predates the citation. It does: `PROBES.md` referenced `reconnaissance-patterns` **twice
+before** rule 6 landed and three times after, so the artifact-level edge is fully explained
+without rule 6 and attributes nothing. Edges are artifact-grained; the citation is
+entry-grained. Adjacent again.
+
+What can honestly be claimed: the entry is defined by a `## R-136 — <title>` heading, which
+is the shape `link_scan` requires to define a token, and the citation
+`reconnaissance-patterns:R-136` names a file that exists and an entry that exists. **Well
+formed and resolvable by construction — not verified by the scan.** The distinction is the
+whole point of this entry, so stating it the strong way would have been self-refuting.
+
+**Promote-when (original, now fired):** a sixth `PROBES.md` rule is written, or a session
+running a check from the wrong sub-kind is recorded. **Both** happened on the day of
+writing — the rule above, and the two mis-checks recorded in this section.
+
+**Promote-when (next):** an entry-grained citation check exists, or `link_scan` surfaces its
+truncation at the call site loudly enough that a reader cannot mistake a capped bucket for a
+clean one. `PROBES.md` is the placement `codescout-ae` argued for and
 is the better home for the table, since it fires exactly when someone is about to answer a
 question with a number — but it should cite this entry rather than restate it, so the
 worked instances live in one place.
