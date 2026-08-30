@@ -286,15 +286,18 @@ async fn create_semantic_anchors(
         crate::embed::document::embed_document_pooled(embedder.as_ref(), content, budget_chars)
             .await?;
 
-    // Code chunk search still goes through the full RetrievalClient — the
-    // embedder seam only covers the dense vector path. When the retrieval
-    // stack is offline, search_code errors and the anchor-creation step is
-    // skipped by the caller (logged at warn).
+    // Code chunk search goes through its own seam. The embedder seam above only
+    // covers the dense vector path, so until 2026-08-30 this line built a real
+    // client from ambient config even in tests that had stubbed the embedder —
+    // which is why the memory suite's runtime tracked the developer's local stack
+    // (1.16s up, 20.65s wedged, 76 passing either way). When the retrieval stack
+    // is offline, search_code errors and the anchor-creation step is skipped by
+    // the caller (logged at warn); that is unchanged.
     let root = ctx
         .agent
         .require_project_root_for(ctx.workspace_override.as_deref())
         .await?;
-    let client = crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
+    let client = ctx.agent.code_search(Some(&root)).await?;
 
     // Code chunk search via the retrieval stack. Overfetch so dedupe-by-file
     // has room to pick the best chunk per file.

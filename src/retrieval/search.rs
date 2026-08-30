@@ -319,6 +319,43 @@ pub fn merge_hits(a: Vec<Hit>, b: Vec<Hit>, limit: usize) -> Vec<Hit> {
     all
 }
 
+/// The single retrieval operation that memory anchor-creation performs.
+///
+/// A test seam, third in the same family as [`crate::agent::Agent::memory_embedder`]
+/// and `semantic_memory_store`. It exists because those two were not sufficient:
+/// `create_semantic_anchors` embeds through the stubbable embedder seam and *then*
+/// searches code chunks through a freshly built `RetrievalClient::from_env`, which
+/// no seam covered. A test with both existing stubs installed still reached whatever
+/// retrieval stack the developer happened to have running.
+///
+/// Measured 2026-08-30, before this existed: `tools::memory::tests` ran in 1.16s
+/// against a live local embedder and 20.65s against one that accepted connections
+/// and never answered — 76 passing either way. The suite's runtime, and its network
+/// reach, were a function of the developer's environment rather than of the code.
+#[async_trait::async_trait]
+pub trait CodeChunkSearch: Send + Sync {
+    async fn search_code(
+        &self,
+        project_id: &str,
+        query: &str,
+        opts: SearchOpts,
+    ) -> Result<Vec<Hit>>;
+}
+
+#[async_trait::async_trait]
+impl CodeChunkSearch for RetrievalClient {
+    async fn search_code(
+        &self,
+        project_id: &str,
+        query: &str,
+        opts: SearchOpts,
+    ) -> Result<Vec<Hit>> {
+        // Disambiguated against the inherent method of the same name, which is
+        // what every non-seam caller still reaches.
+        RetrievalClient::search_code(self, project_id, query, opts).await
+    }
+}
+
 #[cfg(test)]
 mod merge_tests {
     use super::*;

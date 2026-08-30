@@ -90,6 +90,16 @@ pub struct Agent {
     #[cfg(test)]
     pub(crate) test_seen_client_embedder:
         Arc<tokio::sync::OnceCell<Arc<dyn crate::retrieval::embedder::CodeEmbedder>>>,
+    /// Test-only override for [`Agent::code_search`].
+    ///
+    /// Deliberately NOT the lazy-cache shape of `semantic_memory` / `memory_embedder`:
+    /// production builds a fresh client per anchor pass today, keyed on a root that
+    /// varies with `workspace_override`, and a shared `OnceCell` would silently pin
+    /// the first caller's root for every later one. Test-gated so the production
+    /// struct is unchanged.
+    #[cfg(test)]
+    pub(crate) code_search_override:
+        Arc<std::sync::Mutex<Option<Arc<dyn crate::retrieval::search::CodeChunkSearch>>>>,
 }
 
 pub struct AgentInner {
@@ -550,6 +560,8 @@ impl Agent {
             memory_embedder: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
             test_seen_client_embedder: Arc::new(tokio::sync::OnceCell::new()),
+            #[cfg(test)]
+            code_search_override: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -1948,6 +1960,53 @@ impl Agent {
         tokio::sync::SetError<Arc<dyn crate::retrieval::embedder::DenseEmbedder>>,
     > {
         self.memory_embedder.set(embedder)
+    }
+
+    /// Resolve the code-chunk search used by memory anchor creation.
+    ///
+    /// Production behaviour is byte-identical to the inline
+    /// `RetrievalClient::from_env(root)` this replaced — a fresh client per call,
+    /// built from the same root the caller resolved. Only the indirection is new,
+    /// and only so tests can substitute a network-free implementation.
+    ///
+    /// Not cached, unlike [`Agent::memory_embedder`]. `create_semantic_anchors`
+    /// passes a root derived from `ctx.workspace_override`, so a shared `OnceCell`
+    /// would pin whichever root arrived first and serve it to every later caller —
+    /// a cross-workspace leak in exchange for saving one client construction on a
+    /// path that already performs a network search.
+    ///
+    /// In tests, install via [`Agent::set_code_search_for_test`].
+    pub async fn code_search(
+        &self,
+        root: Option<&std::path::Path>,
+    ) -> anyhow::Result<Arc<dyn crate::retrieval::search::CodeChunkSearch>> {
+        #[cfg(test)]
+        {
+            // Cloned out and the guard dropped before any await: a std Mutex must
+            // not be held across one.
+            let installed = self.code_search_override.lock().unwrap().clone();
+            if let Some(stub) = installed {
+                return Ok(stub);
+            }
+        }
+        let client = crate::retrieval::client::RetrievalClient::from_env(root).await?;
+        Ok(Arc::new(client) as Arc<dyn crate::retrieval::search::CodeChunkSearch>)
+    }
+
+    /// Test seam: install a network-free code search so anchor creation never
+    /// reaches `RetrievalClient::from_env`.
+    ///
+    /// Overwrites rather than set-once, unlike the embedder and store seams. Those
+    /// initialise a cache, so a second write would be ambiguous and they return
+    /// `SetError`; this override is read on every call, so replacing it is
+    /// well-defined. That is what lets a test install a counting stub over the
+    /// default one `test_ctx_with_project_raw` puts in place.
+    #[cfg(test)]
+    pub fn set_code_search_for_test(
+        &self,
+        search: Arc<dyn crate::retrieval::search::CodeChunkSearch>,
+    ) {
+        *self.code_search_override.lock().unwrap() = Some(search);
     }
 }
 

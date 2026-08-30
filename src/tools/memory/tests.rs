@@ -44,11 +44,21 @@ impl crate::retrieval::embedder::DenseEmbedder for FixedEmbedder {
 /// for tests that install their OWN isolation immediately afterward (before any
 /// tool call can trigger resolution); everything else must use
 /// `test_ctx_with_project()` below.
+///
+/// One override IS installed here, and deliberately not left to callers: the
+/// code-chunk search behind anchor creation. It is a THIRD resolution path —
+/// `create_semantic_anchors` embeds via the embedder seam and then searches code
+/// through a client neither the store nor the embedder seam covers — so no caller
+/// stubbing "its own isolation" was ever closing it. No memory test wants a real
+/// one, and unlike the other two seams this override is read per call instead of
+/// initialising a cache, so installing it up front constrains nothing.
 async fn test_ctx_with_project_raw() -> (tempfile::TempDir, ToolContext) {
     let dir = tempdir().unwrap();
     // Create .codescout dir so MemoryStore::open works
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
     let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    agent.set_code_search_for_test(std::sync::Arc::new(NoCodeSearch)
+        as std::sync::Arc<dyn crate::retrieval::search::CodeChunkSearch>);
     (
         dir,
         ToolContext {
@@ -64,6 +74,22 @@ async fn test_ctx_with_project_raw() -> (tempfile::TempDir, ToolContext) {
             workspace_override: None,
         },
     )
+}
+
+/// Network-free `CodeChunkSearch` for anchor creation. Returns no hits, which is
+/// the same state the suite already tolerated with the retrieval stack offline —
+/// so installing it changes no assertion, only where the emptiness comes from.
+struct NoCodeSearch;
+#[async_trait::async_trait]
+impl crate::retrieval::search::CodeChunkSearch for NoCodeSearch {
+    async fn search_code(
+        &self,
+        _project_id: &str,
+        _query: &str,
+        _opts: crate::retrieval::search::SearchOpts,
+    ) -> anyhow::Result<Vec<crate::retrieval::search::Hit>> {
+        Ok(Vec::new())
+    }
 }
 
 /// Regression for docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md:
@@ -134,8 +160,80 @@ async fn test_ctx_with_project_writes_land_in_an_isolated_store() {
     );
 }
 
+/// Regression for the second half of
+/// docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md:
+/// anchor creation must reach code search through `Agent::code_search`, not build
+/// its own `RetrievalClient::from_env`.
+///
+/// Until 2026-08-30 it built its own, so a memory `write` in tests queried whatever
+/// retrieval stack the developer had running even with the embedder and store seams
+/// installed. Measured that day: `tools::memory::tests` took 1.16s against a live
+/// local embedder and 20.65s against one that accepted connections and never
+/// answered — 76 passing either way, so the coupling was invisible to the gate and
+/// showed up only as an unexplained slowdown, in the counter-intuitive direction
+/// (slower when the stack is DOWN).
+///
+/// **The mutation this must die on:** restore
+/// `RetrievalClient::from_env(Some(&root))` at the `create_semantic_anchors` call
+/// site. `calls` then stays 0, because the real client is used instead of the seam.
+/// Asserting `> 0` rather than on any search result is deliberate — the assertion
+/// is about which code path ran, and a hit-count assertion would pass for a real
+/// client that happened to return nothing.
+#[tokio::test]
+async fn a_memory_write_reaches_code_search_through_the_seam() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct CountingCodeSearch {
+        calls: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl crate::retrieval::search::CodeChunkSearch for CountingCodeSearch {
+        async fn search_code(
+            &self,
+            _project_id: &str,
+            _query: &str,
+            _opts: crate::retrieval::search::SearchOpts,
+        ) -> anyhow::Result<Vec<crate::retrieval::search::Hit>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+    }
+
+    let (_dir, ctx) = test_ctx_with_project().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    // Overwrites the default `NoCodeSearch` the raw helper installed — the reason
+    // this seam replaces rather than set-onces.
+    ctx.agent
+        .set_code_search_for_test(Arc::new(CountingCodeSearch {
+            calls: calls.clone(),
+        })
+            as Arc<dyn crate::retrieval::search::CodeChunkSearch>);
+
+    Memory
+        .call(
+            json!({ "action": "write", "topic": "seam-probe",
+                    "content": "# Seam probe\n\nContent long enough to anchor." }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        calls.load(Ordering::SeqCst) > 0,
+        "a memory write must reach code search through Agent::code_search; a count \
+         of 0 means create_semantic_anchors built its own RetrievalClient again and \
+         the suite is back to talking to the developer's live retrieval stack"
+    );
+}
+
 async fn test_ctx_no_project() -> ToolContext {
-    ToolContext {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::Arc;
+
+    let ctx = ToolContext {
         agent: Agent::new(None).await.unwrap(),
         lsp: lsp(),
         output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
@@ -146,7 +244,27 @@ async fn test_ctx_no_project() -> ToolContext {
         )),
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         workspace_override: None,
-    }
+    };
+    // Network-free stubs, installed before any tool call can trigger ambient
+    // resolution — see test_ctx_with_project's doc comment for why every
+    // real-Agent fixture needs this, not just the two named helpers. The
+    // code-search override is a THIRD, separate resolution path (see
+    // test_ctx_with_project_raw's doc comment) that neither the embedder nor
+    // the store seam covers.
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    ctx.agent
+        .set_semantic_memory_store_for_test(
+            Arc::new(InMemorySemanticMemoryStore::new()) as Arc<dyn SemanticMemoryStore>
+        )
+        .map_err(|_| ())
+        .expect("set store");
+    ctx.agent.set_code_search_for_test(
+        Arc::new(NoCodeSearch) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
+    );
+    ctx
 }
 
 #[tokio::test]
@@ -1660,6 +1778,9 @@ async fn refresh_anchors_clears_staleness() {
 #[tokio::test]
 async fn memory_write_routes_to_project_dir() {
     use crate::agent::Agent;
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
     use std::sync::Arc;
 
     let dir = tempdir().unwrap();
@@ -1687,6 +1808,27 @@ async fn memory_write_routes_to_project_dir() {
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         workspace_override: None,
     };
+    // Network-free stubs, installed before any tool call can trigger ambient
+    // resolution — this test's "write" actions succeed, which reaches the
+    // best-effort semantic-anchor side effect in Memory::call; without this,
+    // it silently cross-embeds into whatever real embedder/store the
+    // ambient environment resolves. See test_ctx_with_project's doc comment.
+    // The code-search override is a THIRD, separate resolution path (see
+    // test_ctx_with_project_raw's doc comment) that neither the embedder nor
+    // the store seam covers.
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    ctx.agent
+        .set_semantic_memory_store_for_test(
+            Arc::new(InMemorySemanticMemoryStore::new()) as Arc<dyn SemanticMemoryStore>
+        )
+        .map_err(|_| ())
+        .expect("set store");
+    ctx.agent.set_code_search_for_test(
+        Arc::new(NoCodeSearch) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
+    );
 
     // Write memory to mcp-server project
     Memory
@@ -1775,6 +1917,11 @@ async fn memory_write_routes_to_project_dir() {
 /// `mcp-server` is actually discovered. The hint assertions below are the first
 /// thing in the suite that can tell the difference.
 async fn multi_project_ctx() -> (tempfile::TempDir, ToolContext) {
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
+    use std::sync::Arc;
+
     let dir = tempdir().unwrap();
     let root = dir.path();
     std::fs::write(root.join("build.gradle.kts"), "").unwrap();
@@ -1783,21 +1930,37 @@ async fn multi_project_ctx() -> (tempfile::TempDir, ToolContext) {
     std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
     std::fs::create_dir_all(root.join(".codescout")).unwrap();
     let agent = Agent::new(Some(root.to_path_buf())).await.unwrap();
-    (
-        dir,
-        ToolContext {
-            agent,
-            lsp: lsp(),
-            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
-            progress: None,
-            peer: None,
-            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
-                crate::tools::section_coverage::SectionCoverage::new(),
-            )),
-            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
-            workspace_override: None,
-        },
-    )
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    // Network-free stubs, installed before any tool call can trigger ambient
+    // resolution — see test_ctx_with_project's doc comment. The code-search
+    // override is a THIRD, separate resolution path (see
+    // test_ctx_with_project_raw's doc comment) that neither the embedder nor
+    // the store seam covers.
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    ctx.agent
+        .set_semantic_memory_store_for_test(
+            Arc::new(InMemorySemanticMemoryStore::new()) as Arc<dyn SemanticMemoryStore>
+        )
+        .map_err(|_| ())
+        .expect("set store");
+    ctx.agent.set_code_search_for_test(
+        Arc::new(NoCodeSearch) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
+    );
+    (dir, ctx)
 }
 
 #[tokio::test]
@@ -1882,6 +2045,9 @@ async fn memory_read_with_unknown_project_id_says_no_such_project_not_no_topics(
 #[tokio::test]
 async fn memory_write_accepts_project_alias_for_project_id() {
     use crate::agent::Agent;
+    use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
+    use crate::memory::semantic_store::SemanticMemoryStore;
+    use crate::retrieval::embedder::DenseEmbedder;
     use std::sync::Arc;
 
     let dir = tempdir().unwrap();
@@ -1914,6 +2080,25 @@ async fn memory_write_accepts_project_alias_for_project_id() {
         guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
         workspace_override: None,
     };
+    // Network-free stubs, installed before any tool call can trigger ambient
+    // resolution — this test's "write" action succeeds, which reaches the
+    // best-effort semantic-anchor side effect in Memory::call. See
+    // test_ctx_with_project's doc comment. The code-search override is a
+    // THIRD, separate resolution path (see test_ctx_with_project_raw's doc
+    // comment) that neither the embedder nor the store seam covers.
+    ctx.agent
+        .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
+        .map_err(|_| ())
+        .expect("set embedder");
+    ctx.agent
+        .set_semantic_memory_store_for_test(
+            Arc::new(InMemorySemanticMemoryStore::new()) as Arc<dyn SemanticMemoryStore>
+        )
+        .map_err(|_| ())
+        .expect("set store");
+    ctx.agent.set_code_search_for_test(
+        Arc::new(NoCodeSearch) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
+    );
 
     // Write using the `project` ALIAS (not project_id). Regression for the 2026-06-09
     // onboarding bug: the unknown `project` key was silently dropped and the write
@@ -2172,6 +2357,12 @@ languages = ["typescript"]
         )
         .map_err(|_| ())
         .expect("set store");
+    // The code-search override is a THIRD, separate resolution path (see
+    // test_ctx_with_project_raw's doc comment) that neither the embedder nor
+    // the store seam above covers.
+    ctx.agent.set_code_search_for_test(
+        Arc::new(NoCodeSearch) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
+    );
     (dir, ctx)
 }
 
