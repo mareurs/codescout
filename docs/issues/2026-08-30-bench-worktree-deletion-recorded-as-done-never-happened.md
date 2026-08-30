@@ -113,6 +113,14 @@ because `.worktrees/` is not tracked. Nothing routine surfaces them.
 **Partially resolved 2026-08-30**, with the user choosing the scope after being shown
 that `bench` is load-bearing.
 
+Recorded on `experiments` at `4b6ce839` (patch-id
+`4da36a7932d8ccb56bd41205393bf7026a192798`). The pair is written now rather than owed
+later: `experiments` is rebased after every ship, which orphans the SHA, while the
+patch-id is a content hash of the diff and survives both rebase and cherry-pick. That
+this file exists at all is the argument for the rule — its predecessor recorded a
+completed action with no durable pointer and no confirming check, and nothing could
+resolve the claim 14 days on.
+
 **Disk state — done, 184 MB reclaimed** (`du` before and after: 358M → 174M).
 Deleted with `rm -rf`, not `git worktree remove`, because no git registration exists for
 any of them:
