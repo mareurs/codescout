@@ -1153,8 +1153,31 @@ message implies.
 documents (bare clippy missing test targets; an ungated module reaching a gated one;
 `check` not being `test`). The pattern it adds: **a workspace member's
 feature-gated tests are invisible to both test commands** — command 3 does not
-build the member, command 4 builds it with the feature off. Any test under
-`crates/codescout-embed/` behind `remote-embed` is in this hole.
+build the member, command 4 builds it with the feature off.
+
+**Sized 2026-08-30, via `-- --list` so nothing is executed:**
+
+| | tests |
+|---|---|
+| `-p codescout-embed --features remote-embed` | **56** |
+| `-p codescout-embed --no-default-features` (what gate 4 reaches) | 19 |
+| **run by neither test gate command** | **37** |
+
+`codescout-ae` measured 33 an hour earlier (52 vs 19); the tree gained tests in
+between, so the two agree on direction and magnitude and differ only by when they
+were taken. **The 37 include this session's own regression guards** —
+`an_oversize_batch_is_split_into_batch_size_requests`,
+`a_short_response_errors_instead_of_panicking`, and
+`a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever` — the
+tests written today to stop today's bugs recurring. That is the argument for a fifth
+gate command, and it is an operator call rather than ours.
+
+**Getting that number wrong first is itself the lesson.** The first attempt passed
+`--list` before `--`, where cargo rejects it as an unknown argument; with stderr
+suppressed it printed `0`, `0`, `0` and `exit_code 1`. Three clean zeros that ran
+nothing, in the exact shape this entry already documents twice. The tell was the
+exit code, which `2>/dev/null` had not hidden — and which a reader scanning the
+numbers would not have looked at.
 
 Not proposing a `CLAUDE.md` edit from here — that is the most load-bearing document
 in the repo and the gate already runs ~20 s; adding a fifth command is an operator
