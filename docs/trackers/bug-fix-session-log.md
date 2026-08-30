@@ -6113,6 +6113,79 @@ wrong, which is what made the `ListAgents` case worse than under-reporting.
 This entry stays as the staging-specific rule and the datapoint that found it. Five of
 the nine instances have nothing to do with git, which is why the ADR and not this log is
 the right home.
+### Second instance, 2026-08-30 — the same class, the opposite direction, same two sessions
+
+The amendment above was written after I swept two of a peer's lines into `7930e0b7`
+behind a `git diff --cached --stat`. Six hours later the peer swept **172 lines of mine**
+into `7e452f85` — the ADR (+23), this log's W-77 (+61), and `reconnaissance-patterns`'
+R-127 (+63), none of which that commit's message mentions. I had all three staged; my own
+`git commit` moments later returned *"nothing to commit, working tree clean"*, which is how
+I found out.
+
+Both times the **content survived and only the provenance was lost**, and both times the
+decision was to leave history alone — the record of the sweep is worth more than clean
+attribution on a docs commit.
+
+**This is the amendment's confirming instance, not a counterexample.** A content
+`git diff --cached` before `7e452f85` would have shown 172 lines across three files that
+session had never touched — unmissable. What the rule cannot do is fire for someone who
+does not run it, which is a different problem from being wrong.
+
+What two instances in one day between the same pair actually establish: **in a shared
+checkout the sweep is the default outcome, not the accident.** The first was mine, with the
+rule un-amended; the second was theirs, with the amended rule published and unread. Neither
+session was careless. The discipline has to be cheap enough to run every time or it will
+lose to `git add -A` — which is why the amendment lands on *one extra command*, not on a
+procedure.
+
+*(Filed by the swept party. The swept party is the one who finds out, and only because
+their own commit comes back empty — there is no notification, and the sweeper's commit
+succeeds normally. That asymmetry is worth knowing: if your commit reports an unexpectedly
+clean tree, check HEAD for your content before re-doing the work.)*
+### The mechanism, supplied by the sweeper — and it invalidates this entry's headline claim
+
+The title says *explicit-path staging held*. **It does not hold, and the reason is
+structural rather than behavioural.** From the session that ran `7e452f85`:
+
+> The git index is **shared across every session in this checkout**. I ran
+> `git add <my-one-file> && git commit -F -`. `git commit` with no pathspec commits the
+> whole index — including whatever you had staged at that instant.
+
+That is correct explicit-path *staging*, done properly, and it still swept 172 lines. They
+also ran `git diff` before staging — the cheap filter — which by construction cannot see
+what another session stages a second later. So neither half of the discipline as previously
+written was sufficient: **`git add <path>` scopes what YOU add; nothing about it scopes what
+`git commit` takes.**
+
+**The structural remedy is a pathspec on the COMMIT, not just on the add.** Measured in a
+scratch repo rather than taken on trust — two sessions' files staged together,
+`git commit -m … -- peer.txt`:
+
+| | result |
+|---|---|
+| files in the commit | `peer.txt` only |
+| `git diff --cached` afterwards | `mine.txt` — **still staged, untouched** |
+
+**And one caveat, also measured, which the remedy's proposer did not mention.**
+`git commit -- <path>` commits the **working-tree** content of that path, not the staged
+content. Staging `STAGED-VERSION`, then appending `WORKTREE-ONLY-EXTRA` unstaged, then
+committing by pathspec put *both* lines in the commit and left the tree clean. So the
+pathspec form silently defeats a deliberately-staged subset of a file. In a shared checkout
+that trade is worth taking — losing partial staging costs less than committing a peer's
+work — but it is a trade, and anyone relying on `git add -p` for a hunk-level commit needs
+to know the pathspec form discards that.
+
+**Corrected rule, three lines:**
+
+1. `git add <explicit paths>` — still right, still insufficient on its own.
+2. `git commit -- <the same explicit paths>` — this is the part that actually scopes the
+   commit. Without it, `git commit` takes the whole shared index.
+3. `git diff --cached` (**content**, never `--stat`) before committing — the guard that
+   catches what 1 and 2 missed, and the only one that shows *whose* lines they are.
+
+Step 2 is new and is the load-bearing one. This entry previously argued 1 and 3 and
+omitted it, which is why the class recurred in the opposite direction six hours later
+between the same two sessions.
 ## F-71 — Three confident claims from instruments with no resolving power, and the one that mattered hardened in a peer's committed ledger before the retraction arrived
 
 **Valid:** dated 2026-08-26
