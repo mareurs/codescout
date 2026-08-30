@@ -67,7 +67,7 @@ params_schema:
             type: string
           status:
             type: string
-            description: Widened 2026-08-30 to admit the vocabulary the committed bodies were already using. `params_status_drift`'s first live run found 4 of its 6 findings were not drift at all but rows whose body states `not started`, `investigating` or `zombie` — words this enum did not contain, so params had to be approximated into the nearest declared value and then disagreed with the body forever. `investigating` and `zombie` are lifted verbatim from the project's bug-file status vocabulary, which this queue mirrors. NOTE `not-started` and `open` are near-synonyms here, so this enum no longer partitions cleanly — a deliberate trade for a vocabulary that matches what authors write.
+            description: 'Widened 2026-08-30 to admit the vocabulary the committed bodies were already using. `params_status_drift`''s first live run found 4 of its 6 findings were not drift at all but rows whose body states `not started`, `investigating` or `zombie` — words this enum did not contain, so params had to be approximated into the nearest declared value and then disagreed with the body forever. `investigating` and `zombie` are lifted verbatim from the project''s bug-file status vocabulary (get_guide tracker-conventions), which this queue mirrors; keeping them out of the queue''s own enum was the divergence. NOTE `not-started` and `open` are near-synonyms here, so this enum no longer partitions cleanly — that is a deliberate trade: a vocabulary that matches what authors actually write beats one that is tidy and routinely violated.'
             enum:
             - not-started
             - open
