@@ -70,6 +70,27 @@ Two consequences, both live:
   for the same reason `get-guide-section-grain` excluded it.
 - **Rewriting the existing rules' content.** Harvesting records their current text, shape
   and evidence status. Improving a rule's wording is a separate act, gated on its own arm.
+- **Cross-user vs cross-machine ledger scope — UNDECIDED.** The "Where this sits" table names
+  the operator engine's retrieval key as "the human," but the actual corpus root
+  (`docs/trackers/operator-rules.md`) is one git-tracked ledger in one repo checkout, and the
+  routing corpus (`LEDGER_SRC`) is compiled in per build. Given the same human now confirmed
+  to operate from more than one machine (see the Cross-machine bullet above and `CM-10`), it
+  is not yet decided which identity the ledger's scope should actually follow — a prior,
+  more basic question than `CM-10`'s sync-mechanism one:
+  1. **Per-machine** (current design, unchanged). Each machine's build carries its own
+     compiled ledger; a rule added on one host does not reach another until that host's
+     checkout is updated and rebuilt. Simplest, but sits at odds with "the human" as the
+     stated retrieval key.
+  2. **Per-user, synced across machines.** The ledger becomes an identity-scoped resource
+     every machine the human uses reads the same copy of. Closer to the stated key, but
+     needs the sync design this spec already declines to build (Cross-machine bullet above).
+  3. **Per-user base plus a per-machine override layer.** A shared ledger travels with the
+     human; per-machine entries (e.g. rules that only make sense on a host running three
+     profiles) layer on top. Most expressive of the three, also the most design and
+     implementation debt.
+
+  No option is recommended here — this bullet only records that the question is open, and
+  keeps it distinct from `CM-10`'s narrower question of how syncing itself would work.
 
 ---
 

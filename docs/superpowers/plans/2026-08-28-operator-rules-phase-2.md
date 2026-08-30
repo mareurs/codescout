@@ -763,11 +763,19 @@ stamped under op: keys disjoint from the guide namespace."
 
 This is the task that banks `A-34`'s measured win. Until the two sections leave the profile, routing has **added** a delivery path without removing the competition — which is strictly worse than before.
 
-The honest cost, from `A-34`: unlike the `Conclude Last` deletion, `OP-2`/`OP-3` have no measured replacement. Routing is that replacement, and it exists as of Task 5 — so the trade is now available, where at `A-34` time it was not.
+The honest cost, from `A-34`: unlike the `Conclude Last` deletion, `OP-2`/`OP-3` have no measured replacement. Routing is that replacement in principle — Task 5 built the mechanism, but per the blocking note below it does not yet reach either rule in production, so the trade is not yet available.
 
 **Files:**
 - Modify: `~/.claude/CLAUDE.md`, `~/.claude-sdd/CLAUDE.md`, `~/.claude-kat/CLAUDE.md` (untracked, outside the repo)
 - Modify: `docs/trackers/operator-rules.md` (via `artifact(action="update")` — it is a guarded ledger)
+
+> **BLOCKED — do not run this task as written.** Its premise is false. Routing exists but
+> reaches neither rule: no production tool outside the `LibrarianAdapter` family overrides
+> `Tool::selector_key`, so `memory` (OP-3) produces no selector; and `Agent`/`Task` (OP-2) are
+> Claude Code's own tools that never enter this process, so no override can reach them.
+> Deleting these sections would leave both rules undelivered everywhere, with the ledger as
+> their only copy. See
+> `docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`.
 
 - [ ] **Step 1: Back up all three profiles**
 

@@ -408,6 +408,24 @@ impl GuideIndex {
             .filter(|s| wanted.contains(s.heading.as_str()))
             .collect()
     }
+
+    /// Every STATICALLY KNOWN ledger key the guide side can stamp — topic keys
+    /// and section keys. Does NOT include the `<topic>#<preamble>` form
+    /// (`types.rs:957`), synthesized at call time when a call's shape matches
+    /// no section; that key cannot be enumerated from `topics` because it
+    /// exists only as a runtime string, not a stored field.
+    ///
+    /// Exists for Gate 5 in `operator_rules::route`, which must assert the `op:`
+    /// namespace collides with none of them. Returning the keys rather than
+    /// exposing `topics` keeps the map private.
+    pub fn ledger_keys(&self) -> Vec<String> {
+        self.topics
+            .iter()
+            .flat_map(|(t, e)| {
+                std::iter::once((*t).to_string()).chain(e.sections.iter().map(|s| s.ledger_key()))
+            })
+            .collect()
+    }
 }
 
 /// Build a one-topic index from a literal guide body, for tests that need
