@@ -266,15 +266,44 @@ Measured on the reordered sequence, and note the second row is the whole point:
 
 and the positive check passes: `./target/debug/codescout artifact --help` exits 0.
 
-**Cost: reasoned symmetric, not measured symmetric.** Only the reordered direction was
-timed. The argument that it is free: both orders run the same two cargo invocations over the
-same two feature sets, merely transposed, and cargo's cache is keyed on feature set rather
-than order. Clippy precedes both with a *third* set (`default + local-embed`), so neither
-lane inherits a warm cache from it — each order pays exactly one default rebuild and one
-lean rebuild. By contrast `codescout-ae` measured the appended `cargo build --bin codescout`
-at **~12 s** in the case that matters (immediately after the lean lane, i.e. every gate run)
-and 451 ms as a true no-op. So the fifth step pays ~12 s on a ~26 s gate to undo something
-the ordering need never have caused.
+**Cost: "free" was WRONG, and the heading above is kept as written so the correction is
+legible.** The claim rested on a symmetry argument — same two invocations over the same two
+feature sets, cargo's cache keyed on feature set rather than order, clippy ahead of both with
+a third set so neither inherits a warm cache. It was reasoned and never measured, and it was
+flagged as such here. `codescout-ae` then measured the missing direction, in an announced
+window, and it does not hold:
+
+| order | timing | binary after |
+|---|---|---|
+| documented (default 3rd, lean 4th) | 47.0 s + 24.7 s = **71.8 s** | **clobbered** — `artifact --help` exits 2 |
+| reordered (lean 3rd, default 4th) | 26.9 s + 53.5 s = **80.4 s** | correct |
+| documented + appended `cargo build --bin codescout` | 71.8 s + 7.8 s = **79.6 s** | correct |
+
+The reorder came out **~8.6 s slower** than the current (broken) gate, not free — and within
+a second of the fifth-step fix it was supposed to beat on cost.
+
+**But neither "free" nor "slower" is supportable, and the reason is this file's own
+taxonomy.** These are two single runs, taken at different times, on a shared machine with
+four sessions running cargo concurrently — sampling adjacency and temporal adjacency
+together, and 8.6 s sits well inside what concurrent builds produce here. The defensible
+statement is: **the two fixes cost about the same, and both add ~8 s over the current gate.**
+
+### So the reorder wins on structure, not speed
+
+Everything that survives the measurement is architectural:
+
+- **Four commands, not five.** Nothing appended to a gate whose composition is argued
+  line-by-line.
+- **It prevents rather than repairs.** The terminal state is correct *by construction*,
+  not by a step a hurried session can omit — and omitting it is silent, since the omitter's
+  own gate still passes.
+- **It needs no positive-verification line at all**, because there is no build whose exit
+  code could be mistaken for the property. The fifth-step version *requires* the reader to
+  know that `cargo build` succeeding does not mean the binary carries the subcommands; the
+  reorder removes the proposition rather than documenting the trap.
+
+The ~8 s either fix costs is the honest price, and it should be stated to the operator as a
+price rather than hidden behind a symmetry argument nobody had run.
 
 ### What NEITHER fix does
 

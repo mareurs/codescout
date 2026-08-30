@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 135
+entry_high_water_R: 136
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-136 | 2026-08-30 | technique (parent generalisation from `codescout-ae`) | **Adjacent-proposition errors come in THREE kinds, and each needs a DIFFERENT check.** Nine confident wrong answers in one day were all real measurements, faithfully reported, of a proposition next to the one asked — but the remedies diverge, and running the wrong check leaves the error standing while feeling rigorous. *Propositional* (the probe answers a different question: `du` for absence, a build's exit code for "the binary carries the subcommands") needs a **positive control**. *Temporal* (right about an instant, read as standing: `fmt` reporting a reverted mutation) needs **bracketing** — and a control does nothing, because the probe was working perfectly. *Sampling* (right for this observer: one session's `ListAgents` skew) needs a **second observer**, which neither of the others touches. Counterexample kept inside the statement, so it is never written as *every*: the mutual-deference deletion misread no measurement at all — two correct reads, two correct acts, composing badly — the one class instrument discipline cannot reach. Operational half: **a caveat should name its sub-kind**, since *"two readings is not a measurement"* tells a reader to go find a second observer rather than run a control. |
 | R-135 | 2026-08-30 | miss | **A `du` proves size, never absence — a TRUE measurement written up in the past tense.** An archived bug file is `status: fixed` and closes *"174 MB reclaimed, 163 MB of it regenerable `.codescout` index state"*; 14 days later `.worktrees/bench` is still on disk at exactly 174M/163M, dir mtime **2026-05-12** (three months BEFORE the closure) and a gitdir still naming the pre-rename `code-explorer` path, which rules out delete-then-recreate since the file's own rebuild command would name `codescout`. The `du` ran before the removal and was written up as its result. Distinct from R-125 (abundant vs empty) and from the self-validating-gate class: this is a **correct positive number transferred to a proposition it does not support**. Audit verdict on the promoted set: **UNREACHABLE, not Outgrown** — Phase 3's *"name the proposition it proves, then ask whether a broken world produces the same result"* covers it exactly and would have caught it; a broken world yields the identical `du`. Remedy is placement, not wording: the risky moment is writing a **closure**, when the author is furthest from the evidence and most certain. No promotion proposed — one verified instance, and the session-opening surface additionally needs a base arm nobody has run | this session (`docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md`, `worktree-cleanup-session-log:F-1`); three sibling instances reported by a peer session and **not verified by me**; kin R-125, law B |
 | R-134 | 2026-08-30 | miss → rule | **A peer view is ARBITRARY with respect to the population, not merely short.** Five Claude sessions shared this checkout and produced six misattributions in an afternoon, every one an elimination over the peers the asker could see. Both open mysteries resolved in ONE round each by enumerating from the OS (`pgrep -x claude` + `readlink /proc/$p/cwd`) and messaging invisible sessions at `uds:/run/user/1000/cc-socks/<pid>.sock`. Escalates R-50: a short view makes elimination weak, so you hedge; a DISJOINT view makes it unrelated, so hedging still draws the conclusion — you must change instruments. Measured by `codescout-f0`, then CORRECTED by them the same evening (`71fdbef4`): the first reading showed 0 of the 5 in-checkout sessions, later readings 1 of 5 — the count held at 3 while the MEMBERSHIP rotated, which demonstrates arbitrariness where a single snapshot could only assert disjointness. Either reading kills elimination; the zero was a reading, not a property, and publishing it as one was this entry's own failure mode arriving through the record of itself. Tells: the instrument's units differ from the question's (sessions-a-transport-knows vs processes-with-this-cwd), and repeated "must be the remaining one" is equally produced by the answer lying outside the set. Corollary: in a live transcript a COUNT is contaminated by the act of asking (hits went 2→10 because sessions grepped for it) — prefer an ordinal | this session + `codescout-f0`, `codescout-fe`; kin R-50 |
 | R-133 | 2026-08-30 | miss → rule | **Loudness is a property of a PATH, not of a failure.** Three failures in one afternoon across three subsystems: a stale sidecar restores clean reporting success; a widened status region silently discharges the disagreement the scan exists to report; and BL-66, which *aborts the process* — maximally loud — and survived anyway because nothing in-tree reaches it (verified here: `install_default_crypto_provider()` is called unconditionally at every construction site, `main.rs:253` / `agent/mod.rs:448` / `reranker.rs:80` / `embedder.rs:339`, and `transport.rs:34` states the invariant as a reason not to handle the error). So the axis is not loud-vs-silent output but whether any TRAVERSED path observes the failure. When adding a guard, name the path that reaches it and the observer who acts on it; "an external consumer we do not have" is a legitimate reason to keep it and is not coverage of our own risk. Reachability twin of R-132's monotonicity. Tell: ask what an observer would SEE differently if this were broken right now | this session + `codescout-ae` (`e6414362`, BL-66); kin R-131, R-132 |
@@ -5050,6 +5051,84 @@ The `du` figures and mtime are true of this machine at that instant; the law is 
 **Rests on:** law B (*The instrument decides the answer*) and the Phase 3 imperative in the
 reconnaissance SKILL.md; sibling `R-125` covers the abundant-vs-empty axis, which this is
 not.
+
+## R-136 — Adjacent-proposition errors come in three kinds, and each needs a different check
+
+**Valid:** invariant
+
+**Status:** open — proposed as the operational form of law B
+
+**Rests on:** law B (*the instrument decides the answer*), and on nine measured errors from
+2026-08-30 across five sessions in one checkout.
+
+The parent generalisation is `codescout-ae`'s, formed after a day in which five sessions
+produced nine confident wrong answers: **nearly every one was a real measurement,
+faithfully reported, of an ADJACENT proposition.** Not a broken probe, not carelessness —
+a working instrument answering a question next to the one being asked, with a
+plausible-looking bridge between them.
+
+That names what the errors had in common. It does not tell you what to *do*, because the
+three sub-kinds below need **three different checks**, and running the wrong one leaves the
+error standing while feeling rigorous.
+
+### The three kinds
+
+| kind | the gap | the check that settles it |
+|---|---|---|
+| **Propositional** | the probe answers a different question | **a positive control** — does it detect a known positive? |
+| **Temporal** | the probe was right about an *instant*, read as standing | **bracket the measurement** — capture state either side |
+| **Sampling** | right for *this observer*, read as true of all | **a second observer** |
+
+**Propositional.** `du` proving a directory's size, read as proving absence. `nm` on a
+stripped binary returning 0, read as the code being gone. `cargo build` exiting 0, read as
+*the binary carries the librarian subcommands* — two propositions with a plausible bridge.
+An ignore-count padding a coverage number. `pgrep -f … | head -1` naming *a* process, read
+as naming *the* session.
+*The check:* run the probe against something you know is positive. `git log --all -S 'let
+sparse_nonempty = async'` returning 0 is only evidence once
+`sparse_nonempty) = tokio::try_join` returns 3 from the same probe.
+
+**Temporal.** `cargo fmt --check` reporting a mutation that had already been reverted — the
+probe read the file perfectly, at a moment that had passed. A `read_file` and a `grep`
+straddling one real write, agreeing with each other and with neither the before nor the
+after. A `ListAgents` reading published as a property of the tool.
+*The check:* bracket it. `stat` the file before and after a gate run turns *"the gate
+passed"* into *"the gate passed **on these bytes**"*. **A positive control does nothing
+here** — the probe was working perfectly, which is exactly why this kind survives careful
+instrument checking.
+
+**Sampling.** One session's `ListAgents` showing 2-of-2 outside-checkout peers and 1-of-4
+in-checkout ones, read as the tool being biased against the working directory. A second
+observer measured the opposite direction (0-of-2 and 2-of-4), and the bias claim died.
+*The check:* another observer. Neither a control nor a bracket touches this one.
+
+### The counterexample belongs in the statement
+
+Say *nearly* every, never *every*. The **mutual-deference deletion** of the same day does
+not fit: two sessions each read the other's bug file, each judged it the better record, and
+each deferred — one deleted theirs, one reduced theirs to a stub — and together they
+destroyed the fuller analysis. No measurement was misread. Both readings were correct and
+both acts were correct; the failure was in **composition**.
+
+That is the one class this discipline cannot reach, and the reason to keep it visible: no
+amount of checking your own instruments prevents two correct actions from composing badly.
+Same family as `R-129`.
+
+### The operational half — a caveat should name its sub-kind
+
+The taxonomy pays off at the moment you hedge. *"Two readings is not a measurement"* is a
+**sampling-adjacency flag**, and it is why the peer who tested that claim went and got a
+second observer rather than running a control or re-reading. A caveat that merely expresses
+doubt tells a reader to trust you less; **a caveat that names which check would settle it
+tells them where to aim.** Both of the day's caveats that were written this way were
+falsified within the hour, by the check they named — which is the system working, not
+failing.
+
+**Promote-when:** a sixth `PROBES.md` rule is written, or a session running a check from
+the wrong sub-kind is recorded. `PROBES.md` is the placement `codescout-ae` argued for and
+is the better home for the table, since it fires exactly when someone is about to answer a
+question with a number — but it should cite this entry rather than restate it, so the
+worked instances live in one place.
 
 ## Template for new entries
 
