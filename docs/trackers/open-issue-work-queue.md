@@ -100,6 +100,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | **zombie 2026-08-30** — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code + live measurement, plus a newly-found 9 (→ BL-64) acquitted twice. Survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger in frontmatter | `73158c500ff6b293` |
 | BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | **open** — third instance of one mechanism in a day (after `19289b1f` and BL-60); strands `fix=export_augmentations`, which exists to run on the OTHER machine. Root cause INFERRED from `--help`. Two findings now argue for a key-set coverage test over a fourth round of flags | `2f2409074ee2319d` |
 | BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | **done** — `9f743091`, patch-id `92db5adf65b7a748`. Took (a) delete-the-block over (b) plumb-`force`: **both** `index_repo` call sites are test-only while `index_repo` is public API, so (b) was a semver break serving only tests, building a reference implementation nothing references. A comment now stands where the block was — that is the remedy, the hazard being a reader "fixing" the missing `%`. Regression test mutation-verified: **with** `%` FAILS, **without** `%` passes | `6ff4394bb3b18d86` |
+| BL-66 | 3 | `probe_ollama` is the one TLS construction site in either tree that installs no crypto provider, and its failure is reported as "Ollama is not reachable" | **open** — third instance of the root/crate asymmetry, found by auditing the class. Skips `install_default_crypto_provider` by bypassing `build_client`; with `rustls-no-provider` an `https://` `OLLAMA_HOST` fails the handshake and is reported as a down server with "Start Ollama" as the remedy. Not reachable in codescout's binary — `main.rs:253` installs it process-globally first, which is precisely what masks the gap — but reachable for any external consumer, the installer being private and unexported. Fix is (a) install it there + (b) stop calling a TLS-setup failure unreachability | `ac9aa2f9b38eab9b` |
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **blocked** — harness, not this repo. Caused 6 misattributions across 4 sessions in one afternoon; real population ≥ 6 while both sides report "Peer sessions (2)" over disjoint sets. Mitigation in the bug file works today | `4266d09da90acb5e` |
 | BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `6411eb594cd7231d` |
@@ -760,6 +761,47 @@ running the binary rather than reading the struct, on BL-60's lesson that a bug 
 **The remedy two independent findings now point at**, and it is not a fourth round of
 flags: a test asserting the CLI's marshalled key set covers the tool's `Args` field set.
 That closes the mechanism instead of its next instance. BL-60's Resume argues the same.
+### BL-66 — `probe_ollama` is the one TLS site that installs no crypto provider
+
+**Status:** open — filed 2026-08-30, not started.
+**Valid:** dated 2026-08-30
+**Rests on:** `docs/issues/2026-08-30-probe-ollama-is-the-one-tls-site-that-installs-no-crypto-provider.md` (`ac9aa2f9b38eab9b`).
+
+Found by taking up a peer's recommendation to audit other root/crate pairs for the
+asymmetry behind the two bugs fixed on 2026-08-30 — the short-response panic and the
+status-error classifier hijack. The audit's other pairs came back clean, and are worth
+recording as such: the dense transport is now delegated so the pair no longer exists;
+the sparse leg is root-only; `is_https_or_loopback` is duplicated but byte-identical in
+logic, with root's coverage gap closed by `28bb6e8a`; the chunker is delegated; and the
+`read_timeout` port that ET-4 predicted T6 would regress **did** happen, landing both
+bounds in the crate with a comment explaining that neither subsumes the other and a test
+that fails if `.read_timeout()` is removed.
+
+The one asymmetry left is not a duplicated pair at all, which is why the pairwise audit
+nearly missed it. `probe_ollama` bypasses `build_client` and is the only TLS construction
+site in either tree that does not install the crypto provider first — found by
+enumerating call sites of `install_default_crypto_provider` and noticing which
+client-builder was absent from the list. `OLLAMA_HOST` is operator-controlled and may be
+`https://`; the probe runs **before** `RemoteEmbedder::ollama`, so it is the first
+handshake, and with `rustls-no-provider` it fails. The caller then reports *"Ollama is not
+reachable … Start Ollama"*, which misdiagnoses the cause and prescribes a remedy that
+cannot work.
+
+codescout's own binary is immune because `main.rs:253` installs the provider at startup,
+process-globally. That immunity is the *mechanism*, not a mitigation: root's behaviour is
+what hides the gap, so the crate ships it to every external consumer while the one caller
+that would notice is shielded — the same structure as the other two instances.
+
+**It also contradicts ET-4's stated direction.** That entry reads *"root's copy is the one
+missing the guard, both times"*, and treats deleting root's duplicate as the remedy. All
+three instances found on 2026-08-30 have the crate as the deficient side, so the drift is
+bidirectional and ET-4's "audit each pair before deleting" caveat is the load-bearing part
+of it rather than a footnote.
+
+**Next:** run the reproduction (a consumer binary depending only on the crate, no provider
+install of its own, `OLLAMA_HOST=https://…`) before choosing between (a), (b) and (c) — it
+decides whether rustls surfaces a distinguishable provider error at all.
+
 ### BL-45 — Decision 1: may a process on an unlinked binary re-index?
 
 **Status:** open — awaiting an operator decision, not blocked on work.
