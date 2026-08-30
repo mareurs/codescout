@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 80
-entry_high_water_W: 79
+entry_high_water_W: 80
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -216,6 +216,8 @@ entry_high_water_W: 79
 | W-75 | 2026-08-30 | high | Reproduce before AND after each round of a fix, checking a wedge listener's own hit count, not just wall-clock time or a green test run | A round-1 isolation fix that passed all 77 memory tests still left 2 wedge hits (6.35s) from a third resolution path (`create_semantic_anchors`'s own `RetrievalClient::from_env`) that a concurrent session was independently fixing in the same live working tree mid-investigation — caught only by re-running the reproduction, not by trusting the passing suite | validated |
 | W-78 | 2026-08-30 | high | Before attributing a test failure to the change under test, re-run the same failing tests IN THE SAME ENVIRONMENT at the unmodified base. The prompt to do so is a failure in a subsystem the change does not touch | A merge probe returned `4706 passed; 3 failed`; all three were `librarian` temp-guard tests and the branch touches `operator_rules`/`tools::core`/`prompts`, nothing near librarian. The control — same `/tmp` worktree, `checkout --detach experiments`, merge NOT applied — reproduced all three identically, so the failures were the probe's LOCATION, not the merge. Each test builds its "outside-temp" catalog via `TempDir::new_in(current_dir())`, which is inside temp when the checkout is; the assumption sits in a code comment and is enforced by nothing. Without the control the two readings were block-a-clean-merge or bisect-a-working-guard. The failing configuration is the SANCTIONED one — this project points its scratchpad at `/tmp` | validated |
 | W-79 | 2026-08-30 | med | Verify a merged branch's imported bug files AT THE DOOR, in the landing session — and mark attribution as inference when nobody bisected | `03b3fb5c` imported five bug files, all `status: open`, authored against a base 103 commits back. One was already fixed: a severity-**high** futex-deadlock report whose own reproduction now runs 77 passed, no hang. It would have entered `experiments` describing a hang that does not happen and sat in every triage query until someone spent a session on it. Four were correctly open and confirmed at the bytes, which is the half that makes it a check rather than a rubber stamp. The flip names `fd638c76` as closer but records the non-reproduction as measured and the cause as NOT — the file already carried one careful negative, and a confident wrong attribution would have undone it | validated |
+| W-80 | 2026-08-30 | high | When a fix is "introduce a shared constant so two sides cannot drift", a test that builds its fixture FROM that constant tests one side twice — drive the real producer into the real consumer instead | Written and deleted before committing. It asserted `classify_search_error` matches `SPARSE_MARKER` using a fixture formatted from `SPARSE_MARKER`, so reverting the producer's wording — the exact regression — moved it not at all: a guard for the bug that the bug would pass. Shipped, it would have read as coverage in every later review and the bug file would have cited it. The end-to-end replacement dies on that mutation, printing the original defect verbatim, while both constant-built tests stay green | validated |
+
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -7596,6 +7598,72 @@ them before the merge commit lands.*
 **Rests on:** the archive-and-status discipline in
 `get_guide("tracker-conventions")`, and on `unverified:` being queryable — which
 is what made the standing-ledger sweep cheap enough to be worth doing at all.
+
+## W-80 — A regression test built from the shared constant cannot catch a producer that stops rendering it
+
+**Status:** validated
+**Valid:** invariant
+
+**Observed.** 2026-08-30, fixing the sparse-leg classifier bug (`5dfa5051`, bug file
+`docs/issues/archive/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`).
+
+The defect being fixed was a **producer/consumer wording drift**: root's
+`embed_one_batch` emitted `embed_batch sparse status …` while `classify_search_error`
+matched `embed sparse`, which that string does not contain — `embed` is followed by
+`_`, not a space. The remedy was a shared constant, `SPARSE_MARKER`, rendered by both
+producers and matched by the consumer.
+
+The first regression test I wrote for it looked right and was worthless:
+
+```rust
+let marker = crate::retrieval::embedder::SPARSE_MARKER;
+for err in [format!("stack search failed: {marker} send: connection refused"), …] {
+    assert!(classify_search_error(&err, "codescout").contains("embedder"));
+}
+```
+
+**It builds its input from the constant.** So it asserts the *consumer* matches the
+constant — which was never in doubt — and is structurally blind to the *producer*
+walking away from it, which is the entire defect. A guard for this bug that this bug
+would pass.
+
+Caught by asking the mutation question before committing rather than after: *what
+edit makes this fail?* Reverting the producer's wording — the exact regression —
+moves it not at all, because the fixture never came from the producer.
+
+**Counterfactual.** Shipped, it would have read as coverage in every later review; the
+bug's own file would have cited it; and the next drift would have gone out green. The
+test's *name* would still have been accurate, which is what makes this class hard to
+spot on reading.
+
+**The remedy is a shape, not more assertions.** Delete it and drive the real producer
+into the real consumer:
+
+```rust
+let err = e.embed_batch(&["x".to_string()]).await.expect_err(…).to_string();
+let hint = classify_search_error(&err, "codescout");
+```
+
+Reverting the producer's wording now kills it, printing the original bug verbatim
+(`hint: Stack reachable but query failed … qdrant logs`) — **while both
+constant-built tests stay green**, which is the demonstration rather than the claim.
+
+**The generalisation.** Wherever a fix is *"introduce a shared constant so two sides
+cannot drift"*, a test that constructs its fixture from that constant tests one side
+twice. The drift being prevented is between a **producer's output** and a
+**consumer's input**, so at least one test has to obtain its input the way production
+does. Same shape as `ET-5`'s cross-crate argument one level down: there the two sides
+were in different crates and the remedy was to make them share a symbol; here they
+share the symbol already and the remedy is to make one test refuse to use it.
+
+**Promote-when:** a second instance in a different subsystem — at which point it
+belongs beside *demand a deliberate break* in CLAUDE.md, as its corollary: demanding a
+break tells you to mutate; this tells you **which** mutation is the honest one, since
+mutating the constant leaves both sides consistent and proves nothing.
+
+**Rests on:** `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md` — a
+green test built from the value under test is the same failure as a plausible number
+standing in for a measured one.
 
 ## Template for new entries
 

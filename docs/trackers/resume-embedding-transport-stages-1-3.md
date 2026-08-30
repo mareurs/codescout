@@ -677,7 +677,7 @@ failure this board exists to prevent.
 | ~~T4~~ | B3 | Typed `EmbedError::Connect { url }` replacing the `"embed connect failed"` substring contract (`ET-5`) | **done** `6be58840`, patch-id `07a8ea7c676e197bc862da3639bf63c19787d248`. Closes `ET-5`. Reproducing first showed the risk was **already realised**: `RemoteEmbedder` surfaced connect failures as reqwest's own `error sending request for url (…)`, which matched no arm of `classify_search_error` and fell through to the generic Qdrant fallback — live on the `ollama:`/`openai:` resolver path. Mutating `CONNECT_FAILED_MARKER` now fails root's two tests while the crate's pass, which is ET-5's "nothing makes the two fail together" turned false | — |
 | ~~T5~~ | B4 | Export `is_https_or_loopback` (and whatever else Phase D needs) as `pub` | **done** `16dc28a5`, patch-id `dcf74187a08c2cf01399481c8a201f31a0ec2196`. `QueryPrefix::derive_for` shipped `pub` with T3. **`http_client` is NOT needed** — `ET-8`'s table assumed root's `transport.rs` dies in Phase D, but `reranker.rs` uses it at `:67`, `:83`, `:99` and the reranker is outside this consolidation, so **T8 should be re-scoped to the wire structs only**. Carries a differential pinning root's copy against the crate's on 16 urls, six named by neither fixed-expectation test; delete it with root's copy in T7 | — |
 | ~~T6~~ | C | Swap root's dense leg to `RemoteEmbedder` | **done** in four commits — A `8097c2d6` / `18922aa3cc9f4be601e26f53ee68c9c483fec01b`, B `4fd4e5f4` / `d377f8ab6086f9d7137b4f4fc10d4628a26aa01c`, C `f9a205a9` / `469480c898f8db59c3a2e49acd12b628d9d824af`, D `797dd023` / `095ae63248a236e74a2135f101fa416cffb643dc`. **The seam is `dense_batch`, not the call site** — `RemoteEmbedder` is dense-only and root's two legs are fused per sub-batch, so a call-site swap reaches only the lite stack (`ET-10`). Root keeps chunking, both escape hatches, the concurrent sparse leg and the positional alignment; the crate owns the wire. D1's mapping landed **load-bearing**: `dense_query` prefixes via the crate's `embed_query`, so omitting `with_query_prefix` kills a test — root-side concatenation would have left that setting unfalsifiable. Root's empty predicate moved to `trim().is_empty()` to match the crate's, without which a whitespace-only chunk becomes a hard arity error. Two defects fixed en route, both the same shape (a hazard handled on root's side of the pair and never on the crate's): the collection-bucket hijack, and an index-out-of-bounds **panic** on a truncating server | — |
-| ~~T7~~ | D1 | Delete root's `is_https_or_loopback` | **done** `c24d2d60`, patch-id `d7e1f42fa6e68e0922a0197cdd234694f034364f`. Both copies and both callers were already `remote-embed`-gated, so the lean build was never at risk — `ET-2`'s design table calls this function *ungated*, which is stale. **Diverged from this row's "re-point T1's test, do not delete it"**: re-pointed, it was a literal duplicate of the crate's `is_https_or_loopback_matches_host_exactly`, same ten assertions on the same function. Replaced instead with `guarded_api_key_drops_the_key_for_a_host_that_only_looks_like_loopback`, which runs those inputs against **root's own behaviour** — a different claim, and one root had no coverage for at all (all five existing guard tests use a plainly non-loopback host). Mutation: a plausible `contains("localhost")` guard leaves all four old tests **green** and kills only the new one | — |
+| ~~T7~~ | D1 | Delete root's `is_https_or_loopback` | **done** `c24d2d60`, patch-id `d7e1f42fa6e68e0922a0197cdd234694f034364f`. Both copies and both callers were already `remote-embed`-gated, so the lean build was never at risk. *(Corrected: an earlier draft of this row blamed “`ET-2`'s design table” for calling the function ungated. That claim was the **plan's**, and `ET-7` item 6 had already overturned it in writing — “`is_https_or_loopback` does NOT stay ungated. The plan says it does.” The ledger was right before I got here; I cited the stale source and credited it to the ledger.)* **Diverged from this row's "re-point T1's test, do not delete it"**: re-pointed, it was a literal duplicate of the crate's `is_https_or_loopback_matches_host_exactly`, same ten assertions on the same function. Replaced instead with `guarded_api_key_drops_the_key_for_a_host_that_only_looks_like_loopback`, which runs those inputs against **root's own behaviour** — a different claim, and one root had no coverage for at all (all five existing guard tests use a plainly non-loopback host). Mutation: a plausible `contains("localhost")` guard leaves all four old tests **green** and kills only the new one | — |
 | ~~T8~~ | D2 | Delete the duplicated **dense wire structs** — NOT `transport.rs`, which `reranker.rs` keeps alive (`ET-5`) | **already done** by T6 step D (`797dd023`): `OpenAiEmbedReq` / `OpenAiEmbedResp` / `OpenAiEmbedItem` deleted, confirmed dead by the compiler rather than by inspection. `EmbedReq` + `SparseEntry` stay — those are the sparse wire | — |
 | T9 | D3 | Drop `reqwest` / `rustls` from the **root** manifest | **BLOCKED, verified at the bytes 2026-08-30** — and worth **zero crates** even once unblocked. Four live uses remain: `EmbedderHttp.client` (the sparse leg + the `/info` probe), `transport.rs::client` (the shared builder), `RerankerHttp.client`, and `lib.rs`'s `rustls::crypto::ring` install. Root's `reqwest` sits under `remote-embed` (`Cargo.toml:89`), and `EmbedderHttp` — which owns sparse — is `remote-embed`-gated, so the dep cannot move until sparse does. **And the payoff is not crates**: the crate declares the same `reqwest` under its own `remote-embed` and cargo unifies them, so every configuration compiles it either way. The −48 was measured on the *bare* lean build and `ET-2` already banked it. Pursue this for manifest honesty or not at all | T16 |
 | T16 | — | Gate root's **sparse leg** on `server-stack` rather than `remote-embed` — the precondition T9 actually has | **open, unscoped.** Sparse is only reachable when a sparse server is configured, which is the server-stack deployment; `dense_only` is true for every other. Moving it (with `resolve_batch_size`'s `/info` probe) would leave `EmbedderHttp` a thin orchestrator over `RemoteEmbedder` with no `reqwest` of its own, and `dep:reqwest`/`dep:rustls` could then sit under `server-stack` alone. Read `ET-10` finding 3 and T9's row before starting: this buys manifest honesty, not compile time | — |
@@ -747,6 +747,11 @@ flipping it moves only the query side — no re-index required, which makes it
 cheap to test both ways.
 
 ### Resume — T6, cold
+
+> **HISTORICAL — T6 shipped 2026-08-30.** Kept because its corrections (a)/(b)/(c)
+> and the scout handover below are the reasoning the swap rested on, and because
+> its opening sentence was wrong in an instructive way. For what is actually left,
+> read *Resume — what is left* at the end of this entry.
 
 Everything T6 needs now exists; it is a consumer swap, not a design task.
 
@@ -985,6 +990,59 @@ reassurance.*
 **Rests on:** `ET-8` for the ordering argument and `ET-4` for why Phase D audits
 rather than deletes. If either is revised, re-derive this board rather than
 patching rows.
+
+### Resume — what is left (cold, 2026-08-30)
+
+**This stream is done in every sense that was measurable.** T1–T8 are closed. What
+remains is T9 and its precondition T16, and the honest summary is that a reader
+should decide whether to continue *at all* rather than pick up the next row.
+
+**Do first, as always:** sweep the *State* column against `git log`. Every SHA in
+this entry was re-verified on 2026-08-30; that fact decays.
+
+**The three reasons to stop here, each measured rather than argued:**
+
+1. The **crate-count payoff is banked** (`ET-2`, bare lean build). T9 buys **zero**
+   further crates — root and `codescout-embed` declare the same `reqwest` under
+   their own `remote-embed`, and cargo unifies them, so no configuration stops
+   compiling it.
+2. The **measured drift is closed.** `ET-4`'s two instances were fixed by T1/T2/T5.
+3. The **mechanism that produced them is gone.** T6 left one dense implementation.
+
+**The one reason to continue, which is real:** `ET-4`'s heading was corrected on
+2026-08-30 — drift is **bidirectional**, and three of the five known instances had
+the *crate* as the deficient side. `codescout-ae` audited the remaining pairs and
+found them clean, plus one non-pair instance (`probe_ollama`, `BL-66`) that a
+pairwise sweep could not have found. So the audit is done and came back clean; that
+is an argument for confidence, not for more deletion.
+
+**If you do continue, T16 before T9** — gating root's sparse leg on `server-stack`
+is the precondition T9 actually has, and T9 alone cannot be done. Read `ET-10`
+finding 3 first.
+
+**Three things not to re-derive:**
+
+- The seam is `EmbedderHttp::dense_batch`, not `build_embedder_for_url`. The legs
+  are fused per sub-batch; they are not composable at the `CodeEmbedder` boundary.
+- `classify_search_error` is reached from `semantic_search.rs` **only**. Anything
+  about indexing-path error wording that cites it is wrong — that mistake is on
+  record in the archived sparse bug file.
+- Root and the crate now disagree about nothing on the dense path, and four
+  markers (`CONNECT_FAILED_MARKER`, `STATUS_FAILED_MARKER`, `SPARSE_MARKER`,
+  `SPARSE_STATUS_MARKER`) are the contract. Match the constants, never a literal.
+
+**Open, and not this stream's to close:**
+
+- **D2** — the running shell sets `CODESCOUT_QUERY_PREFIX` while serving
+  `CodeRankEmbed-Q4_K_M`, which is the 34-point configuration rather than the
+  37-point champion. Flipping it moves only the query side, so no re-index is
+  needed and it is cheap to test both ways. Operator decision, still live.
+- **D3** — unpushed commits on `experiments`. Operator decision.
+- **`reconnaissance-patterns:R-129`** — its Promote-when **FIRED** on 2026-08-30
+  and is deliberately unapplied, pending an operator call between a CLAUDE.md rule
+  and per-session worktrees. This stream produced the instance that fired it.
+
+**Valid:** dated 2026-08-30
 
 ## ET-10 — T6 is a design task, not a consumer swap — and T9 is blocked by two surfaces outside this stream
 
