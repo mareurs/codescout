@@ -570,8 +570,8 @@ order above is derived from what gates what, not from stage numbering.
 order, what gates what); this holds the *state*. Strike rows here as they land;
 do not restate the rationale.
 
-**Status:** open — 10 tasks, 1 blocked on an operator decision, 3 free for any
-session
+**Status:** open — 8 tasks. **T3 is blocked on decision D1 and T4–T9 sit behind
+it**, so `T11` is the only item any session can pick up today.
 
 **Valid:** dated 2026-08-29
 
@@ -596,12 +596,12 @@ counterexample where root was ahead of the crate.
 
 | # | Task | Why it matters | Pointer |
 |---|---|---|---|
-| T10 | Stop `tools::memory::tests` resolving the embedder from ambient config | The unfixed half of the wedged-server bug. They can no longer hang, but the suite still reaches a live local service when one is configured | `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`, `unverified:` field |
+| ~~T10~~ | Stop `tools::memory::tests` resolving the retrieval stack from ambient config | **done** `fd638c76`, patch-id `2afe9f1378e8dece47fea600ecf840c57a215ab0`. **Co-authored** — the five-fixture isolation is session `2f584bf5`'s (`bug-fix-session-log:W-75`); the `CodeChunkSearch` trait, `Agent::code_search` seam, call site and regression test are mine. **This row understated the task**: the coupling was not "the embedder" but the whole `RetrievalClient` — `create_semantic_anchors` embeds through the seam and then searches code through a client *no seam covered*, so stubbing both documented seams still left every `write` test talking to the developer's live stack. Measured on libtest's clock: 0.88s live / 20.35s wedged before, 0.04–0.08s across live / wedged / refused / no-config after. Spread 19.47s → 0.04s. Regression test mutation-checked: restoring `RetrievalClient::from_env` at the call site turns it red | `docs/issues/archive/2026-08-29-wedged-embed-server-hangs-cargo-test-forever.md`, `unverified:` field |
 | T11 | Retrofit a lean-safe inert embedder; restore the 11 test items `ET-2` gated on `remote-embed` | `ET-2` gated them rather than swapping in `FixedDimEmbedder`, because swapping could make `effective_model_dim_falls_back_when_nothing_is_known` pass while proving nothing. Gating cannot make a test lie; the retrofit must not either | `ET-7` |
 | ~~T12~~ | `rendezvous_poll_for_test` was dead under `--no-default-features --all-targets` | **done** `141b69a3` — gate is now `all(test, feature = "librarian")`, matching its three callers in `guide_hint_tests`. Verified both ways: too wide leaves the lean warning, too narrow drops the 44 tests. Was hidden because CLAUDE.md's lean gate omits `--all-targets`, so no routine command builds lean *test* targets | `server.rs:988` |
 | ~~T13~~ | `init: true` on the three GPU compose services | **done** `9360be99` — as hygiene, **not** as F-2's remedy. Docker's kill path does name `--init` on a Z-state PID, but that zombie held 394 MiB of VRAM and a reaped process holds none, so the driver's fd release was stuck and tini's `wait(2)` would have blocked in the same place. F-2's fix idea #1 claims more than its own evidence supports | `embedder-stack-ops-session-log:F-2` |
 | ~~T14~~ | Healthchecks probe each service's **own** inference endpoint | **done** `9360be99`. Not one shared path — the three servers speak three APIs (`/v1/embeddings`, `/v1/rerank`, `/embed_sparse`), so T14 as written was only literally right for dense-gpu. Measured on this host: `/health` 0.8 ms vs inference 23 ms, a 29x gap no forward pass fits in | `embedder-stack-ops-session-log:F-2` |
-| T15 | `edit_markdown`'s frontmatter write never touches the catalog | The documented status-flip call desyncs the row `find(kind="bug", status=…)` reads. Two independent instances in one day | `docs/issues/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`, `open-issue-work-queue:BL-48` |
+| ~~T15~~ | `edit_markdown`'s frontmatter write never touches the catalog | **DONE by `codescout-ae`, not by me** — `518549d6`, patch-id `c424f89f8aeb67eaa692eeda4a9812a13820041c`, closed as `open-issue-work-queue:BL-48`. Chain is four links and **three** are covered: (2) `edit_markdown` calls the hook when frontmatter changed and (3) the call reaches the installed slot, both pinned by `tests/edit_markdown_catalog_sync.rs` — one integration binary on purpose, since the slot is process-wide and the unit-test binary contests it; (4) the syncer moves the row, checked against a real `Catalog`. All three mutation-confirmed, not merely green. **Residual, measured not assumed:** link (1), `server.rs:374` installing the syncer, is covered by nothing — deleting the install line leaves all 8 tests passing. Same gap exists for `librarian_guard`'s own install, so it is a shared shape rather than this change's defect | `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md` (id `013458f0acdb88b8`, re-minted from `92d619d7a115617b` by the archive move), `open-issue-work-queue:BL-48` |
 
 T13 and T14 landed together in `9360be99` (patch-id
 `47ca28a05d9e5b5fa962b4ba43b9b16d68b52a9d`). Verified by mutation rather than by
