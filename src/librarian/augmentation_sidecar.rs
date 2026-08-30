@@ -179,6 +179,77 @@ pub fn write(path: &Path, sidecar: &AugmentationSidecar) -> Result<()> {
     Ok(())
 }
 
+/// Keep an **already-committed** sidecar true after a shape change.
+///
+/// Writes only when the artifact declares a sidecar that already exists on disk, and only
+/// when the rendered shape actually differs. It never CREATES one — that stays
+/// `doctor(fix="export_augmentations")`'s job, so an `artifact_augment` call cannot quietly
+/// begin committing new files into a repo that never asked for them.
+///
+/// **Why this is needed at all.** Three write paths were each independently correct and
+/// composed into a one-way door: the export skips an artifact whose sidecar already exists
+/// (idempotent, by a pinned test), `reindex` attaches only when a row is *absent* (repair,
+/// never sync, so a live augmentation cannot be clobbered by a stale file), and
+/// `artifact_augment` did not touch the sidecar at all. After the first export, no path
+/// could update one.
+///
+/// The first live shape edit after the mechanism shipped hit that door within a day:
+/// widening a tracker's `params_schema` enum reported `exported: 0` while the committed YAML
+/// still held the superseded seven-value enum, so a fresh clone's `reindex` would have
+/// restored the old shape and reported success. That is strictly worse than the absence this
+/// module exists to fix — an absence is loud (`augmentation_declared_but_absent`), staleness
+/// restores clean. Repaired by hand in `2a8decc5`; this function is why hand-editing is not
+/// the standing remedy.
+///
+/// Returns the repo-relative sidecar path when a file was rewritten, `None` when there was
+/// nothing to do. Callers must surface a failure rather than swallow it: on error the catalog
+/// has already moved and the committed file has not, which is precisely the harmful state.
+pub fn write_through(
+    cat: &crate::librarian::catalog::Catalog,
+    artifact_id: &str,
+) -> Result<Option<String>> {
+    use crate::librarian::tools::doctor::{parse_declaration, Declaration};
+
+    let Some(art) = crate::librarian::catalog::artifact::get(cat, artifact_id)? else {
+        return Ok(None);
+    };
+    // An artifact whose file is unreadable declares nothing; `reindex` owns that case.
+    let Ok(content) = std::fs::read_to_string(&art.abs_path) else {
+        return Ok(None);
+    };
+    let declared = crate::librarian::frontmatter::parse(&content)
+        .ok()
+        .and_then(|(fm, _)| fm)
+        .and_then(|fm| fm.extra.get("expects_augmentation").cloned());
+    let Some(Declaration::Declared { sidecar: Some(rel) }) =
+        declared.as_ref().map(parse_declaration)
+    else {
+        // `true` with no path, absent, or unparseable: nothing on disk this may keep true.
+        return Ok(None);
+    };
+    let Some(root) = crate::librarian::current_project::lookup_git_root(&art.abs_path) else {
+        return Ok(None);
+    };
+    let path = root.join(&rel);
+    if !path.is_file() {
+        return Ok(None);
+    }
+
+    let Some(row) = crate::librarian::catalog::augmentation::get(cat, artifact_id)? else {
+        return Ok(None);
+    };
+    let rendered = serde_yml::to_string(&AugmentationSidecar::from_row(&row))
+        .context("serializing augmentation sidecar")?;
+    // Byte comparison, so a call that changes no shape leaves the file — and its mtime —
+    // untouched. `params` are not part of this rendering, so a params-only write is a no-op
+    // here by construction rather than by the caller remembering to skip it.
+    if std::fs::read_to_string(&path).is_ok_and(|on_disk| on_disk == rendered) {
+        return Ok(None);
+    }
+    std::fs::write(&path, rendered).with_context(|| format!("writing {}", path.display()))?;
+    Ok(Some(rel))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

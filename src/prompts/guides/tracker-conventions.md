@@ -257,6 +257,25 @@ Write the sidecar with `librarian(action="doctor", fix="export_augmentations")`,
 also stamps the declaration. It can only export rows **this** catalog holds, so run it
 on a machine that still has them.
 
+**Export CREATES; it never refreshes.** It skips an artifact whose sidecar already
+exists — that is what makes it idempotent — so it is not the way to update one after a
+shape change. `artifact_augment` handles that itself: a call that changes `prompt`,
+`params_schema`, `render_template`, `entry_collection`, `append_mode` or `history_cap`
+writes through to an existing sidecar, and a params-only merge leaves the file
+byte-identical. The catalog is authoritative and the sidecar is its committed
+projection, so a shape change made locally is what gets published — read `git diff` on
+`docs/augmentations/` before committing, as with any generated file.
+
+That wiring exists because its absence was measured rather than imagined. Export
+skipping, `reindex` attaching only when a row is *absent*, and `artifact_augment` not
+touching the file were each correct alone and composed into a **one-way door**: after
+the first export, no path could update a sidecar. The first live shape edit hit it
+within a day — widening a tracker's `status` enum reported `exported: 0` while the
+committed YAML still held the superseded seven-value list, so a fresh clone's `reindex`
+would have restored the old shape and reported success. **A stale sidecar is worse than
+an absent one**: absence is reported by `augmentation_declared_but_absent`, staleness
+restores clean.
+
 **Why any of this is needed.** Augmentation was the one artifact state with no on-disk
 form: rows, frontmatter and body all rebuild from disk on `reindex`, but the
 augmentation lived only in the catalog, which is machine-local and git-ignored. Its

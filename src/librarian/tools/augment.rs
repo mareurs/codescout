@@ -53,6 +53,24 @@ fn validate_merged_against_schema(
     Ok(())
 }
 
+/// Push a shape change out to the artifact's committed sidecar, when it has one.
+///
+/// Errors rather than warns. On failure the catalog has moved and `docs/augmentations` has
+/// not, so the committed file now describes a superseded shape — and a stale sidecar restores
+/// **silently** on a fresh clone, where an absent one is reported by
+/// `augmentation_declared_but_absent`. The message names both facts, because the augmentation
+/// itself did succeed and a caller told only "failed" would retry a write that already landed.
+fn sidecar_write_through(cat: &crate::librarian::catalog::Catalog, id: &str) -> Result<()> {
+    crate::librarian::augmentation_sidecar::write_through(cat, id).map_err(|e| {
+        anyhow::anyhow!(
+            "the augmentation WAS updated, but its committed sidecar could not be written: \
+             {e:#}. The catalog and docs/augmentations now disagree; re-run once the path is \
+             writable, or a fresh clone will restore the superseded shape and report success."
+        )
+    })?;
+    Ok(())
+}
+
 /// Goal-tracker merge processing: enforce the scope-growth guard and, when the
 /// status flips to `done`, evaluate the auto-close gate. Returns the `gate_check`
 /// evidence to emit (Some) when the gate auto-closes; None otherwise. Errors on a
@@ -196,6 +214,8 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
             refreshed_at_commit: None,
         },
     )?;
+
+    sidecar_write_through(&cat, &a.id)?;
 
     Ok(json!("ok"))
 }
@@ -412,6 +432,7 @@ impl Tool for ArtifactAugment {
                                 refreshed_at_commit: existing.refreshed_at_commit.clone(),
                             },
                         )?;
+                        sidecar_write_through(&cat, &a.id)?;
                         patched_siblings = true;
                     }
                 }
@@ -1217,6 +1238,183 @@ mod tests {
                 .contains("RFC 7396"),
             "`params` must keep its RFC 7396 sentence — array replacement is the rule \
              that actually caused data loss, and A-27 did not test it"
+        );
+    }
+
+    /// A real repo on disk: `.git`, an artifact declaring its sidecar, and the catalog row.
+    ///
+    /// `write_through` resolves the git root from the artifact's OWN path, so the synthetic
+    /// `/test/repo/...` path `seed_artifact` uses makes it a no-op — which is why none of the
+    /// tests above changed behaviour when the write-through landed. Returns the sidecar path,
+    /// deliberately NOT creating the file: creation is the export's job.
+    fn seed_declared_on_disk(
+        ctx: &ToolContext,
+        dir: &std::path::Path,
+        id: &str,
+    ) -> std::path::PathBuf {
+        use crate::librarian::augmentation_sidecar as sc;
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        let art = dir.join("t.md");
+        let rel = sc::rel_path_for(dir, &art);
+        std::fs::write(
+            &art,
+            format!("---\nkind: tracker\nexpects_augmentation: {rel}\n---\n\nbody\n"),
+        )
+        .unwrap();
+        let cat = ctx.catalog.lock();
+        artifact::upsert(
+            &cat,
+            &artifact::TestArtifactRowBuilder::new(id)
+                .with_abs_path(art.to_str().unwrap())
+                .with_kind("tracker")
+                .build(),
+        )
+        .unwrap();
+        dir.join(&rel)
+    }
+
+    /// Writes the sidecar the way the export leaves it, so a test starts from the real
+    /// post-export state rather than an invented one.
+    fn export_sidecar(ctx: &ToolContext, sidecar: &std::path::Path, id: &str) {
+        use crate::librarian::augmentation_sidecar as sc;
+        let cat = ctx.catalog.lock();
+        let row = augmentation::get(&cat, id).unwrap().unwrap();
+        sc::write(sidecar, &sc::AugmentationSidecar::from_row(&row)).unwrap();
+    }
+
+    /// The first live shape edit after the sidecar mechanism shipped found that NOTHING could
+    /// update a committed sidecar: the export skips an already-exported artifact (idempotent,
+    /// by its own pinned test), `reindex` attaches only when a row is absent (repair, not
+    /// sync), and this tool did not touch the file. Each is correct alone; together they were a
+    /// one-way door. A stale sidecar is worse than an absent one — absence is reported by
+    /// `augmentation_declared_but_absent`, staleness restores clean and reports success.
+    #[tokio::test]
+    async fn a_shape_change_writes_through_to_the_committed_sidecar() {
+        use crate::librarian::augmentation_sidecar as sc;
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
+
+        ArtifactAugment
+            .call(&ctx, json!({"id": "art1", "prompt": "before"}))
+            .await
+            .unwrap();
+        export_sidecar(&ctx, &sidecar, "art1");
+        assert_eq!(sc::read(&sidecar).unwrap().prompt, "before");
+
+        ArtifactAugment
+            .call(&ctx, json!({"id": "art1", "prompt": "after"}))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            sc::read(&sidecar).unwrap().prompt,
+            "after",
+            "the committed sidecar must follow the catalog, or a fresh clone restores the \
+             superseded shape and reports success"
+        );
+    }
+
+    /// `merge=true` with a sibling field is the OTHER shape-writing path. Hooking only
+    /// `create_or_replace_augmentation` would leave this one stale, and it is the path the
+    /// documented `artifact_augment(merge=true, ...)` recipe in CLAUDE.md actually uses.
+    #[tokio::test]
+    async fn a_merge_true_sibling_change_writes_through_too() {
+        use crate::librarian::augmentation_sidecar as sc;
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
+
+        ArtifactAugment
+            .call(&ctx, json!({"id": "art1", "prompt": "p"}))
+            .await
+            .unwrap();
+        export_sidecar(&ctx, &sidecar, "art1");
+        assert_eq!(sc::read(&sidecar).unwrap().entry_collection, None);
+
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({"id": "art1", "merge": true, "entry_collection": "rows"}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            sc::read(&sidecar).unwrap().entry_collection.as_deref(),
+            Some("rows"),
+            "a sibling-field patch changes the shape, so the committed shape must follow"
+        );
+    }
+
+    /// The plan's requirement, and the reason the write is guarded by a byte comparison rather
+    /// than by where the call happens to sit.
+    #[tokio::test]
+    async fn a_params_only_merge_leaves_the_committed_sidecar_byte_identical() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
+
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({"id": "art1", "prompt": "p", "params": {"a": 1}}),
+            )
+            .await
+            .unwrap();
+        export_sidecar(&ctx, &sidecar, "art1");
+
+        // A trailing comment no serializer emits. Without it this test would pass even for an
+        // unconditional rewrite, since `params` are not part of the rendering and canonical
+        // output would be byte-identical anyway — the assertion would be unable to fail.
+        // With it, any rewrite at all drops the comment and the test dies.
+        let hand = std::fs::read_to_string(&sidecar).unwrap()
+            + "# hand-edited, as the 2a8decc5 repair had to be\n";
+        std::fs::write(&sidecar, &hand).unwrap();
+
+        ArtifactAugment
+            .call(
+                &ctx,
+                json!({"id": "art1", "merge": true, "params": {"a": 2}}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&sidecar).unwrap(),
+            hand,
+            "a params-only merge must not touch the committed file — params are live state \
+             and deliberately do not travel"
+        );
+        // Positive control: without this the assertion above would also pass if the merge had
+        // silently done nothing at all.
+        let cat = ctx.catalog.lock();
+        let row = augmentation::get(&cat, "art1").unwrap().unwrap();
+        assert!(
+            row.params.contains("\"a\":2"),
+            "the merge itself must still have happened: {}",
+            row.params
+        );
+    }
+
+    /// Creation stays `doctor(fix="export_augmentations")`'s job. If this tool created one, a
+    /// repo that never asked for sidecars would start growing committed files as a side effect
+    /// of an unrelated augment call.
+    #[tokio::test]
+    async fn write_through_never_creates_a_sidecar_that_does_not_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
+
+        ArtifactAugment
+            .call(&ctx, json!({"id": "art1", "prompt": "p"}))
+            .await
+            .unwrap();
+
+        assert!(
+            !sidecar.exists(),
+            "declared-but-absent is the export's case and doctor reports it; creating the file \
+             here would make every augment call a repo-writing side effect"
         );
     }
 }
