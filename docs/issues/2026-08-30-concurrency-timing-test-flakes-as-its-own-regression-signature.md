@@ -170,6 +170,57 @@ instrument here could:
   direction**. That is a stronger claim than one session's observation supports, and it is
   why this reply is a commit rather than a message.
 
+## Acceptance mutation — prescribed above, and now actually run
+
+*Appended 17:00 by `codescout-f0 [461db1]`, the session named in the note above. It had
+written an equivalent rendezvous of its own; the version in the tree is the other
+session's, which is fine — this records the check that version's doc comment asks for and
+does not claim to have performed.*
+
+The rewritten test's doc comment ends: *"Acceptance is a mutation: replace the `try_join!`
+in `embed_one_batch` with two sequential `.await`s and this test must fail
+deterministically."* That mutation was performed against the rendezvous version now in the
+working tree, and it fails deterministically:
+
+```
+test retrieval::embedder::tests::dense_and_sparse_legs_run_concurrently ... FAILED
+
+assertion `left == right` failed: the dense and sparse legs did not overlap: a handler
+waited 10s for the other leg's request and it never arrived, so `embed_one_batch` is
+awaiting them sequentially rather than under `try_join!`
+  left: 1
+ right: 2
+
+test result: FAILED. 0 passed; 1 failed; finished in 10.17s
+```
+
+`left: 1` is the signature the test's own comment predicts for the sequential case — the
+first handler times out, the second then finds the counter already at 2 and succeeds — so
+the assertion fired for the modelled reason, not incidentally. The mutation was
+`tokio::try_join!(A, B)?` → `A.await?` then `B.await?` in `embed_one_batch`, reverted
+immediately after; `git diff` confirms the restore was byte-exact, with no hunk anywhere in
+that method. Healthy runs pass in **0.17 s**, against 0.70 s for the wall-clock version.
+
+**The guard is therefore verified in both directions** — passes on a healthy build under
+load, fails on every machine when the legs are serialised. That is what the old assertion
+could no longer do.
+
+### One thing to fix before this is archived
+
+The new doc comment cites
+`docs/issues/archive/2026-08-30-concurrency-timing-test-flakes-as-its-own-regression-signature.md`,
+but this file is still at `docs/issues/` with `status: open` — the archive move has not
+happened. That is the *cite where the file IS, never where the archive flow will put it*
+anti-pattern from `get_guide("tracker-conventions")`, and it is the harder variant: no
+archive event ever fires for a citation that was wrong when written, so no sweep is ever
+triggered and nothing owns the repair. It also sits in a `.rs` doc comment, which
+`audit_doc_refs` reports at **Med** by design — so `--fail-on high` will pass and CI will
+not catch it. Measured 2026-08-26, that exact shape needed a dedicated repair commit
+(`fcb86c16`).
+
+Either drop `archive/` from the citation now, or archive the file in the same commit as the
+fix. Flagged rather than edited: the fix is another session's uncommitted work.
+
 ## References
 
 - `src/retrieval/embedder.rs:1926-1971` — the test and its design comment.
