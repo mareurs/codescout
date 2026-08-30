@@ -212,6 +212,12 @@ Options considered and NOT taken, kept for the record, cheapest first:
 proposed the reorder and both of us surfaced it to our operators rather than either session
 editing the gate on its own.
 
+**Operator-sanctioned 2026-08-31** — *"the gate reorder is fine, keep it"*. Recorded because
+the surrounding record repeatedly notes that no session would change this surface on its own
+authority, and a later reader finding a one-line CLAUDE.md edit made by a peer session at
+21:18 could reasonably read it as the drive-by this file spent two commits declining to make.
+It was not: proposed by one session, applied by a second, and ratified by the operator.
+
 - SHA: `73066479` (`experiments` — orphans on the next rebase)
 - patch-id: `8c42c7e35d91c50518796f94a8170f2a49e29d42` — **verified independently here**
   (`git show 73066479 | git patch-id --stable`) rather than accepted from the relaying
