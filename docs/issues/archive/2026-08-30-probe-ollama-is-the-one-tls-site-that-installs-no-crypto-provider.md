@@ -103,6 +103,36 @@ and the crate's `install_default_crypto_provider` is a **private associated fn**
 consumer has no supported way to install the provider themselves — they depend on the
 crate doing it, and this one path does not.
 
+
+### The real answer, measured after the fix — the crate's own test for this path could not fail
+
+The account above is true and incomplete. `remote::tests::probe_ollama_errors_when_unreachable`
+**already existed** (`remote.rs:832`) and is nearly identical to the regression test added with
+the fix: same function, same `http://127.0.0.1:1`, same assertion on `"not reachable"`. So
+this path was already covered, and pre-fix that test should have panicked.
+
+It did not, and the reason is **cross-test contamination through process-global state**.
+`CryptoProvider::install_default` is process-wide, `remote::tests` is full of siblings that
+construct a `RemoteEmbedder` (`from_url_*`, `custom_*`, `openai_*`, the retry tests), and every
+one of them routes through `build_client`, whose first line installs the provider. Whichever
+sibling ran first installed it for everybody.
+
+Measured 2026-08-30 by re-removing the install and running the **same** pre-fix code two ways:
+
+| run | result |
+|---|---|
+| `--lib remote::tests::probe_ollama_errors_when_unreachable -- --exact` | **panics**, `No provider set` |
+| `--lib` (full suite, 51 tests) | **passes**, suite green 51/0 |
+
+So the guard existed, ran on every invocation, reported green, and was structurally incapable
+of failing. That is a third distinct way a check can be worthless, alongside the two this
+repo recorded the same day — an assertion monotone under the change it should catch, and a
+failure on a path nothing traverses. Here the assertion is fine and the path *is* traversed;
+the test's own siblings repair the defect before it can be observed.
+
+It also means no amount of care in the existing suite could have caught this. The only
+formulation that can is a **separate test binary**, which is why the added regression test
+lives in `tests/` and says, at length, that nothing else may join it.
 ## Class
 
 Third instance of the asymmetry named in

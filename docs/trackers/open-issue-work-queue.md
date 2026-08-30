@@ -102,6 +102,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-64 | 3 | `reindex_cli` is test-only and carries a broken copy of a DELETE deliberately removed for causing data loss | **done** — `9f743091`, patch-id `92db5adf65b7a748`. Took (a) delete-the-block over (b) plumb-`force`: **both** `index_repo` call sites are test-only while `index_repo` is public API, so (b) was a semver break serving only tests, building a reference implementation nothing references. A comment now stands where the block was — that is the remedy, the hazard being a reader "fixing" the missing `%`. Regression test mutation-verified: **with** `%` FAILS, **without** `%` passes | `6ff4394bb3b18d86` |
 | BL-66 | 3 | `probe_ollama` is the one TLS construction site in either tree that installs no crypto provider, and its failure is reported as "Ollama is not reachable" | **done, archived** — `1909e5f0`, patch-id `90c1612bcd948c09e0fd373be2e754134bf9a463`. Fourth instance of the root/crate asymmetry, found by enumerating call sites of `install_default_crypto_provider` rather than by pairwise diff — `probe_ollama` has no root twin. **The reproduction falsified three premises of this row.** It **panics** inside `ClientBuilder::build()` rather than returning `Err`, so the "Ollama is not reachable" misreport described here is unreachable code and never prints; the URL scheme is irrelevant, so plain `http://localhost:11434` panics identically; and severity was `low` on an operator-with-TLS theory when in fact **every external consumer aborts at zero configuration**. (a) shipped; (b) dropped, its premise being the false one | `a7af9964a16e8056` |
 | BL-67 | 2 | `export_augmentations` will not rewrite a sidecar whose shape changed, so a `params_schema` edit silently does not travel | **open** — split out of BL-50's item (2) when it acquired a live instance. Widening this queue's own status enum updated the catalog immediately while `fix=export_augmentations` reported `exported: 0` and the committed sidecar kept the seven-value list; a fresh clone would have re-attached the stale shape and restored the old vocabulary. Filed separately because the remedies differ — BL-50's remaining item is blocked on another machine, this is reproducible here. Root cause not yet read at the bytes. The open question: re-export on divergence, or refuse and report — a sidecar can legitimately be AHEAD of a catalog, so the two directions are not symmetric and only catalog-ahead is a defect | `eab3cb7631fd2689` |
+| BL-68 | 3 | 37 tests in `crates/codescout-embed/` are not compiled by either gate test command; 33 of them would execute | **open** — measured: `-p codescout-embed --features remote-embed` → **56 compiled, 52 executing** (4 `ollama_*` are `#[ignore]`d), `--no-default-features` → **19**. Bare `cargo test` builds only the ROOT package (0 of them); `cargo test --workspace --no-default-features` builds the member with `remote-embed` off. Not a `tests/`-directory issue — `remote::tests` inline `#[cfg(test)]` is 32 of the 33, including the regression guards for three bugs fixed the same day. **CI does cover them** via its `default` matrix lane (`cargo test --workspace`, `flags: ""`), so this is `W-81`'s feedback-latency axis rather than missing coverage. Candidate remedy is a fifth gate command; adding one is the operator's call, surfaced with the measurement rather than applied | — |
 | BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **done-archived — fixed (`61476cb5`) and archived 2026-08-30** | `4eea94e21203cd46` |
 | BL-58 | 2 | ListAgents omits live cross-profile sessions in the same checkout, and two sessions' counts are **incomparable** rather than merely short | **blocked** — harness, not this repo. Caused 6 misattributions across 4 sessions in one afternoon; real population ≥ 6 while both sides report "Peer sessions (2)" over disjoint sets. Mitigation in the bug file works today | `4266d09da90acb5e` |
 | BL-59 | 2 | the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript" | **blocked** — `claude-plugins`, not this repo. Worse than BL-58 in kind: that one understates who else writes your files, this overstates what **you** wrote, and cannot be refuted from the inside | `6411eb594cd7231d` |
@@ -838,6 +839,60 @@ explicit fix.
 **Next:** run the reproduction — it distinguishes an existence check from a broken
 content comparison from a deliberate no-clobber guard, and those need different fixes.
 
+
+### BL-68 — 37 tests in `crates/codescout-embed/` are not compiled by either gate test command
+
+**Status:** open
+
+**Valid:** conditional — a fifth gate command is adopted, or the crate's features change
+
+Measured 2026-08-30, both numbers from a clean run:
+
+| command | tests run in `codescout-embed` |
+|---|---|
+| `cargo test` (gate cmd 3) | **0** — builds only the root package's targets |
+| `cargo test --workspace --no-default-features` (gate cmd 4) | **19** — member built with `remote-embed` **off** |
+| `cargo test -p codescout-embed --features remote-embed` | **56 compiled** (55 lib + 1 integration), **52 executing** |
+
+**37 compiled tests are invisible to the documented gate, and 33 of them are live guards** — the
+other 4 are `remote::tests::ollama_*`, `#[ignore]`d pending a running Ollama, so they are not
+coverage either way. Both numbers are recorded because they answer different questions, and
+because a peer and I independently produced one each: they measured 56 and I measured 52, and
+the comfortable explanation on offer was "the tree gained tests between the two runs". It had
+not — a re-run an hour later returned byte-identical counts. The gap was passed-vs-total, and
+accepting the timestamp story would have retired the discrepancy without either of us noticing
+that an `#[ignore]`d test was padding a coverage number. **It is not a `tests/`-directory
+property** — that was the first hypothesis and it is wrong: `remote::tests`, an inline
+`#[cfg(test)]` module, is 32 of the 33. The property is *a workspace member's feature-gated
+tests*, whatever form they take.
+
+The 33 include regression guards for three bugs fixed on 2026-08-30 —
+`a_short_response_errors_instead_of_panicking`,
+`a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever`,
+`an_oversize_batch_is_split_into_batch_size_requests`.
+
+**CI is not affected.** Its `default` matrix lane runs `cargo test --workspace ${{ matrix.config.flags }}`
+with `flags: ""`, which covers all 52. So this is `W-81`'s axis — *how long until the check tells
+someone* — not an absence of coverage. A locally-green gate is silent about 33 tests and the
+signal arrives at push time.
+
+**A near-miss worth recording with it.** The first version of this finding was going to be
+"no gate lane runs it at all", which is strictly worse and was stated confidently. It came
+from grepping `ci.yml` for lines containing `--features` / `--no-default-features`, which
+returned the two matrix configs that have them and silently dropped the third, whose `flags`
+is the **empty string**. A filter is a hypothesis about where the thing lives, and an empty
+value is exactly what a pattern-based filter cannot see. Third instance that day of a search's
+**scope**, not its pattern, being the thing that was wrong.
+
+**Not applied, deliberately.** The remedy is probably a fifth gate command — `cargo test
+--workspace`, which subsumes bare `cargo test` and would keep the gate at four. But the gate
+is a ~20s contract in `CLAUDE.md` that every session pays on every task, and changing it is
+the operator's call, not a session's. Surfaced with the measurement attached.
+
+**Found independently by two sessions the same day**, which is the argument that it is
+structural rather than one person's oversight. One commit message (`236f31a4`) cited a gate
+that did not run its own new test — accurate about what was run, misleading about what it
+proved.
 ### BL-45 — Decision 1: may a process on an unlinked binary re-index?
 
 **Status:** open — awaiting an operator decision, not blocked on work.

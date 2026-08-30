@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 81
-entry_high_water_W: 84
+entry_high_water_W: 85
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -217,6 +217,7 @@ entry_high_water_W: 84
 | W-75 | 2026-08-30 | high | Reproduce before AND after each round of a fix, checking a wedge listener's own hit count, not just wall-clock time or a green test run | A round-1 isolation fix that passed all 77 memory tests still left 2 wedge hits (6.35s) from a third resolution path (`create_semantic_anchors`'s own `RetrievalClient::from_env`) that a concurrent session was independently fixing in the same live working tree mid-investigation — caught only by re-running the reproduction, not by trusting the passing suite | validated |
 | W-78 | 2026-08-30 | high | Before attributing a test failure to the change under test, re-run the same failing tests IN THE SAME ENVIRONMENT at the unmodified base. The prompt to do so is a failure in a subsystem the change does not touch | A merge probe returned `4706 passed; 3 failed`; all three were `librarian` temp-guard tests and the branch touches `operator_rules`/`tools::core`/`prompts`, nothing near librarian. The control — same `/tmp` worktree, `checkout --detach experiments`, merge NOT applied — reproduced all three identically, so the failures were the probe's LOCATION, not the merge. Each test builds its "outside-temp" catalog via `TempDir::new_in(current_dir())`, which is inside temp when the checkout is; the assumption sits in a code comment and is enforced by nothing. Without the control the two readings were block-a-clean-merge or bisect-a-working-guard. The failing configuration is the SANCTIONED one — this project points its scratchpad at `/tmp` | validated |
 | W-79 | 2026-08-30 | med | Verify a merged branch's imported bug files AT THE DOOR, in the landing session — and mark attribution as inference when nobody bisected | `03b3fb5c` imported five bug files, all `status: open`, authored against a base 103 commits back. One was already fixed: a severity-**high** futex-deadlock report whose own reproduction now runs 77 passed, no hang. It would have entered `experiments` describing a hang that does not happen and sat in every triage query until someone spent a session on it. Four were correctly open and confirmed at the bytes, which is the half that makes it a check rather than a rubber stamp. The flip names `fd638c76` as closer but records the non-reproduction as measured and the cause as NOT — the file already carried one careful negative, and a confident wrong attribution would have undone it | validated |
+| W-85 | 2026-08-30 | high | **Run a suspicious test alone — a green suite cannot distinguish a working guard from a disarmed one.** Closing `BL-66` I found the crate already had a test on that exact path (`probe_ollama_errors_when_unreachable`), nearly identical to the one I had just written. Re-running the SAME pre-fix code two ways: `--exact` **panics**, full `--lib` suite **passes 51/0**. `CryptoProvider::install_default` is process-global and every sibling constructing a `RemoteEmbedder` installs it first, so whichever won the race repaired the defect before the guard could observe it. A third distinct way a check can be worthless — assertion fine, path traversed, siblings disarm it — and both earlier remedies (non-monotone assertion, reachable path) pass it | Without the isolation run I had two wrong conclusions queued: that BL-66 survived only because root's `main.rs` shields the binary, and that my new test's sibling-contamination warning was foresight about a hazard. It was a demonstrated description of the test one file over. One `--exact` run, no code change, is the whole cost | validated |
 | W-84 | 2026-08-30 | high | **Mutate once per call site — then check that the kill came from a POSITIVE test.** A peer's law (one rule implemented at N call sites needs N mutations; a single kill proves only that one site is guarded) applied to `entry_status_region`, which locates an entry's status by table row OR by heading + `Status:` line. Both sites turned out independently guarded — mutation A killed only the table test, B only the heading test. The finding is in the SURVIVORS: two `assert!(…is_empty())` tests passed under removal of the very locator each exercises, because a dead locator finds nothing and silence is exactly what they assert. This is not a lax assertion — `is_empty()` is already maximal; **the expected value of an absence test IS the output of the failure mode**, so it cannot be tightened. **Corrected same-day, see the entry:** pairing proves only that the mechanism is ALIVE. The general rule is that a test cannot detect a change its assertion is MONOTONE under — absence under removal, existence under widening — and measuring that found a real hole: under a forbidden-act mutation all six tests passed, so the heading locator's precision was covered zero times. Fixed and verified in both directions | I had those four tests as two pairs by luck, not design — a positive and a negative per rendering because both seemed worth stating, not because I knew the negative rested on the positive. Had one locator got only its silence half, that site would have been unguarded behind four green tests and a mutation story I would have believed: a failure mode with no observer, not a wrong result but an absent one | validated |
 | W-83 | 2026-08-30 | high | **Measure the objection that got a task deferred, instead of accepting it or overriding it.** `BL-44` was dropped twice on a stated technical reason — a status comparison is "fragile, and a separate decision" — which was accurate and not decisive. A dry run over the real corpus before any Rust found the fragility is **one convention**: 20 of 26 naive findings are `**done, archived**` against a params value of `done-archived`. Absorbing that left 6 findings on 101 rows and a check worth having. The dry run then reshaped the design three more times — coverage 4 of 9 not 6 (I had read the schema and assumed the rendering, missing 30 of 131 entries), a boundary-anchored predicate instead of the obvious strip-punctuation one, and a `Status:`-line region instead of the whole section. | Shipping from the plan gives 77% noise, half the coverage while looking complete, and `done` matching inside `abandoned` | validated |
 | W-82 | 2026-08-30 | high | **A positive control turned a correct conclusion supported by a meaningless number into a real one.** Verifying BL-64's `#[cfg(test)]` fix is absent from the release binary: `nm -C … \| grep -c reindex_cli` → **0**, the expected answer from a real check. Meaningless — the binary is stripped and `nm` reported **zero symbols total**. Caught by the positive control run in the same breath (a symbol known to be compiled in *also* returned 0). `strings` then discriminated: controls 2 and 6, targets 0 and 0. The valuable direction of the *plausible-value* class — its ~11 prior instances are post-hoc, this one was **prevented at the cost of one extra line**. The honest part: the conclusion was RIGHT either way, so stopping at `nm` would have published a true statement on a false basis and never taught me otherwise — method failed, conclusion survived, which is the configuration in which nothing ever corrects you. Now shipped as practice in `probe_augmentation_restore.py` and `packaged_includes.rs` | validated |
@@ -7908,6 +7909,38 @@ An intermittent-looking result on a file nobody admits touching gets explained b
 
 **Status:** open
 **Promote-when:** a third instance of a mutation window being misread by a peer → the announcement protocol is currently convention held in session memory only, and should become a documented surface (skill or `docs/conventions/`) rather than something each session re-derives.
+
+## W-85 — Run a suspicious test alone — a green suite cannot distinguish a working guard from a disarmed one
+
+**Valid:** dated 2026-08-30
+
+**Observed:** Closing BL-66 (`probe_ollama` installed no rustls crypto provider; every external consumer of `codescout-embed` aborted at zero configuration), I found that `remote::tests::probe_ollama_errors_when_unreachable` **already existed** and was nearly identical to the regression test I had just written — same function, same `http://127.0.0.1:1`, same assertion. The path was already covered. Pre-fix it should have panicked, and the suite was green.
+
+**Got:** Re-removed the install and ran the **same** pre-fix code two ways:
+
+| run | result |
+|---|---|
+| `--lib remote::tests::probe_ollama_errors_when_unreachable -- --exact` | **panics**, `No provider set` |
+| `--lib` (full suite, 51 tests) | **passes**, 51/0 green |
+
+`CryptoProvider::install_default` is **process-global**, and `remote::tests` is full of siblings that construct a `RemoteEmbedder` — `from_url_*`, `custom_*`, `openai_*`, the retry tests — every one routing through `build_client`, whose first line installs it. Whichever sibling won the race installed the provider for everybody. The guard existed, ran on every invocation, reported green, and was **structurally incapable of failing**.
+
+**A third distinct way a check can be worthless**, alongside the two recorded the same day:
+
+| failure | what is wrong |
+|---|---|
+| `W-84` — monotone assertion | the assertion cannot move in the direction of the defect |
+| `R-133` (peer) — unreachable path | no traversed path observes the failure |
+| **this** | the assertion is fine, the path *is* traversed — **the test's own siblings repair the defect before it can be observed** |
+
+The third is the nastiest, because both earlier remedies pass it. The assertion is a specific `Err` with a message check, not a silence test. The path runs on every suite invocation. Nothing about the test, read on its own, is wrong.
+
+**Counterfactual:** without the isolation run I had two wrong conclusions queued and would have shipped either. First, I was about to write that BL-66 survived because root's `main.rs` shields codescout's binary — true, and not the reason the *crate's own* test missed it. Second, my new test's doc comment warns at length that a sibling constructing a `RemoteEmbedder` would disarm it; I wrote that as a **hypothesis about a hazard**, and it is in fact a **demonstrated description of the test one file over**. The warning was already history, not foresight.
+
+**The cheap general move:** when a test covers a path guarded by process-global state — a `OnceLock`, a `set_default`, an env var, a static registry, an installed provider — run it with `--exact` before believing it. One command, no code change. A suite-green result is silent about which of the two states you are in, and the two are indistinguishable from every other vantage point.
+
+**Status:** validated
+**Promote-when:** a second instance of process-global contamination disarming a test → promote to memory `test-design-discipline` and to `docs/conventions/test-env-isolation.md`, which already covers env isolation but not the process-global-singleton case that this one turns on.
 
 ## Template for new entries
 
