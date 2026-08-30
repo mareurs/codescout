@@ -95,6 +95,8 @@ async fn main() -> Result<()> {
             .unwrap_or_default(),
         // Production: the lock is sited in the per-user runtime dir.
         index_lock_dir: None,
+        // Production: snapshot the live process inside sync_project.
+        writer: None,
     };
 
     eprintln!(

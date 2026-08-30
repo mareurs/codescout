@@ -357,6 +357,8 @@ impl Tool for IndexProject {
                         force,
                         &ignore_patterns,
                         None,
+                        // Production: snapshot the live process inside sync_worktree.
+                        None,
                     )
                     .await?;
 

@@ -38,6 +38,15 @@ pub struct SyncOpts {
     /// real runtime dir, and lock files are deliberately never unlinked. See
     /// docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md.
     pub index_lock_dir: Option<std::path::PathBuf>,
+    /// Provenance of the process performing this sync. `None` — every production
+    /// caller — snapshots the live process via `index_state::current_writer()`.
+    ///
+    /// A test seam, for the same reason `index_lock_dir` is one: the staleness
+    /// signal `guard_stale_binary` acts on comes from reading this process's own
+    /// `/proc/self/exe`, which a test cannot make say "deleted" without unlinking
+    /// the running test binary. Injecting the provenance keeps the policy
+    /// testable while leaving detection where it belongs.
+    pub writer: Option<crate::retrieval::index_state::WriterProvenance>,
 }
 
 #[derive(Debug, Default)]
@@ -56,6 +65,46 @@ pub struct SyncReport {
     /// rebuild at a different width is nearly as confusing as the failure it
     /// replaced.
     pub dim_migration: Option<(u64, u64)>,
+}
+
+/// Refuse to (re-)index from a process whose own executable has been unlinked.
+///
+/// A `cargo rb` replaces the binary on disk, but already-running servers keep
+/// executing the old inode. Such a process would embed with code and config that
+/// no longer exist anywhere, then stamp the shared per-project sidecar with the
+/// result — and whoever syncs last wins, so it can overwrite a current server's
+/// state.
+///
+/// **The refusal sits before the embed pass, deliberately.** Direction 2 of the
+/// zombie-server bug originally refused the *sidecar write*, which is inverted at
+/// `sync_project`: the vectors are already in the store by then, so declining the
+/// write destroys the honest record of what happened while keeping the damage
+/// itself. Declining to re-index at all is the only placement that helps. See
+/// `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
+/// § *Re-costed 2026-08-28*, and `open-issue-work-queue:BL-45`.
+///
+/// `exe_deleted` is `Option<bool>` and the `Some(true)` test is exact on purpose.
+/// `None` means the check could not run — `exe_is_deleted()` returns `None` off
+/// Linux, where `/proc/self/exe` does not exist — and reading it as "deleted"
+/// would refuse to index on every non-Linux platform. Absence is "not recorded",
+/// never "yes".
+///
+/// `RecoverableError`, not `bail!`: the operator can fix this by restarting the
+/// server, and `isError: false` lets sibling parallel tool calls survive.
+pub(crate) fn guard_stale_binary(exe_deleted: Option<bool>) -> Result<()> {
+    if exe_deleted == Some(true) {
+        return Err(crate::tools::RecoverableError::with_hint(
+            "this codescout server is running a binary that has been deleted from disk, \
+             so re-indexing would write vectors produced by code that no longer exists \
+             and stamp them into shared per-project state."
+                .to_string(),
+            "Restart the MCP server, then re-run the index — in Claude Code, run `/mcp` \
+             to reconnect. A release build (`cargo rb`) unlinks the running binary, so \
+             every server started before that build is in this state.",
+        )
+        .into());
+    }
+    Ok(())
 }
 
 impl std::fmt::Display for SyncReport {
@@ -698,11 +747,27 @@ pub async fn sync_worktree(
     force_reindex: bool,
     ignore_patterns: &[String],
     index_lock_dir: Option<&Path>,
+    // Provenance of the syncing process. `None` — the production caller — snapshots
+    // the live process via `index_state::current_writer()`. Injected by tests, which
+    // cannot make this binary's own `/proc/self/exe` read "deleted" without unlinking
+    // the running test binary. Same seam as `SyncOpts::writer`.
+    writer: Option<crate::retrieval::index_state::WriterProvenance>,
 ) -> Result<SyncReport> {
     use crate::embed::ast_chunker::split_file;
     use crate::retrieval::drift::{dirty_paths, LocalChunk};
     use crate::retrieval::payload::CodePayload;
     use std::collections::HashSet;
+
+    // Refuse before ANY work — ahead of the index lock, the dirty-set sidecar and the
+    // embed pass. This call site writes its sidecar BEFORE embedding and `sync_project`
+    // writes it after, which is precisely why the refusal cannot live at the writer:
+    // no single rule there is correct for both. See `guard_stale_binary`.
+    guard_stale_binary(
+        writer
+            .as_ref()
+            .map(|w| w.exe_deleted)
+            .unwrap_or_else(|| crate::retrieval::index_state::current_writer().exe_deleted),
+    )?;
 
     const STACK_CHUNK_TARGET: usize = 1200;
     let chunk_target: usize = std::env::var("CODESCOUT_CHUNK_TARGET")
@@ -938,6 +1003,17 @@ impl crate::retrieval::client::RetrievalClient {
         root: &Path,
         opts: SyncOpts,
     ) -> Result<SyncReport> {
+        // Refuse before ANY work — ahead of the index lock, the store, and the embed
+        // pass. A stale process must decline to re-index, not decline to record what
+        // it already did; see `guard_stale_binary` for why the placement is the whole
+        // point. `None` writer = production, which snapshots the live process.
+        guard_stale_binary(
+            opts.writer
+                .as_ref()
+                .map(|w| w.exe_deleted)
+                .unwrap_or_else(|| crate::retrieval::index_state::current_writer().exe_deleted),
+        )?;
+
         // chunk=1200 was the universal sweet spot in the Phase 5.5 chunk×model matrix
         // (see docs/research/2026-05-06-retrieval-stack-benchmark.md). Override with
         // CODESCOUT_CHUNK_TARGET when retuning.
@@ -2443,6 +2519,7 @@ mod tests {
             false,
             &[],
             Some(lock_dir.path()),
+            None,
         )
         .await
         .unwrap();
@@ -2543,6 +2620,7 @@ mod tests {
             false,
             &[],
             Some(lock_dir.path()),
+            None,
         )
         .await
         .expect_err("a store failure on the drift baseline must not be swallowed");
@@ -2603,6 +2681,7 @@ mod tests {
             false,
             &[],
             Some(lock_dir.path()),
+            None,
         )
         .await
         .expect_err("the embedder failed, so the sync must not report success");
@@ -2632,6 +2711,64 @@ mod tests {
             "a byte-identical file is not dirty and must not be excluded from main, \
              got {:?}",
             st.dirty_paths
+        );
+    }
+
+    /// The worktree path embeds too, so it carries the same refusal.
+    ///
+    /// Sibling of `sync_project_refuses_an_unlinked_binary_before_acquiring_the_index_lock`.
+    /// The pair is what stops the guard being wired into one indexing path only: a
+    /// zombie barred from re-indexing a project must not be able to re-index a
+    /// worktree delta instead. Note the two call sites disagree on sidecar ordering
+    /// (this one writes BEFORE its embed pass, `sync_project` after), which is
+    /// exactly why the refusal belongs ahead of both rather than at the writer.
+    ///
+    /// `FakeEmbedder` here succeeds, so the guard is the ONLY thing that can make
+    /// this return `Err` — delete the guard call and the sync completes, making
+    /// `expect_err` panic.
+    #[tokio::test]
+    async fn sync_worktree_refuses_an_unlinked_binary_before_acquiring_the_index_lock() {
+        let (_tmp, wt) = worktree_fixture();
+        let store = seeded_main_store();
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
+        let lock_dir = tempfile::tempdir().unwrap();
+
+        let err = sync_worktree(
+            &store,
+            &wt,
+            "codescout",
+            "coll",
+            &emb,
+            false,
+            &[],
+            Some(lock_dir.path()),
+            Some(crate::retrieval::index_state::WriterProvenance {
+                git_sha: "deadbee".to_string(),
+                git_dirty: false,
+                pid: 4242,
+                exe_deleted: Some(true),
+            }),
+        )
+        .await
+        .expect_err("sync_worktree must refuse to re-index from an unlinked binary");
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "must be RecoverableError (isError: false) so sibling parallel tool calls \
+             survive the refusal; got: {err:#}"
+        );
+        assert!(
+            store.upserted_project_ids().is_empty(),
+            "the refusal must precede the embed pass — nothing may reach the store"
+        );
+        assert_eq!(
+            std::fs::read_dir(lock_dir.path()).unwrap().count(),
+            0,
+            "the refusal must precede the index-lock acquisition, so no lock file \
+             should exist; a non-empty lock dir means the guard runs too late"
         );
     }
 
@@ -2672,6 +2809,7 @@ mod tests {
             false,
             &[],
             Some(lock_dir.path()),
+            None,
         )
         .await
         .unwrap();
@@ -2692,6 +2830,7 @@ mod tests {
             false,
             &[],
             Some(lock_dir.path()),
+            None,
         )
         .await
         .unwrap();
@@ -2712,6 +2851,7 @@ mod tests {
             true,
             &[],
             Some(lock_dir.path()),
+            None,
         )
         .await
         .unwrap();
@@ -2822,6 +2962,7 @@ mod tests {
                 false,
                 &[],
                 Some(&lock_dir_path),
+                None,
             )
             .await
         });
@@ -3070,6 +3211,108 @@ mod tests {
             .await
             .expect("spawned task must not panic")
             .expect("sync_project should still succeed once it completes");
+    }
+
+    /// A process whose own executable has been unlinked must decline to re-index.
+    ///
+    /// The refusal has to sit BEFORE the embed pass, not at the sidecar write.
+    /// Refusing the sidecar write is inverted at this call site: by the time that
+    /// write runs the vectors are already in the store, so declining only the
+    /// record destroys the evidence and keeps the damage. See
+    /// `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
+    /// § *Re-costed 2026-08-28 — direction 2 is INVERTED at one of its two call
+    /// sites*, and `open-issue-work-queue:BL-45`.
+    ///
+    /// `RecoverableError`, not `bail!`: this is operator-fixable (restart the
+    /// server) and `isError: false` lets sibling parallel tool calls survive.
+    #[test]
+    fn an_unlinked_binary_is_refused_with_a_recoverable_error_naming_the_restart() {
+        let err = guard_stale_binary(Some(true))
+            .expect_err("a process running a deleted binary must decline to re-index");
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "must be RecoverableError (isError: false) so sibling parallel tool calls \
+             survive the refusal; got: {err:#}"
+        );
+        let msg = format!("{err:#}");
+        assert!(
+            msg.to_lowercase().contains("restart"),
+            "the refusal must tell the operator how to recover (restart the server), \
+             otherwise it is a dead end rather than a recoverable error; got: {msg}"
+        );
+        assert!(
+            msg.contains("/mcp"),
+            "the remedy must name the concrete command that performs the restart, \
+             not just the word — a hint the reader cannot act on is not a remedy; \
+             got: {msg}"
+        );
+    }
+
+    /// The ordinary case: a live binary indexes normally. Without this, deleting
+    /// the `Some(true)` discriminant in `guard_stale_binary` — refusing
+    /// unconditionally — would still pass the sibling above.
+    #[test]
+    fn a_live_binary_is_not_refused() {
+        assert!(
+            guard_stale_binary(Some(false)).is_ok(),
+            "a process on a live binary must index normally"
+        );
+    }
+
+    /// `None` means "could not tell", never "not deleted" — `exe_is_deleted()`
+    /// returns `None` off Linux, where `/proc/self/exe` does not exist. A guard
+    /// that treated `None` as deleted would refuse to index on every non-Linux
+    /// platform, which is why this is a separate test from the `Some(false)` one:
+    /// the two differ in meaning, not just in value.
+    #[test]
+    fn an_undetectable_binary_state_is_not_refused() {
+        assert!(
+            guard_stale_binary(None).is_ok(),
+            "None means the check could not run (non-Linux); it must never be read \
+             as 'deleted' or the guard refuses to index on every such platform"
+        );
+    }
+
+    /// Call-site wiring proof for `guard_stale_binary`, and the mutation target
+    /// that catches the guard being written but never called.
+    ///
+    /// Asserts the refusal happens before ANY work: the index lock is acquired
+    /// near the top of `sync_project` and lock files are deliberately never
+    /// unlinked, so an empty lock dir proves we returned ahead of even that. If
+    /// the guard call is deleted, this empty tempdir walks to completion and
+    /// returns `Ok` with `added: 0`, so `expect_err` panics.
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn sync_project_refuses_an_unlinked_binary_before_acquiring_the_index_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_dir = tempfile::tempdir().unwrap();
+        let client = test_retrieval_client(RecordingStore::default());
+        let opts = SyncOpts {
+            index_lock_dir: Some(lock_dir.path().to_path_buf()),
+            writer: Some(crate::retrieval::index_state::WriterProvenance {
+                git_sha: "deadbee".to_string(),
+                git_dirty: false,
+                pid: 4242,
+                exe_deleted: Some(true),
+            }),
+            ..SyncOpts::default()
+        };
+        let err = client
+            .sync_project("stale-binary-project", dir.path(), opts)
+            .await
+            .expect_err("sync_project must refuse to re-index from an unlinked binary");
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "must be RecoverableError (isError: false); got: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read_dir(lock_dir.path()).unwrap().count(),
+            0,
+            "the refusal must precede the index-lock acquisition, so no lock file \
+             should exist; a non-empty lock dir means the guard runs too late"
+        );
     }
 
     /// Call-site mutation target for `guard_index_dim`'s wiring into
