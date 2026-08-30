@@ -86,10 +86,10 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-43 | 1 | complete BL-41's coverage — a ledger that declares no `entry_prefix` AND defines nothing is still invisible to the dangling gate | **dropped — handed off**, both targets are other repos; codescout's own declarations are already done | `e891b7c6a5b1dbe7` |
 | BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **done, archived** — all steps shipped (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`, backfills `f04e4c17`/`0d101eb8`/`f5f602e6`/`9703102c`/`c7bdfd22`). `doctor` `ledger_defines_nothing` 10→2, `entry_without_definition` 3→1. The blocking peer file committed and was archived; moved 2026-08-18, id re-keyed `d34dfcd2cc718bd8` → `9dc28c0860b214d9`; 19 citations across 10 live files re-pointed in the same commit | `9dc28c0860b214d9` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
-| BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `39af18d5a73dadc0` |
+| BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `8400845b81ff0475` |
 | BL-46 | 2 | Decision 2: the write-root split — unpinned WRITES resolve to the last writable root, unpinned READS keep resolving to the activated one | **not started** — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive | — |
 | BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `1d085bcddf13d685` |
-| BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing | `92d619d7a115617b` |
+| BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | **done** — `518549d6`, patch-id `c424f89f…`. Installed hook mirroring `librarian_guard`'s oracle; never creates a row; 8 tests, wiring mutation-checked both ways. Residual: the server-side install is covered by nothing. Bug file archived 2026-08-30 — the status flip reproduced the bug on itself, the fix not being live in this server | `013458f0acdb88b8` |
 | BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | open | `caa8bc1df0e8c0d8` |
 | BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | open | `19f44bead56b56cc` |
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `e6c0ddb91fe28228` |
@@ -203,7 +203,7 @@ construction.
 
 **Valid:** dated 2026-08-29
 
-`docs/issues/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`. Filed by a peer
+`docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`. Filed by a peer
 session after two independent hits on one afternoon, one of them mine: a bug archived with
 `status: fixed` on disk kept reporting `open` from `find(kind="bug", …)`, and surfaced in a
 "what's open?" report. The guard at `edit_markdown.rs` correctly passes plain bug files through
@@ -406,7 +406,7 @@ adjacent in one session and got conflated; BL-48's evidence should point at that
 
 **Valid:** dated 2026-08-29
 
-**Rests on:** `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md` § *Re-costed 2026-08-28 — direction 2 is INVERTED at one of its two call sites*.
+**Rests on:** `docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md` § *Re-costed 2026-08-28 — direction 2 is INVERTED at one of its two call sites*.
 
 Direction 2 of the zombie-server bug, as drafted, refuses the **sidecar write**. That is
 inverted at the main sync path: the vectors are already in the store by then, so refusing

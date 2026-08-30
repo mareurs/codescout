@@ -1,7 +1,7 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-29
-closed:
+closed: 2026-08-30
 severity: medium
 owner: marius
 related:
@@ -12,6 +12,7 @@ tags:
   - tooling
   - silent-divergence
 kind: bug
+unverified: "fixed in tree only. The server that closed this file (PID 803849, started 11:10:11) runs an UNLINKED binary — /proc/<pid>/exe reports '(deleted)' — so its code predates 11:10:11; the 11:39:59 rebuild replaced the file on disk, not the running image, and the fix landed 11:46:13. This very status flip therefore reproduced the bug. Also: the server-side install at src/server.rs:374 is covered by no test. Re-verify both after the next `cargo rb`."
 ---
 
 # BUG: `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely
@@ -114,6 +115,40 @@ there, it **feeds a status report**. `CLAUDE.md`'s verify-open cadence and the
 activation bootstrap both prescribe the catalog query as the way to answer
 "what's open?".
 
+**Third instance — 2026-08-30, this bug reproducing on itself.** Closing this
+record was done with the very call it describes:
+`edit_markdown(frontmatter={set: {status: "fixed", closed: "2026-08-30", …}})`.
+Disk flipped to `fixed`; `artifact(action="get")` kept returning `status: "open"`.
+The running server is executing an *unlinked* binary: `/proc/803849/exe` reports
+`… (deleted)`, the process started 11:10:11, and the rebuild at 11:39:59 replaced
+the file on disk (inode 6397097) without touching the running image. The code
+answering these calls therefore predates 11:10:11 — two builds behind the fix
+commit at 11:46:13, not one. *(Corrected: this first read "the running server was
+built 11:39:59", which described the file on disk rather than the process. An
+`mtime` on the binary says nothing about a server that started before it. The
+conclusion is unchanged and stronger.)* The prediction was written down before the
+call, and the reproduction cost nothing — the status had to be flipped anyway.
+
+**It also sharpened the description: the desync is field-selective, and the split
+follows exactly the filterable/non-filterable line.** `src/librarian/tools/get.rs:335`
+serves `status` from `row.status`, a catalog column. `get.rs:525-533` re-parses
+`extra` from the file on every call, with the comment *"not in the catalog and not
+filterable via find — so the file is the only source"*. One `get` payload therefore
+mixes two epochs: `"status": "open"` came back alongside `"closed": "2026-08-30"`
+and an `unverified` note saying the bug was fixed.
+
+That self-contradiction is the reader's **only** tell — and it is an accident of
+this file happening to carry `extra` keys. A bug with none returns a stale
+`status` that looks perfectly self-consistent, which is precisely the shape of the
+two instances above.
+**And this state is BL-45's own condition, which makes the recursion exact.** A
+server running a deleted binary is precisely what `guard_stale_binary`
+(`22f8b8d5`, patch-id `fd2c453b…`) refuses to let re-index. It would fire here —
+except it is not in the running image either, for exactly the reason the hook is
+not. Two correct, committed, gate-green fixes, both absent from the process that
+would enforce them. Anything measured about catalog or index behaviour in this
+window is a measurement of the *old* code, and nothing in any tool response says
+so.
 ## Hypotheses tried
 
 1. **Hypothesis:** the catalog updates lazily and would have caught up.
@@ -149,6 +184,22 @@ Options, cheapest first.
 (1) and (3) are complementary; (1) alone leaves other write routes unguarded, (3)
 alone leaves the window open until someone looks. Not applied in this record.
 
+**Shipped 2026-08-30 — option (1). `518549d6` on `experiments`, patch-id
+`c424f89f8aeb67eaa692eeda4a9812a13820041c`.**
+
+Not as a direct call. `edit_markdown` is core and the catalog sits behind
+`#[cfg(feature = "librarian")]`, so calling it directly compiles locally and fails
+CI's lean lane. It goes through an installed hook mirroring `librarian_guard`'s
+oracle, in the opposite direction: a `CatalogFrontmatterSync` trait and
+process-wide slot in `src/util/librarian_sync.rs`, implemented by
+`CatalogFrontmatterSyncer` in `src/librarian/adapter.rs`, installed at
+`src/server.rs:374`. The syncer looks the row up and **never creates one**, so it
+cannot promote arbitrary markdown into an artifact — the narrowness option (1)
+promised.
+
+Option (3), the `doctor` drift check, is **not** shipped and remains the
+complementary half: (1) closes the `edit_markdown` route only, and says nothing
+about any other writer.
 ## Tests added
 
 None — this record is the finding. A regression test for option (1) should
@@ -171,12 +222,24 @@ keys (`unverified:`, `closed:`) where the divergence does not matter. Or run
 
 ## Resume
 
-Decide between Fix (1) and Fix (3) — they are complementary, so likely both.
-Implement (1) in `src/tools/markdown/edit_markdown.rs` at the
-`frontmatter_changed` branch (`:1356`). Confirm the population first: count
-catalogued artifacts whose file frontmatter `status` differs from their catalog
-row, to size the existing drift rather than assuming these two are all of it.
+Closed. Two things are genuinely outstanding; neither blocks the archive.
 
+1. **The fix is not live in the server that closed this file.** The process (PID 803849, started 11:10:11) runs an
+   unlinked binary — `/proc/<pid>/exe` reports `(deleted)` — so its code predates
+   11:10:11; the 11:39:59 rebuild replaced the file, not the image, and the fix
+   landed 11:46:13. Re-verify after the next
+   `cargo rb`: one `edit_markdown` frontmatter write, then `artifact(action="get")`
+   on the same id, and check that `status` moved.
+2. **The server-side install is covered by no test.** The chain has four links —
+   `edit_markdown` calls the hook, the slot holds it, the syncer updates the row,
+   and `server.rs:374` installs the syncer. Three are mutation-checked. The fourth
+   is not: deleting the install line leaves all 8 tests green, which was run and
+   confirmed rather than assumed. Closing it needs a test that builds a real server
+   and inspects the process-wide slot — and the identical gap exists for
+   `librarian_guard`'s own install, so it is a shared shape, not a one-off.
+
+Both are recorded in the `unverified:` frontmatter key, so a triage query reaches
+them without anyone opening this file.
 ## References
 
 - `src/tools/markdown/edit_markdown.rs:1341-1346` — the only librarian
@@ -186,3 +249,11 @@ row, to size the existing drift rather than assuming these two are all of it.
 - `src/util/librarian_guard.rs` —
   `a_catalogued_but_unaugmented_file_stays_directly_editable`, why the guard
   correctly lets bug files through
+
+- `src/util/librarian_sync.rs` — the trait and process-wide slot (the fix)
+- `src/librarian/adapter.rs` — `CatalogFrontmatterSyncer`, the catalog-side impl
+- `tests/edit_markdown_catalog_sync.rs` — the end-to-end wiring test, in its own
+  binary because the slot is process-wide and the unit-test binary contests it
+- `src/librarian/tools/get.rs:335` and `:525-533` — why the desync is
+  field-selective rather than total
+- `open-issue-work-queue:BL-48`

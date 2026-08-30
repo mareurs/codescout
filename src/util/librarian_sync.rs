@@ -13,7 +13,7 @@
 //! guard's own pinned `a_catalogued_but_unaugmented_file_stays_directly_editable`. Measured
 //! 2026-08-30: **4 of 19** live files under `docs/issues/` carry a stamped `id:`, so 15 are
 //! editable and every one of them can desync. See
-//! `docs/issues/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md` and
+//! `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md` and
 //! `open-issue-work-queue:BL-48`.
 //!
 //! ## Why a hook rather than a call

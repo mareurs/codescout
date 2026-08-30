@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 79
-entry_high_water_W: 73
+entry_high_water_W: 74
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -209,6 +209,7 @@ entry_high_water_W: 73
 | W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
 | W-73 | 2026-08-29 | med | "Compile-error → green" is the trigger for spending a mutation: a test whose only observed RED was a compile error has never run its assertions against a wrong world. In statically typed languages that is the NORMAL TDD cycle, so the shape is common rather than rare | `guard_stale_binary`'s wiring test would have shipped looking like proof. The policy unit tests (`Some(true)` refuses, `Some(false)`/`None` do not) still pass when the guard is written, tested and never called — five green tests, defect 100% present, and nothing else in 4642 tests notices. Mutating the call to `let _ = ...` failed with the exact symptom its doc comment predicts. Second datapoint the same afternoon in `read_file.rs`, where two pre-existing tests assert the identical property and stay green because their 1200-short-line fixture can never reach the valve | validated |
+| W-74 | 2026-08-30 | med | When the closure step IS the broken operation, run it rather than routing around it — the write is mandatory, so the reproduction costs nothing and is the one moment the broken path runs against a known-correct expected answer. Distinct from CLAUDE.md's reproduce-before-the-fix-plan rule, which governs the START of a fix and weighs a real cost | Closing BL-48 required the exact `edit_markdown(frontmatter={set:{status:…}})` call BL-48 describes as broken; `artifact(update)` was the known, faster workaround. Writing the prediction down and then using the broken call yielded three findings unreachable by re-reading: the fix is not live in this server, so every catalog measurement in the window is of old code and no tool response says so; the desync is field-SELECTIVE (`get.rs:335` serves `status` from the catalog column, `:525-533` re-parses `extra` from disk), so one payload mixes two epochs and self-contradicts only when `extra` happens to be populated — a bug with none returns a stale status looking perfectly consistent; and chasing that to `/proc/<pid>/exe` found an UNLINKED binary, BL-45's own condition, which corrected a claim I had already written into the record (I cited the on-disk mtime as the running build; the process predates it) | open |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -5812,7 +5813,7 @@ was wrong on the day it was written.
 **Valid:** dated 2026-08-26
 
 **Observed:** 2026-08-26, picking up
-`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`'s
+`docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`'s
 top-priority Fix item ("0. Exit on `SIGTERM`. ... its absence is why days-old processes were
 still holding stale config"). Before implementing it, `references(shutdown_signal)` and a
 `git log -S` check were run first.
@@ -6634,7 +6635,7 @@ own argument, "agreement is not correctness", is this rule's sharper edge).
 before reading the fix plan* rule applied to a bug file rather than a repro.
 
 **Expected (bug file):**
-`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
+`docs/issues/archive/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
 § *Re-costed 2026-08-28 — direction 2 is INVERTED at one of its two call sites* carries a
 three-row evidence table headed "Measured in `src/retrieval/sync.rs`":
 
@@ -7074,6 +7075,60 @@ Their closing observation, worth keeping verbatim because it is the honest shape
 and not a flourish: *"I wrote 'knowing a rule and executing it are different acts' to my user
 about the paths-and-ids sweep, in the same breath as a commit where I had done exactly that to a
 different rule."*
+## W-74 — When the closure step IS the broken operation, run it — the reproduction is free
+
+**Valid:** dated 2026-08-30
+
+**Category:** method · **Status:** open — 1 datapoint
+
+**Observed (2026-08-30, BL-48).** Closing the bug file required flipping
+`status: open` → `fixed`. The documented call for that is
+`edit_markdown(frontmatter={set: {status: …}})` — which is *the exact call BL-48
+describes as broken*. The workaround (`artifact(action="update")`) was known,
+available, and faster.
+
+**Did instead.** Wrote the prediction down first — *"disk will flip; the catalog
+will still say `open`"* — then used the broken call deliberately and queried the
+catalog. Disk said `fixed`; `artifact(action="get")` said `open`.
+
+**Counterfactual.** Routing around the bug would have closed the file cleanly and
+taught nothing. Three findings came out of the reproduction, none of them
+reachable by re-reading code:
+
+1. **The fix is not live in this server**, so every catalog measurement taken in
+   this window is a measurement of the old code — and no tool response says so.
+2. **The desync is field-selective, not total.** Verified at
+   `src/librarian/tools/get.rs:335` (`status` served from `row.status`, a catalog
+   column) against `:525-533` (`extra` re-parsed from the file on every call, with
+   a comment saying why). One `get` payload therefore mixes two epochs and
+   contradicts itself — `"status": "open"` next to `"closed": "2026-08-30"`. That
+   contradiction is the reader's **only** tell, and it appears solely because this
+   file happened to carry `extra` keys. A bug with none returns a stale `status`
+   that looks perfectly self-consistent.
+3. **Chasing (1) to `/proc/<pid>/exe` corrected a claim already written into the
+   bug file.** I had cited the on-disk binary's mtime (11:39:59) as the running
+   server's build time. The process started 11:10:11 and its binary is *unlinked*
+   — an mtime says nothing about a server that predates it. The conclusion held
+   and strengthened; the stated reason was wrong, and only the probe caught it.
+   That state is also BL-45's own condition, so `guard_stale_binary` would refuse
+   a re-index here — except it is absent from the running image for the same
+   reason.
+
+**The rule.** When the bookkeeping step that closes a bug *is* the operation the
+bug describes, run it rather than routing around it. The write has to happen
+anyway, so the reproduction costs nothing, and it is the one moment the broken
+path is exercised against a known-correct expected answer.
+
+**Distinct from** CLAUDE.md's *"run the reproduction before reading the fix plan"*,
+which governs the **start** of a fix and is justified by the plan being a
+hypothesis. This governs the **end**, and rests on a different mechanism: the
+operation was mandatory, so there is no cost to weigh at all.
+
+**Promote-when:** a second instance where a closure step doubles as a
+reproduction, **or** one where routing around a known-broken closure path hid a
+live regression. At two, promote to CLAUDE.md § Bug Tracking beside the existing
+reproduction rule.
+
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:

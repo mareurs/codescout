@@ -1175,7 +1175,7 @@ mod tests {
     /// Without the syncer the row keeps `open` indefinitely, and
     /// `artifact(find, kind="bug", status=…)` — the triage query CLAUDE.md and the
     /// activation bootstrap both prescribe — reports a value the file contradicts.
-    /// `docs/issues/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`.
+    /// `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`.
     #[test]
     fn sync_frontmatter_writes_the_files_status_onto_its_catalog_row() {
         use crate::util::librarian_sync::CatalogFrontmatterSync;
