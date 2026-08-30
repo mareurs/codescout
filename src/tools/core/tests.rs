@@ -1375,13 +1375,21 @@ async fn write_echo(
 
 /// Stub tool exercising the operator-rules routing path in `call_content`.
 ///
-/// No production tool overrides `selector_key` except `LibrarianAdapter`
-/// (which wraps every librarian tool) — `Memory` in particular does not,
-/// so OP-3 (`serves: memory.write`) cannot route on a real
-/// `memory(action="write", ...)` call today even though it is the rule
-/// Task 6 expects that call to surface. See
-/// docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md
-/// for the full production-routing gap this stub papers over. This stub
+/// **Historical note, kept because it is why this stub exists.** When this was
+/// written, no production tool overrode `selector_key` except
+/// `LibrarianAdapter` — `Memory` in particular did not — so OP-3
+/// (`serves: memory.write`) could not route on a real
+/// `memory(action="write", ...)` call, even though it is the rule Task 6
+/// expects that call to surface. That is no longer true: `Memory` opts in as of
+/// the fix to
+/// docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md,
+/// and `the_real_memory_tool_supplies_a_selector_key_for_op_3` below asserts it
+/// against the real tool rather than this stand-in.
+///
+/// The stub is retained deliberately: it exercises the router against a
+/// synthetic corpus without depending on `Memory`'s call path or its on-disk
+/// state, which is what lets the routing filters be tested in isolation. Read
+/// it as a test double, no longer as a paper-over. This stub
 /// projects `{tool}.{action}` the same way `LibrarianAdapter::selector_key`
 /// does, so the router path in `call_content` can be exercised regardless.
 struct RoutedEchoTool {

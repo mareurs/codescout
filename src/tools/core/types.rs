@@ -1178,10 +1178,18 @@ pub trait Tool: Send + Sync {
             }
             out
         } else {
-            // No tool outside the `LibrarianAdapter` family overrides
-            // `selector_key` (default `None`, `types.rs:1251`), so every other
-            // tool call takes this branch — skip the mutex lock and the corpus
-            // scan for calls that could never route regardless.
+            // Tools that have not opted into routing return the trait default
+            // `None`, so this branch skips the mutex lock and the corpus scan
+            // for calls that could never route regardless.
+            //
+            // It used to read "no tool outside the `LibrarianAdapter` family
+            // overrides `selector_key`, so every other tool call takes this
+            // branch". That was true and is no longer: `memory`, `edit_file`
+            // and `create_file` now opt in, so they take the routing branch
+            // above. The remaining tools still land here, which is the point of
+            // the fast path — but it is a majority now, not a totality, and a
+            // reader must not infer from this branch that routing is
+            // librarian-only.
             Vec::new()
         };
 
