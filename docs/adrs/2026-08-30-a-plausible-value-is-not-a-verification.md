@@ -49,6 +49,9 @@ been safe, and each was consulted **precisely because** its user was being caref
 | a 200-row page cap | how many results are there? | how many fit on a page |
 | a passing unit test | does the policy take effect? | is the policy function correct |
 | `ListAgents` *"Peer sessions (2)"* | who else is writing this checkout? | who shares my config profile |
+| wall-clock around `cargo test` | how long does this suite take? | suite time **plus** any rebuild the run triggered |
+| a stale semantic index | where is this concept in the code? | where it was, N commits ago |
+| `indexed_with_model` | what embedded these vectors? | what some past writer *labelled* them |
 
 **The costs were real and are all from one day:**
 
@@ -74,6 +77,28 @@ been safe, and each was consulted **precisely because** its user was being caref
   function is correct and says **nothing** about whether anything calls it. The same
   gap was measured independently the same day on an installed hook whose four-link
   chain had three links covered.
+- **Wall clock reported a coupling that did not exist, and the number was published.**
+  A probe timed `tools::memory::tests` across four ambient configurations to measure
+  environment coupling. Changing any `CODESCOUT_*` variable invalidates cargo's
+  fingerprint, so *switching conditions* triggered a rebuild and inflated three of the
+  four arms by 15–27s. The verdict `*** STILL COUPLED ***` was reported to the operator
+  before the artefact was caught. libtest's own `finished in` line — which excludes
+  compilation — read `0.04s` in **all four** arms simultaneously. The instrument was
+  measuring the cost of asking the question.
+- **A stale index answers competently.** After a rebuild, `semantic_search` for a
+  symbol committed hours earlier returned three plausible, well-ranked, entirely
+  unrelated chunks. Nothing failed; `git_sync.behind_commits: 10` was the only tell,
+  and it lives in `index(action="status")`, not in the search response. A search over
+  a stale index is not a degraded search — it is a correct answer to *"where was this
+  concept N commits ago"*, a question nobody asked.
+- **A metadata label impersonated a measurement.** The same status call reported
+  `model_mismatch: indexed_with all-minilm / configured CodeRankEmbed`, which reads as
+  two embedding spaces and argues for a full 52k-chunk force re-embed. `GET /v1/models`
+  returned `CodeRankEmbed-Q4_K_M, n_embd: 768` and a live embed returned dim 768: the
+  vectors were fine and the *label* was stale, written by a process whose executable had
+  since been deleted. This one is the counter-example that proves the remedy works — the
+  field's own hint says to go ask the endpoint, and doing so cost one `curl` and saved a
+  pointless rebuild.
 
 ### The property that makes this class distinct
 
@@ -231,4 +256,3 @@ unusually concurrent day, and a quieter session may meet the class far less ofte
 - `7930e0b7` — the commit that carried a peer's two lines past a `--stat` check.
 - `0c4931ef` — BL-60, where "there is nothing to run" was itself run, and returned the
   fact struct-reading could not supply.
-

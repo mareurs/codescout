@@ -685,6 +685,51 @@ than the 37-point champion. Post-fix, documents are stored unprefixed either way
 flipping it moves only the query side — no re-index required, which makes it
 cheap to test both ways.
 
+### Resume — T6, cold
+
+Everything T6 needs now exists; it is a consumer swap, not a design task.
+
+**Do first, before reading further:** sweep the *State* column against `git log`.
+Two rows on this board were stale simultaneously (see the Status block). The
+board is a claim about the past.
+
+**What T6 is.** Replace root's `EmbedderHttp` dense leg with
+`codescout_embed::remote::RemoteEmbedder` in
+`RetrievalClient::build_http_embedder` / `build_embedder_for_url`
+(`src/retrieval/client.rs:231`, `:257`). Hold batch size at **8** so the change is
+behaviour-preserving — `ET-3`.
+
+**The three contracts it must carry across, all now built:**
+
+1. **Query prefix (D1's root-side half).** Map unset `CODESCOUT_QUERY_PREFIX` →
+   `QueryPrefix::Suppressed`, a set value → `QueryPrefix::Explicit(v)`. Do **not**
+   let it fall to `Derive` — `RemoteEmbedder`'s constructors default to `Derive`,
+   so this is an explicit `.with_query_prefix(…)` at the construction site and
+   forgetting it is a silent 37→34 regression on the default model. Expose
+   `Derive` as an opt-in sentinel if you want zero-config; that was the ruling.
+2. **Connect errors.** Already typed — `EmbedError::Connect` renders
+   `CONNECT_FAILED_MARKER`, and `classify_search_error` matches the constant. The
+   swap should need no change here; `the_crates_own_connect_error_routes_where_roots_does`
+   is the test that will tell you if it does.
+3. **Model name.** Root's `dense_model_name` defaults to the **empty string**, so
+   it sends `{"model": ""}` today — tolerated by llama-server, rejected by stricter
+   gateways. `RemoteEmbedder` requires a model. Decide during the swap, not after
+   (`ET-3`).
+
+**The asymmetry to watch.** Root's `EmbedderHttp` fetches dense **and sparse**;
+`RemoteEmbedder` is dense-only. The sparse leg and its retry ladder stay in root.
+Do not delete them with the dense duplicate.
+
+**After T6, Phase D (T7–T9) is deletion**, and two of its three rows already carry
+corrections: T7 must **re-point** `roots_loopback_guard_agrees_with_the_crates_on_every_case`
+and delete it with root's copy — it exists to make that deletion checkable and
+outliving it is worse than useless; T8 is **mis-scoped** and should narrow to the
+wire structs, since `reranker.rs` keeps `transport.rs` alive.
+
+**Verify with a lean RUN**, not a check: `cargo test --workspace
+--no-default-features` is a documented gate as of `6764eb18`, and `2c6f2677`
+showed a check cannot see a lean runtime failure.
+
 **Rests on:** `ET-8` for the ordering argument and `ET-4` for why Phase D audits
 rather than deletes. If either is revised, re-derive this board rather than
 patching rows.
