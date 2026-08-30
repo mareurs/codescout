@@ -2,7 +2,7 @@ use crate::retrieval::code_store::{CodeVectorStore, VectorBackend};
 use crate::retrieval::config::RetrievalConfig;
 use crate::retrieval::embedder::CodeEmbedder;
 #[cfg(feature = "remote-embed")]
-use crate::retrieval::embedder::{is_https_or_loopback, EmbedderHttp};
+use crate::retrieval::embedder::EmbedderHttp;
 #[cfg(feature = "server-stack")]
 use crate::retrieval::qdrant::QdrantWrap;
 #[cfg(feature = "remote-embed")]
@@ -211,7 +211,7 @@ impl RetrievalClient {
         if key.is_empty() {
             return None;
         }
-        if is_https_or_loopback(url) {
+        if codescout_embed::remote::is_https_or_loopback(url) {
             Some(key.to_string())
         } else {
             tracing::warn!(
@@ -912,6 +912,41 @@ mod selection_tests {
             RetrievalClient::guarded_api_key("http://embed.example.com", Some("secret")),
             None
         );
+    }
+
+    /// The spoofed-host cases, asserted at **root's own layer**.
+    ///
+    /// Every other guard test here uses `http://embed.example.com` — a plainly
+    /// non-loopback host that even an unanchored `contains("localhost")` check
+    /// would reject. These are the inputs that separate a correct guard from a
+    /// merely plausible one, and until T7 they were asserted only against root's
+    /// private copy of the predicate, one layer below where a key actually leaks.
+    ///
+    /// Kept at root rather than left to `codescout-embed`'s own predicate test
+    /// because the claim is different: not "the predicate is right" but "root
+    /// drops the key", which is the thing an operator is exposed to. That
+    /// distinction is why deleting root's duplicated predicate test in T7 costs
+    /// nothing — this covers the same inputs against the behaviour that matters.
+    #[cfg(feature = "remote-embed")]
+    #[test]
+    fn guarded_api_key_drops_the_key_for_a_host_that_only_looks_like_loopback() {
+        for spoof in [
+            "http://127.evil.com/v1",
+            "http://localhost.evil.com/v1",
+            "http://127.0.0.1.evil.com/v1",
+            "http://example.com/127.0.0.1",
+            // Userinfo form: the host is `evil.com` and `127.0.0.1` is a
+            // username. A guard that searches the url rather than parsing the
+            // authority accepts this and sends the key to evil.com in cleartext.
+            "http://127.0.0.1@evil.com/v1",
+        ] {
+            assert_eq!(
+                RetrievalClient::guarded_api_key(spoof, Some("secret")),
+                None,
+                "{spoof} does not target loopback — forwarding the key here sends \
+                 it in cleartext to a host the operator did not intend"
+            );
+        }
     }
 
     #[cfg(feature = "remote-embed")]
