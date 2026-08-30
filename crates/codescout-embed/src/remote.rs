@@ -25,7 +25,19 @@ pub struct RemoteEmbedder {
     /// Query-prefix policy for asymmetric models. See [`QueryPrefix`] for why
     /// this is three-state rather than `Option<String>`.
     query_prefix: QueryPrefix,
+    /// Total send attempts per sub-batch, including the first — **not** the
+    /// number of retries after it. `1` means fail-fast. See
+    /// [`Self::with_max_attempts`].
+    max_attempts: usize,
 }
+
+/// Send attempts per sub-batch when a caller does not choose. One initial send
+/// plus two retries.
+///
+/// Deliberately *not* referenced by the test that pins it: a test asserting
+/// `default == DEFAULT_MAX_ATTEMPTS` passes for every value of the constant and
+/// so pins nothing. That test spells `3` as a literal.
+const DEFAULT_MAX_ATTEMPTS: usize = 3;
 
 #[derive(Serialize)]
 struct EmbedRequest<'a> {
@@ -254,6 +266,37 @@ impl RemoteEmbedder {
         self
     }
 
+    /// Set the total send attempts per sub-batch, replacing the default of
+    /// [`DEFAULT_MAX_ATTEMPTS`]. **`1` is fail-fast**: one send, no backoff, the
+    /// first error surfaces.
+    ///
+    /// *Attempts*, not retries, and the distinction is why this is not
+    /// `with_max_retries`. The bound it feeds has always been
+    /// `for attempt in 0..n`, and the operator-facing error has always read
+    /// `"unavailable after {n} attempts"` — only the constant behind it was
+    /// misnamed `MAX_RETRIES`. Naming the knob for retries would have required an
+    /// off-by-one at every call site to mean the same thing.
+    ///
+    /// **Why a caller would want `1`.** codescout's root crate is swapping its
+    /// dense embedding leg onto this type
+    /// (`resume-embedding-transport-stages-1-3:ET-9` T6). That leg issues exactly
+    /// one request today and fails on the first connect error, and it runs while
+    /// the per-project index lock is held. Retrying under that lock is the
+    /// failure mode this project already capped on its *sparse* leg, whose own
+    /// comment names the cost: unbounded retry there "means the lock never
+    /// releases, wedging every subsequent index for that project". So the swap
+    /// opts out of retry to stay behaviour-preserving, rather than silently
+    /// inheriting 1.5s of backoff per sub-batch on a path that has never had any.
+    ///
+    /// `0` is clamped to `1`. Zero attempts would send nothing and then report
+    /// the server "unavailable", blaming a peer that was never contacted — the
+    /// same reasoning as [`Self::http_client`], where a zero override falls back
+    /// rather than erroring.
+    pub fn with_max_attempts(mut self, max_attempts: usize) -> Self {
+        self.max_attempts = max_attempts.max(1);
+        self
+    }
+
     pub fn openai(model: &str, api_key: Option<String>) -> Result<Self> {
         let api_key = api_key
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
@@ -269,6 +312,7 @@ impl RemoteEmbedder {
             api_key: Some(api_key),
             cached_dims: Arc::new(AtomicUsize::new(0)),
             query_prefix: QueryPrefix::Derive,
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
         })
     }
 
@@ -281,6 +325,7 @@ impl RemoteEmbedder {
             api_key: None,
             cached_dims: Arc::new(AtomicUsize::new(0)),
             query_prefix: QueryPrefix::Derive,
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
         })
     }
 
@@ -301,6 +346,7 @@ impl RemoteEmbedder {
             api_key,
             cached_dims: Arc::new(AtomicUsize::new(0)),
             query_prefix: QueryPrefix::Derive,
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
         })
     }
 
@@ -346,6 +392,7 @@ impl RemoteEmbedder {
             api_key,
             cached_dims: Arc::new(AtomicUsize::new(0)),
             query_prefix: QueryPrefix::Derive,
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
         })
     }
 }
@@ -382,15 +429,20 @@ impl Embedder for RemoteEmbedder {
         let filtered: Vec<&str> = non_empty.iter().map(|(_, t)| *t).collect();
 
         const BATCH_SIZE: usize = 32;
-        const MAX_RETRIES: usize = 3;
         const INITIAL_BACKOFF_MS: u64 = 500;
+        // Total sends per sub-batch INCLUDING the first, so `1` is fail-fast.
+        // Was `const MAX_RETRIES: usize = 3` — a misnomer, since the loop below
+        // has always been `0..n` and the error below has always said "attempts".
+        // Now per-instance so a caller can opt out of retry entirely; see
+        // `with_max_attempts` for why the root crate's dense leg does.
+        let max_attempts = self.max_attempts;
 
         let mut embedded = Vec::with_capacity(filtered.len());
         for batch in filtered.chunks(BATCH_SIZE) {
             let mut last_err: Option<anyhow::Error> = None;
             let mut backoff_ms = INITIAL_BACKOFF_MS;
             let resp_data = 'retry: {
-                for attempt in 0..MAX_RETRIES {
+                for attempt in 0..max_attempts {
                     if attempt > 0 {
                         tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
                         backoff_ms *= 2;
@@ -466,7 +518,7 @@ impl Embedder for RemoteEmbedder {
                     break 'retry serde_json::from_slice::<EmbedResponse>(&body_bytes)?;
                 }
                 return Err(last_err.unwrap_or_else(|| {
-                    anyhow::anyhow!("embedding server unavailable after {MAX_RETRIES} attempts")
+                    anyhow::anyhow!("embedding server unavailable after {max_attempts} attempts")
                 }));
             };
             let mut data = resp_data.data;
@@ -709,6 +761,124 @@ mod tests {
         assert!(
             result.is_err(),
             "a peer that never answers cannot produce an embedding"
+        );
+    }
+
+    /// Spawn a loopback server that answers **500** to everything and counts the
+    /// requests it actually served. Returns its base url and the counter.
+    ///
+    /// `500` is load-bearing, not arbitrary. `embed`'s loop retries
+    /// `status.is_server_error()` and `bail!`s on 4xx, so a 4xx server would
+    /// measure the terminal path and report `1` for every attempt setting —
+    /// passing the fail-fast test while proving nothing.
+    ///
+    /// Counted **after** reading the request rather than on `accept`, so the
+    /// number is requests served, not connections opened. `Connection: close`
+    /// keeps the two identical anyway; the ordering is what makes that true
+    /// rather than assumed.
+    async fn spawn_counting_500_server() -> (String, std::sync::Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let hits_bg = std::sync::Arc::clone(&hits);
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let hits = std::sync::Arc::clone(&hits_bg);
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    // One read suffices: the callers below embed a single short
+                    // text, so the whole request fits well inside this buffer and
+                    // the body is never inspected.
+                    let mut buf = [0u8; 4096];
+                    let _ = stream.read(&mut buf).await;
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    let _ = stream
+                        .write_all(
+                            b"HTTP/1.1 500 Internal Server Error\r\n\
+                              Content-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        (format!("http://{addr}"), hits)
+    }
+
+    /// Drive `embed` against the counting server and report how many requests it
+    /// actually sent. The call is expected to fail — every response is a 500.
+    async fn attempts_made(configure: impl FnOnce(RemoteEmbedder) -> RemoteEmbedder) -> usize {
+        let (url, hits) = spawn_counting_500_server().await;
+        let embedder = configure(RemoteEmbedder::from_url(&url, MODEL, None).unwrap());
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(30), embedder.embed(&["x"]))
+                .await
+                .expect("a server that always answers 500 must terminate, not hang");
+        assert!(
+            result.is_err(),
+            "a persistently 500-ing server cannot produce an embedding"
+        );
+        hits.load(Ordering::SeqCst)
+    }
+
+    /// The default is three sends per sub-batch — one initial plus two retries.
+    ///
+    /// `3` is spelled as a **literal**, deliberately. Asserting against
+    /// `DEFAULT_MAX_ATTEMPTS` would hold for every value of that constant and so
+    /// pin nothing; this fails if the default is changed, which is the point.
+    #[tokio::test]
+    async fn the_default_is_three_attempts() {
+        assert_eq!(
+            attempts_made(|e| e).await,
+            3,
+            "default must be one send plus two retries"
+        );
+    }
+
+    /// The fail-fast setting `codescout`'s dense leg needs (ET-9 T6): exactly one
+    /// send, no backoff, the first error surfaces.
+    ///
+    /// This is the assertion the whole knob exists for. A `with_max_attempts`
+    /// that stored the value but never reached the loop — the four-link gap where
+    /// a resolver is correct and nothing calls it — passes a field-equality test
+    /// and fails this one, because this counts requests on the wire.
+    #[tokio::test]
+    async fn max_attempts_of_one_sends_exactly_one_request() {
+        assert_eq!(
+            attempts_made(|e| e.with_max_attempts(1)).await,
+            1,
+            "1 attempt must mean one send and no retry — this is the \
+             behaviour-preserving setting for a caller whose current \
+             implementation does not retry at all"
+        );
+    }
+
+    /// Distinguishes "reads the field" from "special-cases 1". Without this, an
+    /// `if max_attempts == 1 { once } else { 3 }` implementation passes both
+    /// tests above.
+    #[tokio::test]
+    async fn an_intermediate_max_attempts_is_honoured_exactly() {
+        assert_eq!(
+            attempts_made(|e| e.with_max_attempts(2)).await,
+            2,
+            "the loop bound must be the configured value, not a two-state choice \
+             between fail-fast and the default"
+        );
+    }
+
+    /// `0` clamps to `1` rather than sending nothing.
+    ///
+    /// Unclamped, `0..0` never executes, `last_err` stays `None`, and the caller
+    /// is told the server was "unavailable after 0 attempts" — blaming a peer
+    /// that was never contacted. Asserting the request count rather than the
+    /// error text is what makes this about behaviour: the count separates
+    /// "clamped and tried once" from "sent nothing and guessed".
+    #[tokio::test]
+    async fn zero_max_attempts_is_clamped_to_one_send() {
+        assert_eq!(
+            attempts_made(|e| e.with_max_attempts(0)).await,
+            1,
+            "0 must clamp to a single real send, never to zero sends"
         );
     }
 
