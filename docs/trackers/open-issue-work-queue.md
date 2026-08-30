@@ -86,6 +86,19 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-43 | 1 | complete BL-41's coverage — a ledger that declares no `entry_prefix` AND defines nothing is still invisible to the dangling gate | **dropped — handed off**, both targets are other repos; codescout's own declarations are already done | `e891b7c6a5b1dbe7` |
 | BL-39 | 1 | the two sanctioned entry formats are not equivalent — a params-rendered index defines no citable token, so 117 BL-N citations (incl. this queue's own) resolve to nothing | **done, archived** — all steps shipped (`de4df2cd`, `f19d5296`, `758b37dc`, `d3c1e6ed`, backfills `f04e4c17`/`0d101eb8`/`f5f602e6`/`9703102c`/`c7bdfd22`). `doctor` `ledger_defines_nothing` 10→2, `entry_without_definition` 3→1. The blocking peer file committed and was archived; moved 2026-08-18, id re-keyed `d34dfcd2cc718bd8` → `9dc28c0860b214d9`; 19 citations across 10 live files re-pointed in the same commit | `9dc28c0860b214d9` |
 | BL-38 | 1 | the librarian guard is blind to any artifact whose frontmatter omits `id:` — fixed by teaching it the `entry_prefix` ledger declaration; the plan's heading-scoped half was cut as unnecessary | done | `388290ad0f86fe03` |
+| BL-45 | 1 | Decision 1: may a process on an unlinked binary re-index? Direction 2 of the zombie-server bug, corrected — refuse BEFORE the embed pass, not at the sidecar write | **done** — `22f8b8d5`, patch-id `fd2c453b…`. Hard refusal as a `RecoverableError` naming `/mcp`; `guard_stale_binary` guards both `sync_project` and `sync_worktree` ahead of the embed pass; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild | `39af18d5a73dadc0` |
+| BL-46 | 2 | Decision 2: the write-root split — unpinned WRITES resolve to the last writable root, unpinned READS keep resolving to the activated one | **not started** — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive | — |
+| BL-47 | 1 | `tags.in` returns zero while `tags.contains` finds the same row — and the librarian guide teaches the broken form | **done** — `9e4e2d36`, patch-id `cfac211d…`. Both engines routed through `json_each`; `nin` was the worse half, returning EVERY row incl. those holding the tag; 3 tests. Live-verified post-rebuild: same call 0 → 11 in scope | `239227f3228b3460` |
+| BL-48 | 1 | `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely | open | `92d619d7a115617b` |
+| BL-49 | 2 | `workspace(post_compact)` flushes LSP without prewarming — next nav call pays cold start and can blow the 60s timeout, while its hint promises no disruption | open | `caa8bc1df0e8c0d8` |
+| BL-50 | 2 | `expects_augmentation` is a boolean, so a fresh clone knows an augmentation is missing but nothing records what it was | open | `19f44bead56b56cc` |
+| BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | open | `e6c0ddb91fe28228` |
+| BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again — sibling of BL-51, fix together | open | `54a70b49f6f26681` |
+| BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
+| BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | investigating (cross-ref) | `c752708c2757e139` |
+| BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
+| BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | open | `73158c500ff6b293` |
+| BL-57 | 1 | `@tool_*` buffer grep returns the JSON envelope, not the stdout | **fixed by a peer (`61476cb5`), row still reads `investigating` because of BL-48** | `2d546e0f7b8fcc0c` |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -115,6 +128,303 @@ Next actions per row live in each bug's `## Resume`, and in the live params — 
 because a snapshot that carries instructions goes stale in the way that matters most.
 
 ## Per-entry detail
+### BL-47 — `tags.in` returns zero while `tags.contains` finds the same row
+
+**Status:** open — **picked up this session.** Unowned, self-contained, phase 1.
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-28-tags-in-filter-returns-zero.md`. A filter form the librarian guide
+actively teaches returns an empty result where the sibling operator finds the row. The failure
+mode is a **zero that lies** — no error, no warning, just an answer that reads as "nothing
+matches". That is the ledger's most-repeated law (`reconnaissance-patterns` law C) reproduced as
+a defect in the query layer itself, which is why it sorts above larger items.
+
+**Fixed 2026-08-29 — gate green, uncommitted, and NOT yet live.**
+
+**Root cause, at `src/librarian/filter.rs`.** The array-column branch was gated on the *op*:
+`if op == LeafOp::Contains && is_array_col`. `tags`/`owners` are stored as JSON arrays, so
+`in` fell through to `tags IN (?)`, comparing the column's raw JSON text (`["session-log",
+"bug-fix"]`) against a scalar. Never equal.
+
+**`nin` was the worse half, and the bug file did not name it.** `in` returned nothing — a zero
+that lies. `nin` returned **everything**, including rows that DO hold the listed tag, because
+`tags NOT IN (?)` is true for every row whose JSON text differs from the scalar. A silent
+false-*positive* generator: `nin` is the operator `find`'s own archived-hide uses, so this was
+not a hypothetical path.
+
+**Fix.** Gate on the *column*, let the op select the shape — `EXISTS (SELECT 1 FROM
+json_each(tags) WHERE value IN (…))` for `in`, `NOT EXISTS` for `nin`. Both `in` paths now share
+one `in_list_params` helper, deliberately: the defect was a second `in` code path that never
+learned what the first knew. The in-memory `eval` twin got the matching type-driven fix
+(`Value::Array(items) => …`), mirroring its own `Contains` arm, so the two engines cannot answer
+the same AST differently.
+
+**The existing differential test could not have caught this.** `eval_matches_compile_on_fixture`
+passes before and after — its table is `CREATE TABLE e (id, status, confidence, title)`, with no
+array column, so it can never reach the branch. Checked before writing rather than assumed, per
+`bug-fix-session-log:W-73`; that makes three fixture-unreachable instances across three
+subsystems in one afternoon.
+
+**Tests (3):** an end-to-end `in` against a real `json()` column asserting `[t1, t2]` where the
+defect gives `[]`; an end-to-end `nin` asserting `[t2, t3]` where the defect gives `[t1, t2, t3]`,
+which also pins the empty-tags decision (holding none of the listed tags includes holding none at
+all) as a decision rather than an accident; and an `eval` parity test covering hit, miss and
+complement.
+
+**Gate:** `cargo fmt`, `cargo clippy --workspace --all-targets --features local-embed -- -D
+warnings`, `cargo check --no-default-features` all clean; full `cargo test` **4798 passed, 0
+failed**.
+
+**LIVE-VERIFIED 2026-08-29, after the operator rebuilt and restarted the MCP server.** The same
+call — `artifact(find, filter={"tags": {"in": ["session-log"]}})` — that returned **0** against
+the pre-fix binary now returns **11 in scope**. Probed rather than inferred from the rebuild
+having happened.
+
+The before/after pair is `reconnaissance-patterns:R-89` run end to end in one entry: the code was
+correct and the tests green while the serving copy still returned the defect, so "fixed" and
+"live" were genuinely different states for about an hour. The honest claim for an unprobed edit
+is "fixed"; only the probe upgrades it.
+
+**Side effect worth noting:** `get_guide("librarian")` § *Filter Syntax* teaches
+`{"tags": {"in": ["foo", "bar"]}}` as an example — it auto-injected into this session in the same
+response as the zero-result reproduction. No doc edit is owed: the taught form is now correct by
+construction.
+**Shipped `9e4e2d36` on `experiments`**, patch-id
+`cfac211d37020aa4815ce7e0277c15704559ea13`.
+### BL-48 — `edit_markdown`'s frontmatter write never touches the catalog
+
+**Status:** open
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`. Filed by a peer
+session after two independent hits on one afternoon, one of them mine: a bug archived with
+`status: fixed` on disk kept reporting `open` from `find(kind="bug", …)`, and surfaced in a
+"what's open?" report. The guard at `edit_markdown.rs` correctly passes plain bug files through
+(they are neither augmented nor ledgers), so catalog membership is exactly the population allowed
+through whose row then lies. Corrupts the canonical triage query CLAUDE.md and the activation
+bootstrap both prescribe.
+
+### BL-49 — `workspace(post_compact)` flushes LSP without prewarming
+
+**Status:** open
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-28-post-compact-flush-leaves-first-nav-call-to-pay-cold-start.md`. The next
+navigation call pays cold start and can blow the 60s tool timeout, while the tool's own hint
+promises no disruption. The misleading hint is the worse half: latency is survivable, a hint that
+rules out the real cause ends the search for it.
+
+### BL-50 — `expects_augmentation` records existence, not shape
+
+**Status:** open
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-28-augmentation-declaration-records-existence-not-shape.md`. A boolean tells
+a fresh clone that an augmentation is missing and nothing tells it what the augmentation WAS. The
+catalog is machine-local and gitignored, so frontmatter is the only surface that could carry the
+shape. Breaks CLAUDE.md's documented `entry_filter` recipes on every new machine with no recovery
+path. Pairs with `docs/conventions/cross-machine-catalog-resume.md`.
+
+### BL-51 — A rendezvous slot that misses its SessionStart stamp can never be stamped again
+
+**Status:** open
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-28-rendezvous-slot-never-stamped-leaves-phase-c-inactive.md`. Phase C stays
+inactive for the life of that server. Sibling of BL-52; both are rendezvous lifecycle and the two
+failure modes are complementary (never-entered vs never-left), so fixing one without the other
+leaves the gate wrong in the opposite direction.
+
+### BL-52 — The rendezvous gate latches open
+
+**Status:** open
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`. A companion
+hook that goes quiet mid-process leaves `/clear` invisible again. See BL-51 — treat as one piece
+of work.
+
+### BL-53 — Guide topics are atomic nodes in an unmodelled graph
+
+**Status:** open — **cross-referenced, do not fix from here.**
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md`. 63% of the
+guide corpus auto-injected in one session, and three guides cite sections the API cannot serve.
+Also tracked as `resume-get-guide-section-grain-phases-2-3:GG-7`, which sequences it behind GG-1
+and GG-2. Check that queue before starting; this row exists so the bug is not invisible to a
+bug-first triage.
+
+### BL-54 — Workspace `read_only` flips mid-session with no `activate` call
+
+**Status:** investigating — **cross-referenced.**
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md`. Silently blocks every write.
+Also `resume-workspace-pinning-phase-4b-5:WP-5`, listed there for adjacency to the write-root
+split (BL-46) — the two may share a root cause in `with_project_at`, which is worth establishing
+before either is designed.
+
+### BL-55 — Three unrelated tests failed together on the wine lane under load
+
+**Status:** open
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`. Believed genuine
+wall-clock flakiness with no defect underneath — and that belief is now load-bearing, because
+this session used it as the contrast class that (wrongly) explained a *real* defect: an
+`embed_one_batch` `try_join!` race that load merely exposed (`bug-fix-session-log:F-78`,
+fixed `21174425`). Distinguishing "flaky by wall clock" from "defect that load exposes" is the
+actual work here, and this bug is the reference case for the former.
+
+### BL-56 — SDD ledger directory and its catalog rows both vanished between sessions
+
+**Status:** open
+
+**Valid:** dated 2026-08-29
+
+`docs/issues/2026-08-25-sdd-ledger-and-catalog-rows-vanished.md`. Data-loss class. The catalog is
+gitignored, so a vanished row is unrecoverable rather than merely stale — which is what makes a
+root cause worth more than a re-create. Phase 1 on that basis alone.
+
+### BL-57 — `@tool_*` buffer grep returns the JSON envelope, not the stdout
+
+**Status:** in-progress — **owned by another session; listed for completeness, not to pick up.**
+
+**Valid:** conditional — until the owning session flips the bug file's status
+
+`docs/issues/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`, tracked there as
+`resume-cross-machine-catalog-restore:CM-7`. Reproduced and fixed by a peer this session
+(`61476cb5`): the buffer holds the whole envelope on one line, `read_file` addresses by line, and
+that line exceeds `INLINE_BYTE_BUDGET`, so every read overflows into a new buffer of the same
+shape — the smallest addressable unit is larger than the largest returnable one, so it cannot
+converge. The bug row still reads `investigating` because the status was set through
+`edit_markdown` frontmatter, which is **BL-48**. The two are worth reading together: BL-48 is why
+this row looks open.
+### BL-45 — Decision 1: may a process on an unlinked binary re-index?
+
+**Status:** open — awaiting an operator decision, not blocked on work.
+
+**Valid:** dated 2026-08-29
+
+**Rests on:** `docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md` § *Re-costed 2026-08-28 — direction 2 is INVERTED at one of its two call sites*.
+
+Direction 2 of the zombie-server bug, as drafted, refuses the **sidecar write**. That is
+inverted at the main sync path: the vectors are already in the store by then, so refusing
+destroys the evidence and keeps the damage. The corrected shape refuses **before the embed
+pass** — decline to re-index, not decline to record.
+
+The detector already ships: `exe_is_deleted()` and `WriterProvenance.exe_deleted` in
+`src/retrieval/index_state.rs`. Only the policy is missing.
+
+**Ordering re-verified independently 2026-08-29**, and the bug file's evidence table needs
+one correction. It attributes the vector write to `sync.rs:904`, but line 904 is
+`flush_pending` inside **`sync_worktree`**, not the main path. On the `sync_project` path
+the vectors land *inside* `stream_index` (its own `flush_pending` calls at `sync.rs:620`
+and `:626`), which is invoked at `sync.rs:1017`; the sidecar write is at `sync.rs:1065`,
+gated by `opts.record_index_state` at `:1056`. The conclusion is unchanged and slightly
+strengthened — vectors still precede the sidecar write — but the cited line belongs to the
+other call site.
+
+The two call sites do genuinely disagree on ordering, as the bug file says:
+`sync_worktree` writes its sidecar at `sync.rs:839`, **before** `flush_pending` at `:899`
+and `:904`. So no single rule at the writer is correct for both.
+
+**Implementation constraint.** `exe_deleted` is `Option<bool>`, where `None` means "could
+not tell" (non-Linux, where `/proc/self/exe` does not exist). The gate must fire only on
+`Some(true)`. Reading `None` as deleted would make every non-Linux platform refuse to
+index — the field's own doc comment states this rule.
+
+**Decided 2026-08-29 by the operator: refuse.** A process on an unlinked binary
+declines to re-index and returns a `RecoverableError` naming the remedy — if the
+index is genuinely needed, the operator restarts the MCP server. The strict
+option was chosen over the narrower config-divergence gate and over
+warn-and-proceed, with the cost understood: on this host it stops 6 of 8 running
+servers from indexing, and because a rebuild invalidates every running server
+instantly, that cost lands on every `cargo rb`.
+
+**Implemented the same session.** `guard_stale_binary(exe_deleted: Option<bool>)`
+in `src/retrieval/sync.rs`, called as the first statement of BOTH indexing paths
+— `sync_project` (ahead of the index lock) and `sync_worktree` (ahead of the
+dirty-set sidecar). Wiring both is the point: the two disagree on sidecar
+ordering, so a guard at the writer could never be correct for both, and a zombie
+barred from one path must not simply take the other.
+
+A `writer: Option<WriterProvenance>` seam was added to `SyncOpts` and to
+`sync_worktree`, documented as a test seam alongside the existing
+`index_lock_dir` one: detection reads this process's own `/proc/self/exe`, which
+a test cannot make say "deleted" without unlinking the running test binary.
+`None` is every production caller.
+
+Five tests: three on the policy (`Some(true)` refuses; `Some(false)` and `None`
+do not — `None` separately, because it means "could not tell" on non-Linux and
+reading it as deleted would refuse to index on every such platform), and one
+wiring proof per path asserting the refusal precedes even the index-lock
+acquisition.
+
+**The wiring test was mutation-checked, not assumed.** It went from compile
+error straight to green, so it had never been observed to fail for a behavioural
+reason — the vacuous-assertion shape. Replacing the call with
+`let _ = guard_stale_binary(...)` made it fail with exactly the symptom its doc
+comment predicts, `Ok(SyncReport { added: 0, .. })`; then restored.
+
+**Gate:** `cargo fmt`, `cargo clippy --workspace --all-targets --features
+local-embed -- -D warnings`, and `cargo check --no-default-features` all clean;
+full `cargo test` 4642 passed / 2 failed, both failures in two peer sessions'
+uncommitted files (`crates/codescout-embed/src/remote.rs` and
+`src/tools/read_file.rs`), neither in the three files this change touches. The
+clippy gate earned its keep here: `src/bin/sync_project.rs` builds `SyncOpts`
+exhaustively, and only `--all-targets` reaches a bin target.
+
+**Known hazard, not yet addressed.** `writer: None` means live detection, so a
+running test process whose binary is replaced by a concurrent rebuild would read
+its own exe as deleted and its sync tests would begin refusing. Did not occur in
+this run, but three sessions sharing one checkout is the shape that would
+trigger it.
+**Shipped `22f8b8d5` on `experiments`**, patch-id
+`fd2c453bfd381f63cd8fb6f773efdab30551feed`. The pair is recorded once, at fix time, because an
+`experiments` SHA orphans on the next rebase while the patch-id is a content hash of the diff and
+survives both rebase and cherry-pick — so nothing is owed later and no session has to reconcile a
+promotion path.
+
+**Live from the 2026-08-29 rebuild.** One consequence worth stating plainly, since it changes the
+ordinary edit-build loop: from the *next* `cargo rb` onward, this and every other already-running
+server will decline to re-index until restarted. That is the decision working, not a regression.
+Reads and navigation are unaffected — only indexing refuses.
+### BL-46 — Decision 2: the write-root split
+
+**Status:** open — not started.
+
+**Valid:** dated 2026-08-29
+
+**Rests on:** `docs/trackers/bug-ledger-resume-2026-08-28.md` § *Two decisions waiting on a human*.
+
+Answered in principle 2026-08-28: a read-only activation means *exploring only, no
+writing*. One implementation was tried and **reverted**, with the blast radius measured —
+making a read-only activation resident-but-never-default broke **14 tests**
+(`activate_replaces_previous_project`, `is_home_false_after_switching`,
+`activate_hint_shows_switched_when_away_from_home`, …). Those tests are the specification
+of browse-by-activate, and the change would have forced a `workspace=` pin on every call to
+explore the repo just activated — which is not "exploring only", it is "not exploring".
+
+The remaining gap is narrower, and is the whole change:
+
+> Unpinned **writes** should resolve to the last writable root, while unpinned **reads**
+> keep resolving to the activated one.
+
+Both go through a single `with_project_at` today, so this needs a second field
+(`last_writable_root`, set only on a writable activation) plus write-awareness at
+resolution. `call_content` already computes `is_write(&input)` at the choke point, so the
+signal exists; the work is threading it through a core primitive that ~4,600 tests sit on.
 
 ### BL-44 — a params row can drift out of sync with its body counterpart with no check on either side of that direction
 

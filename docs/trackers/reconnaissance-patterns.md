@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 124
+entry_high_water_R: 125
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-125 | 2026-08-29 | miss (self-correcting) → promote-ready | **Law C is stated only for the EMPTY result — and the remedy I first proposed for that gap was law C again.** A keyword count in a peer's diff (19 × "timeout" across +137 lines) was read as causation and the peer was pointed at their own uncommitted work; the real defect was a `tokio::try_join!` race inside the test itself, racy since `9f4debc3`, fixed in `21174425`. The first draft of this entry prescribed *"run the failing test in isolation"* as the cheap decisive check — but it **passes** in isolation, so that green confirms the flake reading wrongly, which is law C's original form committed while writing the entry about law C. Before calling any check decisive, ask whether it can EXPRESS the failure | `bug-fix-session-log:F-78`; mechanism re-verified here at `embedder.rs:606-617` (`try_join!`) and `:540`/`:806` (`dense_only` never consulted by `embed_one_batch`); cost was one `symbols()` read rather than a bisect, because the report carried the failing assertion text verbatim; **second datapoint, volunteered by the fix's own author**: it verified the fix with 10/10 isolated runs — the same instrument, same blind spot, that had already acquitted the bug twice; the structural fact (`dense_batch`, one leg, no `try_join!`, verified at `:992-996`) is what carries it. Three passes of one instrument in one afternoon, each green read as proof of a different proposition. Threshold **fired**. Disposition **corrected from case 2 to case 3**: both datapoints occurred with the skill LOADED and law C's text already covers both errors, so this is not a wording gap and a sixth mechanism on the file's longest bullet is the accretion the audit section forbids — loaded is not reached, and the remedy is placement (a trigger-shaped clause attached to the act of citing a green) not rewording. Promotion owed as a SKILL.md PR, not yet raised; kin [[R-3]]/[[R-113]]/[[R-77]]/[[R-79]]/[[R-104]] — all five of law C's recurrences are the empty form |
 | R-124 | 2026-08-27 | miss (paired hit) | **One law, hit where the skill was invoked and never fetched where it was not.** The prohibition form of *"a fix — and equally a prohibition — is a claim about CURRENT STATE"* went unchecked: CLAUDE.md's "all native `Bash` are hard-denied" was acted on unverified and used to tell the user the mandated gate was unrunnable. The same law's request form had fired correctly hours earlier, stopping a deliberately-deleted `shell_enabled` switch from being re-added. Reading the hook SOURCE would have confirmed the wrong answer — `pre-tool-guard.mjs:177` is `enforce("This call is blocked...")` — and one positive control refuted it | `shell-gating-session-log:F-1` (miss) + `shell-gating-session-log:W-1` (hit); `cat src/main.rs` matched the guard's own block branch at `:165` and executed anyway, PostToolUse hint only; `BREAKER_THRESHOLD = 3` stands the guard down by design, so "hard" is wrong even as intent; audit verdict mode 3 **Unreachable** (placement, not wording) — no law added, base arm owed; kin [[R-19]] (same law, assert-a-checkable-fact form, already quoted in SKILL.md § When NOT to Use), [[R-89]] (recurred for the same placement reason) |
 | R-123 | 2026-08-27 | miss (x2) | **Adjacency is not causation — the nearest recent commit is a suspect, not a cause.** Twice in one session an observation was attributed to the most recent commit touching that surface, and both times the real cause predated it: `Monitor` executing in a deny-list arm was a list that lacked it (fixed 16 min earlier in `e67d419`), and `artifact(get)`'s `headings_truncated` was six weeks old (`3bccb234`), not the peer commit 12 min prior. Adjacency is what makes the check feel unnecessary — same file, same day, plausible subject line | cost: two bug reports, one filed `high` against the wrong layer, then retracted; sibling of [[R-118]] (a check that was refused) with the opposite origin and the same output |
 | R-122 | 2026-08-27 | miss | **Writing the lesson down was the act that broke the instrument.** `R-121` prescribed *"record how it was verified unique rather than the token itself"* and named its probe token inline in the same sentence; the token now returns a hit from the tracker, so the recorded repro would tell the next session the fix regressed — or worse, that the bug never existed. Structural, not careless: a probe for an EXCLUSION mechanism must live only in the excluded region, and any ledger recording it sits in the searched region by construction, so the write *is* the contamination | verified live on the rebuilt binary at `ee7d9a3a`; `R-121` repaired in the same pass to carry the two-command derivation; kin [[R-118]] (a refused verification returns an error, not a fact) |
@@ -4040,6 +4041,147 @@ mode-3 verdict.
 **Rests on:** the positive control, not the hook source — the two disagree, and
 that disagreement is the entry's whole content.
 
+## R-125 — Miss: law C covers the empty result, not the abundant one — and my first fix for that was law C again
+
+**Verdict:** miss — recon did not catch it, and the first remedy I proposed for the miss was
+another instance of the same law.
+
+**Evidence:** 2026-08-29, triaging a full-suite run (4642 passed, 2 failed) in a checkout shared
+by three sessions. `retrieval::embedder::tests::a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever`
+failed. `src/retrieval/embedder.rs` was clean and committed, but a peer's
+`crates/codescout-embed/src/remote.rs` was dirty at +137 lines and `grep -c timeout` on its diff
+returned **19** — and the failing assertion pins the `e.is_timeout()` arm. I told the peer their
+in-flight read-timeout port was the likely cause.
+
+It was not. The real defect was in the **test**: `embed_one_batch` (`embedder.rs:606`) drives
+the dense and sparse legs through `tokio::try_join!` (`:617`), which returns whichever errors
+first; the test wedged both bases under one shared read bound while asserting on the dense leg's
+marker, making the surfacing message a coin flip. `.dense_only(true)` never applied —
+`dense_only` is read at `:540` and `:806`, never in `embed_one_batch`. Racy since `9f4debc3`,
+fixed in `21174425` by calling `dense_batch` directly. Mechanism verified here at the bytes, not
+taken from the peer's account. Full narrative: `bug-fix-session-log:F-78`.
+
+**Why law C did not fire.** Law C — *a search that finds nothing is evidence about the search* —
+is stated entirely in terms of the **empty** result, and all five recurrences
+(`R-3` → `R-113` → `R-77` → `R-79` → `R-104`) are zeros that lied. Nothing in that wording
+reaches a search that comes back **full**. The failure is identical in kind: the instrument
+answered truthfully about a *text* and I read the answer as being about *causation*. The
+abundant form is arguably worse, because a zero at least prompts a question, whereas `19` is
+quantitative and reads as rigour.
+
+**The part worth the entry.** My first draft of this R-N proposed the remedy *"run the failing
+thing in isolation — that is the instrument whose subject is the failure."* **That is wrong here,
+and wrong in exactly the way law C describes.** This test *passes* in isolation; passing under no
+contention is the shape of the bug. `codescout-24` ran it 5/5 isolated and we both read that
+green as evidence of *no defect* — a negative result taken for absence, which is law C's original
+form, committed while I was writing the entry about law C. The instrument whose subject was
+actually the failure was **reading `embed_one_batch`**: about a minute, and neither of us did it.
+
+**Proposal (revised).** Extend law C to both polarities, and make the selection test explicit
+rather than naming a favoured instrument:
+
+> A search result is evidence about the search — when it is empty **and** when it is full. A
+> count of matches measures a text, never a cause. Before trusting any check as decisive, ask
+> whether it can **express** the failure at all: a test that passes in isolation cannot be
+> diagnosed by running it in isolation, and a green there is absence-of-evidence wearing
+> evidence-of-absence's clothes. When a failure is contention-dependent, the code path under the
+> assertion is the artifact; the run is not.
+
+**Severity of the miss:** low — revised down. The mis-aimed pointer cost the peer one `symbols()`
+read rather than a bisect, because the report carried the failing assertion text verbatim.
+Reporting the failure was net positive: the defect is only observable under concurrent load, so
+the session that wrote, ran and shipped the test green could not have found it alone. The
+lesson is about attribution, not about reporting.
+
+**Second datapoint — the fix author, verifying with the same blind instrument.** Volunteered by
+`fix-embedding-transport-stage-1` against its own work, unprompted. Having fixed the race, it
+ran the test **10/10 in isolation** and led its report with that number. But 10/10 uncontended is
+evidence about uncontended runs — the identical instrument, aimed at the identical blind spot,
+that had acquitted the bug twice already. Had the race still been present it would very likely
+have returned 10/10 anyway, which is exactly what it did for `codescout-24` and for me. What
+actually carries the fix is **structural**: verified here at `embedder.rs:992-996`, the test now
+calls `e.dense_batch(&["x"])` directly — one leg, no `try_join!`, so there is no race left to
+lose, and `dense_batch` is also the function that owns the `is_timeout()` error map under
+assertion. The repeat runs are corroboration and rank second.
+
+That makes three passes of one instrument in one afternoon — diagnosis, peer confirmation, and
+fix verification — each reading the same green as proof of a different proposition. The law bites
+the author of a fix as readily as its diagnostician, and this instance landed minutes after that
+session had written a commit message about vacuous verification.
+
+**Status:** open — threshold met, promotion owed. Two datapoints for the
+can-this-instrument-express-the-failure form (the isolation run as diagnosis; the isolation run
+as fix-verification), one for the abundant-result form.
+
+**Promote-when:** **fired 2026-08-29.**
+
+**Disposition — corrected, and the correction is the finding.** I first filed this as case 2
+(**outgrown**), the disposition law C has earned four times. `fix-embedding-transport-stage-1`
+contested it and was substantially right: **both** of today's instances occurred in sessions with
+the skill LOADED — it invoked reconnaissance three times — and law C's existing text already
+covers both errors. *"An instrument that returns a full answer is evidence about the predicate you
+supplied"* states my keyword-count error better than I restated it, and *"run a positive control
+… one per state you believe the instrument can report"* is exactly the check that would have
+caught the 10/10: a positive control against a known-racy build shows the isolated run cannot
+report that state at all. So this is **not a wording gap**, and a sixth mechanism bolted onto
+what the ledger itself notes is already the longest bullet in the file is the accretion the audit
+section exists to prevent.
+
+Where I part from that session: it concluded *neither* case 2 nor case 3. Case 3 is
+**Unreachable** — *"general enough, and still not reached at the moment of need… Remedy is
+placement, not rewording"* — and its precedent (`R-89`) happens to be text that was never
+fetched, which is what makes "reached" read as "loaded". It is not the same thing. Both of us had
+the bullet in context and neither of us consulted it at the decision point, which is precisely
+*not reached at the moment of need*. **Loaded is not reached.** So this is case 3, and the fix
+that session proposes — a short trigger-shaped clause attached to an action — IS case 3's
+prescribed remedy, placement rather than rewording. Its diagnosis and mine converge on the same
+patch by different routes; only the label differs, and the label is what tells the next auditor
+not to lengthen the bullet again.
+
+The placement is also *not* the session-opening surface, which case 3's precedent reaches for.
+That channel exists for laws recurring in sessions that never invoke the skill; these two sessions
+did invoke it. The gap is that law C is written as a property of **instruments**, and both of us
+needed it as a check on **a sentence we were about to write**. Neither of us was reasoning about
+an instrument at the moment of failure — we were writing up a result.
+
+**Proposed clause (trigger-shaped, attaches to an act of writing, not to a class of tool):**
+
+> Before citing a green — or any confirming result — as evidence, name the proposition it proves,
+> then ask whether a broken world produces the same result. An uncontended 10/10 is the output a
+> still-racy test also gives.
+
+**Routing.** Craft-shaped (true in any repo, no project dialect), so the destination is a PR
+against `codescout-companion/skills/reconnaissance/SKILL.md`, citing `R-125` and
+`bug-fix-session-log:F-78`. The PR description must carry the load-bearing fact — **both
+datapoints occurred with the skill loaded** — because it is the one most likely to be dropped in
+summarising, and without it a reviewer will read this as the sixth wording gap and lengthen the
+bullet. If the reviewer still prefers mechanism six, the evidence supports that; they should just
+see first that the add-a-mechanism reading has been tried five times against this law and that
+neither of today's failures was a wording gap. Not yet raised — cross-repo edit, held for the
+user.
+
+**Kin, and an admission:** [[R-120]] — *"a decision procedure is a seam; reading it far enough to
+get an ANSWER is not far enough to get its PRECONDITIONS"* — describes exactly how the wrong
+disposition got filed. The routing test answered cleanly (craft-shaped → SKILL.md) and I let that
+clean answer carry the **diagnosis** as well, when it only ever settles the **destination**. Same
+ledger, five entries earlier, same pass.
+
+**And it happened twice in this thread, to two different procedures — which is the stronger
+datapoint for [[R-120]] than either instance alone.** I read the promotion **routing test** far
+enough to get an answer and stopped before the preconditions that govern the diagnosis.
+`fix-embedding-transport-stage-1` read case 3's **definition** far enough to reach its precedent
+(`R-89`, never-fetched text) and let that precedent narrow the definition, concluding "neither of
+the four" when the definition's own words — *at the moment of need* — already fit. Same failure,
+opposite artifacts: one procedure under-read past its answer, one under-read past its example.
+Neither of us was careless; a decision procedure that yields a clean result is exactly the shape
+that stops you reading on. Its own diagnosis of the miss: *"I had the right remedy and the wrong
+label, which is worse than the reverse, because the label is what stops the next auditor
+lengthening the bullet a sixth time."*
+
+**Valid:** dated 2026-08-29
+
+**Rests on:** `embed_one_batch`'s `try_join!` race and its non-consultation of `dense_only`, both
+read directly at `embedder.rs:606-617`, `:540`, `:806`.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.

@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 75
-entry_high_water_W: 72
+entry_high_water_F: 78
+entry_high_water_W: 73
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -125,6 +125,9 @@ entry_high_water_W: 72
 | F-72 | 2026-08-27 | high | self-friction | validated | Writing an honest caveat discharges the obligation to close it — two sessions, forty minutes apart, each named the exact missing check in prose and then stopped. The tell: a caveat that names a specific next action is a work item, not a deliverable. Mechanism behind [[R-95]], seen from inside |
 | F-71 | 2026-08-26 | med | self-friction | fixed-verified | Three claims published from instruments that could not discriminate the hypothesis from its alternative — and the retraction of one lost a race to a peer's committed ledger entry |
 | F-70 | 2026-08-26 | med | process | fixed-verified | A dead citation that was wrong when written is indistinguishable from one that decayed — 0 of 6 in a 321-citation sweep were decay, and three independent artifacts misread it from the prose; the `--diff-filter=AD` probe is the only discriminator |
+| F-76 | 2026-08-29 | med | plan-prose | fixed-verified | A bug file's own evidence table cited `sync.rs:904` for the main sync path — that line is a `flush_pending` inside `sync_worktree`, the very call site the section exists to distinguish. On `sync_project` the vectors land inside `stream_index` (`:620`/`:626`, invoked at `:1017`). Conclusion unchanged, but a reader verifying it at that line is led straight back to the inverted fix |
+| F-77 | 2026-08-29 | med | cross-session | mitigated | A peer's hazard report was accurate when written and false when read — eleven correct filenames described work committed eight hours earlier (`45a88531`); a second peer credited this session with an edit it never made. Cross-session messages carry a send time, never an observation time |
+| F-78 | 2026-08-29 | low | self-friction | fixed-verified | Attributed a test failure to a peer's uncommitted file from a keyword count in its diff (19 × "timeout" across +137 lines). Wrong twice: the real cause was a `tokio::try_join!` race inside the test itself (`21174425`), and the "cheap decisive check" I first proposed — run it in isolation — PASSES, so it confirms the flake reading wrongly. The instrument whose subject was the failure was reading `embed_one_batch` |
 
 ## Wins Index
 
@@ -204,6 +207,7 @@ entry_high_water_W: 72
 | W-70 | 2026-08-26 | high | Publish the retraction to the peer immediately even when you cannot fix it — two accidental sweeps of the same ledger, four minutes apart in opposite directions, both harmless solely because each session was told within ~3 min | Sweep 2 (`66671bf5`) happened with `git diff -- <file>` honestly run and PASSED; the peer's write landed between the diff and the add, so the guard narrows the race and does not close it. The only thing that prevented rather than repaired was a wire handshake — "file is clear as of `<sha>`, write freely". Absent disclosure, a session whose entry vanished re-runs `append_entry`, allocating a fresh id for content already in HEAD: two ids, divergent bodies, nothing validating for duplication | validated |
 | W-69 | 2026-08-26 | high | Explicit-path staging + re-read status per commit, under three concurrent sessions — **bounded**: it discriminates FILES, so it saved a peer's `src/memory/*` and did nothing when a peer appended to this same ledger 3 min later (`02d80963` swept their F-71). The covering check is `git diff -- <path>` before `git add <path>` | Four peer commits landed inside one 3.5-min window between two of mine; `src/memory/*.rs` sat dirty as a third session's in-flight fix for a live bug, and one `git add -A` would have committed it inside a docs-only commit. (Corrected: the entry originally named that session; the name was an inherited guess and is struck — git metadata cannot attribute a commit to a session here, every commit carrying the same author and committer.) F-67 records that exact loss already happening once. Rule 3 is `codescout-77`'s: `git status` and `git diff` are not two readings of one world when a peer commits between them — they read a race as a stat-cache no-op and retracted it | validated |
 | W-68 | 2026-08-26 | high | A bug's own root-cause claim ("no SIGTERM handler") was false — verified by reading the code before implementing the prescribed fix | Would have shipped a no-op fix and left an unbounded LSP-shutdown await masking a correctly-delivered signal, undocumented | validated |
+| W-73 | 2026-08-29 | med | "Compile-error → green" is the trigger for spending a mutation: a test whose only observed RED was a compile error has never run its assertions against a wrong world. In statically typed languages that is the NORMAL TDD cycle, so the shape is common rather than rare | `guard_stale_binary`'s wiring test would have shipped looking like proof. The policy unit tests (`Some(true)` refuses, `Some(false)`/`None` do not) still pass when the guard is written, tested and never called — five green tests, defect 100% present, and nothing else in 4642 tests notices. Mutating the call to `let _ = ...` failed with the exact symptom its doc comment predicts. Second datapoint the same afternoon in `read_file.rs`, where two pre-existing tests assert the identical property and stay green because their 1200-short-line fixture can never reach the valve | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -6620,6 +6624,368 @@ in one session, six prior independent instantiations, and two peer sessions hitt
 same class the same day (`5b9ebedf` grep/gitignored paths, `020ea69a` memory union — whose
 own argument, "agreement is not correctness", is this rule's sharper edge).
 
+## F-76 — A bug file's own evidence table cited a line from the call site it exists to distinguish
+
+**Observed:** 2026-08-29, implementing Decision 1 (the zombie-server refusal) from
+`docs/trackers/bug-ledger-resume-2026-08-28.md`, having been told to "start with the 1st".
+
+**When:** Reading the fix plan before writing any code — CLAUDE.md's *run the reproduction
+before reading the fix plan* rule applied to a bug file rather than a repro.
+
+**Expected (bug file):**
+`docs/issues/2026-08-26-zombie-servers-on-deleted-binaries-stamp-stale-config-into-shared-state.md`
+§ *Re-costed 2026-08-28 — direction 2 is INVERTED at one of its two call sites* carries a
+three-row evidence table headed "Measured in `src/retrieval/sync.rs`":
+
+| line | what happens |
+|---|---|
+| 904 | `flush_pending(...)` — **vectors go into the shared store** |
+| 1017 | `stream_index(...)` — embed pass completes |
+| 1065 | the sidecar write |
+
+Read as a description of the `sync_project` path, whose inversion is the section's subject.
+
+**Got (scouted reality):** line 904 is a `flush_pending` call inside **`sync_worktree`**, not
+`sync_project`. On the `sync_project` path the vectors land *inside* `stream_index` — its own
+`flush_pending` calls at `sync.rs:620` and `:626` — and `stream_index` is invoked at `:1017`.
+The sidecar write at `:1065` is correct, gated by `opts.record_index_state` at `:1056`.
+
+So the table mixes a line from `sync_worktree` into a table about `sync_project` — in the very
+section whose argument is that *the two call sites disagree and no single rule at the writer is
+correct for both*. The conclusion is unaffected and in fact slightly strengthened: vectors still
+precede the sidecar write on the main path, just via `stream_index` rather than a direct call.
+
+**Probable cause:** The section was written while re-costing direction 2, with both call sites
+open at once; `flush_pending` appears in both, so grepping the symbol name yields hits from each
+and the nearer one got cited. This is `codescout:R-49`'s class — a self-authored artifact
+written *during* the work it describes, at the moment the author's model is most confident.
+
+**Workaround:** None needed for the fix; the corrected ordering is recorded in
+`open-issue-work-queue:BL-45` so the next reader inherits the correction rather than
+re-deriving it.
+
+**Severity:** med — it did not change what I built, but it is the specific error that could
+have. A reader verifying the claim by opening `sync.rs:904`, finding it in `sync_worktree`, and
+concluding the re-costing was wrong would be led straight back to refusing the sidecar write —
+the inverted fix this section exists to prevent, and the one the file says "would manufacture
+the exact failure this file exists to prevent".
+
+**Status:** fixed-verified — ordering re-derived at the bytes and recorded in `BL-45`; the
+guard was placed ahead of BOTH paths, which is correct under either reading of the table.
+
+**Valid:** dated 2026-08-29
+
+True of `sync.rs` at `447ffd4a` plus this session's uncommitted change; the line numbers move
+whenever `sync.rs` does, which is itself the argument for citing symbols over lines.
+
+**Rests on:** `guard_stale_binary` being placed before the embed pass on both call sites, which
+makes the fix correct regardless of which path the table meant.
+
+**Fix idea / Pointer:** When a bug file's evidence table cites bare line numbers in a file with
+two similar call sites, name the enclosing function in the row. `grep` output already carries it
+(codescout's `grep` appends `[enclosing_symbol]`), so the information was present at the moment
+the table was written and was dropped in transcription.
+
+## F-77 — A peer session's hazard report was accurate when written and false when read, and nothing marks the difference
+
+**Observed:** 2026-08-29, three interactive Claude sessions live in one checkout
+(`codescout-97`, `fix-embedding-transport-stage-1`, `codescout-24`).
+
+**When:** Assembling a resume-queue status report for the user, after asking both peers what
+they owned.
+
+**Expected (peer report):** `fix-embedding-transport-stage-1` reported, in a detailed and
+otherwise accurate handoff: *"A THIRD session is active and uncommitted across
+src/util/shrink_guard.rs (new), src/util/mod.rs, src/librarian/tools/{artifact,update}.rs,
+src/memory/mod.rs, src/tools/markdown/*, src/tools/memory/mod.rs,
+src/prompts/guides/librarian.md, CHANGELOG.md. Stage explicitly — never commit -a. Their
+in-progress red test made cargo test look broken to me twice."*
+
+**Got (scouted reality):** `git status --short` was clean, and `git show --stat 45a88531`
+(10:16:20, *"fix(shrink-guard): refuse a write that loses lines while keeping bytes"*) lists
+exactly that eleven-file set. The work had landed roughly eight hours earlier.
+`codescout-24` independently confirmed nothing of its own was uncommitted in those files.
+
+A second instance the same hour, opposite direction: `codescout-24` thanked *me* for a
+`byte_pct`/dimension edit in its uncommitted `src/memory/mod.rs`. This session had made zero
+edits at that point. It retracted on being told, correctly noting it had inferred *which*
+actor from evidence that established only *an* actor.
+
+**Probable cause:** A peer's report is a snapshot of its own last observation, and cross-session
+messages carry no observation timestamp — only a send time, which is not the same thing. The ET
+session's warning was true when it looked and stale when it sent. Nothing in the channel marks
+the gap, and the report's confident specificity (eleven correct filenames) is what makes it
+persuasive.
+
+**Workaround:** Treat a peer's claim about repository state as a hypothesis and re-run the
+cheap check — `git status --short`, `git show --stat <sha>` — before relaying it. Both took
+seconds and both inverted the conclusion.
+
+**Severity:** med — cost avoided rather than paid. Relaying it unchecked would have told the
+user a live collision hazard existed in a shared checkout, plausibly deterring a test run, and
+would have credited this session with an edit it did not make. The second is the worse one:
+misattribution that reaches a commit message or a tracker entry is durable and near-impossible
+to unpick later.
+
+**Status:** mitigated — verified both claims this session and corrected both peers, who each
+confirmed. No mechanism prevents recurrence.
+
+**Valid:** conditional — until cross-session messages carry an observation timestamp distinct
+from send time
+
+**Rests on:** `git status` and `git show --stat` being cheap enough that verifying a peer claim
+is never worth skipping.
+
+**Fix idea / Pointer:** Two candidates. (1) Peers state repo-state claims with the evidence
+attached — *"as of `git status` at 18:19"* — so the reader can judge staleness without re-running
+anything. (2) Prefer claims a reader can check from committed history (a SHA) over claims about
+working-tree state, which decays fastest. The `45a88531` pointer would have been self-verifying;
+the file list was not. Related: `codescout:R-89`, freshness as a property of the copy that serves
+you — this is the same law with a *peer's observation* as the stale copy.
+
+**Third instance, and the one that sharpens the diagnosis (added 2026-08-29).** A peer committed
+an untracked tracker, `docs/trackers/embedder-stack-ops-session-log.md`, attributing its `F-1`
+entry to this session. This session never wrote to that file. It was not the committing session's
+either — so a **fourth writer** exists in this checkout, still unidentified. Retracted by its
+author in `9641798f`, with `F-1`'s content deliberately left untouched: only the claim about
+authorship was wrong, and editing someone's finding to repair your own mistake about them is the
+larger error.
+
+That session's own account of the miss is the useful part: it had already read `F-1` closely
+enough to notice it described operator exchanges that never happened in its session (*"this is the
+laptop not the desktop"*), filed it as a *different incident*, and did not draw the next inference
+— that a different incident implies a different session. **It held the disconfirming evidence and
+did not use it.**
+
+**And the instruments actively mislead here, which reframes the entry.** The two obvious
+discriminators both answer confidently and wrongly: `git log --diff-filter=A -- <path>` on that
+file now resolves to `b7c5ce0f`, the session that added it to the index rather than the one that
+wrote it, and `git log -S'## F-1'` does the same. Every commit in this repo carries the same
+author and committer, so **"which session wrote this" is not a question git can be asked at all**
+— yet every instrument you would reach for returns a name. So the failure is not that we guess in
+the absence of evidence; it is that the available instruments return confident answers to a
+question they cannot see. That is `reconnaissance-patterns:R-125`'s abundant-result form, on
+provenance instead of causation, and it is the third time today the same shape has produced a
+wrong attribution between three sessions.
+
+**Practical consequence:** authorship in a shared checkout is only knowable if the writer states
+it. Nothing recovers it afterwards. A session that creates a tracker should sign it in the file.
+## F-78 — A keyword count in a peer's diff was substituted for reading the code under the assertion
+
+**Observed:** 2026-08-29, triaging two failures in a 4642-passed full-suite run, in a checkout
+shared by three concurrent sessions.
+
+**When:** Deciding which of two test failures were mine, immediately before reporting the gate
+result to the user and messaging both peers.
+
+**Expected (my inference):** `retrieval::embedder::tests::a_peer_that_accepts_and_never_answers_errors_instead_of_waiting_forever`
+failed. `src/retrieval/embedder.rs` was committed and clean, but the ET session's
+`crates/codescout-embed/src/remote.rs` was dirty at +137 lines, and
+`grep -c timeout` on its diff returned **19**. The failing assertion pins the `e.is_timeout()`
+arm of the send error map. I concluded the peer's in-flight read-timeout port was the likely
+cause and messaged them to that effect.
+
+**Got — in two corrections, and the second reverses the first:**
+
+1. `codescout-24` ran the full suite with that `remote.rs` dirty throughout (4644 passed, 0
+   failed) and the test **5/5 in isolation** against the same tree. My attribution was wrong.
+   We both then read that as a timing flake under concurrent load, comparing it to
+   `docs/issues/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`.
+2. The ET session read the code and found a **real defect in the test**, fixed in `21174425`
+   (*"fix(test): remove a race in the wedged-peer embedder test"*, +18/-10). Verified here at
+   the bytes: `embed_one_batch` (`embedder.rs:606`) drives both legs through
+   `tokio::try_join!` (`:617`), which returns whichever errors FIRST. The test pointed both
+   dense and sparse bases at one wedged listener under a shared 250 ms read bound, while
+   asserting on the **dense** leg's marker — so the surfacing message was a coin flip.
+   `got: embed_batch sparse send` is the sparse leg winning. `.dense_only(true)` does not help:
+   `dense_only` is consulted at `:540` and `:806` but never in `embed_one_batch`. Fixed by
+   calling `dense_batch` directly — no join, no race, and it is the function that owns the
+   error map under assertion. The test had been racy since `9f4debc3`.
+
+**Probable cause (of my error):** I had a decisive instrument available and used a proxy —
+keyword co-occurrence between the failure's subject and a diff's contents. The proxy is
+seductive because it is *specific*: 19 is a number, "timeout" is the exact right word, and
+specificity reads as rigour. It is still a measurement of a text, not of a cause.
+
+**And the remedy I first reached for was also wrong, which is the more useful half.** My initial
+write-up of this entry proposed "run the failing test in isolation" as the cheap decisive check.
+It is not: the test **passes** in isolation — that is the whole shape of the bug. Running it
+returns green and *confirms the flake hypothesis wrongly*, which is exactly what it did for
+`codescout-24` and, at one remove, for me. The instrument whose subject was actually the failure
+was **reading `embed_one_batch`**, about a minute's work, and neither of us did it.
+
+**Workaround:** None needed — resolved upstream by `21174425`. Retraction of the `remote.rs`
+attribution was sent; the retraction's own claim that the cause was unknown is now also
+superseded.
+
+**Severity:** low — revised down from med on evidence. The mis-aimed pointer cost the ET session
+one `symbols()` read, not a bisect: I had sent the failing assertion text verbatim, which is what
+made the report actionable despite the wrong attribution. Reporting the failure was net positive
+— the defect is only observable under concurrent load, so the session that authored, ran and
+shipped the test green could not have found it alone. The lesson is about the *attribution*, not
+about reporting.
+
+**Status:** fixed-verified — root cause found and fixed in `21174425`; mechanism independently
+re-verified here against `embedder.rs:606-617`, `:540`, `:806`.
+
+**Valid:** dated 2026-08-29
+
+**Rests on:** `embed_one_batch` racing its two legs through `tokio::try_join!` and not consulting
+`dense_only` — read directly, not taken from the peer's account.
+
+**Fix idea / Pointer:** Two rules, and the second is the one that nearly escaped.
+(1) A keyword count is evidence about a diff, never about a failure — the mirror of the ledger's
+most-cited law (`codescout:R-3`/`R-113`/`R-77`/`R-79`/`R-104`), which is stated only for the
+**empty** result. (2) When picking the "cheap decisive check", ask whether the instrument can
+even *express* the failure: a test that passes in isolation cannot be diagnosed by running it in
+isolation, and a green there is a negative result being read as absence. Filed as
+`reconnaissance-patterns:R-125`. Also worth keeping: sending the verbatim assertion text is what
+made a wrongly-attributed report useful anyway.
+## W-73 — "Compile-error → green" is a cheap tell that a test has never been RED for a behavioural reason
+
+**Observed:** 2026-08-29, implementing the zombie-server refusal (`open-issue-work-queue:BL-45`)
+under TDD, and independently in `codescout-24`'s CM-7 buffer-clamp fix the same afternoon.
+
+**Pattern:** CLAUDE.md already carries *demand a deliberate break* and *ask what mutation would
+make this test fail*. What was missing is a **trigger** — a cheap, mechanical tell for *which*
+tests to spend a mutation on. This is it:
+
+> In a compiled language, a test whose only observed failure was a **compile error** has never
+> been RED for a behavioural reason. Its assertions have never executed against a wrong world.
+> Spend one mutation on it before believing it.
+
+The tell is systematically common rather than rare, which is what makes it worth naming. In
+Rust the normal TDD RED *is* a compile error — the function does not exist yet, the field is not
+on the struct yet. The canonical cycle therefore produces exactly this shape by default:
+`cannot find function` → implement → green. At no point did the assertion body run and fail.
+
+My case: `sync_project_refuses_an_unlinked_binary_before_acquiring_the_index_lock` went
+`E0425: cannot find function guard_stale_binary` → (implement + wire in one edit) → green. I
+replaced the call site with `let _ = guard_stale_binary(...)` and it failed with exactly the
+symptom its own doc comment predicts, `Ok(SyncReport { added: 0, .. })`, then restored. Cost:
+one edit, one 20s targeted run.
+
+**Counterfactual:** Without the mutation, a wiring test that never fired would have shipped
+looking like proof. The specific hazard is that the *policy* unit tests (`Some(true)` refuses,
+`Some(false)` and `None` do not) would still pass, so a `guard_stale_binary` that was written,
+tested, and **never called** reads as fully covered — five green tests, a defect that is
+100% present. This is not hypothetical: the whole point of the entry is that a guard's value is
+entirely in its call sites, and nothing else in the suite would have noticed.
+
+**Confirming data points:**
+1. This session — `guard_stale_binary` wiring test; mutation fired with the predicted symptom.
+2. `codescout-24`, same afternoon, `src/tools/read_file.rs` — mutation-checked its new CM-7 test
+   (2 passed / 1 failed with the clamp disabled) **and** found two pre-existing tests asserting
+   the exact same property that stay green with the defect present, because their fixture is
+   1200 short lines and can never reach the oversized-line valve. That second half is the
+   *fixture-unreachable* mechanism the reconnaissance skill already names; the mutation is what
+   distinguished the two.
+3. Prior art, same class, different session: CLAUDE.md's SDD-ruling lesson *"vacuous assertions
+   cluster — 4 found, the fourth only because the final reviewer was told to hunt for one."*
+
+**Impact:** med — one mutation per wiring test, ~1 minute each, against a failure mode that is
+invisible to every other gate in the project. Both of this afternoon's instances were in
+*load-bearing* code (an indexing guard; a buffer-read clamp), which is where the promoted
+CLAUDE.md guidance already says to spend the extra pass.
+
+**Promote-when:** Threshold met — two independent datapoints, two sessions, two subsystems, one
+afternoon. Per the reconnaissance skill's *audit the promoted set*, this is case 2, **outgrown**:
+the existing law is true and too narrow, so the remedy is to re-promote the evolved form rather
+than file a third recurrence. Candidate destination is the `test-design-discipline` memory
+(project-shaped surface, advertised by name at SessionStart) with the one-line rule: *a test
+whose only observed RED was a compile error is unverified — mutate it once.* Held for the user's
+call rather than written unilaterally, per the skill's *the channel is ungated — guard it*.
+
+**Status:** validated — two datapoints, both with the mutation actually run and the predicted
+symptom observed, not merely asserted.
+
+**Valid:** dated 2026-08-29
+
+**Rests on:** compile-error-as-RED being the normal TDD cycle in statically typed languages,
+which is what makes the tell high-yield rather than a curiosity. Weakens in dynamic languages,
+where a missing function fails at assertion time and the test *is* behaviourally RED.
+
+**Sharpened 2026-08-29, and the sharpening is not mine.** `codescout-24` offered a better
+statement of the underlying class after the third instance landed, and it subsumes the trigger
+above rather than sitting beside it:
+
+> The trap is not a weak assertion — it is **a fixture that cannot reach the code path**. The tell
+> is that the test's DATA lacks the property under test, while its NAME and shape claim
+> otherwise.
+
+That is the more useful form, and it covers a case the compile-error trigger cannot: my trigger
+only fires on tests that are **new**. A pre-existing test with an unreachable fixture was written
+long ago, has always been green, and no authoring event will ever prompt anyone to look at it —
+which is precisely where both of that session's instances sat. Keep both: the compile-error tell
+is the cheap prompt at authoring time, the fixture-reachability question is the one to ask of a
+test you inherited.
+
+**Second instance, and the sharper of the two — `eval_matches_compile_on_fixture`
+(`src/librarian/filter.rs`).** A *differential* test asserting that the SQL compiler and the
+in-memory evaluator agree on the same filter AST. It passed before and after a fix to `in`/`nin`
+on array columns, because its fixture table is `CREATE TABLE e (id, status, confidence, title)` —
+**no array column at all**, so it cannot reach the branch under dispute. That session's reading of
+why this one is worse than its own two: *"a differential test that cannot reach the branch is
+worse than a plain one, because the shape advertises rigour."* Two-engine agreement is about the
+strongest guard a reader can be shown, and it was silent on a defect where one engine returned
+nothing and the other returned every row.
+
+**Method note — corrected 2026-08-29, having first written it backwards.** The three were NOT all
+found the same way, and the difference is useful rather than incidental:
+
+| instance | how it was found | why that method |
+|---|---|---|
+| `filter.rs` `eval_matches_compile_on_fixture` (mine) | **read the fixture** — opened the test, read its `CREATE TABLE e (id, status, confidence, title)`, saw no array column | the missing property is **structural**: an absent column is visible in one line, no run needed |
+| `read_file` over-budget line (`codescout-24`) | **ran a mutation** — disabled the clamp, 2 passed / 1 failed | the missing property is **distributional**: a 1200-short-line fixture does not announce that it can never produce a long line |
+| ~~`shrink_guard`~~ (`codescout-24`) | **not an instance — struck 2026-08-29** | an *avoided* trap, not a discovered one: that session noticed while writing a NEW test that uniform-length lines make the byte and line ratios move together, and chose a different fixture. Nothing was ever blind |
+
+So the cheap read works when the fixture lacks the property **structurally** (an absent column, an
+absent field, a type never constructed — visible in one read of the fixture declaration), and the
+mutation is the fallback when it lacks it only **distributionally** (1200 lines that could each
+have been long, and none are — which announces nothing). Read first, mutate second. That makes the
+intervention cheaper than "always mutate", which is how I first wrote it.
+
+**Count corrected 2026-08-29: two discovered instances, not three.** `codescout-24` re-derived its
+own rows while applying the method correction above and found that its `shrink_guard` case was
+never an instance of this class — it was a trap **anticipated while writing a new test and
+avoided**, not a blind incumbent discovered. Its own account of why it had been counted: *"the
+only reason was to get the tally to three."* Struck in `ec853747`, recorded in place rather than
+edited out, on the grounds that a tracker inflating its own evidence is exactly the failure that
+file exists to catch. The avoided trap is still evidence the procedure works **prospectively**;
+it is not evidence of a blind incumbent, and the two must not be summed.
+
+**And note the fourth test in this session is a different class, not a fourth instance of this
+one.** `guard_stale_binary`'s wiring test (`src/retrieval/sync.rs`) was found by running a
+mutation, but its problem was never an unreachable fixture — it was compile-error-to-green, this
+entry's own trigger. Conflating the two is what produced the backwards note, and it also went out
+in a message to a peer, who wrote it into `test-escape-hardening` § *Scope of the claim* as "all
+three found by running a mutation, none by reading." Corrected with them; recorded here because
+the error was mine at the source.
+
+Reading a test still tells you only what it asserts. But reading its **fixture** can tell you
+whether the assertion is reachable — sometimes for free.
+
+**Promotion, restated — with the honest count.** Two distinct claims, each at exactly two
+datapoints, one afternoon, two sessions:
+
+- *Compile-error → green means never behaviourally RED* — `guard_stale_binary`'s wiring test
+  (mine) and `codescout-24`'s new CM-7 test. Both new tests, both mutation-checked, both fired.
+- *A fixture that cannot reach the code path* — `eval_matches_compile_on_fixture` (mine, found by
+  reading) and `read_file`'s two over-budget-line incumbents (theirs, found by mutation). Both
+  pre-existing.
+
+Threshold met for both, and **not** three-for-either. If this goes to the `test-design-discipline`
+memory, the rule to write is the fixture-reachability one with the compile-error tell as its cheap
+authoring-time prompt — not the trigger alone, which is the narrower half.
+
+**Procedural finding, worth more than the rule it came from.** The correction chain ran: a peer
+wrote up my instance secondhand → asked me to check it rather than assume → my check found a
+*method* error (read vs mutation) that had nothing to do with attribution → applying that fix made
+that session re-derive its own rows → which exposed a self-serving over-count in its evidence that
+no attribution check was looking for. Neither of us predicted that when we agreed to the check; we
+both framed it as an accuracy courtesy about *my* work. **Having the source check a write-up of
+their own work is worth doing for what it forces the author to re-derive, not for the attribution
+it confirms.**
 ## Template for new entries
 
 <!-- Insert new F-N / W-N entries above this line via:
