@@ -267,9 +267,44 @@ and do not cite one if it appears.** The claim here is narrow: two settings now 
 the best-measured configuration on record, and the drift that hid one of them for a
 month is named.
 
-**Takes effect on MCP restart.** Whether `/mcp` alone suffices, or Claude Code must be
-restarted, depends on when it reads `settings.json` — unverified; check the new
-server's `/proc/<pid>/environ` rather than assuming.
+#### Verified after the reconnect — and only half of it took
+
+The check above was run rather than skipped, and it is the reason this section
+exists. In the server spawned 11 s after `/mcp`:
+
+| | on disk | in the new server |
+|---|---|---|
+| `CODESCOUT_BM25_BOOST` | `5.0` | **`5.0`** — applied |
+| `CODESCOUT_QUERY_PREFIX` | **absent** | **still set** — not applied |
+
+One edit, one reconnect, opposite outcomes: **an updated value lands, a deleted key
+does not.** Filed as
+`docs/issues/2026-08-30-mcp-reconnect-applies-env-updates-but-not-env-deletions.md`.
+
+**The boost is the control that makes this a finding rather than a stale cache.**
+`5.0` exists in no other layer — both sibling profiles say `3.0`, `.env.gpu` says
+`3.0`, and the parent `claude` process carries no such variable at all. It could only
+have come from the file edited moments earlier, so the reconnect **did** re-read
+`settings.json` and still produced the old key.
+
+**Why this nearly went unnoticed: the half that worked confirms the half that did
+not.** The natural check after a config edit is to look at what you changed. Any edit
+containing an update passes that check, and a reader concludes the reconnect applied
+the whole edit. Only separately probing a key you *deleted* distinguishes the two, and
+that is not an obvious thing to do.
+
+**Applied workaround — `CODESCOUT_QUERY_PREFIX: ""` rather than absent.** An empty
+value survives the merge because it is an update, and it is *exactly* equivalent to
+unset here, verified in the consuming code rather than assumed:
+`EmbedderHttp::new` reads the var with `unwrap_or_default()`, and `remote_dense`
+maps `query_prefix.is_empty()` → `QueryPrefix::Suppressed` — the same state an
+absent var produces. (That method's own doc comment independently cites this
+tracker's numbers: *"37 without the prefix and 34 with it"*.)
+
+So the settled state on disk is `BM25_BOOST=5.0` and `QUERY_PREFIX=""`. **Takes
+effect on the next MCP restart**; a full Claude Code restart would also allow the
+empty entry to be replaced by a clean deletion, which is cosmetic — the two are
+behaviourally identical.
 
 ### 2026-08-16 (later) — first run attempt on `desktop-threadripper`: corpus indexed, harness scores 0/75, NOT root-caused
 
