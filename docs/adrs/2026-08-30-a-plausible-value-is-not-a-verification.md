@@ -240,6 +240,32 @@ Recorded as `codescout:R-127`. It is deliberately **not** added to the census ta
 the instrument class (`head -1` as a sampler, read as a measurement) adds nothing to the
 nine, and the provenance is the whole contribution.
 
+**An eleventh instance, the next morning, is the first independent confirmation of
+clause 2 — and the first where the misleading instrument was the one this project's own
+documentation prescribes.** A session resuming from compaction read
+`open-issue-work-queue`'s structured rows with
+`artifact(action="get", entry_filter={"status":{"eq":"open"}})`, which is verbatim the
+recipe `CLAUDE.md` gives for that tracker. It returned a well-formed, complete, entirely
+plausible list on which four rows were wrong — including a fix that had been shipped,
+tested, archived, patch-id'd and live-verified, reported as `open` and "not yet scouted".
+The committed markdown a human opens had been right the whole time. Clause 2 — *prefer
+the instrument that reads the artifact you are about to act on* — names the correct
+choice exactly: the file was what would be committed; the catalog is a derived,
+gitignored index of it.
+
+What this adds to the ten: the earlier instruments were **chosen** by an agent exercising
+judgement, so "pick a better instrument" is available as advice. Here the instrument was
+followed, correctly, from written project guidance, and the *less* sophisticated act —
+opening the markdown — was the accurate one. That is a sharper problem than mis-selection,
+because the documentation is doing the selecting. It also carries a second lesson the
+ADR should not lose: the drift was **created by the same session's earlier commits**
+(`0131e504`, `8dd4b910`), which updated the body and left params behind, and *no surface
+reports that direction* — `snapshot_stale` and `doctor`'s `params_behind_body` are both
+id-set comparisons, silent when every id matches and only the field contents disagree.
+The underlying gap is `codescout:BL-44`, re-opened on this evidence after being dropped
+as a design question; its own bug file had predicted this exact consequence in writing
+twelve days earlier.
+
 ## Alternatives considered
 
 1. **Fold it into the existing negative-results ADR.** Rejected. That ADR's Decision is
