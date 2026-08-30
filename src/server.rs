@@ -984,7 +984,14 @@ impl CodeScoutServer {
 
     /// Drive [`poll_rendezvous`](Self::poll_rendezvous) without routing a tool
     /// call through the whole request path.
-    #[cfg(test)]
+    ///
+    /// Gated with its only callers, not with a bare `#[cfg(test)]`: all three live
+    /// in `guide_hint_tests`, which is `#[cfg(feature = "librarian")]`. A bare test
+    /// gate compiles this under `--no-default-features --all-targets`, where
+    /// nothing can call it, and `dead_code` fires. Same shape as
+    /// [`os_random_auth_token`] and [`ct_eq`], which are gated with the `http` arm
+    /// they serve.
+    #[cfg(all(test, feature = "librarian"))]
     pub(crate) fn rendezvous_poll_for_test(&self) {
         self.poll_rendezvous();
     }
