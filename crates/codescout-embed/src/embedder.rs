@@ -30,7 +30,7 @@ pub const CONNECT_FAILED_MARKER: &str = "embed connect failed";
 /// the hard way for its own producer and hoisted the arm above its collection bucket;
 /// the crate's producer had the identical shape and no such protection, so an
 /// embedder 404 whose body read `model not found` was reported as a missing Qdrant
-/// collection (`docs/issues/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`).
+/// collection (`docs/issues/archive/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`).
 pub const STATUS_FAILED_MARKER: &str = "embed status failed";
 
 /// Errors this crate publishes as a **contract**, not merely as prose.

@@ -892,13 +892,24 @@ the same protection** — so an ordinary embedder 404 whose body reads
 `model 'coderank' not found` is classified as a **missing Qdrant collection**, and
 the operator is told to re-index a collection that is fine.
 
-The hazard was identified and fixed for one of two producers. It is live today on
-the `ollama:`/`openai:` resolver path, and the swap would carry it onto the dense
+The hazard was identified and fixed for one of two producers. It *was* live on the
+`ollama:`/`openai:` resolver path, and the swap would have carried it onto the dense
 leg. Filed by a concurrent session as
-`docs/issues/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`;
+`docs/issues/archive/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`;
 its sibling,
 `docs/issues/2026-08-30-sparse-status-errors-never-match-their-classifier-arm.md`,
 covers root's sparse leg and matters to fork branch B, which moves that leg.
+
+**Closed 2026-08-30 by T6 steps A and B** — `8097c2d6` (patch-id
+`18922aa3cc9f4be601e26f53ee68c9c483fec01b`) publishes `EmbedError::Status` +
+`STATUS_FAILED_MARKER`; `4fd4e5f4` (patch-id
+`d377f8ab6086f9d7137b4f4fc10d4628a26aa01c`) matches the constant in root's hoisted
+arm. The scout's correction below is what the fix rests on, and it holds: mutating
+the arm away reproduces `Qdrant collection is missing` for an embedder 404, while
+the pre-existing guard for *root's* producer passes unchanged — the two were
+covered independently, which is exactly the shape "fixed for one of two producers"
+predicts. The **sibling is still open**; branch B moves the sparse leg and will
+meet it.
 
 *Written first, by this same scout, as "PARITY 2, CONFIRMED — error bodies still
 route", and corrected before it was committed. The reasoning was: the context-size

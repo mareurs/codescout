@@ -1272,7 +1272,7 @@ mod tests {
     /// classifier tests `not found` (its Qdrant-collection arm) *before* it tests
     /// `embedding server` — so a healthy collection was reported missing and the
     /// operator was told to re-index it. See
-    /// `docs/issues/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`.
+    /// `docs/issues/archive/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md`.
     /// A marker the body cannot impersonate is what lets a consumer match on
     /// specificity first.
     #[tokio::test]

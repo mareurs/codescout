@@ -1,7 +1,7 @@
 ---
-status: investigating
+status: fixed
 opened: 2026-08-30
-closed:
+closed: 2026-08-30
 severity: medium
 owner: marius
 related: []
@@ -61,19 +61,44 @@ one of two producers.
 
 ## Fix
 
-Publish the contract as a **type**, the remedy `ET-5`/T4 already applied to the
-connect case: `EmbedError::Status { url, status, body }` rendering a
-`STATUS_FAILED_MARKER`, re-exported from `codescout_embed`, matched by
-`classify_search_error` in the hoisted arm alongside `dense openai status`. A literal
-on each side of a crate boundary is what `ET-5` records as unfixable-by-testing —
-nothing makes the two fail together.
+**Fixed on `experiments` 2026-08-30, in two commits.**
 
-This is step A/B of the T6 plan
-(`resume-embedding-transport-stages-1-3:ET-10`), so it is being fixed there rather
-than separately; the swap requires it regardless, since after T6 the crate becomes
-the *only* dense producer and root's hoisted arm would otherwise stop firing
-altogether.
+| | SHA (`experiments`) | patch-id (survives rebase) |
+|---|---|---|
+| A — crate publishes the type | `8097c2d6` | `18922aa3cc9f4be601e26f53ee68c9c483fec01b` |
+| B — root's classifier matches it | `4fd4e5f4` | `d377f8ab6086f9d7137b4f4fc10d4628a26aa01c` |
 
+The remedy is the one `ET-5`/T4 already applied to the connect case: publish the
+contract as a **type**, not a literal. `EmbedError::Status { url, status, body }`
+renders `STATUS_FAILED_MARKER`, re-exported from `codescout_embed`, and
+`classify_search_error` matches the imported constant in the arm already hoisted
+above the collection bucket. A literal on each side of a crate boundary is what
+`ET-5` records as unfixable by testing — nothing makes the two fail together.
+
+**Regression tests** (`src/tools/semantic/semantic_search.rs`):
+
+- `a_status_body_saying_not_found_is_not_reported_as_a_missing_collection` — the
+  negative. Asserts the hint does **not** mention a missing collection or
+  `sync_project`. Asserting only that the right hint appears would have passed
+  with the arm ordered *after* the collection bucket, since both hints mention the
+  embedder.
+- `the_crates_own_status_error_routes_where_roots_does` — the differential, in the
+  shape of its connect-case sibling.
+
+**Mutation-confirmed, not merely green.** Removing the marker from the classifier
+arm kills both, and the failure output reproduces the bug verbatim:
+
+```
+hint: Qdrant collection is missing for project `codescout`.
+      Populate it: `cargo run --release --bin sync_project -- . codescout`
+```
+
+for an embedder 404. Meanwhile `an_embedder_body_mentioning_not_found_does_not_hijack_the_collection_bucket`
+— the pre-existing guard for *root's* producer — passes unchanged under that same
+mutation. That is the evidence for this file's central claim: the two producers
+were covered independently, and the fix had landed on only one of them.
+
+Gate at fix time: fmt clean, clippy exit 0, 4836/0 default, 3362/0 lean.
 ## Provenance
 
 Noticed 2026-08-30 while auditing which error-string contracts the T6 dense-leg swap

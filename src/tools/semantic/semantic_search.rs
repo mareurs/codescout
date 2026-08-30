@@ -77,7 +77,7 @@ pub(crate) fn classify_search_error(err_str: &str, project_id: &str) -> String {
     //     'coderank' not found` was already being reported as a missing Qdrant
     //     collection on the `ollama:`/`openai:` resolver path. The fix for root's own
     //     producer had never been extended to the crate's.
-    //     docs/issues/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md
+    //     docs/issues/archive/2026-08-30-crate-status-errors-hijack-the-qdrant-collection-bucket.md
     //
     //     Matching the imported constant rather than a literal is what survives T6:
     //     once the dense leg delegates to the crate, `dense openai status` has no
