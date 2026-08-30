@@ -5588,6 +5588,43 @@ not:** *never cite a derived value in a message dispatched in the same batch as 
 derivation.* Derive, read the output, then write. It costs one round trip and it removes the
 state in which the error is possible, rather than asking anyone to notice.
 
+#### The hazard is PLAUSIBILITY, not lateness — `codescout-ae`'s sharpening
+
+The rule above is correct and located the mechanism one step short of the actual hazard.
+Lateness is why the value was unavailable; it is not why the message was dangerous.
+
+`f7d4…` is dangerous **because it is well-formed.** Identical batching, identical forward
+promise, identical unread value, but written `<patch-id pending>` — and the message fails
+safe. No reader can mistake it for evidence, and the author cannot forget to fill it in
+without the gap being visible. The defect was never the timing; it was emitting a token
+shaped like the answer.
+
+So there is a **zero-cost variant** for when you do not want the round trip:
+
+> **Omit rather than promise.** Deriving first buys you the value. Omitting buys the same
+> safety for nothing.
+
+The two compose: derive first when the message needs the value, omit when it does not.
+Neither asks anyone to be careful.
+
+#### The general form: a forward reference is an unenforceable claim about process
+
+*"(derived below)"* asserts something about **when the author looked**. Prose has no
+mechanism to enforce that, and once written it is indistinguishable to every later reader
+from *"(derived above)"*. The tense claims a process the artifact cannot carry.
+
+That is the same defect as `R-139`'s unanchored ordinal and its count-without-a-counting-rule:
+**a value whose correctness depends on context the reader does not have and cannot recover.**
+The remedy is identical in all three — put the thing the reader needs *in* the artifact, or
+emit nothing.
+
+**This entry records no vigilance remedy, deliberately.** `codescout-ae` asked that a
+standing structural rule not be diluted into a lesson about care, and they are right: the
+author here was at maximum awareness and it changed nothing. **The error tracked what had
+been read — not what was believed, and not how carefully.** The SHA in the same sentence was
+correct because it was in hand; the patch-id was invented because its command had not
+returned. Only possession of the output predicted the outcome.
+
 Instance 5 is the entry's subject one layer out, and it was caught **only** because the same
 message asked the recipient to check. Had it said `a138eeac`, they would have believed it.
 
