@@ -142,6 +142,35 @@ So this is a **second trigger on proven machinery**, not new machinery. The same
   degrades to today's behaviour plus a round trip. Worth an eval arm before shipping
   broadly — `prompt-engineering` can measure whether the ack is read or reflexive.
 
+### Adoption is per-TOPIC and all-or-nothing — measured 2026-08-31
+
+A constraint found while scoping a candidate move, and it bounds how any of the above
+can be rolled out incrementally.
+
+`GuideIndex::declares()` (`src/prompts/guide_index.rs`) is a **phase switch**, in its own
+words: *"Whether this topic has opted into section-grain delivery. Topics with no
+declarations keep the whole-topic path."* So the **first** `serves:` added anywhere in a
+guide flips that entire topic from whole-topic delivery to section-grain — and every tool
+already routing to it drops to **preamble only** unless it also gains a declaration.
+
+Concretely, the reason `edit_code.at_line` (493B) was NOT moved:
+
+- `edit_code` has no `relevant_guide_topic` at all, so it routes to no topic and a
+  `serves: edit_code.*` section would never fire, wherever it were written.
+- Wiring it to `symbol-navigation` would add the first declaration to that guide, flipping
+  it to section-grain — and `symbols`, `references` and `call_graph` all route there today
+  with no declarations of their own, so all three would silently degrade.
+- `server.rs:3272` catches this rather than letting it ship, so the failure is loud. But
+  the work is then: one `relevant_guide_topic`, three new `serves:` declarations or
+  waivers, plus the section — a delivery-model refactor of a working guide, to buy 493B.
+
+**Implication for the gate.** A `blocks:` declaration must not inherit this switch. If
+adding the first `blocks:` to a topic changed that topic's delivery for every other tool
+routing to it, the gate could not be adopted one call at a time — which is the only safe
+way to adopt something that stalls a call. Whatever the gate's declaration is, it needs to
+compose additively with whole-topic delivery, or `librarian.md` (already section-grain) is
+the only guide that can ever host one.
+
 ### Payoff if it lands
 
 The ~2155B above becomes movable, and the rule "long reference material lives in guides"

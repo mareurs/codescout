@@ -452,6 +452,45 @@ pub static GUIDE_INDEX: std::sync::LazyLock<GuideIndex> = std::sync::LazyLock::n
         .expect("guide index failed to build; see gate `index_builds_for_every_registered_topic`")
 });
 
+/// A `serves: librarian.doctor` declaration in `librarian.md` matches the
+/// selector a doctor call carries.
+///
+/// **Read the name literally: this pins the DECLARATION, not delivery.** It was
+/// first written as `..._is_reachable_from_a_doctor_call`, to verify that moving
+/// the `fix=` repair modes out of the tool schema left them reachable. It passed
+/// — while the modes were, in fact, unreachable in production.
+///
+/// The gap is one layer up: `LibrarianAdapter::relevant_guide_topic` picks the
+/// topic from the RESULT's content, and `names_tracker_path` scans `path` inside
+/// the `violations` array, so a real doctor scan routes to `tracker-conventions`
+/// and never consults `librarian`'s sections at all. Measured 2026-08-31: 128 of
+/// 138 violations named `docs/trackers/` or `docs/issues/`.
+///
+/// So it answered "does the shape match?" when the question that mattered was
+/// "does the router send a doctor result to this topic?" — an adjacent
+/// proposition, faithfully measured (`reconnaissance-patterns:R-136`). The
+/// schema text was restored rather than left resting on this; see
+/// `docs/issues/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
+///
+/// Kept, renamed to what it actually proves, because the declaration is still
+/// worth pinning: a blank line between the heading and its `<!-- serves: -->`
+/// yields a section that parses fine, declares nothing, and is never delivered,
+/// with every other test green.
+///
+/// Mutation that must kill this: change the declaration to `librarian.reindex`,
+/// or move the comment below the first blank line.
+#[test]
+fn doctor_repairs_section_declares_a_shape_a_doctor_selector_matches() {
+    let empty = Value::Object(Default::default());
+    let matched = GUIDE_INDEX.match_sections("librarian", Some("librarian.doctor"), &empty);
+    let headings: Vec<&str> = matched.iter().map(|s| s.heading.as_str()).collect();
+    assert!(
+        headings.iter().any(|h| h.contains("doctor repairs")),
+        "the section must at least declare a shape a doctor selector matches. \
+         matched: {headings:?}"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
