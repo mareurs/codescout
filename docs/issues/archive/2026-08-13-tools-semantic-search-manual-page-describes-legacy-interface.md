@@ -7,6 +7,7 @@ tags:
 - docs
 - semantic-search
 - drift
+- cluster/doc-contradicted-by-code
 closed: 2026-08-14
 opened: 2026-08-13
 owner: marius

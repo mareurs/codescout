@@ -158,7 +158,7 @@ grep -L 'cluster/' docs/issues/2026-*.md
 |---|---|---|---:|---|---|
 | IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 18 | `OB` (OB-2, OB-3) | partial |
 | IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
-| IC-3 | declaration is not execution | `declared-not-wired` | 18 | `OB-7` — promoted 2026-09-01 | partial (1 of 3 families) |
+| IC-3 | declaration is not execution | `declared-not-wired` | 18 | `OB-7` — promoted 2026-09-01 | partial (1 of 3 families, by-name only) |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | `OB` — passes admission test; hook owed | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | `H` — six subsystems; mechanism owed | none yet |
 | IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | `CLAUDE.md` § Parsers Over a Namespace — **landed** | shipped (partial) |
@@ -166,7 +166,7 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 5 | `DC` | none yet |
 | IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 1 | not yet — two tags withdrawn as misfits | none yet |
 | IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
-| IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 1 | not yet — n=1 taggable | none yet |
+| IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 4 | clears count; spread unadjudicated | none yet |
 | IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | 0 | not yet — 1 instance, untagged; archive pass found none | none yet |
 | IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 16 | clears count; spread unadjudicated | none yet |
 | IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 7 | clears count; spread unadjudicated | none yet |
@@ -337,7 +337,7 @@ proxy and reported its output as knowledge.
 **Members:** `filter={"tags": {"contains": "cluster/declared-not-wired"}}` — n=18, 2026-09-01, by query. Was 20 until the `IC-15` boundary was settled on the remedy test; two members that accept a caller's value and drop it moved there. See the Index.
 **Blind party:** the author of the declaration, specifically. They hold the mental model in which the wiring exists — writing `**Serves:** edit_file(path~/.claude)` *is* the act of believing it is served. A more careful version of the same author writes the same line.
 **Promotes to:** `OB-7` — *a declaration is well-formed, and nothing in production reaches it*, `docs/trackers/observer-blindness.md`, promoted 2026-09-01. `OB-5`'s *Known-open residual* is this class seen from the **reporting** side — a check whose `extend()` line is deleted still reports `0` because the enum still declares it — so the two are cited across rather than merged: `OB-5` is about a summary that cannot say what **ran**, `OB-7` about a capability nothing **reaches**. The residual is where they touch, not where they are the same, which is why this got its own row instead of folding in.
-**Mechanism status:** `partial` — decidable for one of three families, and deliberately **not** `designed` for the class. The 18 members split by what disconnects the declaration. **Dead in production (9):** the code exists and only tests call it; `references(symbol)` decides this today, verified 2026-09-01 on `chunk_size_for_model`, whose production callers (`src/tools/memory/mod.rs:227,283`, `src/main.rs:337`) separate cleanly from its in-crate test sites — the check is *non-test caller count == 0*, at call-site rather than file granularity, since test modules live inline. **Schema or doc declares what the code ignores (3):** a round-trip check is only a weak proxy here, because reading a field is not using it. **A matcher that can never match (6):** this entry's original phrasing, needing the set of values production emits at a call site, and it has no mechanism at all. Recording the class as `designed` on the strength of the first family is exactly the conflation `IC-9` was corrected for.
+**Mechanism status:** `partial` — decidable for one of three families, and deliberately **not** `designed` for the class. The 18 members split by what disconnects the declaration. **Dead in production (9):** the code exists and only tests call it. The partition is measured — `grep` tags every hit with its enclosing symbol and test sites carry a `tests/` prefix, and call-site granularity is *required* rather than preferable, since `references` groups `src/librarian/adapter.rs:1451` under a production file while `grep` shows it is `tests/…`. But it decides for **by-name call sites only**: a symbol reached via `dyn Trait`, a function pointer, a macro or a re-export alias has zero textual non-test hits and would be flagged dead, which is a **deletion-authorising false positive** in a codebase built on `impl Tool` and `Arc<dyn CodeEmbedder>`. The zero-caller state is also unexercised — nine symbols probed, all confirming the *has-callers* state. See `cluster-promotion-session-log:F-1`. **Schema or doc declares what the code ignores (3):** a round-trip check is only a weak proxy here, because reading a field is not using it. **A matcher that can never match (6):** this entry's original phrasing, needing the set of values production emits at a call site, and it has no mechanism at all. Recording the class as `designed` on the strength of the first family is exactly the conflation `IC-9` was corrected for.
 **Valid:** dated 2026-08-31
 
 `op-4-path-predicate-can-never-fire` and `triggered-operator-rules-route-nothing-in-production` are the pure form: three operator rules declare `binding: triggered` against tools that emit no `selector_key` in production, so `route()` is never called with anything that could match them. The routing mechanism exists and is unit-tested; the tests construct the selector the production path never produces.
@@ -561,7 +561,7 @@ which holds equally for **agreeing** with one, the direction three of these four
 
 **Slug:** `cluster/doc-contradicted-by-code`
 **Claim:** A document states a behaviour the code contradicts. The statement was *true when written*; the code later gained or lost the capability. Nothing checks prose against code systematically, and the corrective pass that *does* happen is a hand-enumerated sweep whose completeness is unfalsifiable — it reports the surfaces it changed, never the ones it missed. Unlike a wrong statement, this defect has no authoring error to find.
-**Members:** `filter={"tags": {"contains": "cluster/doc-contradicted-by-code"}}` — n=1, 2026-08-31. Three or more further instances are known to sit in the untagged 279 archived files: this is the third of the four candidate shapes recorded above the `IC-1` entry, promoted to a class here because a taggable instance arrived and the gate has no escape hatch for "looked, nothing fits".
+**Members:** `filter={"tags": {"contains": "cluster/doc-contradicted-by-code"}}` — n=4, 2026-09-01, by query after a probed archive pass. **Fourteen candidates were probed and three passed**; the ten that did not are deliberately untagged, not pending. See *The probe* below..
 **Blind party:** the *reader*, routed to the document by its own scope claim and given no signal to cross-check. The author of the prose is not blind — they wrote something true. The author of the *code* change is differently blind: gaining a capability gives you no reason to search prose for sentences your feature just falsified.
 **Promotes to:** `not yet` — n=1 taggable. The likely target is `DC` (`docs/trackers/claim-decay.md`): a true-when-written claim that silently decayed is that ledger's subject, and this class is the bug-corpus entry point to it rather than a competitor — the same relationship `IC-8` declares.
 **Mechanism status:** none yet, and the nearest existing mechanism does not cover it. `librarian(action="audit_doc_refs")` lints *references* — paths, symbols, line numbers, link targets — so a document may cite every path correctly and still assert the opposite of what the code at those paths does. The remedy would have to check claims, not refs.
@@ -584,6 +584,44 @@ the primary defect.
 **Kept apart from `IC-3` and `IC-8` on their own falsifiers, not on judgement.** `IC-3` is a surface declaring a capability production never reaches; this is its mirror — production reaches a capability the surface denies — and `IC-3`'s falsifier explicitly ejects the mirror case (*"the wiring existed and the declaration was merely wrong, which is an ordinary bug rather than this class"*). `IC-8` is an assertion written at the moment of intent and read forever after as outcome; this prose was not intent, it was correct observation, which is why no plausibility check catches either one.
 
 **Falsified by** an instance where the documentation was wrong on the day it was written. That is an ordinary authoring error with an author to find, and it does not belong here.
+
+**The probe, run 2026-09-01 — and it is the reason this class was backfilled last.** This entry's
+admission question is *"was the prose true when written"*, which is a fact about **history**, not
+about the text. No amount of reading either surface answers it: a document that contradicts the
+code reads identically whether the code moved under it or the author was simply wrong. So the
+archive pass that tagged `IC-13`–`IC-16` from claims alone could not tag this one, and fourteen
+candidates went to `git log -S` instead.
+
+**Three passed** and are now tagged. `recoverableerror-display-doc-contradicts-code` is the
+cleanest: the `Display` doc comment said it omitted `hint`/`guidance`, and `dc8f0f1f`
+(2026-05-09) is titled *"Display surfaces RecoverableError guidance text"* — the code **gained**
+the behaviour, so the comment was true until that commit and false after it, with no author to
+find. `tools-semantic-search-manual-page-describes-legacy-interface` describes the pre-Phase-7
+interface, accurate until Phase 7 replaced it. `test-env-isolation-doc-prescribes-rejected-remedy`
+prescribed option B until `a656f8ce` marked that remedy non-viable.
+
+**One was refuted, and it is the one this entry singles out.**
+`docs/issues/archive/2026-08-16-librarian-runtime-guide-claims-move-preserves-id.md` — same guide,
+same § *Where catalog state lives* — looked like the strongest member available. Its own
+`## Hypotheses tried` states the question and defers it: *"the guide is describing an older
+behaviour that was correct when written. **Test** — `git log` on `src/librarian/tools/mv.rs` for a
+commit removing id-stability. **Verdict** — deferred; irrelevant to the fix either way."* Running
+that deferred test settles it against the class: `mv.rs`'s full history contains **no commit that
+removed id-stability**. The id has been `sha256(abs_path)` since the file existed, and the
+2026-08-16 commits nearest the question — *"move now grafts history onto the new id instead of
+stranding it"*, *"repair the frontmatter id the move just invalidated"* — **cope with** the
+re-keying rather than introduce it. The guide was wrong on the day it was written. That is this
+entry's own falsifier (*"an ordinary authoring error with an author to find"*), so it stays out,
+and the earlier note that it "stays untagged under the archive policy" is superseded by a reason
+that survives the policy changing.
+
+**Ten remain untagged because the probe did not establish them, which is not the same as pending.**
+The recurring shape among them: the doc and the contradicting code appear to have coexisted from
+the start — `path_security.rs`'s module doc promises `RecoverableError` while `bail!` is present
+in the file's own creation commits; `scope`'s documented `project` default against a compiled
+`Repo` that only two commits ever touched, the second being the fix. Each is *probably* an
+authoring error, and "probably" is exactly the standard this entry exists to refuse. They are
+listed as probed-and-not-established so the next reader does not re-derive the same fourteen.
 
 ## IC-12 — transient shared state lies to every reader, and the standard diagnostic confirms the lie
 

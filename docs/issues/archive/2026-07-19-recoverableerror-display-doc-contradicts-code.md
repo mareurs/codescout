@@ -4,6 +4,7 @@ status: fixed
 tags:
 - doc-drift
 - error-handling
+- cluster/doc-contradicted-by-code
 closed: 2026-07-20
 opened: 2026-07-19
 owner: marius

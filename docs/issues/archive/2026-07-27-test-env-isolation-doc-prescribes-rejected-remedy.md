@@ -6,6 +6,7 @@ tags:
 - testing
 - convention-drift
 - root-cause
+- cluster/doc-contradicted-by-code
 closed: null
 opened: 2026-07-27
 owner: marius
