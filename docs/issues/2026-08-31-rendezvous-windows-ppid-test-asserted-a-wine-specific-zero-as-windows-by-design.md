@@ -133,8 +133,8 @@ for the full listing; confirmed unchanged and still present.
 Deliberately did NOT touch `parent_pid()`'s Windows implementation itself —
 it was already correct; only the test's claim about it was wrong.
 
-- **SHA (experiments):** _pending — record after commit_
-- **patch-id:** _pending_
+- **SHA (experiments):** `db1c038e41ab8b79ca36bf81c4dd411651d827c2`
+- **patch-id:** `7fa93fc9b1010da50ccd012ab3b15438e3b89d51`
 
 ## Tests added
 
