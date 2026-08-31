@@ -1042,13 +1042,29 @@ pub trait Tool: Send + Sync {
             // pointer to the full topic, once per session.
             if matched.is_empty() {
                 let key = format!("{topic}#<preamble>");
-                if !emitted.insert(key) {
+                // `contains` before `insert`, never `insert`'s return value as
+                // the already-sent test. `GuideLedger::insert` refreshes the
+                // stamp and persists on a repeat, so using it here bills a
+                // call that delivers NOTHING for a staged write + rename
+                // (identified tier, `path: Some`) or a deferred re-arm
+                // (anonymous tier, whose `idle_ttl` is the only thing standing
+                // between a second conversation and permanent starvation).
+                // `op_content` below spells it this way for exactly this reason.
+                if emitted.contains(&key) {
                     return (Vec::new(), None);
                 }
                 return match GUIDE_INDEX.topic(topic) {
-                    Some(entry) => (
-                        vec![Content::text(format!(
-                            "<!-- auto-injected get_guide('{topic}') preamble — no section \
+                    Some(entry) => {
+                        // Stamp only once the block is built. Moving the insert
+                        // here also closes a latent burn-on-silence: an
+                        // unregistered topic used to consume the preamble slot
+                        // and ship nothing. Unreachable today — `declares(topic)`
+                        // already implies `topic(topic).is_some()` — but that is
+                        // an argument, and the fail-safe direction is free.
+                        emitted.insert(key);
+                        (
+                            vec![Content::text(format!(
+                                "<!-- auto-injected get_guide('{topic}') preamble — no section \
                              declares this call's shape. -->\n\
                              \n\
                              {}\n\
@@ -1056,10 +1072,11 @@ pub trait Tool: Send + Sync {
                              Call `get_guide(\"{topic}\")` for the full topic.\n\
                              \n\
                              <!-- end auto-injected get_guide('{topic}') preamble -->",
-                            entry.preamble.trim()
-                        ))],
-                        Some(GuideDeliveryShape::Preamble),
-                    ),
+                                entry.preamble.trim()
+                            ))],
+                            Some(GuideDeliveryShape::Preamble),
+                        )
+                    }
                     None => (Vec::new(), None),
                 };
             }
@@ -1073,18 +1090,24 @@ pub trait Tool: Send + Sync {
             let mut out = Vec::new();
             for sec in matched {
                 let key = sec.ledger_key();
-                if emitted.insert(key) {
-                    out.push(Content::text(format!(
-                        "<!-- auto-injected get_guide('{topic}') § {} — first call this \
+                // `contains` then `insert`, per the preamble branch above: the
+                // `if` here gated only the `push`, so an all-already-sent call
+                // still refreshed and persisted one stamp per matched section
+                // while returning empty.
+                if emitted.contains(&key) {
+                    continue;
+                }
+                emitted.insert(key);
+                out.push(Content::text(format!(
+                    "<!-- auto-injected get_guide('{topic}') § {} — first call this \
                          session that serves this section. Do NOT re-call get_guide for \
                          it. -->\n\
                          \n\
                          {}\n\
                          \n\
                          <!-- end auto-injected get_guide('{topic}') § {} -->",
-                        sec.heading, sec.body, sec.heading
-                    )));
-                }
+                    sec.heading, sec.body, sec.heading
+                )));
             }
             let shape = if out.is_empty() {
                 None

@@ -7278,6 +7278,85 @@ mod guide_hint_tests {
         );
     }
 
+    /// A call that delivers nothing must not refresh the stamps it did not use.
+    ///
+    /// `GuideLedger::insert` refreshes and persists on a repeat — deliberately,
+    /// since the stamp means "last delivered" and that is what `expire_idle`
+    /// reads. `guide_blocks_for` used it as its already-sent *test*, so an
+    /// all-sections-already-sent call inserted once per matched section (the
+    /// `if` gated only the `push`) and returned empty. The bill lands in a
+    /// different place per tier, and neither tier pays both:
+    ///
+    /// - identified (`GuideLedger::load`, `path: Some`, `idle_ttl: None`) — a
+    ///   staged write + rename per nothing-delivered call; the stamp itself is
+    ///   never read for expiry, since `tick()` no-ops without a TTL.
+    /// - anonymous (`path: None`, `idle_ttl: Some`) — `persist` returns early,
+    ///   but the refresh defers re-arm, and re-arm is the only thing standing
+    ///   between a second conversation on one process and permanent starvation.
+    ///
+    /// This asserts the tier-independent half: the stamp does not move. It is
+    /// the observable both harms derive from, and it needs no TTL plumbing.
+    ///
+    /// Mutation that must kill this: restore `if emitted.insert(key)` as the
+    /// loop's already-sent test in `guide_blocks_for`.
+    #[tokio::test]
+    async fn a_call_that_delivers_nothing_does_not_refresh_the_stamp() {
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+
+        let first =
+            guide_blocks(&call_tool(&server, "artifact", json!({"action": "find"})).await).join("");
+        assert!(
+            !first.is_empty(),
+            "setup: the first call must deliver a section for there to be a stamp to refresh"
+        );
+
+        // Age the librarian section stamps by an hour. Only those: `call_tool`
+        // warms the opener slot, so an unfiltered sweep would also catch keys
+        // this test is not about.
+        let tracked: Vec<String> = {
+            let mut led = ctx.guide_hints_emitted.lock();
+            let keys: Vec<String> = led
+                .stamps_for_test()
+                .into_iter()
+                .map(|(k, _)| k)
+                .filter(|k| k.starts_with("librarian#"))
+                .collect();
+            assert!(
+                !keys.is_empty(),
+                "setup: expected at least one librarian section stamp, got none"
+            );
+            for k in &keys {
+                led.backdate_for_test(k, chrono::Duration::hours(1));
+            }
+            keys
+        };
+
+        let again =
+            guide_blocks(&call_tool(&server, "artifact", json!({"action": "find"})).await).join("");
+        assert!(
+            again.is_empty(),
+            "setup: the repeat shape must deliver nothing, got {} B",
+            again.len()
+        );
+
+        let led = ctx.guide_hints_emitted.lock();
+        let stamps: std::collections::BTreeMap<String, _> =
+            led.stamps_for_test().into_iter().collect();
+        let now = chrono::Utc::now();
+        for key in &tracked {
+            let at = stamps
+                .get(key)
+                .unwrap_or_else(|| panic!("`{key}` vanished from the ledger"));
+            assert!(
+                now - *at > chrono::Duration::minutes(30),
+                "`{key}` was refreshed by a call that delivered nothing. The stamp means \
+                 \"last delivered\"; moving it on silence defers an anonymous-tier re-arm \
+                 and rewrites the ledger file for zero bytes shipped."
+            );
+        }
+    }
+
     #[tokio::test]
     async fn an_unmatched_shape_receives_the_preamble_not_the_whole_topic() {
         let (_dir, server) = make_server().await;
