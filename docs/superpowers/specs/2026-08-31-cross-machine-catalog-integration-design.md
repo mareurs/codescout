@@ -189,10 +189,17 @@ against the target schema.
 
 Pass the remaining shape fields in that same call, not because the schema needs them, but
 because the write-through republishes the whole row
-(`docs/issues/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`,
-open). The three-call alternative — permissive schema, then params, then the real schema —
-touches shape fields twice and doubles exposure to that open defect. Atomic is both the
-only working path and the safer one.
+(`docs/issues/archive/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`,
+**fixed 2026-08-31 at `6ae7d39a`**). The three-call alternative — permissive schema, then
+params, then the real schema — touches shape fields twice and doubles exposure to that
+defect. Atomic is both the only working path and the safer one.
+
+> **The exposure argument is narrower since the fix, and the conclusion is unchanged.** A
+> merge call no longer republishes a shape field it did not name over a sidecar that
+> disagrees — it refuses and reports. So the three-call alternative's extra shape writes now
+> fail loudly rather than silently overwriting, which is better but still worse than not
+> making them. The deadlock argument above is independent of that defect and stands on its
+> own: atomic remains the only order that validates.
 
 **Generalisation for unit 3.** Any design that projects schema and rows through separate
 write paths inherits this: a projection restored field-by-field can deadlock against its

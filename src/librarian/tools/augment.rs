@@ -1486,7 +1486,7 @@ mod tests {
     /// Measured instance: a `--merge --params-schema` call republished a stale
     /// `render_template` over the correct committed one, and it was recovered only
     /// because a pre-integration catalog backup happened to exist
-    /// (`docs/issues/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`).
+    /// (`docs/issues/archive/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`).
     #[tokio::test]
     async fn a_merge_call_refuses_to_republish_a_shape_field_it_did_not_set() {
         use crate::librarian::augmentation_sidecar as sc;

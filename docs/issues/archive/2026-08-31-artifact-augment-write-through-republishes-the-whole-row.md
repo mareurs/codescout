@@ -1,12 +1,17 @@
 ---
-status: open
-opened: 2026-08-31
-closed:
-severity: medium
-owner: marius
-related: ["689fb62e40557480"]
-tags: ["librarian", "augmentation", "sidecar"]
 kind: bug
+status: fixed
+tags:
+- librarian
+- augmentation
+- sidecar
+closed: 2026-08-31
+opened: 2026-08-31
+owner: marius
+related:
+- '689fb62e40557480'
+severity: medium
+unverified: Not yet re-verified against a rebuilt live MCP — the running server still answers from the pre-fix binary. Both paths are test-guarded through the tool's own call() entry point, so this is a freshness caveat rather than a coverage gap.
 ---
 
 # BUG: `artifact_augment`'s sidecar write-through republishes the entire row, not the field you patched
@@ -155,17 +160,89 @@ whatever the sidecar held in git history before the trap fired.
    **Evidence link:** Evidence § write-through body.
 
 ## Fix
-No fix required for this filing — this is capture-on-notice per the coordinator's
-ruling (fix-round 1/5, Item 3, 2026-08-31). A plausible direction for a future fix: have
-`sidecar_write_through` (or its caller) pass through only the fields the `AugmentArgs`
-call actually named, diffing against the sidecar's current on-disk content field-by-field
-rather than row-by-row — or at minimum, warn (as `field_patch` event or CLI stderr) when
-a merge call republishes a shape field it did not itself set.
 
+**Fixed on `experiments` at `6ae7d39a`** — patch-id
+`f36fb473f8735539999ead742a811a2ea2035ceb`.
+
+### The framing that produced the fix
+
+This report's mechanism is exact and its *harm* statement is the one that led somewhere: not
+"it publishes six fields" but **what that does in front of `sidecar_shape_drift`.**
+
+That check's entire design position — stated at length in its own doc comment and repeated in
+every finding it emits — is that when the row and the committed file disagree, **the direction
+is undecidable without a human**: *"if the SIDECAR is right (you pulled someone else's shape
+change), do NOT export — that would overwrite their shape with your stale row."*
+
+The write-through was doing precisely that, automatically, catalog-wards, on a call that named
+a different field. A mechanism that silently resolves a conflict in a fixed direction, standing
+in front of a check built on the premise that the direction cannot be decided, is the defect —
+and it explains why the loss was silent rather than merely surprising.
+
+### What shipped
+
+A disagreement on an **unauthored** field is now reported instead of resolved.
+
+`write_through` takes an `Authored` argument. `Authored::Only(&[…])` for a merge call — the
+fields it actually passed, since the upsert *preserves* the rest and a preserved field was
+never authored by this caller. `Authored::All` for a replace, which speaks for the whole shape
+including the omissions it resets. When a merge call would overwrite a field it did not author
+and the sidecar disagrees on it, **nothing is written** and the caller gets a
+`RecoverableError` naming the fields. The field the call *did* set travels on the re-run, once
+the drift is resolved.
+
+It reuses `drifting_fields` rather than adding a second comparator, so the refusal fires on
+exactly the set `sidecar_shape_drift` reports. That function's exhaustive destructure then
+covers this path too: adding a shape field breaks compilation there until it is compared, so
+a new field cannot silently become unrefusable.
+
+### The filed direction was rejected, and not for the reason first supposed
+
+This section proposed publishing **only the named fields**, diffing field-by-field. My first
+objection was that it reopens `689fb62e` (*"a schema edit silently does not travel"*). **That
+objection was wrong** and is recorded because it was nearly acted on: a partial write still
+publishes the field you edited, so the edit still travels.
+
+The real objection is different. Row-wide rendering is what makes the sidecar *the catalog
+row's committed projection*; a partial file matches no catalog row anywhere, so a fresh clone's
+`reindex` would restore a blend of two hosts' shapes. The defect was publishing **without a
+mandate**, not publishing **whole** — and once put that way the remedy is to withhold the write,
+not to narrow it.
+
+An unparseable sidecar still falls through and is overwritten, unchanged. That is
+`sidecar_unparseable`'s case, and refusing there would block a repair on the one file nothing
+else can read.
 ## Tests added
-N/A — no fix implemented in this filing; this is an observational bug report
-(capture-on-notice), not a fix. A regression test belongs with whatever fix is chosen.
 
+Two, in `src/librarian/tools/augment.rs`, driven through `ArtifactAugment.call` so they guard
+the tool's behaviour rather than an internal return. RED first: the refusal test failed with
+`String("ok")` — the bug returning success.
+
+- `a_merge_call_refuses_to_republish_a_shape_field_it_did_not_set` — the guard. It asserts the
+  error is a `RecoverableError`, that it **names** the field, and — the assertion that matters
+  — that the sidecar still holds its original value afterwards. A refusal that already
+  destroyed the value on the way to refusing is not a refusal, and only that third assertion
+  can tell the difference.
+- `a_replace_call_publishes_the_whole_shape_including_fields_it_omitted` — pins the guard
+  **off** for `merge=false`, whose caller really does speak for every field including the ones
+  it resets. It passed before the fix as well as after: its job is to fail against an
+  over-broad guard, not against the pre-fix code.
+
+**The non-vacuity guard already existed**, which is why no third test was written:
+`a_merge_true_sibling_change_writes_through_too` asserts that a named field *does* still reach
+the sidecar. Without it, this change is satisfied by refusing everything — and it would have
+caught that, since it drives the same merge path.
+
+**The fixture's load-bearing detail is annotated on its own line:** the committed sidecar must
+hold a `render_template` the row does not. That asymmetry *is* the case under test — it is the
+shape of the measured incident, where the on-disk value was correct and the row's was the
+loss-window leftover. Make the two agree and the test passes while testing nothing.
+
+Counts: default 4975 → **4977**; lean unchanged at 3412, correctly — `augment.rs` sits behind
+the `librarian` feature, which the lean lane has off.
+
+Clippy caught a redundant `.into()` that both test lanes passed over — the long
+`--all-targets` form earning its place in the gate again.
 ## Workarounds
 Before any `merge=true` `artifact_augment` call that touches only some shape fields,
 diff the sidecar immediately after the call and confirm every field that wasn't
