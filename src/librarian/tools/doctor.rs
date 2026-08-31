@@ -7604,7 +7604,16 @@ mod tests {
             "only the prefix cited under the ACTIVE project may be reported: {v:#?}"
         );
         assert!(
-            v[0].detail.contains("`ZZ-N`") && !v[0].detail.contains("QQ"),
+            // `QQ-N` in BACKTICKS, not a bare `QQ`. The detail embeds the absolute paths of
+            // the citing files (`Citing files: {}` below), and those live under a
+            // `tempfile::tempdir()` whose name carries ~6 random alphanumerics — so a bare
+            // substring search can match the fixture's own scratch path instead of a finding.
+            // Observed in CI 2026-08-31 (run 33404896131, server-stack lane): this test failed
+            // on a detail whose prefix claim was correctly `ZZ-N`, and passed in the runs
+            // either side. Flaky at roughly 1-in-800, i.e. often enough to red a branch and
+            // rarely enough to look like something else. A backticked token cannot occur in a
+            // path, so the assertion now depends only on what the check reports.
+            v[0].detail.contains("`ZZ-N`") && !v[0].detail.contains("`QQ-N`"),
             "the reported finding must be ZZ, the in-project one: {}",
             v[0].detail
         );

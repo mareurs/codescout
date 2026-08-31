@@ -134,25 +134,13 @@ Omitting `project` reads/writes workspace-level memory.
 
 ---
 
-## `read_memory`
-
-Backward-compatible alias for `memory(action="read")`. The dedicated tool is
-still registered; new code should prefer the action-dispatched `memory`.
-
-## `write_memory`
-
-Backward-compatible alias for `memory(action="write")`. The dedicated tool is
-still registered; new code should prefer the action-dispatched `memory`.
-
-## `list_memories`
-
-Backward-compatible alias for `memory(action="list")`. The dedicated tool is
-still registered; new code should prefer the action-dispatched `memory`.
-
-## `delete_memory`
-
-Backward-compatible alias for `memory(action="delete")`. The dedicated tool is
-still registered; new code should prefer the action-dispatched `memory`.
+> **Retired aliases.** `read_memory`, `write_memory`, `list_memories` and `delete_memory`
+> were once separate tools. They are no longer registered — every one of them is an
+> `action` on `memory`. This page documented them as "still registered" until 2026-08-31,
+> which was false and broke CI's `Tool Docs Sync` job: that job diffs the tool names
+> registered under `src/tools/**` against the `^#{1,2} \`name\`$` headings here, so a
+> heading for a tool that no longer exists fails the build. Mention a retired name in
+> prose if it helps a reader arriving from an old transcript; never give it a heading.
 
 ## Private Store
 

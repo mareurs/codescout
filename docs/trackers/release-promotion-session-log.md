@@ -1411,9 +1411,34 @@ The existing guidance covers the *external* case: this skill's Phase 1 says *"Fo
 
 **Severity:** high — it converted "gate green, ready to merge" into three false readiness claims in one session, and the toolchain half will recur on its own schedule.
 
-**Status:** open — the three lints are fixed and Windows is green, but the *skew* is unaddressed and needs the pinning decision.
+**Status:** partial — **skew 1 (toolchain) is CLOSED**; skews 2 and 3 stand.
 
-**Fix idea / Pointer:** Add `rust-toolchain.toml` pinning the channel CI uses, or add a CI job that fails when `cargo --version` differs from a pinned expectation. Either makes the skew loud instead of silent.
+`rust-toolchain.toml` now pins `channel = "1.97.1"` and declares `components` +
+`targets`, and **no CI job installs a toolchain** — `.github/workflows/ci.yml:20-31`
+carries an explicit *DO NOT add `dtolnay/rust-toolchain` back* warning, because that
+action exports `RUSTUP_TOOLCHAIN` and the env var overrides the file, which would leave
+the pin inert while everything still compiled. The `msrv` job is the deliberate exception
+and invokes `cargo +1.88` so the explicit override beats the pin. Verified 2026-08-31:
+in-repo `rustc` and CI both report `1.97.1`. The pin's own header credits W-9 and F-9, so
+the fix shipped under those entries and nothing updated this one — ordinary zombie-open.
+
+**Read the "Fix idea" below as satisfied, not pending.** It proposed exactly the file that
+now exists. One trap it is worth naming, since this session fell into it: `rustc
+--version` reports the *pinned* compiler only when run with the repo as cwd. Run it from
+`/tmp` and you get the machine default — 1.95.0 here — which reads as live skew and is an
+artifact of where you were standing.
+
+**Skews 2 and 3 are untouched and are what keeps this entry open.** Platform-invisible
+bugs (2) cost this branch 5 days of red CI ending 2026-08-31: macOS and Windows lanes
+failed on `/private/var`-vs-`/var` canonicalisation and on path form, while the Linux gate
+stayed green throughout. And a gate command that cannot run locally (3) still cannot —
+`cargo clippy --all-features` still hits `codescout-embed`'s mutually-exclusive-backend
+`compile_error!`.
+
+**Fix idea / Pointer:** ~~Add `rust-toolchain.toml`~~ — done. What remains has no local
+remedy by construction: for skews 2 and 3 the only instrument is CI itself, so the
+operational mitigation this entry already recorded (*push early to get a real verdict*) is
+the answer rather than a workaround.
 
 ## W-2 — Ordering a capped findings list by severity turned an unactionable gate into a self-explaining one
 

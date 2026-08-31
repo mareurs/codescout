@@ -6758,7 +6758,7 @@ true of what was searched and false as the answer the caller took away.
 ("Zero here is the strongest signal available that `root` is not the tree the caller
 meant"); `grep::WalkAudit::completeness_warning`; `semantic_starved` (`e4569fcc`);
 `check_tool_access`'s read-only hint (`00948381`); and `read_file`'s truncation flag
-(`docs/issues/archive/2026-08-26-read-file-truncation-flag-never-rendered.md`). Each was
+(`21507a26`, patch-id `1bc96ae356d6741c08dbcd5a30c462a8e87ab06b`). Each was
 built as a one-off for its own bug.
 
 **Counterfactual — the pattern being unnamed is *why* these were still open.**

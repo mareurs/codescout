@@ -57,8 +57,8 @@ weeks; one had been mis-attributed to an LSP staleness window it had nothing to 
   `k` and still could not fill the page.
 - `check_tool_access`'s read-only hint (`00948381`) — a write refusal naming the subagent
   clobber as a cause to check.
-- `read_file`'s truncation flag
-  (`docs/issues/archive/2026-08-26-read-file-truncation-flag-never-rendered.md`) — and
+- `read_file`'s truncation flag (`21507a26`, patch-id
+  `1bc96ae356d6741c08dbcd5a30c462a8e87ab06b`) — and
   note it shipped **inert**, rendered nowhere, which is the same defect one level up.
 
 Six correct instincts with no common vocabulary. The cost is concrete and measurable:
