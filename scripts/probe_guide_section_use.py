@@ -355,6 +355,9 @@ def scan_transcript(path: Path, topic: str, profile: str = "?") -> dict | None:
 
     injections: list[dict] = []
     discussion_mentions = 0
+    # Session start from the transcript's own first `timestamp`, NOT from mtime --
+    # mtime is a property of the file, and a copied corpus may not preserve it.
+    session_date: str | None = None
     # (line_index, tool_name, serialized_input) for every assistant tool_use
     tool_uses: list[tuple[int, str, str]] = []
 
@@ -365,6 +368,8 @@ def scan_transcript(path: Path, topic: str, profile: str = "?") -> dict | None:
             d = json.loads(line)
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
+        if session_date is None and d.get("timestamp"):
+            session_date = str(d["timestamp"])[:10]
         typ = d.get("type")
         msg = d.get("message")
         if typ == "assistant":
@@ -438,6 +443,7 @@ def scan_transcript(path: Path, topic: str, profile: str = "?") -> dict | None:
         # They are a DIFFERENT POPULATION and must never be blended -- see report().
         "kind": "subagent" if "/subagents/" in str(path) else "main",
         "mtime": int(path.stat().st_mtime),
+        "session_date": session_date or "?",
         "injections": len(injections),
         "discussion_mentions": discussion_mentions,
         "mechanism_calls_after_first_injection": len(after),
@@ -538,6 +544,13 @@ def main() -> int:
         "--roots points at another machine's copy, or the report will claim this host.",
     )
     ap.add_argument("--since", help="only sessions with mtime on/after YYYY-MM-DD")
+    ap.add_argument(
+        "--split-at",
+        metavar="YYYY-MM-DD",
+        help="report each population split at this SESSION-START date (from the "
+        "transcript's own first timestamp, not mtime). Read the stratification "
+        "warning it prints before calling a difference a regime effect.",
+    )
     ap.add_argument("--session", help="restrict to one session id (positive control)")
     ap.add_argument(
         "--kind",
@@ -614,12 +627,35 @@ def main() -> int:
 
     mains = [r for r in records if r["kind"] == "main"]
     subs = [r for r in records if r["kind"] == "subagent"]
+    cut = args.split_at
+    slices = (
+        (lambda rs, base: [(rs, base)])
+        if not cut
+        else (
+            lambda rs, base: [
+                ([r for r in rs if r["session_date"] < cut], f"{base}  < {cut}"),
+                ([r for r in rs if r["session_date"] >= cut], f"{base}  >= {cut}"),
+            ]
+        )
+    )
     if args.kind in ("main", "all"):
-        report(mains, sizes, "MAIN sessions")
+        for rs, lab in slices(mains, "MAIN sessions"):
+            report(rs, sizes, lab)
     if args.kind in ("subagent", "all"):
-        report(subs, sizes, "SUBAGENT sessions")
+        for rs, lab in slices(subs, "SUBAGENT sessions"):
+            report(rs, sizes, lab)
     if args.kind == "all":
         print("\n(DIFFERENT POPULATIONS -- do not average them; see report()'s docstring)")
+    if cut:
+        print(
+            "\nBEFORE reading a period difference as a REGIME effect, stratify by project.\n"
+            "  Measured 2026-08-31 across the 2026-08-27 section-grain ship, main sessions:\n"
+            "  the aggregate moved 49.0% -> 34.4%, but codescout-project sessions moved\n"
+            "  28.0% -> 27.5% while the codescout SHARE moved 38% -> 57%. The aggregate\n"
+            "  shift was MIX, not regime -- project drives more variance here than time.\n"
+            "  (Mechanically expected: tracker-conventions declares no `serves:`, so it is\n"
+            "  delivered whole in every regime. Prediction and measurement agree.)"
+        )
 
     if args.explain:
         print()

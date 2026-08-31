@@ -9,7 +9,7 @@ tags:
 - get_guide
 - progressive-disclosure
 - proposal
-unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27 on branch sdd/get-guide-section-grain, and the USE probe this file''s own `Not yet done` asked for RAN the same day. The DISTRIBUTION probe that directions (b)/(c) were gated on RAN 2026-08-31 -- n=166 sessions across two machines, instrument scripts/probe_guide_section_use.py -- so that gate is now SATISFIED; see the Phase 2 section. It changed the recommendation: the largest lever is subagent delivery (92.5% of delivered bytes never engaged, 2.3x the main-session waste) and it is orthogonal to BOTH Phase 2 blockers, so it needs no decomposition and no addressing work. Still outstanding: the 17,378 B decomposition and cross-topic shape disambiguation (topic_declaring made `serves:` a cross-topic namespace, and no_two_topics_declare_an_overlapping_shape fails the build on the collision, deliberately). Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that reads as settled because someone who knows the file stated it, and it needs re-costing before anyone builds on it.'
+unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27; the USE probe ran the same day. The DISTRIBUTION probe that directions (b)/(c) were gated on RAN 2026-08-31 -- n=166 sessions, two machines, instrument scripts/probe_guide_section_use.py -- so that gate is SATISFIED. It changed the recommendation: the largest lever is subagent delivery (92.5% of delivered bytes never engaged, 2.3x the main-session waste), orthogonal to BOTH Phase 2 blockers. THREE STRATIFICATION CAVEATS, all measured, none optional when quoting a number: (1) main vs subagent must never be blended -- 45% vs 92%; (2) the sample is COMMIT-MIXED, 84% of it predating the 2026-08-27 section-grain ship, and the apparent 49.0%->34.4% improvement is project MIX, not regime -- codescout-project sessions are flat at 28.0%->27.5% while their share moved 38%->57%; (3) project is the dominant stratifier, ~28% waste in codescout sessions vs ~44-62% elsewhere. Still outstanding: the 17,378 B decomposition and cross-topic shape disambiguation (topic_declaring made `serves:` a cross-topic namespace; no_two_topics_declare_an_overlapping_shape fails the build on the collision, deliberately). Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that needs re-costing before anyone builds on it.'
 ---
 
 ## Symptom
@@ -433,6 +433,47 @@ which matches the 08-27 study's 71% for this topic almost exactly and reads as a
 cross-instrument convergence. It is not one — split, the populations are 45% and 92%, and
 the agreement is an artifact of the mix. The blend was checked only because the project
 breakdown looked odd.
+### The headline is a BLEND across a regime change — stratify before quoting it
+
+Checked because the sample spans our own refactors: section-grain delivery shipped
+**2026-08-27** and the routing/ledger fixes landed **2026-08-31**, so these sessions were
+injected by at least three mechanism versions. Dating them by the transcript's own first
+`timestamp` (never mtime — a copied corpus need not preserve it): **140 of 166 sessions,
+84%, predate the section-grain ship**, and only 2 are from today.
+
+Main sessions, split at 2026-08-27:
+
+| slice | n | never engaged |
+|---|---|---|
+| pre-2026-08-27 | 58 | 49.0% |
+| post-2026-08-27 | 21 | **34.4%** |
+
+That looks like the mechanism working. **It is not.** Holding project constant:
+
+| stratum | pre | post |
+|---|---|---|
+| codescout-project sessions | 28.0% (n=22) | **27.5%** (n=12) |
+| non-codescout sessions | 61.9% (n=36) | 43.7% (n=9) |
+
+The codescout stratum is **flat**; what moved was the *mix* — codescout's share of main
+sessions went **38% → 57%**. A 15-point aggregate shift over a 0.5-point within-stratum
+one: Simpson's paradox, and quoting either single number without the other misleads.
+
+**The mechanical prediction agrees, which is what makes this more than a caveat.**
+`tracker-conventions` declares **no** `serves:` sections — only `librarian.md` carries them
+— so section-grain delivery never changed *this topic's* delivery in any regime. It has
+always arrived whole. Prediction from the code and measurement from the data now say the
+same thing, and that is stronger evidence than either alone.
+
+**What the check actually bought: a confound that matters more than the one it tested
+for.** Project drives far more variance than time. Waste is ~28% in codescout-development
+sessions and ~44–62% elsewhere — the guide is most wasted exactly where the librarian is
+least used. That is a third lever, independent of both Phase 2 blockers and of the
+subagent one, and it says any evaluation of a decomposition must be stratified by project
+or it will measure our own workload back at us.
+
+`--split-at` is now in the instrument and prints this stratification warning with the
+numbers, so the next reader cannot take a period difference for a regime effect.
 ## Measured — USE, 2026-08-27 (the probe `Not yet done` asked for)
 
 This section answers the question the rest of the file could only frame: delivery
