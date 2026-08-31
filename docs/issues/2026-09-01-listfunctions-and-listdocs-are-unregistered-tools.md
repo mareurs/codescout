@@ -2,7 +2,7 @@
 id: '7b468a9f8c201641'
 kind: bug
 status: open
-title: ListFunctions and ListDocs implement Tool, are guarded by 15 tests, and no agent can reach either
+title: ListFunctions and ListDocs implement Tool, are guarded by 13 tests, and no agent can reach either
 tags:
 - cluster/declared-not-wired
 - tools
@@ -13,7 +13,7 @@ owner: marius
 severity: low
 ---
 
-# BUG: `ListFunctions` and `ListDocs` implement `Tool`, are guarded by 15 tests, and no agent can reach either
+# BUG: `ListFunctions` and `ListDocs` implement `Tool`, are guarded by 13 tests, and no agent can reach either
 
 ## Summary
 
@@ -43,8 +43,38 @@ files, and every non-definition hit is test code.**
 | `tests/e2e/harness.rs` (`run_list_functions`) | 2 | test |
 | `src/tools/symbol/tests.rs` | 2 | test fixture *string*, not a call |
 
-**Production call sites: zero. Registration sites: zero.** Fifteen tests guard two tools
-nothing can reach.
+**Production call sites: zero. Registration sites: zero.**
+
+**The test count, published as its derivation rather than as a figure — this file said "fifteen"
+and fifteen does not survive a count.** Corrected 2026-09-01 after a peer failed to
+reconstruct it and got 18 by a different rule. Both were answering different questions, and
+neither number is the one the claim needs:
+
+```
+symbols(path="src/tools/ast.rs", name_path="tests", depth=1)   → 19 functions
+  minus project_ctx_with_file (a fixture helper, not a test)   → 18 tests in the module
+grep '\b(ListFunctions|ListDocs)\b' with enclosing-symbol annotation
+  → 12 of those 18 call the tools by name
++ tests/integration.rs::workflow_analyze_ast                    → 13 tests total
++ tests/e2e/harness.rs::run_list_functions                      → 1 e2e path, reached
+                                                                  via run_single's
+                                                                  "list_functions" arm
+                                                                  (a helper, not a test)
+```
+
+So: **13 tests call these two tools, plus one e2e harness path.** The peer's **18** counts every
+test in the module, including four formatter tests, `symbols_include_docs_returns_docstrings`,
+and `list_functions_omits_source_field` — which despite its name contains neither identifier
+and so is not guarding these tools either. My **15** double-counted: it swept in
+`src/tools/symbol/tests.rs::symbols_overview_directory_mode`, which contains the *string*
+`"ListFunctions"` in a JSON fixture and never calls the tool, and counted the e2e helper as a
+test.
+
+**The near-miss is why it survived, and it is the third instance of that shape in one night.**
+15-against-18 is plausible enough that no reader stops; an implausible figure would have been
+caught immediately. Same property as `OB-4`'s 2/3-accurate liveness marker, and same as the
+20%-versus-25% units error corrected in `cluster-promotion-session-log:F-2` an hour earlier. A
+ratio or a count that is merely *close* spends trust it never earned.
 
 The contrast inside the same sweep is what makes this a finding rather than a guess. Seven
 other unregistered `impl Tool` types — `ActivateProject`, `ProjectStatus`, `ListLibraries`,
@@ -67,6 +97,12 @@ scoped to the half that works."*
 `ListFunctions.call(json!({…}), &ctx)` works perfectly. It is the *registration* that is
 absent, and no test that constructs the tool directly can observe that.
 
+The absence was established with a positive control rather than as a bare zero, which is what
+makes it a finding: `src/server.rs:326` shows what registration looks like (`Arc::new(Grep)`
+inside `CodeScoutServer::new`'s `Vec<Arc<dyn Tool>>`), and `ListFunctions|ListDocs` returns
+**0 matches in that same file**. Knowing the shape of a present registration first is what
+lets the zero mean *absent* rather than *not searched for*.
+
 The compiler cannot see it either: both are `pub` in a library crate, so `dead_code` is
 exempt by construction regardless of callers.
 
@@ -86,7 +122,7 @@ they preserve:
 1. **Register them.** They become reachable, and 15 existing tests become meaningful. But
    `symbols` already covers "list the functions in this file" and `include_docs` covers
    docstrings, so this adds two tools to a surface with a documented description-byte cap.
-2. **Delete both, and their 15 tests.** Honest if `symbols` genuinely subsumes them. Note
+2. **Delete both, and their 13 tests.** Honest if `symbols` genuinely subsumes them. Note
    the tests are not evidence *for* keeping them — a test of an unreachable tool is exactly
    what this class produces.
 
@@ -99,4 +135,3 @@ non-`symbols` exercise of that code.
 Decide (1) or (2). Then re-run the same probe against the **remaining** unregistered types —
 `GetUsageStats` is unresolved above — and consider whether the registry-vs-`impl Tool` diff
 is worth a standing test, since it is a set difference over two lists the code already holds.
-
