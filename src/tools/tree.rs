@@ -114,11 +114,29 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         requested_depth
     };
 
-    // Admitted then classified, like the glob branch, and for a sharper reason here:
-    // this walk sets `git_ignore(false)` / `ignore(false)`, so hidden is its ONLY
-    // exclusion. A listing that shows gitignored `target/` while silently omitting
-    // `.github/` reads as complete precisely because it is showing you things other
-    // tools hide. `.git` / `.codescout` stay pruned — see `glob_impl`.
+    // Hidden entries are pruned AT THE BOUNDARY and counted there, rather than admitted
+    // and classified as in `glob_impl`. The two branches ask different questions and so
+    // want different counts.
+    //
+    // A listing asks "what is in this directory?", and what a caller loses to the filter
+    // is `.github/` — one entry — not the nine files inside it. Classifying after the
+    // walk answers with the subtree instead, which is both less useful and *depth-
+    // dependent*: measured here, the same root reports 16 at the default depth and 2765
+    // under `recursive=true`, of which 2548 are session artefacts inside `.buddy/`. A
+    // number that changes by two orders of magnitude with an unrelated flag reads as a
+    // bug to anyone who saw the other one. Pruning here makes the count depth-stable and
+    // restores exactly what `hidden(true)` used to withhold. Reported by `codescout-fe`.
+    //
+    // A glob asks "which files match?", where the useful count IS the matching files
+    // inside a hidden directory, so that branch must descend. See `glob_impl`.
+    //
+    // This walk sets `git_ignore(false)` / `ignore(false)`, so hidden is its ONLY
+    // exclusion — a listing that shows gitignored `target/` while silently omitting
+    // `.github/` reads as complete precisely because it is showing you what other tools
+    // hide. `.git` / `.codescout` are pruned WITHOUT counting: they exist in every
+    // project, so counting them would put a nonzero note on every listing.
+    let withheld = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = withheld.clone();
     let walker = ignore::WalkBuilder::new(&path)
         .max_depth(walker_depth)
         .hidden(false)
@@ -126,11 +144,16 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         .git_exclude(false)
         .git_global(false)
         .ignore(false)
-        .filter_entry(|e| {
-            !matches!(
-                e.file_name().to_string_lossy().as_ref(),
-                ".git" | ".codescout"
-            )
+        .filter_entry(move |e| {
+            let name = e.file_name().to_string_lossy();
+            if matches!(name.as_ref(), ".git" | ".codescout") {
+                return false;
+            }
+            if e.depth() > 0 && name.starts_with('.') && !include_hidden {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return false;
+            }
+            true
         })
         .build()
         .flatten()
@@ -145,17 +168,7 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
     };
 
     let mut entries = Vec::new();
-    let mut hidden_withheld = 0usize;
     for entry in walker {
-        let rel = entry.path().strip_prefix(&path).unwrap_or(entry.path());
-        let hidden = rel.components().any(|c| {
-            let s = c.as_os_str().to_string_lossy();
-            s.starts_with('.') && s.as_ref() != "." && s.as_ref() != ".."
-        });
-        if hidden && !include_hidden {
-            hidden_withheld += 1;
-            continue;
-        }
         let suffix = if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
             "/"
         } else {
@@ -204,6 +217,7 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
     if depth_auto_capped {
         result["depth_capped"] = json!(3);
     }
+    let hidden_withheld = withheld.load(std::sync::atomic::Ordering::Relaxed);
     if hidden_withheld > 0 {
         result["completeness_warning"] = json!(format!(
             "this listing describes what was walked, not the directory: {hidden_withheld} \
@@ -834,6 +848,48 @@ mod tests {
         assert!(
             !format_list_dir(&result).contains("include_hidden"),
             "and nothing in the rendered output either: {result}"
+        );
+    }
+
+    /// The withheld count must not change with `recursive`, because what the caller lost
+    /// did not: `.github/` is one entry at any depth, and the files inside it were never
+    /// going to be listed as siblings of `docker-compose.yml`.
+    ///
+    /// The first version of this fix classified after the walk, which counted the
+    /// SUBTREE and so reported a different number per depth — measured on this repo, 16
+    /// at the default depth against 2765 under `recursive=true`, of which 2548 were
+    /// session artefacts inside `.buddy/`. A number that moves by two orders of magnitude
+    /// with an unrelated flag reads as a bug to anyone who has seen the other value.
+    /// Found by `codescout-fe`.
+    #[tokio::test]
+    async fn the_withheld_count_does_not_change_with_depth() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        seed_hidden_and_visible(dir.path());
+
+        let shallow = Tree
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let deep = Tree
+            .call(
+                json!({ "path": dir.path().to_str().unwrap(), "recursive": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shallow["completeness_warning"], deep["completeness_warning"],
+            "the same directory withholds the same thing however deep the walk goes; \
+             counting the subtree instead makes this depth-dependent.\nshallow: {shallow}\ndeep: {deep}"
+        );
+        assert!(
+            shallow["completeness_warning"]
+                .as_str()
+                .unwrap()
+                .contains("1 hidden entry"),
+            "and the unit is the pruned entry, not its contents: {shallow}"
         );
     }
 
