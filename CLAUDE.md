@@ -10,12 +10,12 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 
 ## Testing Discipline — what a green suite is evidence for
 
-The gate above tells you how to get green. This tells you what green is worth. Four of the five
-laws below were measured on 2026-08-30, across three unrelated subsystems and four sessions;
-*the law reaches past guards, to features* was added 2026-09-01 and extends *loudness is a
-property of a PATH*. (Named by content rather than by position: this paragraph read "all four"
-for the hour after the fifth landed, which is § *Observer Blindness*'s premise-moved-conclusion-
-didn't in the section documenting it.)
+The gate above tells you how to get green. This tells you what green is worth. Each law below
+carries its own measurement and date, and there is deliberately **no count here** — a tally of
+the section's own contents is a premise that every addition falsifies. This sentence read *"all
+four"* for an hour after a fifth law landed, which is § *Observer Blindness*'s
+premise-moved-conclusion-didn't firing inside the section that documents it. Removing the number
+removes the class; correcting it would only have reset the clock.
 
 **A test cannot detect a change its assertion is MONOTONE under.** Absence assertions
 (`is_empty()`, `!exists()`) are monotone under **removal** — a dead mechanism produces exactly
@@ -26,6 +26,26 @@ times, not weakly. For each test ask which direction its assertion is monotone u
 mutate the *other* way. Measured (`e6414362`): a locator widened to swallow its whole section
 killed **none of six tests** — the silence test and the positive test were both blind, and
 pairing them bought nothing.
+
+**And a test cannot detect what its RECORDING filters out — which is the harder twin, because
+the standard remedy is a no-op against it.** The law above is about *members*: a population
+selected so no member can falsify. Its fix is to add one that could — the nine dead-code probes
+that all had visible callers become informative the moment a tenth is drawn from the dispatch
+side. This one is about *observations*: the refuting outcome leaves **no artifact**. Measured
+2026-09-01 — a ledger was about to publish *"of the near-miss numbers, four were caught by
+re-derivation and zero by inspection"*, and that zero is unfalsifiable by construction, because
+a reader who doubts a figure and re-counts it produces nothing. The wrong number never ships,
+so nothing is recorded, so the population contains only the cases where doubt failed to occur.
+**"Widen the sample" fixes member-selection and is a no-op here at any corpus size** — a bigger
+corpus of ledger entries still contains zero catches-by-reading, forever. That is what makes it
+worse than a small sample: the reflex answer looks responsive and changes nothing.
+
+The remedy is to instrument the **doubt**, not the correction: when a re-derivation *confirms*,
+publish the confirmation. Nobody is inclined to, because there is no finding to report — which
+is exactly why the negative case has no record. One null result was published that day only
+because someone said so out loud, and it is a **denominator**, not a catch: a confirming
+re-derivation never entered the wrong-number population and bears on the base rate rather than
+on the hit rate. Absorbing it as a near-catch would make the population look self-correcting.
 
 **Mutate once per guarded SITE, not once per feature.** A mutation run answers a question
 about one *line*. Where a law is implemented at N call sites, one kill proves exactly one site
