@@ -3254,7 +3254,7 @@ mod tests {
         // files (measured 2026-08-31: 128 of 138), so without it the content branch
         // is unreachable from this test and every `serves: librarian.doctor`
         // declaration reads as covered while never being delivered.
-        // docs/issues/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md
+        // docs/issues/archive/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md
         let probes = [
             serde_json::json!({}),
             serde_json::json!({"abs_path": "docs/issues/x.md"}),

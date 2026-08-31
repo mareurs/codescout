@@ -368,7 +368,7 @@ impl GuideIndex {
     /// `LibrarianAdapter::relevant_guide_topic` sent `tracker-conventions` —
     /// whole, 26x the size of the displaced section — and the section could not
     /// be delivered at all. See
-    /// `docs/issues/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
+    /// `docs/issues/archive/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
     ///
     /// Returning a topic here does NOT mean it wins. The caller tries the
     /// tool's own result-based topic FIRST and only falls through to this one
@@ -525,7 +525,7 @@ pub static GUIDE_INDEX: std::sync::LazyLock<GuideIndex> = std::sync::LazyLock::n
 /// "does the router send a doctor result to this topic?" — an adjacent
 /// proposition, faithfully measured (`reconnaissance-patterns:R-136`). The
 /// schema text was restored rather than left resting on this; see
-/// `docs/issues/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
+/// `docs/issues/archive/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
 ///
 /// Kept, renamed to what it actually proves, because the declaration is still
 /// worth pinning: a blank line between the heading and its `<!-- serves: -->`
@@ -685,7 +685,7 @@ n body
         // topic adopts `serves:`, which is precisely when the ambiguity becomes
         // possible and no one is looking for it. `tracker-conventions` is the
         // likely next adopter — see
-        // `docs/issues/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
+        // `docs/issues/archive/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
         //
         // Overlap is over-approximated on `(tool, action)` with `None` as a
         // wildcard. Sound in the direction that matters: `path~` can only narrow
