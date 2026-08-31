@@ -285,6 +285,28 @@ My figure and `F-3`'s disagree on the ratio and agree on that, which is the part
 
 **Why the count and not the filename:** the three axes every other check on this page depends on — do the sessions' files overlap, is the peer enumerable, was the commit pathspec-scoped or index-scoped — are exactly the axes that failed here (see `F-2`: the peer is *not* enumerable, 4 of 20). The count depends on none of them.
 
+**Failure mode of this practice, measured 2026-09-01 over seven consecutive commits, and it is
+structural rather than attentional.** The predicted stat is only a check if the prediction is
+*measured*. Split by how the measurement was invoked:
+
+| how | correct |
+|---|---|
+| `git diff --stat` as its own call, output read, message composed after | **5 / 5** |
+| `git diff --stat && git add && git commit -m "…predicted N…"` in one chain | **0 / 2** |
+
+Chaining puts the measurement and the write in the same invocation, so the message is composed
+**before the output exists** — the prediction is written blind by construction, and "be careful"
+cannot reach it. Both misses were mine (`c7be203f` 17/2 vs 19/1; `236a2873` 43/1 vs 47/0), and
+the second landed in a commit whose own message discusses reading stats off artifacts.
+
+**Why it matters beyond neatness:** a soft prediction degrades W-2's comparison from *detects a
+foreign hunk* to *detects a large one*, because both sides of the comparison are then estimates.
+The peer named that risk before I had a measurement for it (`codescout-e8`).
+
+**Rule:** measure in a separate call, read the number, then write it. Never chain the stat into
+the commit. This is the *make the correct path end in a safe state* shape — the split call has
+no blind window to be disciplined about.
+
 **What this does NOT establish, stated because I asserted it once already and it does not hold.** I told the user that disclosing the capture prevented the duplicate-work half, citing `d710e58d` — the owner's next commit — touching only `cluster-promotion-session-log.md` and `observer-blindness.md`, never `issue-clusters.md`, with no duplicated content (three marker strings, one occurrence each; verified). **That inference is unfounded.** I sent the disclosure to `codescout-fc`, which has since denied authoring any of it, so I have no evidence the message ever reached the owner. A world where disclosure did nothing and the owner simply had no `issue-clusters.md` work left pending produces the identical commit. It is the same error as `F-2` one layer up — attributing an effect to a party identified by proximity. The non-duplication is real and measured; its **cause** is not established.
 
 **Confirming data points:**
