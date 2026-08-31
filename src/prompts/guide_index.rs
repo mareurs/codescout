@@ -390,7 +390,11 @@ impl GuideIndex {
     /// `match_sections(t, sel, result)` is non-empty — it selects `t` *by* a
     /// section matching, and `match_sections` only ever adds the `requires:`
     /// closure on top. So a declaring candidate can never take the preamble
-    /// path, which is what makes trying it free of ledger side effects.
+    /// path — which spares it that path's `insert`-then-return-empty, but does
+    /// NOT make trying it side-effect free. See `Tool::call_content`, which
+    /// carries the correction: `GuideLedger::insert` refreshes and persists on
+    /// repeats, so a fallthrough onto a topic whose sections are all spent still
+    /// pays stamp refreshes and disk writes for zero delivered bytes.
     pub fn topic_declaring(&self, sel: Option<&str>, result: &Value) -> Option<&'static str> {
         self.topics.iter().find_map(|(topic, entry)| {
             entry

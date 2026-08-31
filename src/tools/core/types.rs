@@ -1204,12 +1204,32 @@ pub trait Tool: Send + Sync {
                 // spent for this session — and now deliver a section written for
                 // their shape. No call loses a guide it used to get.
                 //
-                // Trying a candidate that ships nothing is free: every
-                // `guide_blocks_for` path returning empty also leaves the ledger
-                // untouched, and a declaring candidate cannot reach the preamble
-                // path at all — `topic_declaring` selects it BY a section
-                // matching, so `match_sections` is non-empty for it by
-                // construction.
+                // Trying a candidate that ships nothing is free of DELIVERY
+                // effects — it cannot emit, suppress or duplicate a block. It is
+                // NOT free of ledger effects, and the first version of this
+                // comment claimed it was, from reading rather than running.
+                // `GuideLedger::insert` persists unconditionally and refreshes
+                // the stamp on a repeat, by design: the stamp means "last
+                // delivered", which is what `expire_idle`'s TTL reads. Two of
+                // `guide_blocks_for`'s four empty-return paths call it anyway —
+                // the preamble path inserts before deciding to return empty, and
+                // the all-sections-already-sent path inserts per matched
+                // section, its `if` gating only the `push`.
+                //
+                // Only the first is excluded here by construction: a declaring
+                // candidate cannot reach the preamble path, since
+                // `topic_declaring` selects it BY a section matching. The second
+                // is live, and is the fallthrough's real price — falling through
+                // onto a spent declaring topic costs N stamp refreshes and N
+                // disk writes for zero bytes delivered.
+                //
+                // Deliberately not worked around at this call site. `op_content`
+                // below solves the same problem with `contains`-then-`insert`,
+                // and the matching fix belongs inside `guide_blocks_for`, where
+                // it would also cover the pre-existing repeat-call path that has
+                // always done this. That is a wider change — it moves
+                // `expire_idle` re-arm timing for every topic — and wants its own
+                // decision rather than riding in on this one.
                 let mut candidates: Vec<&str> = vec![content_topic];
                 if let Some(t) = crate::prompts::guide_index::GUIDE_INDEX
                     .topic_declaring(selector.as_deref(), &val)
