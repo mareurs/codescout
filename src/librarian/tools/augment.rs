@@ -60,14 +60,42 @@ fn validate_merged_against_schema(
 /// **silently** on a fresh clone, where an absent one is reported by
 /// `augmentation_declared_but_absent`. The message names both facts, because the augmentation
 /// itself did succeed and a caller told only "failed" would retry a write that already landed.
-fn sidecar_write_through(cat: &crate::librarian::catalog::Catalog, id: &str) -> Result<()> {
-    crate::librarian::augmentation_sidecar::write_through(cat, id).map_err(|e| {
-        anyhow::anyhow!(
-            "the augmentation WAS updated, but its committed sidecar could not be written: \
-             {e:#}. The catalog and docs/augmentations now disagree; re-run once the path is \
-             writable, or a fresh clone will restore the superseded shape and report success."
-        )
-    })?;
+///
+/// A **refusal** is reported the same way and for the same reason, but it is not a failure:
+/// the write-through declined to publish a field this call never authored over a committed
+/// value that disagrees with it. See [`crate::librarian::augmentation_sidecar::write_through`].
+fn sidecar_write_through(
+    cat: &crate::librarian::catalog::Catalog,
+    id: &str,
+    authored: crate::librarian::augmentation_sidecar::Authored<'_>,
+) -> Result<()> {
+    let outcome = crate::librarian::augmentation_sidecar::write_through(cat, id, authored)
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "the augmentation WAS updated, but its committed sidecar could not be written: \
+                 {e:#}. The catalog and docs/augmentations now disagree; re-run once the path is \
+                 writable, or a fresh clone will restore the superseded shape and report success."
+            )
+        })?;
+
+    if !outcome.refused.is_empty() {
+        return Err(RecoverableError::new(format!(
+            "the augmentation WAS updated, but its committed sidecar was NOT republished. \
+             This call did not set {fields}, and the sidecar disagrees with the catalog on \
+             {those}. One of the two is stale and nothing here can tell which — mtime cannot, \
+             because a checkout stamps a file with checkout time whatever its shape's age. \
+             Publishing the row would overwrite a committed value this call never spoke for, \
+             which is the loss `sidecar_shape_drift` exists to prevent. Read the difference, \
+             resolve it from the correct side, then re-run — the field you DID set will travel \
+             then. `librarian(action=\"doctor\")` reports the drift.",
+            fields = outcome.refused.join(", "),
+            those = if outcome.refused.len() == 1 {
+                "it"
+            } else {
+                "them"
+            },
+        )));
+    }
     Ok(())
 }
 
@@ -215,7 +243,13 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
         },
     )?;
 
-    sidecar_write_through(&cat, &a.id)?;
+    // Replace semantics: the caller speaks for the entire shape, including the fields it
+    // omitted — those reset to None by documented design. So nothing here is unauthored.
+    sidecar_write_through(
+        &cat,
+        &a.id,
+        crate::librarian::augmentation_sidecar::Authored::All,
+    )?;
 
     Ok(json!("ok"))
 }
@@ -428,7 +462,33 @@ impl Tool for ArtifactAugment {
                                 refreshed_at_commit: existing.refreshed_at_commit.clone(),
                             },
                         )?;
-                        sidecar_write_through(&cat, &a.id)?;
+                        // Merge semantics: the upsert above PRESERVED every field this call
+                        // did not pass, so only the passed ones were authored here. Anything
+                        // else must not be republished over a sidecar that disagrees.
+                        let mut authored: Vec<&'static str> = Vec::new();
+                        if a.prompt.is_some() {
+                            authored.push("prompt");
+                        }
+                        if a.params_schema.is_some() {
+                            authored.push("params_schema");
+                        }
+                        if a.render_template.is_some() {
+                            authored.push("render_template");
+                        }
+                        if a.entry_collection.is_some() {
+                            authored.push("entry_collection");
+                        }
+                        if a.append_mode.is_some() {
+                            authored.push("append_mode");
+                        }
+                        if a.history_cap.is_some() {
+                            authored.push("history_cap");
+                        }
+                        sidecar_write_through(
+                            &cat,
+                            &a.id,
+                            crate::librarian::augmentation_sidecar::Authored::Only(&authored),
+                        )?;
                         patched_siblings = true;
                     }
                 }
@@ -1411,6 +1471,104 @@ mod tests {
             !sidecar.exists(),
             "declared-but-absent is the export's case and doctor reports it; creating the file \
              here would make every augment call a repo-writing side effect"
+        );
+    }
+
+    /// A merge call must not silently republish a shape field it did not set.
+    ///
+    /// The write-through stands in front of `sidecar_shape_drift`, whose entire design
+    /// position is that when the catalog and the committed sidecar disagree, **the
+    /// direction is undecidable without a human** — its own detail says so, and warns
+    /// "if the SIDECAR is right … do NOT export — that would overwrite their shape with
+    /// your stale row". Resolving that automatically, catalog-wards, on a call that
+    /// named a different field, is exactly the move that check exists to prevent.
+    ///
+    /// Measured instance: a `--merge --params-schema` call republished a stale
+    /// `render_template` over the correct committed one, and it was recovered only
+    /// because a pre-integration catalog backup happened to exist
+    /// (`docs/issues/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`).
+    #[tokio::test]
+    async fn a_merge_call_refuses_to_republish_a_shape_field_it_did_not_set() {
+        use crate::librarian::augmentation_sidecar as sc;
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
+
+        ArtifactAugment
+            .call(&ctx, json!({"id": "art1", "prompt": "p"}))
+            .await
+            .unwrap();
+        export_sidecar(&ctx, &sidecar, "art1");
+
+        // The load-bearing fixture detail: the committed sidecar holds a
+        // `render_template` the catalog row does not. That asymmetry IS the case under
+        // test — it is the shape of the measured incident, where the on-disk value was
+        // the correct one and the row's was the loss-window leftover. Make the two
+        // agree and this test passes while testing nothing.
+        let mut committed = sc::read(&sidecar).unwrap();
+        committed.render_template = Some("the correct, human-authored template".into());
+        sc::write(&sidecar, &committed).unwrap();
+
+        let err = ArtifactAugment
+            .call(
+                &ctx,
+                json!({"id": "art1", "merge": true, "entry_collection": "rows"}),
+            )
+            .await
+            .expect_err("republishing an unnamed field over a disagreeing sidecar must refuse");
+
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "a refusal is recoverable — sibling calls must survive it: {err:#}"
+        );
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("render_template"),
+            "the refusal must NAME the field it declined to overwrite, or the operator \
+                 cannot act on it: {msg}"
+        );
+
+        assert_eq!(
+            sc::read(&sidecar).unwrap().render_template.as_deref(),
+            Some("the correct, human-authored template"),
+            "and it must not have been overwritten on the way to refusing — a refusal \
+                 that already destroyed the value is not a refusal: {msg}"
+        );
+    }
+
+    /// A REPLACE call authors the whole shape, so nothing in it is unnamed.
+    ///
+    /// `merge=false` resets omitted fields by documented design — that is the foot-gun
+    /// `merge=true` exists to avoid, not an accident. So the refusal above must not fire
+    /// here, or the guard would block the one path whose caller really did intend to
+    /// speak for every field.
+    #[tokio::test]
+    async fn a_replace_call_publishes_the_whole_shape_including_fields_it_omitted() {
+        use crate::librarian::augmentation_sidecar as sc;
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
+
+        ArtifactAugment
+            .call(&ctx, json!({"id": "art1", "prompt": "p"}))
+            .await
+            .unwrap();
+        export_sidecar(&ctx, &sidecar, "art1");
+
+        let mut committed = sc::read(&sidecar).unwrap();
+        committed.render_template = Some("about to be replaced, deliberately".into());
+        sc::write(&sidecar, &committed).unwrap();
+
+        ArtifactAugment
+            .call(&ctx, json!({"id": "art1", "prompt": "p2"}))
+            .await
+            .expect("a replace call speaks for the whole shape and must not be refused");
+
+        assert_eq!(
+            sc::read(&sidecar).unwrap().render_template,
+            None,
+            "replace semantics reset the omitted field, and the sidecar must follow the \
+                 row rather than keep a value the row no longer holds"
         );
     }
 }

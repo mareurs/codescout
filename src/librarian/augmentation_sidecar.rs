@@ -179,6 +179,30 @@ pub fn write(path: &Path, sidecar: &AugmentationSidecar) -> Result<()> {
     Ok(())
 }
 
+/// Which shape fields the calling `artifact_augment` actually spoke for.
+///
+/// The distinction matters because `merge=true` **preserves** every field the caller did not
+/// pass. A preserved field was not authored by this call, so the call carries no mandate to
+/// publish it over a committed value that disagrees.
+#[derive(Clone, Copy, Debug)]
+pub enum Authored<'a> {
+    /// A `merge=true` call named exactly these.
+    Only(&'a [&'static str]),
+    /// A `merge=false` call replaces the whole shape, omissions included — that reset is
+    /// documented behaviour rather than an accident, so every field is spoken for.
+    All,
+}
+
+/// The outcome of a write-through attempt.
+#[derive(Debug, Default)]
+pub struct WriteThrough {
+    /// The repo-relative sidecar path, when a file was rewritten.
+    pub written: Option<String>,
+    /// Shape fields on which the committed sidecar disagrees with the row and which this call
+    /// did NOT author. Non-empty means nothing was written and a human must pick a side.
+    pub refused: Vec<&'static str>,
+}
+
 /// Keep an **already-committed** sidecar true after a shape change.
 ///
 /// Writes only when the artifact declares a sidecar that already exists on disk, and only
@@ -201,21 +225,37 @@ pub fn write(path: &Path, sidecar: &AugmentationSidecar) -> Result<()> {
 /// restores clean. Repaired by hand in `2a8decc5`; this function is why hand-editing is not
 /// the standing remedy.
 ///
-/// Returns the repo-relative sidecar path when a file was rewritten, `None` when there was
-/// nothing to do. Callers must surface a failure rather than swallow it: on error the catalog
-/// has already moved and the committed file has not, which is precisely the harmful state.
+/// **It publishes the whole row, and therefore refuses to publish fields it was not sent to
+/// change.** Rendering is row-wide by design — a sidecar is the catalog row's committed
+/// projection, and a partial file would match no catalog anywhere. But that made a
+/// single-field patch republish five other fields as a side effect, and when one of those was
+/// stale it overwrote a correct committed value: measured 2026-08-31, a `--merge
+/// --params-schema` call republished a loss-window `render_template` over the right one,
+/// recovered only because a pre-integration catalog backup happened to exist. That is exactly
+/// the move `sidecar_shape_drift` warns against — *"if the SIDECAR is right … do NOT export —
+/// that would overwrite their shape with your stale row"* — and that check's whole design
+/// position is that **the direction is undecidable without a human**. Resolving it silently,
+/// catalog-wards, on a call that named a different field contradicts the check it stands in
+/// front of. So a disagreement on an unauthored field is reported, not resolved.
+/// (`docs/issues/archive/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`.)
+///
+/// Returns the repo-relative sidecar path when a file was rewritten, and the refused fields
+/// when it declined. Callers must surface a failure rather than swallow it: on error the
+/// catalog has already moved and the committed file has not, which is precisely the harmful
+/// state.
 pub fn write_through(
     cat: &crate::librarian::catalog::Catalog,
     artifact_id: &str,
-) -> Result<Option<String>> {
+    authored: Authored<'_>,
+) -> Result<WriteThrough> {
     use crate::librarian::tools::doctor::{parse_declaration, Declaration};
 
     let Some(art) = crate::librarian::catalog::artifact::get(cat, artifact_id)? else {
-        return Ok(None);
+        return Ok(WriteThrough::default());
     };
     // An artifact whose file is unreadable declares nothing; `reindex` owns that case.
     let Ok(content) = std::fs::read_to_string(&art.abs_path) else {
-        return Ok(None);
+        return Ok(WriteThrough::default());
     };
     let declared = crate::librarian::frontmatter::parse(&content)
         .ok()
@@ -225,18 +265,18 @@ pub fn write_through(
         declared.as_ref().map(parse_declaration)
     else {
         // `true` with no path, absent, or unparseable: nothing on disk this may keep true.
-        return Ok(None);
+        return Ok(WriteThrough::default());
     };
     let Some(root) = crate::librarian::current_project::lookup_git_root(&art.abs_path) else {
-        return Ok(None);
+        return Ok(WriteThrough::default());
     };
     let path = root.join(&rel);
     if !path.is_file() {
-        return Ok(None);
+        return Ok(WriteThrough::default());
     }
 
     let Some(row) = crate::librarian::catalog::augmentation::get(cat, artifact_id)? else {
-        return Ok(None);
+        return Ok(WriteThrough::default());
     };
     let rendered = serde_yml::to_string(&AugmentationSidecar::from_row(&row))
         .context("serializing augmentation sidecar")?;
@@ -244,10 +284,36 @@ pub fn write_through(
     // untouched. `params` are not part of this rendering, so a params-only write is a no-op
     // here by construction rather than by the caller remembering to skip it.
     if std::fs::read_to_string(&path).is_ok_and(|on_disk| on_disk == rendered) {
-        return Ok(None);
+        return Ok(WriteThrough::default());
     }
+
+    // The file and the row disagree; WHICH fields disagree decides whether this call may
+    // overwrite them. `drifting_fields` rather than a second opinion, so the refusal covers
+    // exactly the set `sidecar_shape_drift` would report — one law, one implementation.
+    //
+    // An unparseable sidecar yields no field list, so it falls through and is overwritten, as
+    // before. That case is `sidecar_unparseable`'s, and refusing here would block a repair on
+    // a file nothing else can read.
+    if let Authored::Only(named) = authored {
+        if let Ok(committed) = read(&path) {
+            let refused: Vec<&'static str> = drifting_fields(&row, &committed)
+                .into_iter()
+                .filter(|f| !named.contains(f))
+                .collect();
+            if !refused.is_empty() {
+                return Ok(WriteThrough {
+                    written: None,
+                    refused,
+                });
+            }
+        }
+    }
+
     std::fs::write(&path, rendered).with_context(|| format!("writing {}", path.display()))?;
-    Ok(Some(rel))
+    Ok(WriteThrough {
+        written: Some(rel),
+        refused: Vec::new(),
+    })
 }
 
 /// The shape fields on which a committed sidecar disagrees with the catalog's live row.
