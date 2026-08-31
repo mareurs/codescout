@@ -9,6 +9,7 @@ tags:
 - guide-ledger
 - prompt-surface
 - doc-vs-code
+unverified: 'ROOT CAUSE NOT FOUND. The 84% double-delivery figure is solid (n=87, two machines, both orders ~50/50). What produces it is not: the 2026-08-31 investigation ELIMINATED four candidate mechanisms -- subagents having their own ledger file (0 of 40 are agent-*), spurious ledger clearing (13 topics survive a rebuild+reconnect in a live ledger), ordering (39 parent-first vs 34 subagent-first), and process overlap (real but only 2 of 7 multi-process conversations, which cannot produce 73 of 87). It also FALSIFIED persist()''s own doc-comment claim that two live writers per session id is ''unreachable'' -- measured reachable, with a concrete overlapping pair, and persist is a whole-map overwrite rather than read-modify-write, so the later writer drops the other''s topics. That is a separate defect in the same mechanism and needs its own fix and test. Remaining hypothesis, UNTESTED: a subagent''s tool calls reach a server process whose in-memory `emitted` was loaded before the parent''s injection was written. Post-fix sample is 5 of 5, far too small to conclude the companion snapshot/restore fix is ineffective -- do not read it as one.'
 ---
 
 ## Symptom
@@ -47,6 +48,52 @@ also contains the **opening** marker
 2026-08-27 parsing contract. Session dates come from each transcript's own first
 `timestamp` field, never mtime.
 
+## Investigation 2026-08-31 — four mechanisms eliminated, one documented assumption falsified
+
+Runtime state first, source second, per the project's own rule.
+
+**Eliminated — subagents do NOT get their own ledger.** `~/.local/state/codescout/guide_hints/`
+holds **40 ledgers, 0 of them `agent-*`**; every filename is a session uuid. So a subagent
+shares its parent's ledger file, exactly as `workspace-state` documents. This was the most
+plausible explanation and it is wrong.
+
+**Eliminated — the ledger is not being spuriously cleared, and it survives `/mcp`.** This
+session's live ledger carries 13 topics with stamps from `11:32` still present at `12:58`,
+across a rebuild and reconnect. Section-grain keys (`librarian#Filter Syntax`, ...) dedup
+correctly alongside whole-topic keys. `project-activation-bootstrap` re-stamped at `12:57`
+is the session-opening topic re-arming on reconnect — documented behaviour, not a leak.
+
+**Eliminated — ordering.** The first injection is parent-first in **39** cases and
+subagent-first in **34**, near 50/50. A shared ledger should permit neither, so this is not
+an artifact of who ran first.
+
+**FALSIFIED — `persist()`'s single-writer assumption.** The method's own doc comment says:
+
+> This assumes a **single writer per session id**; two live processes racing on the same
+> fixed `.tmp` name is a distinct, dismissed-as-**unreachable** case. [...] Deliberately NOT
+> read-modify-write [...] **last writer wins**. Two live processes sharing one session id
+> would need to write simultaneously for that to matter, and an MCP reconnect is
+> kill-then-spawn, not overlap.
+
+Measured against `usage.db`, which records `session_id` (per **process**) alongside
+`cc_session_id` (per **conversation**):
+
+| | |
+|---|---|
+| conversations mapping to >1 server process | **7** |
+| …of those, with **overlapping** process lifetimes | **2** |
+| max distinct processes for one conversation | **28** |
+
+So the case dismissed as unreachable is **reachable**. Concretely, `cc_session_id`
+`428b66b8…` has process `a9a52aa3` alive 2026-08-28 16:16 → 2026-08-29 07:18 and process
+`057a79c6` alive 2026-08-29 06:36 → 06:37, wholly **inside** that window. Because `persist`
+is a whole-map overwrite rather than read-modify-write, the later writer drops every topic
+the other process added while it held its own snapshot.
+
+**But rarity means this is NOT the driver of the 84%** — 2 of 7 cannot produce 73 of 87. It
+is a real, separate defect in a documented-as-impossible case, found while looking for
+something else. Recorded here rather than split out only because it lives in the same
+mechanism; it deserves its own fix and its own test.
 ## What is NOT established
 
 - **n = 5 post-fix.** The 100% post-2026-08-27 rate is 5 of 5. It is consistent with no
@@ -92,4 +139,3 @@ Measured the same day (`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-
 bytes they receive against main sessions' ~55%, and 38 of 87 engage none of it. So this is
 not merely repeated delivery — it is repeated delivery into the population least likely to
 use it.
-
