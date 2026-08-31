@@ -7523,7 +7523,9 @@ false, `should_refuse` correctly returns false, and `expect_err` panics with a
 message blaming the guard. The assumption is stated in a code comment
 (*"Assumes the repo checkout is not itself under the OS temp dir, which holds
 here"*) and enforced by nothing. Filed as
-`docs/issues/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
+`docs/issues/archive/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`
+(archived 2026-08-31; fixed at `3ec8e500`, patch-id
+`a09e8ef8809f8ccf2a7d3b0d52f50dce2cf58ad4`).
 
 **What the counterfactual costs.** Without the control, the two available readings
 were both wrong and both expensive: report "this branch breaks three librarian

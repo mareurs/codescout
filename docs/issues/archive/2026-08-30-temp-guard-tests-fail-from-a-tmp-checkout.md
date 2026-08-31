@@ -1,17 +1,18 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- tests
+- librarian
+- temp-guard
+- environment-sensitivity
+- false-attribution
+closed: 2026-08-31
 opened: 2026-08-30
-closed:
-severity: medium
 owner: marius
 related: []
-tags:
-  - tests
-  - librarian
-  - temp-guard
-  - environment-sensitivity
-  - false-attribution
-kind: bug
+severity: medium
+unverified: 'No CI lane runs from a cwd under the OS temp dir, so nothing would catch a REGRESSION of this fix by re-deriving the premise from current_dir(). The protection is structural rather than tested: TempGuardEnv has no default, so every construction site must state its temp root and the compiler enumerates any that do not. A deliberate revert would still pass CI.'
 ---
 
 # BUG: three temp-guard tests fail from any checkout under `/tmp`, and blame the guard for it
@@ -145,6 +146,42 @@ proof, which is the same trade `ET-9` T7's row refuses for the loopback-guard te
 
 ## Fix
 
+**Fixed 2026-08-31 on `experiments` at `3ec8e500`**, patch-id
+`a09e8ef8809f8ccf2a7d3b0d52f50dce2cf58ad4`. Option 2, as this section preferred.
+
+`TempGuardEnv { temp_dir, opted_in }` resolves the process environment **once, at the edge**
+(`from_env`), and `guard_temp_workspace_write` takes it as an argument. `ToolContext` carries it,
+so the `create`/`reindex` wiring tests inject a synthetic temp root via
+`TestToolContextBuilder::with_temp_guard`. Both "inside" and "outside" then live physically under
+the OS temp dir, and which is which is a property of the **fixture** rather than of the machine.
+
+**Not** the `TMPDIR`-plus-`#[serial]` shape, which was the first design I reached for.
+`docs/conventions/test-env-isolation.md` records that as option B — *NOT VIABLE*, "do not
+reintroduce this pattern" — because `set_var` is process-global and `#[serial]` only locks
+against tests that opt in; the class was driven from 119 occurrences to 0. This is option A.
+
+The new field deliberately carries **no default**, so the compiler enumerated all nine remaining
+construction sites rather than letting any silently inherit the machine's temp dir.
+
+### Correction — the trigger is the CWD, not the checkout
+
+This file's title and Reproduction say "any checkout under `/tmp`". Measured at fix time with the
+**same binary and same source**, cwd as the only variable:
+
+| cwd | result |
+|---|---|
+| `/tmp/...` | **3 FAILED** |
+| `~/work/claude/codescout` | 3 passed |
+
+The tests never consult where the source lives, so the checkout location is irrelevant; a `/tmp`
+worktree failed because its cwd was also under `/tmp`. The original framing is not wrong — it
+describes the observed incident — it is narrower than the defect.
+
+That distinction changed the fix. A `CARGO_MANIFEST_DIR`-based repair (compile-time crate root,
+immune to cwd) would have cleared the case reproduced here and left the *reported* one — a `/tmp`
+worktree, where checkout and cwd are both under temp — still broken. Fixing the probe's artifact
+instead of the incident was a live risk, avoided only because the control was run.
+
 Not applied — filed on notice while merging a different branch.
 
 Make the precondition **loud instead of assumed**. Two shapes, and they are not
@@ -168,8 +205,22 @@ following this project's own scratchpad instruction will be in.
 
 ## Tests added
 
-None — the fix is the test change.
+The three that were failing now pass from a `/tmp` cwd — `10/10` where it was `3` red — and one
+new test guards the guard:
 
+- `the_same_fixture_is_allowed_once_the_caller_opts_in`
+  (`src/librarian/tools/temp_write_guard.rs`) — **non-vacuity**. The *same* fixture must be
+  ALLOWED with `opted_in: true` and still REFUSED without it. Without that pairing, a fixture
+  that quietly stopped satisfying the refusal precondition — precisely this bug — turns every
+  refusal test green again, and green is also what they report when they are working.
+- `synthetic_temp()` is the shared fixture, with the load-bearing detail annotated on it: both
+  directories are physically under the OS temp dir *on purpose*, and both paths are canonicalized
+  because the guard canonicalizes what it compares — on a host whose temp dir is a symlink an
+  uncanonicalized prefix would not match and the fixture would silently stop discriminating.
+
+The non-vacuity check is a **fixture flip rather than a source mutation**, deliberately: the tree
+is shared with concurrent sessions, and a transient edit to `should_refuse` would surface in their
+runs as an unexplained red — the failure mode this repo has been recording all day.
 ## Workarounds
 
 Run the suite from a checkout outside the OS temp dir. If a `/tmp` worktree is
@@ -179,12 +230,17 @@ change under test.
 
 ## Resume
 
-Implement fix option 2 in `src/librarian/tools/temp_write_guard.rs` and its two
-siblings (`create.rs:1133`, `reindex.rs:1198`): give the wiring tests an injectable
-`temp_dir` so they stop deriving "outside-temp" from `current_dir()`. Then verify
-from a worktree under `/tmp` — a green run there is the whole point, and a run in
-the main checkout proves nothing, since it is green today.
+N/A — fixed and verified from the configuration that mattered. Gate green in the documented order:
+`fmt` 0 diffs, `clippy --workspace --all-targets --features local-embed` 0 warnings, lean
+`--no-default-features` 3404 passed / 0 failed (third), default `--workspace` 4964 passed / 0
+failed (last).
 
+**One honest gap, recorded in `unverified:` so a query can read it.** No CI lane runs from a cwd
+under the OS temp dir, so nothing would catch a *regression* — someone re-deriving the premise
+from `current_dir()` would pass CI exactly as before. The protection is **structural, not tested**:
+`TempGuardEnv` has no `Default`, so every construction site must state its temp root and the
+compiler names any that do not. That is a stronger guard than a test for accidental drift and no
+guard at all against a deliberate revert.
 ## References
 
 - `src/librarian/tools/temp_write_guard.rs:14-21` — `should_refuse`, correct.

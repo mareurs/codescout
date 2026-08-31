@@ -20,7 +20,7 @@ const ALLOW_ENV: &str = "CODESCOUT_ALLOW_TEMP_WORKSPACE";
 /// under `std::env::current_dir()`, which silently becomes an *inside*-temp catalog when the
 /// cwd is itself under the OS temp dir. `should_refuse` then correctly declined to fire and
 /// `expect_err` panicked with a message blaming the guard — an unmet premise reported as a
-/// guard defect. `docs/issues/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
+/// guard defect. `docs/issues/archive/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
 #[derive(Clone, Debug)]
 pub struct TempGuardEnv {
     /// What counts as "the OS temp dir" for this decision, canonicalized.
@@ -101,7 +101,7 @@ pub(crate) fn guard_temp_workspace_write(
 /// dir; the guard then correctly declined and `expect_err` panicked with a message blaming
 /// the guard. Measured 2026-08-31 — same binary, same source, cwd the only variable: 3
 /// failed from a `/tmp` cwd, 3 passed from the checkout.
-/// `docs/issues/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
+/// `docs/issues/archive/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
 ///
 /// Keep `scratch` alive for the duration of the test; dropping it removes both directories.
 /// Both paths are canonicalized because the guard canonicalizes what it compares — on a host

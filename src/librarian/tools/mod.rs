@@ -110,7 +110,7 @@ pub struct ToolContext {
     /// `std::env::temp_dir()`, and no such directory is guaranteed to exist.
     /// Deriving one from `current_dir()` inverts silently when the cwd is itself
     /// under temp. See
-    /// `docs/issues/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
+    /// `docs/issues/archive/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
     pub temp_guard: crate::librarian::tools::temp_write_guard::TempGuardEnv,
 }
 #[cfg(test)]
