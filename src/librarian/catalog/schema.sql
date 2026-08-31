@@ -164,3 +164,8 @@ CREATE TABLE IF NOT EXISTS catalog_meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- catalog_audit + its triggers are NOT created here: audit::install (audit.rs)
+-- creates them on every open, AFTER migrations, rebuilding triggers from live
+-- PRAGMA table_info so table-copy migrations can never orphan them. See
+-- docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md.

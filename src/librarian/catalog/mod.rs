@@ -5,6 +5,7 @@ use std::path::Path;
 use crate::librarian::workspace::WorkspaceConfig;
 
 pub mod artifact;
+pub(crate) mod audit;
 pub mod augmentation;
 pub mod commits;
 pub mod entry_cite;
@@ -423,6 +424,7 @@ impl Catalog {
         )?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
         run_migrations(&conn, None).context("running migrations")?;
+        audit::install(&conn).context("installing audit triggers")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
@@ -435,6 +437,7 @@ impl Catalog {
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
         run_migrations(&conn, None).context("running migrations")?;
+        audit::install(&conn).context("installing audit triggers")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
@@ -463,6 +466,7 @@ impl Catalog {
         if needs_v6 {
             migrate_v6::drop_legacy_and_stamp(&conn).context("dropping legacy columns")?;
         }
+        audit::install(&conn).context("installing audit triggers")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
