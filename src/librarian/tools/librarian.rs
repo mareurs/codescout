@@ -14,7 +14,6 @@ impl Tool for Librarian {
 
     fn description(&self) -> &'static str {
         "Workspace-level librarian operations. \
-             action: context | reindex | tracker_design | workspace_state_at | audit_doc_refs | legibility_scan | link_scan | doctor | merge_worktree. \
              context: pack topic/anchor neighbourhood into a markdown bundle. \
              reindex: re-scan and classify markdown artifacts. \
              tracker_design: return teaching prompt + archetype library (call BEFORE artifact(create) for trackers). \

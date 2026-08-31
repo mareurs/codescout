@@ -13,7 +13,7 @@ impl Tool for Artifact {
     }
 
     fn description(&self) -> &'static str {
-        "Artifact CRUD and query. action: find | get | create | update | move | delete | graft | link | graph | state_at | append_entry | update_entry. \
+        "Artifact CRUD and query. \
          Defaults: scope=project (active project only), archived/superseded hidden when \
          filter does not constrain status. Shortcut params kind/status expand to eq-filters \
          and combine with filter via AND. \

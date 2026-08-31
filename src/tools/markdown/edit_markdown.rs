@@ -1219,8 +1219,8 @@ impl Tool for EditMarkdown {
     }
 
     fn description(&self) -> &str {
-        "Edit a Markdown document by heading. Actions: replace, insert_before, insert_after, \
-             remove, edit. Supports batch mode via edits array. Optional `frontmatter: {set, delete}` \
+        "Edit a Markdown document by heading. Supports batch mode via edits array. \
+             Optional `frontmatter: {set, delete}` \
              mutates the YAML frontmatter block atomically alongside any body edits."
     }
 
