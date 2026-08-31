@@ -452,6 +452,14 @@ what plausibility means here. Same law as the 2/3 marker above, with the accurac
 rather than earned, which is the worse case: nothing had to build trust first. Derivation and
 full count table: `cluster-promotion-session-log:F-3`.
 
+> **This mechanism has its own row since 2026-09-01 — `OB-9`, *a near-miss number sits inside the
+> reader's resolution limit* (`3cff5fb7`, patch-id `40f6831e967491430979abb9d68fa8f356b7a88f`).**
+> The paragraph above is kept because the two entries split a question this instance happens to
+> answer twice. `OB-4` asks **why a value is trusted** — here, accidental accuracy standing in for
+> earned accuracy. `OB-9` asks **why a wrong value is not caught downstream** — the reader's
+> resolution limit. Different remedies, so neither subsumes the other; read `OB-9` first if the
+> question is about a *number*.
+
 **The confirmation of that correction is itself subject to this entry's substrate rule.** Two
 sessions' `ListAgents` outputs agreed on the composition of the four — three `backend-kotlin`,
 one codescout peer — from opposite vantage points, each listing naming the other. That is
