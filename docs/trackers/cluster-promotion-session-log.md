@@ -135,6 +135,38 @@ about `IC-11` backfilling — the edits were staged in the shared index when it 
 warning message was in flight while it did. `OB-7`'s half is in `8ceb9ea9`. Recorded because the
 ledger prose cites this entry, so a reader following the correction arrives here and would
 otherwise find no pointer back to the commit that carries it.
+**PROBE RUN 2026-09-01, and it refuted my own hypothesis while producing the negative
+control.** Seeded from the dispatch side as prescribed: enumerate every `impl Tool for X`
+(41 impls, 37 production types), diff against `CodeScoutServer::new`'s registry.
+
+**The false-positive mode I was worried about does not occur for this codebase's dominant
+idiom, and the reason is worth keeping.** I feared `dyn Trait` dispatch would hide a symbol
+from a text search. It does not: a trait object must be **constructed**, and construction is
+by name — `Arc::new(Grep)` — so every live tool type is named at least once at registration.
+The delegating pattern is by name too (`"activate" => ActivateProject.call(…)`,
+`"register" => RegisterLibrary.call(…)`). Dispatch consumes the name; it does not erase it.
+The genuine false-positive candidates are narrower than I wrote: **macro-generated names and
+re-export-only aliases**, neither of which the tool registry uses.
+
+**And the check found a real instance — the negative control that nine earlier probes could
+not produce.** `ListFunctions` and `ListDocs`: `impl Tool`, 25 identifier hits across four
+files, **every non-definition hit test code**, zero registration, zero production call sites.
+Fifteen tests guarding two tools no agent can reach. Filed as
+`docs/issues/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md`. So the state
+the check exists to detect is now *observed*, not merely reasoned — and the first observation
+of it was a true positive.
+
+**The cross-instrument check I designed was unavailable, which is its own finding.**
+`references("ListFunctions")` returned **0** with its false-zero guard firing correctly
+(*"appears as a whole word in 3+ other source files — the reference index may still be warming"*),
+and `references("GetUsageStats")` returned `symbol not found`. So the LSP half of the
+substrate comparison could not run, and the conclusion above rests on the text instrument
+alone. That is exactly the limitation this entry was opened about, still true — the guard
+naming it is the difference between a degraded instrument and a silent one.
+
+**Net effect on `OB-7`:** the family-1 check is stronger than the correction credited it, and
+its residual risk is narrower and differently shaped. `GetUsageStats` is left explicitly
+unresolved rather than swept in.
 ## W-1 — Re-probing the served copy after a rebuild found 5 of 11 peers on deleted inodes, and an open bug's fix failing open
 
 **Observed:** 2026-09-01 00:35, immediately after the operator rebuilt the release binary and reconnected. Scouting whether the rebuild invalidated anything published earlier in the session.
