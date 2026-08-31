@@ -143,6 +143,139 @@ working-tree hash against the hash the session last wrote would catch it — but
 `core.hooksPath` is broken (`docs/issues/2026-08-30-core-hookspath-points-at-pre-rename-path.md`),
 so no hook fires here at all.
 
+## Instance 5 — the captured side, and an announce channel that was used and did not help
+
+2026-08-31 23:53, commit `e0525462`. Same file as Instance 4 (`docs/trackers/issue-clusters.md`),
+opposite role: this time the session writing about the mechanism was the **captured** party, not
+the capturing one. Five edits — IC-4's routing adjudication, IC-7's `two of three` → `two of four`,
+IC-9's `Mechanism status` correction and field-block reorder, the Index's `Six` → `Eight of
+eleven`, and two Index preamble notes — all landed inside a commit whose subject and 30-line body
+are **entirely** about IC-6's promotion to `CLAUDE.md` and name none of them.
+
+Verified rather than inferred: each of the six changed strings is present in `HEAD` exactly once
+(`git show HEAD:docs/trackers/issue-clusters.md | grep -c`), and `git log -S'passes admission
+test; hook owed'` returns `e0525462` — the IC-6 commit — as the sole introducing commit for an
+IC-4 adjudication. Nothing was lost; the record is simply wrong about who did what and why.
+
+**What this instance adds is the failure of the remaining non-worktree remedy.** Two minutes
+before the commit, the captured session sent the capturing session a `SendMessage` naming every
+field it was editing and asking it not to undo them. The channel existed, was used, was
+specific, and was early. It did not prevent the capture, and could not have: cross-session
+messages drain at the **receiver's next tool round**, and the receiver was mid-turn on a
+commit. So announcing is subject to exactly the defect
+`docs/issues/2026-08-30-a-transient-uncoordinated-mutation-during-an-announced-window.md`
+records — an announcement is not a lock, and a window announced is still a window.
+
+That closes the remedy space on this side. (1) path-scoping fails on contended files
+(Instance 4). (3) is noise. **Announcing fails on delivery latency** — and unlike the other two
+it fails *silently to the sender*, whose message returns `success: true`. Only (2) a separate
+worktree removes the shared tree that all three are trying to police.
+
+**One thing to check next time, which this instance could not settle after the fact.** The
+capturing commit's message ends `Gate green: cargo test --workspace 4991/0`. On a shared
+checkout a verification run and the commit citing it bracket a window a peer can write into, so
+a green claim in a message attests to a tree that may not be the tree that was tested. Whether
+that happened here is **not recoverable** — which is `issue-clusters:IC-10` (*authorship on a
+shared checkout is unrecoverable after the fact*) applying to verification rather than to
+authorship. A gate claim would need the tree hash it ran against to be checkable at all.
+
+## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
+
+Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because
+the capture is performed by the other session's `git add -A`. This is worse, and it is the
+opposite direction: **`git commit -- <pathspec>` can capture THEIRS.**
+
+`git-commit(1)`: *"When pathspec is given on the command line, commit the contents of the
+files that match the pathspec without recording the changes already staged."* The pathspec
+form commits the **working tree** at those paths, ignoring the index. So on a shared
+checkout, naming a path you edited also commits whatever a peer wrote to that same path
+since you last looked — and the more careful you are about scoping, the more confident you
+are in a command that reads the wrong source.
+
+That is not hypothetical here: the peer session reports capturing this repo's `IC-11` that
+way in `cab5c9e3`.
+
+**Audit of this session's six commits: nothing captured.** `14997d36`, `5816c8eb`,
+`89550d2a`, `63f135f1`, `70f4eaf6`, `1757ac11` — every file in every one is a file this
+session edited. But the reason is `git status --short` run immediately before each commit,
+confirming the peer's dirty set was disjoint. That is **discipline, not structure**: it
+worked six times and would have failed the first time the two sets overlapped, silently,
+with the commit reporting success.
+
+The near-miss is on the record: at `63f135f1` this session edited `docs/TAXONOMY.md`, a
+file the peer had committed minutes earlier and was actively working in. It was clean on
+disk at that instant. Had it not been, the pathspec commit would have taken their in-flight
+edit under a message describing only mine.
+
+### The safe form, and why it is the point rather than a workaround
+
+```
+git add <paths> && git diff --cached && git commit
+```
+
+Staging first makes the index — a snapshot you chose — the thing that gets committed, and
+`git diff --cached` is the read that makes the choice reviewable. `--no-verify` also
+silences the check and is the wrong habit.
+
+### Re-ranking, third time
+
+1. **A worktree** — still the only unilateral defence, since it removes the shared working
+   tree instead of coordinating access to it.
+2. **`git add` then a bare `git commit`** — replaces the old remedy (1). Protects the peer
+   from you. Does *not* protect you from their `add -A`.
+3. ~~Path-scoped `git commit -- <paths>`~~ — **withdrawn.** It reads the working tree, so it
+   is a capture vector wearing the costume of a mitigation.
+
+### Mechanism status: shipped, by the other session
+
+`scripts/pre-commit-unreviewed-content.sh` refuses a pathspec commit whose content differs
+from what was staged, verified against four cases including the staged-then-changed-under-you
+case that is instance 4. That is the shape CLAUDE.md § *Observer Blindness* asks for — a
+check that runs when nobody is worried — and it closes this class for both directions of the
+pathspec half. Worth noting who built it: the party who had just performed a capture, not
+the party who had just documented one. Neither session could have written it from its own
+evidence alone.
+
+## The read-side twin: during a peer's pre-commit run, your uncommitted work vanishes
+
+All of the above is about writes. There is a **read** hazard with the same root, and it was
+hit within a minute of the hooks going live — by the session writing this file.
+
+`pre-commit` stashes unstaged changes before running hooks and restores them afterwards. On
+a shared checkout that stash covers **every session's** in-flight work, not just the
+committing one's. So for the duration of a peer's commit:
+
+- your edited file reverts to its HEAD content;
+- `git status` reports it **clean**;
+- a `grep` for text you just wrote returns **0**;
+- and `git stash list` is **empty**, because pre-commit uses its own patch cache under
+  `~/.cache/pre-commit` rather than `git stash` — so the obvious way to detect a stash says
+  there is not one.
+
+Measured 2026-08-31: an `artifact(update)` on this file returned `updated: true`, and the
+next two reads showed a clean tree and no matching text. The natural conclusion — that a
+peer had overwritten the write — was wrong. The catalog's own event log settled it: a
+`field_patch` recording `prev_bytes: 9723 -> new_bytes: 12912`, and `wc -c` on the file
+agreeing at 12912 once the window closed.
+
+**Why this is worth a section rather than a footnote.** Every symptom points at data loss,
+and data loss is the one failure in this file's family that would justify dropping
+everything. It is also self-clearing, so a session that reacts — by re-writing the section
+from memory — races the restore and can genuinely lose or duplicate work while "recovering"
+from a problem that no longer exists.
+
+**The check that distinguishes them, and it is cheap:** the catalog event log
+(`artifact_event(action="list", artifact_id=...)`) records byte counts per write and is not
+touched by any git operation. If the last `field_patch` matches what you meant to write,
+your write landed and you are looking at a transient tree. Re-read after the peer's commit
+lands before concluding anything. For non-artifact files the same role is played by the
+file's own `wc -c` — compare against `git show HEAD:<path> | wc -c` rather than trusting
+`git status`.
+
+**Not a criticism of the hooks.** They close the write half, which is the half that had
+already cost three captures. This is the cost side of that trade, it is small, and it is
+only dangerous while undocumented.
+
 ## Candidate remedies
 
 1. **Path-scoped commits as standing practice** — `git commit -- <explicit paths>`, never
