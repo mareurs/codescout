@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 6
+entry_high_water_OB: 7
 entry_prefix: OB
 ---
 
@@ -126,6 +126,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-7 | 2026-09-01 | a declaration is well-formed, and nothing in production reaches it — including for the compiler, which cannot lint `pub` in a lib crate | the author of the declaration | wrong instrument | **partial** — decidable for 1 of 3 families |
 | OB-6 | 2026-09-01 | a gate collapses "cannot observe" into the confident answer — three states exist, two are offered | the gate, and every reader of its output | wrong instrument | **designed** — exemplar shipped at `b9cc75b4` |
 | OB-5 | 2026-08-31 | a summary keyed only by findings cannot say which checks RAN — absence reads as a clean bill of health | the reader of the report | wrong instrument | **none yet** — designed, 3 lines |
 | OB-4 | 2026-08-31 | a liveness marker with a good hit rate (2/3) spends the trust it earned — and three git-based instruments agreeing is **one** instrument | the session doing cleanup | wrong instrument | **none yet** — worklist |
@@ -620,6 +621,34 @@ For the harness-scoped half add a fourth move, from `post_compact`'s design note
 **Instances:** the 16 members of `cluster/gate-keyed-on-unobservable-event`. They split by whether the substrate that would answer the question exists at all, and the split predicts their fate. **Filesystem/repo-scoped (7)** — `workspace-status-claims-up-to-date-without-checking-git-sync`, `index-status-claims-complete-without-checking-coverage`, `index-status-lock-contention-reads-as-failed`, `symbols-stale-after-external-git-checkout`, `worktree-write-guard-is-dead-code-in-production`, `companion-test-suite-stamped-live-rendezvous-slots`, `buildrs-source-md-outdir-snapshot-staleness`: **all seven are closed** (six fixed, one wontfix). **Harness/peer-scoped (9)** — the three rendezvous members, `post-compact-clears-the-ledger-with-no-compaction-check`, `served-guide-sections-arrive-after-the-call-they-inform`, `subagents-receive-guides-their-parent-already-holds`, `guide-topics-are-atomic-nodes-in-an-unmodelled-graph`, `path-relative-banner-not-rearmed-after-compaction`, `mcp-reconnect-does-not-refresh-server-instructions`: **five are still live.** Where the substrate exists the class is an ordinary bug and gets fixed; where it does not, the members accumulate — which is the argument for move (1), since a third state is available even when the event is not.
 
 **Status:** open — promoted from `IC-2` on 2026-09-01 at n=16 spanning index status, the LSP cache, `build.rs`, companion hook scripts, the guide ledger and the workspace write guard. Sibling to `OB-4`: that entry asks *why a proxy is trusted* (an accuracy record it later spends), this one asks *what the proxy does when wrong* (returns the confident value rather than admitting it cannot tell). Kept apart because the remedies differ — `OB-4` wants you to change instrument, this one wants the instrument to have a third answer.
+
+## OB-7 — a declaration is well-formed, and nothing in production reaches it
+
+**Valid:** invariant
+
+**Rests on:** `issue-clusters:IC-3` (`cluster/declared-not-wired`, n=18 after the `IC-15` boundary settled; 20 when this entry was drafted, and the split below is re-derived against 18); `CLAUDE.md` § *Testing Discipline* — *"name the concrete caller that reaches it"*, which is this class's remedy stated before the class was.
+
+**Class:** a surface declares a capability that **production never reaches**. Every piece is individually correct — the selector, the matcher, the schema field, the enum variant, the computed header — and no call site connects them. The declaration reads as a shipped feature, and the tests pass.
+
+**Blind party:** the author of the declaration, specifically. Writing `**Serves:** edit_file(path~/.claude)` *is* the act of believing it is served; the mental model in which the wiring exists is what produces the line. **A more careful version of the same author writes the same line**, which is the admission test.
+
+**Who can see it:** only an instrument that starts from the **production emission side** and works back to the declaration — never one that starts from the declaration and checks it is well-formed. Every declaration in all 20 members is well-formed.
+
+**Plausible-answer property:** a green suite, a documented feature, a populated schema. Nothing is malformed and nothing errors. The reason ordinary testing does not reach it is structural rather than accidental: **a unit test constructs its own inputs**, so it hands the matcher a selector production never emits, and passes. The test is not weak — it is *scoped to the half that works*.
+
+**Vigilance:** wrong instrument, and this class has an unusually literal blind observer — **the compiler**. Rust's `dead_code` lint cannot fire on `pub` items in a library crate, because it cannot know the crate's consumers and must assume reachability. codescout is lib-plus-bin, so **every `pub fn` under `src/` is exempt by construction regardless of whether anything calls it.** That is the same structure this ledger describes in humans, in a tool: the party best placed to notice holds a parameter (the set of external consumers) that makes noticing impossible. It is why the dead-in-production family survived `-D warnings` on every gate run for months.
+
+**Mechanism status:** partial — **designed and instrument-verified for one of three families, and honestly unsolved for the other two.** The 20 members split by what disconnects the declaration:
+
+1. **Dead in production (9).** The code exists; only tests call it. `references(symbol)` **decides this today** — verified 2026-09-01 on `chunk_size_for_model`, a former member: it returns 16 sites across 5 files, and the production callers (`src/tools/memory/mod.rs:227,283`, `src/main.rs:337`) are cleanly separable from the in-crate test sites at lines 384–439. The check is *non-test caller count == 0*, and the partition needs call-site granularity rather than file granularity, since test modules live inline — which the AST index already carries (`grep` annotates each source hit with its enclosing symbol). Roughly six of the nine are Rust symbols and in scope; the rest are a shell hook and a cargo feature, which need their own reachability notion.
+2. **Schema or doc declares what the code ignores (3).** The check is a round-trip — for each declared field, assert the handler reads it — and it is **weak**: reading a field is not using it, so this detects the absent read and not the ignored value.
+3. **A matcher that can never match (6).** `op-4-path-predicate-can-never-fire`, `triggered-operator-rules-route-nothing-in-production`. This is IC-3's original phrasing — *for each declared selector, assert some production path emits it* — and it is the **hard** one: it needs the set of values production actually emits at a call site, which is a dataflow question no index answers today.
+
+**Do not record this as `designed` for the class.** One family has a decidable check, one has a weak proxy for a check, one has no mechanism at all. `IC-9` was carried at `designed` on exactly this conflation — a member that *named* a check while recording it as insufficient — and the cost was a later reader re-running the measurement it warned against.
+
+**Instances:** the 18 members of `cluster/declared-not-wired`, spanning the embedder chunk budget, the live Qdrant payload (579,311 chunks with empty `ast_kind`/`ast_header`), `grep`'s overflow hints, `link_scan`'s bucket split, `audit_doc_refs`' stubbed-off LSP, the operator-rule router, the constitution glob, librarian's error downcast, the CLI's `doctor`, and a CI lane that compiled no tests behind `server-stack`. `OB-5`'s *Known-open residual* is this class seen from the reporting side — a check whose `extend()` line is deleted still reports `0`, because the enum still declares it — and the two should be cited across rather than merged: `OB-5` is about a summary that cannot say what **ran**, this is about a capability nothing **reaches**.
+
+**Status:** open — promoted from `IC-3` on 2026-09-01 at n=18, the second-largest class in the corpus. **The `IC-15` boundary was raised before the archive tagging pass and settled during it**, on a remedy test reducible to one question: *was a caller-supplied value accepted?* Yes — the path ran and discarded it, remedy is round-trip or refuse, `IC-15`. No — the capability exists and no call site reaches it, remedy is find a caller, `IC-3`. Exactly two members moved; `cli-doctor-exposes-no-fix-flag` stayed because the flag does not exist at the boundary at all, so nothing is accepted to be dropped. Worth carrying beyond this pair: every one of these reads as *"declares X but does not do X"*, a sentence fitting at least four classes here — matching on it is how `IC-9` acquired two misfits, and the **remedy**, never the description, is the discriminator.
 
 ## Template for new entries
 

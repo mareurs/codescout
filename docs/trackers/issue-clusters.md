@@ -158,7 +158,7 @@ grep -L 'cluster/' docs/issues/2026-*.md
 |---|---|---|---:|---|---|
 | IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 18 | `OB` (OB-2, OB-3) | partial |
 | IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
-| IC-3 | declaration is not execution | `declared-not-wired` | 18 | `OB` (OB-5 residual) | none yet |
+| IC-3 | declaration is not execution | `declared-not-wired` | 18 | `OB-7` — promoted 2026-09-01 | partial (1 of 3 families) |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | `OB` — passes admission test; hook owed | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | `H` — six subsystems; mechanism owed | none yet |
 | IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | `CLAUDE.md` § Parsers Over a Namespace — **landed** | shipped (partial) |
@@ -336,8 +336,8 @@ proxy and reported its output as knowledge.
 **Claim:** A surface declares a capability that production never reaches. Every piece is individually correct — the selector, the matcher, the ledger entry, the schema — and no call site connects them, so the declaration reads as a shipped feature and tests pass in isolation.
 **Members:** `filter={"tags": {"contains": "cluster/declared-not-wired"}}` — n=18, 2026-09-01, by query. Was 20 until the `IC-15` boundary was settled on the remedy test; two members that accept a caller's value and drop it moved there. See the Index.
 **Blind party:** the author of the declaration, specifically. They hold the mental model in which the wiring exists — writing `**Serves:** edit_file(path~/.claude)` *is* the act of believing it is served. A more careful version of the same author writes the same line.
-**Promotes to:** `OB` — `docs/trackers/observer-blindness.md`. `OB-5` already carries this as its *"Known-open residual — declaration is not execution"*; this class is the instance side of that residual and the two should be linked rather than duplicated.
-**Mechanism status:** none yet. The remedy is a reachability check — for each declared selector, assert some production path emits it — and nothing implements one.
+**Promotes to:** `OB-7` — *a declaration is well-formed, and nothing in production reaches it*, `docs/trackers/observer-blindness.md`, promoted 2026-09-01. `OB-5`'s *Known-open residual* is this class seen from the **reporting** side — a check whose `extend()` line is deleted still reports `0` because the enum still declares it — so the two are cited across rather than merged: `OB-5` is about a summary that cannot say what **ran**, `OB-7` about a capability nothing **reaches**. The residual is where they touch, not where they are the same, which is why this got its own row instead of folding in.
+**Mechanism status:** `partial` — decidable for one of three families, and deliberately **not** `designed` for the class. The 18 members split by what disconnects the declaration. **Dead in production (9):** the code exists and only tests call it; `references(symbol)` decides this today, verified 2026-09-01 on `chunk_size_for_model`, whose production callers (`src/tools/memory/mod.rs:227,283`, `src/main.rs:337`) separate cleanly from its in-crate test sites — the check is *non-test caller count == 0*, at call-site rather than file granularity, since test modules live inline. **Schema or doc declares what the code ignores (3):** a round-trip check is only a weak proxy here, because reading a field is not using it. **A matcher that can never match (6):** this entry's original phrasing, needing the set of values production emits at a call site, and it has no mechanism at all. Recording the class as `designed` on the strength of the first family is exactly the conflation `IC-9` was corrected for.
 **Valid:** dated 2026-08-31
 
 `op-4-path-predicate-can-never-fire` and `triggered-operator-rules-route-nothing-in-production` are the pure form: three operator rules declare `binding: triggered` against tools that emit no `selector_key` in production, so `route()` is never called with anything that could match them. The routing mechanism exists and is unit-tested; the tests construct the selector the production path never produces.
@@ -348,6 +348,46 @@ The reason ordinary testing does not catch this class is structural rather than 
 
 **Falsified by** a member where the wiring existed and the declaration was merely wrong, which is an ordinary bug rather than this class.
 
+**The compiler is a blind party here, literally, and it explains the dead-in-production family's
+survival.** Rust's `dead_code` lint cannot fire on `pub` items in a **library** crate: it does
+not know the crate's consumers, so it must assume reachability. codescout is lib-plus-bin, so
+every `pub fn` under `src/` is exempt **by construction**, however many callers it has. That is
+this ledger's own structure appearing in a tool rather than a person — the party best placed to
+notice holds a parameter (the set of external consumers) that makes noticing impossible — and it
+is why nine members sat under `-D warnings` on every gate run for months without one warning.
+The remedy is not a stricter lint setting; it is a different question, asked from the caller
+side.
+
+**The `IC-15` boundary, raised before the archive tagging pass and settled during it — the rule
+matters more than the outcome.** Members here stated `IC-15`'s claim (*a parameter accepted at
+the boundary and silently dropped*) rather than this one's, because this entry files by
+**defect** — the unreachable capability — as its cli-doctor paragraph says, and under that rule
+every `IC-15` member is also one of these, which would have made `IC-15` a sub-family rather than
+a peer.
+
+**The remedy test settled it, as it did for `IC-1` vs `IC-2`, and it reduces to one question you
+can ask of a file: was a caller-supplied value accepted?** If **yes**, the code path *ran* and
+discarded the value; the remedy is to round-trip it or refuse it — `IC-15`. If **no**, the
+capability exists and no call site reaches it; the remedy is to find a caller — `IC-3`. Two
+different remedies, so two classes, and this entry's file-by-defect rule was what needed
+narrowing.
+
+Applied to the twenty, **exactly two moved**: `audit-doc-refs-scope-param-ignored` and
+`audit-doc-refs-fail-on-doc-mismatch`, where a caller passes `scope`, or `fail_on: med`, and the
+value is taken and dropped. `cli-doctor-exposes-no-fix-flag` **stays** — the flag does not exist
+at the boundary at all, so nothing is accepted to be dropped — and `audit-doc-refs-lsp-stubbed-off`
+stays for the same reason. `constitution-rule-malformed-glob-silent-fail-open` and
+`drift-detection-enabled-is-a-dead-config-key` were left here as **visibly undecided** rather
+than moved on a coin-flip; both are defensible either way and neither has been probed.
+
+Note what the discriminator is *not*: all of these read as *"declares X but does not do X"*, a
+sentence fitting at least four classes in this ledger. Matching on it is how `IC-9` acquired two
+misfits, and the **remedy**, never the description, is what separates them. One weak
+corroboration that the pass was claim-based rather than title-based: the moves were predicted to
+fall in the *schema-declares-what-code-ignores* family if titles had driven the classification,
+and they did — but only **2 of that family of 5**, which is the signature of a boundary gap
+rather than of systematic leakage. That is not an independent check and is not offered as one;
+classification and application were the same party throughout.
 ## IC-4 — config propagation is additive — updates land, removals and renames do not
 
 **Slug:** `cluster/config-propagation-is-additive`
