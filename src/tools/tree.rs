@@ -121,11 +121,14 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
     // A listing asks "what is in this directory?", and what a caller loses to the filter
     // is `.github/` — one entry — not the nine files inside it. Classifying after the
     // walk answers with the subtree instead, which is both less useful and *depth-
-    // dependent*: measured here, the same root reports 16 at the default depth and 2765
-    // under `recursive=true`, of which 2548 are session artefacts inside `.buddy/`. A
-    // number that changes by two orders of magnitude with an unrelated flag reads as a
-    // bug to anyone who saw the other one. Pruning here makes the count depth-stable and
-    // restores exactly what `hidden(true)` used to withhold. Reported by `codescout-fe`.
+    // dependent*. Measured on this repo: **3877** entries live under the root's hidden
+    // directories (2548 of them session artefacts in `.buddy/`, 1061 in `.worktrees/`),
+    // so the subtree-counting form ran into the thousands where pruning reports 16 at
+    // depth 1 and 51 unlimited — each exactly matching a `find` that excludes anything
+    // inside a hidden directory. Reported by `codescout-fe`.
+    //
+    // The count is NOT depth-invariant and should not be: a deeper walk really would have
+    // listed more hidden entries. What pruning excludes is the CONTENTS of a pruned entry.
     //
     // A glob asks "which files match?", where the useful count IS the matching files
     // inside a hidden directory, so that branch must descend. See `glob_impl`.
@@ -219,17 +222,57 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
     }
     let hidden_withheld = withheld.load(std::sync::atomic::Ordering::Relaxed);
     if hidden_withheld > 0 {
-        result["completeness_warning"] = json!(format!(
-            "this listing describes what was walked, not the directory: {hidden_withheld} \
-             hidden entr{} not listed. Pass include_hidden=true to list them. `.git` and \
-             `.codescout` are never listed.",
-            if hidden_withheld == 1 { "y" } else { "ies" },
-        ));
+        // When the entry cap stopped the walk the tally is a LOWER BOUND, and naming the
+        // cause is not decoration. Measured live: the default listing reports 16 withheld
+        // while `recursive=true` reports 10, because the collect loop broke before the
+        // walk finished. So a caller who WIDENS the search watches the omission count
+        // FALL, and the natural reading — "less is hidden now" — is the exact inverse of
+        // the truth. A bare "at least N" does not block that reading; the comparison
+        // between two runs is what has to be refused. Found on the live check by me and
+        // independently by `codescout-fe`.
+        let lead = "this listing describes what was walked, not the directory";
+        let body = format!(
+            "{hidden_withheld} hidden entr{} not listed",
+            if hidden_withheld == 1 { "y" } else { "ies" }
+        );
+        result["completeness_warning"] = json!(if hit_early_cap {
+            withheld_note_truncated(lead, &body, "listed")
+        } else {
+            withheld_note(lead, &body, "listed")
+        });
     }
     Ok(result)
 }
 
 // ── glob behavior ───────────────────────────────────────────────────────────
+
+/// The completeness note both branches emit, as a pure function so the *wording* can be
+/// tested without staging a walk that both hits the entry cap and prunes a hidden entry —
+/// an ordering `ignore::Walk` does not guarantee, so a test built on it would pass or fail
+/// by luck.
+///
+/// `truncated` is the load-bearing argument. When the entry cap stopped the walk the tally
+/// is a LOWER BOUND, and the danger is not vagueness but sign: measured live, a default
+/// listing reports 16 withheld while `recursive=true` reports 10, because the collect loop
+/// broke before the walk finished. A caller who WIDENS the search watches the omission
+/// count FALL, and reads it as "less is hidden now" — the exact inverse of the truth. A
+/// bare "at least N" does not block that reading, so the note refuses the comparison
+/// outright.
+fn withheld_note(lead: &str, body: &str, never: &str) -> String {
+    format!(
+        "{lead}: {body}. Pass include_hidden=true to list them. `.git` and `.codescout` \
+         are never {never}."
+    )
+}
+
+/// [`withheld_note`] for a tally the entry cap cut short.
+fn withheld_note_truncated(lead: &str, body: &str, never: &str) -> String {
+    format!(
+        "{lead}: at least {body} — this result was itself cut short, so the true total is \
+         higher and this count is NOT comparable with one from a wider search. Pass \
+         include_hidden=true to list them. `.git` and `.codescout` are never {never}."
+    )
+}
 
 /// Glob search under `path`.
 ///
@@ -338,17 +381,17 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         });
     }
     if hidden_withheld > 0 {
-        // `at least` when the cap stopped the walk: the counter then describes the
-        // prefix that was reached, not the tree. Claiming the exact figure there would
-        // be the same overclaim this warning exists to prevent.
-        let qualifier = if hit_cap { "at least " } else { "" };
-        result["completeness_warning"] = json!(format!(
-            "this count describes what was searched, not the pattern: {qualifier}{hidden_withheld} \
-             matching file{} under hidden paths {} withheld. Pass include_hidden=true to list \
-             them. `.git` and `.codescout` are never counted.",
-            if hidden_withheld == 1 { "" } else { "s" },
-            if hidden_withheld == 1 { "was" } else { "were" },
-        ));
+        let lead = "this count describes what was searched, not the pattern";
+        let body = if hidden_withheld == 1 {
+            format!("{hidden_withheld} matching file under hidden paths was withheld")
+        } else {
+            format!("{hidden_withheld} matching files under hidden paths were withheld")
+        };
+        result["completeness_warning"] = json!(if hit_cap {
+            withheld_note_truncated(lead, &body, "counted")
+        } else {
+            withheld_note(lead, &body, "counted")
+        });
     }
     Ok(result)
 }
@@ -851,18 +894,76 @@ mod tests {
         );
     }
 
-    /// The withheld count must not change with `recursive`, because what the caller lost
-    /// did not: `.github/` is one entry at any depth, and the files inside it were never
-    /// going to be listed as siblings of `docker-compose.yml`.
+    /// When the entry cap cut the walk, the tally is a lower bound — and the danger is
+    /// not vagueness but SIGN. Measured live before this: the default listing reports 16
+    /// withheld and `recursive=true` reports 10, because the collect loop broke before
+    /// the walk finished. A caller who widens the search watches the omission count FALL
+    /// and reads "less is hidden now", the exact inverse of the truth.
     ///
-    /// The first version of this fix classified after the walk, which counted the
-    /// SUBTREE and so reported a different number per depth — measured on this repo, 16
-    /// at the default depth against 2765 under `recursive=true`, of which 2548 were
-    /// session artefacts inside `.buddy/`. A number that moves by two orders of magnitude
-    /// with an unrelated flag reads as a bug to anyone who has seen the other value.
-    /// Found by `codescout-fe`.
+    /// So "at least" is necessary and not sufficient: 10 is still visibly less than 16,
+    /// and a reader comparing two runs is not stopped by a hedge on one of them. The note
+    /// has to refuse the comparison outright, which is what the second assertion pins.
+    ///
+    /// Tested on the pure function rather than through a walk: reproducing this needs a
+    /// run that BOTH hits the entry cap AND prunes a hidden entry before breaking, and
+    /// `ignore::Walk` does not guarantee that ordering — such a test would pass or fail by
+    /// luck, which is worse than none.
+    #[test]
+    fn a_capped_tally_says_at_least_and_refuses_the_comparison() {
+        let note = withheld_note_truncated("lead", "10 hidden entries not listed", "listed");
+
+        assert!(
+            note.contains("at least 10"),
+            "a tally the cap cut short is a lower bound and must say so: {note}"
+        );
+        assert!(
+            note.contains("NOT comparable"),
+            "the hedge alone leaves 10-vs-16 readable as 'less is hidden now'; the note \
+             must refuse the cross-run comparison: {note}"
+        );
+    }
+
+    /// The other side of the pair, and the one that keeps the qualifier meaningful: an
+    /// uncapped tally is exact and must NOT hedge, or "at least" appears on every note and
+    /// stops distinguishing the case it exists for.
+    #[test]
+    fn an_uncapped_tally_states_the_count_without_hedging() {
+        let note = withheld_note("lead", "16 hidden entries not listed", "listed");
+
+        assert!(note.contains("16 hidden entries"), "{note}");
+        assert!(
+            !note.contains("at least"),
+            "an exact count must not hedge, or the hedge means nothing: {note}"
+        );
+        assert!(
+            !note.contains("NOT comparable"),
+            "and an uncapped count IS comparable across runs: {note}"
+        );
+    }
+
+    /// A pruned hidden directory counts as ONE withheld entry, never as its contents.
+    /// `.github/` is one thing the caller lost; the files inside it were never going to
+    /// be listed as siblings of `docker-compose.yml`.
+    ///
+    /// The first version of this fix classified after the walk and so counted the
+    /// SUBTREE. Measured on this repo: **3877** entries live under the root's hidden
+    /// directories, 2548 of them session artefacts in `.buddy/`, so that form ran into
+    /// the thousands. Found by `codescout-fe`.
+    ///
+    /// **The invariant is subtree-exclusion, NOT depth-invariance**, and this test's name
+    /// claims more than it verifies. The count legitimately grows with the walk, because
+    /// a deeper walk really would have listed more hidden entries — measured live: **16**
+    /// at depth 1 and **51** unlimited, each exactly matching a `find` that excludes
+    /// anything inside a hidden directory. Equality across the two depths holds *here*
+    /// only because this fixture has no hidden entry below depth 1; that is the mechanism
+    /// this test uses, not the property it asserts.
+    ///
+    /// Mutation: count by rel-path component instead of pruning, and this reads 1
+    /// against 4. A first mutation that only stopped the pruning SURVIVED — the fixture's
+    /// sole dot-named entry is `.github` itself, so a name-keyed tally stays 1 at every
+    /// depth. The mutation had not expressed the defect.
     #[tokio::test]
-    async fn the_withheld_count_does_not_change_with_depth() {
+    async fn a_pruned_hidden_directory_counts_as_one_entry_not_as_its_contents() {
         let ctx = test_ctx().await;
         let dir = tempdir().unwrap();
         seed_hidden_and_visible(dir.path());
@@ -881,8 +982,10 @@ mod tests {
 
         assert_eq!(
             shallow["completeness_warning"], deep["completeness_warning"],
-            "the same directory withholds the same thing however deep the walk goes; \
-             counting the subtree instead makes this depth-dependent.\nshallow: {shallow}\ndeep: {deep}"
+            "this fixture has exactly one hidden entry and it sits at depth 1, so a walk \
+             that prunes at the boundary must report the same thing at either depth. A \
+             larger number in the deep run means the contents of `.github/` were counted.\n\
+             shallow: {shallow}\ndeep: {deep}"
         );
         assert!(
             shallow["completeness_warning"]
