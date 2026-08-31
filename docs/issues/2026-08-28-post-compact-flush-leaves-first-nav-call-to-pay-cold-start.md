@@ -1,7 +1,7 @@
 ---
 id: caa8bc1df0e8c0d8
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: workspace(post_compact) flushes LSP without prewarming, so the next navigation call pays cold start and can blow the 60s tool timeout — while its own hint promises no disruption'
 owners:
 - marius
@@ -12,7 +12,8 @@ tags:
 - references
 - doc-vs-behavior
 - timeout
-unverified: 'PARTIAL. The false sentence is now FIXED AT SOURCE (claude-plugins:02ac8f3, patch-id 798f7d6fb9fc9f3cd1f36e123660a563ab69a377) but is NOT LIVE: the plugin cache is version-keyed and all three profiles still serve 1.19.8, so every session keeps receiving the old text until a bump + reinstall. That bump is owned by the claude-plugins session, not this one — do not re-derive it. NOT shipped: (a) the prewarm, deliberately deferred — its prescribed form is a no-op for this bug''s own Rust reproduction, and the mux makes the cold window much narrower than this record assumed. Status stays open on the not-live half plus (a); close it only after probing the SERVED copy, never the source.'
+closed: 2026-08-31
+unverified: 'The MESSAGING is fixed and verified live in all three profiles; the MECHANISM is untouched. (a) the prewarm is deliberately unshipped — its prescribed form is a no-op for this bug''s own Rust reproduction (PREWARM_LANGUAGES is JVM-only) and the workspace-keyed mux makes the cold window far narrower than this record assumed, so the flush still does not prewarm and a genuinely cold single-session workspace still pays. Also NO REGRESSION GUARD: nothing asserts the hook text, so the sentence can regress silently — which is why this is not archived. The original 60s timeout has still never been reproduced with the mux confirmed down; that measurement remains owed.'
 ---
 
 ## Summary
@@ -277,6 +278,44 @@ That work is owned by the claude-plugins session and is deliberately not duplica
 Close this bug only after probing the **served** copy — the cached file's own bytes, or a fresh
 post-compaction session's injected text. Commit, install record and directory listing all read
 green in the broken world; `reconnaissance-patterns:R-89`.
+
+### Verified live 2026-08-31 — the served copy, not the source
+
+The bump landed in the other repo (`claude-plugins:30f8fd8` → 1.19.9, checklist refreshed at
+`fe39f85`) and the fix is now **actually being served**. Probed rather than inferred, because
+every upstream proxy for this reads green in the broken world:
+
+| check | result |
+|---|---|
+| `md5sum` of source + all three profile caches | **identical** — `cc63702c25a7218d432784ff135415b8` |
+| old sentence in the served copy | **0** occurrences |
+| new wording in the served copy | **1** occurrence |
+| `installed_plugins.json` × 3 | `version=1.19.9`, each `installPath` under its **own** profile |
+
+The last row is not ceremony: this machine has previously carried a `~/.claude-kat` install
+record whose `installPath` pointed into `~/.claude`'s cache, so "the cache has 1.19.9" and "this
+profile loads 1.19.9" are separate claims.
+
+**Checksums alone would have been the trap.** Four copies agreeing with each other is consistent
+with all four being stale — that is exactly how `R-89`'s distribution instance passed review. The
+content check against the *claim* (0 old / 1 new) is the half that discriminates; the checksum
+only adds that the three profiles do not disagree with one another.
+
+### Why this is `mitigated` and not `fixed`
+
+What shipped is **honest messaging about a cost**, not the removal of the cost. The flush still
+does not prewarm; a genuinely cold single-session workspace, idle past the mux's 180s timeout,
+still pays the language-server start on its first navigation call. That is (a), deliberately
+deferred with reasons recorded above rather than by omission.
+
+**Not archived, and the reason is a gap rather than a formality.** The archive trigger is a
+verified fix *plus a regression test*, and nothing asserts the hook's text — in either repo. The
+sentence can regress silently, and the only thing that would notice is a human reading a
+post-compaction banner. A guard asserting `session-start.mjs` does not contain "no disruption"
+would be cheap and belongs in the `claude-plugins` repo.
+
+The measurement this file has owed since it was opened is still owed: the original 60s timeout has
+never been reproduced **with the mux confirmed down**.
 ## Tests added
 
 `post_compact_hint_prices_the_flush_rather_than_only_describing_the_mechanism`
