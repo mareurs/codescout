@@ -6,6 +6,7 @@ title: 'BUG: workspace(post_compact) flushes LSP without prewarming, so the next
 owners:
 - marius
 tags:
+- cluster/lazy-warmup-bills-the-first-caller
 - lsp
 - cold-start
 - post-compact

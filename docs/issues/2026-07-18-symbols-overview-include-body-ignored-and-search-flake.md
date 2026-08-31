@@ -3,6 +3,7 @@ kind: bug
 status: zombie
 title: 'BUG: symbols search mode occasionally 0-matches then succeeds on retry (Bug A fixed in b2344aab; Bug B mitigated + instrumented)'
 tags:
+- cluster/lazy-warmup-bills-the-first-caller
 - symbols
 - include_body
 - overview-mode

@@ -2,6 +2,7 @@
 kind: bug
 status: open
 tags:
+- cluster/gate-keyed-on-unobservable-event
 - guide-ledger
 - rendezvous
 - phase-c

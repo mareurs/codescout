@@ -1,12 +1,18 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/addressing-without-an-escape-hatch
+- librarian
+- link_scan
+- citations
+- graph-hygiene
+- no-escape-syntax
+closed: null
 opened: 2026-08-31
-closed:
-severity: low
 owner: marius
 related: []
-tags: [librarian, link_scan, citations, graph-hygiene, no-escape-syntax]
-kind: bug
+severity: low
 ---
 
 # BUG: an entry id cannot be MENTIONED without citing it — the only escape is a fenced block, and inline backticks are explicitly scanned

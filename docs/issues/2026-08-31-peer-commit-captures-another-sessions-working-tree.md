@@ -4,21 +4,17 @@ kind: bug
 status: open
 title: A peer session's commit captured this session's in-flight working-tree changes, filing them under an unrelated message
 tags:
+- cluster/blast-radius-exceeds-visibility
 - concurrency
 - shared-checkout
 - git
 - provenance
 - multi-session
----
-
----
-status: open
 opened: 2026-08-31
-severity: medium
 owner: marius
-related: [docs/issues/2026-08-31-cross-account-agents-cannot-see-each-other.md]
-tags: [concurrency, shared-checkout, git, provenance, multi-session]
-kind: bug
+related:
+- docs/issues/2026-08-31-cross-account-agents-cannot-see-each-other.md
+severity: medium
 ---
 
 # A peer session's commit captured this session's in-flight working-tree changes, filing them under an unrelated message

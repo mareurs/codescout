@@ -1,11 +1,17 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/blast-radius-exceeds-visibility
+- multi-account
+- coordination
+- peer-discovery
+- concurrency
+- shared-checkout
 opened: 2026-08-31
-severity: high
 owner: marius
 related: []
-tags: [multi-account, coordination, peer-discovery, concurrency, shared-checkout]
-kind: bug
+severity: high
 ---
 
 # Agents on different accounts cannot see each other, while writing the same checkout

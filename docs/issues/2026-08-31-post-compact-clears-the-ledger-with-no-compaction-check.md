@@ -4,6 +4,7 @@ kind: bug
 status: open
 title: workspace(post_compact=true) clears the whole guide ledger without checking that a compaction happened — ~49 KB re-delivered on one mistaken call, and the flag name is what misleads
 tags:
+- cluster/gate-keyed-on-unobservable-event
 - guides
 - guide-ledger
 - workspace

@@ -1,13 +1,19 @@
 ---
+kind: bug
 status: mitigated
-opened: 2026-08-26
+tags:
+- cluster/repro-env-diverges-from-gate-env
+- ci
+- windows
+- wine
+- cross-compile
+- test-environment
 closed: 2026-08-26
-severity: medium
+opened: 2026-08-26
 owner: marius
 related: []
-tags: [ci, windows, wine, cross-compile, test-environment]
-unverified: "Mitigated, not fixed: TWO tests (the heredoc write and the yes|head overflow) are skipped on the wine lane rather than the version gap being closed. Both hang identically under wine 9.0 and pass under 11.16, so they share a cause and a remedy. The durable fix — pin the lane to a WineHQ build matching the local loop — is designed and argued below but NOT implemented or measured; the honest expectation is that changing wine versions moves the failure set in BOTH directions. Skip list is now 8 entries, each classified, down from 32."
-kind: bug
+severity: medium
+unverified: 'Mitigated, not fixed: TWO tests (the heredoc write and the yes|head overflow) are skipped on the wine lane rather than the version gap being closed. Both hang identically under wine 9.0 and pass under 11.16, so they share a cause and a remedy. The durable fix — pin the lane to a WineHQ build matching the local loop — is designed and argued below but NOT implemented or measured; the honest expectation is that changing wine versions moves the failure set in BOTH directions. Skip list is now 8 entries, each classified, down from 32.'
 ---
 
 # BUG: the windows-gnu lane runs wine 9.0 while the local loop runs wine 11.16, and the two disagree

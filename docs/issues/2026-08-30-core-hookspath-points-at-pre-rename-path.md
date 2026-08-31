@@ -1,13 +1,19 @@
 ---
-status: fixed
-opened: 2026-08-30
-closed: 2026-08-30
-severity: medium
-owner: marius
-related: ["docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md"]
-tags: [git-config, pre-commit, repo-rename, environment]
 kind: bug
-unverified: "Hooks still do not run — the stale pointer is gone but no hook is installed; `pre-commit install` has not been run. Also: the fix is an untracked-config change with NO commit, so there is no SHA or patch-id to cite, and no regression test is possible."
+status: fixed
+tags:
+- cluster/config-propagation-is-additive
+- git-config
+- pre-commit
+- repo-rename
+- environment
+closed: 2026-08-30
+opened: 2026-08-30
+owner: marius
+related:
+- docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md
+severity: medium
+unverified: 'Hooks still do not run — the stale pointer is gone but no hook is installed; `pre-commit install` has not been run. Also: the fix is an untracked-config change with NO commit, so there is no SHA or patch-id to cite, and no regression test is possible.'
 ---
 
 # BUG: `core.hooksPath` points at the pre-rename repo path, so no git hook runs in this checkout

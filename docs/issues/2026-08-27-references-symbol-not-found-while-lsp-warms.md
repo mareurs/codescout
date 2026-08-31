@@ -1,14 +1,21 @@
 ---
+kind: bug
 status: zombie
+tags:
+- cluster/lazy-warmup-bills-the-first-caller
+- references
+- lsp
+- cold-start
+- misleading-error
+- unreproduced
+- refuted-mechanism
+closed: null
+last_observed: 2026-08-27
 opened: 2026-08-27
-closed:
-severity: low
 owner: marius
 related: []
+severity: low
 unverified: Symptom observed exactly once and never reproduced. The originally-filed mechanism (a warming LSP yielding a resolution error the false-zero guard cannot see) is REFUTED by deliberate cold-start probes, which produce the guarded false-zero instead. No mechanism identified; kept as zombie with a re-open trigger rather than closed.
-tags: ["references", "lsp", "cold-start", "misleading-error", "unreproduced", "refuted-mechanism"]
-kind: bug
-last_observed: 2026-08-27
 ---
 
 # BUG: `references` answers a warming LSP with `symbol not found` — a resolution error, which the false-zero guard cannot see

@@ -4,6 +4,7 @@ kind: bug
 status: mitigated
 title: 'BUG: the working tree briefly held a mutation nobody applied, during the window announcing that exact mutation'
 tags:
+- cluster/blast-radius-exceeds-visibility
 - shared-checkout
 - cross-session
 - unexplained

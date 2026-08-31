@@ -4,6 +4,7 @@ kind: bug
 status: zombie
 title: 'BUG: two Windows CI tests flake on wall-clock/race assumptions — one is skip-listed on wine but gates on MSVC'
 tags:
+- cluster/repro-env-diverges-from-gate-env
 - windows
 - ci
 - flake

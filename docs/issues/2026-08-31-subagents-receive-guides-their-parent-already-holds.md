@@ -4,6 +4,7 @@ kind: bug
 status: investigating
 title: Subagents are auto-injected guide topics their parent already holds — 84% of measured subagent sessions, ~2.84 MB for one topic, and the workspace-state guide says it cannot happen
 tags:
+- cluster/gate-keyed-on-unobservable-event
 - guides
 - subagents
 - guide-ledger

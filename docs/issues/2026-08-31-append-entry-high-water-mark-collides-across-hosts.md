@@ -1,11 +1,18 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/blast-radius-exceeds-visibility
+- librarian
+- append_entry
+- entry-id
+- cross-machine
+- collision
+- allocator
 opened: 2026-08-31
-severity: high
 owner: marius
 related: []
-tags: [librarian, append_entry, entry-id, cross-machine, collision, allocator]
-kind: bug
+severity: high
 ---
 
 # BUG: append_entry's committed high-water mark does not guard against a second HOST, only a second worktree

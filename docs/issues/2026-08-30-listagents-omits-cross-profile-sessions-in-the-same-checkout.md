@@ -4,6 +4,7 @@ kind: bug
 status: mitigated
 title: 'BUG: ListAgents omits live cross-profile sessions writing the same checkout, and reports the short count as complete'
 tags:
+- cluster/blast-radius-exceeds-visibility
 - harness
 - listagents
 - cross-session

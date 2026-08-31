@@ -1,13 +1,19 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/repro-env-diverges-from-gate-env
+- windows
+- wine
+- ci
+- flake
+- concurrency
+closed: null
 opened: 2026-08-26
-closed:
-severity: low
 owner: marius
 related: []
-tags: [windows, wine, ci, flake, concurrency]
-unverified: "NARROWED 2026-08-26 by CI run 32997878934: two of the three tests failed there with the wine-9.0 `timed_out` signature, NOT this file''s partial-key payload, so they belong to the lane''s already-classified wine-9 hang group and are skipped there. Only run_migrations_is_safe_under_concurrent_connections remains in scope for this file — observed ONCE, locally, never on CI, mechanism inferred (contention) and never instrumented. Treat it as a lead, not a finding, and do NOT add retries or raise the SQLite busy timeout on this evidence."
-kind: bug
+severity: low
+unverified: 'NARROWED 2026-08-26 by CI run 32997878934: two of the three tests failed there with the wine-9.0 `timed_out` signature, NOT this file''''s partial-key payload, so they belong to the lane''''s already-classified wine-9 hang group and are skipped there. Only run_migrations_is_safe_under_concurrent_connections remains in scope for this file — observed ONCE, locally, never on CI, mechanism inferred (contention) and never instrumented. Treat it as a lead, not a finding, and do NOT add retries or raise the SQLite busy timeout on this evidence.'
 ---
 
 # BUG: three unrelated tests failed together on the wine lane under load, and passed on the next run

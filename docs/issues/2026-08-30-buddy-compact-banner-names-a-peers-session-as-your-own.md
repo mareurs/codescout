@@ -2,6 +2,7 @@
 kind: bug
 status: open
 tags:
+- cluster/blast-radius-exceeds-visibility
 - companion-plugin
 - buddy
 - attribution

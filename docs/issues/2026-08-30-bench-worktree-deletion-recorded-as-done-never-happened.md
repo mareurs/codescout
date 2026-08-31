@@ -1,16 +1,18 @@
 ---
 kind: bug
 status: mitigated
-opened: 2026-08-30
-closed:
-severity: medium
-owner: marius
-related: ["docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md"]
 tags:
-  - worktree
-  - verification
-  - disk-space
-  - stale-record
+- cluster/record-asserts-an-unchecked-completion
+- worktree
+- verification
+- disk-space
+- stale-record
+closed: null
+opened: 2026-08-30
+owner: marius
+related:
+- docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md
+severity: medium
 ---
 
 # BUG: an archived bug file records a worktree deletion, with reclaimed-MB figures, that never happened on this machine

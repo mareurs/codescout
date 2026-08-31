@@ -4,6 +4,7 @@ kind: bug
 status: investigating
 title: Workspace read_only flipped to true twice mid-session with no activate call from this session, silently blocking every write
 tags:
+- cluster/blast-radius-exceeds-visibility
 - workspace
 - read-only
 - concurrency

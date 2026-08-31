@@ -1,13 +1,19 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-29
+tags:
+- cluster/config-propagation-is-additive
+- docker-compose
+- retrieval-stack
+- embedder
+- env-config
+- multi-machine-config
 closed: 2026-08-29
-severity: medium
+opened: 2026-08-29
 owner: marius
 related: []
-tags: ["docker-compose", "retrieval-stack", "embedder", "env-config", "multi-machine-config"]
-kind: bug
-unverified: 'fix is to a gitignored .env file — no commit/SHA/patch-id exists for it; only the code-adjacent class of the bug (docker-compose reads an un-validated, git-ignored .env for a bind-mount path) is undocumented anywhere else'
+severity: medium
+unverified: fix is to a gitignored .env file — no commit/SHA/patch-id exists for it; only the code-adjacent class of the bug (docker-compose reads an un-validated, git-ignored .env for a bind-mount path) is undocumented anywhere else
 ---
 
 # BUG: project-root `.env` carried multiple stale desktop-machine values, silently masked by ambient shell/MCP env

@@ -4,6 +4,7 @@ kind: bug
 status: open
 title: 'BUG: /mcp reconnect applies a CHANGED env var from settings.json but not a REMOVED one — and the change that lands falsely confirms the one that did not'
 tags:
+- cluster/config-propagation-is-additive
 - harness
 - mcp-reconnect
 - config

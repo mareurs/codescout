@@ -2,6 +2,7 @@
 kind: bug
 status: fixed
 tags:
+- cluster/declared-not-wired
 - operator-rules
 - routing
 closed: 2026-08-31

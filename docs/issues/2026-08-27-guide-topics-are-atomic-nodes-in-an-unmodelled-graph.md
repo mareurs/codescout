@@ -4,6 +4,7 @@ kind: bug
 status: open
 title: Guide topics are atomic nodes in a graph nobody modelled — 63% of the corpus auto-injected in one session, and three guides already cite sections the API cannot serve
 tags:
+- cluster/gate-keyed-on-unobservable-event
 - guides
 - prompt-surface
 - get_guide

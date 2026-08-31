@@ -2,6 +2,8 @@
 kind: bug
 status: open
 title: peer-sessions.sh collects process start time but never compares it to the binary's build time, so a peer serving stale bytes reads as healthy
+tags:
+- cluster/blast-radius-exceeds-visibility
 opened: 2026-08-31
 owner: marius
 severity: med

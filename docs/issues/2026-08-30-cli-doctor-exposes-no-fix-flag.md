@@ -1,12 +1,18 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/declared-not-wired
+- cli
+- librarian
+- doctor
+- parity
+- cross-machine
+closed: null
 opened: 2026-08-30
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [cli, librarian, doctor, parity, cross-machine]
-kind: bug
+severity: medium
 ---
 
 # BUG: the CLI's `doctor` exposes no `--fix`, so every repair is MCP-only

@@ -1,12 +1,18 @@
 ---
+kind: bug
 status: open
+tags:
+- cluster/gate-keyed-on-unobservable-event
+- guides
+- section-grain-delivery
+- tool-surface
+- ack-handle
+- progressive-disclosure
+closed: null
 opened: 2026-08-31
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [guides, section-grain-delivery, tool-surface, ack-handle, progressive-disclosure]
-kind: bug
+severity: medium
 ---
 
 # BUG: a `serves:`-declared guide section is delivered with the RESPONSE, so it cannot prevent the first-call mistake it exists to prevent

@@ -4,6 +4,7 @@ kind: bug
 status: fixed
 title: 'BUG: two byte-identical headings make both sections permanently unaddressable, and the error''s prescribed remedy names parameters that do not exist on the tool it names'
 tags:
+- cluster/addressing-without-an-escape-hatch
 - edit-markdown
 - librarian
 - error-hints

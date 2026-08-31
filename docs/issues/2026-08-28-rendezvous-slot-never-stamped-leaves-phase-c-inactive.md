@@ -4,6 +4,7 @@ kind: bug
 status: wontfix
 title: 'BUG: a rendezvous slot that misses its SessionStart stamp can never be stamped again, so Phase C stays inactive for the life of that server'
 tags:
+- cluster/gate-keyed-on-unobservable-event
 - rendezvous
 - companion-plugin
 - guide-ledger
