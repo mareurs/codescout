@@ -61,7 +61,15 @@ pub fn read_utf8(path: &Path) -> Result<String> {
 /// because the freshly-created tmp file has default 0644 perms.
 pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, content)?;
+
+    // Cleanup is needed on BOTH failure points, not just the rename below.
+    // `std::fs::write` is `File::create` + `write_all`, so under ENOSPC the create
+    // can SUCCEED — the tmp file now exists — while the write fails. Before this
+    // guard the `?` propagated straight out and left the sibling `.tmp` behind;
+    // the target itself was always safe, because only the rename touches it.
+    std::fs::write(&tmp, content).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
 
     // Preserve original mode if the target already exists.
     #[cfg(unix)]
@@ -429,6 +437,74 @@ mod tests {
 
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o755, "exec bit must survive atomic_write");
+    }
+
+    /// The leak the `rename` guard never covered. `std::fs::write` is
+    /// `File::create` + `write_all`, so under ENOSPC the create SUCCEEDS — the tmp
+    /// file exists from that moment — and the write then fails. The `?` propagated
+    /// straight out, leaving the sibling `.tmp` behind.
+    ///
+    /// **Reproducing it requires create to succeed and the write to fail**, and
+    /// that is the whole difficulty. The obvious reproductions — making the tmp
+    /// path a directory, or its parent read-only — fail at `File::create` instead,
+    /// so nothing is created, nothing leaks, and such a test PASSES against the
+    /// unfixed function. `/dev/full` gives the right shape: the open succeeds and
+    /// every write returns ENOSPC. Verified at the shell before this was written,
+    /// then demonstrated failing against the unfixed function.
+    ///
+    /// Linux-only: `/dev/full` does not exist on macOS, and CI runs a macOS lane.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn atomic_write_removes_its_tmp_file_when_the_write_itself_fails() {
+        // Absence of /dev/full must be LOUD. A graceful skip here would turn this
+        // into a clean `0 passed` that is character-identical to coverage.
+        assert!(
+            Path::new("/dev/full").exists(),
+            "/dev/full is missing, so this test cannot reproduce ENOSPC — that is a \
+             broken harness, not a passing test"
+        );
+
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("target");
+        let tmp = target.with_extension("tmp");
+
+        // Pre-existing content, so the atomicity guarantee is pinned as "unchanged"
+        // rather than merely "not created" — the stronger of the two properties, and
+        // the one the .tmp-then-rename dance exists for.
+        const ORIGINAL: &str = "original content, must survive a failed write\n";
+        std::fs::write(&target, ORIGINAL).unwrap();
+
+        std::os::unix::fs::symlink("/dev/full", &tmp).unwrap();
+
+        // (1) It must FAIL. A version that swallowed the error and returned Ok would
+        // satisfy the cleanup assertion below while breaking the function's purpose.
+        let err = atomic_write(&target, "new content")
+            .expect_err("atomic_write must propagate the write failure, not swallow it");
+
+        // (2) Positive control: pin that we reproduced the INTENDED failure. Without
+        // it, a mechanism that silently started yielding some other error (EACCES,
+        // say) would still satisfy (3) and (4) while exercising a different path.
+        assert_eq!(
+            err.raw_os_error(),
+            Some(28),
+            "expected ENOSPC (28) from /dev/full, got {err:?}"
+        );
+
+        // (3) Atomicity: the target is untouched, because only the rename ever
+        // touches it and the failure happened well before that.
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            ORIGINAL,
+            "a failed write must leave the target byte-identical"
+        );
+
+        // (4) The leak itself. `symlink_metadata`, not `exists()`: `exists()` follows
+        // the link and would report on /dev/full — which always exists — rather than
+        // on the tmp entry that must have been removed.
+        assert!(
+            tmp.symlink_metadata().is_err(),
+            "atomic_write leaked {tmp:?} after the write failed"
+        );
     }
 
     // `Path::is_absolute()` requires a drive or UNC prefix on Windows — a bare
