@@ -1170,37 +1170,88 @@ pub trait Tool: Send + Sync {
                     }
                     None => (None, Vec::new()),
                 }
-            } else if let Some(topic) = self.relevant_guide_topic(&val) {
-                // Either the default-path buffering kicked in (large JSON),
-                // or the tool itself pre-buffered (e.g. run_command storing
-                // a `@cmd_*` ref and returning a small envelope with
-                // `output_id`). Both signal the agent should learn the
-                // progressive-disclosure pattern.
-                let should = match topic {
-                    "progressive-disclosure" => {
-                        exceeds_inline_limit(&json)
-                            || val
-                                .as_object()
-                                .and_then(|o| o.get("output_id"))
-                                .and_then(|v| v.as_str())
-                                .is_some()
+            } else if let Some(content_topic) = self.relevant_guide_topic(&val) {
+                // Two ways to name a topic. The tool's own
+                // `relevant_guide_topic` reads the RESULT; `topic_declaring`
+                // asks which section was WRITTEN for this call's shape. They
+                // can disagree, and until 2026-08-31 the result heuristic did
+                // not merely win — it was the only one consulted, so a section
+                // it disagreed with could never be delivered at all. Measured:
+                // `librarian.md` § *doctor repairs* declares `librarian.doctor`,
+                // yet every `doctor` scan of a real catalog names tracker paths,
+                // so the call shipped 39,106 bytes of `tracker-conventions` and
+                // 0 of the 1,490-byte section authored for it.
+                //
+                // **The result heuristic still goes first, and that is not
+                // deference — it is more specific.** It encodes what the call
+                // TOUCHED, which no unqualified `serves:` shape expresses.
+                // `doctor` routing to `tracker-conventions` closed `32736ca0`,
+                // because the entry-validity checks' remediation lives only
+                // there; an `artifact.create` under `docs/trackers/` needs the
+                // frontmatter and status vocabulary far more than it needs
+                // § *Artifact Model*. Letting declarations win outright would
+                // revert both, and `librarian.md` declares nearly every
+                // librarian/artifact shape, so it would starve
+                // `tracker-conventions` about as thoroughly as the old order
+                // starved the sections — the same defect with the sign flipped,
+                // on a guide that already spent one stretch authored, pointed at
+                // and never connected (see
+                // `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`).
+                //
+                // So the declaring topic is a FALLTHROUGH, and the change is
+                // strictly additive: the only calls whose output differs are the
+                // ones that used to deliver NOTHING — content topic already
+                // spent for this session — and now deliver a section written for
+                // their shape. No call loses a guide it used to get.
+                //
+                // Trying a candidate that ships nothing is free: every
+                // `guide_blocks_for` path returning empty also leaves the ledger
+                // untouched, and a declaring candidate cannot reach the preamble
+                // path at all — `topic_declaring` selects it BY a section
+                // matching, so `match_sections` is non-empty for it by
+                // construction.
+                let mut candidates: Vec<&str> = vec![content_topic];
+                if let Some(t) = crate::prompts::guide_index::GUIDE_INDEX
+                    .topic_declaring(selector.as_deref(), &val)
+                {
+                    if t != content_topic {
+                        candidates.push(t);
                     }
-                    _ => true,
-                };
-                if should {
+                }
+                let mut delivered: (Option<(String, GuideDeliveryShape)>, Vec<Content>) =
+                    (None, Vec::new());
+                for topic in candidates {
+                    // Either the default-path buffering kicked in (large JSON),
+                    // or the tool itself pre-buffered (e.g. run_command storing
+                    // a `@cmd_*` ref and returning a small envelope with
+                    // `output_id`). Both signal the agent should learn the
+                    // progressive-disclosure pattern.
+                    let should = match topic {
+                        "progressive-disclosure" => {
+                            exceeds_inline_limit(&json)
+                                || val
+                                    .as_object()
+                                    .and_then(|o| o.get("output_id"))
+                                    .and_then(|v| v.as_str())
+                                    .is_some()
+                        }
+                        _ => true,
+                    };
+                    if !should {
+                        continue;
+                    }
                     let (blocks, shape) =
                         guide_blocks_for(topic, selector.as_deref(), &val, &mut emitted);
                     // `shape.is_none()` iff `blocks.is_empty()` — every return
                     // path in `guide_blocks_for` keeps the two in lockstep —
                     // so branching on `shape` alone is sufficient and avoids
                     // restating the emptiness check.
-                    match shape {
-                        Some(shape) => (Some((topic.to_string(), shape)), blocks),
-                        None => (None, Vec::new()),
+                    if let Some(shape) = shape {
+                        delivered = (Some((topic.to_string(), shape)), blocks);
+                        break;
                     }
-                } else {
-                    (None, Vec::new())
                 }
+                delivered
             } else {
                 (None, Vec::new())
             }

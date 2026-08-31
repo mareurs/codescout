@@ -358,6 +358,48 @@ impl GuideIndex {
         self.topic(t).is_some_and(|e| e.declared().next().is_some())
     }
 
+    /// The topic owning a section that DECLARES this call's shape, if any.
+    ///
+    /// Corpus-wide, unlike `match_sections`, which is *told* its topic. That
+    /// difference is the point: it lets a `serves:` declaration compete with a
+    /// tool's own result-based topic heuristic instead of sitting unreachable
+    /// behind it. `librarian.md` § *doctor repairs* declares `librarian.doctor`,
+    /// but every `doctor` scan of a real catalog names tracker paths, so
+    /// `LibrarianAdapter::relevant_guide_topic` sent `tracker-conventions` —
+    /// whole, 26x the size of the displaced section — and the section could not
+    /// be delivered at all. See
+    /// `docs/issues/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
+    ///
+    /// Returning a topic here does NOT mean it wins. The caller tries the
+    /// tool's own result-based topic FIRST and only falls through to this one
+    /// when that ships nothing — because the result heuristic encodes what the
+    /// call touched, which an unqualified `serves:` shape cannot express. See
+    /// `Tool::call_content` for the two fixes an outright victory would revert.
+    ///
+    /// **Only tools implementing `selector_key` are reachable here at all.** The
+    /// trait default is `None` and `Shape::matches` refuses to match on `None`
+    /// — deliberately, per its own doc comment — so this cannot hijack the
+    /// topic of a tool that never opted into selectors.
+    ///
+    /// Deterministic by `BTreeMap` order, but that order is never allowed to
+    /// decide anything: `no_two_topics_declare_an_overlapping_shape` fails if
+    /// two topics could both answer one call. Ambiguity is a corpus defect to
+    /// fix at authoring time, not a runtime coin-flip.
+    ///
+    /// Guarantee relied on by the caller: if this returns `Some(t)`, then
+    /// `match_sections(t, sel, result)` is non-empty — it selects `t` *by* a
+    /// section matching, and `match_sections` only ever adds the `requires:`
+    /// closure on top. So a declaring candidate can never take the preamble
+    /// path, which is what makes trying it free of ledger side effects.
+    pub fn topic_declaring(&self, sel: Option<&str>, result: &Value) -> Option<&'static str> {
+        self.topics.iter().find_map(|(topic, entry)| {
+            entry
+                .declared()
+                .any(|s| s.serves.iter().any(|sh| sh.matches(sel, result)))
+                .then_some(*topic)
+        })
+    }
+
     /// Sections serving this call, plus their transitive `requires:` closure,
     /// in document order with no duplicates.
     ///
@@ -463,8 +505,17 @@ pub static GUIDE_INDEX: std::sync::LazyLock<GuideIndex> = std::sync::LazyLock::n
 /// The gap is one layer up: `LibrarianAdapter::relevant_guide_topic` picks the
 /// topic from the RESULT's content, and `names_tracker_path` scans `path` inside
 /// the `violations` array, so a real doctor scan routes to `tracker-conventions`
-/// and never consults `librarian`'s sections at all. Measured 2026-08-31: 128 of
+/// and never consulted `librarian`'s sections at all. Measured 2026-08-31: 128 of
 /// 138 violations named `docs/trackers/` or `docs/issues/`.
+///
+/// **Partly closed the same day** by the fallthrough in `Tool::call_content`:
+/// once `tracker-conventions` has been spent for the session, a later librarian
+/// call falls through to the topic whose section declares its shape, so
+/// § *doctor repairs* is reachable — pinned end-to-end by
+/// `guide_hint_tests::a_declared_section_still_arrives_once_the_content_topic_is_spent`.
+/// Only partly: the FIRST tracker-path-naming call of a session still routes
+/// away, deliberately (that route closed `32736ca0`). So this test still does not
+/// measure delivery, and the `fix=` modes still belong in the schema.
 ///
 /// So it answered "does the shape match?" when the question that mattered was
 /// "does the router send a doctor result to this topic?" — an adjacent
@@ -613,6 +664,62 @@ n body
                     "{topic} has a duplicate section heading `{}`",
                     sec.heading
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn no_two_topics_declare_an_overlapping_shape() {
+        // `topic_declaring` scans topics in `BTreeMap` order and takes the first
+        // match, so two topics able to answer one call would make delivery hinge
+        // on alphabetical accident — and silently, since the loser is simply
+        // never consulted. That is the exact failure mode section-grain delivery
+        // exists to prevent, so it must not be reintroducible one level up.
+        //
+        // **Vacuous today, and deliberately kept.** Only `librarian` declares
+        // anything, so nothing can collide yet; this fires the moment a second
+        // topic adopts `serves:`, which is precisely when the ambiguity becomes
+        // possible and no one is looking for it. `tracker-conventions` is the
+        // likely next adopter — see
+        // `docs/issues/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
+        //
+        // Overlap is over-approximated on `(tool, action)` with `None` as a
+        // wildcard. Sound in the direction that matters: `path~` can only narrow
+        // a shape, never widen it, so two shapes disagreeing here can never both
+        // match one call. It may flag a pair that `path~` would in fact keep
+        // disjoint — the right answer then is to make the ambiguity explicit,
+        // not to loosen this.
+        let idx = GuideIndex::try_build().unwrap();
+        let mut seen: Vec<(&str, &Shape)> = Vec::new();
+        for topic in crate::prompts::GUIDE_TOPICS {
+            let Some(entry) = idx.topic(topic) else {
+                continue;
+            };
+            for sec in entry.declared() {
+                for shape in &sec.serves {
+                    for (other_topic, other) in &seen {
+                        // Same-topic overlap is legal and present: `librarian.md`
+                        // declares `artifact.update` from both § *Choosing a
+                        // mode* and § *The shrink guard*, and `match_sections`
+                        // delivers both. Only CROSS-topic overlap is ambiguous.
+                        if *other_topic == *topic {
+                            continue;
+                        }
+                        let overlaps = other.tool == shape.tool
+                            && (other.action.is_none()
+                                || shape.action.is_none()
+                                || other.action == shape.action);
+                        assert!(
+                            !overlaps,
+                            "`{topic}` and `{other_topic}` both declare a shape matching \
+                             {}.{} — topic_declaring would resolve that by BTreeMap \
+                             order, i.e. by accident",
+                            shape.tool,
+                            shape.action.as_deref().unwrap_or("*")
+                        );
+                    }
+                    seen.push((topic, shape));
+                }
             }
         }
     }

@@ -7199,6 +7199,85 @@ mod guide_hint_tests {
         assert!(again.is_empty());
     }
 
+    /// A declared section is still reachable after the result-based topic is spent.
+    ///
+    /// The two topic sources disagree for any librarian call touching
+    /// `docs/trackers/` or `docs/issues/`: `names_tracker_path` sends it to
+    /// `tracker-conventions` (which declares nothing, so it ships WHOLE), while
+    /// the call's shape is declared by a `librarian.md` section. Before the
+    /// fallthrough only the first source was ever consulted, so once
+    /// `tracker-conventions` was spent such calls delivered **nothing at all**
+    /// and their sections were unreachable for the rest of the session.
+    ///
+    /// That is not a hypothetical: two tests above route around it explicitly,
+    /// putting their fixtures under `docs/specs/` with the comment *"a
+    /// docs/trackers/ path here would route to `tracker-conventions` ... and
+    /// starve both calls of a section-grain hint"*. This test walks into it on
+    /// purpose.
+    ///
+    /// Both halves are asserted together because each is monotone in a
+    /// direction the other is blind to. Dropping the fallthrough leaves half 1
+    /// passing; letting declarations WIN instead of falling through leaves half
+    /// 2 passing while reverting `32736ca0` — the fix that routes tracker work
+    /// to the only guide teaching `**Valid:**` and the entry-validity checks.
+    ///
+    /// Mutations that must kill this:
+    /// - `candidates` truncated to `vec![content_topic]` → half 2 dies.
+    /// - declaring topic pushed FIRST instead of appended → half 1 dies.
+    #[tokio::test]
+    async fn a_declared_section_still_arrives_once_the_content_topic_is_spent() {
+        let (_dir, server) = make_server().await;
+
+        // 1 — a create under docs/trackers/ must still deliver the tracker guide
+        //     whole. This is the behaviour `32736ca0` bought and
+        //     `an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide`
+        //     protects; the fallthrough must not cost it.
+        let created = call_tool(
+            &server,
+            "artifact",
+            json!({
+                "action": "create",
+                "rel_path": "docs/trackers/fallthrough-probe.md",
+                "kind": "tracker",
+                "title": "fallthrough probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+        assert!(
+            content_carries_guide_body(&created, "tracker-conventions"),
+            "the result-based topic must still go first and still ship whole, got: {}",
+            guide_blocks(&created)
+                .join("")
+                .chars()
+                .take(300)
+                .collect::<String>()
+        );
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+
+        // 2 — a `get` on that same tracker. Same result-based topic, now spent,
+        //     so this call used to deliver nothing. `artifact.get` is declared by
+        //     librarian.md § Artifact Model, which should now arrive.
+        let out = call_tool(&server, "artifact", json!({"action": "get", "id": id})).await;
+        let guide = guide_blocks(&out).join("");
+        assert!(
+            guide.contains("`id` and `rel_path` together are the canonical identifiers"),
+            "the declared section's BODY must arrive once the content topic is \
+             spent — asserting body text, not the `§ Artifact Model` marker, which \
+             an empty section would satisfy. got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+        assert!(
+            !content_carries_guide_body(&out, "tracker-conventions"),
+            "one topic per call — the spent whole guide must not ride along again"
+        );
+    }
+
     #[tokio::test]
     async fn an_unmatched_shape_receives_the_preamble_not_the_whole_topic() {
         let (_dir, server) = make_server().await;

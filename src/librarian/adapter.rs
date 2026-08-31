@@ -1461,6 +1461,17 @@ mod tests {
     /// 2026-08-31, 128 of 138. So the section was never consulted. Restored in
     /// `c7d66f94`.
     ///
+    /// **Still true after the same day's fallthrough fix, for a narrower reason.**
+    /// `Tool::call_content` now falls through to the declaring topic when the
+    /// result-based one ships nothing, so § *doctor repairs* IS reachable — on a
+    /// later call. Not on the first tracker-path-naming call of a session, which
+    /// is precisely when a caller forms its first `fix=` call; and a served
+    /// section rides the response it should have informed, never precedes it
+    /// (`docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md`).
+    /// The schema is the only surface that beats both, which is why these modes
+    /// stay inline rather than moving back into the guide now that the guide can
+    /// reach them.
+    ///
     /// The existing gate `every_observed_shape_of_a_declaring_topic_has_a_section`
     /// cannot catch this and is not the place to try: it skips non-declaring
     /// topics, and `tracker-conventions` declares no sections at all, so the
