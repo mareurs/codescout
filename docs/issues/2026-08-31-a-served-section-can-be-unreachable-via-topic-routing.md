@@ -1,12 +1,13 @@
 ---
-status: open
+status: fixed
 opened: 2026-08-31
-closed:
+closed: 2026-08-31
 severity: high
 owner: marius
 related: []
 tags: [guides, section-grain-delivery, topic-routing, librarian, silent-non-delivery]
 kind: bug
+unverified: "Reachability is fixed and mutation-verified, but the FIRST tracker-path-naming call of a session still ships tracker-conventions WHOLE (39,106 B) and no section — deliberate, since that route closed 32736ca0. The 26x overshoot therefore stands on that call until tracker-conventions adopts `serves:`. Not yet re-verified against a rebuilt live MCP."
 ---
 
 # BUG: a guide section can declare a call's shape, pass every test, and still never be delivered — because the TOPIC router picks a different topic from the result's content
@@ -164,17 +165,42 @@ the same move that produced this bug file.
 
 ## Fix
 
-Not applied. The immediate damage is undone: the `fix=` per-mode text was **restored to
-the tool schema**, so the modes are documented on the surface a caller actually receives.
-The guide section is left in place — it is correct content, reachable via an explicit
-`get_guide("librarian")` and on a clean-catalog doctor run.
+**APPLIED 2026-08-31 (`experiments`) — as a FALLTHROUGH, not as the option this file
+originally recommended.**
 
-Candidate fixes, none chosen:
+- Fix SHA (`experiments`): `50590b6c`
+- Fix patch-id: `13b643673b57831244a5ed63a5dce0bf1d43a965`
+
+`Tool::call_content` now builds an ordered candidate list: the tool's own result-based
+topic first, then — only if that ships nothing — the topic whose section declares this
+call's shape, found by a new corpus-wide `GuideIndex::topic_declaring`. The earlier
+remedy stands and is independent: the `fix=` per-mode text remains in the tool schema,
+because a served section still rides the response it should have informed.
+
+**Strictly additive.** The only calls whose output differs are those that used to deliver
+nothing at all — content topic already spent for the session — and now deliver a section
+written for their shape. All 44 pre-existing guide tests pass unmodified.
+
+Candidate fixes as originally framed, with what testing them showed:
 
 - **Make declaration beat content.** If any section in the corpus declares the call's
-  shape, route to that section's topic rather than to the content heuristic. Most correct,
-  and it makes `serves:` mean what it appears to mean. Needs a tie-break when two topics
-  declare the same shape.
+  shape, route to that section's topic rather than to the content heuristic. Called "most
+  correct" here when this file was written. **It is wrong, and mutation proved it rather
+  than argument.** Implemented as an experiment, it fails
+  `an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide`: an
+  `artifact.create` under `docs/trackers/` receives `librarian` § *Artifact Model*
+  instead of the frontmatter and status vocabulary it needs. It also reverts `32736ca0`,
+  which routes `doctor` to `tracker-conventions` precisely because the entry-validity
+  checks' remediation lives only there — 24 of the 139 violations in the run that opened
+  this file were that class. `librarian.md` declares nearly every librarian/artifact
+  shape, so an outright win starves `tracker-conventions` about as thoroughly as the old
+  order starved the sections: the same defect with the sign flipped.
+
+  The reframe that resolved it: the two topics are **not competitors for one slot**.
+  `librarian.md` answers *how do I form this call*; `tracker-conventions` answers *what
+  must the artifact I am touching look like*. Both are right, each backed by its own
+  measured fix, and the real defect was a mechanism that could name only one — so the
+  loser was silent. Ordering with fallthrough keeps both reachable.
 - **Let a tool return several candidate topics** and deliver matching sections from each,
   rather than one topic winning outright.
 - **Extend the `server.rs:3272` gate with its converse**: every declared shape must be
@@ -216,11 +242,31 @@ is not.
 ## Tests added
 
 `doctor_repairs_section_declares_a_shape_a_doctor_selector_matches`
-(`src/prompts/guide_index.rs`) — kept and **renamed to what it proves**, with its own doc
-comment naming the gap. No test yet covers the end-to-end property; writing one means
-asserting that a realistic doctor result reaches a topic serving `librarian.doctor`, which
-would fail today. That is the regression test for whichever fix is chosen.
+(`src/prompts/guide_index.rs`) — kept and **renamed to what it proves**, doc comment now
+recording that the fallthrough partly closes the gap it names.
 
+`a_declared_section_still_arrives_once_the_content_topic_is_spent`
+(`src/server.rs`, `guide_hint_tests`) — **the end-to-end regression test this section
+previously said was missing.** Creates an artifact under `docs/trackers/` (spending
+`tracker-conventions` whole), then `get`s it, and asserts the `librarian` § *Artifact
+Model* body arrives. It asserts *body text*, not the `§ Artifact Model` marker, which an
+emptied section would satisfy.
+
+Both halves are asserted in one test because each is monotone in a direction the other
+is blind to — and both mutations were run:
+
+| Mutation | Result |
+|---|---|
+| candidate list truncated to `vec![content_topic]` | dies on half 2, message `got 0 B` — the bug itself |
+| declaring topic pushed FIRST instead of appended | dies on half 1, **and** takes `an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide` with it |
+
+`no_two_topics_declare_an_overlapping_shape` (`src/prompts/guide_index.rs`) — guards the
+one piece of `topic_declaring` that is otherwise decided by accident: it scans in
+`BTreeMap` order and takes the first match. **Vacuous today by construction** — only
+`librarian` declares anything — and kept deliberately, to fire the moment a second topic
+adopts `serves:`. Because "vacuous but kept" is indistinguishable from "cannot fire", it
+was proved able to fire: adding `serves: artifact.find` to `tracker-conventions.md` makes
+it fail naming both topics.
 ## Workarounds
 
 Do not move first-call-relevant text out of a tool schema into a section served by a
@@ -230,21 +276,25 @@ the gate that fails.
 
 ## Resume
 
-Decide between "declaration beats content" and "several candidate topics" in
-`Tool::relevant_guide_topic` (`src/tools/core/types.rs` calls it; `src/librarian/adapter.rs`
-implements the librarian one).
+The unreachability defect is closed. Two pieces of the original scope are not, and both
+are now better specified than when this file was opened:
 
-**The runtime confirmation constrains that choice.** The destination here declares no
-sections at all, so any fix phrased as "prefer the topic whose sections match the call"
-must still say what happens when the content-chosen topic is whole-topic — today's answer
-is to silently pay 39,106 bytes. With 9 of 10 topics whole-topic, that is the common case,
-not the exotic one.
+1. **The first-call cost stands.** A session's first tracker-path-naming librarian call
+   still ships `tracker-conventions` whole — 39,106 B where 1,490 would do. The fix makes
+   the section reachable *later*, not cheaper *now*. The real remedy is giving
+   `tracker-conventions` its own `serves:` declarations so it too delivers section-grain;
+   that is a content job over 707 lines, and `no_two_topics_declare_an_overlapping_shape`
+   is already in place to catch the ambiguity it would introduce.
 
-A commit-time gate is still wanted, but it is **not** the converse of `src/server.rs:3272`:
-that gate is scoped to declaring topics and cannot see this bug (§ *Fix*). Whatever is built
-has to start from the declaration side — for each declared shape, assert that some plausible
-result routes to its declaring topic.
+2. **9 of 10 topics are still whole-topic**, so the same shape — a big content-chosen
+   destination displacing a small declared section on the first call — is live wherever
+   else a tool grows a result-based heuristic. Nothing gates that; a commit-time check
+   would have to start from the declaration side (for each declared shape, assert some
+   plausible result routes to its topic), **not** from the converse of
+   `src/server.rs`'s gate, which is scoped to declaring topics and cannot see it (§ *Fix*).
 
+Still unverified against a rebuilt live MCP — the gate is green but `cargo rb` has not
+run, so the runtime confirmation above still describes the old binary.
 ## References
 
 - `docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md` —
