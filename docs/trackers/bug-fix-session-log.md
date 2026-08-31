@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 82
-entry_high_water_W: 88
+entry_high_water_F: 83
+entry_high_water_W: 89
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -132,6 +132,7 @@ entry_high_water_W: 88
 | F-80 | 2026-08-30 | high | cross-session | open | Closed an authorship question by ELIMINATION over a population no instrument reports completely, and sent it as a positive ID. `ListAgents` is scoped to one Claude profile's socket dir; this machine runs three, and a fourth session in `~/.claude-sdd` shared the checkout, wrote the contested hunks, and could not be seen or messaged (BL-58). Cost: `fix-embedding-transport-stage-1`'s correct first read — "not mine" — was abandoned to my well-argued wrong analysis, the inverse of every other misattribution that day. Remedy is a different KIND of instrument: grep session transcripts for `tool_use` write calls carrying a distinctive symbol from the diff, across ALL THREE profile dirs — positive identification, and it reaches exited sessions the process table cannot |
 | F-79 | 2026-08-30 | low | cross-session | mitigated | Told a peer a shared file was clean, kept editing it, and their explicit-path `git add` swept my BL-51/BL-52 re-statusing into a commit about archiving a different bug. Not `W-69`'s committer-side check but its missing sender-side half: "clean" is a claim with an expiry only the sender can see, so an all-clear should name a SHA or be retracted the moment you touch the file again |
 | F-78 | 2026-08-29 | low | self-friction | fixed-verified | Attributed a test failure to a peer's uncommitted file from a keyword count in its diff (19 × "timeout" across +137 lines). Wrong twice: the real cause was a `tokio::try_join!` race inside the test itself (`21174425`), and the "cheap decisive check" I first proposed — run it in isolation — PASSES, so it confirms the flake reading wrongly. The instrument whose subject was the failure was reading `embed_one_batch` |
+| F-83 | 2026-09-01 | high | codescout-tool | open | `artifact(get)` carries `updated_at` per response but nothing says "changed since your last read", so two reads of one artifact 5.7 min apart composed a contradiction present in neither commit either side of it (75085 vs 78448 bytes = `13226bda^` vs `13226bda`). Five false "the ledger contradicts itself" findings were one step from a user-facing report; the natural reading blames the FILE, not the read |
 
 ## Wins Index
 
@@ -228,6 +229,8 @@ entry_high_water_W: 88
 | W-80 | 2026-08-30 | high | When a fix is "introduce a shared constant so two sides cannot drift", a test that builds its fixture FROM that constant tests one side twice — drive the real producer into the real consumer instead | Written and deleted before committing. It asserted `classify_search_error` matches `SPARSE_MARKER` using a fixture formatted from `SPARSE_MARKER`, so reverting the producer's wording — the exact regression — moved it not at all: a guard for the bug that the bug would pass. Shipped, it would have read as coverage in every later review and the bug file would have cited it. The end-to-end replacement dies on that mutation, printing the original defect verbatim, while both constant-built tests stay green | validated |
 
 | W-88 | 2026-08-31 | high | **A fix option that names a file KIND is a hypothesis about which instances are live — count the population before preferring it for being narrow.** Running the reproduction before the plan (CLAUDE.md § Bug Tracking) on the gitignored-anchor bug: the filed mechanism was churn — a lock file and a db "rewritten on every index build" — and both are **inert here**, last changed 2026-04-17 and 2026-05-13, the retrieval backend having moved to remote Qdrant. What fires is the file's own second-order effect, and it is a different KIND of defect: all five sidecars recorded one identical `.codescout/project.toml` hash matching no file present, mtime three days before the re-anchor that supposedly refreshed it. A tracked sidecar hashing a gitignored file is a cross-machine oscillation with **no fixed point** — A refreshes, commits A's hash, B is permanently stale, B refreshing flips A — so unlike churn, the repair action creates the next defect, for someone not present to see it. Paired second win: three write sites, `refresh_hashes` never re-seeding, confirmed by per-site mutation rather than argued | The plan's option (2), "exclude by kind — lock files, `*.db`, `*.sqlite`, cache dirs", is a churn detector, and reads as the prudent narrow choice **until** you count what it catches. The worst instance is a small, stable, hand-edited TOML: no matching extension, no cache directory, never rewritten. It would have excluded the two already-inert anchors and left `project.toml` — the one firing in all five memories — anchored: 12 bad anchors down to 7, and **zero** of the eight false staleness reports resolved, behind its own green tests. Separately, a fix at `seed_anchors` alone (the site "anchor-selection time" most naturally names) would have compiled, passed the gate, and changed nothing observable, since every affected memory already had a sidecar and so reaches only the two other sites | validated |
+
+| W-89 | 2026-09-01 | high | **Compare `updated_at` across every response a cross-section claim rests on, before publishing it** — and escalate to `artifact_event(action="list")`'s `field_patch` `prev_bytes`/`new_bytes` to learn exactly which state each read saw. A versioned store read through more than one call is not a snapshot | Five discrepancies sitting in context (IC-3 20-vs-18; IC-13/14/15/16 0-vs-16/7/15/2) were **all** artifacts of the torn read [[F-83]] — both commits either side are internally consistent, so the ledger contradicted itself in none of sixteen rows. Publishing would have called a peer's correct in-flight backfill a five-row self-contradiction, inside a report whose declared subject was count-vs-prose staleness, which is what would have made it credible rather than suspect. Detection cost: one `artifact(get)`. The same check then fired AGAIN four minutes later on the same artifact — IC-3's target moved to `OB-7` and `cluster/doc-contradicted-by-code` went 1 → 4, carrying IC-11 over n≥3 — so it is the correct default for the whole window `ListAgents` reports a busy peer, not a one-off | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -8209,6 +8212,117 @@ narrower and sharper than the existing rule: **a fix option that names a file KI
 hypothesis about which instances are live** — count the population it would actually catch
 before preferring it for being narrow. That is the population form of `R-117`, arriving from
 the remedy side rather than the diagnosis side.
+
+## F-83 — `artifact(get)` has no changed-since-your-last-read signal, so a multi-call read tears silently and the composite reads as a defect in the FILE
+
+**Observed:** 2026-09-01, auditing `docs/trackers/issue-clusters.md` (artifact
+`1b5a080fe2efcb6b`) while peer session `codescout-fc [a90dcf]` was actively writing it.
+
+**When:** Composing an audit report out of two `artifact(action="get")` calls issued ~5.7
+minutes apart against the same artifact — `start_line=116` for the `## Index` table, and
+`start_line=496` for the `IC-12`…`IC-16` entry bodies.
+
+**Expected:** Two reads of one artifact inside a single task compose into one coherent
+picture of that artifact.
+
+**Got:** The two responses were served from different working-tree states. The Index read
+carried `updated_at=1788210771474` and returned `n=0` cells for `IC-13`/`IC-14`/`IC-15`/`IC-16`;
+the entry-body read carried `updated_at=1788211113779` and returned `**Members:** … n=16` for
+`IC-13`. Reconciled exactly afterwards: 75085 bytes (= `prev_bytes` of the final `field_patch`
+event, = `git show 13226bda^`) versus 78448 bytes (= `new_bytes`, = `git show 13226bda`). **Both
+commits are internally consistent** — at `13226bda^` the table *and* the `**Members:**` fields
+both read 0; at `13226bda` both read 16/7/15/2. The contradiction existed only in my composite.
+
+**Probable cause:** Every response carries `updated_at`, so the information needed to detect
+the tear is present — but correlating it across calls is entirely the caller's job, and no
+field says *"this artifact changed since your last read."* A torn composite is therefore
+indistinguishable from a genuinely self-contradictory document, and the natural reading blames
+the file rather than the read.
+
+**Workaround:** Before publishing any claim that spans two sections of one artifact, compare
+`updated_at` across every response the claim rests on; re-read if they differ. To learn exactly
+which state each read saw, use `artifact_event(action="list")` and match the `field_patch`
+`prev_bytes`/`new_bytes` against `git show <sha>:<path> | wc -c` — that reconstruction is exact
+and is what closed this.
+
+**Severity:** high — this session was one step from publishing five fabricated *"the ledger
+contradicts itself"* findings to the user, about a peer session's correct in-flight work.
+Nothing in the tool output would have flagged it, and the audit's own subject was
+count-versus-prose drift, so a false positive of exactly that shape was maximally credible.
+
+**Status:** open
+
+**Valid:** dated 2026-09-01
+
+Observed against codescout at `c6d7d83b`; re-verify if `artifact(get)` gains a revision token
+or an if-none-match style parameter.
+
+**Rests on:** the `field_patch` event log's `prev_bytes`/`new_bytes` being an exact
+reconstruction oracle for which state a given read saw — the same oracle `IC-12` prescribes for
+this class (*"`artifact_event(action="list")`'s `field_patch` byte counts, which no git
+operation touches"*).
+
+**Fix idea / Pointer:** a monotonic per-artifact revision token echoed in every
+`artifact(get)` response, plus an optional `if_unchanged_since=<token>` on follow-up reads that
+errors rather than silently serving a newer state. Candidate cluster for a bug file is `IC-12`
+(`cluster/transient-shared-state-lies-to-readers`), which currently sits at n=0 with *"nothing
+to tag yet"* — but it differs from `IC-12`'s git-hook exemplar on the diagnostic axis: there
+`git stash list` actively confirms the lie, whereas here `updated_at` does report the truth and
+merely goes uncorrelated. Not filed as a bug file yet: the `cluster/` slug set is being
+rewritten by the peer session right now and `tests/issue_clusters.rs` gates on it.
+
+## W-89 — Comparing `updated_at` across two reads of one tracker killed five false findings before they reached the user
+
+**Observed:** 2026-09-01, at the end of a *"check all issue clusters"* audit of
+`docs/trackers/issue-clusters.md`, immediately before reporting 16 cluster counts to the user.
+
+**Pattern:** Before publishing a claim that spans two sections of one librarian artifact,
+compare `updated_at` across every response the claim rests on. If they differ, re-read and
+re-derive before saying anything. When you need to know exactly which state each read saw,
+escalate to `artifact_event(action="list")` and match `field_patch` `prev_bytes`/`new_bytes`
+against `git show <sha>:<path>`.
+
+**Counterfactual:** Concrete and countable. The composite sitting in context asserted **five**
+discrepancies between the ledger's Index table and its own entry bodies: `IC-3` table n=20
+against a measured 18, and `IC-13`/`IC-14`/`IC-15`/`IC-16` table n=0 against measured
+16/7/15/2. Every one was an artifact of the torn read (`F-83`) — both commits either side of
+the tear are internally consistent. Publishing them would have (a) told the user their ledger
+contradicted itself in five of sixteen rows when it contradicted itself in none, (b)
+misattributed a peer session's correct in-flight backfill as drift, and (c) done so inside a
+report whose declared subject was count-versus-prose staleness, which is precisely what would
+have made the false finding credible rather than suspect. Detection cost was one extra
+`artifact(action="get")`; the post-publication cost is a retraction plus a full re-audit,
+because once five counts are disputed none of the other eleven are trusted either.
+
+**Confirming data points:**
+1. `F-83` (this session) — the torn read itself, reconstructed exactly from the `field_patch`
+   byte counts (75085 → 78448, matching `13226bda^` → `13226bda`).
+2. The same check fired **again, four minutes later, on the same artifact**: between the audit
+   report and this reconnaissance pass, `IC-3`'s promotion target moved to `OB-7` and
+   `cluster/doc-contradicted-by-code` went 1 → 4, carrying `IC-11` over the n≥3 threshold. So
+   the re-read is not a one-off precaution against a single unlucky moment — it is the correct
+   default for the whole window in which `ListAgents` reports a busy peer.
+
+**Impact:** high — prevented five false findings in a user-facing report, and then caught two
+further decays in the report already delivered.
+
+**Promote-when:** a third independent instance where an `updated_at` comparison catches a torn
+multi-call read. At 3 datapoints, promote to the reconnaissance skill's Phase 1 as a substrate
+bullet — *a versioned store read through more than one call is not a snapshot* — routed
+**craft-shaped**, not project-shaped, since it holds for any store whose reads are per-section
+rather than per-document.
+
+**Status:** validated
+
+**Valid:** dated 2026-09-01
+
+Two datapoints, both from one session; the promote-when threshold of 3 independent instances is
+not yet reached.
+
+**Rests on:** `F-83`'s byte-level reconstruction, and on `ListAgents` reporting peer liveness —
+the busy peer `codescout-fc [a90dcf]` is what made a re-read obviously worth its cost rather
+than paranoia. Without a liveness signal the same discipline still applies but has no cheap
+trigger, which is the open half of this win.
 
 ## Template for new entries
 
