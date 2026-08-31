@@ -266,42 +266,26 @@ mod tests {
         }
     }
 
-    /// `OP-4`'s `path~` predicate cannot fire against a real write response.
+    /// `OP-4`'s predicate is sound given a response that names a path.
     ///
-    /// Pinned rather than fixed: write tools answer with the no-echo `"ok"`
-    /// convention, and `names_path_containing` scans only `abs_path`/`rel_path`
-    /// (top level and `items[]`) plus `violations[].path`. Giving writes a path
-    /// field is a change to the no-echo convention, not a bug fix — see
-    /// docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md
+    /// Kept as the unit-level isolation of the matcher: if this fails, the selector
+    /// or the `path~` parse is broken, which is a different bug with a different fix
+    /// from anything in the response shape.
     ///
-    /// `Some("edit_file")` below is a synthetic selector: no production tool
-    /// overrides `selector_key` for `edit_file`/`create_file` at all, so this
-    /// string never actually reaches `route()` on a real call — see
-    /// docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md.
+    /// **It used to sit beside a pin asserting the predicate could not fire against a
+    /// write response**, whose doc read *"when this test starts failing, that is the
+    /// fix landing"*. The fix landed and it did not fail — its fixture was a
+    /// hand-written `json!({"status":"ok","wrote_to":…})` bound to a variable named
+    /// `observed`, so it asserted against a response no tool returns and could see
+    /// neither the bug nor its repair. Removed rather than repaired, per its own
+    /// instruction to delete it and assert delivery instead. That assertion now runs
+    /// against a response the pipeline actually produced, in
+    /// `tools::core::tests::op_4_routes_on_a_write_response_the_pipeline_produced`,
+    /// with a negative control for a path outside `~/.claude`.
     ///
-    /// **When this test starts failing, that is the fix landing.** Delete it and
-    /// assert delivery instead; close the bug file.
-    #[test]
-    fn op_4s_path_predicate_cannot_fire_against_a_write_response_today() {
-        let observed = json!({"status": "ok", "wrote_to": "/home/u/work/claude/codescout"});
-        let hit = route(Some("edit_file"), &observed);
-        assert!(
-            !hit.iter().any(|r| r.id == "OP-4"),
-            "OP-4 fired — the write-response shape gained a path field. This is the \
-             GOOD failure: delete this test, assert delivery, and close the bug file."
-        );
-    }
-
-    /// The same rule DOES fire once a response names the path — so the defect is
-    /// the response shape, not the selector or the matcher.
-    ///
-    /// Without this cell the test above is indistinguishable from "OP-4's selector
-    /// is malformed", which is a different bug with a different fix.
-    ///
-    /// As above, `Some("edit_file")` is synthetic — no production `edit_file`
-    /// call ever produces this selector today (see
-    /// docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md).
-    /// This test isolates the predicate from that separate blocker.
+    /// `Some("edit_file")` here is still supplied by hand, and that is now honest
+    /// rather than synthetic: `EditFile` produces exactly this string, asserted in
+    /// `tools::core::tests::the_real_write_tools_supply_selector_keys_for_op_4`.
     #[test]
     fn op_4s_predicate_is_itself_sound_given_a_path_bearing_response() {
         let hit = route(

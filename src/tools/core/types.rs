@@ -200,6 +200,49 @@ fn annotate_write_root(val: &mut Value, root: &std::path::Path) {
     }
 }
 
+/// Name the path a write targeted, so a `path~` predicate has something to match.
+///
+/// Sibling to [`annotate_write_root`] and deliberately separate from it. That one
+/// answers *which checkout did this reach*, and is gated on the call being
+/// **unpinned**, because a pinned call already named its target. This one answers
+/// *which file did this write*, which is a fact about the call whether or not a
+/// workspace was pinned — so it is gated on `is_write` alone.
+///
+/// Without it, `OP-4` (`**Serves:** edit_file(path~/.claude)`) could never match:
+/// `names_path_containing` scans the response, writes answer `"ok"` under the
+/// no-echo convention, and the one field promotion added was `wrote_to` — the
+/// project ROOT, which for a write to `~/.claude/…` names the wrong thing entirely.
+/// `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`.
+///
+/// **This is a narrow, deliberate exception to no-echo, not its repeal.** The
+/// convention exists so a write does not echo the *content* it wrote — the reason
+/// `call_content` refuses to clone its own input is that `edit_file`/`create_file`
+/// carry whole file bodies. A path is bounded, is already half-present as
+/// `wrote_to`, and tells the caller where the write landed. See
+/// `docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md`.
+///
+/// Keyed by absoluteness rather than always `abs_path`, because
+/// `names_path_containing` scans both and a relative path filed under `abs_path`
+/// would be a lie the matcher happens not to notice. Never overwrites a path the
+/// tool set itself.
+fn annotate_write_path(val: &mut Value, path: &str) {
+    // Same promotion as `annotate_write_root`: a bare string has nowhere to hold
+    // an annotation, so it becomes `{"status": <the string>}` rather than being
+    // discarded.
+    if let Some(status) = val.as_str() {
+        *val = serde_json::json!({ "status": status });
+    }
+    let key = if std::path::Path::new(path).is_absolute() {
+        "abs_path"
+    } else {
+        "rel_path"
+    };
+    if let Some(obj) = val.as_object_mut() {
+        obj.entry(key)
+            .or_insert_with(|| Value::String(path.to_string()));
+    }
+}
+
 /// MCP client identity resolved from the `initialize` handshake's `clientInfo`.
 /// This is the protocol-proper, agent-agnostic source — every MCP client sends
 /// it. Verified live for Claude Code: name="claude-code", version="2.1.177"
@@ -789,6 +832,23 @@ pub trait Tool: Send + Sync {
         let annotate_root = ctx.workspace_override.is_none()
             && self.is_write(&input)
             && !WRITE_ROOT_ANNOTATION_EXEMPT.contains(&self.name());
+        // Captured BEFORE `self.call` consumes `input`, for the same reason as
+        // the two above — and note this clones ONE string, never `input`, which
+        // for `create_file`/`edit_file` carries a whole file body.
+        //
+        // Not gated on `workspace_override`, unlike `annotate_root`: that gate
+        // exists because a pinned call already named the checkout it meant,
+        // which says nothing about which file it wrote. The path is a fact
+        // about the call either way.
+        let write_path: Option<String> =
+            if self.is_write(&input) && !WRITE_ROOT_ANNOTATION_EXEMPT.contains(&self.name()) {
+                input
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            } else {
+                None
+            };
         let mut val = self.call(input, ctx).await?;
 
         // Field-aware project-root stripping. Runs HERE, on the typed Value,
@@ -817,6 +877,12 @@ pub trait Tool: Send + Sync {
             if let Some(root) = project_root.as_deref() {
                 annotate_write_root(&mut val, root);
             }
+        }
+        // After stripping for the same reason as the root annotation: this names
+        // the target the caller asked for, and the stripper rewrites
+        // project-rooted paths into relative ones.
+        if let Some(path) = write_path.as_deref() {
+            annotate_write_path(&mut val, path);
         }
         let val = val;
         let form = self.output_form();

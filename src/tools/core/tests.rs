@@ -1628,6 +1628,132 @@ async fn an_unpinned_write_names_the_checkout_it_reached() {
     );
 }
 
+/// A write must name the **path it wrote**, not only the checkout root.
+///
+/// `OP-4` declares `**Serves:** edit_file(path~/.claude)`, and its predicate runs
+/// through `names_path_containing`, which scans the tool's *response*. Writes answer
+/// `"ok"` under the no-echo convention, promoted here to `{"status":"ok","wrote_to":…}`
+/// — and `wrote_to` is the project ROOT, not the file. So the rule could never match a
+/// write to `~/.claude/…`: the one field present names the wrong thing.
+/// `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md` records exactly this,
+/// its Mutation 1 showing that widening the scan to `wrote_to` still does not fire while
+/// a response carrying a real `abs_path` does.
+///
+/// The path is captured from `&input` before `self.call` consumes it — the same
+/// pre-consumption capture `selector` and `annotate_root` already use — and clones one
+/// string rather than the input, which for `edit_file`/`create_file` carries whole file
+/// bodies.
+///
+/// Deliberately asserts a path OUTSIDE the project root: that is `OP-4`'s actual target,
+/// and it also survives the path-stripper, so the assertion cannot pass by accident on a
+/// relativised value.
+///
+/// Mutation that must kill this: drop the `abs_path` insertion and the response carries
+/// `wrote_to` alone, which is the current behaviour.
+#[tokio::test]
+async fn a_write_response_names_the_path_it_wrote_so_op_4_can_match() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_root, ctx) = worktree_repo_ctx(&tmp).await;
+    let tool = WriteEchoTool {
+        name: "edit_file",
+        result: serde_json::json!("ok"),
+    };
+    let content = tool
+        .call_content(
+            serde_json::json!({"path": "/home/u/.claude/settings.json"}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let val: serde_json::Value =
+        serde_json::from_str(&text).expect("a write result must round-trip as JSON");
+
+    assert_eq!(
+        val.get("abs_path").and_then(|v| v.as_str()),
+        Some("/home/u/.claude/settings.json"),
+        "a write must name the path it wrote, or a path~ predicate has nothing to \
+         match on; got {val}"
+    );
+    assert_eq!(
+        val.get("status").and_then(|v| v.as_str()),
+        Some("ok"),
+        "adding the path must not discard the tool's own answer; got {val}"
+    );
+}
+
+/// `OP-4` now routes on a write response the pipeline actually produced.
+///
+/// This replaces `op_4s_path_predicate_cannot_fire_against_a_write_response_today`
+/// in `operator_rules::route`, which pinned the defect and told its reader
+/// *"when this test starts failing, that is the fix landing"*. It never failed.
+/// Its fixture was a hand-written `json!({"status":"ok","wrote_to":…})` bound to a
+/// variable named `observed`, so it asserted against a response no tool returns —
+/// and could not notice the fix any more than it could have noticed the bug. Same
+/// shape as `RoutedEchoTool` supplying the `selector_key` the real tool lacked.
+///
+/// So the response here is not written by hand: it comes back out of
+/// `call_content`, past the path-stripper and both annotations, and is fed to
+/// `route` unmodified. The selector is supplied explicitly, which is honest
+/// because `the_real_write_tools_supply_selector_keys_for_op_4` proves the real
+/// tool produces exactly that string — the two tests meet at a value both check.
+///
+/// Mutation that must kill this: drop the `abs_path` insertion in `call_content`
+/// and the response falls back to `wrote_to` alone, which names the project root
+/// and matches no `~/.claude` needle.
+#[tokio::test]
+async fn op_4_routes_on_a_write_response_the_pipeline_produced() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_root, ctx) = worktree_repo_ctx(&tmp).await;
+    let tool = WriteEchoTool {
+        name: "edit_file",
+        result: serde_json::json!("ok"),
+    };
+    let content = tool
+        .call_content(
+            serde_json::json!({"path": "/home/u/.claude/settings.json"}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let produced: serde_json::Value =
+        serde_json::from_str(&text).expect("a write result must round-trip as JSON");
+
+    let hit = crate::operator_rules::route::route(Some("edit_file"), &produced);
+    assert!(
+        hit.iter().any(|r| r.id == "OP-4"),
+        "OP-4 must route on a real write response naming a ~/.claude path; \
+         produced={produced}, routed={:?}",
+        hit.iter().map(|r| &r.id).collect::<Vec<_>>()
+    );
+
+    // Guard the guard: a write to a path OUTSIDE ~/.claude must NOT route, or the
+    // assertion above would be equally satisfied by a predicate that matches
+    // everything — which is the failure mode a `path~` predicate exists to avoid.
+    let elsewhere = tool
+        .call_content(serde_json::json!({"path": "/home/u/work/notes.md"}), &ctx)
+        .await
+        .unwrap();
+    let text = elsewhere[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let other: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(
+        !crate::operator_rules::route::route(Some("edit_file"), &other)
+            .iter()
+            .any(|r| r.id == "OP-4"),
+        "a write outside ~/.claude must not route OP-4: {other}"
+    );
+}
+
 /// The no-echo write convention, guarded. Single-checkout repos — every test
 /// tempdir, and the overwhelmingly common real case — must be byte-identical to
 /// before this change. This is the test that makes the conditional shape change
