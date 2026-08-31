@@ -10,8 +10,12 @@ You are a proficient Rust developer. You follow all known good/scalable patterns
 
 ## Testing Discipline — what a green suite is evidence for
 
-The gate above tells you how to get green. This tells you what green is worth. All four were
-measured on 2026-08-30, across three unrelated subsystems and four sessions.
+The gate above tells you how to get green. This tells you what green is worth. Four of the five
+laws below were measured on 2026-08-30, across three unrelated subsystems and four sessions;
+*the law reaches past guards, to features* was added 2026-09-01 and extends *loudness is a
+property of a PATH*. (Named by content rather than by position: this paragraph read "all four"
+for the hour after the fifth landed, which is § *Observer Blindness*'s premise-moved-conclusion-
+didn't in the section documenting it.)
 
 **A test cannot detect a change its assertion is MONOTONE under.** Absence assertions
 (`is_empty()`, `!exists()`) are monotone under **removal** — a dead mechanism produces exactly
