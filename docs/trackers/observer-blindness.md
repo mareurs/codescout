@@ -278,6 +278,30 @@ sentence ships.
 agreed perfectly on the wrong object. See `OB-4` § *Third instance* — instrument agreement
 verifies the measurement and never the referent, which is the limit on that entry's own remedy.
 
+**Fourth instance, four hours after this sub-pattern was committed — and it adds the half the
+other three do not have: PROPAGATION.** This session's context carries a marker reading
+`from=c0ab9bc4-…`. I read that as *"the session this one was compacted from"*, never checked what
+the marker denotes, and passed it to a peer as fact while flagging a possible defect in a
+commit-trailer mechanism. `CLAUDE_CODE_SESSION_ID` was one command away and reads
+`bcc98c22-…`; the commits in question touch `scripts/install-hooks.sh` and siblings, which this
+session has never edited; and every stamped commit postdates the 02:00 hook install, hence
+postdates the compaction, hence could only carry `bcc98c22`. Three independent checks, none run.
+
+> **Why this one is worse than the solo form.** The other three stopped at their author. This
+> one reached a second party, who then did everything right — verified against real commits,
+> reasoned carefully, reached the **correct conclusion** (one work stream, one session, trailer
+> upheld) — and attached a **wrong attribution** to it, because the premise being reasoned over
+> was mine and was not among the things they could check. A referent error that crosses a party
+> boundary gets **laundered into a conclusion the recipient can defend**, and their verification
+> is genuine and does not touch it. The recipient is now the blind party, structurally: nothing
+> in their evidence bears on a premise they inherited.
+>
+> **So the rule gains a second clause.** Resolve the referent from the artifact *before you
+> hand it to anyone* — an unverified referent kept to yourself decays into one wrong sentence,
+> and the same referent passed on decays into someone else's defended finding. And when you
+> receive a premise you cannot check, say which part of your conclusion rests on it, so the
+> party who can check it knows to.
+
 ### Sub-pattern — mark provenance at the WRITE, because nobody downstream can
 
 Found 2026-08-31, and it is the sharpest thing in `OB-1` because it names a defect the
