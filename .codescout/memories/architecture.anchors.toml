@@ -7,7 +7,7 @@ hash = "53e6e26163c8155d1d50af1598444221181e428ad4597aa45efe0a6d5cacacce"
 
 [[anchors]]
 path = "src/prompts/source.md"
-hash = "3408577ed6e045a56396aea45e94d5f6ec4697ae099f925327c13d3428d738e9"
+hash = "c90642c243de38bb385a1b9b4393be05f92e6a08be5860e538b49ef5c33b31e2"
 
 [[anchors]]
 path = "Cargo.toml"
@@ -71,7 +71,7 @@ hash = "c0ba221088c1fb79e35bdff0ff405715e4704e7b16e4bfbb75d80f4d72f780f4"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "721e31973913a5404766990f819fdb5b893fd9150707f51b1d8cd0a8932adb0e"
+hash = "9c53bcdc80848c641a02ad67cb184940957579c47ea956dbfa48676e11d8d1b0"
 
 [[anchors]]
 path = "src/tools/section_coverage.rs"

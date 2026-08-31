@@ -19,7 +19,7 @@ hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "721e31973913a5404766990f819fdb5b893fd9150707f51b1d8cd0a8932adb0e"
+hash = "9c53bcdc80848c641a02ad67cb184940957579c47ea956dbfa48676e11d8d1b0"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
