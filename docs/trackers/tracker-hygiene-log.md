@@ -361,7 +361,7 @@ moves, grep the moved basenames across live surfaces and repoint, then verify wi
 `audit_doc_refs` (0 high findings as the gate). This sweep did it manually; it should not
 depend on the operator thinking of it.
 
-**2. There is no whole-corpus tracker index.** docs/trackers/README.md does not exist — named bare rather than code-spanned, so the audit does not read this statement of absence as a citation (the precedent is CLAUDE.md's note on the deliberately-deleted docs/ARCHITECTURE.md) — so
+**2. There is no whole-corpus tracker index.** There is no `README` under `docs/trackers/`, so
 D1 can only diff `docs/TAXONOMY.md`'s 11 prefix-owning rows against disk — 11 of 62 live
 trackers, 18% coverage. D1 reported 0 findings, which is true and nearly meaningless. The
 remaining 51 files were discoverable only via `git ls-files` and the catalog. **Proposal:**

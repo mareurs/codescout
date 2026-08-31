@@ -345,8 +345,7 @@ cold start behavior, circuit breaker, and LSP mux details.
 Files:
 
 - **`docs/PROGRESSIVE_DISCOVERABILITY.md`** — Canonical guide for output sizing, overflow hints, and agent guidance patterns. **READ THIS before adding or modifying any tool.**
-- `docs/manual/src/architecture.md` — Component details, tech stack, design principles. (There is no docs/ARCHITECTURE.md — deliberately deleted, and left un-code-spanned
-  here so the doc-ref audit does not read a statement of absence as a citation — see `docs/superpowers/specs/2026-05-06-doc-audit-design.md` § 1a.)
+- `docs/manual/src/architecture.md` — Component details, tech stack, design principles.
 - **[`docs/PROBES.md`](docs/PROBES.md)** — One-page index of every measurement instrument: standalone scripts, built-in `librarian` scans, skill-driven analyses. **Start here before answering a question with a number** — an instrument may already exist, and each row names the blind spot that would make you mis-trust its output.
 - `docs/ROADMAP.md` — Quick status overview
 - `CONTRIBUTING.md` — Contributor-facing setup + PR checklist
