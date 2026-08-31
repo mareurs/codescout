@@ -51,6 +51,51 @@ older commit:
 
 Observed live 2026-08-31 during a laptop→desktop catalog resume.
 
+### Second reproduction — the other machine, at near-minimum gap
+
+Observed 2026-08-31 12:52 on the laptop (the other half of the same resume), pid 3247619,
+release build from `aa7d5039`, after `git merge --ff-only` took HEAD to `43c2f81a`. Same
+disagreement, at a gap ~70× smaller:
+
+```
+workspace(action="status")  "index": { "status": "up_to_date", "files": 1754, "chunks": 53894 }
+index(action="status")      git_sync: { "status": "behind", "behind_commits": 4,
+                                        "last_indexed_commit": "aa7d5039",
+                                        "head_commit": "43c2f81a" }
+index(action="verify")      verdict "stale", expected_files 1757, stored_files 1754,
+                            missing_count 3
+```
+
+**What this adds: the field is not inaccurate *at* a large gap, it is independent *of* the
+gap.** The first reproduction — 286 commits, 70 files — is equally consistent with a
+tolerance that is merely too loose, and that reading points at a fix (tighten the
+threshold) which would leave this case untouched. Four commits and three files report the
+identical `"up_to_date"`, because `chunks > 0` is satisfied by 53894 either way. There is
+no threshold to tighten; the value is not a function of the gap at any magnitude, which is
+what the root cause predicts and what a second datapoint at the opposite end of the range
+is needed to show.
+
+Note also that `index(action="verify")`'s own `hint` reads *"Index is 4 commit(s) behind
+HEAD; the 3 missing file(s) are explained by that. Run index(action='build') to catch up"*
+— the honest sentence, naming the remedy, emitted by the same process that had just
+answered `up_to_date`.
+
+The three missing files were exactly the three this pull added:
+
+```
+docs/issues/2026-08-31-workspace-status-claims-up-to-date-without-checking-git-sync.md
+docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md
+docs/trackers/archive/provenance-subsystem-recovered-entries.md
+```
+
+So this report was itself absent from the index whose currency it disputes, while
+`workspace(status)` reported that index current — a session that oriented with `status`
+and then ran `semantic_search` for prior art on the defect would have found none, and been
+given no reason to doubt the zero (cf. `docs/adrs/2026-08-27-negative-results-name-their-scope.md`).
+
+*Measured against a closing window: the background reindex was already running, so
+`behind_commits: 4` is a fact about 12:52 and not about whenever this is read. The
+`up_to_date` claim is not — it is reproducible at any non-zero chunk count.*
 ## Environment
 
 Arch Linux (zen 7.1.9), codescout 0.15.0 at `2f434fba`, release build via `cargo rb`
@@ -138,6 +183,15 @@ populated-and-current case is monotone under exactly this defect and would have 
 throughout (see CLAUDE.md § *Testing Discipline* — the assertion must be able to fail in
 the direction of the bug).
 
+**Make the fixture's gap exactly one commit, and say on the fixture line that the `1` is
+load-bearing.** The second reproduction above shows the defect is gap-independent, so a
+fixture built on a comfortable margin — 50 commits, 20 files — passes under the correct fix
+*and* under a wrong one that merely thresholds on staleness, and nothing distinguishes
+them. A one-commit, one-file gap is the only fixture a threshold-shaped fix fails. This is
+the monotone-assertion rule applied to setup rather than to the assertion: the gap size is
+the part of the arrangement that makes the test able to tell, and a later tidy-up that
+rounds it up to "a clearly stale index" leaves the test green and no longer
+discriminating (CLAUDE.md § *Testing Discipline*, the fixture-annotation clause).
 ## Workarounds
 
 Use `index(action="verify")` rather than `workspace(action="status")` whenever currency
