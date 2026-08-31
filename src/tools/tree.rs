@@ -39,6 +39,7 @@ impl Tool for Tree {
                 "glob": { "type": "string", "description": "When set, return matching paths; otherwise list directory" },
                 "recursive": { "type": "boolean", "default": false, "description": "Descend into subdirectories (auto-capped at depth 3 in exploring mode). Ignored when `glob` is set." },
                 "max_depth": { "type": "integer", "minimum": 1, "description": "Max depth (1=children only, default). Overrides recursive. Ignored when `glob` is set." },
+                "include_hidden": { "type": "boolean", "default": false, "description": "Also include hidden files/dirs (dotfiles, .github/)" },
                 "detail_level": { "type": "string", "description": "'full' for all entries (default: compact)" },
                 "offset": { "type": "integer", "description": "Pagination offset" },
                 "limit": { "type": "integer", "description": "Max entries per page (default 50; for `glob`, max files default 100)" }
@@ -89,6 +90,10 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         &security,
     )?;
     let recursive = parse_bool_param(&input["recursive"]);
+    let include_hidden = input
+        .get("include_hidden")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let explicit_max_depth = optional_u64_param(&input, "max_depth").map(|d| d as usize);
     let guard = OutputGuard::from_input(&input);
 
@@ -109,13 +114,24 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         requested_depth
     };
 
+    // Admitted then classified, like the glob branch, and for a sharper reason here:
+    // this walk sets `git_ignore(false)` / `ignore(false)`, so hidden is its ONLY
+    // exclusion. A listing that shows gitignored `target/` while silently omitting
+    // `.github/` reads as complete precisely because it is showing you things other
+    // tools hide. `.git` / `.codescout` stay pruned — see `glob_impl`.
     let walker = ignore::WalkBuilder::new(&path)
         .max_depth(walker_depth)
-        .hidden(true)
+        .hidden(false)
         .git_ignore(false)
         .git_exclude(false)
         .git_global(false)
         .ignore(false)
+        .filter_entry(|e| {
+            !matches!(
+                e.file_name().to_string_lossy().as_ref(),
+                ".git" | ".codescout"
+            )
+        })
         .build()
         .flatten()
         .filter(|e| e.depth() > 0);
@@ -129,7 +145,17 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
     };
 
     let mut entries = Vec::new();
+    let mut hidden_withheld = 0usize;
     for entry in walker {
+        let rel = entry.path().strip_prefix(&path).unwrap_or(entry.path());
+        let hidden = rel.components().any(|c| {
+            let s = c.as_os_str().to_string_lossy();
+            s.starts_with('.') && s.as_ref() != "." && s.as_ref() != ".."
+        });
+        if hidden && !include_hidden {
+            hidden_withheld += 1;
+            continue;
+        }
         let suffix = if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
             "/"
         } else {
@@ -178,11 +204,38 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
     if depth_auto_capped {
         result["depth_capped"] = json!(3);
     }
+    if hidden_withheld > 0 {
+        result["completeness_warning"] = json!(format!(
+            "this listing describes what was walked, not the directory: {hidden_withheld} \
+             hidden entr{} not listed. Pass include_hidden=true to list them. `.git` and \
+             `.codescout` are never listed.",
+            if hidden_withheld == 1 { "y" } else { "ies" },
+        ));
+    }
     Ok(result)
 }
 
 // ── glob behavior ───────────────────────────────────────────────────────────
 
+/// Glob search under `path`.
+///
+/// **Hidden entries are admitted into the walk and classified afterwards, rather than
+/// pruned by the walker.** Pruning is what made a withheld match indistinguishable from
+/// no match: `tree(glob=".github/workflows/*.yml")` returned a bare `0 files` while both
+/// files existed and were tracked, and `**/*.yml` returned 1 of 3 — a *plausible
+/// non-zero*, so not even a suspicious-zero heuristic could fire.
+/// `docs/issues/2026-08-30-tree-glob-silently-omits-dotfiles.md`.
+///
+/// Counting rather than gating on a zero is deliberate, and differs from `grep`'s
+/// `completeness_warning`, which fires only when the result is empty. That rule is a
+/// proxy: it cannot see the 1-of-3 case above. Tree's walk opens no files, so it can
+/// afford the exact measure — and the exact measure is one rule instead of two, silent
+/// precisely when nothing was withheld.
+///
+/// `.git` and `.codescout` stay pruned. They exist by construction in every project
+/// codescout touches, so counting matches inside them would fire this warning on
+/// essentially every call and train the reader to skip it — the same reasoning as
+/// `grep`'s `uninformative` list.
 async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
     let pattern = input["glob"]
         .as_str()
@@ -202,6 +255,10 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         &security,
     )?;
     let max = optional_u64_param(&input, "limit").unwrap_or(100) as usize;
+    let include_hidden = input
+        .get("include_hidden")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let glob = globset::GlobBuilder::new(pattern)
         .literal_separator(false)
@@ -215,10 +272,17 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         .compile_matcher();
 
     let mut matches = vec![];
+    let mut hidden_withheld = 0usize;
     let mut hit_cap = false;
     let walker = ignore::WalkBuilder::new(&search_path)
-        .hidden(true)
+        .hidden(false)
         .git_ignore(true)
+        .filter_entry(|e| {
+            !matches!(
+                e.file_name().to_string_lossy().as_ref(),
+                ".git" | ".codescout"
+            )
+        })
         .build();
     for entry in walker.flatten() {
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
@@ -228,12 +292,24 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
             .path()
             .strip_prefix(&search_path)
             .unwrap_or(entry.path());
-        if glob.is_match(rel) {
-            matches.push(to_forward_slash(entry.path()));
-            if matches.len() >= max {
-                hit_cap = true;
-                break;
-            }
+        if !glob.is_match(rel) {
+            continue;
+        }
+        // Any dot-prefixed component makes the path hidden, not just the file name:
+        // `.github/workflows/ci.yml` is hidden by its directory, and that is the case
+        // the bug was reported for.
+        let hidden = rel.components().any(|c| {
+            let s = c.as_os_str().to_string_lossy();
+            s.starts_with('.') && s.as_ref() != "." && s.as_ref() != ".."
+        });
+        if hidden && !include_hidden {
+            hidden_withheld += 1;
+            continue;
+        }
+        matches.push(to_forward_slash(entry.path()));
+        if matches.len() >= max {
+            hit_cap = true;
+            break;
         }
     }
 
@@ -246,6 +322,19 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
                 matches.len()
             )
         });
+    }
+    if hidden_withheld > 0 {
+        // `at least` when the cap stopped the walk: the counter then describes the
+        // prefix that was reached, not the tree. Claiming the exact figure there would
+        // be the same overclaim this warning exists to prevent.
+        let qualifier = if hit_cap { "at least " } else { "" };
+        result["completeness_warning"] = json!(format!(
+            "this count describes what was searched, not the pattern: {qualifier}{hidden_withheld} \
+             matching file{} under hidden paths {} withheld. Pass include_hidden=true to list \
+             them. `.git` and `.codescout` are never counted.",
+            if hidden_withheld == 1 { "" } else { "s" },
+            if hidden_withheld == 1 { "was" } else { "were" },
+        ));
     }
     Ok(result)
 }
@@ -331,6 +420,12 @@ pub(crate) fn format_list_dir(val: &Value) -> String {
             "[depth capped at {depth} — use max_depth=N or detail_level='full' for deeper]\n"
         ));
     }
+    // Same placement rule as the cap signals above, and for the same reason: appended
+    // under a long listing it is cut by `truncate_compact` on exactly the listings that
+    // hide the most.
+    if let Some(w) = val["completeness_warning"].as_str() {
+        head_extra.push_str(&format!("[{w}]\n"));
+    }
     head_extra.push_str(&overflow_head(val));
 
     insert_below_header(out, &head_extra)
@@ -410,7 +505,20 @@ pub(crate) fn format_glob(result: &Value) -> String {
         }
     }
     out.push_str(&format!("{total} files{cap_note}"));
-    out
+    // Rendered here rather than left in the JSON, because this is the caller's only
+    // surface: `tree` returns text, so a key nothing formats is a key nobody reads.
+    //
+    // FIRST, not appended. `format_compact` output passes through `truncate_compact`
+    // (soft 2 KB), and a 100-file listing runs several times that — so a note after the
+    // list is cut on exactly the results big enough to need it. The sibling
+    // `format_list_dir` states the same rule and solves it with `insert_below_header`;
+    // that helper puts the note after the first line, which works there because the
+    // count is the header. Here the count prints LAST, so leading is the equivalent
+    // placement. An earlier revision of this function appended it and was wrong.
+    match result["completeness_warning"].as_str() {
+        Some(w) => format!("{w}\n\n{out}"),
+        None => out,
+    }
 }
 
 #[cfg(test)]
@@ -491,6 +599,242 @@ mod tests {
         let files = result["files"].as_array().unwrap();
         assert_eq!(files.len(), 2);
         assert!(files.iter().all(|f| f.as_str().unwrap().ends_with(".rs")));
+    }
+
+    /// Fixture for the hidden-path cases: two files under a dot-prefixed directory and
+    /// one beside it, all matching the same glob. Mirrors the reported shape — this
+    /// repo's `.github/workflows/{ci,manual}.yml` against `docker-compose.yml`.
+    fn seed_hidden_and_visible(dir: &std::path::Path) {
+        std::fs::create_dir_all(dir.join(".github/workflows")).unwrap();
+        std::fs::write(dir.join(".github/workflows/ci.yml"), "").unwrap();
+        std::fs::write(dir.join(".github/workflows/manual.yml"), "").unwrap();
+        std::fs::write(dir.join("docker-compose.yml"), "").unwrap();
+    }
+
+    /// The reported defect: a glob naming a hidden directory returned a bare `0 files`
+    /// while both files existed. The zero was correct about the walk and wrong about the
+    /// question, and nothing in the response said which.
+    ///
+    /// Asserts on the FORMATTED output, not the JSON. `tree` returns text, so a
+    /// `completeness_warning` key that `format_glob` does not render is invisible to the
+    /// caller — a JSON-only assertion passes while the defect stands, which is the same
+    /// shape as the bug itself.
+    #[tokio::test]
+    async fn glob_naming_a_hidden_dir_reports_what_it_withheld() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        seed_hidden_and_visible(dir.path());
+
+        let result = Tree
+            .call(
+                json!({ "glob": ".github/workflows/*.yml", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["total"], 0, "default still withholds: {result}");
+        // The exact phrase, not `contains('2')`: the rendered output carries tempdir
+        // paths, and a temp path with a `2` in it would satisfy a bare digit check
+        // whatever the warning said — or whether one was rendered at all.
+        let rendered = format_glob(&result);
+        assert!(
+            rendered.contains("2 matching files"),
+            "the caller must be told HOW MANY were withheld — a bare zero is what made \
+             this indistinguishable from no match: {rendered}"
+        );
+        assert!(
+            rendered.contains("include_hidden"),
+            "naming the remedy is the actionable half; without it the reader knows only \
+             that the answer is wrong: {rendered}"
+        );
+    }
+
+    /// The under-reporting case, and the one no zero-gated warning can reach: the result
+    /// is a plausible NON-zero, so nothing about it invites suspicion. `grep`'s
+    /// `completeness_warning` fires only on an empty result and would stay silent here.
+    #[tokio::test]
+    async fn a_glob_matching_both_reports_the_withheld_count_beside_a_nonzero_result() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        seed_hidden_and_visible(dir.path());
+
+        let result = Tree
+            .call(
+                json!({ "glob": "**/*.yml", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["total"], 1,
+            "one visible match — the shape that reads as a complete answer: {result}"
+        );
+        let rendered = format_glob(&result);
+        assert!(
+            rendered.contains("2 matching files"),
+            "1 of 3 must not render as a complete answer: {rendered}"
+        );
+    }
+
+    /// The escape hatch the tool had no way to offer: before this, hidden paths were
+    /// unreachable by any argument, so the warning above would have named a remedy that
+    /// did not exist.
+    #[tokio::test]
+    async fn include_hidden_lists_the_files_the_default_withholds() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        seed_hidden_and_visible(dir.path());
+
+        let result = Tree
+            .call(
+                json!({
+                    "glob": "**/*.yml",
+                    "path": dir.path().to_str().unwrap(),
+                    "include_hidden": true
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["total"], 3, "all three must be listed: {result}");
+        assert!(
+            result["completeness_warning"].is_null(),
+            "nothing was withheld, so there is nothing to warn about: {result}"
+        );
+    }
+
+    /// The silent direction, and the load-bearing one. A warning attached to every glob
+    /// would be noise, and `symbols.rs`'s `completeness_warning` states why: it trains
+    /// the reader to skip it in the case that matters. Here a hidden directory EXISTS
+    /// and simply holds nothing the glob matches — presence of dotfiles is not the
+    /// trigger; a withheld MATCH is.
+    #[tokio::test]
+    async fn no_warning_when_the_hidden_paths_held_nothing_matching() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        seed_hidden_and_visible(dir.path());
+        std::fs::write(dir.path().join("main.rs"), "").unwrap();
+
+        let result = Tree
+            .call(
+                json!({ "glob": "*.rs", "path": dir.path().to_str().unwrap() }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["total"], 1);
+        assert!(
+            result["completeness_warning"].is_null(),
+            "a dot-prefixed directory that holds no match must not trigger the warning, \
+             or it fires on nearly every call: {result}"
+        );
+        assert!(
+            !format_glob(&result).contains("include_hidden"),
+            "and it must not reach the rendered output either: {result}"
+        );
+    }
+
+    /// List mode had the same `.hidden(true)` and never read `include_hidden` — the parse
+    /// sat inside `glob_impl` alone. So the parameter was accepted by the schema and
+    /// silently ignored, which is a worse contract than an absent one: an absent
+    /// parameter sends you elsewhere, an inert one tells you the answer you got is the
+    /// answer you asked for. Reported by `codescout-fe`.
+    ///
+    /// List mode is the sharper case. It sets `git_ignore(false)` / `ignore(false)`, so
+    /// hidden is its ONLY exclusion — the listing shows gitignored paths while omitting
+    /// `.github/`, and reads as complete *because* it is showing you what other tools
+    /// hide.
+    #[tokio::test]
+    async fn list_mode_reports_the_hidden_entries_it_withheld() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        seed_hidden_and_visible(dir.path());
+
+        let result = Tree
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(
+            entries.len(),
+            1,
+            "default still withholds — the listing itself is unchanged: {result}"
+        );
+        let rendered = format_list_dir(&result);
+        assert!(
+            rendered.contains("1 hidden entry"),
+            "the caller must be told the listing is partial: {rendered}"
+        );
+        // Placement, not just presence. `truncate_compact` cuts from the tail, so a note
+        // under a long listing is dropped on exactly the listings that hide the most —
+        // the rule `format_list_dir` already states for its cap signals.
+        let first_two: Vec<&str> = rendered.lines().take(2).collect();
+        assert!(
+            first_two.iter().any(|l| l.contains("hidden entry")),
+            "must sit in the header region, not below the entries: {rendered}"
+        );
+    }
+
+    /// The parameter now does something in list mode, which is the whole point of the
+    /// report: before this it was accepted and inert.
+    #[tokio::test]
+    async fn list_mode_include_hidden_lists_them() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        seed_hidden_and_visible(dir.path());
+
+        let result = Tree
+            .call(
+                json!({ "path": dir.path().to_str().unwrap(), "include_hidden": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2, "`.github/` must now appear: {result}");
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.as_str().unwrap().contains(".github")),
+            "and it must be the hidden one that appeared: {result}"
+        );
+        assert!(
+            result["completeness_warning"].is_null(),
+            "nothing withheld, nothing to warn about: {result}"
+        );
+    }
+
+    /// Silence where there is nothing to disclose. Measured on this repo: the warning
+    /// fires at the project root (16 informative dotfiles) and in none of `src`,
+    /// `src/tools`, `docs`, `crates` — so it marks the listings that are genuinely
+    /// partial rather than annotating every call.
+    #[tokio::test]
+    async fn list_mode_is_silent_with_no_hidden_entries() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "").unwrap();
+
+        let result = Tree
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["entries"].as_array().unwrap().len(), 2);
+        assert!(
+            result["completeness_warning"].is_null(),
+            "a directory with no dotfiles must produce no note: {result}"
+        );
+        assert!(
+            !format_list_dir(&result).contains("include_hidden"),
+            "and nothing in the rendered output either: {result}"
+        );
     }
 
     #[tokio::test]
