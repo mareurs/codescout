@@ -7,7 +7,7 @@ owner: marius
 related: []
 tags: [guides, section-grain-delivery, topic-routing, librarian, silent-non-delivery]
 kind: bug
-unverified: "Reachability is fixed and mutation-verified, but the FIRST tracker-path-naming call of a session still ships tracker-conventions WHOLE (39,106 B) and no section — deliberate, since that route closed 32736ca0. The 26x overshoot therefore stands on that call until tracker-conventions adopts `serves:`. Not yet re-verified against a rebuilt live MCP."
+unverified: "Cost, not correctness. Reachability is fixed, mutation-verified, and confirmed live 2026-08-31 09:49Z. What remains: a session's FIRST tracker-path-naming call still ships tracker-conventions WHOLE (39,106 B) and no section — deliberate, since that route closed 32736ca0 — so the 26x overshoot stands on that one call until tracker-conventions adopts `serves:`. See § Resume item 1."
 ---
 
 # BUG: a guide section can declare a call's shape, pass every test, and still never be delivered — because the TOPIC router picks a different topic from the result's content
@@ -131,6 +131,21 @@ repairs/,/^### [^d]/'` does not stop at `##`-level headings and over-captured by
 /&&!/^### doctor repairs/{exit} f'`, whose first and last captured lines were read back
 before the number was published.
 
+**Closed and confirmed live, 2026-08-31 09:49Z**, against the rebuilt binary (release built
+12:46 local; a fresh server, since the ledger was written in the same window). The same
+`librarian(action="doctor")` call now delivers `librarian` § *doctor repairs* — the 1,490-byte
+section authored for it — in place of 39,106 B of the wrong topic.
+
+The **fallthrough** is what delivered it: `tracker-conventions` was already spent from the
+08:59Z call, so the result-based topic shipped nothing and the declaring topic was reached.
+A session's *first* tracker-path-naming call still ships the whole guide, deliberately — that
+residual is § *Resume* item 1, not a gap in this verification.
+
+A second probe pinned the ledger half in the same pass. `librarian(action="tracker_design")`
+matches § *Reference*, already spent, so it delivered nothing — and left that section's stamp
+at `08:58:20Z` while the clock read `09:49:06Z`. **Negative control:** the ledger *was* written
+in that window (`project-activation-bootstrap` stamped `09:48:01Z`, file mtime 12:48:01 local),
+so an unmoved stamp is a measurement rather than an artefact of nothing persisting.
 ### The guard that exists does not cover this
 
 `src/server.rs:3272` asserts every call shape routing to a *declaring* topic has a section
