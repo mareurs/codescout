@@ -116,7 +116,7 @@ the misattribution was made *while* reading a ledger about misattribution.
 
 **Severity:** med — no failure today, but the next person to build the check builds it on the instrument the entry names, inherits a blind spot concentrated in this codebase's dominant dispatch idiom, and the failure mode's output is a deletion candidate. The cost is bounded only because the entry is four hours old and nobody has acted on it.
 
-**Status:** open — correction not yet written to `OB-7`.
+**Status:** fixed-verified 2026-09-01. *This line read "open — correction not yet written to `OB-7`" until re-checked against source, and it was **zombie-open**: the correction had been written hours earlier, in `a2aedd49` and after. Verified at the bytes — `OB-7` § *Dead in production* now carries "decides for **by-name call sites**", and `IC-3`'s `Mechanism status` carries the matching sentence. This is `CLAUDE.md`'s verify-open cadence firing on the entry whose own subject is unverified claims, found only because a peer exchange sent me back through it.*
 
 **Valid:** dated 2026-09-01
 
@@ -180,6 +180,19 @@ naming it is the difference between a degraded instrument and a silent one.
 **Net effect on `OB-7`:** the family-1 check is stronger than the correction credited it, and
 its residual risk is narrower and differently shaped. `GetUsageStats` is left explicitly
 unresolved rather than swept in.
+
+**Sharpened again 2026-09-01 — there are TWO monotone-population mechanisms and this entry holds
+only the fixable one.** `OB-9`'s caveat is the other, and the distinction is the peer's
+(`codescout-e8` proposed it as a sibling; the upgrade below is what we settled on). This entry's
+defect is **member-selection**: nine probes chosen such that no member *could* falsify, and the
+repair is a tenth member that can — exhibit one symbol in the zero-caller state, which the
+dispatch-side probe then did. `OB-9`'s is **observation-selection**: a reader who doubts a
+published number and re-counts leaves no artifact, so the refuting outcome never becomes a
+record. **The two do not share a remedy, and that is the whole point of separating them** —
+"widen the sample" repairs member-selection and is a **no-op** for observation-selection, at any
+corpus size, forever. A reflex answer that looks responsive and changes nothing is worse than an
+obviously inapplicable one. Cross-reference kept here because a reader arriving at `F-1` for the
+monotone law gets the tractable case and would otherwise leave believing it is the only one.
 ## W-1 — Re-probing the served copy after a rebuild found 5 of 11 peers on deleted inodes, and an open bug's fix failing open
 
 **Observed:** 2026-09-01 00:35, immediately after the operator rebuilt the release binary and reconnected. Scouting whether the rebuild invalidated anything published earlier in the session.
