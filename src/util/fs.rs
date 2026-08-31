@@ -52,6 +52,48 @@ pub fn read_utf8(path: &Path) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))
 }
 
+/// The staging path `atomic_write` writes through before renaming onto `path`.
+///
+/// Appends to the **whole filename** rather than replacing the extension, and that
+/// distinction is the only reason this helper exists. `Path::with_extension("tmp")` — what
+/// this used to be — derives the staging path from the directory and stem alone, so
+/// `Cargo.toml` and `Cargo.lock` both stage through `Cargo.tmp`. Two concurrent writers then
+/// rename *each other's* content onto their own targets: cross-file corruption rather than a
+/// lost update, with a successful return on both sides and nothing logged anywhere.
+///
+/// Measured 2026-08-31 from `git ls-files`: **7** groups of tracked files in this repo share
+/// a stem, including `Cargo.toml`/`Cargo.lock`, five `.env.*` variants, and
+/// `src/prompts/source.md`/`source.rs` — the last a prompt surface with three consumers that
+/// must stay consistent, written through `edit_markdown` and `edit_code`, both of which route
+/// here. `docs/issues/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`.
+///
+/// **This does not make `atomic_write` race-free and must not be read as doing so.** Two
+/// writers to the *same* target still race — inherent to write-then-rename without a lock.
+/// What this removes is only the case where the damage lands on a file the caller never
+/// named. A per-writer unique suffix would go further and is a separate decision.
+///
+/// The sibling `with_extension` uses at `src/lsp/mux/mod.rs` and `src/retrieval/index_lock.rs`
+/// are **not** instances of this defect: both take an internally-built `*.lock` path, so their
+/// input namespace holds exactly one extension and no two inputs can share a stem. Checked
+/// rather than assumed, because a fix that names a population asserts that population is
+/// non-empty.
+fn staging_path(path: &Path) -> PathBuf {
+    match path.file_name() {
+        Some(name) => {
+            let mut staged = name.to_os_string();
+            staged.push(".tmp");
+            path.with_file_name(staged)
+        }
+        // A path with no final component — a bare root, or one ending in `..`. No caller can
+        // reach this (all 15 call sites pass a real file path) and `atomic_write` on such a
+        // path cannot succeed anyway, since the rename target is not a file. Deliberately
+        // preserves the previous derivation rather than synthesising a name: appending to an
+        // empty filename would yield a writable `<root>/.tmp`, turning an operation that used
+        // to fail harmlessly into one that creates a stray file at the filesystem root.
+        None => path.with_extension("tmp"),
+    }
+}
+
 /// Atomic write: write to a sibling `.tmp` file then rename, so a crash or
 /// disk-full condition mid-write can't leave the target in a corrupt state.
 /// The target file must have a parent directory (true for all real paths).
@@ -60,7 +102,7 @@ pub fn read_utf8(path: &Path) -> Result<String> {
 /// rename. Without this, editing a `*.sh` script would silently strip +x
 /// because the freshly-created tmp file has default 0644 perms.
 pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
+    let tmp = staging_path(path);
 
     // Cleanup is needed on BOTH failure points, not just the rename below.
     // `std::fs::write` is `File::create` + `write_all`, so under ENOSPC the create
@@ -422,6 +464,84 @@ mod tests {
         let rp = RepoPath::from_path(std::path::Path::new("a\\b"));
         let owned: String = rp.into_string();
         assert_eq!(owned, "a/b");
+    }
+
+    /// The staging path must be unique per TARGET FILENAME, not per stem.
+    ///
+    /// `Path::with_extension("tmp")` — what this derivation used to be — builds the staging
+    /// path from the directory and stem alone, discarding the one component that tells
+    /// `Cargo.toml` from `Cargo.lock`. Two concurrent `atomic_write`s to same-stem files then
+    /// stage through one path, and the loser does not merely lose its own write: it renames
+    /// the OTHER file's content onto its own target. Cross-file corruption, and both callers
+    /// are told the write succeeded.
+    ///
+    /// **Every group below is a real collision group in this repo**, enumerated from
+    /// `git ls-files` on 2026-08-31 — they are findings, not illustrations, and replacing them
+    /// with invented names would leave the test passing while it stopped describing anything.
+    /// `source.md`/`source.rs` is the pair that sets the severity: `CLAUDE.md` § *Prompt
+    /// Surface Consistency* makes `source.md` a load-bearing surface with three consumers that
+    /// must stay consistent, and `edit_markdown` and `edit_code` both route through
+    /// `atomic_write`. The extensionless group is here because it was **not** anticipated when
+    /// the bug was filed; drop it and a fix that special-cases only dotted filenames still
+    /// passes this test.
+    ///
+    /// Asserts DISTINCTNESS rather than a literal name deliberately. A literal pins the suffix
+    /// scheme and would need rewriting for any later change to it, while distinctness is the
+    /// contract that actually protects the caller.
+    #[test]
+    fn staging_paths_are_distinct_for_files_that_share_a_stem() {
+        let dir = Path::new("/repo");
+        let groups: [&[&str]; 4] = [
+            &["Cargo.toml", "Cargo.lock"],
+            &["source.md", "source.rs"],
+            &[
+                ".env.amd",
+                ".env.cpu",
+                ".env.example",
+                ".env.gpu",
+                ".env.lite",
+            ],
+            &["target", "target.md"],
+        ];
+
+        for group in groups {
+            let mut seen: Vec<(&str, PathBuf)> = Vec::new();
+            for name in group {
+                let staged = staging_path(&dir.join(name));
+                if let Some((other, _)) = seen.iter().find(|(_, p)| *p == staged) {
+                    panic!(
+                        "'{name}' and '{other}' both stage through {} — a concurrent write to \
+                         either renames the other's content onto its own target",
+                        staged.display()
+                    );
+                }
+                seen.push((name, staged));
+            }
+        }
+    }
+
+    /// The staging path must stay a SIBLING of its target.
+    ///
+    /// `atomic_write` finishes with `std::fs::rename`, which fails across filesystems. Staging
+    /// anywhere but the target's own directory — a temp dir, say — would turn every write into
+    /// an EXDEV error the moment the repo and `/tmp` sit on different mounts, and it is the
+    /// sibling placement that makes the rename atomic at all. Pinned separately from the
+    /// distinctness test above because uniqueness is trivially satisfiable by moving the file:
+    /// a fix that bought distinctness with a process-unique path in `/tmp` would pass that test
+    /// and break every write.
+    #[test]
+    fn the_staging_path_stays_beside_its_target() {
+        let target = Path::new("/repo/src/prompts/source.md");
+        let staged = staging_path(target);
+
+        assert_eq!(
+            staged.parent(),
+            target.parent(),
+            "staging must happen in the target's own directory, or the final rename crosses \
+             filesystems: {} vs {}",
+            staged.display(),
+            target.display()
+        );
     }
 
     #[cfg(unix)]
