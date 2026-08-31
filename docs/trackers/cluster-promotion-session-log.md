@@ -14,7 +14,7 @@ topic: cluster promotion and mechanism design
 entry_prefix:
 - F
 - W
-entry_high_water_F: 2
+entry_high_water_F: 3
 entry_high_water_W: 2
 ---
 
@@ -48,6 +48,7 @@ entry_high_water_W: 2
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-09-01 | med | architectural | open | `OB-7`'s mechanism cites an LSP-verified result to justify a text-search check |
 | F-2 | 2026-09-01 | high | tooling | open | `ListAgents` enumerated 4 of 20 live sessions, so authorship inferred from it came from a 20%-complete population |
+| F-3 | 2026-09-01 | med | architectural | fixed-verified | The split's load-bearing sentence was refuted as a population claim 67 seconds before it was committed |
 
 ## Wins Index
 
@@ -249,6 +250,34 @@ unresolved rather than swept in.
 **Promote-when:** a second capture is caught by this comparison, in a session that did not already know it was at risk. At 2 datapoints, promote to `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` § *Detection* as standing practice rather than as one session's observation.
 
 **Status:** validated — one datapoint, the detection itself measured and reproducible from the two numbers.
+
+## F-3 — the split's load-bearing sentence was refuted as a population claim 67 seconds before it was committed
+
+**Valid:** dated 2026-08-31
+
+**Observed:** 2026-09-01, post-commit reconnaissance on `0dea224` (the `IC-1` → `IC-17` split). Scouting what the three peer commits that landed *during* my work had touched.
+
+**When:** Immediately after committing the split. Two of the three peer commits — `6ada4d49` and `08d72a6e` — touched the seam the split's argument rests on, and neither was in HEAD when I began drafting.
+
+**Expected (the ledger as committed):** `IC-1`'s falsification paragraph ends *"Enumeration was complete and changed nothing."* It is the load-bearing sentence: the whole split turns on enumeration having been available and having failed to prevent the collisions.
+
+**Got (scouted reality):** `08d72a6e`, committed at 00:43:32 — **67 seconds before** my `0dea224` at 00:44:39 — measures `ListAgents` returning **4** peers across three calls spanning 20 minutes while `ls /run/user/1000/cc-socks/` returns **20**, with both of the relevant session addresses present in the socket list. So it is a strict 4-of-20 subset, not a stale snapshot. Read as a claim about the *population*, "enumeration was complete" is false on this project's own data.
+
+**Probable cause:** The sentence was written in `d710e58d` (00:32) before its author took that measurement, and I inherited it while editing the same entry twelve minutes later. Nothing was wrong at either write. The defect is that a *quantified* claim and a *per-pair* claim were expressed in one unqualified sentence, so the later measurement refutes the reading the words invite while leaving the reading the argument uses intact.
+
+**Why it matters more than a wording slip:** the falsifier `IC-1` pre-registered needs only the **pair** — *"an instance where the writing session could enumerate the peer and still collided"* — and that is exactly what was measured (both sessions in each other's listing, eight messages exchanged). So `IC-17` never depended on the population claim. But a reader checking the ledger against `F-2` would refute the visible sentence and could reasonably discard a correct partition on it. A load-bearing sentence that is false under its natural reading and true under its intended one is worse than one that is simply wrong, because the error survives review by anyone who agrees with the conclusion.
+
+**The direction is the interesting part.** A 4-of-20 instrument makes the *visibility* class worse than `IC-1` assumed, so the same measurement **strengthens `IC-1`** while leaving `IC-17`'s evidence untouched. Two halves of a former single class moving independently under new evidence is what a correct split should look like — this is the first post-hoc test the partition has had, and it passed.
+
+**Workaround:** Narrowed the sentence in place to *"complete for this pair"*, with the 4/20 numbers, the `cluster-promotion-session-log:F-2` citation, and an explicit note that the falsifier needs only the pair. Not deleted — the original reading is what a future reader will attempt, so the refutation has to be visible next to it.
+
+**Severity:** med — the split is unaffected and no member moves; the cost is a correct partition being discardable by a reader who checks it. Would be `high` if the population claim had been the one the falsifier consumed.
+
+**Status:** fixed-verified — narrowing landed in the ledger; `tests/issue_clusters.rs` 6/6 unaffected (it gates tags, not prose).
+
+**Rests on:** the falsification condition being per-pair, as `IC-1` itself worded it. If it is ever restated in population terms, this entry's resolution stops holding and the split needs re-arguing.
+
+**Fix idea / Pointer:** `docs/trackers/issue-clusters.md` `IC-1`, falsification paragraph; `cluster-promotion-session-log:F-2` for the measurement; commit `0dea224` for the split.
 
 ## Template for new entries
 

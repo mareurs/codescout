@@ -315,7 +315,18 @@ It fired **four times in 34 minutes**. Two sessions enumerated each other — `L
 both, and they exchanged eight messages about this exact mechanism — and collided at
 `e0525462` (23:53), `3a5aec7a` (23:55), `1b40dabd` (00:06) and `77d4da06` (00:27). Every one
 post-dates mutual enumeration; the fourth landed with a warning message **in flight**.
-Enumeration was complete and changed nothing.
+Enumeration was complete **for this pair** and changed nothing.
+
+**Narrowed 2026-09-01, and the narrowing is confirming rather than damaging.** Enumeration was
+not complete as a *population*: `ListAgents` returned **4** peers across three calls spanning 20
+minutes while `/run/user/1000/cc-socks/` held **20** sockets — a strict subset, containing both
+of these two sessions (`cluster-promotion-session-log:F-2`, measured 67 seconds before the
+commit that took the split). The falsifier needs only the **pair**, which is exactly what was
+measured, so `IC-17` stands on unchanged evidence. But the sentence above, read as a population
+claim, is refutable from this project's own data — and a reader who refuted it would discard a
+correct partition. Note the direction: a 4-of-20 instrument makes **this** class worse than the
+entry assumed, so the same measurement strengthens `IC-1` and leaves `IC-17` untouched. A split
+whose two halves move independently under new evidence is behaving like two classes.
 
 **What that breaks is the *therefore* in this entry's own Claim.** The claim reads *"its peer
 listing reaches only peers sharing its config profile. Coordination is **therefore** impossible
