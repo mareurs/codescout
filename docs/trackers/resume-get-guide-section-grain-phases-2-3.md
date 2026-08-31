@@ -11,7 +11,7 @@ tags:
 - prompt-surfaces
 - progressive-disclosure
 topic: get_guide section grain
-entry_high_water_GG: 7
+entry_high_water_GG: 8
 entry_prefix: GG
 ---
 
@@ -196,6 +196,79 @@ Cross-topic `requires:` is not modelled.
 
 **Next:** read the bug file before Phase 2 design work; its conclusion may change
 what GG-1 declares.
+
+## GG-8 — Re-run the section-use probe once the post-refactor sample is large enough — pre-registered
+
+**Status:** open — blocked on sample size, not on work
+**Valid:** conditional — the sample trigger below fires (n >= 30 post-2026-08-31 main sessions)
+
+**Observed.** The distribution probe that gated Phase 2 ran 2026-08-31 —
+`scripts/probe_guide_section_use.py`, n=166 sessions across two machines (see
+`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md`
+§ *The DISTRIBUTION probe ran*). Its findings are real but the sample is
+**commit-mixed**: 84% of it predates the 2026-08-27 section-grain ship, and
+against **today's** code the sample is **n=1 main, n=1 subagent**. So the two
+weakest claims are the two most decision-relevant:
+
+- the **subagent lever** (92.5% of delivered bytes never engaged, 2.3x the
+  main-session waste) rests almost entirely on pre-27 data — post-ship n=5;
+- the apparent post-ship improvement (main 49.0% -> 34.4% never-engaged) is
+  **mix, not regime** — codescout-project sessions were flat at 28.0% -> 27.5%
+  while their share of main sessions moved 38% -> 57%.
+
+**Trigger — check it cheaply, do not eyeball the calendar.**
+
+```
+python3 scripts/probe_guide_section_use.py --kind main --split-at 2026-08-31
+```
+
+Read `n=` on the `>= 2026-08-31` slice. Thresholds, in order of what they buy:
+
+| n (post-2026-08-31) | what it supports |
+|---|---|
+| main >= 15 | a provisional read; label it underpowered |
+| main >= 30, of which >= 15 codescout-project | the codescout stratum is comparable to its n=12 baseline — this is the real bar |
+| subagent >= 20 | settles the subagent lever, the weakest-evidenced and largest one |
+
+At 2026-08-31 the counts were **main 1, subagent 1** (post-2026-08-27: main 21 of
+which 12 codescout, subagent 5).
+
+**Pre-registered — decided BEFORE the data exists, so the re-run is a test and not a
+re-derivation.** Record each as held or falsified.
+
+1. **codescout-stratum main never-engaged stays 28% +/- 8pp.** Falsified outside that,
+   which would mean the mechanism did change something and the regime question re-opens.
+2. **`Querying with the librarian` remains the top-engaged section.** It held in all four
+   slices measured (laptop 89%, desktop 82%, pre-27 81%, post-27 90%) at 5.1% of the
+   topic's bytes. Falsified if any other section outranks it.
+3. **Subagent never-engaged stays >= 85%.** This is the one worth running for.
+4. **tracker-conventions injections per session DROP**, because `50590b6c`'s fallthrough
+   reroutes tracker-path-naming `doctor` calls to `librarian` § *doctor repairs* (1,490 B)
+   instead of this topic (39 KB). **This is a prediction about our own fix that nobody has
+   verified**, and it is the cheapest thing here to check.
+
+**Three stratification rules — every one earned by a wrong number this probe produced
+before it was split.** Never blend main with subagent (45% vs 92%); never quote a period
+figure without holding project constant; never read a zero for a whole profile as absence
+without confirming that profile receives *other* topics (`.claude-kat` genuinely never
+receives this one — it takes `librarian` 64x).
+
+**Next:**
+
+1. **Re-copy the desktop transcripts first.** `~/work/claude/transcripts/` is a frozen
+   snapshot taken 2026-08-31; without a fresh copy the re-run is laptop-only and loses the
+   second observer, which is the check PROBES rule 6 prescribes for exactly this hazard.
+2. Run both corpora with `--split-at 2026-08-31`, then stratify by project.
+3. Record held/falsified against the four predictions above, in this entry.
+4. If 3 holds, the subagent lever is settled — act on it. It is orthogonal to both of
+   GG-1's Phase 2 blockers, so it needs no decomposition and no cross-topic addressing.
+
+**Byte figures in GG-1 have drifted — re-measure before acting on them.** Measured
+2026-08-31, fence-aware: the topic is **38,870 B** attributed across 7 sections (39,106 B
+on disk, less 236 B of `##` heading lines), not the "~28 KB" GG-1 states;
+§ *Entry-level standard* is **17,323 B** (GG-1: 17,378) and § *Bug files* is **11,319 B**
+(GG-1: 10,170). The queue's own header says to verify these first; this is that check,
+done.
 
 ## Template for new entries
 
