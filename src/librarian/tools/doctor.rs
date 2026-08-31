@@ -2346,7 +2346,19 @@ fn declared_status_enum(schema: &serde_json::Value) -> Option<Vec<String>> {
     }
 }
 
-/// Every entry token cited anywhere in the catalog, computed fresh from the files.
+/// What one sweep of the corpus knows about entry tokens.
+#[derive(Default)]
+struct CorpusTokens {
+    /// Tokens cited anywhere in the catalog.
+    cited: std::collections::BTreeSet<String>,
+    /// Token → the artifacts carrying a `## <ID> — <title>` heading for it, in `abs_path`
+    /// order. A token absent from this map is defined **nowhere**, which is the only state
+    /// that makes a citation of it genuinely dangle.
+    definers: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// Every entry token cited anywhere in the catalog, and every artifact that DEFINES one,
+/// computed fresh from the files in a single pass.
 ///
 /// **Deliberately not `entry_cite`.** That table has two writers with different freshness
 /// guarantees. `append_entry(cites=…)` writes an `origin="write"` row permanently at
@@ -2360,6 +2372,18 @@ fn declared_status_enum(schema: &serde_json::Value) -> Option<Vec<String>> {
 /// [`crate::librarian::catalog::augmentation::body_defined_indices`] uses for the
 /// *definition* half, which is what keeps the two halves of this check agreeing about what
 /// a citation and a definition are.
+///
+/// **The definitions half is collected here rather than per-ledger, and that closes a
+/// measured false claim.** `body_defined_indices` answers "does THIS body define the token",
+/// which is right for the ledger-scoped *count* and wrong for "does this citation resolve":
+/// `link_scan` binds a token to its defining heading wherever that heading lives, and
+/// `tracker-conventions` § *Compaction and archival* prescribes moving definitions into an
+/// archive companion — so a definer outside the ledger is a supported end state, not an
+/// anomaly. Measured 2026-08-31: `doctor` named 31 `PV-N` tokens as resolving to nothing
+/// while the companion defining them carried live incoming entry links
+/// (`docs/issues/archive/2026-08-31-entry-without-definition-claims-broken-refs-that-resolve.md`).
+/// The sweep already reads every file, so this half costs no extra I/O — only the half of a
+/// `DocExtract` the loop was already building and discarding.
 ///
 /// **Both citation shapes count.** A bare `PV-12` extracts as `EntryToken`; a qualified
 /// `provenance-subsystem:PV-12` extracts as `CrossRepoToken`, because a file-stem qualifier
@@ -2394,7 +2418,7 @@ fn declared_status_enum(schema: &serde_json::Value) -> Option<Vec<String>> {
 /// actually claims.
 ///
 /// Unreadable files are skipped, as `missing_file` is the finding for those.
-fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<std::collections::BTreeSet<String>> {
+fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<CorpusTokens> {
     use crate::librarian::tools::link_scan::extract::{extract, CitationKind};
 
     let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
@@ -2402,26 +2426,30 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<std::collections::
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
 
-    let mut cited = std::collections::BTreeSet::new();
+    let mut out = CorpusTokens::default();
     for path in paths {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        for c in extract(&text).citations {
+        let doc = extract(&text);
+        for c in doc.citations {
             match c.kind {
                 CitationKind::EntryToken => {
-                    cited.insert(c.raw);
+                    out.cited.insert(c.raw);
                 }
                 CitationKind::CrossRepoToken => {
                     if let Some((_, token)) = c.raw.rsplit_once(':') {
-                        cited.insert(token.to_string());
+                        out.cited.insert(token.to_string());
                     }
                 }
                 _ => {}
             }
         }
+        for d in doc.definitions {
+            out.definers.entry(d.token).or_default().push(path.clone());
+        }
     }
-    Ok(cited)
+    Ok(out)
 }
 
 /// Whether this row counts as "archived" for exposure purposes.
@@ -3262,10 +3290,10 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
             crate::librarian::catalog::augmentation::body_defined_indices(&l.body, &l.prefix);
         l.claimed.iter().any(|n| !defined.contains(n))
     });
-    let cited = if any_undefined {
+    let corpus = if any_undefined {
         corpus_cited_tokens(conn)?
     } else {
-        std::collections::BTreeSet::new()
+        CorpusTokens::default()
     };
 
     let mut out = Vec::new();
@@ -3299,8 +3327,38 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
                 ),
             ));
         } else {
-            let (cited_undefined, uncited): (Vec<String>, Vec<String>) =
-                undefined.iter().cloned().partition(|t| cited.contains(t));
+            let (cited_undefined, uncited): (Vec<String>, Vec<String>) = undefined
+                .iter()
+                .cloned()
+                .partition(|t| corpus.cited.contains(t));
+
+            // A cited entry with no heading HERE is not automatically a broken reference:
+            // `link_scan` binds a token to its defining heading wherever that heading
+            // lives, and the compaction ladder deliberately ends with definitions in an
+            // archive companion. Only a token defined NOWHERE actually dangles.
+            //
+            // Self is excluded explicitly rather than assumed away. The local `defined`
+            // set comes from the catalog's stored `body` and this map from a fresh read of
+            // the file; those are two reads and a disagreement between them must not turn
+            // into a claim about the graph.
+            let foreign_definer = |t: &String| -> Option<&String> {
+                corpus
+                    .definers
+                    .get(t)?
+                    .iter()
+                    .find(|p| *p != &ledger.abs_path)
+            };
+            let (resolved_elsewhere, broken): (Vec<String>, Vec<String>) = cited_undefined
+                .iter()
+                .cloned()
+                .partition(|t| foreign_definer(t).is_some());
+            // Named, not merely counted: without the definer a reader cannot tell this
+            // case from the broken one, and the obvious repair — add the heading here —
+            // creates a SECOND definer, which is an ambiguous token that resolves to
+            // nothing. The advice would manufacture the break it claimed to find.
+            let elsewhere_example = resolved_elsewhere
+                .first()
+                .and_then(|t| foreign_definer(t).map(|p| (t.clone(), p.clone())));
 
             // Bounded sample; the count carries the magnitude. An unbounded list of 50
             // ids buries every other finding — the failure
@@ -3308,10 +3366,15 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
             // from the CITED half whenever there is one, because those are the ids a reader
             // can act on today.
             const SAMPLE: usize = 8;
-            let focus = if cited_undefined.is_empty() {
-                &uncited
+            // Sample the most actionable population present: genuinely broken first,
+            // then the resolves-elsewhere set a reader may still want to see, then the
+            // uncited remainder.
+            let focus = if !broken.is_empty() {
+                &broken
+            } else if !resolved_elsewhere.is_empty() {
+                &resolved_elsewhere
             } else {
-                &cited_undefined
+                &uncited
             };
             let shown = focus
                 .iter()
@@ -3325,7 +3388,53 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
                 String::new()
             };
 
-            let detail = if cited_undefined.is_empty() {
+            let detail = if !broken.is_empty() {
+                let elsewhere_clause = match &elsewhere_example {
+                    Some((token, path)) => format!(
+                        "Cited but defined in ANOTHER artifact, so not broken: {} (e.g. \
+                             {token} in `{path}`). ",
+                        resolved_elsewhere.len()
+                    ),
+                    None => String::new(),
+                };
+                format!(
+                    "{} of {} `{}` entries have no `## <ID> — <title>` heading. Cited despite \
+                         that: {} — {}{}, whose references resolve to nothing right now. Fix those \
+                         first; each needs a `## <ID> — <title>` heading, the only shape `link_scan` \
+                         binds a token to. {}Uncited: {} — nothing is broken there yet, and that is \
+                         consistent with a ledger whose convention is to define an entry when \
+                         something first cites it. This check reads the citation graph, so the split \
+                         is measured rather than assumed. \
+                         See get_guide(\"tracker-conventions\") § Entry headings.",
+                    undefined.len(),
+                    ledger.claimed.len(),
+                    ledger.collection,
+                    broken.len(),
+                    shown,
+                    suffix,
+                    elsewhere_clause,
+                    uncited.len()
+                )
+            } else if let Some((token, path)) = &elsewhere_example {
+                format!(
+                    "{} of {} `{}` entries have no `## <ID> — <title>` heading IN THIS FILE: \
+                         {}{}. All {} of the cited ones are defined in a sibling artifact (e.g. \
+                         {token} in `{path}`), so `link_scan` resolves them and no reference is \
+                         broken. That is the supported end state of the compaction ladder in \
+                         get_guide(\"tracker-conventions\") § Compaction and archival — \"live body → \
+                         archived section (heading kept)\" — not an omission. Do NOT add a heading \
+                         here to close this: a second definer makes the token ambiguous, and an \
+                         ambiguous token resolves to nothing, which would manufacture the break this \
+                         finding used to claim. Uncited: {}.",
+                    undefined.len(),
+                    ledger.claimed.len(),
+                    ledger.collection,
+                    shown,
+                    suffix,
+                    resolved_elsewhere.len(),
+                    uncited.len()
+                )
+            } else {
                 format!(
                     "{} of {} `{}` entries have no `## <ID> — <title>` heading: {}{}. Nothing in \
                      the catalog cites any of them, so no reference is broken today. That is what \
@@ -3338,24 +3447,6 @@ fn scan_undefined_entries(conn: &rusqlite::Connection) -> Result<Vec<Violation>>
                     ledger.collection,
                     shown,
                     suffix
-                )
-            } else {
-                format!(
-                    "{} of {} `{}` entries have no `## <ID> — <title>` heading. Cited despite \
-                     that: {} — {}{}, whose references resolve to nothing right now. Fix those \
-                     first; each needs a `## <ID> — <title>` heading, the only shape `link_scan` \
-                     binds a token to. Uncited: {} — nothing is broken there yet, and that is \
-                     consistent with a ledger whose convention is to define an entry when \
-                     something first cites it. This check reads the citation graph, so the split \
-                     is measured rather than assumed. \
-                     See get_guide(\"tracker-conventions\") § Entry headings.",
-                    undefined.len(),
-                    ledger.claimed.len(),
-                    ledger.collection,
-                    cited_undefined.len(),
-                    shown,
-                    suffix,
-                    uncited.len()
                 )
             };
 
@@ -7180,6 +7271,90 @@ mod tests {
             !v[0].detail.contains("Cited despite that"),
             "nothing cites BL-3, so the actionable half must be absent entirely: {}",
             v[0].detail
+        );
+    }
+
+    /// A cited entry whose heading lives in a SIBLING artifact is not a broken reference.
+    ///
+    /// The count is ledger-scoped and correct — the heading really is absent from this body.
+    /// The consequence clause was not: `link_scan` binds a token to its defining heading
+    /// wherever that heading lives, and `tracker-conventions` § *Compaction and archival*
+    /// prescribes exactly this shape — "live body → archived section (heading kept)" — and
+    /// states a unique definer resolves even when archived. So the check was asserting a
+    /// graph property it never consulted, about the supported end state of its own ladder.
+    ///
+    /// Measured 2026-08-31: `doctor` named 31 `PV-N` tokens as resolving to nothing while
+    /// the archive companion defining them held live incoming entry links for 38 distinct
+    /// `PV-` tokens, three of them in the eight `doctor` listed
+    /// (`docs/issues/archive/2026-08-31-entry-without-definition-claims-broken-refs-that-resolve.md`).
+    ///
+    /// **A reader following the old text would have made things worse**, not merely wasted
+    /// time: adding the heading to the live body creates a second definer, and two definers
+    /// is an *ambiguous* token that resolves to nothing — manufacturing the break the
+    /// finding claimed to have found.
+    #[test]
+    fn a_cited_entry_defined_in_a_sibling_artifact_is_not_called_broken() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "log",
+            tmp.path(),
+            "# L\n\n## BL-1 — first\n\n## BL-2 — second\n\n| ID | task |\n| BL-3 | c |\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+        // The load-bearing fixture detail: BL-3's heading is in a SEPARATE artifact. Move it
+        // into `log.md` and BL-3 leaves `undefined` altogether, so the test would pass while
+        // exercising none of this. The index row above is what makes BL-3 *cited* — rows
+        // define nothing but are scanned for citations.
+        seed_ledger(
+            &cat,
+            "archive",
+            &tmp.path().join("archive.md"),
+            "# A\n\n## BL-3 — third, archived\n",
+        );
+
+        let v = scan_undefined_entries(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        let detail = &v[0].detail;
+        assert!(
+            !detail.contains("resolve to nothing"),
+            "a sibling defines BL-3, so the reference resolves and the finding must not \
+             assert otherwise: {detail}"
+        );
+        assert!(
+            detail.contains("archive.md"),
+            "and it must NAME the definer — without it a reader cannot tell this from the \
+             genuinely-broken case, and the obvious repair manufactures an ambiguous \
+             token: {detail}"
+        );
+    }
+
+    /// Non-vacuity twin: with no sibling definer, the reference really is broken and the
+    /// finding must still say so.
+    ///
+    /// The fixture differs from the one above by exactly one artifact. Without this, the
+    /// test above is satisfied by never claiming a break at all — which would silence the
+    /// check's entire actionable half while passing.
+    #[test]
+    fn a_cited_entry_defined_nowhere_is_still_reported_as_broken() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "log",
+            tmp.path(),
+            "# L\n\n## BL-1 — first\n\n## BL-2 — second\n\n| ID | task |\n| BL-3 | c |\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+
+        let v = scan_undefined_entries(&cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        let detail = &v[0].detail;
+        assert!(
+            detail.contains("resolve to nothing"),
+            "nothing anywhere defines BL-3, so this citation IS broken and the finding \
+             must keep saying so: {detail}"
         );
     }
 
