@@ -777,6 +777,17 @@ readers who were, at that moment, writing about this class.
 > falsify the claim. The honest statement is: of the near-misses that reached a ledger, none
 > was caught by reading. Whether reading catches any is not measured here and this corpus
 > cannot measure it.
+>
+> **And it is a third instance of the monotone-population defect, not a repeat of the first two
+> — the mechanism differs, and so does the fix** (`codescout-e8`, 2026-09-01).
+> `cluster-promotion-session-log:F-1`'s nine probes were selected so that no *member* could
+> falsify: the filter ran on the population. Here the filter runs on the **observations** — a
+> reader who doubts and re-counts leaves nothing behind, so the refuting outcome is not absent
+> from the sample, it is unrecordable in principle. This matters because the obvious remedy is
+> not shared: **widening the sample fixes member-selection and does nothing at all for
+> observation-selection.** A larger corpus of ledger entries still contains zero catches-by-
+> reading, and would at any size. Only instrumenting the act itself — recording the doubt, not
+> the correction — could measure it, and nothing does.
 
 **Plausible-answer property:** definitional rather than incidental. Plausibility is not a side
 effect of this failure, it *is* the failure.
@@ -795,6 +806,21 @@ field already makes between `OB-4` and `OB-6`, extended by one:
 
 Remedies differ, so none subsumes another. `OB-1` sits upstream of all three: it says why the
 value was published thin in the first place.
+
+**Boundary — what this class does NOT cover, worked on the case that tested it.** During this
+entry's own write I cited a commit as `2dd5e4d3`, a SHA that is not a valid object in this repo
+and that I had never read: `git show --stat HEAD | tail -4` prints the stat and the trailer and
+**not** the identifier, so the commit was confirmed from output that never contained the thing I
+then quoted. That is not an `OB-9`, and the reason is **cost, not plausibility**
+(`codescout-e8`'s separator, which is sharper than the one I first offered). A hex string carries
+no plausibility signal at all, so the reader has *no* margin rather than a narrow one — but the
+deciding fact is that its check is **one command** (`git log -1 --format=%h`), where a near-miss
+count needs an entire population re-derived. `OB-9`'s remedy is *attach the derivation, because
+re-deriving is expensive*; this one's is *never write an identifier you have not read from output
+in this turn*, which costs nothing and therefore admits no excuse. **Different price, different
+rule** — file the identifier case under `OB-1` (a value whose only verification is a command the
+author did not run). Recorded here because a class with no stated boundary absorbs its
+neighbours, and this one was one sentence from doing so.
 
 **Instances** — four, in four different measurement subjects, all 2026-08-31/09-01:
 
