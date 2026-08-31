@@ -32,8 +32,20 @@
 # windows for every session, to buy discoverability that this script already provides.
 #
 # Usage:
-#   scripts/install-hooks.sh            # install / repair
-#   scripts/install-hooks.sh --check    # report only, change nothing
+#   scripts/install-hooks.sh                     # index guard only (default)
+#   scripts/install-hooks.sh --with-session-id   # ...and the Session-Id trailer
+#   scripts/install-hooks.sh --check             # report only, change nothing
+#
+# THE TRAILER IS OPT-IN, AND THE ASYMMETRY IS THE WHOLE REASON.
+# The index guard is REVERSIBLE: uninstall it and nothing it did persists. The
+# Session-Id trailer is NOT. Uninstalling removes the hook and leaves every trailer it
+# already wrote, in commits that are pushed and permanent. **A default should be set at
+# the reversibility of its worst outcome, not at the value of its best** — so someone
+# who runs this script without reading it does not end up with stamped commits.
+#
+# Requested 2026-09-01 by a peer session's operator, who approved the stamp for this
+# project while noting it may not suit every project. The capability stays committed and
+# one flag away; only the default moved.
 
 set -uo pipefail
 
@@ -41,7 +53,18 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT" || exit 1
 
 check_only=0
-[ "${1:-}" = "--check" ] && check_only=1
+with_session_id=0
+for arg in "$@"; do
+    case "$arg" in
+        --check) check_only=1 ;;
+        --with-session-id) with_session_id=1 ;;
+        *)
+            echo "unknown argument: $arg" >&2
+            echo "usage: $0 [--check] [--with-session-id]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 fail=0
 
@@ -136,8 +159,13 @@ SHIM
     echo "ok      $hook_name      shim installed -> $target"
 }
 
-install_shim prepare-commit-msg scripts/prepare-commit-msg-session-id.sh
 install_shim post-index-change scripts/post-index-change-stage-log.sh
+
+if [ "$with_session_id" = "1" ]; then
+    install_shim prepare-commit-msg scripts/prepare-commit-msg-session-id.sh
+else
+    echo "skip    prepare-commit-msg   opt-in; pass --with-session-id"
+fi
 
 echo
 if [ "$fail" != "0" ]; then
@@ -146,14 +174,31 @@ if [ "$fail" != "0" ]; then
     exit 1
 fi
 
-cat <<'EOF'
-Installed. Now VERIFY POSITIVELY — a successful install is compatible with the hook
-never running, which is how the last hooks defect stayed invisible:
+# A --check run reports; it installs nothing, so it has no install to verify.
+[ "$check_only" = "1" ] && exit 0
 
+echo "Installed. Now VERIFY POSITIVELY — a successful install is compatible with the"
+echo "hook never running, which is how the last hooks defect stayed invisible:"
+echo
+if [ "$with_session_id" = "1" ]; then
+    cat <<'EOF'
     git commit --allow-empty -m 'hook probe'
-    git log -1 --format='%(trailers:key=Session-Id)'    # <- must print your session id
-    git reset --hard HEAD~1                             # <- discard the probe
+    git log -1 --format='%(trailers:key=Session-Id)'   # <- must print your session id
+    git reset --hard HEAD~1                            # <- discard the probe
+EOF
+else
+    cat <<'EOF'
+    git add <a file you own>
+    cat "$(git rev-parse --git-dir)/session-stage-log"  # <- must name your session id
+
+The stage log is the guard's ONLY input, so an empty one after staging means the
+guard is inert whatever this script just reported. The Session-Id trailer was NOT
+installed; pass --with-session-id if you want it, and read why it is opt-in first.
+EOF
+fi
+cat <<'EOF'
 
 Several sessions share this checkout, and installing these hooks changes every
-session's `git commit`. Tell them before you run this, not after.
+session's `git commit`. Tell them before you run this, not after — and wait for an
+answer, because silence is not consent.
 EOF

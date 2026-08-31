@@ -20,18 +20,25 @@ comment explains why it is pinned and how to bump it. Note it is **not** the MSR
 ## Git Hooks
 
 ```bash
-scripts/install-hooks.sh            # install / repair
-scripts/install-hooks.sh --check    # report only
+scripts/install-hooks.sh                     # index guard only (default)
+scripts/install-hooks.sh --with-session-id   # ...and the Session-Id trailer
+scripts/install-hooks.sh --check             # report only
 ```
 
 Three hooks, installed by two different routes because one of them cannot go through
 the framework at all:
 
-| hook | route | what it does |
-|---|---|---|
-| `pre-commit` | pre-commit.com | `cargo fmt --check`, plus two shared-checkout guards |
-| `prepare-commit-msg` | direct shim | stamps `Session-Id: <uuid>` into the commit |
-| `post-index-change` | direct shim | records which session staged each blob |
+| hook | route | default | what it does |
+|---|---|---|---|
+| `pre-commit` | pre-commit.com | on | `cargo fmt --check`, plus two shared-checkout guards |
+| `post-index-change` | direct shim | on | records which session staged each blob |
+| `prepare-commit-msg` | direct shim | **opt-in** | stamps `Session-Id: <uuid>` into the commit |
+
+**The trailer is opt-in and the asymmetry is the reason.** The index guard is
+reversible — uninstall it and nothing it did persists. The trailer is not:
+uninstalling removes the hook and leaves every trailer it already wrote, in commits
+that are pushed and permanent. A default should be set at the reversibility of its
+worst outcome, not at the value of its best.
 
 The last two exist because several agent sessions routinely share this working tree
 and all commit as the same git author, so `%an`, commit adjacency and the dirty-file
