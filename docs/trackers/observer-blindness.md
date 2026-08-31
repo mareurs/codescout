@@ -321,8 +321,22 @@ OS: `pgrep -x claude` plus `readlink /proc/$p/cwd`, and the sockets under
 
 **Plausible-answer property:** you reason by elimination over the visible set and reach a
 confident attribution. Six misattributions in one afternoon across five sessions.
-**Re-verified 2026-08-31: `ListAgents` reported 2 peers while 7 other sockets were
-live.**
+
+**Do not quote a single under-count ratio — the ratio is a property of (profile × checkout
+population), not of the instrument.** Measured 2026-09-01 on one population from two
+vantages: a `~/.claude` session sees `ListAgents` return **1 of 4** same-checkout peers,
+while a `~/.claude-sdd` session on the identical population sees **2 of 4**. Both are
+correct and neither generalises. This entry previously carried *"reported 2 peers while 7
+other sockets were live"*, which is the same mistake one layer down — and a raw socket count
+is wrong on its own terms besides, since 7 of the 20 socket files had no process at all.
+
+**What survives every vantage, and is the thing to cite: the instrument errs in BOTH
+directions at once.** It misses same-checkout peers running under another profile *and*
+reports other-checkout peers running under yours — from `~/.claude` three of the four names
+returned were in an unrelated repo. Under-count and over-count simultaneously, which is why
+no single ratio characterises it and why a reader who patches the number rather than the
+framing will publish the next wrong one. (Both figures above supplied by peers on their own
+vantages, which is the only way this was measurable at all.)
 
 **Vigilance:** wrong instrument. A short view makes elimination weak, so a careful reader
 hedges — but a **disjoint** view makes elimination *unrelated* to the answer, so hedging
@@ -330,8 +344,18 @@ still draws the wrong conclusion. Care cannot rescue an instrument whose units d
 from the question's.
 
 **Mechanism status:** shipped as practice — enumerate from the OS before attributing, and
-message invisible sessions directly at `uds:/run/user/1000/cc-socks/<pid>.sock`. Not
-gated; a candidate `H-N`.
+message invisible sessions directly at `uds:/run/user/1000/cc-socks/<pid>.sock`. Not gated;
+a candidate `H-N`.
+
+**But enumeration is NOT the remedy for attribution, and conflating them is this entry's
+most available misreading.** Corrected 2026-09-01: a session mis-attributed a write by
+*elimination* ("X is the only other busy session"), and a **larger correct population makes a
+wrong elimination more persuasive, not less** — `docs/PROBES.md` says so directly. So
+*"the probe existed and nobody ran it"* is true and is not the finding. Enumeration bounds
+the population; it does not attribute a write. **Asking is the discriminator even when the
+population is fully known** — which is a stronger claim than "run the probe first", and the
+one the evening's five misattributions actually support: four were resolved by asking, none
+by counting.
 
 **Tell, reusable beyond this instance:** the instrument's units differ from the
 question's — *sessions a transport knows about* vs *processes with this cwd*. And
@@ -340,7 +364,11 @@ lying outside the set entirely.
 
 **Status:** validated — measured twice, by two sessions, with the membership rotating
 between readings (which demonstrates arbitrariness where one snapshot could only show
-disjointness)
+disjointness); re-measured 2026-09-01 from two *profiles* on one population, which is what
+showed the ratio to be vantage-dependent and the both-directions property to be the
+invariant. A third instrument axis is `SendMessage` itself: resolution **by name** is
+profile-scoped and fails for an invisible peer, while the **socket address** works — the same
+split one layer up, and the reason a send-by-name failure must never be read as unreachability.
 
 ## OB-4 — a liveness marker with a good hit rate is more dangerous than a bad one
 
