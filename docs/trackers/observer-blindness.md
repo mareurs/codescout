@@ -168,7 +168,12 @@ about the class.
 - **Name which part of an instruction is the evidence.** *"Check it exits 0 and lists
   `find`"*, never *"check that it looks right."*
 - **Unconditional policy that caught one:** *verify before contradicting a peer.* It
-  fires on an event that happens anyway rather than on suspicion.
+  fires on an event that happens anyway rather than on suspicion. **It is bidirectional, and
+  was stated one-directionally here until 2026-09-01.** It fired the other way that night: a
+  peer corrected a commit stat I had reported, I verified before *agreeing*, and the correction
+  was wrong. Had I accepted it, I would have withdrawn an accurate claim — **worse than
+  accepting a wrong one, because a withdrawal ends the thread and nothing later re-reads it.**
+  The trigger is *about to change your position on a peer's say-so*, in either direction.
 - **Not yet mechanised:** nothing gates a bare integer in a doc. Candidate `H-N`.
 
 ### Sub-pattern — the remedy is the part that escapes verification
@@ -223,6 +228,34 @@ contradict them.
 (the query-shaped child), `334cf64b`, `2f412a1c`, `bdfd7a62`.
 
 **Status:** validated — 4 instances, 3 sessions, one evening
+
+### Sub-pattern — resolve the referent from the artifact, never from the sentence pointing at it
+
+**Three instances in one night, 2026-08-31/09-01, same shape and same price.** Named by
+`codescout-e8` after the third, on itself.
+
+| what was written from context | what the artifact would have said | the command |
+|---|---|---|
+| a commit SHA (`2dd5e4d3`) quoted after `git show --stat HEAD \| tail -4` — output that confirms a commit while never containing its identifier | the SHA | `git log -1 --format=%h` |
+| a commit's actual stat recalled rather than read | `19/1`, not the remembered figure | `git show --stat <sha>` |
+| a referent inferred from a peer's prose — *"the commit that fixes stale claims"*, near-verbatim one commit's title — while holding both SHAs and with the disputed `17/2` string greppable across both | which commit the claim was about | `grep` the disputed string |
+
+**What makes them one family is the price, and that is what separates this from `OB-9`.** Each
+check is **one command against an artifact already in hand**, so it costs nothing and therefore
+admits no excuse — where `OB-9`'s remedy concedes that re-deriving a population is expensive and
+asks for the derivation to be published instead. Different price, different rule. This is why
+the identifier case files here rather than there.
+
+**The blind party is `OB-1`'s, exactly.** In all three the author's own context supplies the
+referent for free — *the commit I just made*, *what I just changed*, *obviously the one they
+meant* — so no lookup presents itself as missing. Nothing is skipped; the question never forms.
+That is why "look it up" is not the finding and the **trigger** is: whenever a value names
+something outside the sentence you are writing, resolve it against the thing itself before the
+sentence ships.
+
+**Sharpest of the three is the last**, because it survived a verification step: two instruments
+agreed perfectly on the wrong object. See `OB-4` § *Third instance* — instrument agreement
+verifies the measurement and never the referent, which is the limit on that entry's own remedy.
 
 ### Sub-pattern — mark provenance at the WRITE, because nobody downstream can
 
