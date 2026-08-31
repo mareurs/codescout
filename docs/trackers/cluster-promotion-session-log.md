@@ -275,7 +275,29 @@ unresolved rather than swept in.
 
 **Got (scouted reality):** `08d72a6e`, committed at 00:43:32 — **67 seconds before** my `0dea224` at 00:44:39 — measures `ListAgents` returning **4** peers across three calls spanning 20 minutes while `ls /run/user/1000/cc-socks/` returns **20**, with both of the relevant session addresses present in the socket list. So it is a strict 4-of-20 subset, not a stale snapshot. Read as a claim about the *population*, "enumeration was complete" is false on this project's own data.
 
-**Probable cause:** The sentence was written in `d710e58d` (00:32) before its author took that measurement, and I inherited it while editing the same entry twelve minutes later. Nothing was wrong at either write. The defect is that a *quantified* claim and a *per-pair* claim were expressed in one unqualified sentence, so the later measurement refutes the reading the words invite while leaving the reading the argument uses intact.
+**Probable cause:** The sentence was written in `d710e58d` (00:32) and I inherited it while editing the same entry twelve minutes later. Nothing was wrong at either write. The defect is that a *quantified* claim and a *per-pair* claim were expressed in one unqualified sentence, so a later measurement refutes the reading the words invite while leaving the reading the argument uses intact.
+
+**Corrected 2026-09-01, on two independent counts, neither found by me.**
+
+*(1) The attribution was wrong, and it is this ledger's own class.* As first written, the line above read *"before **its author** took that measurement"* — tying `F-2` to whoever wrote `d710e58d`. `F-2` and `W-2` were appended by a third party that the file, `git` (one author string for every session here) and the catalog all fail to identify. I inferred authorship from **file ownership**, while reading a log about misattribution, having corrected myself for this exact class twice in the preceding hour. File-ownership is a *better* proxy than commit-proximity and is still wrong — which is the point worth keeping. **Cite the entry, never a party.**
+
+*(2) `F-2`'s number does not survive a units check.* `4 of 20` compares a profile-scoped instrument against a raw socket-file count. Measured on this host rather than inherited:
+
+| quantity | count |
+|---|---|
+| socket files in `/run/user/1000/cc-socks/` | 20 |
+| … of which the process is **dead** (stale file only) | 7 |
+| live sessions machine-wide | 13 |
+| live sessions with `cwd` inside this checkout | 5 (incl. this one) → **4 peers** |
+| peers `ListAgents` returns | 4 |
+| … of which are in **another checkout** (`mirela/backend-kotlin`) | 3 |
+| … of which share this working tree | **1** |
+
+The instrument is wrong in **both directions at once**: it misses 3 of the 4 peers who can reach these files, and reports 3 who share no tree with this session at all. The honest figure for the question `IC-1` asks — *can the writing session see the peers who can reach its files?* — is **1 of 4**, not 4 of 20. That 20% and 25% land close together is precisely what makes a unit mismatch hard to notice: the mis-scoped ratio is not absurd, it is *plausible*.
+
+**Both corrections strengthen the split.** The population reading of *"enumeration was complete"* is not merely false, it is **75% false** on the population that matters. And the pair whose collision fired the falsifier sat inside the visible quarter — mutually enumerable while three of four same-checkout peers were not. So the falsification ran on the *most favourable sample available for coordination*, and coordination failed four times anyway. A sample unrepresentative in the direction **against** the conclusion is the strongest kind there is.
+
+**Not annotating `F-2` itself.** It is another party's entry, marked `high` and `open`, and rewriting it would repeat the error this section records one layer down. The measurement above is offered beside it, not over it.
 
 **Why it matters more than a wording slip:** the falsifier `IC-1` pre-registered needs only the **pair** — *"an instance where the writing session could enumerate the peer and still collided"* — and that is exactly what was measured (both sessions in each other's listing, eight messages exchanged). So `IC-17` never depended on the population claim. But a reader checking the ledger against `F-2` would refute the visible sentence and could reasonably discard a correct partition on it. A load-bearing sentence that is false under its natural reading and true under its intended one is worse than one that is simply wrong, because the error survives review by anyone who agrees with the conclusion.
 

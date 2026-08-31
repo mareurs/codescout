@@ -318,15 +318,28 @@ post-dates mutual enumeration; the fourth landed with a warning message **in fli
 Enumeration was complete **for this pair** and changed nothing.
 
 **Narrowed 2026-09-01, and the narrowing is confirming rather than damaging.** Enumeration was
-not complete as a *population*: `ListAgents` returned **4** peers across three calls spanning 20
-minutes while `/run/user/1000/cc-socks/` held **20** sockets — a strict subset, containing both
-of these two sessions (`cluster-promotion-session-log:F-2`, measured 67 seconds before the
-commit that took the split). The falsifier needs only the **pair**, which is exactly what was
-measured, so `IC-17` stands on unchanged evidence. But the sentence above, read as a population
-claim, is refutable from this project's own data — and a reader who refuted it would discard a
-correct partition. Note the direction: a 4-of-20 instrument makes **this** class worse than the
-entry assumed, so the same measurement strengthens `IC-1` and leaves `IC-17` untouched. A split
-whose two halves move independently under new evidence is behaving like two classes.
+not complete as a *population*. Measured on this host, in units matched to the question this
+entry asks — *can the writing session see the peers who can reach its files?* — **`ListAgents`
+returns 1 of the 4 live peer sessions whose `cwd` is inside this checkout**, while
+simultaneously reporting 3 peers in an unrelated checkout. The instrument is wrong in both
+directions at once: 75% of the peers who share this working tree are invisible, and 75% of what
+it does report cannot reach it.
+
+The falsifier needs only the **pair**, and the pair was mutually enumerable, so `IC-17` stands
+on unchanged evidence. But the sentence above, read as a population claim, is refutable from
+this project's own data — and a reader who refuted it would discard a correct partition.
+
+Two consequences, both favourable to the split and neither available by argument. A 1-of-4
+instrument makes **this** class considerably worse than the entry assumed, so the measurement
+strengthens `IC-1` and leaves `IC-17` untouched — two halves of a former single class moving
+independently under new evidence is what a correct split looks like. And the colliding pair sat
+inside the visible quarter, so the falsification ran on the *most favourable sample available
+for coordination* and coordination failed four times regardless.
+
+*(Supersedes a `4 of 20` figure cited here for six minutes. That ratio compared a profile-scoped
+instrument against a raw socket-file count of which 7 were dead processes — a units mismatch
+whose danger is that 20% and 25% are close enough to read as agreement. Derivation and the full
+count table: `cluster-promotion-session-log:F-3`.)*
 
 **What that breaks is the *therefore* in this entry's own Claim.** The claim reads *"its peer
 listing reaches only peers sharing its config profile. Coordination is **therefore** impossible
