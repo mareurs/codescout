@@ -425,6 +425,8 @@ impl Catalog {
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
         run_migrations(&conn, None).context("running migrations")?;
         audit::install(&conn).context("installing audit triggers")?;
+        audit::install_session(&conn, &audit::resolve_actor())
+            .context("installing audit session")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
@@ -438,6 +440,8 @@ impl Catalog {
         conn.execute_batch(SCHEMA_SQL).context("applying schema")?;
         run_migrations(&conn, None).context("running migrations")?;
         audit::install(&conn).context("installing audit triggers")?;
+        audit::install_session(&conn, &audit::resolve_actor())
+            .context("installing audit session")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
@@ -467,10 +471,21 @@ impl Catalog {
             migrate_v6::drop_legacy_and_stamp(&conn).context("dropping legacy columns")?;
         }
         audit::install(&conn).context("installing audit triggers")?;
+        audit::install_session(&conn, &audit::resolve_actor())
+            .context("installing audit session")?;
         // Clean up any artifact_vec rows that lost their parent artifact row
         // (e.g. orphans from before the cascade-delete trigger was added).
         conn.execute_batch("DELETE FROM artifact_vec WHERE id NOT IN (SELECT id FROM artifact);")?;
         Ok(Self { conn })
+    }
+
+    /// Best-effort verb tag for subsequent audit rows on this connection.
+    /// The verb persists until the next stamp — it means "last dispatched verb",
+    /// not "verb of this exact statement"; audit_log documents this.
+    pub fn set_audit_verb(&self, verb: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute("UPDATE audit_ctx SET verb = ?1", [verb])
+            .map(|_| ())
     }
 }
 

@@ -212,6 +212,15 @@ impl Tool for Artifact {
                 "action required — one of: find, get, create, update, move, graft, link, graph, state_at, append_entry, update_entry",
             )
         })?;
+        // Best-effort: identity enrichment must never fail a tool call; a failed
+        // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
+        if let Err(e) = ctx
+            .catalog
+            .lock()
+            .set_audit_verb(&format!("artifact.{action}"))
+        {
+            tracing::warn!("audit verb stamp failed: {e}");
+        }
         match action {
             "find"     => super::find::call(ctx, args).await,
             "get"      => super::get::call(ctx, args).await,
@@ -252,6 +261,22 @@ mod tests {
             err.downcast_ref::<RecoverableError>().is_some(),
             "expected RecoverableError, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn dispatch_stamps_the_audit_verb() {
+        let ctx = mk_ctx();
+        // find is read-only; the stamp happens at dispatch regardless of verb kind
+        let _ = Artifact
+            .call(&ctx, serde_json::json!({"action": "find"}))
+            .await;
+        let verb: Option<String> = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(verb.as_deref(), Some("artifact.find"));
     }
 
     #[tokio::test]

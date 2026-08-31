@@ -114,6 +114,15 @@ impl Tool for Librarian {
                     "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree",
                 )
             })?;
+        // Best-effort: identity enrichment must never fail a tool call; a failed
+        // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
+        if let Err(e) = ctx
+            .catalog
+            .lock()
+            .set_audit_verb(&format!("librarian.{action}"))
+        {
+            tracing::warn!("audit verb stamp failed: {e}");
+        }
         match action {
                 "context"            => super::context::call(ctx, args).await,
                 "reindex"            => super::reindex::call(ctx, args).await,

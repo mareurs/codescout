@@ -168,6 +168,50 @@ fn install_in_txn(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// "codescout:<session-id>" for an identified connection, "codescout:anonymous"
+/// for a codescout connection with no harness id. NEVER returns "unknown" —
+/// 'unknown' is reserved for writers that did not identify themselves at all
+/// (foreign processes), and the distinction is the forensic value.
+pub(crate) fn resolve_actor() -> String {
+    use crate::tools::session_key::{resolve, HARNESS_SESSION_VARS};
+    let key = resolve(
+        std::env::var("CODESCOUT_SESSION_ID").ok(),
+        HARNESS_SESSION_VARS
+            .iter()
+            .filter_map(|v| std::env::var(v).ok().map(|val| (*v, val))),
+    );
+    match key.id() {
+        Some(id) => format!("codescout:{id}"),
+        None => "codescout:anonymous".to_string(),
+    }
+}
+
+/// Per-connection identity: audit_ctx temp table + TEMP stamping trigger.
+/// Temp objects are invisible to other connections; the trigger fires only for
+/// this connection's inserts into catalog_audit (probe-validated, including
+/// nested firing from inside the main capture triggers). Idempotent: replaces
+/// both the row and the trigger.
+pub(crate) fn install_session(conn: &Connection, actor: &str) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS audit_ctx(actor TEXT NOT NULL, verb TEXT);
+         DELETE FROM audit_ctx;",
+    )?;
+    conn.execute(
+        "INSERT INTO audit_ctx(actor, verb) VALUES(?1, NULL)",
+        [actor],
+    )?;
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS audit_stamp;
+         CREATE TEMP TRIGGER audit_stamp AFTER INSERT ON catalog_audit BEGIN
+           UPDATE catalog_audit
+              SET actor = COALESCE((SELECT actor FROM audit_ctx), 'unknown'),
+                  verb  = (SELECT verb FROM audit_ctx)
+            WHERE seq = NEW.seq;
+         END;",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::librarian::catalog::{artifact, Catalog};
@@ -351,5 +395,91 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 2, "insert+delete rows outlive the artifact row");
+    }
+
+    #[test]
+    fn codescout_connection_rows_are_stamped_with_the_session_actor() {
+        let cat = Catalog::open_in_memory().unwrap();
+        // Deterministic: re-seed the session with a known actor (idempotent —
+        // install_session replaces the audit_ctx row and the temp trigger).
+        super::install_session(&cat.conn, "codescout:test-session").unwrap();
+        seed(&cat, "s1");
+        let actor: String = cat
+            .conn
+            .query_row(
+                "SELECT actor FROM catalog_audit ORDER BY seq DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(actor, "codescout:test-session");
+    }
+
+    // THE vanished-rows reproduction (docs/issues/2026-08-25-sdd-ledger-and-
+    // catalog-rows-vanished.md): a raw second connection deletes a row; the trail
+    // answers with op, full OLD image, and actor 'unknown'.
+    #[test]
+    fn foreign_connection_mutations_record_as_unknown_with_full_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("c.db");
+        let cat = Catalog::open(&db).unwrap();
+        seed(&cat, "victim");
+        let foreign = rusqlite::Connection::open(&db).unwrap(); // no install_session
+        foreign.pragma_update(None, "busy_timeout", 5000).unwrap();
+        foreign
+            .execute("DELETE FROM artifact WHERE id='victim'", [])
+            .unwrap();
+        let (actor, payload): (String, String) = cat
+            .conn
+            .query_row(
+                "SELECT actor, payload FROM catalog_audit WHERE op='delete' AND row_id='victim'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            actor, "unknown",
+            "a writer that did not identify itself is 'unknown' — that IS the answer"
+        );
+        let img: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(
+            img["id"], "victim",
+            "the deleted row is reconstructible from the trail alone"
+        );
+    }
+
+    // Deliberate break for the stamping path: without the temp trigger the system
+    // degrades to 'unknown' — never blocks, never mis-attributes (probe-pinned
+    // failure direction; see module doc).
+    #[test]
+    fn dropping_the_stamp_trigger_degrades_to_unknown_not_to_an_error() {
+        let cat = Catalog::open_in_memory().unwrap();
+        cat.conn.execute("DROP TRIGGER audit_stamp", []).unwrap();
+        seed(&cat, "u1");
+        let actor: String = cat
+            .conn
+            .query_row(
+                "SELECT actor FROM catalog_audit ORDER BY seq DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(actor, "unknown");
+    }
+
+    #[test]
+    fn set_audit_verb_reaches_subsequent_rows() {
+        let cat = Catalog::open_in_memory().unwrap();
+        cat.set_audit_verb("artifact.update").unwrap();
+        seed(&cat, "v1");
+        let verb: Option<String> = cat
+            .conn
+            .query_row(
+                "SELECT verb FROM catalog_audit ORDER BY seq DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(verb.as_deref(), Some("artifact.update"));
     }
 }
