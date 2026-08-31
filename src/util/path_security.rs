@@ -2782,7 +2782,7 @@ mod tests {
     /// design and pinned by the test above.
     ///
     /// The complaint in
-    /// `docs/issues/2026-08-31-dangerous-command-gate-scans-heredoc-body.md` is therefore
+    /// `docs/issues/archive/2026-08-31-dangerous-command-gate-scans-heredoc-body.md` is therefore
     /// answered by making the flag DISCRIMINATING rather than by removing it: the reason
     /// names where the match was, so acknowledging is a judgement instead of a reflex.
     #[test]
