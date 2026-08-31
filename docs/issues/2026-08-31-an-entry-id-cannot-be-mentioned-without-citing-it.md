@@ -25,7 +25,8 @@ number, whose content is unrelated by construction.
 
 ## Symptom (Effect)
 
-Measured 2026-08-31 at `831d2496`. A spec section discussing an id-allocation collision
+Measured 2026-08-31 at `83125c1f` (patch-id `92ca62eb7c9800ef3f48d4b0be378813d775a300`;
+the pre-rebase SHA was `831d2496`). A spec section discussing an id-allocation collision
 across two hosts produced a `cites` edge to a tracker it does not cite:
 
 ```
@@ -93,7 +94,7 @@ existing behaviour is right for every other caller.
 
 ## Consequence accepted for now
 
-The edge was materialised at `831d2496` (`link_scan(write=true)`, `edges_added: 1`),
+The edge was materialised at `83125c1f` (`link_scan(write=true)`, `edges_added: 1`),
 deliberately, rather than dodged by rewording the spec — rewording to satisfy a graph
 trades a legible sentence for one edge.
 

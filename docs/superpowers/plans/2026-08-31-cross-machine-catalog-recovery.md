@@ -790,12 +790,14 @@ git commit -F $SP/msg.txt
 ```
 
 **Correction 2026-08-31 (fix round 2) — this commit message shipped with the same wrong
-claim.** `84512bc8`'s message (reproduced verbatim above) said *"PV-11's authored text
+claim.** `bf4b5c04`'s message (patch-id `952e7501a977c6dfe02f853f43bf3e8211619b59`;
+pre-rebase `84512bc8`, reproduced verbatim above) said *"PV-11's authored text
 matched its canonical in substance, so only the AUTHORED caveat is dropped there."* That
 commit is immutable and is not being rewritten — history is history. But this plan is
 executable documentation: replayed as written, it would reinstate the claim. It was
 wrong for the reason given at Step 3's correction above — a substance match does not
-license a verbatim label. Fix round 1 (commit `220794b8`) installed PV-11's canonical
+license a verbatim label. Fix round 1 (commit `1c8312a9`, patch-id
+`2d1857d89223ed3fccd62a519ad0eab494f0421d`; pre-rebase `220794b8`) installed PV-11's canonical
 title byte-for-byte instead of keeping the approximation.
 
 ---

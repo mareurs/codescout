@@ -39,16 +39,27 @@ Observed via `git diff` after the round-1 fix commit: the diff hunk touched
 ## Reproduction
 1. Have an augmented artifact whose catalog `render_template` has drifted from what the
    committed sidecar *should* say (any content mismatch works; in this case the catalog
-   held the loss-period template, described in the corrected fix at commit `67c13cbc`).
+   held the loss-period template, described in the corrected fix at patch-id
+   `af52dd707d001887d36da9d03afa7a3ba07e2211` — see the provenance note below).
 2. Run `artifact_augment(id=..., merge=true, params_schema={...})` — i.e. patch a shape
    field that is *not* `render_template`.
 3. Inspect `docs/augmentations/<slug>.yaml` afterward: `render_template:` (and `prompt:`,
    `entry_collection:`, etc.) have all been rewritten to the catalog's current values,
    not left untouched.
 
-Git commit at time of observation: `061850c5fec93c57d4fd8d17e55baf853fa2d7e4` (the
-Task 2 fix that first hit this), corrected at `67c13cbce99e43acff1248f9cf2554250a5a2d48`
-on `experiments`.
+Git commit at time of observation: patch-id `c5ad1831aec43681cf9f429fd4367967be7fbb09`
+(the Task 2 fix that first hit this), corrected at patch-id
+`af52dd707d001887d36da9d03afa7a3ba07e2211`.
+
+**Provenance note — both SHAs are gone, and how they went is the point.** They were
+`061850c5` and `67c13cbc` on `experiments`. The 2026-08-31 cross-machine rebase
+**dropped both** as *"patch contents already upstream"*: the other host had independently
+re-exported the same sidecar at `4bb0c76e` (patch-id
+`ead8d9235d1e845df1a108ed717243fad23f3f82`) and produced **byte-identical** content
+(`sha256 83d16ed646b08ba1…`). So the fix is present upstream under a different diff, which
+is why a patch-id lookup for the originals now returns nothing while the *file* is
+correct. Cited by patch-id above per CLAUDE.md; the SHAs are recorded here as history,
+not as pointers.
 
 ## Environment
 codescout repo, `experiments` branch, cross-machine SDD run (desktop +
@@ -131,7 +142,8 @@ partial-shape-write case — the code has no such guard, only a whole-file byte 
 ### Displaced value's recovery path
 The correct `render_template` this write-through overwrote was not lost: it was
 recovered from `~/.local/share/librarian/catalog.db.bak-20260831-preintegration` (the
-pre-integration catalog backup) and re-applied at commit `67c13cbce99e43acff1248f9cf2554250a5a2d48`.
+pre-integration catalog backup) and re-applied at patch-id
+`af52dd707d001887d36da9d03afa7a3ba07e2211` (see the provenance note above).
 Had that backup not existed, the only record of the correct template would have been
 whatever the sidecar held in git history before the trap fired.
 
@@ -171,7 +183,10 @@ changed" so it can diff-and-patch the sidecar instead of blanket-republishing th
   (artifact id `689fb62e40557480`, fixed at `5f88be65`, patch-id `59ba22f9d7a6dfed66fcd8e551e09455b5c58f32`).
   That bug was `export_augmentations` never refreshing a stale sidecar; this bug is the
   same write-through mechanism now refreshing *too much* of it on an unrelated field change.
-- Fix-round commit that recovered the displaced value: `67c13cbce99e43acff1248f9cf2554250a5a2d48`
-  (patch-id `af52dd707d001887d36da9d03afa7a3ba07e2211`).
+- Fix-round commit that recovered the displaced value: patch-id
+  `af52dd707d001887d36da9d03afa7a3ba07e2211` (SHA was `67c13cbc`, dropped in the
+  2026-08-31 rebase as already-upstream — see *Provenance note* above). This entry is
+  why the pair is recorded rather than the SHA alone: the SHA died the same day it was
+  written and the patch-id is still the only thing that finds the change.
 - `.superpowers/sdd/2026-08-31-cross-machine-catalog-recovery/task-2-report.md` — full
   session narrative (Task 2 + fix round 1).
