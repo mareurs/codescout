@@ -1196,7 +1196,7 @@ fn format_activate_project(result: &Value) -> String {
 /// alone — a statement about non-emptiness wearing the name of a statement about
 /// currency — and, sitting behind a live Qdrant call, no test could reach it. An
 /// index 286 commits behind HEAD reported as up to date
-/// (`docs/issues/2026-08-31-workspace-status-claims-up-to-date-without-checking-git-sync.md`).
+/// (`docs/issues/archive/2026-08-31-workspace-status-claims-up-to-date-without-checking-git-sync.md`).
 ///
 /// **Three states, because three exist.** `git_sync_status` returns `None` when
 /// freshness is *indeterminate* — a non-git root, no sidecar, an unreadable HEAD

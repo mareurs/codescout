@@ -3238,7 +3238,7 @@ languages = ["typescript"]
 }
 
 // --- index envelope: `workspace(status)` must not claim currency it never checked ---
-// docs/issues/2026-08-31-workspace-status-claims-up-to-date-without-checking-git-sync.md
+// docs/issues/archive/2026-08-31-workspace-status-claims-up-to-date-without-checking-git-sync.md
 //
 // WHAT THESE COVER, AND WHAT THEY DO NOT. The fix has two sites and these reach
 // only one. They mutate `index_envelope` — the three-state mapping, which is

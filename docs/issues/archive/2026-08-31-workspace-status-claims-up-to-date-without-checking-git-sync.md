@@ -1,12 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- workspace
+- index
+- staleness
+- misleading-report
+closed: 2026-08-31
 opened: 2026-08-31
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [workspace, index, staleness, misleading-report]
-kind: bug
+severity: medium
+unverified: The FIX is gate-green with five regression tests, but they reach index_envelope only — the call site in ProjectStatus/call that passes git_sync_status(&root) in is guarded by nothing and needs a populated Qdrant to reach. Not yet re-verified against a rebuilt live MCP; the running server still answers from the pre-fix binary.
 ---
 
 # BUG: workspace(status) reports index.status "up_to_date" on chunks > 0 alone, never consulting git_sync
@@ -181,37 +186,71 @@ and 70 files, all of them the just-pulled work.
 
 ## Fix
 
-Not yet implemented.
+**Fixed on `experiments` at `b9cc75b4`** — patch-id
+`5a5c761072c44b54dc80f224d89355dd2d31e498`.
 
-Plan: in `ProjectStatus/call` (`src/tools/config/mod.rs`, the `chunks > 0` arm), read the
-git-sync state from `src/retrieval/index_state.rs` and emit its `status` verbatim
-(`"up_to_date" | "behind"`), carrying `behind_commits` / `last_indexed_commit` /
-`head_commit` alongside `files` / `chunks`. When behind, the `hint` should name
-`index(action='build')` rather than `index(action='status')`. Prefer reusing the existing
-function over recomputing the comparison, so the two surfaces cannot drift apart again —
-this bug is what a second implementation of one predicate looks like.
+`index_envelope(chunks, files, git_sync)` is extracted from `ProjectStatus/call`
+(`src/tools/config/mod.rs`) and called from the `chunks > 0` arm with
+`crate::retrieval::index_state::git_sync_status(&root)`. It emits git_sync's own word
+verbatim, carrying `behind_commits` / `last_indexed_commit` / `head_commit` alongside
+`files` / `chunks`, so the two surfaces cannot drift into different words for one state
+again.
 
-Consider whether `not_indexed` should stay binary against a populated-but-behind index, or
-whether the third state deserves its own word here as it does in `index_state.rs`.
+The extraction is not cosmetic — it is what makes the mapping testable at all. Behind a
+live `RetrievalClient::from_env` call, the arm was unreachable from any unit test, which
+is why a hardcoded string survived there.
 
+**Three states, resolving the open question this section used to carry.** `git_sync_status`
+returns `None` when freshness is *indeterminate* — a non-git root, no sidecar, an
+unreadable HEAD — which is not the same as known-current. That arm emits **`indexed`**, the
+word `build_activation_response` already uses for "a usable index exists"; defaulting to
+the strong claim is exactly how the original went wrong. `behind_commits` is **omitted**
+rather than zeroed there, because a `0` nobody measured is indistinguishable from one that
+was.
+
+`format_project_status` gains `"indexed"` beside `"up_to_date" | "behind"`. It is a
+populated state, and the `_` arm renders `index:none` — reporting an index that exists as
+absent, the same class of false report one layer up.
+
+The `behind` hint now names `index(action='build')`. The shipped one named
+`index(action='status')`, which only re-reports the staleness — the hint was steering
+readers away from the single call that resolves it.
 ## Tests added
 
-None yet — the fix is not written. The regression test should assert the `"behind"` arm is
-reachable from `workspace(status)`: build an index, move HEAD, then assert
-`status == "behind"` and `behind_commits > 0`. A test that only checks the
-populated-and-current case is monotone under exactly this defect and would have passed
-throughout (see CLAUDE.md § *Testing Discipline* — the assertion must be able to fail in
-the direction of the bug).
+Five, in `src/tools/config/tests.rs`, all on `index_envelope`. Written **RED first**
+against a stub carrying the shipped behaviour, and the failure was the defect itself:
+`left: String("up_to_date")`, `right: "behind"`.
 
-**Make the fixture's gap exactly one commit, and say on the fixture line that the `1` is
-load-bearing.** The second reproduction above shows the defect is gap-independent, so a
-fixture built on a comfortable margin — 50 commits, 20 files — passes under the correct fix
-*and* under a wrong one that merely thresholds on staleness, and nothing distinguishes
-them. A one-commit, one-file gap is the only fixture a threshold-shaped fix fails. This is
-the monotone-assertion rule applied to setup rather than to the assertion: the gap size is
-the part of the arrangement that makes the test able to tell, and a later tidy-up that
-rounds it up to "a clearly stale index" leaves the test green and no longer
-discriminating (CLAUDE.md § *Testing Discipline*, the fixture-annotation clause).
+- `a_populated_index_one_commit_behind_head_reports_behind` — the regression guard.
+- `a_populated_index_level_with_head_still_reports_up_to_date` — non-vacuity. Without it
+  the guard above is equally satisfied by hardcoding `"behind"`: one unconditional answer
+  swapped for another. The pair is only satisfied by actually reading `git_sync`.
+- `an_index_whose_freshness_cannot_be_determined_is_indexed_not_up_to_date` — the `None`
+  arm, and that the unmeasured distance is absent rather than `0`.
+- `a_behind_index_is_pointed_at_build_rather_than_at_status` — the remedy in the hint.
+- `the_compact_line_shows_counts_for_every_populated_index_state` — `format_project_status`
+  had **no** tests before this.
+
+**The fixture's gap is one commit, and the test says so on the fixture line.** As this file
+argued before the fix existed: the defect is gap-independent, so a comfortable fixture (50
+commits, 20 files) passes under the correct fix *and* under a wrong one that merely
+thresholds on staleness, and cannot tell them apart. One commit is the only gap a
+threshold-shaped fix fails. A later tidy-up rounding it up to "a clearly stale index"
+leaves the test green and no longer discriminating.
+
+### What these do NOT cover — the second site
+
+The fix has two sites and the tests reach one. They mutate `index_envelope`; they cannot
+reach the **call site** in `ProjectStatus/call` that passes `git_sync_status(&root)` in.
+Re-hardcoding that arm back to `json!({"status": "up_to_date", ...})` leaves all five
+green, because none of them goes through `ProjectStatus.call`.
+
+It is not cheaply guardable: the arm sits behind `RetrievalClient::from_env`, needs a
+populated Qdrant to reach `chunks > 0`, and the client is not injectable there. The
+observer that would catch a regression is a live `workspace(action="status")` against a
+rebuilt binary — recorded at the tests themselves, so five green ticks are not read as
+end-to-end protection they do not provide. This is the "mutate once per guarded **site**,
+not per feature" rule in CLAUDE.md § *Testing Discipline*, applied to its own fix.
 ## Workarounds
 
 Use `index(action="verify")` rather than `workspace(action="status")` whenever currency
