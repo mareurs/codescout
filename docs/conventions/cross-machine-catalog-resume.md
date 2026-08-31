@@ -48,6 +48,38 @@ reason this page exists:
 
 Nothing fails. You just quietly get less.
 
+**A fifth mode has the OPPOSITE shape, and it is not on the table above.** The four
+above are state that fails to arrive. This one is state that arrives *without* its
+catalog counterpart: **an artifact moved on the other host.** Because
+`id = sha256(abs_path)`, `artifact(action="move")` re-keys the row *there* and drops the
+old one — but git carries only a file rename, so your catalog keeps a row keyed on a path
+that no longer exists. Archiving a bug file is the routine case, and it happens constantly.
+
+The symptom is reported, but you have to look at the right field:
+
+```
+librarian(action="doctor")
+  → "missing_file": 2    ← THIS is the check. It names the artifact and its dead path.
+librarian(action="link_scan")
+  → "unreadable": 2      ← corroborating, but only ARTIFACT IDS — resolve them yourself
+index(action="verify")
+  → "orphan_count": 2    ← the semantic index holds point-sets for the vanished paths
+```
+
+`reindex` repairs the catalog side (`removed: N`) and `index(action="build")` clears the
+orphans. Measured 2026-08-31: the other host archived two bug files it had fixed; the pull
+brought both renames, and this host held both stale rows until a reindex.
+
+**None of the three says "your catalog is stale after a pull" — and that is enough to miss
+it.** `missing_file` is one row among ~30 checks in a 127-violation report, and it reads as
+a local-hygiene problem rather than a sync consequence. On the 2026-08-31 pass the value
+went 0 → 2 across the pull, and the session carried the earlier `0` forward and only
+noticed via `link_scan`'s `unreadable` — then nearly wrote *"doctor stays clean, it has no
+such check"* into this very page. It has the check. Re-read it after every pull rather than
+trusting a reading taken before one.
+
+
+
 ## The sequence
 
 Run in this order. Later steps read state the earlier ones write.
@@ -73,6 +105,16 @@ query** — a `find` against a stale catalog returns a confidently wrong empty s
 response's `unindexed_hint` on a prior call is the tell you skipped it.
 
 *2026-08-28: 99 added, 67 updated, 23 removed, 165 embedded.*
+
+**Reindex is also the repair for a move made on the other host.** Any artifact the other
+machine archived or renamed leaves this catalog holding a row keyed on the pre-move path
+(`id = sha256(abs_path)`); the pull brings the rename, not the re-key. The `removed:` count
+is where that shows up. Skip this step and `doctor`'s `missing_file` is what names it —
+re-read that field after every pull, because a reading taken *before* the pull says 0. See
+§ *Why a clone is never enough*, fifth mode.
+
+*2026-08-31: 4 added, 8 updated, **2 removed**, 12 embedded — the two removals were bug
+files the other host had fixed and archived the same day.*
 
 ### 3. Repair memory vectors
 
@@ -133,6 +175,16 @@ opposite responses, and the report does not separate them for you:
    yours to fix as part of a resume.
 3. **Other repos** — `abs_path_outside_managed_roots`, and most `missing_file`.
    The catalog is machine-global, so it holds rows for every repo on the host.
+
+**`missing_file` has TWO populations and this triage used to collapse them.** Most rows are
+category 3 and correctly ignorable. But a row whose path is **inside this project** means an
+artifact moved on the other host and your catalog never re-keyed — category 1, your work,
+and repaired by `reindex`. Read the paths, not just the count: project-internal paths render
+*relative*, foreign repos stay absolute (§ *Traps*, third trap), so the leading `/` is the
+discriminator. Measured 2026-08-31: this page's own "most `missing_file`" line is why a
+session skipped the field entirely and found the stale rows only via `link_scan`'s
+`unreadable` — the guidance was right about the majority and wrong about the case the
+reader was in.
 
 **Never run `fix=prune_missing` as part of a resume.** Those rows may be perfectly
 valid for a repo that is simply in a different state on this machine. Pruning is
@@ -412,7 +464,7 @@ and the **catalog**. Both bit during the 2026-08-28 pass.
   main checkout.
 - **Subagents must not call `workspace(action="activate")`.** It mutates the
   *parent's* active project mid-turn
-  (`docs/issues/2026-08-23-subagent-activate-mutates-parent-active-project.md`, open).
+  (`docs/issues/archive/2026-08-23-subagent-activate-mutates-parent-active-project.md`, since fixed and archived).
   Brief them to pass `workspace=<path>` per call instead. All four restore agents on
   this pass were briefed that way and none tripped it.
 
