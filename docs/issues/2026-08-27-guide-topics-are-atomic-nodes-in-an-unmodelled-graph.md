@@ -9,7 +9,7 @@ tags:
 - get_guide
 - progressive-disclosure
 - proposal
-unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27 on branch sdd/get-guide-section-grain, and the USE probe this file''s own `Not yet done` asked for RAN the same day, resolving the delivered-vs-used gap it was blocked on. What remains is proposal work, not a defect: directions (b) and (c) are gated on a DISTRIBUTION probe -- which sections of tracker-conventions are cited back or acted on across a real sample -- because the two sessions measured so far were selected by talking to each other, not by any sampling rule, and both arms would survive a bad sampling design. Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that reads as settled because someone who knows the file stated it, and it needs re-costing before anyone builds on it. Added 2026-08-30 by a verify-open sweep: this was the only one of twelve open bugs with no queryable disposition.'
+unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27 on branch sdd/get-guide-section-grain, and the USE probe this file''s own `Not yet done` asked for RAN the same day, resolving the delivered-vs-used gap it was blocked on. What remains is proposal work, not a defect: directions (b) and (c) are gated on a DISTRIBUTION probe -- which sections of tracker-conventions are cited back or acted on across a real sample -- because the two sessions measured so far were selected by talking to each other, not by any sampling rule, and both arms would survive a bad sampling design. Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that reads as settled because someone who knows the file stated it, and it needs re-costing before anyone builds on it. Added 2026-08-30 by a verify-open sweep: this was the only one of twelve open bugs with no queryable disposition. Added 2026-08-31: two defects IN the shipped Phase 1 mechanism were found and fixed (50590b6c, 8364e472) -- see the Phase 1.5 section -- and one gives Phase 2 a SECOND blocker, independent of the 17,378 B decomposition: topic_declaring made `serves:` a CROSS-TOPIC namespace, so tracker-conventions cannot declare a shape librarian.md already declares without a specificity rule, and the build gate no_two_topics_declare_an_overlapping_shape fails on exactly that, deliberately.'
 ---
 
 ## Symptom
@@ -297,6 +297,64 @@ and the remedy rather than narrowing more guide content; the narrowing pass had 
 spent a concrete example out of the guide to buy 385 B. Recorded in
 `docs/trackers/sdd-ruling-log.md`.
 
+## Phase 1.5 — 2026-08-31: two defects in the shipped mechanism, and a second blocker on Phase 2
+
+Phase 1 shipped section-grain delivery for `librarian`. Using it in anger found two defects
+**in the mechanism itself**, both fixed the same day, and one of them adds a precondition to
+Phase 2 that did not exist when this file was written.
+
+**Defect 1 — a declared section can be unreachable, because the TOPIC is chosen first.**
+`serves:` selects sections *within* a topic. The topic is selected earlier and separately by
+`Tool::relevant_guide_topic`, a heuristic over the RESULT, and nothing reconciled the two. So
+`librarian.md` § *doctor repairs* declared `librarian.doctor`, matched its selector, passed
+every gate — and could not be delivered at all, because every `doctor` scan of a real catalog
+names tracker paths and routed the call to `tracker-conventions`. Measured live: **39,106 B of
+the wrong topic displacing the 1,490 B written for that call — a 26x overshoot**, with the
+declaring topic never consulted. Two of Phase 1's own tests were already routing *around* this,
+putting fixtures under `docs/specs/` with the comment that a `docs/trackers/` path "would starve
+both calls of a section-grain hint".
+
+Fixed at `50590b6c` (patch-id `13b643673b57831244a5ed63a5dce0bf1d43a965`) as a **fallthrough**,
+not a precedence flip: the result heuristic still goes first, because it encodes what the call
+*touched*, which no unqualified `serves:` shape expresses. "Declaration beats content" was
+implemented as an experiment and fails
+`an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide`, reverting `32736ca0`. Full
+record: `docs/issues/archive/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
+
+**Defect 2 — the ledger charged calls that delivered nothing.** `guide_blocks_for` used
+`GuideLedger::insert` as its already-sent *test*, and `insert` refreshes the stamp and persists
+on repeats. An all-sections-already-sent call therefore wrote once per matched section and
+returned empty. Fixed at `8364e472` with `contains`-then-`insert`. The harms split by tier and
+neither tier paid both: identified sessions carry `idle_ttl: None`, so their stamps are never
+read for expiry; anonymous sessions carry `path: None`, so `persist` returns early.
+
+### Phase 2 now has a SECOND blocker, independent of the 17,378 B one
+
+The fix introduced `GuideIndex::topic_declaring`, a corpus-wide lookup from call shape to
+declaring topic. That makes `serves:` a **cross-topic** namespace for the first time.
+`librarian.md` declares nearly every librarian and artifact shape, so the moment
+`tracker-conventions` declares `artifact.create` or `artifact.append_entry` the two collide, and
+`topic_declaring` would resolve it by `BTreeMap` order — alphabetically, silently.
+`no_two_topics_declare_an_overlapping_shape` fails the build on exactly that, deliberately, and
+will fire on the first naive Phase 2 attempt.
+
+So Phase 2 is blocked on two independent things: **decomposing the 17,378 B section** (size),
+and **cross-topic shape disambiguation** (addressing). This section adds the second.
+
+The resolution is already expressible, and may be worth more than the unblocking. `Shape`
+carries a `path_contains` field, so `serves: artifact.create path~docs/trackers/` states
+declaratively, at section grain, exactly what `names_tracker_path` states imperatively at topic
+grain. Two things must land with it: a **specificity rule** in `topic_declaring` (a
+`path~`-qualified shape beats an unqualified one — the same "more specific wins" principle the
+fallthrough already encodes), and widening the ambiguity gate to model `path_contains`, which
+today over-approximates and would flag that pair. Done together, Phase 2 could **retire**
+`names_tracker_path` rather than work around it — which would also close Defect 1's residual.
+
+**Residual, unchanged by the fix.** A session's *first* tracker-path-naming librarian call still
+ships `tracker-conventions` whole. Reachability was fixed; cost was not. And **9 of the 10
+topics still declare nothing** — only `librarian.md` carries `serves:`, 13 declarations — so any
+call routing to one of the nine pays its full body. Phase 1's containment property and the shape
+of what is left to do are the same fact.
 ## Measured — USE, 2026-08-27 (the probe `Not yet done` asked for)
 
 This section answers the question the rest of the file could only frame: delivery
