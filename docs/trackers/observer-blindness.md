@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 8
+entry_high_water_OB: 9
 entry_prefix: OB
 ---
 
@@ -126,6 +126,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-9 | 2026-09-01 | plausibility is a filter with a resolution limit — a near-miss number fits inside it; 4 instances, 4 caught by re-derivation, 0 by reading | the reader | wrong instrument | **partial** — remedy shipped under `OB-1`; this row adds its scope condition |
 | OB-8 | 2026-09-01 | a shared resource carries no owner, so seeing the peer does not help — four captures in 34 min with enumeration complete | the writing session | wrong instrument | **partial** — outbound gate shipped; inbound not closeable per-session |
 | OB-7 | 2026-09-01 | a declaration is well-formed, and nothing in production reaches it — including for the compiler, which cannot lint `pub` in a lib crate | the author of the declaration | wrong instrument | **partial** — decidable for 1 of 3 families |
 | OB-6 | 2026-09-01 | a gate collapses "cannot observe" into the confident answer — three states exist, two are offered | the gate, and every reader of its output | wrong instrument | **designed** — exemplar shipped at `b9cc75b4` |
@@ -732,6 +733,94 @@ For the harness-scoped half add a fourth move, from `post_compact`'s design note
 **Instances:** the six recorded in the peer-capture bug file; `OB-2`'s `target/` clobber (the same class on a different resource, seen from the arming side); the `entry_high_water_<PREFIX>` cross-host collision; and the pre-commit hook's own whole-tree diff, which attributes by temporal proximity for exactly the reason described here and refused a push on a green run naming a file nothing under `src/` writes.
 
 **Status:** open — promoted from `IC-1` on 2026-09-01, which this entry also **falsifies in part**: `IC-1`'s claim contains a *therefore* (*"its peer listing reaches only peers sharing its config profile. Coordination is therefore impossible by construction"*) and the causal link is broken. Coordination failed with enumeration complete. `IC-1`'s visibility half stands on its own members — `cross-account-agents-cannot-see-each-other`, `listagents-omits-cross-profile-sessions`, `peer-sessions-never-compares-start-time-to-build-time` — and is a real class; it is simply **not the reason** the write side has no remedy. `OB-3` is the visibility half already promoted; this is the ownership half, and they are siblings rather than one class.
+
+## OB-9 — plausibility is a filter with a resolution limit, and a near-miss number fits inside it
+
+**Valid:** invariant
+
+**Rests on:** `OB-1` (*publish the derivation, not the value* — this row is the scope condition
+that makes that remedy mandatory rather than stylistic); `OB-4` § *Second instance*, where this
+mechanism was first written down as an aside under a different headline law; `CLAUDE.md`
+§ *Testing Discipline* — *"a count of a defect population must arrive with its unit or not at
+all"*, landed `fe085987`. Framing proposed by `codescout-e8`; instances and the table below
+verified at source here.
+
+**Class:** a published number wrong by a **small** margin is never queried, because the only
+cheap check a reader has is plausibility, and a near-miss is precisely what plausibility means.
+Error magnitude is **anti-correlated with detection**: a figure wrong by 5× is caught by its own
+reader, one wrong by 15% is not. A wrong number far from the truth defends nothing; a wrong
+number near it defends itself.
+
+**Blind party:** the **reader** — a different party from `OB-1`'s author and `OB-4`'s trusting
+session, which is what earns this a row rather than a paragraph. Structurally unable, for a
+stateable reason: short of redoing the measurement, the reader's only instrument is whether the
+value looks about right, and every member of this class looks about right. A *more careful*
+reader does not catch it. Carefulness raises the threshold for what reads as wrong, and these
+already sit under it. The check that works is re-deriving from scratch — which is the exact cost
+that publishing a number is supposed to save, so the class is funded by the thing it defeats.
+
+**Who can see it:** someone who re-derives independently, and nobody else. Across the four
+instances below, **4 of 4 were caught by re-derivation and 0 by inspection** — including by
+readers who were, at that moment, writing about this class.
+
+> **That 0 is not as strong as it looks, and the weakness runs one way.** An instance caught by
+> inspection produces no artifact — the reader doubts, re-counts, and the wrong figure never
+> ships — so the recorded population is selected *against* exactly the outcome that would
+> falsify the claim. The honest statement is: of the near-misses that reached a ledger, none
+> was caught by reading. Whether reading catches any is not measured here and this corpus
+> cannot measure it.
+
+**Plausible-answer property:** definitional rather than incidental. Plausibility is not a side
+effect of this failure, it *is* the failure.
+
+**Vigilance:** wrong instrument, and this is the ledger's cleanest case for that phrasing.
+"Read the number more carefully" is not a weaker remedy here, it is a null operation — the
+discriminating act is arithmetic, not attention.
+
+**Where it sits relative to its neighbours** — the same adjudication `IC-2`'s *Promotes to*
+field already makes between `OB-4` and `OB-6`, extended by one:
+
+- `OB-4` — **why a value is trusted**: an accuracy record it later spends.
+- `OB-6` — **what an instrument does when it cannot tell**: returns the confident value.
+- `OB-9` — **why the wrong value is not caught downstream**: it lands inside the reader's
+  resolution limit.
+
+Remedies differ, so none subsumes another. `OB-1` sits upstream of all three: it says why the
+value was published thin in the first place.
+
+**Instances** — four, in four different measurement subjects, all 2026-08-31/09-01:
+
+| published | true | ratio | subject | caught by |
+|---|---|---|---|---|
+| `4 of 20` (20%) | `1 of 4` / `2 of 4` — vantage-dependent (25–50%) | ~1.25× | peer enumeration | re-derivation via `scripts/peer-sessions.sh` (`cluster-promotion-session-log:F-3`) |
+| `15` tests | `13` | 1.15× | tests reaching `ListFunctions`/`ListDocs` | an independent re-count by a peer (`93bd6f88`) |
+| any one of `13`/`15`/`17`/`18` | all four correct, for four different questions | 1.38× spread | one population, four units | two parties counting independently and disagreeing (`fe085987`) |
+| `IC-3` n=`20` | n=`18` | 1.11× | cluster size, feeding a promotion threshold | re-running the membership query after the `IC-15` boundary moved (`issue-clusters.md:429`) |
+
+**The third row is why the class is not about wrongness.** Nothing in it is wrong: four correct
+counts inside a 13–18 spread. Citing the wrong-unit one is undetectable by the same filter, so
+this class covers correct-but-unqualified values and not only errors — which is the half a
+reader primed for "check your arithmetic" will still miss.
+
+**Mechanism status:** partial. The remedy is already published and already load-bearing; what
+this row contributes is its **scope condition**.
+
+- **Shipped:** *publish the derivation, not the result* (`OB-1`, and the mining table in
+  § *The vigilance finding*). `CLAUDE.md` § *Testing Discipline* now states the mandatory form
+  for counts.
+- **The scope condition:** a derivation is optional for a value whose plausibility a reader can
+  actually assess, and **mandatory** for one they cannot — which is every count over a
+  population the reader would have to re-enumerate to check. The test is not *"is this number
+  important?"* but *"could a reader tell if I were off by 15%?"*.
+- **Candidate mechanism, not built:** `claim-decay.md:417` already parses fields stating a
+  number a live query can re-derive. A `doctor` check flagging a **quoted count with no adjacent
+  query or derivation** in a tracker body would fire on write, unconditionally, without anyone
+  suspecting — the shape this ledger prefers. It does not exist.
+
+**Status:** validated — four instances, each verified at source in this session
+(`cluster-promotion-session-log.md:241-250`; `93bd6f88`; `fe085987`; `issue-clusters.md:391`
+and `:429`, the last confirming n moved 20→18 with *no bug added, removed, fixed or
+re-examined* — only the boundary).
 
 ## Template for new entries
 
