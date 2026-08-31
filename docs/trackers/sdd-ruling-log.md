@@ -181,6 +181,72 @@ session walks into the same trap and nothing catches it until someone builds lea
 
 Append below. Newest run first.
 
+### cross-machine-catalog-recovery — 2026-08-31
+
+Plan: `docs/superpowers/plans/2026-08-31-cross-machine-catalog-recovery.md` ·
+Spec: `docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md` ·
+15 commits (2 dropped by the integrating rebase as already-upstream) · final review
+0 Critical / 5 Important, all closed · **30 rulings, 1 outright wrong, 1 partly wrong,
+1 superseded.**
+
+Unusual shape worth noting before the table: this run spanned **two machines**, with a
+live concurrent session on the other one that pushed 17 commits mid-run. Several rulings
+are about that concurrency rather than about the plan.
+
+| ruling | class | cost if wrong | verdict |
+|---|---|---|---|
+| NO worktree for this plan, overriding the skill's default — the plan's subject IS the librarian catalog, and a linked worktree makes the server fork shadow rows, adding a THIRD divergent catalog state to a run whose purpose is reconciling two | safety | no isolation from the main checkout | held |
+| Implementer floor sonnet; reviewers opus for the tasks touching irreplaceable rows (1, 2, 3) — 38 params rows existed in exactly one place | process | spend | held |
+| Task 2 Step 6 is wrong as written and is corrected before dispatch: `git pull` updates the sidecar FILE, not the laptop's catalog `params_schema`, and `reindex` never overwrites a live augmentation row | correctness | the laptop's restore fails schema validation mid-run | held — reviewer proved it load-bearing (`git cat-file -t <sha>` on the laptop: not a valid object) |
+| Absolute `sidecar_shape_drift` assertions (4→3→2→0) stay as written despite being order-dependent, because SDD never runs implementers in parallel; reviewers are told to read them as "decremented by one" | process | a reviewer misreads an absolute number | held |
+| CM-2's heading keeps the word "permanently" — the heading IS the `CM-2` token's sole definition and rewriting risks citation breakage | correctness | **premise false. `def_re` anchors on token + FIRST dash only — which I had verified myself, with `cat -A`, two tasks earlier on PV-9. Heading retracted in the fix wave** | **WRONG** |
+| Pre-flight abort PF1 is overridden — its stated premise ("a divergent laptop invalidates the row comparisons") re-measured false, every baseline unchanged | correctness | halting a run on a false premise | held |
+| Execution splits at the host boundary: tasks 2/3/4 write to the laptop and need our commits reachable there, which the plan silently assumed and never stated | safety | a stall until authorised | held — user authorised with the correct precondition (fetch and sync first) |
+| Task 1's own verification is insufficient and gains one check at review time: `scan_undefined_entries` reads the ledger's own body, so `entry_without_definition` will STILL report 38 of 68 after the fix | measurement | a false "resolved" claim on the run's headline deliverable | held |
+| The spec's § 2.1 terminal-row projection is NOT retracted on the scout's evidence — what it refutes is my proposed replacement, not the original | scope | unit 3 plans a feature partly redundant with a shipped check | held |
+| No `append_entry` from this host while the branches are diverged: desktop high-water 146, laptop 147 unpushed, and both desktop allocator inputs resolve to 147 | safety | a silent duplicate id, unrepairable at merge because the renumber covers only params rows | **held, with a demonstrable counterfactual — exactly one entry at that number exists in the tree** |
+| The spec's § 2.3 premise is falsified and must be revised before unit 3 is planned | correctness | **conflated two claims. "Zero measured instances" IS falsified; the Revisit-when trigger (two hosts mutating the SAME entry) is NOT — an allocator collision has no shared entry and nothing to three-way merge. The fix wave's annotation inherited the conflation and had to be corrected** | **PARTLY WRONG** |
+| Scope the render_template fix to the TEMPLATE only — the installed prompt is genuinely the better of the two, so restoring both would discard good operating text | scope | a good prompt discarded to fix a bad table | held |
+| Task 3 gets a lean review, not a diff-based one — there is no diff by design (catalog-only writes) | process | a brief requirement slips unverified | held |
+| The zero-padded id error is mine, originating in the plan's own Task 3 Step 7 payload; correct the immutable event with an append-only correction rather than pretend | correctness | an immutable event carries wrong ids | held — **but see the last row: the sweep it triggered was closed at five sites and was not complete** |
+| Laptop off the network → Task 4 is blocked. Infrastructure, not a plan defect, so not one of the four stop conditions; resequence the desktop-only tasks and halt on Task 4 | process | a halt mid-run | held |
+| Dispatch the scoped re-review anyway rather than accept my own check — I authored the fix instruction, so I cannot judge whether the event faithfully executes it as opposed to satisfying the checks I happened to think of | process | one review seat | held |
+| Make the label TRUE rather than soften it: install PV-11's canonical title verbatim instead of downgrading `RECOVERED-VERBATIM` to "matched in substance" | correctness | one extra edit | held — the asymmetry (PV-9 got canonical text, PV-11 got a label) was itself the defect |
+| Sweep site 5 is in scope despite the reviewer deferring it — closing a class means the summary lines too | scope | one extra annotation | held |
+| Sweep site 4 justifies a second documentation round because the plan is EXECUTABLE and would reinstate the claim; and do NOT rewrite the original commit message — history is history | correctness | one more fix round | held |
+| The whole-branch review is not re-run despite being based at the wrong commit (BASE was Task 1's own commit, so the run's largest deliverable was absent from the diff) | process | **the 496-line companion got one opus pass plus this reviewer's direct read instead of two full passes. The wrong BASE was my error, and the package step now carries a positive control** | held |
+| `usage.db`'s Bash blind spot is recorded, not fixed — it is a property of an ad-hoc query, and CLAUDE.md already states the instrument is MCP-only | measurement | none | held |
+| The final gate is met on every row the run could affect and NOT met as written (`params_behind_body` 2, plan expects ≤1 with one named allowance) — report it that way | measurement | nothing material; the unqualified phrasing would have had a reader trust a number the plan said should be smaller | held |
+| Hold `reindex` until the scoped re-review returns — moving substrate under a live reviewer is a concurrency error I had already made once this run | safety | one file uncatalogued for minutes | held |
+| Materialise the semantically false `cites` edge rather than reword the spec to dodge the token — rewording trades a legible sentence for one graph edge | scope | one false edge polluting context packing for one spec | **SUPERSEDED — the re-review's accuracy correction dropped the token anyway, so the edge prunes on the next pass. Bug file updated rather than left asserting a state that no longer holds** |
+| Rewrite the plan's overclaiming annotation to state what is true AND leave the withdrawn overclaim visible in it — an annotation whose job is correcting an overclaim must not quietly become another one | process | a longer note | held |
+| Separate § 2.3's two claims explicitly and narrow its third rejection reason from "no instances" to "no instance of the class `merge_host` would address", rather than withdrawing the annotation | correctness | unit 3 reads a narrower warrant than the evidence allows | held |
+| Re-run the padded-id sweep REPO-WIDE with a pattern derived from the catalog (`T-001`–`T-013` are genuinely padded, so `T-0NN` where NN≥14 cannot exist) rather than over the five files I remembered | correctness | none | held — **found a sixth site, in a spec I had edited twice after declaring the sweep closed** |
+| Repair the six SHA citations the integrating rebase orphaned by patch-id lookup, and label every retained pre-rebase SHA as history rather than deleting it | process | a few extra parenthetical SHAs | held — deleting would hide that the rot happened, and this run's subject is durability across machines |
+| Run the four-command gate AFTER the rebase, not before — the merged tree is a state neither machine has compiled | process | ~80s | held — merged tree green, 3412 lean / 4975 default, 0 failed |
+| Recover Task 4's unrecorded findings from the subagent transcript before deleting the workspace, rather than accept them as lost | process | three minors and two Importants deleted with a gitignored directory | held |
+
+**Lessons this run adds, all with two or more instances:**
+
+- **Having the disproving fact in the same paragraph does not prevent the overclaim.** Three
+  instances. The CM-2 heading ruling was made on a premise I had personally verified false
+  two tasks earlier; the § 2.3 annotation's own closing sentence conceded the distinction
+  its headline denied. A headline sentence and its qualifying clause get composed by
+  different standards — the qualifier carefully, the headline for punch. Remedy that
+  worked: leave the withdrawn overclaim *visible* in the correction.
+- **"Sweep closed at N sites" is a claim about a corpus, and the corpus is usually the
+  files you remembered.** Declaring a number is precisely what stops anyone looking. A
+  sweep is only closed when the pattern is derived from the *data* and run over the whole
+  tree — mine missed a sixth site in a file I edited twice after closing it.
+- **A whole-branch review package based at the last task's BASE excludes the first task's
+  deliverable.** Per-task reviews train you to reach for the number in front of you. The
+  branch base is not any task's base, and the controller who chose it is the one party who
+  cannot see what is missing. Positive control: confirm the package contains the FIRST
+  task's commit.
+- **A deferral rationale expires.** I deferred the § 2.3 annotation as "unit 1 mid-flight"
+  and then committed two further spec edits, so the reason was stale by my own hand before
+  the reviewer read it.
+
 ### get-guide-section-grain — 2026-08-27
 
 Plan: `docs/superpowers/plans/2026-08-27-get-guide-section-grain.md` · 23 commits ·
