@@ -408,6 +408,51 @@ that changes **what is shared**, where the others rearrange who touches a shared
 **Not filed as instance 6.** The count stopped being the informative variable two instances ago;
 what this adds is a vector and a falsification, which is what the ranking consumes.
 
+## Detection — the commit's own `--stat` is the only check that fired, and it fired for free
+
+2026-09-01, commit `d617051b`, capturing session `codescout-d9`. This is **layer 2** of the table
+in *Remedy (2)* above (explicit paths, co-edited file), so it is **not filed as a new instance** —
+the vector is already recorded and the count stopped being the informative variable. What is new
+is that the capture was *detected*, within one call, and the detector is cheap enough to make
+deliberate.
+
+**What happened.** Verified `git diff -- docs/trackers/issue-clusters.md` in its own call: 23
+insertions / 16 deletions, 9 hunks, offsets recorded, all mine. Ran
+`git add <that one path> && git commit -F <msg>` roughly 40 seconds later. A peer wrote its
+`IC-1` / `OB-8` split work into the same file inside that gap. The commit landed **58 insertions
+/ 19 deletions**, carrying three hunks belonging to another session under a message describing
+only mine.
+
+**Every guard passed, and each was right to.** `unreviewed-content` printed `Passed` — this was
+an **index** commit, not a pathspec one, so the hook is out of scope by its own § *WHAT IT DOES
+NOT CATCH*, which names this case and grants it *"the content was staged and is presumed
+reviewed"*. **That presumption is the hole.** `git add <path>` stages the working tree *as of the
+add*, so "reviewed" and "staged" are different instants; a review performed before the add
+measures a state the add is not obliged to see. The gap needs no peer malice and no file
+ambiguity — only elapsed time.
+
+**The one signal that survived is the number.** `git commit` prints its own `--stat`, and `58/19`
+against a remembered `23/16` is unmissable. A foreign hunk cannot leave the count unchanged. That
+is the property worth leaning on: it holds regardless of which layer the capture came through,
+whether the two sessions' files overlap, and whether the peer is enumerable at all — the three
+axes every other check on this page turns out to depend on. It is **detection, not prevention**:
+the commit has already happened when the number arrives.
+
+**So the discipline is one comparison, not one more step.** Measure the count before staging;
+read the commit's own stat line against it. Both halves already happen in any careful sequence —
+what is missing is comparing them. This does not close the inbound half, and this file already
+explains why nothing per-session can. But a *detected* capture is disclosable, and *Instance 5*
+together with `bug-fix-session-log:W-70` both argue disclosure is what prevents the downstream
+damage — a captured session re-running `append_entry` and allocating a fresh id for content
+already in `HEAD`.
+
+**One measurement trap, from a peer that ran the check successfully the same hour** (`5d405b67`):
+`git diff | grep -c '^+'` counts the `+++ b/<path>` header line, so its raw 117/3 was really
+116/2 — which is what `--stat` then reported. Compare `--stat` against `--stat`, or subtract the
+two header lines. A one-line discrepancy in either direction reads exactly like a small foreign
+hunk, which makes the trap worse than a wrong number: it manufactures a false positive for the
+very mechanism the check exists to find.
+
 ## Candidate remedies
 
 > **Superseded by *Re-ranking, third time* above — kept for the reasoning, not the ranking.**
