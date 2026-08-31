@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 82
-entry_high_water_W: 87
+entry_high_water_W: 88
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -227,6 +227,7 @@ entry_high_water_W: 87
 | W-81 | 2026-08-30 | high | **Choose a gate's surface by measuring its feedback latency, not by what kind of check it is.** `F-14` proposed "add a CI step" and it went unbuilt for months while its own prediction came true on the next escaping `include_str!`. The reading is not inertia — "CI gate" was the wrong half of the sentence to act on. Two measurements decided it: `cargo package --list` **does not build** (0.21s/package, so the cost objection died at the stopwatch), and the repo was **119 commits ahead of origin across two days**, so a CI-only gate would not have run once in that window. A gate's value is not *does it catch the defect* but *how long until it tells someone*, and that latency is a property of the workflow, not the check — here CI was a weekly signal in a per-commit costume. Put it on the fastest surface that can host it and let slower ones inherit it (`cargo test` is run by both the gate commands and CI). Sibling call: when a check must predict a tool's behaviour, **call the tool** — reimplementing `exclude`'s matching would have been the two-implementations defect deleted from `reindex_cli` two hours earlier | validated |
 | W-80 | 2026-08-30 | high | When a fix is "introduce a shared constant so two sides cannot drift", a test that builds its fixture FROM that constant tests one side twice — drive the real producer into the real consumer instead | Written and deleted before committing. It asserted `classify_search_error` matches `SPARSE_MARKER` using a fixture formatted from `SPARSE_MARKER`, so reverting the producer's wording — the exact regression — moved it not at all: a guard for the bug that the bug would pass. Shipped, it would have read as coverage in every later review and the bug file would have cited it. The end-to-end replacement dies on that mutation, printing the original defect verbatim, while both constant-built tests stay green | validated |
 
+| W-88 | 2026-08-31 | high | **A fix option that names a file KIND is a hypothesis about which instances are live — count the population before preferring it for being narrow.** Running the reproduction before the plan (CLAUDE.md § Bug Tracking) on the gitignored-anchor bug: the filed mechanism was churn — a lock file and a db "rewritten on every index build" — and both are **inert here**, last changed 2026-04-17 and 2026-05-13, the retrieval backend having moved to remote Qdrant. What fires is the file's own second-order effect, and it is a different KIND of defect: all five sidecars recorded one identical `.codescout/project.toml` hash matching no file present, mtime three days before the re-anchor that supposedly refreshed it. A tracked sidecar hashing a gitignored file is a cross-machine oscillation with **no fixed point** — A refreshes, commits A's hash, B is permanently stale, B refreshing flips A — so unlike churn, the repair action creates the next defect, for someone not present to see it. Paired second win: three write sites, `refresh_hashes` never re-seeding, confirmed by per-site mutation rather than argued | The plan's option (2), "exclude by kind — lock files, `*.db`, `*.sqlite`, cache dirs", is a churn detector, and reads as the prudent narrow choice **until** you count what it catches. The worst instance is a small, stable, hand-edited TOML: no matching extension, no cache directory, never rewritten. It would have excluded the two already-inert anchors and left `project.toml` — the one firing in all five memories — anchored: 12 bad anchors down to 7, and **zero** of the eight false staleness reports resolved, behind its own green tests. Separately, a fix at `seed_anchors` alone (the site "anchor-selection time" most naturally names) would have compiled, passed the gate, and changed nothing observable, since every affected memory already had a sidecar and so reaches only the two other sites | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -8156,6 +8157,58 @@ no `unverified:` line**, and a sweep can be scoped to those at little loss.
 **Promote-when:** a third sweep confirms staleness concentrates in the no-caveat set — at
 which point the cadence should say to partition first and verify the uncaveated remainder,
 rather than implying every open entry needs re-checking.
+
+## W-88 — reproduction-before-plan inverted the fix from a denylist to an invariant
+
+**Valid:** dated 2026-08-31
+
+**Class:** win — CLAUDE.md § *Bug Tracking*, "run the reproduction before reading the fix
+plan". Fifth datapoint for that rule; first where the plan's own *recommended* option
+survived but its stated **mechanism** did not.
+
+**Observed:** `docs/issues/archive/2026-08-31-memory-anchors-include-gitignored-runtime-artifacts.md`
+led with a lock file and a database "rewritten on every index build" — a churn story. Its
+`## Fix options` offered (2) "exclude by kind — lock files, `*.db`, `*.sqlite`, anything under
+an `embeddings/`-style cache dir", correctly self-labelled a denylist.
+
+**Got:** reproducing first showed the churn half is **inert on this machine**.
+`.codescout/write.lock` last changed 2026-04-17 and `.codescout/embeddings/project.db`
+2026-05-13 — the retrieval backend had moved to remote Qdrant, so the local db is dead
+weight. What actually fired was the file's *second-order* effect: all five sidecars recorded
+one identical `.codescout/project.toml` hash (`34e422b9…`) matching no file present
+(`1c616aaf…`), with an mtime three days **before** the re-anchor that supposedly refreshed
+it. That is not churn but a cross-machine oscillation with no fixed point — a tracked sidecar
+hashing a gitignored file, so A refreshes, commits A's hash, B is permanently stale, and B
+refreshing flips A. The repair action creates the next defect.
+
+**Counterfactual, and why it is not merely "a bit worse":** option (2) is a *churn* detector.
+The worst instance is a small, stable, hand-edited TOML — no extension, no cache directory,
+never rewritten. So a denylist would have excluded `write.lock` and `project.db`, the two
+already inert, and left `project.toml` — the one anchor firing in all five memories —
+anchored. It would have passed its own tests, shipped, and moved the count from 12 bad
+anchors to 7 while resolving **zero** of the eight false staleness reports. Reading the plan
+first makes (2) look like the narrow, prudent option; the reproduction is what shows it
+misses the entire live population.
+
+**Second, independent win in the same pass — the three-site read.** `refresh_hashes` never
+re-seeds, and `memory(action="refresh_anchors")` calls it. Every affected memory already had
+a sidecar, so a fix at `seed_anchors` alone — the site the plan's phrase
+"anchor-selection time" most naturally names — would have compiled, passed a green gate, and
+changed nothing observable for all five. Confirmed by mutation rather than argued: disabling
+each site's filter kills that site's test **and no other**.
+
+**Also worth keeping:** the file's `## Resume` had independently warned that "the memory is
+fresh" is monotone under an empty anchor list and prescribed asserting on the anchor list's
+contents. That held, and it is what made the two widening-direction twins obviously necessary
+rather than optional. A plan can be wrong about the substrate and right about the test design
+in the same breath.
+
+**Promote-when:** a sixth datapoint for reproduction-before-plan, or a second where the
+plan's *mechanism* was inert while its recommended option stood. The generalisable shape is
+narrower and sharper than the existing rule: **a fix option that names a file KIND is a
+hypothesis about which instances are live** — count the population it would actually catch
+before preferring it for being narrow. That is the population form of `R-117`, arriving from
+the remedy side rather than the diagnosis side.
 
 ## Template for new entries
 
