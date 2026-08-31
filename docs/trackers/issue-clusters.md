@@ -813,6 +813,15 @@ after first contact, and three of the four captures are this session's own. Enum
 merely possible; it had already happened, been acted on, and produced eight messages about this
 exact mechanism.
 
+**And the sample was biased *against* this conclusion, which is what makes it strong.** Measured
+2026-09-01: `ListAgents` returns **1 of the 4** live peer sessions whose `cwd` is inside this
+checkout. The colliding pair was that one — mutually enumerable, while three of four
+same-checkout peers were invisible to each other. So the falsification did not run on a typical
+pair. It ran on the **most favourable sample available for coordination**, and coordination
+failed four times anyway. A result that survives its own best case needs no argument about
+typicality: had the pair been drawn from the invisible three-quarters, the same collision would
+have been evidence for `IC-1` rather than against it. Counts: `cluster-promotion-session-log:F-3`.
+
 **The discriminator is executable, and it is the remedy test** — the same one that kept
 `IC-1`/`IC-2` and `IC-3`/`IC-15` apart. Ask of each member: *would a complete, correct peer
 listing have prevented this?*

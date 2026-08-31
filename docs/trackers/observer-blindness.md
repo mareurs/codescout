@@ -413,6 +413,24 @@ sharpens a wrong answer.
 > thumb, and the third case is deleted with confidence. When a heuristic's accuracy is what
 > justifies skipping the direct check, its accuracy is the hazard.
 
+**Second instance, 2026-09-01 — different instrument, and the unit is a *ratio* rather than a
+marker.** A ledger entry reported `ListAgents` enumerating **4 of 20** live sessions. Measured in
+units matched to the question, the figure is **1 of 4**: the denominator counted socket *files*,
+7 of which were dead processes, and the numerator counted peers, 3 of which were in an unrelated
+checkout. What carried it into two ledgers is that **20% and 25% read as agreement**. An
+implausible ratio is caught by its own reader; a plausible one is not — and near-miss is exactly
+what plausibility means here. Same law as the 2/3 marker above, with the accuracy accidental
+rather than earned, which is the worse case: nothing had to build trust first. Derivation and
+full count table: `cluster-promotion-session-log:F-3`.
+
+**The confirmation of that correction is itself subject to this entry's substrate rule.** Two
+sessions' `ListAgents` outputs agreed on the composition of the four — three `backend-kotlin`,
+one codescout peer — from opposite vantage points, each listing naming the other. That is
+genuinely useful and it is **one instrument**, per the blockquote above: same mechanism, two
+callers. The independent substrate is `/proc/<pid>/cwd`, which is what supplies the *denominator*
+(5 live sessions rooted in this checkout) and which neither `ListAgents` run could have produced.
+Count distinct substrates, not distinct sessions.
+
 **Mechanism status:** none yet — this is the open worklist row.
 
 - **Practice, effective immediately:** before deleting anything large, grep for **citations**
@@ -425,7 +443,9 @@ sharpens a wrong answer.
   pointer and the reference graph agree, and no check is needed.
 
 **Instances:** `.worktrees/bench` (live, nearly deleted twice); `bench-legacy` and
-`no-local-embedding` (correctly deleted, and the source of the marker's false credibility).
+`no-local-embedding` (correctly deleted, and the source of the marker's false credibility); and
+the `4 of 20` peer-enumeration ratio (2026-09-01), whose nearness to the true `1 of 4` is the
+entire reason it survived review in two ledgers.
 
 **Status:** validated — reported by `codescout-fe`, corrected by them, independently verified
 here at each step (directory present at 174M; gitdir target absent; 84 citations across 16
