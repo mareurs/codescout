@@ -88,14 +88,34 @@ docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md
 docs/trackers/archive/provenance-subsystem-recovered-entries.md
 ```
 
-So this report was itself absent from the index whose currency it disputes, while
-`workspace(status)` reported that index current — a session that oriented with `status`
-and then ran `semantic_search` for prior art on the defect would have found none, and been
-given no reason to doubt the zero (cf. `docs/adrs/2026-08-27-negative-results-name-their-scope.md`).
+So this report was itself absent from the semantic index whose currency it disputes, while
+`workspace(status)` reported that index current.
+
+> **Retracted, same day, `83b5651d` → this commit.** That paragraph first continued: *"a
+> session that oriented with `status` and then ran `semantic_search` for prior art on the
+> defect would have found none, and been given no reason to doubt the zero."* The zero is
+> real and the mechanism is wrong, which is the worse of the two ways to be wrong here.
+> `semantic_search` would have returned nothing **either way**: five probes, twenty-five
+> results, zero markdown among them — including phrases lifted verbatim from files that
+> exist only as markdown. It is documented as concept-level *code* exploration
+> (`src/prompts/source.md:136`); documents are the librarian's lane, and
+> `artifact(action="find")` located this report without difficulty throughout.
+>
+> Keep the distinction the retraction exposes, because this report's own title depends on
+> it: **"the index" names two stores.** The semantic index (Qdrant, `index(action=…)`) is
+> what `workspace(status)` misreports. The librarian **catalog** is a different store with
+> a different repair (`librarian(action="reindex")`), and in this window it was *also*
+> stale — `artifact(action="find")` reported `unindexed_files: 3` and could match none of
+> them until reindexed. Two layers arrived stale from one `git pull`, only one of them is
+> this bug, and the surface that would have told you about either is the one under report.
+> The prior-art hazard is therefore real but belongs to the catalog layer, and is already
+> documented at `docs/conventions/cross-machine-catalog-resume.md`.
 
 *Measured against a closing window: the background reindex was already running, so
 `behind_commits: 4` is a fact about 12:52 and not about whenever this is read. The
-`up_to_date` claim is not — it is reproducible at any non-zero chunk count.*
+`up_to_date` claim is not — it is reproducible at any non-zero chunk count. Both stores
+were brought level afterwards; `index(action="verify")` now returns `verdict: "complete"`,
+1757/1757, level with HEAD.*
 ## Environment
 
 Arch Linux (zen 7.1.9), codescout 0.15.0 at `2f434fba`, release build via `cargo rb`
