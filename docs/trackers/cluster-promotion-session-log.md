@@ -15,6 +15,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 1
+entry_high_water_W: 1
 ---
 
 # Session Log — Cluster Promotion (IC-N → OB-N)
@@ -51,6 +52,7 @@ entry_high_water_F: 1
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-1 | 2026-09-01 | med | re-probe the served copy after a rebuild (`readlink /proc/<pid>/exe`) | 5 of 11 peers on deleted inodes, invisible to every existing instrument; an open bug's fix shown to fail open | validated |
 
 ---
 
@@ -131,6 +133,35 @@ about `IC-11` backfilling — the edits were staged in the shared index when it 
 warning message was in flight while it did. `OB-7`'s half is in `8ceb9ea9`. Recorded because the
 ledger prose cites this entry, so a reader following the correction arrives here and would
 otherwise find no pointer back to the commit that carries it.
+## W-1 — Re-probing the served copy after a rebuild found 5 of 11 peers on deleted inodes, and an open bug's fix failing open
+
+**Observed:** 2026-09-01 00:35, immediately after the operator rebuilt the release binary and reconnected. Scouting whether the rebuild invalidated anything published earlier in the session.
+
+**Pattern:** After a rebuild, **re-probe the copy the serving process actually holds, and check the same for every peer** — `readlink /proc/<pid>/exe`. A rebuild is a substrate change under every tool-behaviour claim made before it, and the claims do not announce their own staleness.
+
+**Counterfactual:** two things would have gone unnoticed.
+
+1. **`OB-7`'s mechanism claim was verified against the pre-rebuild binary.** Re-probed on the fresh one and it holds identically — `grep` still annotates each hit with its enclosing symbol and test sites still carry a `tests/` prefix. A *match*, and the point is that it was not knowable without the probe: this is the one claim in the entry that had already needed correcting once, so inheriting it across a substrate change would have been the second unverified inheritance of the same sentence.
+
+2. **5 of 11 `codescout start` servers were holding deleted inodes at that moment** — started 11:20, 11:38, 14:46, 21:45 and 22:20, all pre-dating the 00:34 rebuild. Every existing instrument called them healthy: `peer-sessions.sh` prints start time and `cwd`, `ListAgents` lists sessions, and `~/.cargo/bin/codescout` is a correct symlink to the right path. Nothing in any of those outputs distinguishes a process serving current bytes from one serving replaced bytes.
+
+**And the scout found a defect in an open bug's *proposed fix*, which is the part worth carrying.** `docs/issues/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md` prescribes comparing process start time against binary mtime. Run against a genuinely stale pid it prints **nothing**: `readlink` returns the path with a literal ` (deleted)` suffix, `stat` on that string fails, `[ N -lt "" ]` errors to stderr and evaluates false, and the `&&` chain short-circuits. The one branch that must fire is the only one that cannot, and a caller redirecting stderr sees a clean report. The discriminator was already in the string the fix had just read and was discarded in favour of a timestamp proxy — which is `OB-6` in a proposed remedy rather than in shipped code.
+
+**Confirming data points:**
+1. This session — rebuild at 00:34, five stale peers found, proposed fix demonstrated failing open against `pid 997544`.
+2. `reconnaissance-patterns:R-89`, ×4 recurrences, which is the same law from the build/process/distribution axes; this adds the **inode** axis, where the path and the symlink are both correct and only the held inode is wrong.
+3. `OB-2` — the session that arms a shared-state trap gets no signal; here the arming action is a rebuild and the unsignalled parties are five peers.
+
+**Impact:** med — no wrong result was published, because the re-probe matched. The value is that "matched" became a fact rather than an assumption, and the peer measurement surfaced a fix that would have shipped silently broken.
+
+**Promote-when:** a second session finds a stale-inode peer that no existing instrument reported. At two datapoints this belongs in `docs/PROBES.md` as a named check, since it is one `readlink` and it answers a question three other instruments cannot.
+
+**Status:** validated — single session, but the fix defect is independently reproducible from the commands recorded in the bug file.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** `reconnaissance-patterns:R-89` — freshness is a property of the copy that serves you — extended with the inode axis, and `OB-6`'s rule that a signal must come from the event's own side of the boundary.
+
 ## Template for new entries
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:

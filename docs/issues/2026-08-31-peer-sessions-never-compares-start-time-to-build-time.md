@@ -102,6 +102,61 @@ infer.
 **Not proposed:** killing stale servers. A live session is attached to some of these, and
 this bug is about making the state legible, not about reaping it.
 
+## The proposed fix above FAILS OPEN in exactly its target case — measured 2026-09-01
+
+Run it against a genuinely stale process and it prints **nothing**. Verified on `pid 997544`
+(started Aug 31 21:45, binary rebuilt Sep 1 00:34):
+
+```
+exe=[/home/marius/work/claude/codescout/target/release/codescout (deleted)]
+(no STALE line printed)
+stat: cannot statx '…/codescout (deleted)': No such file or directory
+sh: [: : integer expected
+```
+
+**Mechanism.** When a process's binary has been replaced, `readlink /proc/$pid/exe` returns the
+path **with a literal ` (deleted)` suffix**. `stat -c %Y "$exe"` therefore fails, the comparison
+gets an empty string, `[ N -lt "" ]` errors to stderr and evaluates false, and the `&&` chain
+short-circuits. The one branch that must fire is the only one that cannot. A caller redirecting
+stderr — which a status script normally does — sees a clean report.
+
+**The discriminator is already in the string the fix just read, and the fix discards it.** The
+suffix *is* the answer; the timestamp comparison built on top of it is a proxy for a question
+`readlink` already answered:
+
+```sh
+exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
+case "$exe" in
+  *" (deleted)") echo "    ^ STALE: serving a binary that has since been replaced" ;;
+esac
+```
+
+Shorter, correct, and it needs no binary mtime in the header — though printing one is still
+useful for sizing the gap.
+
+**Why the substitution is the interesting part, not the bug.** Start-time-versus-build-time is a
+**proxy for an event the script cannot observe** — *did this process load the current bytes?* —
+and it is wrong in both directions: a process started in the window between the build finishing
+and the rename completing reads fresh and is not, and a rebuild producing identical bytes reads
+stale and is not. `(deleted)` is not a comparison at all; it is the kernel reporting that the
+inode this process holds is no longer the one at that path. That is `OB-6`'s remedy exactly —
+take the signal from the **event's own side of the boundary** rather than substituting a
+plausible proxy — and this bug is a worked example of it inside a *proposed fix* rather than
+shipped code.
+
+**Scope of the better instrument, stated so it is not over-trusted.** It answers *the inode this
+process holds is not the one at that path*, which is the right question for a rebuild (cargo
+writes and renames, so the old inode is unlinked). It will not flag a byte-identical rebuild —
+harmless, since nothing is stale. It **will** flag a binary deleted for unrelated reasons, which
+is also worth knowing. Linux-only via `/proc`, as the script already is.
+
+**Live measurement, same run:** **5 of 11** `codescout start` servers were holding deleted
+inodes — pids started 11:20, 11:38, 14:46, 21:45 and 22:20, all pre-dating the 00:34 rebuild;
+the other 6 all started 00:34–00:35 and hold the current inode. So a third of the day's sessions
+were serving replaced bytes at the moment of measurement, and every existing instrument —
+`peer-sessions.sh`, `ListAgents`, the symlink at `~/.cargo/bin/codescout` (correct, and pointing
+at the right path) — reported them healthy.
+
 ## Tests added
 
 None yet — the script has no harness. If one lands, the case worth pinning is a fixture
