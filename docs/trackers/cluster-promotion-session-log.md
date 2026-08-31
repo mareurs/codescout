@@ -14,8 +14,8 @@ topic: cluster promotion and mechanism design
 entry_prefix:
 - F
 - W
-entry_high_water_F: 1
-entry_high_water_W: 1
+entry_high_water_F: 2
+entry_high_water_W: 2
 ---
 
 # Session Log — Cluster Promotion (IC-N → OB-N)
@@ -47,12 +47,14 @@ entry_high_water_W: 1
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-09-01 | med | architectural | open | `OB-7`'s mechanism cites an LSP-verified result to justify a text-search check |
+| F-2 | 2026-09-01 | high | tooling | open | `ListAgents` enumerated 4 of 20 live sessions, so authorship inferred from it came from a 20%-complete population |
 
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-09-01 | med | re-probe the served copy after a rebuild (`readlink /proc/<pid>/exe`) | 5 of 11 peers on deleted inodes, invisible to every existing instrument; an open bug's fix shown to fail open | validated |
+| W-2 | 2026-09-01 | med | compare pre-stage diff counts against `git commit`'s own `--stat` | capture of another session's hunks was invisible to four guards that all passed correctly; 23/16 measured vs 58/19 committed | validated |
 
 ---
 
@@ -161,6 +163,60 @@ otherwise find no pointer back to the commit that carries it.
 **Valid:** dated 2026-09-01
 
 **Rests on:** `reconnaissance-patterns:R-89` — freshness is a property of the copy that serves you — extended with the inode axis, and `OB-6`'s rule that a signal must come from the event's own side of the boundary.
+
+## F-2 — ListAgents enumerated 4 of 20 live sessions, so every authorship inference drawn from it came from a 20%-complete population
+
+**Valid:** dated 2026-08-31
+
+**Observed:** 2026-09-01 ~00:40, issue-clusters hygiene pass on a shared checkout with concurrent sessions.
+
+**When:** After `d617051b` captured three hunks of another session's `IC-1`/`OB-8` work, while trying to identify the owner in order to offer them a repair.
+
+**Expected:** `ListAgents` enumerates the local sessions that could be writing this checkout, so a `busy` peer adjacent in time to a commit is its probable author.
+
+**Got (measured):** `ListAgents` returned **4** peers across three calls spanning 20 minutes. `ls /run/user/1000/cc-socks/ | wc -l` returned **20** live session sockets; `pgrep -c -f claude` returned 42. The two peers whose addresses I actually held — `2481440.sock` (`codescout-5f`) and `2081267.sock` (`codescout-fc`) — are both present in the socket list, so the listing is a strict **4-of-20 subset**, not a stale snapshot. Six codescout commits landed 00:20–00:37; both enumerated codescout sessions deny authoring the `issue-clusters.md` ones.
+
+**Probable cause:** the listing reaches only sessions sharing this one's config profile, and this machine runs three (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat` — CLAUDE.md § *Three Claude Code Instances*). Every session also commits as the same git author on the same checkout, so `%an` carries no signal either. **Adjacency and author are constant across sessions by construction** — no amount of care reading them helps, which is what makes this a mechanism problem rather than a diligence one.
+
+**Cost, as it actually played out:** I attributed the swept hunks to `codescout-5f` from proximity; it denied, having made one commit to a different file. I reassigned to `codescout-fc` from proximity; it denied, having made zero codescout commits — and observed that my second inference sat *inside the message correcting the first*. Three `IC-10` firings in one exchange, two of them in corrections. The owner is still unidentified and is not reachable from anything I can query.
+
+**Why it is worse than a wrong guess:** the failure returns a *plausible name*, never an error, and the repair it suggests — amending `d617051b`'s message to credit the owner — would write that name permanently into git, where it is durable and no longer falsifiable against a live session that can deny it. `codescout-fc`'s judgement was that this option is *worse than doing nothing*, and that is right.
+
+**Workaround:** ask the session. `SendMessage` is the only signal that discriminated — but it reaches only the enumerated 4, so it does not close the gap; it merely declines to lie about it.
+
+**Severity:** high — silent, produces a confident wrong answer, and its natural remedy makes the error permanent.
+
+**Status:** open — no mechanism. The instrument's own population is not queryable through the instrument, which is why three passive re-reads produced three identical wrong answers.
+
+**Rests on:** the socket count being a live-session proxy — supported here by both known session addresses appearing in it, but not independently established as complete either.
+
+**Fix idea / Pointer:** this is `IC-1`'s *visibility* half with a number attached, and the number is the contribution — the class text says "the peer cannot be enumerated", which reads as a possibility rather than a 5× under-count. Related: `docs/issues/2026-08-31-cross-account-agents-cannot-see-each-other.md`, `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`.
+
+## W-2 — The commit's own --stat caught a capture that four correct guards passed
+
+**Valid:** dated 2026-08-31
+
+**Observed:** 2026-09-01, commit `d617051b` — a working-tree capture on a shared checkout, detected within one call of committing.
+
+**Pattern:** Measure the diff's insertion/deletion counts immediately before staging, then read `git commit`'s **own** `--stat` line against that number. `23 insertions / 16 deletions` measured; `58 insertions / 19 deletions` committed. A foreign hunk cannot leave the count unchanged, so the number is the signal — and `git commit` prints it unprompted, so the check costs no extra command.
+
+**Counterfactual:** without the comparison the capture is invisible, because **every other guard passed and each was correct to**. `unreviewed-content` printed `Passed` — this was an index commit, which its own § *WHAT IT DOES NOT CATCH* excludes by design, granting it *"the content was staged and is presumed reviewed"*. `git diff` on the single path had been read in its own call 40 seconds earlier and was genuinely clean. The commit named one explicit file. Four green signals, none of them wrong, and the capture sat underneath all of them. Detection would otherwise have waited for the owner to notice their work missing — which is the state `bug-fix-session-log:W-70` describes, where a captured session re-runs `append_entry` and allocates a fresh id for content already in `HEAD`.
+
+**Why the count and not the filename:** the three axes every other check on this page depends on — do the sessions' files overlap, is the peer enumerable, was the commit pathspec-scoped or index-scoped — are exactly the axes that failed here (see `F-2`: the peer is *not* enumerable, 4 of 20). The count depends on none of them.
+
+**What this does NOT establish, stated because I asserted it once already and it does not hold.** I told the user that disclosing the capture prevented the duplicate-work half, citing `d710e58d` — the owner's next commit — touching only `cluster-promotion-session-log.md` and `observer-blindness.md`, never `issue-clusters.md`, with no duplicated content (three marker strings, one occurrence each; verified). **That inference is unfounded.** I sent the disclosure to `codescout-fc`, which has since denied authoring any of it, so I have no evidence the message ever reached the owner. A world where disclosure did nothing and the owner simply had no `issue-clusters.md` work left pending produces the identical commit. It is the same error as `F-2` one layer up — attributing an effect to a party identified by proximity. The non-duplication is real and measured; its **cause** is not established.
+
+**Confirming data points:**
+1. This session — capture detected at commit time by count mismatch alone, after four correct greens.
+2. Adjacent, not confirming: `codescout-5f` ran the same comparison successfully the same hour (`5d405b67`, measured 116/2 pre-stage, landed `116 insertions(+), 2 deletions(-)`). That is the check passing in a *clean* world, so it evidences the check is runnable, not that it detects.
+
+**Measurement trap, from that same run:** `git diff | grep -c '^+'` counts the `+++ b/<path>` header, so its raw 117/3 was really 116/2. Compare `--stat` against `--stat`, or subtract the two header lines — a one-line discrepancy in either direction reads exactly like a small foreign hunk, so the trap manufactures a false positive for the very mechanism the check exists to find.
+
+**Impact:** med — detection, never prevention; the commit has already happened when the number arrives. Its value is that it makes a capture *disclosable* at all.
+
+**Promote-when:** a second capture is caught by this comparison, in a session that did not already know it was at risk. At 2 datapoints, promote to `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` § *Detection* as standing practice rather than as one session's observation.
+
+**Status:** validated — one datapoint, the detection itself measured and reproducible from the two numbers.
 
 ## Template for new entries
 
