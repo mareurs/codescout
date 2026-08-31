@@ -28,6 +28,7 @@
 set -uo pipefail
 
 SRC="$(cd "$(dirname "$0")/../scripts" && pwd)"
+REAL_REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PASS=0
 FAIL=0
 
@@ -40,10 +41,43 @@ no() {
 eq() { [ "$2" = "$3" ] && ok "$1" || no "$1" "want '$3' got '$2'"; }
 has() { printf '%s' "$2" | grep -qF "$3" && ok "$1" || no "$1" "missing: $3"; }
 
+# REFUSE TO RUN ANYWHERE BUT A THROWAWAY. Defence in depth, and not theoretical.
+#
+# This suite runs `git add -A` and `git commit`. On 2026-09-01 its first version defined
+# `new_repo() { cd "$(mktemp -d)"; ...; }` and called it as `T="$(new_repo)"` — command
+# substitution runs a SUBSHELL, so the `cd` never reached the parent and every one of
+# those commands executed against the real shared checkout. A junk commit landed on
+# `experiments`, and a `git reset --hard` in the same suite ran in a tree four other
+# sessions were working in.
+#
+# The `cd` bug is fixed below. This check exists because fixing a bug is not the same as
+# making its class impossible: any future edit that reintroduces a subshell gets a
+# refusal instead of a live repo. `git reset --hard` is also gone from the suite outright
+# — a plain `git reset` empties the index without touching the working tree, which is all
+# any case here ever needed, so the destructive form has no reason to appear in a test.
+assert_throwaway() {
+    _at="$(pwd -P)"
+    case "$_at" in
+        "$REAL_REPO" | "$REAL_REPO"/*)
+            echo "REFUSING: this suite is running inside the real checkout:" >&2
+            echo "    $_at" >&2
+            echo "It runs destructive git commands and must only run in a throwaway." >&2
+            exit 1
+            ;;
+    esac
+    [ -d "$_at/.git" ] || {
+        echo "REFUSING: no .git at $_at — not running git commands here." >&2
+        exit 1
+    }
+}
+
+# Sets $T and cds into it. Call as `new_repo`, NEVER as `T="$(new_repo)"` — that is the
+# subshell that caused the incident described above.
 new_repo() {
-    _nr="$(mktemp -d)"
-    cd "$_nr" || exit 1
+    T="$(mktemp -d)"
+    cd "$T" || exit 1
     git init -q .
+    assert_throwaway
     git config user.email t@t
     git config user.name t
     mkdir -p .git/hooks
@@ -52,7 +86,6 @@ new_repo() {
 exec "$SRC/post-index-change-stage-log.sh" "\$@"
 SHIM
     chmod +x .git/hooks/post-index-change
-    echo "$_nr"
 }
 
 # The guard as a bare (index) commit sees it. GIT_INDEX_FILE must be UNSET rather than
@@ -71,7 +104,7 @@ B="bbbbbbbb-1111-1111-1111-bbbbbbbbbbbb"
 
 # ---------------------------------------------------------------- 1. the index guard
 echo "== index guard"
-T="$(new_repo)"
+new_repo
 echo base > a.txt
 echo base > b.txt
 git add -A > /dev/null 2>&1
@@ -95,7 +128,7 @@ has "pathspec commit -> silent" \
     "$(CLAUDE_CODE_SESSION_ID="$A" GIT_INDEX_FILE=".git/next-index-1.lock" \
         bash "$SRC/pre-commit-foreign-index.sh" 2>&1; echo "EXIT=$?")" "EXIT=0"
 
-git reset -q --hard HEAD
+git reset -q
 has "nothing staged -> silent" "$(guard "$A")" "EXIT=0"
 
 echo x > a.txt
@@ -109,7 +142,7 @@ rm -rf "$T"
 # The production failure. `post-index-change` fires on EVERY index write including
 # `git status`, so "first observer wins" let a passer-by claim a peer's staged batch.
 echo "== stager wins"
-T="$(new_repo)"
+new_repo
 echo base > s1.txt
 echo gone > del.txt
 git add -A > /dev/null 2>&1
@@ -138,7 +171,7 @@ rm -rf "$T"
 
 # -------------------------------------------------------------- 3. owner resolution
 echo "== owner resolution"
-T="$(new_repo)"
+new_repo
 LIVE="${CLAUDE_CODE_SESSION_ID:-}"
 if [ -n "$LIVE" ]; then
     echo base > live.txt
@@ -173,7 +206,7 @@ rm -rf "$T"
 # working tree moving under a pathspec commit after you staged. Neither covers the
 # other, so a change to one must never be read as covering both.
 echo "== intra-path axis (pre-commit-unreviewed-content.sh)"
-T="$(new_repo)"
+new_repo
 echo base > f.txt
 git add f.txt > /dev/null 2>&1
 git commit -qm base

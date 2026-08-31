@@ -42,6 +42,19 @@ tests/fixtures/*/.codescout/
 /.codescout/tmp/
 /.buddy/*
 !/.buddy/memory/
+
+# Nested per-session hook state. The two patterns above are ROOT-ANCHORED, so a
+# `.buddy/` or `.codescout/` that a hook creates in a SUBDIRECTORY was untracked and
+# not ignored — the state docs/issues/2026-08-31-nested-hook-state-dirs-are-untracked-
+# but-not-ignored.md describes. On 2026-09-01 a stray `git add -A` swept 22 such files
+# into a commit, which is the failure that pattern invites: files nobody intends to
+# track, sitting in `git status` as untracked noise, one careless add away from history.
+#
+# Scoped to docs/** deliberately rather than matching `.codescout/` at any depth: the
+# repo TRACKS content under /.codescout/projects/ (see the note further down), and a
+# blanket pattern would swallow it.
+docs/**/.buddy/
+docs/**/.codescout/
 # Cross-process write lock file (per-project; recreated on activate)
 .codescout/write.lock
 /.codescout/call_edges.db
