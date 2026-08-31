@@ -822,7 +822,7 @@ Expected: hits in `CM-1` and the `CM-2` heading — the three claims this task r
 `CM-2`'s `Status:` is `open` and `Valid: invariant`. The invariant is false, so
 both change. Note the heading itself says "permanently" and must change too.
 
-> **Superseded 2026-08-31.** The heading these selectors name no longer exists — the final-review fix wave appended `— RETRACTED 2026-08-31` to it, so both `"heading"` values below are stale by exactly that suffix. Kept verbatim as the record of what the plan asked for. A selector written as full heading text is a by-text positional reference and breaks on any title edit; this is the sixth site of that class in this run.
+> **Annotated 2026-08-31, then corrected.** The final-review fix wave appended `— RETRACTED 2026-08-31` to the heading these selectors name, so neither `"heading"` value below matches the file's text exactly any more. **They would nonetheless still resolve.** Probed live rather than assumed: `artifact(action="get", id="f4923e5e894de62f", heading="## CM-2 — provenance-subsystem is missing 38 rows, permanently")` — the unsuffixed text — returns the CM-2 section, because heading resolution is fuzzy and `apply_body_edits` shares `edit_markdown`'s matcher (`src/librarian/tools/update.rs:260-283`). So this is text drift, **not** an instance of the by-text-reference class that actually breaks. Kept verbatim as the record of what the plan asked for. The first draft of this note asserted the selectors were stale and would fail; that assertion was untested and wrong, and is left visible here because an annotation correcting an overclaim should not quietly become another one.
 
 ```
 artifact(action="update", id="f4923e5e894de62f", patch={"body_edits": [

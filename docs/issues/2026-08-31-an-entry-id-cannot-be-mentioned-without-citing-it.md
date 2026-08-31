@@ -80,7 +80,7 @@ Note the shape: the tool's own remedy converts the defect into a silent success.
 1. **Do nothing; document the fenced-block escape** in `get_guide("tracker-conventions")`
    § *Citing an entry*, which currently describes how to cite and never how not to.
    Cheapest, and honest.
-2. **A literal marker.** A doubled backtick, a `!` prefix (``!R-147``), or an
+2. **A literal marker.** A doubled backtick, a `!` prefix (`!PFX-<n>`), or an
    HTML-comment pragma suppressing extraction for one line. Small, but it is new syntax
    every author must learn to avoid a rare problem.
 3. **Confidence-rank the edge rather than suppress it.** An entry token whose citing
@@ -93,9 +93,18 @@ existing behaviour is right for every other caller.
 
 ## Consequence accepted for now
 
-The false edge at `831d2496` is left materialised rather than dodged by rewording the
-spec. Rewording would mean not naming the id in a section whose subject is that id,
-which trades a human-legible sentence for one graph edge. Recorded here instead.
+The edge was materialised at `831d2496` (`link_scan(write=true)`, `edges_added: 1`),
+deliberately, rather than dodged by rewording the spec — rewording to satisfy a graph
+trades a legible sentence for one edge.
+
+**That is no longer the state, for an unrelated reason.** The fix wave's re-review found
+the same annotation overstated its claim, and rewriting the sentence for accuracy
+happened to drop the token, so `link_scan` will prune the edge as stale on its next
+`write=true`. The rewrite was not motivated by this bug and the reasoning above still
+stands on its merits; the surviving demonstration is the three instances in
+`docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`
+(`:29`, `:31`, `:89`), which genuinely cannot be reworded away — that file's subject *is*
+the colliding id.
 
 ## Resume
 

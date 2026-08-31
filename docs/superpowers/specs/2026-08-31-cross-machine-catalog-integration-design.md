@@ -146,8 +146,8 @@ laptop's newer `params_schema` rejects this desktop's older rows:
 **`tool-usage-patterns` is not a copy, it is a merge.** Verified id-by-id across both hosts
 on 2026-08-31: the laptop's **id set** is a superset (it adds `T-31`, `T-32`; the desktop
 has no id the laptop lacks), but its **field content is not**. Ten rows carry a `verdict`
-on the desktop and none on the laptop — `T-005`, `T-008`, `T-011`, `T-012`, `T-019`,
-`T-020`, `T-022` (`wrong-tool`) and `T-17`, `T-18`, `T-21` (`legitimate`). Copying the
+on the desktop and none on the laptop — `T-005`, `T-008`, `T-011`, `T-012`, `T-19`,
+`T-20`, `T-22` (`wrong-tool`) and `T-17`, `T-18`, `T-21` (`legitimate`). Copying the
 laptop's params wholesale would erase all ten.
 
 The resolution is a field-level union: take `T-31` and `T-32` from the laptop, keep the
@@ -301,7 +301,7 @@ problem with zero measured instances.
 the same entry between syncs, where neither side is a superset. At that point this becomes
 the right answer and the `merge_worktree` machinery is already built.
 
-**That condition fired the same day, 2026-08-31.** `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md` records two hosts allocating the same `R-147` for different entries — desktop high-water 146, laptop 147 unpushed, neither side a superset. So "zero measured instances" above is no longer true and this section's rejection now rests only on its other two reasons (no natural fork event, and the transport requirement). Note the counterexample is an *allocator* collision rather than a params three-way, which is the narrower thing `merge_host` would have to cover.
+**The "zero measured instances" clause above is falsified. The Revisit-when trigger is NOT — keep the two apart.** `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md` records a measured cross-host merge problem: two hosts independently allocated the same id in the `R` namespace, 147, for two *different* entries (desktop high-water 146, laptop 147 unpushed). That is an **allocator** collision — there is no shared entry, no common ancestor, and nothing for a three-way merge to reconcile. It therefore falsifies "solves a merge problem with zero measured instances", and it does **not** satisfy the trigger as worded, which requires two hosts mutating *the same* entry with neither side a superset. The rejection still stands on all three reasons, with the third narrowed from "no instances" to "no instance of the class `merge_host` would address". *(The first draft of this annotation led with "that condition fired the same day" — overstated, and caught by the fix wave's re-review. Its own closing sentence already conceded the distinction, which is what made the headline wrong rather than merely loose.)*
 
 ### 2.4 Rejected as the answer, adopted as a stopgap
 
