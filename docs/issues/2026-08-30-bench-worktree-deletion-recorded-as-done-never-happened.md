@@ -13,6 +13,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md
 severity: medium
+unverified: 'Mitigated, not fixed — and the residual is now closed by an UNATTRIBUTED removal rather than by the decision this file parked on. Measured 2026-09-01: `.worktrees/bench` is absent, `.worktrees/` holds only `audit-trail-t1`, and `git worktree list` reports neither — so the orphaned gitdir and the 163M are gone. WHO removed it and WHEN is not establishable: no commit in the last 60 mentions the bench worktree, and the `.worktrees/` mtime (02:24) is equally explained by `audit-trail-t1` being created in it, since a directory mtime records its last entry change and not which entry. No regression guard exists for the class: nothing prevents a record asserting an unchecked completion again, and `docs/trackers/retrieval-benchmark.md:76` agrees with reality today by accident rather than by repair.'
 ---
 
 # BUG: an archived bug file records a worktree deletion, with reclaimed-MB figures, that never happened on this machine
@@ -148,24 +149,28 @@ corpus to have "nothing worth keeping", but three live surfaces resolve against 
 block, and its frontmatter carries `unverified:` naming the contradiction, so the
 canonical bug triage query can reach it.
 
-## Residual — still open
+## Residual — RESOLVED 2026-09-01 by an unattributed removal
 
-`.worktrees/bench` retains the orphaned gitdir this bug's predecessor was filed about:
-`.git` reads `gitdir: /home/marius/work/claude/code-explorer/.git/worktrees/bench`, and
-that repository does not exist. Consequences, unchanged:
+`.worktrees/bench` no longer exists. Measured 2026-09-01: `.worktrees/` contains only
+`audit-trail-t1`, `.worktrees/bench/.git` is absent, and `git worktree list` reports the
+main checkout plus `audit-trail-t1` and nothing else. The orphaned gitdir this section was
+filed about is gone — and with it the decision it was parked on (re-register against this
+repo at a 163M re-index, or accept a plain untracked directory). Neither was chosen. The
+directory was removed.
 
-- `git worktree list` will never report it; `git worktree prune` will never clean it
-- any `git -C .worktrees/bench <cmd>` fails
-- it is invisible to every git-based hygiene check, which is how it survived a closure
-  that believed it deleted
+**By whom and when is not establishable — this file's own cluster firing on its own
+residual.** No commit in the last 60 mentions the bench worktree, and `.worktrees/` has an
+mtime of 2026-09-01 02:24 that is equally explained by `audit-trail-t1` being created in
+it: a directory mtime records its last entry change, not which entry. So this note records
+an observed end state, not a completion anyone can be credited with — which is the same
+shape as the defect this file was opened about, one turn later.
 
-`git worktree repair` cannot fix this — it requires the referenced repository to exist.
-The options are to re-register it against this repo
-(`git worktree add --detach .worktrees/bench ede25e694b63219e1382f359d7ba242f66a516a5`
-after moving the existing directory aside, which costs a 163M re-index), or to accept it
-as a plain untracked directory and note that in `docs/trackers/retrieval-benchmark.md`
-so the next reader does not run `git worktree list` and conclude the corpus is missing.
-Not decided.
+One consequence runs the other way and is worth naming. `docs/trackers/retrieval-benchmark.md:76`
+tells the reader to run `git worktree list | grep .worktrees/bench` and says it will be
+missing on a fresh host. That check returned nothing while 163M of corpus sat on disk,
+which is what produced this bug. Today it returns nothing and the directory really is
+absent, so instruction and reality agree again — **by accident, not by repair**. Nothing
+stops the same divergence recurring the next time a worktree is created there.
 ## Workarounds
 
 Treat `.worktrees/` as filesystem state that git cannot see. Audit with `du`/`ls` and by
@@ -173,12 +178,14 @@ reading each `.git` pointer, never with `git worktree list` alone.
 
 ## Resume
 
-The disk cleanup and the record correction are both done (see `## Fix`). What remains is
-the single decision in `## Residual`: whether to re-register `.worktrees/bench` against
-this repo — costing a 163M re-index — or to accept it as a plain untracked directory and
-say so in `docs/trackers/retrieval-benchmark.md:76`, which currently tells the reader to
-check for it with `git worktree list | grep .worktrees/bench`. That check returns nothing
-today and always will, which is the trap that produced this bug.
+Nothing outstanding on this incident. The disk cleanup and the record correction are done
+(see `## Fix`); the residual decision was overtaken by the directory's removal (see
+`## Residual`).
+
+What is NOT closed is the class. Nothing prevents a record from asserting an unchecked
+completion again, and the removal that closed the residual is itself unattributed — so the
+file now contains one instance of its own defect class in each of its two halves. Re-open
+if a `.worktrees/` entry is again reported deleted without a check that the path is gone.
 ## References
 
 - `docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md` — the closure this contradicts

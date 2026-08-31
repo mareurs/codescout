@@ -7,11 +7,11 @@
 # `scripts/pre-commit-foreign-index.sh` and `scripts/post-index-change-stage-log.sh`
 # guard against one session's commit capturing another's staged work. The guard failed
 # in production within two hours of being installed
-# (docs/issues/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md), and
-# nothing in the repo would have caught a recurrence: there is no shellcheck, no CI step
-# for `scripts/`, and the sibling hook `pre-commit-unreviewed-content.sh` has no test at
-# all. Its precedent was a hand-run matrix pasted into a commit message, which is
-# evidence about one instant and cannot fail a later build.
+# (docs/issues/archive/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md),
+# and nothing in the repo would have caught a recurrence: there is no shellcheck, no CI
+# step for `scripts/`, and the sibling hook `pre-commit-unreviewed-content.sh` has no
+# test at all. Its precedent was a hand-run matrix pasted into a commit message, which
+# is evidence about one instant and cannot fail a later build.
 #
 # Every case below is a DISCRIMINATION: each asserts the hook is silent where it must be
 # silent AND loud where it must be loud. A suite checking only the loud direction passes

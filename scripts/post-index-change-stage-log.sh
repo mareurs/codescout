@@ -41,8 +41,8 @@
 # five sessions polling `git status`, your staged batch was claimed by whoever ran
 # `git status` next, not by you. It failed live within two hours: one session came to
 # own all 13 staged paths, `src/tools/ast.rs` moved from its real stager to a peer, and
-# the guard then passed on a bare commit that swept a staged deletion and broke the
-# build (docs/issues/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md).
+# the guard then passed on a bare commit that swept a staged deletion and broke the build
+# (docs/issues/archive/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md).
 #
 # The discriminator is `/proc/$PPID/cmdline`: this hook runs as a child of the git
 # process that wrote the index, so it can read which operation caused the write.
