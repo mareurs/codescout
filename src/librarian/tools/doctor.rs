@@ -850,12 +850,21 @@ fn validate_rehome_request<'a>(
 /// exists in exactly one place until this runs.
 ///
 /// Skips an artifact whose sidecar already exists AND is already declared — so it is
-/// idempotent, and a second run reports 0 rather than rewriting files.
+/// idempotent, and a second run reports 0 exported rather than rewriting files.
+///
+/// **The skip is REPORTED, not merely `continue`d.** Idempotence is correct; delivering it
+/// through silence was not. A decision to decline leaves no trace in a count of what was
+/// written, so `exported: 0` is a truthful answer to "how many did you create?" and the
+/// wrong answer to "did you fix my drift?" — which is what callers sent here actually
+/// asked. `sidecar_shape_drift` prescribed this fix for a case whose sidecar exists by that
+/// check's own precondition, making every such run a guaranteed no-op that returned no
+/// error and named no artifact. The remedy text is fixed; this reports the no-op whether or
+/// not anyone suspected one.
 fn export_augmentation_sidecars(
     cat: &crate::librarian::catalog::Catalog,
     scope_root: &std::path::Path,
     confirm: bool,
-) -> Result<(Vec<Value>, Vec<Value>)> {
+) -> Result<(Vec<Value>, Vec<Value>, Vec<Value>)> {
     use crate::librarian::augmentation_sidecar as sidecar;
 
     let mut stmt = cat.conn.prepare(
@@ -870,11 +879,13 @@ fn export_augmentation_sidecars(
 
     let mut exported: Vec<Value> = Vec::new();
     let mut failed: Vec<Value> = Vec::new();
+    let mut skipped: Vec<Value> = Vec::new();
 
     for (id, abs_path) in rows {
         let art = std::path::Path::new(&abs_path);
         // Component-boundary containment, the same predicate the other writing fixes use:
         // a prefix match would let `/repo-backup` pass as `/repo`, and this WRITES.
+        // Out of scope is not a decision about this artifact, so it stays unreported.
         if !art.starts_with(scope_root) {
             continue;
         }
@@ -893,6 +904,13 @@ fn export_augmentation_sidecars(
                 matches!(parse_declaration(&v), Declaration::Declared { sidecar: Some(s) } if s == sidecar_rel)
             });
         if declared_already && sidecar_abs.is_file() {
+            skipped.push(json!({
+                "path": abs_path,
+                "sidecar": sidecar_rel,
+                "reason": "already exported and declared — this fix CREATES sidecars and \
+                           never refreshes them. To republish a shape this catalog owns, \
+                           delete the sidecar and re-run.",
+            }));
             continue;
         }
 
@@ -923,7 +941,7 @@ fn export_augmentation_sidecars(
             })),
         }
     }
-    Ok((exported, failed))
+    Ok((exported, failed, skipped))
 }
 
 /// Point an artifact's `expects_augmentation:` at its sidecar, preserving everything else.
@@ -1191,7 +1209,7 @@ async fn run_fix(
                     }
                 },
             };
-            let (exported, failed) = {
+            let (exported, failed, skipped) = {
                 let cat = ctx.catalog.lock();
                 export_augmentation_sidecars(&cat, &scope_root, confirm)?
             };
@@ -1201,8 +1219,25 @@ async fn run_fix(
                 "root": scope_root.to_string_lossy(),
                 "exported": exported,
                 "failed": failed,
-                "totals": { "exported": exported.len(), "failed": failed.len() },
-                "hint": if confirm {
+                "skipped": skipped,
+                "totals": {
+                    "exported": exported.len(),
+                    "failed": failed.len(),
+                    "skipped": skipped.len(),
+                },
+                // The all-skipped arm comes FIRST because it is the one a misled reader
+                // actually lands on: `sidecar_shape_drift` used to send them here, and
+                // every one of its findings has a sidecar on disk by that check's own
+                // precondition. Explaining the no-op where it happens beats explaining it
+                // in a finding they may never re-read.
+                "hint": if exported.is_empty() && !skipped.is_empty() {
+                    "Nothing written: every augmented artifact in scope already has a \
+                     declared sidecar, and this fix CREATES sidecars rather than refreshing \
+                     them. If you arrived here from sidecar_shape_drift, note that all of \
+                     its findings have a sidecar on disk — so this call could not have \
+                     repaired one. Establish which side is correct first; if it is the \
+                     catalog, delete the sidecar and re-run to republish its shape."
+                } else if confirm {
                     "Commit docs/augmentations/ and the stamped frontmatter together — the \
                      sidecar is only a recovery path once it is in git."
                 } else {
@@ -4375,8 +4410,12 @@ fn scan_sidecar_shape_drift(conn: &rusqlite::Connection) -> Result<Vec<Violation
                  One of them is stale and THIS CHECK CANNOT TELL WHICH — mtime does not \
                  discriminate, because a git checkout stamps the file with checkout time \
                  whatever its shape's age. Read the difference before acting. If your catalog is \
-                 right (you changed the shape here and it has not been published), re-export it: \
-                 librarian(action=\"doctor\", fix=\"export_augmentations\"). If the SIDECAR is \
+                 right (you changed the shape here and it has not been published), DELETE the \
+                 sidecar and then re-run librarian(action=\"doctor\", \
+                 fix=\"export_augmentations\") — that fix CREATES sidecars and never refreshes \
+                 them, so it skips any artifact whose sidecar already exists, which is every \
+                 finding this check can emit. Without the delete it reports exported: 0, exits \
+                 successfully, and repairs nothing. If the SIDECAR is \
                  right (you pulled someone else's shape change), do NOT export — that would \
                  overwrite their shape with your stale row; apply the committed values with \
                  artifact_augment instead, which also rewrites the file and so leaves the two \
@@ -5685,6 +5724,68 @@ mod tests {
             missing.contains("cannot help"),
             "and it must say reindex will NOT fix it, or the reader's first move is the \
              one thing that does nothing and reports success: {missing}"
+        );
+    }
+
+    /// The drift remedy must name the step without which the export it prescribes does
+    /// nothing.
+    ///
+    /// `sidecar_shape_drift` fires ONLY when the sidecar is present — `is_file()` is its
+    /// own precondition — and `export_augmentation_sidecars` skips exactly that
+    /// population (`declared_already && sidecar_abs.is_file()`). The intersection is
+    /// empty, so "re-export it" with no delete step is advice that cannot act on a single
+    /// finding this check can emit: it returns `exported: 0` and exits successfully.
+    /// `sidecar_unparseable`, emitted by the same scanner for another present-sidecar
+    /// case, already says "delete it and re-run".
+    ///
+    /// **The assertion is on the DELETE instruction, never on the token
+    /// `export_augmentations`.** The shipped wrong string contains that token too, so a
+    /// presence check on it is monotone under this exact defect and would have passed
+    /// throughout — the trap this test exists to avoid, not merely to document.
+    #[test]
+    fn the_drift_remedy_names_the_delete_step_without_which_the_export_is_a_no_op() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // `scan_sidecar_shape_drift` resolves the sidecar through `lookup_git_root`, so
+        // without this marker the artifact takes the `continue` and reports nothing.
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let rel = "docs/augmentations/drifted.yaml";
+        seed_declared(&cat, root, "drifted", Some(rel), true);
+        // `seed_declared` gives the ROW prompt "p". Committing a different one is the
+        // load-bearing detail: it is what makes `drifting_fields` non-empty, and so what
+        // makes the check fire at all. Match the two and this test reports nothing.
+        let sidecar = root.join(rel);
+        std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+        crate::librarian::augmentation_sidecar::write(
+            &sidecar,
+            &crate::librarian::augmentation_sidecar::AugmentationSidecar {
+                schema_version: 1,
+                prompt: "a superseded shape".into(),
+                entry_collection: None,
+                params_schema: None,
+                render_template: None,
+                append_mode: false,
+                history_cap: None,
+            },
+        )
+        .unwrap();
+
+        let found = scan_sidecar_shape_drift(&cat.conn).unwrap();
+        let v = found
+            .iter()
+            .find(|v| v.artifact_id.as_deref() == Some("drifted"))
+            .expect("a committed sidecar disagreeing with its row must be reported");
+        assert_eq!(v.check, "sidecar_shape_drift", "{:?}", v.detail);
+
+        assert!(
+            v.detail.contains("delete"),
+            "the catalog-is-right branch must name the delete step. Without it the \
+             prescribed export skips this artifact by its own precondition, reports \
+             exported: 0, and exits 0 — a clean no-op the reader reads as \"nothing \
+             needed doing\": {}",
+            v.detail
         );
     }
 
@@ -11658,6 +11759,62 @@ root = "work/elsewhere/ghost"
             again["totals"]["exported"],
             json!(0),
             "already-exported artifacts must be skipped, not rewritten: {again:#?}"
+        );
+    }
+
+    /// An artifact the export DECLINES to touch must be reported, never silently omitted.
+    ///
+    /// The idempotence asserted by the test above is correct and worth keeping — but it
+    /// is delivered by a bare `continue`, so the only trace of a decision not to act is
+    /// a `0` in a count of what was written. `exported: 0` is a truthful answer to "how
+    /// many did you create?" and the wrong answer to "did you fix my drift?", which is
+    /// what the caller actually asked. There is no error, no refusal, and no mention of
+    /// the artifact.
+    ///
+    /// That silence is what turns a wrong remedy into an invisible one:
+    /// `sidecar_shape_drift` prescribes this very fix for a case whose sidecar exists by
+    /// the check's own precondition, and the reader gets a clean exit and no repair.
+    /// Making the skip legible is the mechanism half of that bug — it reports the
+    /// no-op whether or not anyone suspected one.
+    #[tokio::test]
+    async fn an_already_exported_artifact_is_reported_as_skipped_not_silently_omitted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat, root, "t", None, true);
+        let ctx = TestToolContextBuilder::new(cat).build();
+
+        let args = json!({
+            "fix": "export_augmentations",
+            "root": root.to_string_lossy(),
+            "confirm": true,
+        });
+
+        let first = call(&ctx, args.clone()).await.unwrap();
+        assert_eq!(first["totals"]["exported"], json!(1), "{first:#?}");
+        assert_eq!(
+            first["totals"]["skipped"],
+            json!(0),
+            "nothing is already-exported on the first run: {first:#?}"
+        );
+
+        let second = call(&ctx, args).await.unwrap();
+        assert_eq!(second["totals"]["exported"], json!(0), "{second:#?}");
+        assert_eq!(
+            second["totals"]["skipped"],
+            json!(1),
+            "a run that wrote nothing BECAUSE everything was already exported must say \
+                 so; `exported: 0` alone is indistinguishable from `nothing matched`: \
+                 {second:#?}"
+        );
+        assert_eq!(
+            second["skipped"][0]["path"]
+                .as_str()
+                .map(|p| p.ends_with("t.md")),
+            Some(true),
+            "and it must name WHICH artifact it declined to touch, or the reader \
+                 cannot tell whether their artifact was the one skipped: {second:#?}"
         );
     }
 
