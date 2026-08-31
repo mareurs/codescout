@@ -13,7 +13,7 @@ tags:
 - mineable
 topic: issue clusters and rule promotion
 entry_prefix: IC
-entry_high_water_IC: 10
+entry_high_water_IC: 11
 ---
 
 > **Prefix:** `IC-N` — one **defect class** the bug corpus instantiates. Declared ledger; the
@@ -144,11 +144,12 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-3 | declaration is not execution | `declared-not-wired` | 20 | `OB` (OB-5 residual) | none yet |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | not yet — routing unsettled | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | **re-adjudicate** — its own condition fired | none yet |
-| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 26 | **re-adjudicate** — now the largest class | shipped (partial) |
+| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | **re-adjudicate** — now the largest class | shipped (partial) |
 | IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | 4 | not yet — 2 of 4 unconfirmed | shipped (partial) |
 | IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 5 | `DC` | none yet |
 | IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 3 | **re-adjudicate** — count now met | designed |
 | IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
+| IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 1 | not yet — n=1 taggable | none yet |
 
 **Six of ten now clear the count threshold** (IC-1, IC-2, IC-3, IC-4, IC-5, IC-6), and three of
 those changed status on the backfill rather than on new evidence — which is the ledger working:
@@ -176,11 +177,14 @@ are unbackfilled. **Every `n` above therefore remains a floor.** Covering the ar
 an explicit `cluster/unclassified` slug meaning *looked, nothing fits* — a taxonomy decision,
 not a gate one.
 
-Four recurring shapes in the untagged 279 reached three or more instances and match no existing
+Four recurring shapes in the untagged 279 reached three or more instances and matched no existing
 class — a capped result presented as complete; a guard whose coverage is narrower than its name;
 documentation stating a behaviour the code contradicts; and an accepted parameter silently
-dropped on some path. They are recorded here as candidates only. Adding them is a taxonomy
-decision, not a backfill one.
+dropped on some path. **Three remain candidates.** The third was promoted to `IC-11` on
+2026-08-31 when a taggable instance arrived and the gate proved to have no escape hatch — there
+is no `cluster/unclassified`, so an open bug whose shape is a known-but-unadded candidate cannot
+be committed at all. Promotion was forced by that, not by the count. Adding the other three is
+still a taxonomy decision, not a backfill one.
 ## IC-1 — the blast radius of a write is wider than the set of peers you can see
 
 **Slug:** `cluster/blast-radius-exceeds-visibility`
@@ -368,6 +372,24 @@ The file belongs to a third session neither had enumerated. `git log` shows why 
 Note the pattern is `OB-1`'s — *"the author, specifically"*. All three attributions were made by parties who had just read the evidence, in messages *about* attribution failure. Knowing the class prevented none of them, which is the standing argument against answering this kind of defect with care rather than mechanism.
 
 **Falsified by** an attribution dispute on a shared checkout that a party could settle from committed state alone.
+
+## IC-11 — documentation denies a capability the code has since gained, because the prose was true when written
+
+**Slug:** `cluster/doc-contradicted-by-code`
+**Claim:** A document states a behaviour the code contradicts. The statement was *true when written*; the code later gained or lost the capability, and nothing re-checks prose against code, so the document goes on asserting the old world with undiminished confidence. Unlike a wrong statement, this one has no authoring defect to find — it decayed.
+**Members:** `filter={"tags": {"contains": "cluster/doc-contradicted-by-code"}}` — n=1, 2026-08-31. Three or more further instances are known to sit in the untagged 279 archived files: this is the third of the four candidate shapes recorded above the `IC-1` entry, promoted to a class here because a taggable instance arrived and the gate has no escape hatch for "looked, nothing fits".
+**Blind party:** the *reader*, routed to the document by its own scope claim and given no signal to cross-check. The author of the prose is not blind — they wrote something true. The author of the *code* change is differently blind: gaining a capability gives you no reason to search prose for sentences your feature just falsified.
+**Promotes to:** `not yet` — n=1 taggable. The likely target is `DC` (`docs/trackers/claim-decay.md`): a true-when-written claim that silently decayed is that ledger's subject, and this class is the bug-corpus entry point to it rather than a competitor — the same relationship `IC-8` declares.
+**Mechanism status:** none yet, and the nearest existing mechanism does not cover it. `librarian(action="audit_doc_refs")` lints *references* — paths, symbols, line numbers, link targets — so a document may cite every path correctly and still assert the opposite of what the code at those paths does. The remedy would have to check claims, not refs.
+**Valid:** dated 2026-08-31
+
+Seed instance: `2026-08-31-librarian-runtime-guide-denies-the-augmentation-sidecar`. The served `librarian-runtime` guide states augmentation has *"**No** — there is no on-disk representation"* and that sharing it is *"local-only by design"*, three months after `src/librarian/augmentation_sidecar.rs` shipped the sidecar. Both sentences were accurate when written. The guide mentions `sidecar`/`expects_augmentation` zero times; `tracker-conventions` mentions them thirteen.
+
+**The cost is not that a reader is misinformed — it is that the reader stops.** A sentence saying a capability does not exist terminates the search that would have found it. Measured downstream the same day: a consumer repo held two augmentations in a machine-local catalog with no sidecar and no declaration, one clone away from silent loss, because the guide consulted for exactly that question said there was nothing to export. `doctor`'s `augmentation_declared_but_absent` could not report it either — that check fires only on a *declared* sidecar that is missing, so undeclared-and-unexported reads identically to nothing-to-declare.
+
+**Kept apart from `IC-3` and `IC-8` on their own falsifiers, not on judgement.** `IC-3` is a surface declaring a capability production never reaches; this is its mirror — production reaches a capability the surface denies — and `IC-3`'s falsifier explicitly ejects the mirror case (*"the wiring existed and the declaration was merely wrong, which is an ordinary bug rather than this class"*). `IC-8` is an assertion written at the moment of intent and read forever after as outcome; this prose was not intent, it was correct observation, which is why no plausibility check catches either one.
+
+**Falsified by** an instance where the documentation was wrong on the day it was written. That is an ordinary authoring error with an author to find, and it does not belong here.
 
 ## Template for new entries
 

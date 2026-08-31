@@ -1,0 +1,198 @@
+---
+id: c202d8febd80ca8a
+kind: bug
+status: open
+title: a body that already begins with a frontmatter block silently becomes a second, inert block
+tags:
+- cluster/addressing-without-an-escape-hatch
+- librarian
+- frontmatter
+- silent-corruption
+- artifact-create
+- artifact-update
+closed: null
+opened: 2026-08-31
+owner: marius
+related:
+- docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md
+- docs/issues/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md
+severity: medium
+---
+
+# BUG: a body that already begins with a frontmatter block silently becomes a second, inert block
+
+## Summary
+
+`artifact(action="create")` and `artifact(action="update", patch={body})` interpolate the
+caller's body verbatim beneath the frontmatter they generate. A body that itself begins with
+`---\n…\n---` therefore lands as a **second frontmatter block inside the body**, where it is
+inert: every key in it is invisible to the catalog and to every `artifact(find)` query, while
+reading exactly like authoritative frontmatter to a human or an agent opening the file.
+
+Both calls return success. Nothing warns.
+
+## Symptom (Effect)
+
+The file acquires four `---` lines instead of two. Reproduced 2026-08-31 on `experiments`:
+
+```
+     1	---
+     2	id: '0fa067bda1e1df6a'
+     3	kind: note
+     4	status: draft          <- the catalog's value
+     5	title: Repro — body that already carries a frontmatter block
+     6	---
+     7	
+     8	---
+     9	status: open           <- the caller's value, inert
+    10	opened: 2026-08-31
+    11	severity: medium
+    12	owner: marius
+    13	---
+    14	
+    15	# Repro body
+```
+
+The two `status` values disagree and the catalog silently wins. In the wild this produced a
+bug file whose body read `status: fixed`, `closed: 2026-08-31` while
+`artifact(find, kind="bug")` reported it `open`.
+
+## Reproduction
+
+Minimal, on `experiments` at `c6d7d83b`:
+
+```
+artifact(action="create", kind="note",
+         rel_path="docs/zz-repro-double-frontmatter.md",
+         title="…",
+         body="---\nstatus: open\nowner: marius\n---\n\n# Repro body\n")
+```
+
+Then `grep -c '^---$' docs/zz-repro-double-frontmatter.md` → **4**.
+
+The second seam, on the same artifact:
+
+```
+artifact(action="update", id="…", patch={body: "---\nstatus: mitigated\n---\n\n# Second seam\n"})
+```
+
+→ **4** again. Both seams reproduce; neither warns.
+
+## Environment
+
+Linux; codescout `experiments` @ `c6d7d83b`; MCP stdio transport; project `codescout`.
+Observed and reproduced 2026-08-31.
+
+## Root cause
+
+`src/librarian/frontmatter.rs:149` ends `write` with:
+
+```rust
+format!("---\n{yaml}---\n{body}")
+```
+
+`body` is interpolated with no check that it begins with a frontmatter delimiter. **Measured
+2026-08-31**: the reproduction above, run twice against a live server, once per seam — not
+inferred from the source alone.
+
+The near-miss is what makes this worth recording. The same function already reasons carefully
+about duplicate keys, ten lines above, and its comment states the stakes exactly:
+
+> *"A reserved key here would emit a SECOND line for a key `serde_yml` already wrote above, and
+> a duplicate key makes the entire block unparseable — which costs every field, not just this
+> one."*
+
+That guard covers the `extra` map and stops at the map boundary. A body carrying a whole
+duplicate *block* is the same failure one level up, and no guard looks there. The author was
+reasoning about precisely this hazard at the adjacent seam.
+
+## Evidence
+
+### Two instances in the wild, both on 2026-08-31
+
+- `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — orphan block
+  carried `opened`, `severity`, `owner`, `related`; all four invisible to every query. Repaired
+  in `351836a8` by rewriting the body and merging the keys into real frontmatter via `extra`.
+- `docs/issues/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md` — orphan block
+  carried `status: fixed`, `closed`, `severity`, `owner`, `unverified`. The catalog reported
+  `open`. Repaired by a concurrent session.
+
+### Why it survives review
+
+The malformed file is *more* plausible than a correct one, not less: it opens with a
+well-formed stamped block, and the orphan below it looks like an ordinary hand-written header.
+Nothing in `git diff` marks the second block as inert, and `artifact(get)` returns it as body
+content without comment.
+
+## Hypotheses tried
+
+1. **Hypothesis:** the two observed instances came from hand-editing rather than a tool path.
+   **Test:** ran `artifact(create)` with a frontmatter-leading body against a live server.
+   **Verdict:** rejected — the tool reproduces it exactly, byte-for-byte in structure.
+2. **Hypothesis:** only `create` has the seam, so a fix there is sufficient.
+   **Test:** ran `artifact(update, patch={body})` with the same shape.
+   **Verdict:** rejected — both seams reproduce. Two guarded sites, not one.
+
+## Fix
+
+Not yet implemented. Refuse at the input boundary rather than repair at the writer:
+`RecoverableError` from `create` and from `update`'s body path when `body` starts with `---`
+followed by a delimiter line, naming the two legitimate intents — *pass the fields as
+`status`/`tags`/`extra` parameters*, or *fence the block if it is documentation*.
+
+Refusal is preferred over silently stripping the block: stripping would discard keys the
+caller believed they were setting, which is the same silent-loss failure in the other
+direction.
+
+**The writer must stay infallible.** `write` returns `String`, and its own comment explains
+that the `extra` backstop exists so it can. The check belongs where the `RESERVED_KEYS`
+refusal already lives — at `artifact(create|update)`'s input boundary — not at
+`frontmatter.rs:149`.
+
+## Tests added
+
+None yet. The regression test should cover **both** seams: a `create` and an `update` each
+refusing a frontmatter-leading body, plus one asserting a *fenced* block in a body is still
+accepted, since documentation about frontmatter is a legitimate body.
+
+## Workarounds
+
+Pass metadata as parameters, never as body text:
+
+```
+artifact(action="create", kind="bug", rel_path=…, title=…, status="open",
+         tags=["cluster/…", …], extra={"opened": "…", "severity": "…"},
+         body="# BUG: …\n\n## Summary\n…")
+```
+
+This file was written that way deliberately.
+
+To detect existing instances:
+
+```
+for f in docs/issues/*.md; do n=$(awk 'NR>1 && /^---$/{c++} END{print c+0}' "$f");
+  [ "$n" -ge 2 ] && echo "$n $f"; done
+```
+
+To repair one, merge the orphan's unique keys into real frontmatter and rewrite the body
+without it, in a single `artifact(action="update", patch={body: …, extra: {…}})` — the orphan
+sits above the first heading, so `body_edits` cannot target it.
+
+## Resume
+
+Add the input-boundary refusal to `artifact(create)` and `artifact(update)`. The `RESERVED_KEYS`
+clash refusal is the pattern and the place to put it next to — read
+`src/librarian/frontmatter.rs:70-78` (`reserved_keys_in_extra`) and follow its caller into the
+tool boundary. Write the two-seam regression test first; a fix applied to `create` alone passes
+a single-seam test and leaves `update` open, which is how this class survives.
+
+Then sweep `docs/issues/` and `docs/issues/archive/` with the detection loop above — only the
+open corpus has been checked, and only on 2026-08-31.
+
+## References
+
+- `src/librarian/frontmatter.rs:105-150` — `write`, and the `RESERVED_KEYS` guard at `:70-78`
+- `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — instance 1
+- `docs/issues/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md` — instance 2
+- `docs/trackers/issue-clusters.md` — `IC-6`, the class this instantiates
+
