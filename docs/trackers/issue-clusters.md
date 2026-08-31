@@ -143,20 +143,30 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB` (OB-4) | none yet |
 | IC-3 | declaration is not execution | `declared-not-wired` | 20 | `OB` (OB-5 residual) | none yet |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | not yet — routing unsettled | none yet |
-| IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | **re-adjudicate** — its own condition fired | none yet |
-| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | **re-adjudicate** — now the largest class | shipped (partial) |
+| IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | `H` — six subsystems; mechanism owed | none yet |
+| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | `CLAUDE.md` — escape + disambiguator | shipped (partial) |
 | IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | 4 | not yet — 2 of 4 unconfirmed | shipped (partial) |
 | IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 5 | `DC` | none yet |
-| IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 3 | **re-adjudicate** — count now met | designed |
+| IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 1 | not yet — two tags withdrawn as misfits | designed |
 | IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
 | IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 1 | not yet — n=1 taggable | none yet |
 
-**Six of ten now clear the count threshold** (IC-1, IC-2, IC-3, IC-4, IC-5, IC-6), and three of
-those changed status on the backfill rather than on new evidence — which is the ledger working:
-the counts were floors, and the judgements resting on them were provisional. **IC-5, IC-6 and
-IC-9 are flagged `re-adjudicate` rather than promoted**, because promotion is a reading of the
-spread as well as the count, and this pass supplied only the count. IC-7 still fails on premise
-confidence, IC-8 routes to `DC` regardless of n, and IC-10 is newly opened at n=1.
+**Six of eleven clear the count threshold** (IC-1, IC-2, IC-3, IC-4, IC-5, IC-6). **IC-5 and IC-6
+are now adjudicated rather than flagged**, and both route away from `OB` — each declares
+`Blind party: none`, which fails OB's admission test, so the count was never the only thing
+stopping them. IC-5 spans six subsystems (cargo feature config, wine, shell env, workspace
+resolution, toolchain, ambient embedder config), seven of its eleven members outside the
+Windows/wine lane its old note said contained all of them. IC-6 spans five. IC-7 still fails on
+premise confidence, IC-8 routes to `DC` regardless of n, and IC-10 / IC-11 are newly opened at
+n=1.
+
+**IC-9's flag is withdrawn, and the error was mine.** I tagged two archive files into it that do
+not instantiate its claim: `ollama_large_batch_exceeding_batch_size` was vacuous the day it was
+written and `cross-process-write-lock-test-passes-when-it-does-not-run` is vacuous when skipped —
+neither turns on **environment-controlled text**, which is the whole of IC-9's claim. Both were
+matched from their titles, which read as "a test that passes when it shouldn't" — true of IC-9
+and true of a wider family. Tags withdrawn, n back to 1, below threshold. Their own pre-existing
+`vacuous-assertion` and `green-proves-nothing` tags say what they actually are.
 
 **IC-10 was split out of IC-1 on the remedy test**, not on a count. `IC-1` wants an ownership
 protocol over a shared resource; `IC-10` wants a provenance channel. The
@@ -180,7 +190,10 @@ not a gate one.
 Four recurring shapes in the untagged 279 reached three or more instances and matched no existing
 class — a capped result presented as complete; a guard whose coverage is narrower than its name;
 documentation stating a behaviour the code contradicts; and an accepted parameter silently
-dropped on some path. **Three remain candidates.** The third was promoted to `IC-11` on
+dropped on some path. **Three remain candidates**, and a fourth was added by the IC-9 withdrawal above: *an assertion
+that cannot fail* — the broader family the two withdrawn tags belong to, already named in
+CLAUDE.md § Testing Discipline as the "vacuous assertions cluster" and holding at least those two
+instances across `codescout-embed` and the write-lock path. The third was promoted to `IC-11` on
 2026-08-31 when a taggable instance arrived and the gate proved to have no escape hatch — there
 is no `cluster/unclassified`, so an open bug whose shape is a known-but-unadded candidate cannot
 be committed at all. Promotion was forced by that, not by the count. Adding the other three is
@@ -265,7 +278,7 @@ The generalisation worth extracting: **a config surface that supports removal ne
 **Claim:** The environment built so failures can be reproduced locally is not the environment that gates. While the two agree the divergence is invisible; when they disagree the local run is authoritative-looking and wrong, and a genuine platform defect is indistinguishable from an environment gap.
 **Members:** `filter={"tags": {"contains": "cluster/repro-env-diverges-from-gate-env"}}` — n=11, 2026-08-31, by query after archive backfill.
 **Blind party:** `none — ordinary design defect`. A careful engineer comparing wine versions catches this; nobody is structurally prevented from seeing it. Recorded so the class is not mis-promoted to `OB`, whose admission test it fails.
-**Promotes to:** `not yet` — clears the count but not the subsystem spread; all three sit in the Windows/wine lane, so under this ledger's threshold rule they are *a broken subsystem*, not a mechanism. Revisit if a fourth lands outside it.
+**Promotes to:** `H` — `docs/trackers/codescout-usage-hookify.md`, adjudicated 2026-08-31 after the archive backfill. **Not `OB`**: `Blind party:` is `none`, which fails OB's admission test, so the routing question was never open. The old note read *"clears the count but not the subsystem spread; all three sit in the Windows/wine lane… Revisit if a fourth lands outside it"* — seven have. The eleven members span **six** subsystems: cargo feature config (3), wine/Windows (4), shell environment (1), cargo workspace resolution (1), toolchain (1), ambient embedder config (1). **It promotes as a worklist item, not a rule**, because `Mechanism status:` is still `none yet` and this ledger holds that a rule without one produces advice. The mechanism shape is a check diffing the documented four-command gate against `ci.yml`'s matrix; the four Windows lanes red on 2026-08-31 are a live instance of exactly what that would have caught.
 **Mechanism status:** none yet. `scripts/build-windows.sh` could assert the wine version CI packages, which would convert the divergence from silent to loud at ~3 lines.
 **Valid:** conditional — a member appears outside the Windows/wine lane
 
@@ -281,9 +294,9 @@ This class is deliberately kept even though it does not currently promote. Its v
 
 **Slug:** `cluster/addressing-without-an-escape-hatch`
 **Claim:** An addressing scheme interprets every token in its namespace and provides no way to write one literally, or to disambiguate two that collide. The scheme is correct on every input it accepts; the defect is the input it makes unrepresentable.
-**Members:** `filter={"tags": {"contains": "cluster/addressing-without-an-escape-hatch"}}` — n=25, 2026-08-31, by query after archive backfill.
+**Members:** `filter={"tags": {"contains": "cluster/addressing-without-an-escape-hatch"}}` — n=27, 2026-08-31, by query.
 **Blind party:** `none — ordinary design defect`. The gap is visible to anyone who tries the unrepresentable input; nobody is structurally prevented from seeing it. Recorded so it is not mis-promoted to `OB`.
-**Promotes to:** `not yet` — n=2, below threshold.
+**Promotes to:** `CLAUDE.md` — adjudicated 2026-08-31 after the archive backfill took it from n=2 to n=27, the largest class in the corpus. **Not `OB`**: `Blind party:` is `none`. It is codescout-specific engineering discipline, statable as one rule — *a parser over a namespace owes an escape for writing a token literally, and a disambiguator for two that collide.* Five subsystems: file-format navigation (`json_path`, `toml_key`), markdown editing (fences, heading-shaped content), the link/citation resolver (frontmatter delimiters, qualifiers, prefix collisions, doc-examples-read-as-citations), shell command gates (IL-3, dangerous-command, source gate, `run_command` — four separate gates, every one of them on heredocs), and symbol navigation (`name_path` with no disambiguator). Unlike IC-5 this one has partial mechanism already shipped, so the rule has something behind it.
 **Mechanism status:** `shipped (partial)` — `edit_markdown` and `artifact(get)` gained an `occurrence` selector, closing the heading half for librarian-managed files. The `link_scan` half has no escape syntax at all.
 **Valid:** dated 2026-08-31
 
@@ -335,9 +348,11 @@ This is filed as a class of one deliberately rather than folded into `DC`. The t
 
 **Slug:** `cluster/assertion-satisfiable-by-accident`
 **Claim:** An assertion whose haystack embeds environment-controlled text — a path, a tempdir name, a hostname, a timestamp — can be satisfied by coincidence. It fails **open**: it passes on almost every machine and almost every run, so the green tick is evidence of luck rather than of the property.
-**Members:** `filter={"tags": {"contains": "cluster/assertion-satisfiable-by-accident"}}` — n=3, 2026-08-31, by query after archive backfill.
+**Members:** `filter={"tags": {"contains": "cluster/assertion-satisfiable-by-accident"}}` — n=1, 2026-08-31, by query. Went to 3 in the archive backfill and back to 1 the same evening: two of those tags were misfits and were withdrawn, see **Promotes to**.
 **Blind party:** `none — ordinary design defect`, but with an unusually strong *detection* asymmetry: at ~1-in-800 the failure is unreachable by local reproduction, so the author's evidence is necessarily circumstantial. The file records that honestly in its own `unverified:` field.
 **Promotes to:** `not yet` — n=1. When it moves, the target is `I` (`docs/trackers/test-escape-hardening.md`), because the remedy is a standing grep rather than a rule anyone remembers.
+
+**Two tags were withdrawn on 2026-08-31, and the mistake is instructive.** The archive backfill put `ollama_large_batch_exceeding_batch_size` and `cross-process-write-lock-test-passes-when-it-does-not-run` in here, taking n to 3 and appearing to meet the threshold. Neither instantiates the claim: the first was vacuous the day it was written and the second is vacuous when skipped, and **neither turns on environment-controlled text**, which is the entire content of this class. They were matched from their titles — both read as *"a test that passes when it shouldn't"*, which is true of this class and true of a wider one. That is precisely how a class inflates past its threshold on members that do not instantiate it, which is the failure this ledger's own *"a wrong class corrupts the counts that promotion reads"* names. Their real family, *an assertion that cannot fail*, is recorded as a candidate class in the Index; their own `vacuous-assertion` and `green-proves-nothing` tags already said so.
 **Mechanism status:** `designed` — the member names the check: *negative `contains` assertions over anything that interpolates a `Path`*. Nobody has run it corpus-wide.
 **Valid:** dated 2026-08-31
 
