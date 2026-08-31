@@ -454,6 +454,35 @@ Measured 2026-09-01: it refused a push on a **green** `cargo test --workspace` r
 
 That this arrived *inside infrastructure built by the session that opened the class, four hours after opening it*, is the `OB-1` signature again — and it is why the remedy field reads `H` (a provenance channel) rather than any amount of care.
 
+**Adjacent, and deliberately NOT counted as a member: the verification reflex is trained on the
+technical domain and does not fire on the social one.** Named by `codescout-e8` about itself on
+2026-09-01, after three wrong assertions to a peer in one evening — that peer reachability was
+partitioned (it was comparing a send-by-address against a send-by-name, two different
+operations); that five newly-opened classes had "landed with instances" (all five read `n=0
+tagged`, and the commit subject says so); and a near-miss on routing a pattern to `IC-8` that
+was caught only because it happened to read the admission test first. Its own diagnosis: *"I
+have been rigorous about every claim concerning the corpus and casual about every claim
+concerning the collaboration. Code claims get a probe; claims about who did what and why get an
+inference."*
+
+**It generalises to at least two sessions.** The receiving session made the same move earlier
+the same evening: told that `IC-9`'s count had gone from 1 to 3, it asserted a mechanism — that
+a recursive grep over `docs/issues/` had counted slug strings inside untracked session logs —
+and published it before checking. The real cause was two mis-tagged archive files, a decision by
+another party. Both errors are the same shape: **a mechanism inferred for another party's action
+and asserted at the confidence reserved for measured facts**, while every claim either session
+made about the corpus that evening was probed first.
+
+**Kept out of the member count on purpose, and the reason is the same test that governs this
+ledger.** `IC-10`'s claim is that the information *does not exist* to be careless with — git
+collapses sessions into one author string. This is the opposite: in all four cases the answer
+**was** available and cheap (a Members line, a tag history, two tool signatures), and nobody
+looked. It also fails `OB`'s admission test outright, since a more careful version of the same
+party would have caught it, which is precisely what disqualifies an `OB` row. Folding it in
+would inflate `IC-10` on a family resemblance — the error `IC-9` was corrected for four hours
+earlier. Recorded here because this is where a reader of `IC-10` will look for it, and because
+the standing remedy is cheap and already written down: *verify before contradicting a peer* —
+which holds equally for **agreeing** with one, the direction three of these four ran.
 ## IC-11 — documentation denies a capability the code has since gained, because the prose was true when written
 
 **Slug:** `cluster/doc-contradicted-by-code`

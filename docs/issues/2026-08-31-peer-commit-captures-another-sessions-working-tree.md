@@ -371,10 +371,24 @@ care — stage, stop, read `--cached`, then commit as a separate call.
 
 **But ordering closes only the outbound half, and this session is the evidence.** It staged,
 stopped, read the cached diff in its own call, confirmed 6 hunks all its own — and was captured
-anyway, because `1b40dabd` landed in the gap between that read and its `commit`. Correct
-ordering prevents *you* committing content you never reviewed; nothing about it prevents a peer
-committing content *you* staged. The two halves need different fixes, and only the outbound one
-is a discipline.
+anyway, because `1b40dabd` landed in the gap between that read and its `commit`.
+
+**That is a time-of-check-to-time-of-use window on shared index state, not a discipline
+failure** — the check was correct when it ran and false when it was acted on, with **no action
+of this session's in between**. The distinction matters because it settles what can be asked of
+a session: the outbound half (*do not commit what you never read*) is closeable by ordering, and
+the inbound half is **not closeable by any per-session behaviour at all**, because the state it
+depends on is written by a process this session can neither observe nor lock. State that flatly
+wherever the remedies are ranked, so the next reader does not go looking for a discipline that
+cannot exist. It is also why the ranking now has one entry: a worktree is not the best available
+discipline, it is the removal of the shared object the others contend over.
+
+Two **structural** candidates are named rather than recommended, because neither has been
+probed: per-session index isolation via `GIT_INDEX_FILE`, and the pathspec commit form, which
+ignores the index entirely — the same form the `unreviewed-content` gate currently refuses, which
+is the inversion above. Both need a probe before either is written down as advice. Recorded this
+way deliberately: three of tonight's wrong claims came from asserting an unprobed mechanism, and
+two of those were remedies.
 
 That makes three remedies falsified by the mechanism they were proposed against, each in the
 form *the thing you were told to do is how it happens*:
