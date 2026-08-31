@@ -4,6 +4,7 @@ kind: bug
 status: fixed
 title: A doctor test substring-matches a random tempdir name, so it reds CI at roughly 1-in-800
 tags:
+- cluster/assertion-satisfiable-by-accident
 - flaky-test
 - test-isolation
 - ci
