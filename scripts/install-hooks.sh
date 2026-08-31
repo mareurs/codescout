@@ -207,8 +207,17 @@ fi
 
 if [ "$with_session_id" = "1" ]; then
     install_shim prepare-commit-msg scripts/prepare-commit-msg-session-id.sh
+elif [ "$check_only" = "1" ]; then
+    # A --check run REPORTS; it must describe what is on disk, not what this
+    # invocation's flags would have installed. Reporting "skip" for a hook that is in
+    # fact live would be a status tool lying about the status it exists to report.
+    if [ -x "$git_dir/hooks/prepare-commit-msg" ]; then
+        echo "ok      prepare-commit-msg    shim present (opt-in, installed earlier)"
+    else
+        echo "off     prepare-commit-msg    opt-in; not installed"
+    fi
 else
-    echo "skip    prepare-commit-msg   opt-in; pass --with-session-id"
+    echo "skip    prepare-commit-msg    opt-in; pass --with-session-id"
 fi
 
 echo
