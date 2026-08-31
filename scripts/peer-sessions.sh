@@ -89,17 +89,74 @@ profile_of() {
     basename "$_pp_cfg"
 }
 
+# Which BINARY a process is running, and whether that binary has since been
+# replaced. `readlink /proc/<pid>/exe` appends a literal " (deleted)" once the
+# inode has been unlinked, which is exactly what a rebuild or a CC upgrade does.
+#
+# THAT SUFFIX IS THE ANSWER. Do not compare process start time against binary
+# mtime, which was the fix originally proposed for this: it is a proxy for an
+# event the script cannot observe (*did this process load the current bytes?*)
+# and it is wrong in both directions — a process started between the build
+# finishing and the rename completing reads fresh and is not, and a
+# byte-identical rebuild reads stale and is not. Worse, it FAILS OPEN in exactly
+# the case it targets: `stat` on the "(deleted)" string errors, the comparison
+# gets an empty operand, `[ N -lt "" ]` errors to stderr and evaluates false,
+# and the stale row prints nothing at all. Measured 2026-09-01 against pid
+# 997544. See docs/issues/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md.
+binary_state() {
+    _bs=$(readlink "/proc/$1/exe" 2>/dev/null) || { echo "?"; return; }
+    [ -z "$_bs" ] && { echo "?"; return; }
+    case "$_bs" in
+        *" (deleted)") echo "REPLACED" ;;
+        *)            echo "current" ;;
+    esac
+}
+
+# The identifying part of a binary's path. For `claude` this is the version
+# directory (2.1.252) — the axis that actually varies between sessions, and one
+# worth printing: six distinct CC versions were live in this checkout on
+# 2026-09-01. For codescout it is always "codescout", so callers print the state
+# word alone rather than a name that carries no information.
+binary_name() {
+    _bn=$(readlink "/proc/$1/exe" 2>/dev/null) || { echo "?"; return; }
+    [ -z "$_bn" ] && { echo "?"; return; }
+    basename "${_bn% (deleted)}"
+}
+
+# The codescout MCP server is a CHILD of the session process, so its freshness is
+# a DIFFERENT question from the session's own — and it is the one that moves,
+# because codescout is rebuilt many times a day while `claude` upgrades rarely.
+# The originally proposed fix read /proc/<session>/exe only, which answers the
+# question that almost never changes and leaves the one that does invisible.
+# Measured 2026-09-01: 5 of 11 codescout servers held replaced inodes while every
+# other instrument — this script, ListAgents, and a correct ~/.cargo/bin symlink
+# — reported them healthy.
+#
+# One pass over /proc rather than one scan per session. Processes exit while the
+# glob is being walked, so every read is guarded: an unreadable entry is a race,
+# not an error, and letting it reach stderr would put noise above the table.
+declare -A CS_OF_SESSION
+for _stat in /proc/[0-9]*/stat; do
+    _cp=${_stat#/proc/}; _cp=${_cp%/stat}
+    [ -r "/proc/$_cp/comm" ] || continue
+    [ "$(tr -d '\0' < "/proc/$_cp/comm" 2>/dev/null || true)" = "codescout" ] || continue
+    [ -r "$_stat" ] || continue
+    _cpp=$(awk '{print $4}' "$_stat" 2>/dev/null || true)
+    [ -n "$_cpp" ] && CS_OF_SESSION[$_cpp]=$_cp
+done
+
 self_profile="?"
 if [ -n "$self_pid" ]; then
     self_profile=$(profile_of "$self_pid")
 fi
 
-printf '%-9s %-4s %-13s %-6s %-40s %-24s %s\n' PID SELF PROFILE LISTED CWD STARTED STATE
+printf '%-9s %-4s %-13s %-6s %-40s %-24s %s\n' PID SELF PROFILE LISTED CWD STARTED BINARIES
 live=0
 stale=0
 matched=0
 blind=0
 visible=0
+replaced=0
 for sock in "$SOCK_DIR"/*.sock; do
     [ -e "$sock" ] || continue
     pid=$(basename "$sock" .sock)
@@ -139,8 +196,25 @@ for sock in "$SOCK_DIR"/*.sock; do
         blind=$((blind + 1))
     fi
 
+    # Two binaries, two independent freshness questions. `cc` is the Claude Code
+    # version this session runs; `cs` is the codescout MCP server it talks to.
+    # They move on different clocks — codescout is rebuilt many times a day,
+    # `claude` upgrades rarely — which is why reading only the session's own exe
+    # answers the question that almost never changes.
+    cc_ver=$(binary_name "$pid")
+    cc_st=$(binary_state "$pid")
+    [ "$cc_st" = "current" ] && cc_show="cc $cc_ver" || cc_show="cc $cc_ver $cc_st"
+    cs_pid="${CS_OF_SESSION[$pid]:-}"
+    if [ -n "$cs_pid" ]; then
+        cs_show="cs $(binary_state "$cs_pid")"
+    else
+        cs_show="cs none"
+    fi
+    binaries="$cc_show / $cs_show"
+    case "$binaries" in *REPLACED*) replaced=$((replaced + 1)) ;; esac
+
     printf '%-9s %-4s %-13s %-6s %-40s %-24s %s\n' \
-        "$pid" "$mark" "$prof" "$vis" "$cwd" "$started" "$comm"
+        "$pid" "$mark" "$prof" "$vis" "$cwd" "$started" "$binaries"
 done
 
 echo
@@ -179,6 +253,20 @@ else
     echo "short count as complete. The blind half is ENUMERABLE, not unknowable: that is the"
     echo "whole difference this column buys you."
 fi
+echo
+if [ "$replaced" -gt 0 ]; then
+    echo "$replaced of the $matched row(s) above run a binary that has since been REPLACED —"
+    echo "the process holds an inode that no longer exists at that path. A rebuild or a CC"
+    echo "upgrade does that, and nothing else reports it: start time, cwd and a correct"
+    echo "~/.cargo/bin symlink all read healthy. Such a session's numbers are evidence about"
+    echo "the build it LOADED, not about the tree on disk — the same discipline the note below"
+    echo "applies to authorship, extended to the other thing a peer report invites you to infer."
+else
+    echo "No row above runs a replaced binary. Note what that does and does not say: it means"
+    echo "each process still holds the inode at its path, not that the path holds current"
+    echo "source — an unbuilt commit is invisible to this check."
+fi
+
 echo
 echo "Any pid above is addressable whether or not ListAgents lists it:"
 echo "  SendMessage(to: \"uds:$SOCK_DIR/<pid>.sock\", …)"

@@ -103,6 +103,24 @@ case "$CMD" in
   clippy) set -x; exec cargo clippy --target "$TARGET" "${FEATURES[@]}" "${ARGS[@]}" ;;
   test)
     require wine "install wine to execute the test binaries (e.g. 'sudo pacman -S wine')"
+    # IC-5 — the reproduction environment is not the gating environment. CI's
+    # windows-gnu lane installs Ubuntu's `wine` package (.github/workflows/ci.yml,
+    # step "Install MinGW + wine"); a dev box tracks its own distro and is
+    # typically two majors ahead. The two have already diverged twice, and the
+    # divergence is SILENT — both runs print the same "test result: ok", so a
+    # green here gets read as a green lane. Naming both ends at the top of every
+    # run is what makes a local result comparable to a CI one.
+    #
+    # Deliberately NOT asserting a specific CI version. ubuntu-latest's wine
+    # moves, so a hardcoded "9.0" would be a constant that decays while still
+    # reading as fact — the shape docs/trackers/issue-clusters.md files as IC-11.
+    # Print what THIS box runs, name where CI's is decided, and let the reader
+    # compare two live values rather than one live and one remembered.
+    echo ">>> wine here:  $(wine --version 2>/dev/null || echo unknown)" >&2
+    echo ">>> wine in CI: whatever 'apt-get install wine' gives ubuntu-latest" >&2
+    echo ">>>             (.github/workflows/ci.yml, step 'Install MinGW + wine')" >&2
+    echo ">>> A green run here is NOT a green wine LANE — nor a green windows-latest." >&2
+    echo ">>>   docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md" >&2
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER="wine"
     export WINEDEBUG="${WINEDEBUG:--all}"   # silence wine's GL/pci-id probe noise
     set -x; exec cargo test --target "$TARGET" "${FEATURES[@]}" "${ARGS[@]}" ;;
