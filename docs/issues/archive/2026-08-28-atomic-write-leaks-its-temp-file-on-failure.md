@@ -10,7 +10,6 @@ opened: 2026-08-28
 owner: marius
 related: []
 severity: low
-unverified: The full gate was RED when this was committed — server::tests::tool_surface_under_budget, driven by an unrelated uncommitted src/tools/tree.rs (+353) left in the shared checkout by a session that has since exited. Not caused by this change (util/fs.rs advertises no tool schema; an earlier run tonight was green while tree.rs was clean), and absent from the commit because tree.rs is uncommitted — but this fix has NOT been observed under a fully green gate. Re-confirm when the tree.rs situation resolves.
 ---
 
 # BUG: `atomic_write` leaks its `.tmp` file when the initial write fails (e.g., disk full)
@@ -138,6 +137,22 @@ std::fs::write(&tmp, content).inspect_err(|_| {
 
 - **SHA:** `f671c3a1` (on `experiments`)
 - **patch-id:** `a4ca9f56c791c604e68205bac2b1fd2d32a3b3a0`
+
+**Green-gate caveat discharged 2026-08-31T11:13.** This was committed while
+`server::tests::tool_surface_under_budget` was failing, so the file carried an
+`unverified:` noting the fix had never been observed under a fully green gate. That is
+now closed: a full four-lane run reports **0 failures, 0 errors**, and the `unverified:`
+field has been removed rather than left empty, because presence is what a query filters
+on.
+
+The budget failure was never this change, and it was never `tree.rs` either — which is
+worth recording, because the obvious attribution was wrong twice over. The overage came
+from in-flight prompt work elsewhere, since trimmed (`52712759`, `e245f983`). The author
+of the tree change found that by stubbing their own schema description down to a single
+character and watching the advertised surface go **up**, 56698 → 56845 — an arithmetic
+attribution rather than a "who touched it last" one, and the only reason the repair did
+not land on the wrong file. `tree.rs` shipped clean at `799e5dc6` (patch-id
+`67f9094a40e4a2872fac52d316b22d641fbd7ba1`, verified here by independent derivation).
 
 **Why the partial guard was the trap, and not merely an omission.** A reader skimming
 `atomic_write` for "is there cleanup?" *finds* cleanup. The defect lived in the one path
