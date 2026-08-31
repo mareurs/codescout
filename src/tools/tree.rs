@@ -281,7 +281,7 @@ fn withheld_note_truncated(lead: &str, body: &str, never: &str) -> String {
 /// no match: `tree(glob=".github/workflows/*.yml")` returned a bare `0 files` while both
 /// files existed and were tracked, and `**/*.yml` returned 1 of 3 — a *plausible
 /// non-zero*, so not even a suspicious-zero heuristic could fire.
-/// `docs/issues/2026-08-30-tree-glob-silently-omits-dotfiles.md`.
+/// `docs/issues/archive/2026-08-30-tree-glob-silently-omits-dotfiles.md`.
 ///
 /// Counting rather than gating on a zero is deliberate, and differs from `grep`'s
 /// `completeness_warning`, which fires only when the result is empty. That rule is a

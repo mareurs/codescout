@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- tree
+- glob
+- negative-results
+- hidden-files
+closed: 2026-08-31
 opened: 2026-08-30
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [tree, glob, negative-results, hidden-files]
-kind: bug
+severity: medium
 ---
 
 # BUG: `tree(glob=...)` returns `0 files` for dot-prefixed files that exist and are tracked
@@ -149,25 +153,90 @@ ask. `tree` gives the caller no way to express the same intent.
 
 ## Fix
 
-Not attempted. Two candidate directions, listed so a later session does not have to
-re-derive them:
+**Fixed 2026-08-31 on `experiments`, in three commits**, each gate-green and
+live-verified after `cargo rb` + `/mcp`:
 
-- Add an `include_hidden` parameter to `tree`, mirroring `grep`'s, defaulting to `false`
-  for compatibility. Smallest change; makes the intent expressible.
-- Additionally, when a glob returns zero and hidden files were excluded, say so in the
-  response — that is what turns an untrustworthy zero into a trustworthy one and is what
-  the ADR actually asks for. The parameter alone still leaves a silent `0 files` for
-  everyone who does not know to pass it.
+| commit | patch-id | what |
+|---|---|---|
+| `799e5dc6` | `67f9094a40e4a2872fac52d316b22d641fbd7ba1` | `include_hidden` + the withheld-count warning, glob **and** list mode |
+| `2f434fba` | `c409c4ca1e3844a3bdfa02b678731d4aa7613e0b` | a pruned hidden directory counts as ONE entry, not as its subtree |
+| `390bf4f0` | `227d98a5400e3eca0fa8997fe46c12f2ab67a2da` | a cap-truncated tally refuses cross-run comparison |
 
-The second is the one that closes the class; the first only gives an informed caller an
-escape hatch.
+**This section's own analysis was right about the important thing** and is kept above
+rather than replaced: it called the warning, not the parameter, the change that closes
+the class, and that is exactly how it shipped. The parameter alone would have left a
+silent `0 files` for everyone who did not already know to pass it.
 
+Live verification on the rebuilt binary:
+
+```
+tree(glob=".github/workflows/*.yml")        → 0 files + "2 matching files … were withheld"
+tree(glob="**/*.yml")                       → 1 file  + "2 … withheld"
+tree(glob="…", include_hidden=true)         → both files returned
+tree(path=".")                              → 22 entries + "16 hidden entries not listed"
+tree(path=".", include_hidden=true)         → 38 entries = 22 + 16
+tree(path="src/tools")                      → 33 entries, no note   (silence control)
+```
+
+### Three things this file did not know
+
+1. **The zero is the milder half.** `**/*.yml` returned **1 of 3** — a plausible
+   *non-zero*, so no suspicious-zero heuristic fires and the reader has no prompt to
+   doubt it. `grep`'s `completeness_warning`, the obvious model, gates on an empty result
+   and could not have reached this case; `tree`'s walk opens no files, so it can afford
+   the exact count instead of the proxy.
+2. **List mode had the same defect plus a worse one.** `list_dir_impl` had its own
+   `.hidden(true)` and never read `include_hidden` — so after the first commit the
+   parameter was *accepted by the schema and silently ignored*, a worse contract than an
+   absent one. It is also the sharper case: list mode sets `git_ignore(false)` /
+   `ignore(false)`, so hidden is its **only** exclusion, and the listing shows gitignored
+   `target/` while omitting `.github/` — reading as complete precisely because it shows
+   what other tools hide. Reported by `codescout-fe`.
+3. **Placement decides whether any of it is read.** `format_compact` output passes
+   through `truncate_compact` (2 KB soft cap) and a 100-file listing runs several times
+   that, so a note appended after the list is cut on exactly the results big enough to
+   need it. The glob note leads; the list note joins the cap signals below the header via
+   `insert_below_header`. The first revision appended both.
 ## Tests added
 
-None yet — bug is filed, not fixed. A regression test should assert the **positive**
-direction (a dotfile IS returned when hidden files are requested) rather than only that
-the count changed, so that it cannot pass by the file disappearing for some other reason.
+Thirteen in `src/tools/tree.rs`, every behavioural claim mutation-checked — they were
+written after the implementation and went straight to green, so their ability to fail was
+unestablished until each mutation ran.
 
+| mutation | dies |
+|---|---|
+| warning never rendered | both rendered-output tests |
+| warn unconditionally | both silence tests |
+| restore `.hidden(true)` | both list-mode tests |
+| note appended at the tail | the placement assertion, on its own line |
+| count by rel-path component instead of pruning | the subtree-exclusion test, 1 against 4 |
+| collapse the truncated note into the plain one | the lower-bound assertion |
+
+This section's original instruction — *assert the **positive** direction, so it cannot
+pass by the file disappearing for some other reason* — is honoured: `include_hidden=true`
+returns the named files, rather than merely changing a count.
+
+**Three defects in my own tests, each found only by mutation:**
+
+- `rendered.contains('2')` scanned the whole output **including tempdir paths**, so a
+  temp path containing a `2` would satisfy it whatever the warning said. Now matches the
+  exact phrase.
+- `contains("violations[")` matched the appended generic shape line rather than the
+  truncation line. Scoped to the line under test.
+- One mutation **survived**, and the fault was the mutation: it stopped the pruning but
+  kept counting by entry *name*, and the fixture's only dot-named entry is `.github`
+  itself, so the tally stayed 1 at every depth. Reading a surviving mutation as "the test
+  is weak" would have weakened a guard that works.
+
+The hidden-**directory** case is the primary fixture rather than an add-on:
+`.github/workflows/*.yml` has visible filenames and is hidden by its directory, so a
+dotfile-only fixture would have gone green while `.github/` stayed invisible — the
+`## Resume` section called this out and it was right.
+
+The capped-tally wording is tested on a **pure function**, deliberately: reproducing it
+through a walk needs a run that both hits the entry cap and prunes a hidden entry before
+breaking, and `ignore::Walk` guarantees no such ordering — that test would pass or fail by
+luck, which is worse than none.
 ## Workarounds
 
 Use `grep(pattern=..., include_hidden=true)` to establish existence of a dot-prefixed

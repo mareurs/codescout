@@ -220,6 +220,42 @@ contradict them.
 
 **Status:** validated — 4 instances, 3 sessions, one evening
 
+### Sub-pattern — mark provenance at the WRITE, because nobody downstream can
+
+Found 2026-08-31, and it is the sharpest thing in `OB-1` because it names a defect the
+reader is *structurally* unable to catch.
+
+**The incident.** A peer measured a figure with an instrument they later identified as
+wrong, and retracted it. I had meanwhile quoted that figure into a commit message as a
+measurement — I never ran it. They then read my commit as an independent re-derivation
+and **un-retracted the number on the strength of it**.
+
+> **A citation loop: one measurement, two documents, reading as two witnesses.**
+
+It is worse than the sibling error of mistaking adjacency for evidence
+(`reconnaissance-patterns:R-145`), in three ways that generalise:
+
+- **Genre supplies the authority.** A commit message's register is *report of work done*,
+  so a bare number inside one reads as measured by default. No ambiguous phrasing is
+  needed; the document type does the work.
+- **It is durable.** A conversational restatement evaporates; a committed one is quoted
+  onward.
+- **It inverted a correction** rather than merely inflating confidence — the loop
+  *destroyed a true datapoint* instead of adding a false one.
+
+**The asymmetry is the actionable part, and it is why this belongs in this ledger:**
+from outside, a document *reporting* a measurement is indistinguishable from one
+*performing* it. **Only the author knows which.** Both instances of this loop were broken
+by the party who introduced it — no reader caught either, and none could have.
+
+> **So provenance is marked at the write, never audited at the read. Cite a figure you
+> did not take as "reported by X", never bare — least of all in an artifact whose genre
+> implies measurement.** One clause at write time; unrecoverable afterwards.
+
+**Instances:** `2f434fba`'s message (the 2765 figure; corrected in code at `390bf4f0`,
+the message itself immutable), and `reconnaissance-patterns:R-142`'s first instance.
+Framing of the genre/durability/inversion asymmetry is `codescout-fe`'s, recorded by them
+at `e8dd2445`.
 ## OB-2 — the session that arms a shared-state trap gets no signal
 
 **Valid:** conditional — reopens if the gate's command order changes, or if a second
