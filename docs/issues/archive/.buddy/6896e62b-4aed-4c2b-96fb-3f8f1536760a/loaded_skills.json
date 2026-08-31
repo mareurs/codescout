@@ -1,0 +1,22 @@
+{
+ "version": 1,
+ "transcript_offset": 10437922,
+ "skills": {
+  "superpowers:brainstorming": {
+   "first_ts": 1788211676,
+   "count": 1
+  },
+  "superpowers:writing-plans": {
+   "first_ts": 1788211676,
+   "count": 1
+  },
+  "superpowers:subagent-driven-development": {
+   "first_ts": 1788211676,
+   "count": 1
+  },
+  "codescout-companion:reconnaissance": {
+   "first_ts": 1788213055,
+   "count": 1
+  }
+ }
+}

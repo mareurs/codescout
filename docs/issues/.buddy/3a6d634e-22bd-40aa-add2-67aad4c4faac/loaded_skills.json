@@ -1,0 +1,14 @@
+{
+ "version": 1,
+ "transcript_offset": 2976863,
+ "skills": {
+  "superpowers:brainstorming": {
+   "first_ts": 1788204953,
+   "count": 1
+  },
+  "superpowers:test-driven-development": {
+   "first_ts": 1788206791,
+   "count": 1
+  }
+ }
+}
