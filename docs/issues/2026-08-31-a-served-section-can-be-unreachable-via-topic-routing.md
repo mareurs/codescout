@@ -181,6 +181,18 @@ because a served section still rides the response it should have informed.
 nothing at all — content topic already spent for the session — and now deliver a section
 written for their shape. All 44 pre-existing guide tests pass unmodified.
 
+**Follow-up, and a retraction of this fix's own prose.** `50590b6c` shipped a comment
+claiming every `guide_blocks_for` path returning empty leaves the ledger untouched, so
+trying a candidate that ships nothing is free. Argued from reading, never run, and false:
+`GuideLedger::insert` refreshes the stamp and persists on repeats, and two of the four
+empty-return paths call it. Delivery was never affected — that is what the mutation runs
+proved — but a fallthrough onto a spent declaring topic cost N stamp refreshes and N disk
+writes for zero bytes. Retracted in `8bae6ba0`, then fixed in `8364e472` once
+`expire_idle` and `persist` had been read: both paths now use `contains`-then-`insert`,
+matching `op_content` eight lines down. The harms split cleanly by tier and neither tier
+paid both — identified sessions have `idle_ttl: None` so their stamps are never read for
+expiry, and anonymous sessions have `path: None` so `persist` returns early.
+
 Candidate fixes as originally framed, with what testing them showed:
 
 - **Make declaration beat content.** If any section in the corpus declares the call's
