@@ -11,7 +11,7 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: medium
-unverified: The FIX is gate-green with five regression tests, but they reach index_envelope only — the call site in ProjectStatus/call that passes git_sync_status(&root) in is guarded by nothing and needs a populated Qdrant to reach. Not yet re-verified against a rebuilt live MCP; the running server still answers from the pre-fix binary.
+unverified: 'Cost, not correctness. The fix is confirmed LIVE 2026-08-31 11:59Z against the rebuilt binary on a discriminating case (54000 chunks, 3 commits behind — the pre-fix code would have said up_to_date). What remains is structural: the call site in ProjectStatus/call has no automated guard, because reaching it needs a populated Qdrant behind an uninjectable RetrievalClient::from_env. A re-hardcode would be caught only by another live check, never by the suite. See § Tests added.'
 ---
 
 # BUG: workspace(status) reports index.status "up_to_date" on chunks > 0 alone, never consulting git_sync
@@ -251,6 +251,38 @@ observer that would catch a regression is a live `workspace(action="status")` ag
 rebuilt binary — recorded at the tests themselves, so five green ticks are not read as
 end-to-end protection they do not provide. This is the "mutate once per guarded **site**,
 not per feature" rule in CLAUDE.md § *Testing Discipline*, applied to its own fix.
+**Confirmed live 2026-08-31 11:59Z**, against the rebuilt binary — `server.git_sha`
+`926bcdba` on pid 3786819, up from 3247619, so a fresh process reading the fix rather than
+a warm one reporting on itself.
+
+The case was **discriminating, not confirmatory**, which is the whole value: the index held
+**54,000 chunks** and was **3 commits behind** (`4bb0c76e` → `926bcdba`). `chunks > 0` was
+satisfied, so the pre-fix code would have answered `up_to_date` on exactly this input. A
+level index would have shown `up_to_date` from both surfaces and proved nothing.
+
+The two surfaces that contradicted each other in the Symptom section now agree, at one
+instant, on one process:
+
+```
+index(action="status")      git_sync: { status: "behind", behind_commits: 3,
+                                        last_indexed_commit: "4bb0c76e",
+                                        head_commit: "926bcdba" }
+workspace(action="status")  index:    { status: "behind", behind_commits: 3,
+                                        last_indexed_commit: "4bb0c76e",
+                                        head_commit: "926bcdba",
+                                        files: 1757, chunks: 54000,
+                                        hint: "Index is behind HEAD; run
+                                               index(action='build') to catch up." }
+```
+
+The corrected hint is live too — it names `build`, the call that resolves the state, rather
+than `status`, which only re-reports it.
+
+**This is what discharges the `unverified:` line, and it narrows rather than clears it.**
+The live check is the only observer that can see the call site, so it covers this instant
+and no future one. The structural gap stands: a re-hardcode of that arm passes the whole
+suite, and nothing but another live check would notice. That residual is cost, not
+correctness — recorded here so the archive does not read as fuller coverage than exists.
 ## Workarounds
 
 Use `index(action="verify")` rather than `workspace(action="status")` whenever currency
