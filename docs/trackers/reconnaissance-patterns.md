@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 146
+entry_high_water_R: 147
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-147 | 2026-08-31 | miss → rule | **A quotation that asserts its own fidelity does not check it — and the assertion is what stops the reader looking.** A manual block reproduced a plugin's SessionStart injection under a ⚠️ note saying it was quoted **verbatim** from `session-start.mjs:339`, that its last line was known-wrong, and that it was reproduced unchanged *"because a manual that quotes a hook has to match the hook"* — correct reasoning, exact `file:line`, and the known-wrong line did match. **Two of the other three lines had drifted anyway** (hook emits `POST-COMPACT: Context was just compacted.` / `workspace(post_compact=true)`; block showed `codescout PostCompact: …` / the `action: status` form), and the section's closing prose repeated the second error. The label INVERTS the check: a reader told "quoted verbatim" has been told the check was done, so the assurance substitutes for it — an unlabelled quote invites *is this current?*, a labelled one answers pre-emptively and wrongly. It also survived a deliberate correction pass the day before, which edited this very block to add the warning and did not re-derive the rest: **a targeted edit is exactly what will not look at the parts you are not thinking about.** Caught by comparing against what a live session actually received, not by re-reading. **Runnable:** treat a quotation of a live emitter as a DERIVED artifact — re-derive the whole block whenever you touch any line of it, or drop the fidelity claim and say *paraphrased*. | this session; instance in `caa8bc1df0e8c0d8` § Fix, fixed at `2c730ebd`; documentation-side twin of R-89; kin R-142, R-144 |
 | R-146 | 2026-08-31 | miss → rule (5 instances, one day), Promote-when FIRED | **A measurement of state someone else is editing expires before the message carrying it arrives — and the cost FLIPS SIGN rather than decaying.** A peer reported the lean lane red naming two `tools::tree` tests, with sound attribution (neither name exists at `git show HEAD`, so new-and-red not a regression) — but *new-and-red is RED's own signature*, so the very evidence proving it was not a regression is what should have marked it transient. Re-measured here: **7 passed, 0 failed**, both named tests green; `grep cfg(feature` → 0 matches, so not lane-specific; the file read **+204 → +214 → +360** across three readings, 146 lines added between their run and mine. Acting on the stale warning costs the INVERSE of what it prevents — not a session blaming itself for another's red, but a session distrusting a green that is real. Two sibling instances the same evening: an unbacked "the tree dotfile bug is mine" that displaced the bug's own filer, retracted as *"a claim with no work behind it … asserts a state that has an expiry and does not carry one."* **Runnable:** ship the derivation (command + instant + cheap re-check), not the value; re-run on receipt whenever the artifact is under active edit. | this session, verified by re-measurement; kin R-98, R-142, R-143 |
 | R-145 | 2026-08-31 | miss → rule | **Co-occurrence in a working-tree snapshot is not evidence of one change.** `git status` showed `src/tools/tree.rs` (+204) and `src/util/fs.rs` (+58); I broadcast them to four peer sessions as one change and they were **two authors**, the `fs.rs` delta an unrelated `atomic_write` tmp-file leak fix. Verified after: the fs.rs diff has **0** occurrences of `hidden_at_root` and **5** of `atomic_write`, and the tree.rs diff adds **no** `util::fs` import — no dependency edge in either direction. The instrument caused it: `git diff -U0 -- <a> <b>` into one buffer carries no author column and no separator a skim registers, and the disconfirming evidence was already sitting in that buffer's tail. Complement of R-50 rather than an instance — that is a view which silently DROPPED, this is one that silently MERGED, and in a shared checkout `git status` is a union over N concurrent authors. **Runnable:** `--stat` per path, and look for a dependency edge before calling two paths one change. | this session, corrected by an author's reply after 4 messages had gone out; kin R-50, R-142, R-4 |
 | R-144 | 2026-08-31 | miss → rule (3 instances, one stream) | **A tripwire aimed at a FABRICATED fixture cannot detect the change it was written to detect.** A test meant to notice a future change must assert on a value the system PRODUCES; given a literal it holds equally in the world where the change landed and the world where it did not, so it is silent in both. Three instances, escalating: (1) `RoutedEchoTool { name: "memory" }` supplied the `selector_key` production `Memory` lacked, so the whole operator-rules suite was green while every triggered rule was dead — fixed `2447f709`; (2) a regression test asserted `by_check.get(…).is_none()` to mean *found nothing here*, encoding the exact ambiguity it guarded, and passing under BOTH conflated world-states — fixed `09cd1b46`; (3) worst, `op_4s_path_predicate_cannot_fire_against_a_write_response_today` **advertised itself as a detector** — *"when this test starts failing, that is the fix landing"* — and did not fail when the fix landed at `a6b4fc35`, because its fixture was a hand-written response bound to a variable named `observed`. It bought a tripwire's confidence and delivered none; a fabricated fixture is what a reader skims past, because it looks like setup. **Tell:** a literal beside an assertion about production behaviour — ask *did anything under test produce this value?* **Runnable:** a test naming a future condition must obtain its fixture from the pipeline it watches, or say in its doc that it cannot. | this session, all three fixed; sibling of `observer-blindness:OB-5` (which covers the vocabulary half — this covers whether the fixture was produced at all); kin R-139 |
@@ -6125,6 +6126,65 @@ ownership claims, one of which displaced the bug's own filer; and one compile-br
 stale within ten seconds and cheap to discharge because it shipped its derivation).
 
 **Kin:** R-98 (a max read at the start of a pass is stale by the time you write — a peer took R-97 with a four-minute margin), R-142, R-143 (ship the instrument, not the number), R-145
+
+## R-147 — A quotation that asserts its own fidelity does not check it, and the assertion is what stops the reader looking
+
+**Valid:** dated 2026-08-31
+
+**Verdict:** miss → rule · **Observed:** 2026-08-31, landing the cross-repo half of the
+post-compact bug (`caa8bc1df0e8c0d8`)
+
+**Seam:** whether a block of text labelled *quoted verbatim* from a live emitter still matches
+what that emitter emits.
+
+`docs/manual/src/concepts/post-compact-cache-flush.md` reproduced the companion plugin's
+SessionStart injection inside a fenced block, with a ⚠️ note directly beneath stating it was
+quoted **verbatim** from `codescout-companion/hooks/session-start.mjs:339`, that its last line was
+known to be wrong, and that it was *"reproduced unchanged rather than silently corrected, because
+a manual that quotes a hook has to match the hook."*
+
+That reasoning is correct, the marker names the exact file and line, and the known-wrong line
+genuinely did match. **Two of the block's other three lines had drifted anyway.** The hook emits
+`POST-COMPACT: Context was just compacted.` and `workspace(post_compact=true)`; the block showed
+`codescout PostCompact: context was compacted.` and the `action: status` form — and the
+section's closing prose repeated the second error a few lines further down.
+
+**Why this is not just ordinary doc drift.** The marker is the best-intentioned version of the
+practice: added deliberately, by an author who had the invariant explicitly in mind, naming its
+source precisely. Its effect is *inverted*. A reader who sees "quoted verbatim" has been told the
+check was already done, so the label **substitutes** for the check rather than prompting it. An
+unlabelled quote invites *is this current?*; a labelled one answers the question pre-emptively and
+wrongly. The stronger the assurance, the less likely anyone looks — which is the same structure as
+`observer-blindness`'s reassuring-instrument class, arrived at from the documentation side.
+
+**And it survived a deliberate correction pass.** On 2026-08-30 someone edited *this exact block's
+surroundings* to add the warning about the wrong last line, and did not notice the other two.
+Editing a quotation for one reason does not re-derive it — the parts you are not thinking about
+are exactly the parts a targeted edit leaves alone.
+
+**What caught it:** not re-reading the block, but comparing it against what a live consumer
+actually received. The injected text was sitting in this session's own SessionStart context, so
+the emitter's real output and the manual's claim about it were both in front of me at once. That
+adjacency was luck; the rule below is how to get it on purpose.
+
+**Tell:** any block labelled *verbatim*, *quoted from*, *as emitted by*, *copied from* — most of
+all one whose label names a `file:line`, because the precision reads as recency.
+
+**Runnable:** a quotation of a live emitter is a **derived artifact** — treat it like generated
+code, not like prose. Re-derive it at the moment you touch anything inside it (`sed -n` the
+emitting lines, or capture what a live consumer received), or stop asserting fidelity and label it
+*paraphrased*. Never edit one line of a quoted block without re-deriving the whole block: the
+targeted edit is precisely what will not look at the rest.
+
+**Promote-when:** a second instance of a fidelity-asserting label found stale — in this repo or
+another. A cheap sweep exists: grep for `verbatim`, `quoted from`, `as emitted` across `docs/` and
+diff each hit against its named source.
+
+**Status:** open — 1 datapoint, but a dense one: 3 drifted lines under an explicit verbatim
+marker, one of them surviving a deliberate edit of the same block a day earlier.
+
+**Kin:** R-89 (probe the copy the consumer loads — this is its documentation-side twin), R-142
+(a restatement is not a second witness), R-144 (a fixture that cannot detect what it advertises)
 
 ## Template for new entries
 
