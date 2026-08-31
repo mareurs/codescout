@@ -50,22 +50,31 @@ the MCP transport and cannot call tools directly, the hook injects an
 `additionalContext` directive:
 
 ```
-codescout PostCompact: context was compacted.
-→ Call workspace(action: status, post_compact: true) as your FIRST action to flush stale LSP position caches.
-   LSP clients restart lazily — no disruption to the session.
+POST-COMPACT: Context was just compacted.
+→ Call workspace(post_compact=true) as your FIRST action to flush stale LSP position caches.
+   The first navigation call after it (symbol_at, references) pays the language-server
+   start, unless another session in this workspace is already holding it warm — the
+   server is shared per workspace, not per session. If that call stalls or times out,
+   re-run it.
 ```
 
-> ⚠️ The block above is quoted **verbatim** from what the hook currently emits
-> (`codescout-companion/hooks/session-start.mjs:339`), and its last line — *"LSP
-> clients restart lazily — no disruption to the session"* — is **wrong** for the
-> reason given in the section above. It is reproduced unchanged rather than silently
-> corrected, because a manual that quotes a hook has to match the hook. Fixing it is a
-> change in the `claude-plugins` repo, tracked in
-> `docs/issues/2026-08-28-post-compact-flush-leaves-first-nav-call-to-pay-cold-start.md`;
-> update this quotation in the same commit that lands there.
+*(Updated 2026-08-31, in step with the hook. The block above used to end "LSP clients
+restart lazily — no disruption to the session" — the sentence that cost an investigation
+its diagnosis — and was reproduced unchanged on purpose, because a manual that quotes a
+hook has to match the hook. That sentence is now fixed at its source in the
+`claude-plugins` repo, so the quotation moves with it.*
+
+*Worth recording: while it carried a warning asserting it was quoted **verbatim**, two of
+its three lines had silently drifted anyway. The hook emits "POST-COMPACT: Context was
+just compacted." and `workspace(post_compact=true)`; this block showed "codescout
+PostCompact: context was compacted." and the `action: status` form. Caught by reading
+what a live session actually received, not by re-reading the block. A quotation that
+asserts its own fidelity does not check it — re-read the emitting file whenever you touch
+this section.)*
 
 The agent sees this as the first message of the new turn and calls
-`workspace(action: status, post_compact: true)` before any navigation work.
+`workspace(post_compact=true)` before any navigation work — the form the hook actually
+names, and the one verified live on 2026-08-31.
 
 ## When is this useful?
 
