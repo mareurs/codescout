@@ -14,6 +14,7 @@ tags:
 - read_file
 - audit
 - omnibus
+- cluster/capped-result-presented-as-complete
 fixed: 2026-07-10
 opened: 2026-07-10
 related:

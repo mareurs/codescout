@@ -1,12 +1,20 @@
 ---
-status: fixed
-opened: 2026-08-06
-closed: 2026-08-06
-severity: high
-owner: marius
-related: ["56b725405a9c36d1", "21f6d21b3bf82c30"]
-tags: [librarian, audit_doc_refs, ci, progressive-disclosure, silent-cap]
 kind: bug
+status: fixed
+tags:
+- librarian
+- audit_doc_refs
+- ci
+- progressive-disclosure
+- silent-cap
+- cluster/capped-result-presented-as-complete
+closed: 2026-08-06
+opened: 2026-08-06
+owner: marius
+related:
+- '56b725405a9c36d1'
+- '21f6d21b3bf82c30'
+severity: high
 ---
 
 # BUG: audit_doc_refs exits 1 but its 50-finding cap hides every finding that caused it

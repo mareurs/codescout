@@ -1,5 +1,5 @@
 ---
-id: 9fabc6ccc51d865f
+id: '9fabc6ccc51d865f'
 kind: bug
 status: fixed
 title: 'BUG: run_command''s unfiltered_output ref carries no size/emptiness signal — an agent cannot tell a 2-line buffer from a 20,000-line one without a blind round-trip'
@@ -7,6 +7,7 @@ tags:
 - run_command
 - progressive-disclosure
 - usability
+- cluster/capped-result-presented-as-complete
 closed: 2026-08-26
 opened: 2026-08-26
 owner: marius

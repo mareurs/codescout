@@ -11,6 +11,7 @@ tags:
 - silent-failure
 - read_file
 - json_path
+- cluster/capped-result-presented-as-complete
 closed: 2026-07-10
 opened: 2026-07-09
 owner: marius

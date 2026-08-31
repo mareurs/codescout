@@ -9,6 +9,7 @@ tags:
 - edit_markdown
 - read_markdown
 - data-loss
+- cluster/guard-narrower-than-its-name
 closed: 2026-08-16
 opened: 2026-08-16
 owner: marius

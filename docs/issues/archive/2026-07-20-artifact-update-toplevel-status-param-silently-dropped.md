@@ -9,6 +9,7 @@ tags:
 - update
 - silent-noop
 - schema-drift
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-07-20
 opened: 2026-07-20
 owner: marius

@@ -1,12 +1,17 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-16
+tags:
+- librarian
+- silent-failure
+- api-ergonomics
+- tool-quirk
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-08-16
-severity: medium
+opened: 2026-08-16
 owner: marius
 related: []
-tags: [librarian, silent-failure, api-ergonomics, tool-quirk]
-kind: bug
+severity: medium
 ---
 
 # BUG: `artifact(action="update_entry")` silently no-ops when the patch arrives under the wrong param name

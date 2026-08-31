@@ -6,6 +6,7 @@ tags:
 - artifact-create
 - silent-drop
 - doc-vs-code-drift
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-08-16
 opened: 2026-08-16
 owner: marius

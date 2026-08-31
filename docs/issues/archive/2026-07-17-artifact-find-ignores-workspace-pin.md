@@ -7,6 +7,7 @@ tags:
 - workspace-pin
 - librarian
 - artifact-find
+- cluster/accepted-parameter-silently-dropped
 ---
 
 ## Summary

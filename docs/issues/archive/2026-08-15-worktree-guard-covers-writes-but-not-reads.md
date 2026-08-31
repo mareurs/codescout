@@ -11,6 +11,7 @@ tags:
 - guards
 - silent-wrong-answer
 - agent-agnostic
+- cluster/guard-narrower-than-its-name
 ---
 
 ## Summary

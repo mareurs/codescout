@@ -6,6 +6,7 @@ tags:
 - vacuous-assertion
 - codescout-embed
 - embeddings
+- cluster/assertion-that-cannot-fail
 closed: 2026-08-30
 opened: 2026-08-30
 owner: marius

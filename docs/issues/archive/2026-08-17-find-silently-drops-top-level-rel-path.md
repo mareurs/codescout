@@ -1,5 +1,5 @@
 ---
-id: 7d9e2dc48eb2b128
+id: '7d9e2dc48eb2b128'
 kind: bug
 status: fixed
 title: 'BUG: artifact(find) silently drops a top-level `rel_path` and returns page 1 of the catalog as `count: 50` — the number that reads as a match total is the default limit'
@@ -9,6 +9,7 @@ tags:
 - find
 - schema
 - silent-drop
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-08-17
 opened: 2026-08-17
 owner: marius

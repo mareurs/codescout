@@ -7,6 +7,7 @@ tags:
 - write-lock
 - cross-process
 - green-proves-nothing
+- cluster/assertion-that-cannot-fail
 closed: 2026-08-27
 opened: 2026-08-27
 owner: marius

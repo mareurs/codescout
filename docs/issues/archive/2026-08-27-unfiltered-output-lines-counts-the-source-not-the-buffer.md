@@ -1,5 +1,5 @@
 ---
-id: 2b2dec92f0996cf3
+id: '2b2dec92f0996cf3'
 kind: bug
 status: fixed
 title: unfiltered_output_lines counts the source, not the buffer — and greps over the truncated buffer answer silently-partially
@@ -8,6 +8,7 @@ tags:
 - progressive-disclosure
 - buffers
 - observability
+- cluster/capped-result-presented-as-complete
 ---
 
 ---

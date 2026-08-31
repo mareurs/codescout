@@ -7,6 +7,7 @@ tags:
 - workspace-pin
 - audit
 - residual
+- cluster/accepted-parameter-silently-dropped
 ---
 
 ## Summary

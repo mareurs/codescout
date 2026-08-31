@@ -1,19 +1,15 @@
 ---
-id: null
 kind: bug
 status: fixed
-title: null
-owners: []
 tags:
 - workspace-pin
 - memory
 - semantic-store
 - cross-embed
 - data-integrity
-topic: null
-time_scope: null
-closed: '2026-07-13'
-opened: '2026-07-10'
+- cluster/accepted-parameter-silently-dropped
+closed: 2026-07-13
+opened: 2026-07-10
 owner: marius
 related:
 - docs/issues/2026-07-09-residual-workspace-pin-gaps-post-edit-code-fix.md

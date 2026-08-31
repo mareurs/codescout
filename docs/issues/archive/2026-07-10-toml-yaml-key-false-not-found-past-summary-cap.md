@@ -12,6 +12,7 @@ tags:
 - yaml
 - correctness
 - silent-cap
+- cluster/capped-result-presented-as-complete
 closed: 2026-07-10
 opened: 2026-07-10
 related:

@@ -1,5 +1,5 @@
 ---
-id: 43a4abe4f4397663
+id: '43a4abe4f4397663'
 kind: bug
 status: fixed
 title: 'BUG: link_scan caps its finding arrays at 8% of the population and reports the truncation somewhere nobody reads — so absence from a bucket looks like a clean result'
@@ -9,6 +9,7 @@ tags:
 - negative-results
 - silent-truncation
 - progressive-disclosure
+- cluster/capped-result-presented-as-complete
 closed: 2026-08-31
 found_by: codescout-f0 (pid 807989), filed here at their offer
 opened: 2026-08-30

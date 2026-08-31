@@ -6,6 +6,7 @@ tags:
 - usage-db
 - telemetry
 - friction
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-08-20
 opened: 2026-08-20
 owner: marius

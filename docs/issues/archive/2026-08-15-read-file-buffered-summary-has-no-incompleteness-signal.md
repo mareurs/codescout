@@ -5,6 +5,7 @@ tags:
 - read_file
 - progressive-disclosure
 - external-report
+- cluster/capped-result-presented-as-complete
 closed: null
 opened: 2026-08-15
 owner: marius

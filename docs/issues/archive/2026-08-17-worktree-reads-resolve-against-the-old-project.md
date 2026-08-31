@@ -1,5 +1,5 @@
 ---
-id: 3650e74d5331221e
+id: '3650e74d5331221e'
 kind: bug
 status: mitigated
 title: 'BUG: after EnterWorktree, MCP writes are blocked until activate but reads are not — git reconnaissance silently answers about the old checkout, and the notice that says so sits beside the answer'
@@ -10,6 +10,7 @@ tags:
 - guard
 - silent-wrong-answer
 - companion-plugin
+- cluster/guard-narrower-than-its-name
 opened: 2026-08-17
 owner: marius
 related:

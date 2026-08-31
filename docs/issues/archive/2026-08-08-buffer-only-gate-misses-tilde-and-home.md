@@ -6,6 +6,7 @@ tags:
 - run_command
 - output-buffer
 - windows
+- cluster/guard-narrower-than-its-name
 closed: 2026-08-08
 opened: 2026-08-08
 owner: marius

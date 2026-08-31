@@ -1,17 +1,18 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-28
+tags:
+- librarian
+- data-loss
+- progressive-disclosure
+- cluster/capped-result-presented-as-complete
 closed: 2026-08-29
-severity: high
+opened: 2026-08-28
 owner: marius
 related:
-  - docs/trackers/resume-cross-machine-catalog-restore.md
-  - docs/issues/archive/2026-08-28-memory-write-has-no-shrink-guard.md
-tags:
-  - librarian
-  - data-loss
-  - progressive-disclosure
-kind: bug
+- docs/trackers/resume-cross-machine-catalog-restore.md
+- docs/issues/archive/2026-08-28-memory-write-has-no-shrink-guard.md
+severity: high
 ---
 
 # BUG: a capped `artifact get --full` body round-trips into a truncating `artifact update --body`, and the shrink guard cannot see it

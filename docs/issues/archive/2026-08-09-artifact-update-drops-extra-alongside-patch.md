@@ -10,6 +10,7 @@ tags:
 - artifact
 - silent-data-loss
 - tool-quirk
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-08-14
 opened: 2026-08-09
 related:

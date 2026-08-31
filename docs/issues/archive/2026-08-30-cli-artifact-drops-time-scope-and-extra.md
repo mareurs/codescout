@@ -6,6 +6,7 @@ tags:
 - librarian
 - parity
 - silent-default
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-08-30
 opened: 2026-08-30
 owner: marius

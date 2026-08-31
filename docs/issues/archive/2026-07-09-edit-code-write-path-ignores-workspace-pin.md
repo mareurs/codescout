@@ -10,6 +10,7 @@ tags:
 - workspace-pin
 - regression
 - write-path
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-07-09
 opened: 2026-07-09
 severity: high

@@ -1,5 +1,5 @@
 ---
-id: 0622f053fa599a5d
+id: '0622f053fa599a5d'
 kind: bug
 status: fixed
 title: repair_frontmatter_id has no worktree-registration guard, so it rewrites files inside an active worktree — and the check that feeds it misdiagnoses every shadow as a stale move
@@ -10,6 +10,7 @@ tags:
 - librarian
 - worktree
 - fix-safety
+- cluster/guard-narrower-than-its-name
 closed: 2026-08-19
 opened: 2026-08-19
 owner: marius

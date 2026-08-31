@@ -5,6 +5,7 @@ tags:
 - read_file
 - progressive-disclosure
 - external-report
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-08-17
 opened: 2026-08-15
 owner: marius

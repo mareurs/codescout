@@ -8,6 +8,7 @@ tags:
 - trackers
 - progressive-disclosure
 - error-hint
+- cluster/capped-result-presented-as-complete
 closed: 2026-08-27
 opened: 2026-08-27
 owner: marius

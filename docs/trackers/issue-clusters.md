@@ -158,7 +158,7 @@ grep -L 'cluster/' docs/issues/2026-*.md
 |---|---|---|---:|---|---|
 | IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 18 | `OB` (OB-2, OB-3) | partial |
 | IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
-| IC-3 | declaration is not execution | `declared-not-wired` | 20 | `OB` (OB-5 residual) | none yet |
+| IC-3 | declaration is not execution | `declared-not-wired` | 18 | `OB` (OB-5 residual) | none yet |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | `OB` — passes admission test; hook owed | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | `H` — six subsystems; mechanism owed | none yet |
 | IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | `CLAUDE.md` § Parsers Over a Namespace — **landed** | shipped (partial) |
@@ -167,11 +167,11 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 1 | not yet — two tags withdrawn as misfits | none yet |
 | IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
 | IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 1 | not yet — n=1 taggable | none yet |
-| IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | 0 | not yet — 1 instance, untagged | none yet |
-| IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 0 | not yet — count unverified | none yet |
-| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 0 | not yet — count unverified | none yet |
-| IC-15 | a parameter is accepted then silently dropped | `accepted-parameter-silently-dropped` | 0 | not yet — count unverified | none yet |
-| IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | 0 | rule ALREADY in `CLAUDE.md`; membership owed | designed |
+| IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | 0 | not yet — 1 instance, untagged; archive pass found none | none yet |
+| IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 16 | clears count; spread unadjudicated | none yet |
+| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 7 | clears count; spread unadjudicated | none yet |
+| IC-15 | a parameter is accepted then silently dropped | `accepted-parameter-silently-dropped` | 15 | clears count; spread unadjudicated | none yet |
+| IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | 2 | rule ALREADY in `CLAUDE.md`; below threshold | designed |
 
 **Every class at n≥3 clears the count threshold; spread is adjudicated per entry.** Read the `n`
 column — that is the derivation, and it cannot go stale when a count moves. This sentence used to
@@ -244,6 +244,40 @@ an SDD run, and lives in `CLAUDE.md` § *Testing Discipline* already. What never
 indexing the corpus against it — so *"which of our bugs instantiate the vacuous-assertion rule?"*
 has no answer, and nobody can tell whether the rule is working. The class exists to make an
 existing rule measurable rather than to earn a new one.
+**The 2026-09-01 archive pass had no independent second read, and that is the caveat to carry.**
+One party (`codescout-e8`) did both the classification and the tag application for all 40 files
+behind IC-13 (16), IC-14 (7), IC-15 (15) and IC-16 (2), plus the two IC-3 → IC-15 moves. Nobody
+re-checked those assignments against the class claims. That is not a reason to distrust the
+counts; it is the difference between them and the `IC-9` withdrawal, where a second read is
+exactly what caught two misfits. A reader in a month cannot otherwise tell which of the two
+regimes produced a given number.
+
+Each tag was matched against the class's **stated claim**, never the bug file's title — title
+matching is what put the two misfits in `IC-9` four hours earlier, because *"a test that passes
+when it shouldn't"* is true of at least four classes. Members already carrying a `cluster/` tag
+were left alone rather than re-adjudicated, with two deliberate exceptions named below.
+
+**`IC-12` received nothing, and that is a finding rather than an omission.** Its claim requires a
+*transient* mutation of shared state that the standard diagnostic reports as truth; the 279
+untagged archive files contain plenty of shared-state pollution and none that is transient in
+that sense. It stays at 0 on evidence, not on an unexamined queue.
+
+**`IC-11` was deliberately not backfilled.** Roughly 15 doc-vs-code candidates exist, but its
+claim turns on *"the prose was true when written"*, which is a fact about history and not about
+the text — the same discriminator `claim-decay`'s inclusion test makes mandatory, and which
+separates `decayed` from `never-true` only under `git log -S`. Tagging them without that probe
+per file would be exactly the shortcut that ledger exists to forbid.
+
+**The `IC-3` / `IC-15` boundary, settled 2026-09-01 on the remedy test** — the same test that
+keeps `IC-1` and `IC-2` apart. The discriminator is: **was a caller-supplied value accepted?**
+If yes, the code path *ran* and discarded the value, and the remedy is to round-trip it or refuse
+it — `IC-15`. If no, the capability exists and no call site reaches it, and the remedy is to find
+a caller — `IC-3`. Applied to `IC-3`'s twenty, exactly two move: `audit-doc-refs-scope-param-ignored`
+and `audit-doc-refs-fail-on-doc-mismatch`, both of which take a caller's value and drop it.
+`cli-doctor-exposes-no-fix-flag` stays in `IC-3` — the flag does not exist at the boundary, so
+nothing is accepted to be dropped — and `audit-doc-refs-lsp-stubbed-off` stays for the same
+reason. `constitution-rule-malformed-glob-silent-fail-open` and `drift-detection-enabled-is-a-dead-config-key`
+were left in `IC-3` as genuinely arguable rather than moved on a coin-flip.
 ## IC-1 — the blast radius of a write is wider than the set of peers you can see
 
 **Slug:** `cluster/blast-radius-exceeds-visibility`
@@ -300,7 +334,7 @@ proxy and reported its output as knowledge.
 
 **Slug:** `cluster/declared-not-wired`
 **Claim:** A surface declares a capability that production never reaches. Every piece is individually correct — the selector, the matcher, the ledger entry, the schema — and no call site connects them, so the declaration reads as a shipped feature and tests pass in isolation.
-**Members:** `filter={"tags": {"contains": "cluster/declared-not-wired"}}` — n=20, 2026-08-31, by query after archive backfill.
+**Members:** `filter={"tags": {"contains": "cluster/declared-not-wired"}}` — n=18, 2026-09-01, by query. Was 20 until the `IC-15` boundary was settled on the remedy test; two members that accept a caller's value and drop it moved there. See the Index.
 **Blind party:** the author of the declaration, specifically. They hold the mental model in which the wiring exists — writing `**Serves:** edit_file(path~/.claude)` *is* the act of believing it is served. A more careful version of the same author writes the same line.
 **Promotes to:** `OB` — `docs/trackers/observer-blindness.md`. `OB-5` already carries this as its *"Known-open residual — declaration is not execution"*; this class is the instance side of that residual and the two should be linked rather than duplicated.
 **Mechanism status:** none yet. The remedy is a reachability check — for each declared selector, assert some production path emits it — and nothing implements one.
@@ -535,7 +569,7 @@ Measured 2026-08-31, within a minute of git hooks being enabled on this shared c
 
 **Slug:** `cluster/capped-result-presented-as-complete`
 **Claim:** A result is truncated by a limit — a page size, a byte budget, a display cap — and returned without a marker saying so. The caller reads a partial answer as the whole answer, and a **zero** from a capped scan reads as "not present" rather than "not reached".
-**Members:** `filter={"tags": {"contains": "cluster/capped-result-presented-as-complete"}}` — n=0 tagged, 2026-09-01. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), which I have not independently verified.** The count is a peer's, the membership is unassigned, and the query is honest about that: it returns nothing until the files are tagged.
+**Members:** `filter={"tags": {"contains": "cluster/capped-result-presented-as-complete"}}` — n=16, 2026-09-01, by query after the archive backfill pass. Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), which I have not independently verified.** The count is a peer's, the membership is unassigned, and the query is honest about that: it returns nothing until the files are tagged.
 **Blind party:** the caller, who has no way to distinguish a short list from a complete one. Also the *author of a downstream count*, since an aggregate computed over a capped scan is wrong in a direction nothing signals.
 **Promotes to:** `not yet` — opened on an unverified count; needs its members tagged before any judgement rests on it.
 **Mechanism status:** none yet, though the shape of one is known — `link_scan` already carries a per-array `counts.truncated` flag, and `run_command`'s buffer envelope carries `unfiltered_truncated`. Both are the pattern to copy.
@@ -551,7 +585,7 @@ The archived instances are not yet cited here because I have not read them. What
 
 **Slug:** `cluster/guard-narrower-than-its-name`
 **Claim:** A guard's name states the property; its implementation covers a subset of it. Everything the name promises is believed protected, the uncovered remainder is protected by nothing, and the guard's own green result is what conceals the gap.
-**Members:** `filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}}` — n=0 tagged, 2026-09-01. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me.**
+**Members:** `filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}}` — n=7, 2026-09-01, by query after the archive backfill pass. Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me.**
 **Blind party:** everyone downstream of the name. The implementer knows the scope at the moment they write it; every later reader knows only the name, and the name is what they reason with. This is `OB-1`'s shape — the parameter the author's context supplied for free.
 **Promotes to:** `not yet` — opened on an unverified count.
 **Mechanism status:** none yet.
@@ -569,7 +603,7 @@ Two live examples visible from this session without consulting the archive. `car
 
 **Slug:** `cluster/accepted-parameter-silently-dropped`
 **Claim:** A parameter is accepted at the boundary — it validates, the call succeeds — and some path downstream discards it. The caller has positive evidence the value was set, because nothing rejected it, and no later observation distinguishes "applied" from "accepted and dropped".
-**Members:** `filter={"tags": {"contains": "cluster/accepted-parameter-silently-dropped"}}` — n=0 tagged, 2026-09-01. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me.**
+**Members:** `filter={"tags": {"contains": "cluster/accepted-parameter-silently-dropped"}}` — n=15, 2026-09-01, by query after the archive backfill pass (13 newly tagged, 2 moved from `IC-3`). Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me.**
 **Blind party:** the caller, and specifically because acceptance is the only feedback the interface gives. Rejection is loud; silent discard is indistinguishable from success at every point they can observe.
 **Promotes to:** `not yet` — opened on an unverified count.
 **Mechanism status:** none yet.
@@ -587,7 +621,7 @@ Note the asymmetry that makes this worth a class rather than a bug-by-bug fix: t
 
 **Slug:** `cluster/assertion-that-cannot-fail`
 **Claim:** An assertion has **no input that would make it fail**. It is not weak coverage — it is zero coverage wearing a passing test's clothes, and it is added most often in the very commit that closes a missing-guard finding.
-**Members:** `filter={"tags": {"contains": "cluster/assertion-that-cannot-fail"}}` — n=0 tagged, 2026-09-01. Named as a candidate by the 2026-08-31 backfill and by the `IC-9` tag withdrawal; at least two archive members are identified (`ollama_large_batch_exceeding_batch_size`, vacuous the day it was written; `cross-process-write-lock-test-passes-when-it-does-not-run`, vacuous when skipped) and `CLAUDE.md` records four more from a single SDD run.
+**Members:** `filter={"tags": {"contains": "cluster/assertion-that-cannot-fail"}}` — n=2, 2026-09-01, by query — the two members the `IC-9` withdrawal identified, now tagged here. Below threshold. Single-party classification — see the Index caveat. Named as a candidate by the 2026-08-31 backfill and by the `IC-9` tag withdrawal; at least two archive members are identified (`ollama_large_batch_exceeding_batch_size`, vacuous the day it was written; `cross-process-write-lock-test-passes-when-it-does-not-run`, vacuous when skipped) and `CLAUDE.md` records four more from a single SDD run.
 **Blind party:** the reviewer, structurally — a passing test is the evidence they are given, and vacuity is invisible in exactly that evidence. `CLAUDE.md` measures it: of four found in one run, *"the fourth only because the final reviewer was told to hunt for one."* Care does not find these; a changed question does.
 **Promotes to:** `not yet` for the ledger's purposes, but note it is **already promoted in substance** — `CLAUDE.md` § *Testing Discipline* and § *SDD Rulings* both carry it (*"Ask 'what mutation would make this test fail?', never 'does it pass?'"*, and *demand a deliberate break*). What is missing is the membership query, not the rule.
 **Mechanism status:** `designed` — the rule exists and is written down; nothing enforces it. Mutation testing per guarded site is the mechanism, applied by hand today.

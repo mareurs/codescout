@@ -1,5 +1,5 @@
 ---
-id: 388290ad0f86fe03
+id: '388290ad0f86fe03'
 kind: bug
 status: fixed
 title: 'BUG: the librarian guard is blind to any artifact whose frontmatter omits `id:` — 26 of 66 tracker/bug files are unprotected, including the most-damaged ledger'
@@ -8,6 +8,7 @@ tags:
 - guard
 - trackers
 - data-integrity
+- cluster/guard-narrower-than-its-name
 ---
 
 ## Summary

@@ -5,6 +5,7 @@ tags:
 - grep
 - progressive-disclosure
 - external-report
+- cluster/capped-result-presented-as-complete
 closed: 2026-08-16
 opened: 2026-08-15
 owner: marius

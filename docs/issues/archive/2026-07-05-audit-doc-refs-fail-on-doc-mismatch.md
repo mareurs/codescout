@@ -5,7 +5,7 @@ tags:
 - librarian
 - audit_doc_refs
 - doc-drift
-- cluster/declared-not-wired
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-07-06
 opened: 2026-07-05
 owner: marius
