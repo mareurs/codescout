@@ -185,8 +185,8 @@ Append below. Newest run first.
 
 Plan: `docs/superpowers/plans/2026-08-31-cross-machine-catalog-recovery.md` ·
 Spec: `docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md` ·
-15 commits (2 dropped by the integrating rebase as already-upstream) · final review
-0 Critical / 5 Important, all closed · **30 rulings, 1 outright wrong, 1 partly wrong,
+18 commits (2 dropped by the integrating rebase as already-upstream) · final review
+0 Critical / 5 Important, all closed · **31 rulings, 1 outright wrong, 1 partly wrong,
 1 superseded.**
 
 Unusual shape worth noting before the table: this run spanned **two machines**, with a
@@ -225,6 +225,7 @@ are about that concurrency rather than about the plan.
 | Repair the six SHA citations the integrating rebase orphaned by patch-id lookup, and label every retained pre-rebase SHA as history rather than deleting it | process | a few extra parenthetical SHAs | held — deleting would hide that the rot happened, and this run's subject is durability across machines |
 | Run the four-command gate AFTER the rebase, not before — the merged tree is a state neither machine has compiled | process | ~80s | held — merged tree green, 3412 lean / 4975 default, 0 failed |
 | Recover Task 4's unrecorded findings from the subagent transcript before deleting the workspace, rather than accept them as lost | process | three minors and two Importants deleted with a gitignored directory | held |
+| Delete the run workspace at finish — but only after scanning the ledger for content with no durable home, which found three items and moved them into two git-tracked memories first. The previous run's deletion is logged WRONG in this very file for destroying its reports; the difference is the scan, not the decision | process | the run's narrative reports go, and the ruling log's summary is what survives of them | held |
 
 **Lessons this run adds, all with two or more instances:**
 
