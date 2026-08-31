@@ -231,11 +231,34 @@ unresolved rather than swept in.
 
 **Severity:** high — silent, produces a confident wrong answer, and its natural remedy makes the error permanent.
 
-**Status:** open — no mechanism. The instrument's own population is not queryable through the instrument, which is why three passive re-reads produced three identical wrong answers.
+**Status:** open — mechanism still owed. **The published ratio was wrong and is corrected below**; `F-3` caught it. The claim it supports survives the correction; the number in this entry's own heading does not, and the heading is left intact because it is the citable token.
 
 **Rests on:** the socket count being a live-session proxy — supported here by both known session addresses appearing in it, but not independently established as complete either.
 
 **Fix idea / Pointer:** this is `IC-1`'s *visibility* half with a number attached, and the number is the contribution — the class text says "the peer cannot be enumerated", which reads as a possibility rather than a 5× under-count. Related: `docs/issues/2026-08-31-cross-account-agents-cannot-see-each-other.md`, `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`.
+
+**Correction, 2026-09-01 — the claim holds, the ratio does not, and it is not a single number.**
+`F-3` caught a units mismatch here and was right to. `4 of 20` compares a **profile-scoped
+instrument** against a **raw socket-file count**, and 7 of those 20 sockets are stale files with
+no process — so "20 live session sockets" above is wrong on its own terms; 13 are live. Written
+by this entry's author, because `F-3` deliberately declined to annotate another party's entry and
+left it open; the pointer arrived by `codescout-b1` asking who owned `F-2`, which is the same
+channel that resolved everything else tonight.
+
+**But `F-3`'s replacement figure of `1 of 4` does not transfer to this session, and that is the
+sharper finding.** That table was measured from a `~/.claude` vantage, where three of the four
+listed peers sit in `mirela/backend-kotlin`. Re-derived here with `scripts/peer-sessions.sh` for
+this `~/.claude-sdd` session: 5 live sessions have `cwd` inside this checkout (**4 peers**);
+`ListAgents` returns 4 peers, of which **2** share this working tree (`2081267`, `2481440`) and 2
+do not (`claude-plugins`, `agents/system`); the two same-checkout peers it misses (`2112574`,
+`3708603`) are both `~/.claude`. The honest figure **here** is `2 of 4`.
+
+**So the ratio is a property of (profile × checkout population), not of the tool.** No single
+number is quotable as "the" under-count — quoting one is exactly how this entry went wrong the
+first time, and a second entry quoting a different one would repeat it. What survives every
+vantage, and is what `IC-1` actually needs: the instrument errs in **both directions at once**,
+missing same-checkout peers on other profiles while reporting other-checkout peers on your own.
+My figure and `F-3`'s disagree on the ratio and agree on that, which is the part to cite.
 
 ## W-2 — The commit's own --stat caught a capture that four correct guards passed
 
