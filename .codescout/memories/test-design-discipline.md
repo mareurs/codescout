@@ -147,9 +147,19 @@ mutation-verifiable. Pin toward the *failing* condition, not away from it: forci
 permanently incapable of catching the bug.
 
 2026-08-13 adds a blunter instance of the same family, worth knowing **before** touching
-retrieval. `src/retrieval/qdrant.rs:422` marks the **only** real-Qdrant test `#[ignore]`, so
-CI never runs it; sqlite's `real_vec0_*` tests (`:421,:482,:565`) are neither ignored nor
-feature-gated and do run, because sqlite-vec needs no daemon. So the backend most
+retrieval. `src/retrieval/qdrant.rs` marks **every** real-Qdrant test `#[ignore]`, so
+CI never runs any of them; sqlite's `real_vec0_*` tests are neither ignored nor
+feature-gated and do run, because sqlite-vec needs no daemon.
+
+**Re-measured 2026-08-31 and the asymmetry has WIDENED, not closed** — the original entry
+said "the only real-Qdrant test" and cited `:422`, which is now `hybrid_query` rather than a
+test at all. Current counts, by symbol rather than by line, since these moved once already:
+`qdrant.rs` holds **4** ignored tests — `qdrant_creates_collection_with_dense_and_sparse`,
+`qdrant_hybrid_query_excludes_paths`,
+`qdrant_hybrid_rrf_query_excludes_paths_on_both_prefetch_legs`,
+`qdrant_worktree_union_ranks_the_delta_by_relevance_not_by_rank_position` — and **0**
+non-ignored. `src/retrieval/sqlite_code_store.rs` holds **5** `real_vec0_*` tests and **0**
+ignored. So one backend has 4 tests none of which run, the other has 5 that all do. So the backend most
 contributors actually run has no automatic coverage, and the one they mostly don't is
 verified — an asymmetry that is easy to invert in your head and get backwards.
 
@@ -271,7 +281,7 @@ Found twice independently on 2026-08-30, by two sessions, each by running the mu
 than reasoning about coverage:
 
 - A hook chain with four links — `edit_markdown` calls the hook, the slot holds it, the syncer
-  updates the row, `server.rs:374` installs the syncer. Three were mutation-checked. Deleting the
+  updates the row, `install_catalog_frontmatter_sync` (`src/server.rs`, ~`:379`) installs the syncer. Three were mutation-checked. Deleting the
   install line left **all 8 tests green**. Predicted, then run, then recorded as a measured
   residual rather than claimed as coverage.
 - A peer's policy resolver: a pure unit test for `resolve()` plus four wire tests. Mutating

@@ -3,8 +3,12 @@
 Cross-repo. Canonical spec: codescout `docs/superpowers/specs/2026-06-18-headroom-proxy-measurement-design.md`.
 
 **Discoverable hub:** codescout tracker *Headroom + llm-proxy integration & trial*
-(id `3366f6ae253097bd`, `docs/trackers/headroom-llm-proxy-integration.md`) — phase, §9 gates,
-pointers, history. Read it with `artifact(action="get", id="3366f6ae253097bd")`. This memory holds
+(id `2483966c259c55e6`, `docs/trackers/archive/headroom-llm-proxy-integration.md`, status
+**archived**) — phase, §9 gates, pointers, history. Read it with
+`artifact(action="get", id="2483966c259c55e6")`. *Re-pointed 2026-08-31: the tracker was
+archived in the 2026-08-16 hygiene sweep (`8ad83c42`), and because `id = sha256(abs_path)` the
+move minted a new id — the old id 3366f6ae253097bd (un-code-spanned deliberately: a statement of absence, not a citation) now returns `unknown artifact id`, so both
+the path and the id in this entry were dead.* This memory holds
 the live ops detail; the tracker is the catalog-indexed hub.
 
 ## Topology

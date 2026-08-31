@@ -32,7 +32,7 @@
 | `Embedder` | Async trait: `embed(&[&str]) -> Vec<Embedding>` + `embed_query(&str)` |
 | `RawChunk` | Pre-embedding text chunk with 1-indexed `start_line` / `end_line` provenance |
 | `model_spec` | Full model identifier including prefix: `local:AllMiniLML6V2Q`, `ollama:<name>`, `openai:<name>` |
-| `chunk_size` | In characters (not tokens); derived as `floor(max_tokens × 0.85 × 3)` |
+| `chunk_size` | In characters (not tokens); `floor(max_tokens × 0.85 × 3)` (`chunk_size_for_model`, `crates/codescout-embed/src/lib.rs:72`). **Local models are then CLAMPED to fastembed's real 512-token ceiling = 1305 chars** — the formula alone would over-chunk a large-context model against a hard cap. `ollama:` specs are not clamped. Pinned by `local_models_are_clamped_to_fastembeds_actual_token_ceiling` |
 
 ## Eval fixture specific (edit-eval-rust)
 
@@ -41,4 +41,4 @@
 | `EditCase` | One eval scenario: input JSON for `edit_code` + expected disk invariants + compiler expectation |
 | `ContentInvariant` | Assertion that a file Contains or NotContains a needle string after the edit |
 | `CompilerExpected` | `Builds` (fixture compiles after edit) or `Breaks` (intentional compile failure) |
-| `Verdict` | Eval outcome: `Correct | SilentWrong | Panic | Hung` |
+| `Verdict` | Eval outcome — **seven** variants (`tests/e2e/eval_common/verdict.rs:2`): `Correct`, `Partial`, `CleanError`, `SilentWrong`, `Corrupt`, `Hung`, `Panic`. The three middle ones are the discriminating cases: `CleanError` is a refusal that reported itself, `SilentWrong` is the dangerous one, `Corrupt` is a damaged file. Verified 2026-08-31 |

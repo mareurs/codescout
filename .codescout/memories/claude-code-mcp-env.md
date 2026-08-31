@@ -4,7 +4,7 @@
 
 - **Elicitation** (server→user structured prompt): supported since **v2.1.76**
   — confirmed by two independent sources; rmcp `elicitation` feature already
-  enabled in `Cargo.toml:50`. Tension with codescout's progressive-disclosure
+  enabled in `Cargo.toml` (`:53` as of 2026-08-31 — the `:50` ref had drifted). Tension with codescout's progressive-disclosure
   design; adopt only as a CC-gated layer over the existing compact disambiguation
   list, never the primary path.
 - **Progress notifications**: ~v2.1.172. **Resources + `list_changed`**,
@@ -38,8 +38,11 @@ not.
 **Claude Code already speaks MCP v2** — inferred from a bug fix that presupposes
 it: 2.1.233 "Fixed MCP v2 connections endlessly reopening the subscriptions/listen
 stream". codescout does not: `ServerCapabilities::builder().enable_tools()
-.enable_tool_list_changed().enable_resources()` (`src/server.rs:867-873`) declares
-no `extensions` block, and rmcp is pinned at **1.3.0**, which predates the spec.
+.enable_tool_list_changed().enable_resources()` (`src/server.rs:1335-1338`, re-located
+2026-08-31 — the old `:867-873` ref had drifted onto unrelated `has_git_remote` code)
+declares no `extensions` block. rmcp is declared `version = "1.3"`, which is a **caret**
+requirement (`>=1.3.0, <2.0.0`), **not a pin** — so "pinned at 1.3.0", as this entry used to
+read, is wrong in a way that matters: `cargo update` can move it with no file changing.
 **Open, and the gate on any adoption: whether the Rust SDK has shipped
 stateless/extensions/tasks support and at what version.** Not yet looked up.
 

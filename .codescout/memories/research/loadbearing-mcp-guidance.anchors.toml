@@ -3,12 +3,12 @@
 
 [[anchors]]
 path = "docs/research/2026-07-03-mcp-guidance-findings.md"
-hash = "d12df27509689b1fdcc6da7826127bd553aaa1526019beab3c6879a4642f207c"
+hash = "8ba97c10171fae3ee7657cb9f025e68edc214025e6327a0558ef8f6440090e07"
 
 [[anchors]]
 path = "docs/trackers/prompt-hamsa-audit-log.md"
-hash = "d527e955668d1e3ea3570c36db5175b13248c1bcadfdf004ccfa4312146523cd"
+hash = "6f3d3d44436a8ff4de85c174b4d5c0cf90530f6e4e6fb4306a68eb8eddd0f9fd"
 
 [[anchors]]
 path = "src/tools/core/types.rs"
-hash = "8e374e3d25b36b8db8969526b401313c00c1a957e33dae10ab113fba6c613374"
+hash = "7319b6b24a7e3068b09bc6177b10da8b14e1037cbbd74f1b293ed574660e6d1b"

@@ -3,12 +3,12 @@
 
 [[anchors]]
 path = "src/server.rs"
-hash = "272266e2b8287ed9d3f39f3794efb408a73c4f9344ecfebd7fcb5351b35d232a"
+hash = "6ecf2977d29063c7ff02047c915039ad158a5a80333bca43b3d2a8f8d8596efc"
 
 [[anchors]]
 path = "src/usage/mod.rs"
-hash = "7690f7f610b237db813e0b58f302ccb0009832661e9b2c9c32b97b3e4a01c5e5"
+hash = "3af2c7bf11fc79390ece4a19879303e6edb7b9c2ddf528485909b16888f4b386"
 
 [[anchors]]
 path = "src/usage/db.rs"
-hash = "66da424510150184f5af46d82cb00afbd0f406301db286f41031a5ff7641d95d"
+hash = "14415de0ac963fb01052e918ee13d447dec834e09ce924f51a258df2222da8a0"

@@ -3,19 +3,19 @@
 
 [[anchors]]
 path = "src/server.rs"
-hash = "52d3c20f8aa796c9132af283c13b48aa5f6801350b533bb58473107d476a4fa1"
+hash = "6ecf2977d29063c7ff02047c915039ad158a5a80333bca43b3d2a8f8d8596efc"
 
 [[anchors]]
 path = "src/tools/core/types.rs"
-hash = "e8e67fab5421656a68863abb7c5f87f8eeb28d67524b9c6076b5921f6d067c83"
+hash = "7319b6b24a7e3068b09bc6177b10da8b14e1037cbbd74f1b293ed574660e6d1b"
 
 [[anchors]]
 path = "src/tools/output.rs"
-hash = "3780a914063ee4973c233c17fd9299424725ea08cd775e0e4d2415e4d414a88a"
+hash = "580156d6e5fd836bc495a9b01d60ee51ad02381cbe28bd298650d520f9ebfed3"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "5c28721ba34f85a42a584b6b27d56bf97a8e156816a41ff62941784b5e172fa7"
+hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
@@ -23,24 +23,24 @@ hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
-hash = "dd5fd6f8fdbb6662d9eb0f6510e4b3e706df309723350e93abad061a2d6b54d6"
+hash = "ea7af4233f1d2995b8111145ee00a8184f54382000b869e8e0a479bf318f66c5"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "0b8186ea53d7b04799d13711a56de4f9b16caf5ee6af5b925ec7784342e04731"
+hash = "721e31973913a5404766990f819fdb5b893fd9150707f51b1d8cd0a8932adb0e"
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "ad0e85f7250eb474a849509291466e669f26eef3656e4b76f918d9ca449c763a"
+hash = "877da71d94ff8de17a44f3deefc6a2340250d7d30f8e0a78ff75c8d216a1d271"
 
 [[anchors]]
 path = "src/agent/mod.rs"
-hash = "65747eb4fc388f067f2e60b2c70ecb6c68bbb425588a2458d11d2cf07169fc3e"
+hash = "db293a6d7933a182ef4c5816d52af547b27035a1cccc37a80ed632375ef5ccf2"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "f856c9ba3b3de1a550384c1baf51365f4a789120b4f2041c26f702cb843cf20b"
+hash = "02a9636e103462cb234c7bfbc7b245fdbfabe686e3330a7fc304337683a82086"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "697e68e05c7f567a6e1e97cba531f78a50795c8287faca8ee9a09eda724d1ff8"
+hash = "c0ba221088c1fb79e35bdff0ff405715e4704e7b16e4bfbb75d80f4d72f780f4"
