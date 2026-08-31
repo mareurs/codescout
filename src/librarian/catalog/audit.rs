@@ -101,7 +101,33 @@ fn update_diff_expr(cols: &[String]) -> String {
 /// (memory catalog-sql-hazards), and the same open that ran the migration
 /// reinstalls them here — no cross-open self-heal window. Drop+create (not
 /// IF NOT EXISTS) so a definition change or column add always converges.
+///
+/// The whole body runs in one `BEGIN IMMEDIATE` / `COMMIT` transaction, same
+/// pattern as `run_migrations` (bug 33e4ae68). Without it, each `DROP TRIGGER`
+/// / `CREATE TRIGGER` pair is its own autocommit statement, and on a WAL
+/// catalog shared by two codescout instances a foreign writer mutating an
+/// audited table in the gap between the DROP and the CREATE goes unaudited —
+/// silently: no row is written, so there is no seq gap to notice. One
+/// `install()` call opens up to `AUDITED_TABLES.len() * 3` such windows.
+/// Wrapping the whole thing in a transaction closes all of them: the DROPped
+/// triggers and their CREATEd replacements become atomic from every other
+/// connection's point of view (busy_timeout makes a concurrent writer block
+/// on BEGIN IMMEDIATE rather than observe a half-updated trigger set).
 pub(crate) fn install(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    match install_in_txn(conn) {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+fn install_in_txn(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS catalog_audit (
            seq     INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -717,4 +717,62 @@ mod tests {
             assert_no_fk_violations(&cat.conn, path_label);
         }
     }
+
+    // Task review Finding 2 (2026-09-01): open_with_workspace's ordering
+    // constraint — audit::install must run AFTER drop_legacy_and_stamp — had
+    // no discriminating test. Reusing this module's own v3->v6 fixture
+    // (seed_v3_db + ws_with) exercises the table-copy migration path that
+    // silently drops a table's triggers with the table, then proves the
+    // audit triggers both exist AND fire post-open. Verified by hand: moving
+    // `audit::install(&conn)` above the `if needs_v6 { ... }` block in
+    // `Catalog::open_with_workspace` turns this test red (0 rows instead of
+    // 2) — see task-1-report.md fix log for the captured failure output.
+    #[test]
+    fn open_with_workspace_installs_audit_triggers_after_v6_table_copy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("catalog.db");
+        seed_v3_db(&db_path);
+        let ws = ws_with("r", tmp.path().to_str().unwrap());
+
+        let cat = crate::librarian::catalog::Catalog::open_with_workspace(&db_path, &ws).unwrap();
+
+        let trigger_count: i64 = cat
+            .conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'audit_%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            trigger_count > 0,
+            "audit triggers must exist after open_with_workspace's v6 table-copy path"
+        );
+
+        cat.conn
+            .execute(
+                "INSERT INTO artifact(id, abs_path, kind, status, title,
+                                      owners, tags, created_at, updated_at,
+                                      file_mtime, file_sha256)
+                 VALUES ('v6a', '/r/x.md', 'tracker', 'active', 't',
+                         '[]', '[]', 0, 0, 0, 'sha')",
+                [],
+            )
+            .unwrap();
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id='v6a'", [])
+            .unwrap();
+        let n: i64 = cat
+            .conn
+            .query_row(
+                "SELECT count(*) FROM catalog_audit WHERE tbl='artifact' AND row_id='v6a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            n, 2,
+            "audit triggers installed after the v6 table-copy must still fire (insert+delete)"
+        );
+    }
 }
