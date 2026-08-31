@@ -1,5 +1,6 @@
 pub mod file_address;
 pub mod fs;
+pub mod gitignore;
 pub mod librarian_guard;
 pub mod librarian_response;
 pub mod librarian_sync;

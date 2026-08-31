@@ -34,14 +34,6 @@ path = "src/lsp/ops.rs"
 hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
 
 [[anchors]]
-path = ".codescout/project.toml"
-hash = "34e422b9cb37995c6891543f050de3c994f6a710c4f4e1fd6330ac1b45ac34d1"
-
-[[anchors]]
-path = ".codescout/workspace.toml"
-hash = "689f9a8d3e05faee1daf220f1827ac4151214ce3abb9d19192a5fcdd464f4a1e"
-
-[[anchors]]
 path = "src/tools/mod.rs"
 hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
 
@@ -56,14 +48,6 @@ hash = "02a9636e103462cb234c7bfbc7b245fdbfabe686e3330a7fc304337683a82086"
 [[anchors]]
 path = "src/agent/write_guard.rs"
 hash = "2d9bdcd6081fce74fd5b3133ef487d2cbc861c74a7bef13b1deecb91319b5e79"
-
-[[anchors]]
-path = ".codescout/write.lock"
-hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-
-[[anchors]]
-path = ".codescout/embeddings/project.db"
-hash = "299cc710929e49e6dcaead85f654d22518b5d6268a0ca361e1cb0da98ea0a2b1"
 
 [[anchors]]
 path = "src/util/path_security.rs"

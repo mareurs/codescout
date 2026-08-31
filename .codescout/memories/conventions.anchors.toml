@@ -85,14 +85,3 @@ hash = "cb57b5fd62bc7af6f134589c1ff9b8aa9037a8b38d4551c17ab0646e6d473b8c"
 path = "src/tools/mod.rs"
 hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
 
-[[anchors]]
-path = ".codescout/project.toml"
-hash = "34e422b9cb37995c6891543f050de3c994f6a710c4f4e1fd6330ac1b45ac34d1"
-
-[[anchors]]
-path = ".codescout/libraries.json"
-hash = "a221fb4da03ded8bc4d9b4af860d73d51dd97ee4c01b2cdd3695a7e5f4d6a652"
-
-[[anchors]]
-path = ".codescout/write.lock"
-hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

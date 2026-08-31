@@ -1139,8 +1139,20 @@ impl Tool for Memory {
                     .into());
                 }
 
-                crate::memory::anchors::refresh_hashes(&root, &memories_dir, topic)?;
-                Ok(json!("ok"))
+                let dropped =
+                    crate::memory::anchors::refresh_hashes(&root, &memories_dir, topic)?;
+                if dropped.is_empty() {
+                    return Ok(json!("ok"));
+                }
+                // Silent when there is nothing to say; when the anchor set shrank,
+                // nothing else would tell the caller why.
+                Ok(json!({
+                    "status": "ok",
+                    "dropped_machine_local": dropped,
+                    "hint": "These paths are gitignored, so their hashes could not travel \
+                             with this sidecar and made the memory stale by construction. \
+                             They are no longer anchored.",
+                }))
             }
             _ => Err(RecoverableError::with_hint(
                 format!(

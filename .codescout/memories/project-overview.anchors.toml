@@ -13,6 +13,3 @@ hash = "23c21e0816f8be4ed2a30337a78eaedbb11a92f305cc6ba813e376a105682fcf"
 path = "Cargo.toml"
 hash = "53b988f75f8f3e2104b384367a95d08b30a440c4debc61af5a14d534c8859aa8"
 
-[[anchors]]
-path = ".codescout/project.toml"
-hash = "34e422b9cb37995c6891543f050de3c994f6a710c4f4e1fd6330ac1b45ac34d1"

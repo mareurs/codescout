@@ -691,22 +691,12 @@ fn build_basename_index(
 }
 /// Compile the repo-root `.gitignore` for the gitignored-path severity cap.
 ///
-/// Only the root file is loaded — not nested `.gitignore`s and not the user's
-/// global excludes. The cap exists to recognise paths *this repo* declares
-/// generated-or-local, and a nested rule reaching a documented path is rare
-/// enough not to justify the extra walk. Any failure returns `None`, which
-/// disables the cap rather than failing the audit: a missing or malformed
-/// `.gitignore` should cost precision, never the run.
+/// Thin alias over [`crate::util::gitignore::build_root_gitignore`], which carries
+/// the root-file-only rationale and the failure policy. Shared with
+/// `memory::anchors`, whose remedy differs — it refuses to record an ignored path
+/// rather than capping a finding about one — but whose question is the same.
 fn build_gitignore(repo_root: &std::path::Path) -> Option<ignore::gitignore::Gitignore> {
-    let path = repo_root.join(".gitignore");
-    if !path.exists() {
-        return None;
-    }
-    let mut builder = ignore::gitignore::GitignoreBuilder::new(repo_root);
-    // `add` reports a parse error per file rather than returning Result; one bad
-    // line should not discard the rules that did parse.
-    let _ = builder.add(&path);
-    builder.build().ok()
+    crate::util::gitignore::build_root_gitignore(repo_root)
 }
 
 /// Forward-slash relative directories holding at least one file in git's index —

@@ -26,20 +26,12 @@ path = "docs/issues/archive/2026-08-23-index-build-fails-embed-batch-sparse-send
 hash = "e33a0fce73534bf1c03e088bc1c2f54312a2d2d8436b8ccfbee51efa2bf88e2f"
 
 [[anchors]]
-path = ".codescout/embeddings/project.db"
-hash = "299cc710929e49e6dcaead85f654d22518b5d6268a0ca361e1cb0da98ea0a2b1"
-
-[[anchors]]
 path = "src/lsp/client.rs"
 hash = "4ebd75a0368ed5caf79461702af7d69dc37976f6e34626e2129b7fc74b4c18d0"
 
 [[anchors]]
 path = "src/util/path_security.rs"
 hash = "c0ba221088c1fb79e35bdff0ff405715e4704e7b16e4bfbb75d80f4d72f780f4"
-
-[[anchors]]
-path = ".codescout/project.toml"
-hash = "34e422b9cb37995c6891543f050de3c994f6a710c4f4e1fd6330ac1b45ac34d1"
 
 [[anchors]]
 path = "src/memory/anchors.rs"

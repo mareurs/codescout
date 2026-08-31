@@ -69,11 +69,42 @@ pub fn extract_paths(content: &str) -> Vec<String> {
     result
 }
 
-/// Seed anchors from memory content. Only includes files that exist on disk.
+/// Whether a path must be kept out of an anchor sidecar because `.gitignore`
+/// declares it machine-local.
+///
+/// A sidecar is **tracked in git**; the files it hashes need not be. Recording a
+/// hash of an ignored file therefore stores a fact about one machine inside a file
+/// that travels to all of them, and the result is not merely noisy — it has no
+/// fixed point. Machine A refreshes, commits A's hash, B pulls and is permanently
+/// stale; B refreshing flips A. The repair action is what creates the next defect,
+/// for someone who is not present to see it.
+///
+/// Measured on this repo 2026-08-31: five memories anchored to
+/// `.codescout/project.toml`, all five recording one hash that matched no machine
+/// present. The second-order cost was worse than the false alarm — `architecture`
+/// reported "16 of 27 anchored files changed" and the real finding inside it, a
+/// module map left unresolvable by a `src/tools/` reorganisation, was
+/// indistinguishable from the noise.
+///
+/// Deliberately keyed on `.gitignore` rather than on a file-type denylist
+/// (`*.db`, `*.lock`, cache directories): the ignore file is the project's own
+/// declaration of what does not travel, so it states the invariant instead of
+/// enumerating today's instances of it. Most of `.codescout/` is tracked —
+/// `memories/*.md`, `system-prompt.md`, `librarian.toml` — and stays anchorable.
+fn machine_local(ignore: Option<&ignore::gitignore::Gitignore>, rel_path: &str) -> bool {
+    crate::util::gitignore::is_machine_local(ignore, rel_path)
+}
+
+/// Seed anchors from memory content. Only includes files that exist on disk and
+/// that `.gitignore` does not declare machine-local — see [`machine_local`].
 pub fn seed_anchors(project_root: &Path, content: &str) -> Result<AnchorFile> {
     let paths = extract_paths(content);
+    let ignore = crate::util::gitignore::build_root_gitignore(project_root);
     let mut anchors = Vec::new();
     for p in paths {
+        if machine_local(ignore.as_ref(), &p) {
+            continue;
+        }
         let full = project_root.join(&p);
         if full.is_file() {
             let hash = super::hash::hash_file(&full)?;
@@ -85,11 +116,16 @@ pub fn seed_anchors(project_root: &Path, content: &str) -> Result<AnchorFile> {
 
 /// Merge existing sidecar with newly seeded anchors.
 /// Keeps user-added paths, adds new paths, refreshes all hashes.
+///
+/// A carried-over path is re-checked against [`machine_local`], not just re-hashed:
+/// every sidecar written before that rule existed reaches this function rather than
+/// [`seed_anchors`], so filtering only the seed would leave them all unrepaired.
 pub fn merge_anchors(
     project_root: &Path,
     existing: &AnchorFile,
     new_seed: &AnchorFile,
 ) -> Result<AnchorFile> {
+    let ignore = crate::util::gitignore::build_root_gitignore(project_root);
     let mut seen = HashSet::new();
     let mut anchors = Vec::new();
 
@@ -102,6 +138,9 @@ pub fn merge_anchors(
 
     // Add user-curated paths not in new seed, refresh their hashes
     for a in &existing.anchors {
+        if machine_local(ignore.as_ref(), &a.path) {
+            continue;
+        }
         if seen.insert(a.path.clone()) {
             let full = project_root.join(&a.path);
             if let Ok(hash) = super::hash::hash_file(&full) {
@@ -274,12 +313,30 @@ pub fn update_anchors_on_write(
 
 /// Re-hash all anchored files without changing the anchor list.
 /// Used to acknowledge "I reviewed this memory, it's still accurate."
-pub fn refresh_hashes(project_root: &Path, memories_dir: &Path, topic: &str) -> Result<()> {
+///
+/// Returns the paths dropped because `.gitignore` declares them machine-local, so
+/// the caller can say why the anchor set shrank. This is the path that wrote the
+/// bad anchors in the first place: it never re-seeds, so `refresh_anchors` on a
+/// sidecar carrying an ignored path re-hashed that path against the *local* file
+/// and committed the result — a faithful refresh of an anchor that should not
+/// exist. Files that are simply gone are still dropped silently; that is
+/// pre-existing behaviour and needs no explanation.
+pub fn refresh_hashes(
+    project_root: &Path,
+    memories_dir: &Path,
+    topic: &str,
+) -> Result<Vec<String>> {
     let sidecar_path = anchor_path_for_topic(memories_dir, topic);
     let mut anchor_file = read_anchor_file(&sidecar_path)?;
+    let ignore = crate::util::gitignore::build_root_gitignore(project_root);
+    let mut dropped = Vec::new();
 
     // Re-hash existing paths, remove entries for deleted files
     anchor_file.anchors.retain_mut(|a| {
+        if machine_local(ignore.as_ref(), &a.path) {
+            dropped.push(a.path.clone());
+            return false;
+        }
         let full = project_root.join(&a.path);
         if let Ok(hash) = super::hash::hash_file(&full) {
             a.hash = hash;
@@ -290,7 +347,7 @@ pub fn refresh_hashes(project_root: &Path, memories_dir: &Path, topic: &str) -> 
     });
 
     write_anchor_file(&sidecar_path, &anchor_file)?;
-    Ok(())
+    Ok(dropped)
 }
 
 #[cfg(test)]
@@ -691,6 +748,191 @@ mod tests {
             "anchor path {:?} must be inside {:?}",
             path,
             memories_dir,
+        );
+    }
+
+    /// A sidecar is tracked in git; the paths it hashes may not be. `.gitignore`
+    /// is the project's own declaration that a file does not travel, so hashing
+    /// one records a fact about *this machine* inside a *shared* file.
+    ///
+    /// The load-bearing fixture detail is that `.gitignore` names
+    /// `/.codescout/project.toml` while `src/a.rs` is unmatched: drop either half
+    /// and the test can no longer tell exclusion from a blanket refusal to anchor.
+    #[test]
+    fn seed_anchors_skips_a_path_gitignore_declares_machine_local() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), "/.codescout/project.toml\n").unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "a").unwrap();
+        std::fs::write(root.join(".codescout/project.toml"), "local = true").unwrap();
+
+        let anchors = seed_anchors(root, "Uses `src/a.rs` and `.codescout/project.toml`.").unwrap();
+
+        let paths: Vec<&str> = anchors.anchors.iter().map(|a| a.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["src/a.rs"],
+            "a gitignored path must not be anchored, and a tracked one must be"
+        );
+    }
+
+    /// The opposite direction from the test above, and the reason it is a separate
+    /// test rather than one more assertion: every other test in this cluster asserts
+    /// an *absence*, which a fix that simply refused to anchor anything under
+    /// `.codescout/` — or anything at all — would satisfy. Most of `.codescout/` is
+    /// tracked (`memories/*.md`, `system-prompt.md`, `librarian.toml`); only the
+    /// runtime files are ignored, and the discriminator is `.gitignore`, not the
+    /// directory name.
+    #[test]
+    fn seed_anchors_still_records_a_dotcodescout_path_git_tracks() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), "/.codescout/project.toml\n").unwrap();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join(".codescout/system-prompt.md"), "prompt").unwrap();
+
+        let anchors = seed_anchors(root, "See `.codescout/system-prompt.md`.").unwrap();
+
+        let paths: Vec<&str> = anchors.anchors.iter().map(|a| a.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![".codescout/system-prompt.md"],
+            "a .codescout path git tracks is a legitimate anchor"
+        );
+    }
+
+    /// `.gitignore:28` in this repo is `.codescout/embeddings/` — a *directory*
+    /// rule. `Gitignore::matched` tests only the path handed to it, so it answers
+    /// "not ignored" for a file inside an ignored directory;
+    /// `matched_path_or_any_parents` is the one that sees it. This test is the only
+    /// thing that distinguishes the two calls, and the real anchor that motivated
+    /// the bug — `.codescout/embeddings/project.db` — is of exactly this shape.
+    #[test]
+    fn a_gitignored_directory_rule_covers_a_file_inside_it() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), ".codescout/embeddings/\n").unwrap();
+        std::fs::create_dir_all(root.join(".codescout/embeddings")).unwrap();
+        std::fs::write(root.join(".codescout/embeddings/project.db"), "blob").unwrap();
+
+        let anchors = seed_anchors(root, "Reads `.codescout/embeddings/project.db`.").unwrap();
+
+        assert!(
+            anchors.anchors.is_empty(),
+            "a directory rule must exclude the files under it, got {:?}",
+            anchors.anchors,
+        );
+    }
+
+    /// A project with no `.gitignore` must behave exactly as before. The matcher is
+    /// optional precisely so a missing or malformed file costs precision, never the
+    /// call — the same degradation policy `audit_doc_refs` applies.
+    #[test]
+    fn anchors_are_unfiltered_when_the_project_has_no_gitignore() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join(".codescout/project.toml"), "local = true").unwrap();
+
+        let anchors = seed_anchors(root, "Uses `.codescout/project.toml`.").unwrap();
+
+        let paths: Vec<&str> = anchors.anchors.iter().map(|a| a.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![".codescout/project.toml"],
+            "with no .gitignore nothing is declared machine-local, so nothing is excluded"
+        );
+    }
+
+    /// The second guarded site. An existing sidecar's paths are re-hashed and kept
+    /// by `merge_anchors`, so a fix applied only to `seed_anchors` leaves every
+    /// already-written sidecar carrying its gitignored anchors — which is every
+    /// affected memory in the repo that motivated this.
+    #[test]
+    fn merge_anchors_drops_a_gitignored_path_an_existing_sidecar_carries() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), "/.codescout/project.toml\n").unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "a").unwrap();
+        std::fs::write(root.join(".codescout/project.toml"), "local = true").unwrap();
+
+        let existing = AnchorFile {
+            anchors: vec![
+                PathAnchor {
+                    path: ".codescout/project.toml".into(),
+                    hash: "hash_from_another_machine".into(),
+                },
+                PathAnchor {
+                    path: "src/a.rs".into(),
+                    hash: "stale".into(),
+                },
+            ],
+        };
+        let new_seed = seed_anchors(root, "Nothing new here.").unwrap();
+        let merged = merge_anchors(root, &existing, &new_seed).unwrap();
+
+        let paths: Vec<&str> = merged.anchors.iter().map(|a| a.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["src/a.rs"],
+            "merge must drop a carried-over gitignored anchor, not re-hash it"
+        );
+    }
+
+    /// The third guarded site, and the one that explains how the affected sidecars
+    /// were written in the first place: `refresh_hashes` never re-seeds, so
+    /// `memory(action="refresh_anchors")` re-hashed the gitignored path against the
+    /// *local* file and committed that hash into a tracked sidecar.
+    ///
+    /// It returns the dropped paths rather than dropping them silently: the caller
+    /// asked for a refresh and gets a smaller anchor set back, and nothing else
+    /// would tell them why.
+    #[test]
+    fn refresh_hashes_drops_gitignored_anchors_and_names_them() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let memories_dir = root.join(".codescout/memories");
+        std::fs::write(root.join(".gitignore"), "/.codescout/project.toml\n").unwrap();
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "a").unwrap();
+        std::fs::write(root.join(".codescout/project.toml"), "local = true").unwrap();
+
+        let sidecar = anchor_path_for_topic(&memories_dir, "arch");
+        write_anchor_file(
+            &sidecar,
+            &AnchorFile {
+                anchors: vec![
+                    PathAnchor {
+                        path: "src/a.rs".into(),
+                        hash: "stale".into(),
+                    },
+                    PathAnchor {
+                        path: ".codescout/project.toml".into(),
+                        hash: "hash_from_another_machine".into(),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        let dropped = refresh_hashes(root, &memories_dir, "arch").unwrap();
+
+        assert_eq!(
+            dropped,
+            vec![".codescout/project.toml".to_string()],
+            "the refresh must name what it dropped"
+        );
+        let reread = read_anchor_file(&sidecar).unwrap();
+        let paths: Vec<&str> = reread.anchors.iter().map(|a| a.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/a.rs"]);
+        assert_ne!(
+            reread.anchors[0].hash, "stale",
+            "the surviving anchor must still be re-hashed"
         );
     }
 }
