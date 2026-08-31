@@ -158,6 +158,46 @@ rejects, and the laptop's is its normalised form.
 This is the one place in the whole integration where a naive row-level copy loses data in
 either direction, which is why it is called out rather than folded into the table.
 
+
+### 1.3a Schema and params are mutually gating — migrate them atomically
+
+Measured 2026-08-31 while executing § 1.3, and it invalidated that section's prescribed
+order. Recorded here because it will recur on the next cross-machine schema change and
+otherwise survives only in one task report.
+
+**Neither order works one field-group at a time.** § 1.3 said params first, shape second,
+reasoning that a new schema rejects old rows — true, and measured. The reverse is equally
+true and was not measured: the *stored* schema rejects the new rows.
+
+| artifact | stored schema (stale) | sidecar schema (current) |
+|---|---|---|
+| `docs/research/README.md` | `required: [file, …]` **plus `additionalProperties: false`** | `required: […, path]` |
+| `docs/trackers/fable-tuning-findings.md` | `required: [… claim …]` | `required: [… title …]` |
+
+The laptop's migrated `research/README` rows fail the stored schema on **two** counts —
+missing `file`, and `path` disallowed by `additionalProperties: false`. Old-schema/old-rows
+and new-schema/new-rows both validate, so the incompatibility is precisely the swapped
+field. A params-only write is refused; a schema-only write is refused; the migration has no
+one-field-group path.
+
+**The escape is a single atomic call, and it is a designed affordance rather than a
+bypass.** `validate_merged_against_schema` (`src/librarian/tools/augment.rs:36-52`, called
+at `:370`) validates merged params against **the schema the call itself supplies** when one
+is present — comment-tagged `F-5`. So one `artifact_augment` / `artifact-augment --merge`
+carrying `params` *and* `params_schema` *and* the remaining shape fields is fully validated
+against the target schema.
+
+Pass the remaining shape fields in that same call, not because the schema needs them, but
+because the write-through republishes the whole row
+(`docs/issues/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`,
+open). The three-call alternative — permissive schema, then params, then the real schema —
+touches shape fields twice and doubles exposure to that open defect. Atomic is both the
+only working path and the safer one.
+
+**Generalisation for unit 3.** Any design that projects schema and rows through separate
+write paths inherits this: a projection restored field-by-field can deadlock against its
+own live data. Terminal-row projection (§ 2.1) must therefore restore a row's shape and
+its rows in one validated write, or define a documented permissive intermediate state.
 ### 1.4 Correct the two authored titles
 
 `PV-9`'s committed title materially diverges from the canonical one and is replaced:
