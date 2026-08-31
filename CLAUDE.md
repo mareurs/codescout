@@ -40,6 +40,20 @@ tick gets read as protection. The tell: ask what an observer would *see differen
 were broken right now; if the answer is "nothing", the guard is decoration however loudly it
 is written.
 
+**The law reaches past guards, to features.** `ListFunctions` and `ListDocs`
+(`src/tools/ast.rs:10-11`) both `impl Tool` and are registered nowhere — `src/server.rs:326` is
+where a tool joins the registry (`Arc::new(Grep)`), and neither name occurs in that file. Their
+module holds **18 tests**, 12 of which call the two tools by name. No agent can reach any of it.
+Keep `BL-66` above rather than swapping it out: that is the **alarm** shape, a `panic!` nothing
+arrives at, and it is the harder half to see. This is the **feature** shape, and it is cleaner in
+exactly one way — `BL-66` had an out-of-tree consumer to argue about, and these have none, so the
+green tick protects precisely nothing. Note what the unit is: the defect is the *tests*, not the
+tools. **Derive the count, don't cite it** — the bug file
+(`docs/issues/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md`) says 15 where
+`symbols(path="src/tools/ast.rs")` gives 19 functions in `mod tests` less one helper, and the
+discrepancy is unresolved. Two counts of one population, which is § *Observer Blindness*'s
+closing rule firing on the very example added to illustrate it.
+
 **Annotate a fixture's load-bearing detail, on the fixture line.** The assertion states what
 must be true; nothing states which part of the *setup* is what makes the test able to tell.
 Say what breaks if the detail goes — not in the test name, not in the assertion message, and
