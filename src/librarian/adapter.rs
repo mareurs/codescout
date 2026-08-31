@@ -444,6 +444,9 @@ fn librarian_compact_summary(inner_name: &str, result: &Value) -> Option<String>
     if let Some(cut) = finding_truncation_summary(result) {
         lines.push(cut);
     }
+    if let Some(elided) = elided_rows_summary(result) {
+        lines.push(elided);
+    }
 
     // Artifact-shaped messages stay gated on the tool, so another librarian action
     // carrying a similar-looking field is never described as an artifact body.
@@ -563,6 +566,45 @@ fn finding_truncation_summary(result: &Value) -> Option<String> {
     Some(format!(
         "TRUNCATED: {} — absence from a cut list is not evidence.",
         cut.join(", ")
+    ))
+}
+
+/// The same incompleteness signal under `doctor`'s shape: `summary.shown` against
+/// `summary.total`, with no per-array `counts.truncated` map.
+///
+/// Kept separate from [`finding_truncation_summary`] rather than folded into it, because
+/// the two answer different questions. That one reports **which** arrays were cut, from a
+/// map that names them; this one reports **how many** rows a single set lost, from a pair
+/// of totals. Merging them would need a union shape that fits neither and would make each
+/// branch harder to read than the two functions are.
+///
+/// **Latent, not live, and that is the argument for it.** Measured 2026-08-31 on this
+/// repo: `total: 136, shown: 136` — nothing elided, because only 5 `abs_path_outside_
+/// managed_roots` rows existed against a window of 10. Both of `doctor`'s `retain` passes
+/// are deliberate and both can cut. When one does, the envelope will read `violations[N]`
+/// exactly as it does on a complete run, so nothing prompts anyone to look; the bug file
+/// records `417 of 1314` on another machine.
+///
+/// Names the array whose length matches `shown` so the reader knows which set shrank,
+/// falling back to `rows` when no array matches — a wrong name would be worse than none,
+/// and `shown`/`total` alone still carry the finding.
+fn elided_rows_summary(result: &Value) -> Option<String> {
+    let summary = result.get("summary")?.as_object()?;
+    let total = summary.get("total")?.as_u64()?;
+    let shown = summary.get("shown")?.as_u64()?;
+    if shown >= total {
+        return None;
+    }
+
+    let name = result
+        .as_object()
+        .into_iter()
+        .flatten()
+        .find(|(_, v)| v.as_array().is_some_and(|a| a.len() as u64 == shown))
+        .map_or("rows", |(k, _)| k.as_str());
+
+    Some(format!(
+        "TRUNCATED: {name}[{shown} of {total}] — absence from a cut list is not evidence."
     ))
 }
 
@@ -969,6 +1011,66 @@ mod tests {
         assert!(
             librarian_compact_summary("librarian", &result).is_none(),
             "an untruncated scan must leave the slot to the generic describer"
+        );
+    }
+
+    /// `doctor` elides rows too, by a different mechanism and under a different key:
+    /// `summary.shown` against `summary.total`, with no `counts.truncated` map. Two
+    /// `retain` passes can cut rows — scoped rows belonging to another project, and the
+    /// `abs_path_outside_managed_roots` window (default 10) — and both are deliberate.
+    ///
+    /// It is **latent rather than live** on this corpus: a real run measured
+    /// `total: 136, shown: 136`, because only 5 outside-root rows existed and the window
+    /// is 10. That is precisely why it needs the guard now. When the window does bite the
+    /// envelope will read `violations[N]` exactly as it does today, so there is no moment
+    /// at which anyone is prompted to look — the bug file records `417 of 1314` on another
+    /// machine.
+    #[test]
+    fn compact_summary_names_the_real_total_when_rows_were_elided() {
+        let result = json!({
+            "violations": (0..136).map(|i| json!({ "check": format!("c{i}") })).collect::<Vec<_>>(),
+            "summary": { "total": 1314, "shown": 136, "by_check": { "missing_file": 18 } },
+            "catalog_health": {},
+        });
+
+        let summary = librarian_compact_summary("librarian", &result)
+            .expect("an elided row set is an incompleteness signal and must surface");
+
+        assert!(
+            summary.contains("136 of 1314"),
+            "the shown count is worthless without the total it is a fraction of: {summary}"
+        );
+        // Scoped to the TRUNCATED line, not the whole summary: the generic shape
+        // description appended below it already prints `arrays: violations[136]`, so a
+        // whole-summary `contains` passes whatever this line says. That is the same
+        // vacuous shape the sibling test's exclusion assertion hit, caught the same way
+        // — by a mutation that makes the name lookup miss.
+        let warning = summary
+            .lines()
+            .find(|l| l.contains("TRUNCATED"))
+            .unwrap_or_else(|| panic!("no truncation line at all: {summary}"));
+        assert!(
+            warning.contains("violations["),
+            "the SET that shrank must be named — a report carrying several arrays leaves \
+             the reader unable to tell which one they are seeing a fraction of: {warning}"
+        );
+    }
+
+    /// The sibling direction. `shown == total` is the overwhelmingly common case — the
+    /// live run that motivated this test was one — so a summary that announced itself
+    /// whenever `summary` merely *carried* the two keys would cry wolf on every clean
+    /// report, and the one that mattered would read as routine.
+    #[test]
+    fn compact_summary_is_silent_when_every_row_was_shown() {
+        let result = json!({
+            "violations": [ { "check": "missing_file" } ],
+            "summary": { "total": 136, "shown": 136, "by_check": { "missing_file": 18 } },
+            "catalog_health": {},
+        });
+
+        assert!(
+            librarian_compact_summary("librarian", &result).is_none(),
+            "a complete report must leave the slot to the generic describer"
         );
     }
 
