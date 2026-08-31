@@ -202,9 +202,30 @@ A `#[test]` in the doc-gate family (`src/prompts/mod.rs` is the pattern) that wa
 The third condition is what keeps the namespace closed and catches a typo'd slug, which is
 otherwise a silent no-op that reads as a real cluster of size one.
 
-**Archived files are in scope for the gate.** They are the majority of the evidence — the
-`concurrency` probe found 14 rows of which 11 were archived — so exempting them would leave
-promotion counts derived from the smaller and less settled half of the corpus.
+**Archived files are OUT of scope, and this reverses what this spec first said.** The original
+reasoning was that the archive holds most of the evidence, so exempting it would derive
+promotion counts from the smaller half of the corpus. The backfill falsified the premise: of
+the 357 archived files dated 2026-07-01 or later, 78 were tagged and **279 were deliberately
+left untagged**, because the nine classes were derived from the open backlog and forcing a fit
+would corrupt the counts promotion reads. A further 137 pre-July files are untouched. A gate
+demanding a tag on all of them would either red on 416 files or coerce false classifications
+into the exact numbers it exists to protect.
+
+So absence in `archive/` is a deliberate answer, not a gap, and the gate cannot tell the two
+apart. Covering the archive would first need an explicit marker — a `cluster/unclassified`
+slug meaning *looked, nothing fits* — which is a taxonomy decision, not a gate decision. Left
+for later; the four candidate shapes the backfill surfaced may settle it.
+
+**Tracked files only.** An untracked bug file is a peer session's in-flight work on a shared
+checkout. Gating the working tree lets one session's unfinished file red another's build,
+which is `IC-1` in a new costume — and was specified that way here before the distinction was
+noticed.
+
+**The gate parses frontmatter; it must never grep.** Measured 2026-08-31: a
+`grep -rho "cluster/[a-z-]*" docs/issues/` over this corpus returns two slugs that do not
+exist — `cluster/blast` from a truncated tool-log line and a bare `cluster/` from a bug file
+discussing the convention. A grep-based gate reports both as real classes of size one.
+Reproduced deliberately as mutation M2 against the shipped checker.
 
 Backfill happens once as a data change; after that the gate makes the tag a condition of
 opening a bug, and the correct path ends in a compliant state without anyone remembering. That

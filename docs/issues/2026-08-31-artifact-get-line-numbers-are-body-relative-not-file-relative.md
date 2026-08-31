@@ -2,6 +2,12 @@
 kind: bug
 status: open
 title: artifact(get) reports body-relative line numbers while grep and link_scan report file-relative ones, so a heading map and a citation finding cannot be composed
+tags:
+- cluster/addressing-without-an-escape-hatch
+- librarian
+- line-numbers
+- coordinate-frame
+- composability
 opened: 2026-08-31
 owner: marius
 severity: med
