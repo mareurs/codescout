@@ -587,7 +587,7 @@ instead of an empty commit:
 
 ```
 artifact_event(action="create", artifact_id="f2ecdd76a6189efb", kind="note",
-  payload={"text": "Field-level union across hosts 2026-08-31: laptop's 32 rows as base, 10 verdicts restored from the desktop (T-005/008/011/012/019/020/022 wrong-tool; T-17/18/21 legitimate). T-30 normalised to the laptop's schema-valid `legitimate`. Both catalogs now identical."})
+  payload={"text": "Field-level union across hosts 2026-08-31: laptop's 32 rows as base, 10 verdicts restored from the desktop (T-005, T-008, T-011, T-012, T-19, T-20, T-22 wrong-tool; T-17, T-18, T-21 legitimate). T-30 normalised to the laptop's schema-valid `legitimate`. Both catalogs now identical."})
 ```
 
 ---
