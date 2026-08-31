@@ -210,7 +210,7 @@ construction.
 `cfac211d37020aa4815ce7e0277c15704559ea13`.
 ### BL-48 — `edit_markdown`'s frontmatter write never touches the catalog
 
-**Status:** open
+**Status:** done — fixed 2026-08-30 (`518549d6`, patch-id `c424f89f…`); bug file archived. Residual, already tracked in that file's `unverified:` and not work owed here: the server-side install at `src/server.rs:374` is covered by no test.
 
 **Valid:** dated 2026-08-29
 
@@ -267,7 +267,7 @@ covered either. Suggested by `fix-embedding-transport-stage-1`, whose mutation p
 rather than closing it.
 ### BL-49 — `workspace(post_compact)` flushes LSP without prewarming
 
-**Status:** open
+**Status:** partial — hint + manual fixed (`ff90ce41`, patch-id `9da21228d4392923`), observed live in the release binary 2026-08-30. Its originally-prescribed fix was a no-op for its own repro. Stays open only for the cross-repo false sentence at `session-start.mjs:339`, which is still emitting.
 
 **Valid:** dated 2026-08-29
 
@@ -306,7 +306,9 @@ sentence named with its exact replacement. **This entry stays open for that sent
 which is the half this record itself calls the worse one.
 ### BL-50 — `expects_augmentation` records existence, not shape
 
-**Status:** open
+**Status:** partial — mechanism shipped and tested; local export done; write-through closed by `5f88be65` (BL-67). One item was left open: 13 trackers whose augmentation shape exists only in another machine's gitignored catalog, so the export must be run *there*.
+
+**Note 2026-08-31 (not yet acted on):** a live `doctor` run here reports `augmentation_declared_but_absent: 0`, which would mean that residual is already discharged. Left `partial` deliberately — a zero is also what you get if the declarations changed rather than the shapes arriving, and this session did not establish which. Confirm the export ran on the other host before closing.
 
 **Valid:** dated 2026-08-29
 
@@ -402,7 +404,7 @@ not one: two trackers legitimately share `tasks`, and an earlier draft of the pr
 `8 of 9` under a banner reading "must be distinct", i.e. a correct run described as a failure.
 ### BL-51 — A rendezvous slot that misses its SessionStart stamp can never be stamped again
 
-**Status:** open
+**Status:** dropped — the bug is `wontfix`, closed 2026-08-30. Nothing was fixed because nothing was broken: the claim this entry rested on was wrong, which its own bug file says is exactly why it should not have kept an open row here.
 
 **Valid:** dated 2026-08-29
 
@@ -428,7 +430,7 @@ opposite polarities of one mechanism, which made them look like a single fix; ne
 all.
 ### BL-52 — The rendezvous gate latches open
 
-**Status:** open
+**Status:** blocked — the sketched fix is refuted (`hook_at` ages span 0.6–25h, so no window discriminates); a viable fix is cross-repo and needs a design decision. Next step is measurement, not code.
 
 **Valid:** dated 2026-08-29
 
@@ -494,7 +496,7 @@ actual work here, and this bug is the reference case for the former.
 
 ### BL-56 — SDD ledger directory and its catalog rows both vanished between sessions
 
-**Status:** open
+**Status:** zombie 2026-08-30 — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code plus live measurement, and a newly-found 9 (→ BL-64) acquitted twice. The survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger is in the bug file's frontmatter.
 
 **Valid:** dated 2026-08-29
 
@@ -614,7 +616,7 @@ catalog row kept its old value until an `artifact(update)` repaired it. The two 
 adjacent in one session and got conflated; BL-48's evidence should point at that one.
 ### BL-58 — ListAgents omits live cross-profile sessions, and the counts are incomparable
 
-**Status:** blocked — harness, not this repo. **Valid:** dated 2026-08-30
+**Status:** partial — root cause still blocked upstream (harness, not this repo), but the local mitigation SHIPPED: `scripts/peer-sessions.sh` plus a `docs/PROBES.md` row, so it fires at the moment of use rather than when someone opens the bug file. **Valid:** dated 2026-08-31
 
 `docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`.
 Discovery is scoped to the calling session's config profile; the socket directory
@@ -656,7 +658,7 @@ sid as its origin.
 
 ### BL-60 — the CLI's `artifact create` / `artifact update` silently drop `time_scope` and `extra`
 
-**Status:** open — in-repo, unowned, phase 1. **Valid:** dated 2026-08-30
+**Status:** done-archived — shipped 2026-08-30 (`0c4931ef`, patch-id `a0a4a3b4d0ea3f1b1d52e9299b9809dad98fcf05`), tests added, bug file archived. **Valid:** dated 2026-08-31
 
 `docs/issues/archive/2026-08-30-cli-artifact-drops-time-scope-and-extra.md`. A **silent** loss on
 the write path: the call succeeds, the fields are gone, and nothing surfaces until someone
@@ -765,7 +767,7 @@ flags: a test asserting the CLI's marshalled key set covers the tool's `Args` fi
 That closes the mechanism instead of its next instance. BL-60's Resume argues the same.
 ### BL-66 — `probe_ollama` is the one TLS site that installs no crypto provider
 
-**Status:** open — filed 2026-08-30, not started.
+**Status:** done-archived — fixed 2026-08-30, patch-id `90c1612bcd948c09e0fd373be2e754134bf9a463`. Verified at the bytes 2026-08-31: `probe_ollama` installs the provider before any client construction (`crates/codescout-embed/src/remote.rs:619`), guarded by its own single-test binary — and that binary is now reached by the gate (see BL-68).
 **Valid:** dated 2026-08-30
 **Rests on:** `docs/issues/archive/2026-08-30-probe-ollama-is-the-one-tls-site-that-installs-no-crypto-provider.md` (`a7af9964a16e8056`).
 
@@ -806,7 +808,7 @@ decides whether rustls surfaces a distinguishable provider error at all.
 
 ### BL-67 — `export_augmentations` will not rewrite a sidecar whose shape changed
 
-**Status:** open — filed 2026-08-30, not started.
+**Status:** done-archived — fixed 2026-08-30 by `5f88be65`, patch-id `59ba22f9d7a6dfed66fcd8e551e09455b5c58f32`; bug file archived.
 **Valid:** dated 2026-08-30
 **Rests on:** `docs/issues/archive/2026-08-30-export-augmentations-will-not-rewrite-a-sidecar-whose-shape-changed.md` (`689fb62e40557480`); `BL-50` item (2), where this was first recorded as a known consequence.
 
@@ -842,9 +844,11 @@ content comparison from a deliberate no-clobber guard, and those need different 
 
 ### BL-68 — 37 tests in `crates/codescout-embed/` are not compiled by either gate test command
 
-**Status:** open
+**Status:** done — closed by the 2026-08-30 gate swap to `cargo test --workspace`, confirmed by re-measurement 2026-08-31 rather than inferred: that lane runs **56** `codescout-embed` tests (55 lib + the 1 integration binary, `ollama_probe_installs_its_own_crypto_provider`), **52 executing**, 4 `#[ignore]`d — identical to the `-p codescout-embed --features remote-embed` column below. The 37-test hole is closed.
 
-**Valid:** conditional — a fifth gate command is adopted, or the crate's features change
+Note which way it closed, because the condition below did not fire: no fifth gate command was adopted and the crate's features did not change. `--workspace` was *swapped in* for the bare form, a route the condition did not name — so this entry would have stayed open indefinitely on its own trigger.
+
+**Valid:** dated 2026-08-31
 
 Measured 2026-08-30, both numbers from a clean run:
 
@@ -916,7 +920,7 @@ CLAUDE.md** instead of restating a list that can rot on its own. Archived bug fi
 which gate *they* ran were left alone: historical records, per `get_guide("tracker-conventions")`.
 ### BL-45 — Decision 1: may a process on an unlinked binary re-index?
 
-**Status:** open — awaiting an operator decision, not blocked on work.
+**Status:** done — the decision was taken and shipped: `22f8b8d5`, patch-id `fd2c453b…`. `guard_stale_binary` refuses **before the embed pass** (not at the sidecar write, the inversion this entry identified) on both `sync_project` and `sync_worktree`; hard refusal as a `RecoverableError` naming `/mcp`; 5 tests, wiring mutation-checked; live from the 2026-08-29 rebuild. The prose below predates the decision and states the question it answered — read it as history, not as an open ask.
 
 **Valid:** dated 2026-08-29
 
@@ -1006,7 +1010,7 @@ server will decline to re-index until restarted. That is the decision working, n
 Reads and navigation are unaffected — only indexing refuses.
 ### BL-46 — Decision 2: the write-root split
 
-**Status:** open — not started.
+**Status:** not-started — needs a `last_writable_root` field plus write-awareness in `with_project_at`; ~4,600 tests sit on that primitive.
 
 **Valid:** dated 2026-08-29
 
