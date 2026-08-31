@@ -94,6 +94,30 @@ the other process added while it held its own snapshot.
 is a real, separate defect in a documented-as-impossible case, found while looking for
 something else. Recorded here rather than split out only because it lives in the same
 mechanism; it deserves its own fix and its own test.
+### The obvious next test does NOT work as written — do not repeat it
+
+The remaining hypothesis is that a subagent's calls reach a server process whose in-memory
+`emitted` predates the parent's injection. The natural test is to join a subagent's
+injection instant against `usage.db` and read the `session_id` serving it. **It returns a
+plausible answer and it is the wrong one.**
+
+Querying `called_at BETWEEN t-120s AND t+120s` for a subagent injection returns an empty
+process list, which reads as *"no server was serving this subagent"*. It is not: it means
+**no calls landed in that window**. Cross-checked — subagent injection `2026-08-28T09:52:35Z`
+is `12:52` local, and process `8911bc18` was demonstrably alive `11:52–14:18`. The process
+existed and was idle.
+
+The parent row makes it worse, not better: it *does* return processes, so it reads as a
+passing positive control and lends the subagent's empty result false authority. Two further
+traps in the same query — it is unscoped by `cc_session_id`, so it returns processes from
+**other conversations** (`857a6727` is not this conversation's), and `.codescout/usage.db`
+is **project-local**, so a subagent whose server had a different active project writes
+nowhere this query can see.
+
+A working version needs: scoping by `cc_session_id`, process **liveness intervals**
+(`min/max(called_at)` per `session_id`) rather than point windows, and per-project usage
+databases unioned. Also note only **2** of the sampled subagents are codescout-project
+sessions under `.claude`, so even a correct query is underpowered on this corpus.
 ## What is NOT established
 
 - **n = 5 post-fix.** The 100% post-2026-08-27 rate is 5 of 5. It is consistent with no
