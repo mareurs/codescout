@@ -316,6 +316,40 @@ would be cheap and belongs in the `claude-plugins` repo.
 
 The measurement this file has owed since it was opened is still owed: the original 60s timeout has
 never been reproduced **with the mux confirmed down**.
+
+### Correction 2026-08-31 — "not live until the bump" was wrong for this marketplace
+
+The section above, and `30c9be7a`'s commit message, reason that the hook fix could not be live
+until a version bump seeded the version-keyed cache. **That is false here**, raised by
+`claude-plugins-08` and verified rather than accepted:
+
+```json
+// ~/.claude-sdd/plugins/known_marketplaces.json
+"sdd-misc-plugins": {
+  "source": { "source": "directory", "path": "/home/marius/work/claude/claude-plugins" },
+  "installLocation": "/home/marius/work/claude/claude-plugins"
+}
+```
+
+`sdd-misc-plugins` is a **directory-source** marketplace whose `installLocation` is the repo
+itself, so `CLAUDE_PLUGIN_ROOT` resolves to the working tree at runtime. The version-keyed cache
+directories exist and are seeded, but they are not what makes a change take effect. The bump was
+still correct — it makes the declared version honest, and keeps the three profiles' records
+consistent — but it was **not** the delivery mechanism, and this file said it was.
+
+Note `installed_plugins.json` disagrees on its face: its `installPath` names the cache
+(`…/cache/sdd-misc-plugins/codescout-companion/1.19.9`). Two records, two answers, and the
+install record is the one that reads like the authority. That is why this needed the marketplace
+registration rather than the install record to settle.
+
+**And the probe above proves less than it claimed.** It establishes that the corrected *text* is
+what every candidate path holds — which is worth having — but it cannot say **which** path serves
+it, because after seeding the source and all three caches are byte-identical and nothing
+discriminates them. That is this file's own checksum caveat applied one level up, and I missed it
+in the same section that states it. The load path was measured on 2026-08-30 in the one window
+where it was answerable (tree and cache differing in exactly one file; the served copy carried the
+tree's version) — but that was a **skill body**, and `02ac8f3` is a **hook**, so the hook axis is
+formally still open. The next content edit, *before* its bump, is the only place to close it.
 ## Tests added
 
 `post_compact_hint_prices_the_flush_rather_than_only_describing_the_mechanism`
