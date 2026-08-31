@@ -1658,11 +1658,25 @@ async fn a_write_response_names_the_path_it_wrote_so_op_4_can_match() {
         name: "edit_file",
         result: serde_json::json!("ok"),
     };
+    // Absolute ON THIS PLATFORM, and outside the project root on both.
+    //
+    // The assertion below needs `abs_path` to echo this literal back, which only happens
+    // when the input is already absolute. `/home/u/.claude/settings.json` is absolute on
+    // POSIX and is NOT on Windows — no drive letter, no UNC — so the write resolved it
+    // against the temp project root instead and the response carried no `abs_path` at
+    // all. The assertion then read `None` on the three Windows lanes and wine while
+    // passing on Linux and macOS (CI run 33433055755).
+    //
+    // "Outside the project root" is the property the test actually depends on (it is
+    // OP-4's target, and it survives the path-stripper). Keep that true of both arms if
+    // either literal changes.
+    let target = if cfg!(windows) {
+        r"C:\Users\u\.claude\settings.json"
+    } else {
+        "/home/u/.claude/settings.json"
+    };
     let content = tool
-        .call_content(
-            serde_json::json!({"path": "/home/u/.claude/settings.json"}),
-            &ctx,
-        )
+        .call_content(serde_json::json!({ "path": target }), &ctx)
         .await
         .unwrap();
     let text = content[0]
@@ -1674,7 +1688,7 @@ async fn a_write_response_names_the_path_it_wrote_so_op_4_can_match() {
 
     assert_eq!(
         val.get("abs_path").and_then(|v| v.as_str()),
-        Some("/home/u/.claude/settings.json"),
+        Some(target),
         "a write must name the path it wrote, or a path~ predicate has nothing to \
          match on; got {val}"
     );

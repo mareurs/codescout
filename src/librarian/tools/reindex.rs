@@ -793,6 +793,25 @@ mod tests {
         );
     }
 
+    /// The seeded tracker's path, spelled with NATIVE separators.
+    ///
+    /// Do not inline this as `root.join("docs/trackers/t.md")`. `Path::join` appends a
+    /// slash-bearing string VERBATIM, so on Windows that yields
+    /// `C:\...\docs/trackers/t.md` while the walker stores `C:\...\docs\trackers\t.md`.
+    /// `aug_for` and the row lookups below compare `abs_path` as an exact string
+    /// (`SELECT id FROM artifact WHERE abs_path = ?1`), so the two spellings simply do
+    /// not match and the row reads as absent — `row must exist`, on three tests, on the
+    /// three Windows lanes and wine, while passing on Linux and macOS where the two
+    /// spellings are byte-identical (CI run 33433055755).
+    ///
+    /// Writing through the slash form works fine on Windows; only the COMPARISON breaks.
+    /// The helper covers both anyway, so the path has one spelling in this file.
+    /// Same class as
+    /// docs/issues/archive/2026-08-26-doctor-entry-validity-tests-spell-paths-natively-on-windows.md.
+    fn tracker_path(root: &std::path::Path) -> std::path::PathBuf {
+        root.join("docs").join("trackers").join("t.md")
+    }
+
     /// Build a repo whose single tracker declares a sidecar, and write that sidecar.
     /// `.git` matters: the declared path is repo-relative and `lookup_git_root` is what
     /// resolves it, so without the marker the restore silently finds nothing.
@@ -800,7 +819,7 @@ mod tests {
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
         std::fs::write(
-            root.join("docs/trackers/t.md"),
+            tracker_path(root),
             "---\nkind: tracker\nstatus: active\n\
              expects_augmentation: docs/augmentations/t.yaml\n---\n\n# t\n",
         )
@@ -855,7 +874,7 @@ mod tests {
         );
 
         let cat = ctx.catalog.lock();
-        let row = aug_for(&cat, &root.join("docs/trackers/t.md")).expect("row must exist");
+        let row = aug_for(&cat, &tracker_path(root)).expect("row must exist");
         assert_eq!(row.prompt, "committed prompt");
         assert_eq!(row.entry_collection.as_deref(), Some("rows"));
         assert_eq!(
@@ -878,7 +897,7 @@ mod tests {
         let root = tmp.path();
         seed_sidecar_repo(root);
         let ctx = mk_ctx(root.to_path_buf(), TRACKER_RULES);
-        let art = root.join("docs/trackers/t.md");
+        let art = tracker_path(root);
 
         call(&ctx, json!({})).await.unwrap();
 
@@ -937,7 +956,7 @@ mod tests {
         std::fs::create_dir_all(root.join("docs/trackers")).unwrap();
         // No declaration and no sidecar — the state every augmented tracker was in.
         std::fs::write(
-            root.join("docs/trackers/t.md"),
+            tracker_path(root),
             "---\nkind: tracker\nstatus: active\n---\n\n# t\n",
         )
         .unwrap();
@@ -951,10 +970,7 @@ mod tests {
                 .conn
                 .query_row(
                     "SELECT id FROM artifact WHERE abs_path = ?1",
-                    [root
-                        .join("docs/trackers/t.md")
-                        .to_string_lossy()
-                        .to_string()],
+                    [tracker_path(root).to_string_lossy().to_string()],
                     |r| r.get(0),
                 )
                 .unwrap();
@@ -995,7 +1011,7 @@ mod tests {
         );
 
         let cat = b.catalog.lock();
-        let row = aug_for(&cat, &root.join("docs/trackers/t.md"))
+        let row = aug_for(&cat, &tracker_path(root))
             .expect("the augmentation must exist on the second catalog");
         assert_eq!(row.prompt, "the only copy of this prompt");
         assert_eq!(row.entry_collection.as_deref(), Some("rows"));
