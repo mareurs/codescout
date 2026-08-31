@@ -2295,7 +2295,7 @@ async fn memory_read_sections_filter_private_integration() {
 /// a workspace fixture must not become the ambient-resolution hole that
 /// `docs/issues/archive/2026-08-26-test-fixtures-write-into-the-live-memories-collection.md`
 /// closed.
-async fn workspace_ctx_with_sub_project() -> (tempfile::TempDir, ToolContext) {
+async fn workspace_ctx_with_sub_project() -> (tempfile::TempDir, std::path::PathBuf, ToolContext) {
     use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
     use crate::memory::semantic_store::SemanticMemoryStore;
     use crate::retrieval::embedder::DenseEmbedder;
@@ -2363,7 +2363,22 @@ languages = ["typescript"]
     ctx.agent.set_code_search_for_test(
         Arc::new(NoCodeSearch) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
     );
-    (dir, ctx)
+    // CANONICALISED, and handing it back is what makes the callers' path assertions
+    // portable. `Agent::new` canonicalises the root it is given, so every path
+    // `resolve_memory_dirs` returns is already normalised while `dir.path()` is not.
+    //
+    // On Linux the two spellings coincide, so the difference is invisible to the local
+    // gate. On macOS the temp dir resolves /var -> /private/var; on Windows
+    // canonicalisation adds the `\\?\` verbatim prefix AND expands the `RUNNER~1` 8.3
+    // short name. Comparing a resolved path against a raw `dir.path()` therefore passes
+    // here and fails on both other platforms — it did, on six lanes, for five days
+    // (CI run 33404896131).
+    //
+    // Returned rather than left to each test to remember: two of the six callers compare
+    // paths today, and a seventh written from this fixture would reintroduce the bug with
+    // nothing local able to catch it.
+    let canonical_root = std::fs::canonicalize(dir.path()).expect("canonicalise temp root");
+    (dir, canonical_root, ctx)
 }
 
 /// The write target for sub-project `svc`.
@@ -2391,9 +2406,9 @@ fn seed(dir: &std::path::Path, topic: &str, body: &str) {
 /// workspace where 53 memories sat project-local and the workspace tree held 0.
 #[tokio::test]
 async fn memory_list_unions_both_layouts_for_a_sub_project() {
-    let (dir, ctx) = workspace_ctx_with_sub_project().await;
-    seed(&ws_layout_dir(dir.path()), "from-workspace-tree", "# W");
-    seed(&local_layout_dir(dir.path()), "from-project-local", "# L");
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
+    seed(&ws_layout_dir(&root), "from-workspace-tree", "# W");
+    seed(&local_layout_dir(&root), "from-project-local", "# L");
 
     let listed = Memory
         .call(json!({ "action": "list", "project_id": "svc" }), &ctx)
@@ -2412,8 +2427,8 @@ async fn memory_list_unions_both_layouts_for_a_sub_project() {
 /// topic targets the workspace tree and would leave this file shadowed.
 #[tokio::test]
 async fn memory_read_falls_back_to_the_other_layout_and_names_the_write_target() {
-    let (dir, ctx) = workspace_ctx_with_sub_project().await;
-    seed(&local_layout_dir(dir.path()), "only-local", "# Local only");
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
+    seed(&local_layout_dir(&root), "only-local", "# Local only");
 
     let read = Memory
         .call(
@@ -2441,8 +2456,8 @@ async fn memory_read_falls_back_to_the_other_layout_and_names_the_write_target()
 /// stamped them would pass the fallback test unchanged.
 #[tokio::test]
 async fn memory_read_from_the_write_target_carries_no_provenance_fields() {
-    let (dir, ctx) = workspace_ctx_with_sub_project().await;
-    seed(&ws_layout_dir(dir.path()), "in-write-target", "# W");
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
+    seed(&ws_layout_dir(&root), "in-write-target", "# W");
 
     let read = Memory
         .call(
@@ -2469,9 +2484,9 @@ async fn memory_read_from_the_write_target_carries_no_provenance_fields() {
 /// exactly this, and this test is what holds it in place.
 #[tokio::test]
 async fn a_union_read_does_not_materialise_the_other_layouts_directory() {
-    let (dir, ctx) = workspace_ctx_with_sub_project().await;
-    seed(&ws_layout_dir(dir.path()), "only-in-tree", "# W");
-    let local = local_layout_dir(dir.path());
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
+    seed(&ws_layout_dir(&root), "only-in-tree", "# W");
+    let local = local_layout_dir(&root);
     assert!(!local.exists(), "precondition: the local layout is absent");
 
     Memory
@@ -2498,13 +2513,13 @@ async fn a_union_read_does_not_materialise_the_other_layouts_directory() {
 /// never reproduced the bug and sees no change from the fix.
 #[tokio::test]
 async fn the_root_project_resolves_a_single_directory() {
-    let (dir, ctx) = workspace_ctx_with_sub_project().await;
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
 
     // No `project_id`: focus defaults to the root project (`Workspace::new`), and
     // this is the path that must stay byte-identical to its pre-union behaviour.
     let dirs = resolve_memory_dirs(&json!({}), &ctx).await.unwrap();
 
-    assert_eq!(dirs.primary, dir.path().join(".codescout").join("memories"));
+    assert_eq!(dirs.primary, root.join(".codescout").join("memories"));
     assert!(
         dirs.secondary.is_none(),
         "the root project's two layouts are the same path, so there is nothing to \
@@ -2518,14 +2533,14 @@ async fn the_root_project_resolves_a_single_directory() {
 /// here rather than silently making the union a no-op everywhere.
 #[tokio::test]
 async fn a_sub_project_resolves_two_distinct_directories() {
-    let (dir, ctx) = workspace_ctx_with_sub_project().await;
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
 
     let dirs = resolve_memory_dirs(&json!({ "project_id": "svc" }), &ctx)
         .await
         .unwrap();
 
-    assert_eq!(dirs.primary, ws_layout_dir(dir.path()));
-    assert_eq!(dirs.secondary, Some(local_layout_dir(dir.path())));
+    assert_eq!(dirs.primary, ws_layout_dir(&root));
+    assert_eq!(dirs.secondary, Some(local_layout_dir(&root)));
 }
 
 /// The provenance fields must be RENDERED, not merely carried.
