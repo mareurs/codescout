@@ -1,12 +1,18 @@
 ---
+kind: bug
 status: open
+tags:
+- companion-plugin
+- buddy
+- attribution
+- misleading-instrument
+- multi-session
+closed: null
 opened: 2026-08-30
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [companion-plugin, buddy, attribution, misleading-instrument, multi-session]
-kind: bug
+severity: medium
+unverified: 'Root cause not established — the hook source has not been read. What IS established (2026-08-31): the cited sid is a live session in a DIFFERENT config profile, so the hook is resolving ''from'' against something not scoped to the reader''s profile. Still reproducing.'
 ---
 
 # BUG: the buddy compact banner's `from=<sid>` names another live session, reading as "your own pre-compaction transcript"
@@ -40,6 +46,42 @@ the same checkout throughout.
 There is no error and no hedge. `from=` in a banner whose subject is
 *this* session's reload reads as provenance for *this* session.
 
+
+### Verified still reproducing 2026-08-31 — and the mechanism is CROSS-PROFILE
+
+A verify-open sweep caught this live, in the sweeping session's own startup banner, which
+makes it reproducible rather than recalled:
+
+```
+<!-- buddy:reloaded sid=2f584bf5-ded1-4094-8443-14a6e2b3edc1
+                   from=428b66b8-0b8c-48e5-84c6-754008e3ccc7 source=compact -->
+```
+
+The reader was `codescout-f0`, pid 807989, `CLAUDE_CONFIG_DIR=/home/marius/.claude-sdd`.
+Searching all three profiles for the cited transcript:
+
+| profile | `428b66b8…jsonl` |
+|---|---|
+| `~/.claude` | **FOUND**, last modified 10:35:25 — ~20 s before the check |
+| `~/.claude-sdd` (the reader's own) | not present |
+| `~/.claude-kat` | not present |
+
+So the banner is not merely naming *another* session — it names a session in a **different
+config profile**, one that was being actively written at the moment of reading, and it labels
+it `from=` on a `source=compact` line. The natural reading is *"your own pre-compaction
+transcript"*; the file is another profile's live session, and is not in the reader's profile
+at all.
+
+**Why the profile detail matters more than "another session".** It says the `from` value is
+resolved against something that is **not scoped to the reader's config dir** — which is the
+same axis that partitions `ListAgents` visibility
+(`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`,
+where `CLAUDE_CONFIG_DIR` was measured as the discriminator 7/7). A same-profile mix-up would
+be a selection bug; crossing the profile boundary suggests the lookup has no profile scope in
+it at all.
+
+Not diagnosed: the hook source has not been read, so this names the shape of the defect and
+not its cause.
 ## Reproduction
 
 Not reduced to steps. Observed once, on this machine, with four concurrent

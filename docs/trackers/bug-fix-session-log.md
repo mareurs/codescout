@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 82
-entry_high_water_W: 86
+entry_high_water_W: 87
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -218,6 +218,7 @@ entry_high_water_W: 86
 | W-75 | 2026-08-30 | high | Reproduce before AND after each round of a fix, checking a wedge listener's own hit count, not just wall-clock time or a green test run | A round-1 isolation fix that passed all 77 memory tests still left 2 wedge hits (6.35s) from a third resolution path (`create_semantic_anchors`'s own `RetrievalClient::from_env`) that a concurrent session was independently fixing in the same live working tree mid-investigation — caught only by re-running the reproduction, not by trusting the passing suite | validated |
 | W-78 | 2026-08-30 | high | Before attributing a test failure to the change under test, re-run the same failing tests IN THE SAME ENVIRONMENT at the unmodified base. The prompt to do so is a failure in a subsystem the change does not touch | A merge probe returned `4706 passed; 3 failed`; all three were `librarian` temp-guard tests and the branch touches `operator_rules`/`tools::core`/`prompts`, nothing near librarian. The control — same `/tmp` worktree, `checkout --detach experiments`, merge NOT applied — reproduced all three identically, so the failures were the probe's LOCATION, not the merge. Each test builds its "outside-temp" catalog via `TempDir::new_in(current_dir())`, which is inside temp when the checkout is; the assumption sits in a code comment and is enforced by nothing. Without the control the two readings were block-a-clean-merge or bisect-a-working-guard. The failing configuration is the SANCTIONED one — this project points its scratchpad at `/tmp` | validated |
 | W-79 | 2026-08-30 | med | Verify a merged branch's imported bug files AT THE DOOR, in the landing session — and mark attribution as inference when nobody bisected | `03b3fb5c` imported five bug files, all `status: open`, authored against a base 103 commits back. One was already fixed: a severity-**high** futex-deadlock report whose own reproduction now runs 77 passed, no hang. It would have entered `experiments` describing a hang that does not happen and sat in every triage query until someone spent a session on it. Four were correctly open and confirmed at the bytes, which is the half that makes it a check rather than a rubber stamp. The flip names `fd638c76` as closer but records the non-reproduction as measured and the cause as NOT — the file already carried one careful negative, and a confident wrong attribution would have undone it | validated |
+| W-87 | 2026-08-31 | high | **Partition an open-bug ledger by whether entries carry `unverified:`, then verify only the uncaveated remainder.** Sweep after an evening in which five sessions filed ~9 bug files and committed heavily without reconciling: **0 stale of 15**, against the cadence's cautionary 75% datapoint. 8 of 15 carried a precise `unverified:` — one naming the exact file and line in *another repo* still emitting a false sentence, another naming which of two fix options shipped and which was deferred. Those cannot go stale unnoticed because the caveat is queryable. All 5 uncaveated non-zombies verified by direct test rather than by reading the record: `tree(glob=".gitignore")` returned **0 files** for a tracked file (reproduced live); `--fix` still absent from `codescout doctor`; the buddy banner's cited sid found in `~/.claude`, **another profile**, modified 20 s earlier. Two findings a status check could not produce: `atomic_write`'s *rename* path is guarded while the *initial write* is not, so **a partial fix is what makes a record look addressed** — reading for the presence of a remedy is not reading for the absence of the defect; and reading the code turned up an unfiled sibling, `path.with_extension("tmp")` collapsing `foo.md` and `foo.rs` onto one `foo.tmp`. Second consecutive sweep where staleness tracked the ABSENCE of the caveat field (2-of-12, then 0-of-15). |
 | W-86 | 2026-08-30 | high | **When reviewing a change of ARRANGEMENT, grep the file for prose describing the old one — the diff cannot show it.** A peer reordered CLAUDE.md's gate on my proposal and left two sentences of mine false: "the **third command** carries `--workspace`" (now the lean lane) and "still ~26s" (one lane, now beside 71.8s/80.4s). Both sit in UNCHANGED prose in the changed paragraph, so they render as context, not change — diff review is **structurally** blind to them, not merely likely to miss. Found only by grepping the file for my own earlier wording after standing down from editing it. Root cause is a rule this repo already has: an ordinal is **positional**, correct for one arrangement and silently wrong after any reorder — the defect a bare SHA has, which is why fixes are cited SHA + patch-id. "Both test lanes" is content-addressed and cannot rot | Both would have shipped: a correct, well-argued, gate-verified change by a careful session, with the defects in the half no reviewer looks at, in the file every session reads as authoritative — one of them contradicting a measurement in its own paragraph | validated |
 | W-85 | 2026-08-30 | high | **Run a suspicious test alone — a green suite cannot distinguish a working guard from a disarmed one.** Closing `BL-66` I found the crate already had a test on that exact path (`probe_ollama_errors_when_unreachable`), nearly identical to the one I had just written. Re-running the SAME pre-fix code two ways: `--exact` **panics**, full `--lib` suite **passes 51/0**. `CryptoProvider::install_default` is process-global and every sibling constructing a `RemoteEmbedder` installs it first, so whichever won the race repaired the defect before the guard could observe it. A third distinct way a check can be worthless — assertion fine, path traversed, siblings disarm it — and both earlier remedies (non-monotone assertion, reachable path) pass it | Without the isolation run I had two wrong conclusions queued: that BL-66 survived only because root's `main.rs` shields the binary, and that my new test's sibling-contamination warning was foresight about a hazard. It was a demonstrated description of the test one file over. One `--exact` run, no code change, is the whole cost | validated |
 | W-84 | 2026-08-30 | high | **Mutate once per call site — then check that the kill came from a POSITIVE test.** A peer's law (one rule implemented at N call sites needs N mutations; a single kill proves only that one site is guarded) applied to `entry_status_region`, which locates an entry's status by table row OR by heading + `Status:` line. Both sites turned out independently guarded — mutation A killed only the table test, B only the heading test. The finding is in the SURVIVORS: two `assert!(…is_empty())` tests passed under removal of the very locator each exercises, because a dead locator finds nothing and silence is exactly what they assert. This is not a lax assertion — `is_empty()` is already maximal; **the expected value of an absence test IS the output of the failure mode**, so it cannot be tightened. **Corrected same-day, see the entry:** pairing proves only that the mechanism is ALIVE. The general rule is that a test cannot detect a change its assertion is MONOTONE under — absence under removal, existence under widening — and measuring that found a real hole: under a forbidden-act mutation all six tests passed, so the heading locator's precision was covered zero times. Fixed and verified in both directions | I had those four tests as two pairs by luck, not design — a positive and a negative per rendering because both seemed worth stating, not because I knew the negative rested on the positive. Had one locator got only its silence half, that site would have been unguarded behind four green tests and a mutation story I would have believed: a failure mode with no observer, not a wrong result but an absent one | validated |
@@ -8085,6 +8086,74 @@ A paragraph that tells its reader *the order is load-bearing* must not then refe
 
 **Status:** validated
 **Promote-when:** a second instance of arrangement-change stranding prose → promote to `docs/RELEASE.md`'s review guidance, next to the mutation-testing note, since both are "what a green diff review does not tell you".
+
+## W-87 — Verify-open sweep found 0 stale of 15 — and the `unverified:` field is why
+
+**Valid:** dated 2026-08-31
+
+**Status:** validated — second consecutive sweep where the caveat field predicted the result
+
+**Observed:** 2026-08-31, after an evening in which five sessions filed ~9 bug files and
+committed heavily without reconciling the ledger. Exactly the conditions the verify-open
+cadence exists for, and the cadence's own cautionary datapoint is a **75%** zombie-open rate
+in one tracker.
+
+**Result: 0 stale of 15.** No entry needed a status change.
+
+### The discriminator that made it cheap
+
+Rather than deep-diving 15 entries, partition them by whether they carry an `unverified:`
+frontmatter field — i.e. whether anyone has already reconciled the record against reality:
+
+| | count | disposition |
+|---|---|---|
+| carries `unverified:` | **8** | already reconciled, caveat stated, correctly open |
+| no `unverified:` | **7** | never revisited — the staleness candidates |
+
+Then verify only the seven. Five were checked directly this pass; two are `zombie` entries,
+which the conventions define as recurrence checks rather than tasks, and nothing was observed
+this session for either.
+
+### The five, each by direct test rather than by reading the record
+
+| bug | test run | verdict |
+|---|---|---|
+| `tree(glob)` omits dotfiles | `tree(glob=".gitignore")` → **0 files**, for a file that exists and is tracked | **reproduced live** |
+| temp-guard tests fail from `/tmp` | `TempDir::new_in(current_dir())` still at `temp_write_guard.rs:141`, no guard added | still open |
+| CLI `doctor` has no `--fix` | `codescout doctor --help` → `--project`, `--json`, `--no-color`, `--fail-on-violations`. No `--fix` | still open |
+| buddy banner names a peer's sid | this session's own banner cited `428b66b8`, found in `~/.claude` and modified 20 s earlier — a **live cross-profile** session | reproduced, **mechanism upgraded** |
+| `atomic_write` leaks `.tmp` | `src/util/fs.rs:62` — the *rename* failure path now cleans up; the *initial write* `?` still returns early | still open, **partial fix present** |
+
+### Two findings the sweep produced that a status check would not
+
+**A partial fix is what makes a record look addressed.** `atomic_write`'s rename path is now
+guarded with `inspect_err`, so a reader skimming for "is there cleanup?" finds cleanup. The
+bug is specifically about the *initial write*, which is three lines above and unguarded.
+**Reading for the presence of a remedy is not the same as reading for the absence of the
+defect** — and only the second answers the question.
+
+**Reading the code turned up an unfiled sibling.** `let tmp = path.with_extension("tmp")`
+*replaces* the extension rather than appending, so `foo.md` and `foo.rs` in one directory both
+resolve to `foo.tmp`. Concurrent `atomic_write`s to same-stem different-extension files
+collide on one temp path. Latent and unfiled; noted here rather than in the bug, since it is a
+different defect.
+
+### Why 0-of-15 is a result rather than a null
+
+The cadence was promoted on a 75%-stale observation, so a clean sweep is worth explaining
+rather than filing away. **The `unverified:` field is doing the work.** Eight of fifteen
+records carry a precise statement of what their status overstates — one names the exact file
+and line in another repo that still emits a false sentence; another names which of two fix
+options shipped and which was deliberately deferred. Those cannot go stale unnoticed, because
+the caveat is queryable and the next reader inherits it.
+
+Two consecutive sweeps now (2 stale of 12, then 0 of 15) where staleness tracked the *absence*
+of that field. The prediction to test next time: **staleness is concentrated in records with
+no `unverified:` line**, and a sweep can be scoped to those at little loss.
+
+**Promote-when:** a third sweep confirms staleness concentrates in the no-caveat set — at
+which point the cadence should say to partition first and verify the uncaveated remainder,
+rather than implying every open entry needs re-checking.
 
 ## Template for new entries
 
