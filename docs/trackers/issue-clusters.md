@@ -153,12 +153,25 @@ grep -L 'cluster/' docs/issues/2026-*.md
 > own measurement back as corpus — observed 2026-08-31 inflating three cells at once. `git
 > ls-files` is also the definition `tests/issue_clusters.rs` enforces, so it is the one that
 > matches the gate.
+>
+> **One bug file carries exactly one `cluster/` tag, so a bug instantiating two classes is
+> counted for one — and the loss is not random.** Whichever class the author framed as
+> *secondary* is the one that disappears, which is systematically the less-developed class, i.e.
+> the one nearest a threshold. Measured 2026-09-01: the vacuous `pinnable` assertion was found
+> *inside* the `GetUsageStats` reachability sweep and belonged to `IC-3` by framing and to
+> `IC-16` by claim; `IC-16` sat at n=2 and read *"what is missing is a third instance"* while a
+> third existed in the corpus, invisible to its own membership query. Resolved by filing the
+> assertion as its **own** bug file rather than as a paragraph inside another — which is the
+> general remedy: **if a finding satisfies a second class's claim, it is a second bug file.** The
+> one-tag rule is worth keeping (it is what makes `n` a partition rather than a tally); what it
+> requires is that the unit of filing be the *claim satisfied*, not the investigation that found
+> it.
 
 | id | class | slug | n | promotes to | mechanism |
 |---|---|---|---:|---|---|
 | IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 3 | `OB-3` — 2026-09-01 | partial; **split taken → IC-17** |
 | IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
-| IC-3 | declaration is not execution | `declared-not-wired` | 18 | `OB-7` — promoted 2026-09-01 | partial (1 of 3 families, by-name only) |
+| IC-3 | declaration is not execution | `declared-not-wired` | 19 | `OB-7` — promoted 2026-09-01 | **family 1 GATED** (`tests/tool_reachability.rs`); 2 of 3 families open |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | `OB` — passes admission test; hook owed | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | `H` — six subsystems; mechanism owed | none yet |
 | IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | `CLAUDE.md` § Parsers Over a Namespace — **landed** | shipped (partial) |
@@ -169,9 +182,9 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 4 | clears count; spread unadjudicated | none yet |
 | IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | 0 | not yet — 1 instance, untagged; archive pass found none | none yet |
 | IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 16 | clears count; spread unadjudicated | none yet |
-| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 7 | clears count; spread unadjudicated | none yet |
+| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 8 | clears count; spread unadjudicated | none yet |
 | IC-15 | a parameter is accepted then silently dropped | `accepted-parameter-silently-dropped` | 15 | clears count; spread unadjudicated | none yet |
-| IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | 2 | rule ALREADY in `CLAUDE.md`; below threshold | designed |
+| IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | 3 | **clears both bars 2026-09-01**; rule already in `CLAUDE.md` — the third instance buys measurability, not a rule | designed; positive-form guard owed |
 | IC-17 | a shared resource carries no owner, so enumerating the peer does not help | `shared-resource-carries-no-owner` | 15 | `OB-8` (+ OB-2) — 2026-09-01 | partial |
 
 **Every class at n≥3 clears the count threshold; spread is adjudicated per entry.** Read the `n`
@@ -791,10 +804,10 @@ Note the asymmetry that makes this worth a class rather than a bug-by-bug fix: t
 
 **Slug:** `cluster/assertion-that-cannot-fail`
 **Claim:** An assertion has **no input that would make it fail**. It is not weak coverage — it is zero coverage wearing a passing test's clothes, and it is added most often in the very commit that closes a missing-guard finding.
-**Members:** `filter={"tags": {"contains": "cluster/assertion-that-cannot-fail"}}` — n=2, 2026-09-01, by query — the two members the `IC-9` withdrawal identified, now tagged here. Below threshold. Single-party classification — see the Index caveat. Named as a candidate by the 2026-08-31 backfill and by the `IC-9` tag withdrawal; at least two archive members are identified (`ollama_large_batch_exceeding_batch_size`, vacuous the day it was written; `cross-process-write-lock-test-passes-when-it-does-not-run`, vacuous when skipped) and `CLAUDE.md` records four more from a single SDD run.
-**Blind party:** the reviewer, structurally — a passing test is the evidence they are given, and vacuity is invisible in exactly that evidence. `CLAUDE.md` measures it: of four found in one run, *"the fourth only because the final reviewer was told to hunt for one."* Care does not find these; a changed question does.
-**Promotes to:** `not yet` — **below threshold at n=2**, which is now the only bar it fails. It is **already promoted in substance** — `CLAUDE.md` § *Testing Discipline* and § *SDD Rulings* both carry it (*"Ask 'what mutation would make this test fail?', never 'does it pass?'"*, and *demand a deliberate break*). This field read *"what is missing is the membership query, not the rule"* until `13226bda` (2026-09-01) tagged the two identified members: the query now answers, and what is missing is a third instance.
-**Mechanism status:** `designed` — the rule exists and is written down; nothing enforces it. Mutation testing per guarded site is the mechanism, applied by hand today.
+**Members:** `filter={"tags": {"contains": "cluster/assertion-that-cannot-fail"}}` — **n=3, 2026-09-01, by query.** Third instance filed 2026-09-01: `docs/issues/archive/2026-09-01-pinnable-assertion-vacuous-for-an-unregistered-tool.md` — `server_advertises_workspace_param_only_for_pinnable_tools` asserted `!pinnable.contains("get_usage_stats")` where `pinnable` is built from the **registry** and the tool was never registered, so no input could fail it. The other two are `ollama_large_batch_exceeding_batch_size` (vacuous the day it was written) and `cross-process-write-lock-test-passes-when-it-does-not-run` (vacuous when skipped). `CLAUDE.md` records four more from a single SDD run, untagged.
+**Blind party:** the reviewer, structurally — a passing test is the evidence they are given, and vacuity is invisible in exactly that evidence. `CLAUDE.md` measures it: of four found in one run, *"the fourth only because the final reviewer was told to hunt for one."* Care does not find these; a changed question does. **The third instance is a clean confirmation:** it was not found by reading the test, but while resolving whether a *tool* was reachable — a different question that happened to pass through the same three lines.
+**Promotes to:** **clears both bars as of 2026-09-01** — n=3 across three subsystems (embeddings transport, cross-process locking, MCP tool registry). What the third instance buys is **measurability, not a rule**: `CLAUDE.md` § *Testing Discipline* and § *SDD Rulings* already carry the substance (*"Ask 'what mutation would make this test fail?', never 'does it pass?'"*, and *demand a deliberate break*), so no rule is owed. The open item is the **mechanism**. This field previously read *"below threshold at n=2, which is now the only bar it fails"*; that bar is passed, and the sentence is superseded rather than deleted because the count is what moved and nothing else did.
+**Mechanism status:** `designed` — the rule exists and is written down; nothing enforces it. Mutation testing per guarded site is the mechanism, applied by hand today. **The third instance names a narrower, buildable one:** an absence assertion over a name list should first assert the **positive** — that each listed name is actually produced by something in the population being searched — and only then that it is absent from the filtered subset. Without that, `!contains` cannot distinguish *correctly excluded* from *never present*. Not built; it would have caught this instance on the day it was written.
 **Valid:** dated 2026-09-01
 
 **Boundary against `IC-9`, which is a strict sub-case and must not absorb this.** `IC-9`'s assertion *can* fail — roughly 1-in-800, when a random tempdir name happens to contain the needle. Its mechanism is environment-controlled text in the haystack. This class is the harder one: **no input fails it at all**, so no run frequency, no environment and no amount of CI time will ever surface it. An `IC-9` member is a flake; a member here is a permanent zero.
