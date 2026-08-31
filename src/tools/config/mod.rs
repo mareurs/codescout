@@ -554,12 +554,14 @@ impl Tool for ProjectStatus {
                 };
             match qdrant_stats {
                 Some((chunks, files)) if chunks > 0 => {
-                    result["index"] = json!({
-                        "status": "up_to_date",
-                        "files": files,
-                        "chunks": chunks,
-                        "hint": "Call index(action='status') for full Qdrant collection details.",
-                    });
+                    // `chunks > 0` answers "is there an index", never "is it
+                    // current". Let the git-sync state name the state instead of
+                    // asserting the strong one from a non-emptiness check.
+                    result["index"] = index_envelope(
+                        chunks,
+                        files,
+                        crate::retrieval::index_state::git_sync_status(&root),
+                    );
                 }
                 _ => {
                     result["index"] = json!({
@@ -1187,6 +1189,56 @@ fn format_activate_project(result: &Value) -> String {
     }
 }
 
+/// Build the `index` envelope for a project whose collection HOLDS chunks.
+///
+/// Split out of `ProjectStatus/call` because this mapping *is* the defect it
+/// exists to prevent: the shipped code hardcoded `"up_to_date"` on `chunks > 0`
+/// alone — a statement about non-emptiness wearing the name of a statement about
+/// currency — and, sitting behind a live Qdrant call, no test could reach it. An
+/// index 286 commits behind HEAD reported as up to date
+/// (`docs/issues/2026-08-31-workspace-status-claims-up-to-date-without-checking-git-sync.md`).
+///
+/// **Three states, because three exist.** `git_sync_status` returns `None` when
+/// freshness is *indeterminate* — a non-git root, no sidecar, an unreadable HEAD
+/// — which is not the same as known-current. The honest word there is `indexed`,
+/// the one `build_activation_response` already uses for "a usable index exists";
+/// defaulting to the strong claim is how the original went wrong. Note the
+/// distance is omitted rather than zeroed in that arm: a `behind_commits: 0` we
+/// never measured is indistinguishable from one we did.
+///
+/// The status vocabulary is `index_state.rs`'s verbatim, so the two surfaces
+/// cannot drift apart into different words for one state again.
+fn index_envelope(chunks: usize, files: usize, git_sync: Option<Value>) -> Value {
+    const DETAILS: &str = "Call index(action='status') for full Qdrant collection details.";
+
+    let mut env = json!({ "files": files, "chunks": chunks });
+
+    let Some(sync) = git_sync else {
+        env["status"] = json!("indexed");
+        env["hint"] = json!(DETAILS);
+        return env;
+    };
+
+    // Emit git_sync's own word rather than re-deriving one. `indexed` is the
+    // fallback for a shape we do not recognise, never `up_to_date`.
+    let status = sync["status"].as_str().unwrap_or("indexed");
+    env["status"] = json!(status);
+    for key in ["behind_commits", "last_indexed_commit", "head_commit"] {
+        if let Some(v) = sync.get(key) {
+            env[key] = v.clone();
+        }
+    }
+
+    // A stale index's hint must name the call that FIXES it. The shipped one
+    // named `status`, which only re-reports the staleness.
+    env["hint"] = if status == "behind" {
+        json!("Index is behind HEAD; run index(action='build') to catch up.")
+    } else {
+        json!(DETAILS)
+    };
+    env
+}
+
 fn format_project_status(result: &Value) -> String {
     let root = result["project_root"].as_str().unwrap_or("?");
     let name = std::path::Path::new(root)
@@ -1195,7 +1247,11 @@ fn format_project_status(result: &Value) -> String {
         .unwrap_or(root);
     let status = result["index"]["status"].as_str().unwrap_or("unknown");
     let index_str = match status {
-        "up_to_date" | "behind" => {
+        // `indexed` belongs here, not in the `_` arm: it is a POPULATED state
+        // (freshness indeterminate), and falling through would print
+        // `index:none` for an index that exists — the same class of false
+        // report one layer down in `index_envelope`.
+        "up_to_date" | "behind" | "indexed" => {
             let files = result["index"]["files"].as_u64().unwrap_or(0);
             let chunks = result["index"]["chunks"].as_u64().unwrap_or(0);
             format!("index:{files}f/{chunks}c ({status})")

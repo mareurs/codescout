@@ -3236,3 +3236,160 @@ languages = ["typescript"]
         status.memories
     );
 }
+
+// --- index envelope: `workspace(status)` must not claim currency it never checked ---
+// docs/issues/2026-08-31-workspace-status-claims-up-to-date-without-checking-git-sync.md
+//
+// WHAT THESE COVER, AND WHAT THEY DO NOT. The fix has two sites and these reach
+// only one. They mutate `index_envelope` — the three-state mapping, which is
+// where the defect lived. They cannot reach the CALL SITE in `ProjectStatus/call`
+// that passes `git_sync_status(&root)` in: re-hardcoding that arm back to
+// `json!({"status": "up_to_date", ...})` leaves every test below green, because
+// none of them goes through `ProjectStatus.call`.
+//
+// That arm is guarded by nothing here and is not cheaply guardable: it is behind
+// `RetrievalClient::from_env`, needs a populated Qdrant to reach `chunks > 0`,
+// and the client is not injectable at that point. The observer that would catch
+// a regression is a live `workspace(action="status")` against a rebuilt binary,
+// which is how this fix was verified rather than by these tests alone. Say so
+// here, or five green ticks read as end-to-end protection they do not provide.
+
+/// A populated index that is BEHIND HEAD must report `behind`, not `up_to_date`.
+///
+/// The gap in this fixture is deliberately **one** commit, and that `1` is
+/// load-bearing. The defect is independent of the gap — `chunks > 0` is
+/// satisfied at any magnitude — so a comfortable fixture (50 commits, 20 files)
+/// passes under the correct fix *and* under a wrong one that merely thresholds
+/// on staleness, and cannot tell them apart. One commit is the only gap a
+/// threshold-shaped fix fails. A tidy-up that rounds this up to "a clearly
+/// stale index" leaves the test green and no longer discriminating.
+#[test]
+fn a_populated_index_one_commit_behind_head_reports_behind() {
+    let env = index_envelope(
+        53_894,
+        1_754,
+        Some(json!({
+            "status": "behind",
+            "behind_commits": 1,
+            "last_indexed_commit": "aa7d5039",
+            "head_commit": "43c2f81a",
+        })),
+    );
+
+    assert_eq!(
+        env["status"], "behind",
+        "an index one commit behind HEAD is not up to date; `chunks > 0` is not \
+         a statement about currency: {env}"
+    );
+    assert_eq!(
+        env["behind_commits"], 1,
+        "the caller needs the distance, not just the verdict: {env}"
+    );
+    assert_eq!(env["last_indexed_commit"], "aa7d5039", "{env}");
+    assert_eq!(env["head_commit"], "43c2f81a", "{env}");
+    assert_eq!(env["files"], 1_754, "counts survive the behind arm: {env}");
+    assert_eq!(
+        env["chunks"], 53_894,
+        "counts survive the behind arm: {env}"
+    );
+}
+
+/// Non-vacuity guard for the test above: `up_to_date` must still be reachable.
+///
+/// Without this, `a_populated_index_one_commit_behind_head_reports_behind` is
+/// equally satisfied by a mutation that hardcodes `"behind"` — swapping one
+/// unconditional answer for another. This pins the other direction, so the pair
+/// is only satisfied by actually reading `git_sync`.
+#[test]
+fn a_populated_index_level_with_head_still_reports_up_to_date() {
+    let env = index_envelope(
+        53_993,
+        1_757,
+        Some(json!({
+            "status": "up_to_date",
+            "behind_commits": 0,
+            "last_indexed_commit": "83b5651d",
+            "head_commit": "83b5651d",
+        })),
+    );
+
+    assert_eq!(
+        env["status"], "up_to_date",
+        "level with HEAD is exactly when this word is earned: {env}"
+    );
+    assert_eq!(env["behind_commits"], 0, "{env}");
+}
+
+/// When freshness is INDETERMINATE the envelope must weaken its claim, not
+/// default to the strong one.
+///
+/// `git_sync_status` returns `None` for a non-git root, a missing sidecar, or an
+/// unreadable HEAD — cases where currency is unknowable rather than known-good.
+/// `indexed` is the honest word, and it is the one `build_activation_response`
+/// already uses for "a usable index exists".
+#[test]
+fn an_index_whose_freshness_cannot_be_determined_is_indexed_not_up_to_date() {
+    let env = index_envelope(53_894, 1_754, None);
+
+    assert_eq!(
+        env["status"], "indexed",
+        "no git_sync means currency is unknown, and `indexed` is the weaker \
+         true claim: {env}"
+    );
+    assert_eq!(
+        env["files"], 1_754,
+        "a usable index still reports its counts: {env}"
+    );
+    assert!(
+        env.get("behind_commits").is_none(),
+        "a distance we could not measure must not be invented: {env}"
+    );
+}
+
+/// A behind index must be pointed at the call that FIXES it.
+///
+/// The shipped hint names `index(action='status')`, which only re-reports the
+/// staleness. The remedy is `build`, and a reader acts on the remedy.
+#[test]
+fn a_behind_index_is_pointed_at_build_rather_than_at_status() {
+    let env = index_envelope(
+        1,
+        1,
+        Some(json!({
+            "status": "behind",
+            "behind_commits": 1,
+            "last_indexed_commit": "aaaaaaaa",
+            "head_commit": "bbbbbbbb",
+        })),
+    );
+
+    let hint = env["hint"].as_str().unwrap_or_default();
+    assert!(
+        hint.contains("index(action='build')"),
+        "a stale index's hint must name the call that catches it up: {hint:?}"
+    );
+}
+
+/// Every populated state renders its counts in the compact line.
+///
+/// `format_project_status` matched only `"up_to_date" | "behind"`, so a third
+/// populated word falls to the `_` arm and prints `index:none` — reporting an
+/// index that exists as absent, which is the same class of lie one layer down.
+#[test]
+fn the_compact_line_shows_counts_for_every_populated_index_state() {
+    for status in ["up_to_date", "behind", "indexed"] {
+        let out = format_project_status(&json!({
+            "project_root": "/home/marius/work/claude/codescout",
+            "index": { "status": status, "files": 10, "chunks": 100 },
+        }));
+        assert!(
+            out.contains("10f/100c"),
+            "`{status}` is a populated index and must show its counts, not \
+             `index:none`: {out}"
+        );
+        assert!(
+            out.contains(status),
+            "the compact line must name the state it is reporting: {out}"
+        );
+    }
+}
