@@ -448,6 +448,12 @@ Note the pattern is `OB-1`'s — *"the author, specifically"*. All three attribu
 
 **Falsified by** an attribution dispute on a shared checkout that a party could settle from committed state alone.
 
+**A TOOL commits this class too, which is the strongest evidence the ledger has for it.** The three misattributions above were made by agents, so "be more careful" remains an available (wrong) reading. `pre-commit` removes it. Its post-hook check is an unconditional whole-tree diff — `files_modified = diff_before != diff_after`, `pre_commit/commands/run.py:203-206`, no per-hook opt-out in 4.6.2 — and it reports any difference as *"files were modified by this hook"*. The tool has no way to ask who wrote them, so it attributes by **proximity in time**, exactly as the agents attributed by proximity in the working tree.
+
+Measured 2026-09-01: it refused a push on a **green** `cargo test --workspace` run, naming `docs/trackers/claim-decay.md` — a file nothing under `src/` writes (`claim-decay` appears there three times, all citations in comments) and which a peer session was editing at that moment. The false-failure window is the hook's runtime: sub-second for the commit-stage checks, 30-80s for the workspace test. The push stage was withdrawn for this reason (`5fbc65fb`), and the reasoning is inline in `.pre-commit-config.yaml` so nobody re-adds one without meeting it.
+
+That this arrived *inside infrastructure built by the session that opened the class, four hours after opening it*, is the `OB-1` signature again — and it is why the remedy field reads `H` (a provenance channel) rather than any amount of care.
+
 ## IC-11 — documentation denies a capability the code has since gained, because the prose was true when written
 
 **Slug:** `cluster/doc-contradicted-by-code`
