@@ -168,7 +168,14 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
 | IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 1 | not yet — n=1 taggable | none yet |
 
-**Eight of eleven clear the count threshold** (IC-1 through IC-8), and **IC-6 is the
+**Every class at n≥3 clears the count threshold; spread is adjudicated per entry.** Read the `n`
+column — that is the derivation, and it cannot go stale when a count moves. This sentence used to
+publish the *value* alongside a hand-maintained list of which classes qualified, and it rotted
+three times in one evening: each editor updated the list for the classes they were adjudicating
+and let the number ride along, so "six of ten" became "six of eleven" became eight, the middle
+one never re-derived by anyone. `CLAUDE.md` § *Observer Blindness* prescribes exactly this — ship
+a claim's derivation rather than its value, so a reader re-checks it instead of re-deriving it
+under a counting rule of their own choosing. **IC-6 is the
 first to land its rule** — `CLAUDE.md` § *Parsers Over a Namespace*, 2026-08-31. **IC-5 and IC-6
 are now adjudicated rather than flagged**, and both route away from `OB` — each declares
 `Blind party: none`, which fails OB's admission test, so the count was never the only thing

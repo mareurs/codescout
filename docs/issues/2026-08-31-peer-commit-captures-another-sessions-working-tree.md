@@ -179,6 +179,14 @@ that happened here is **not recoverable** — which is `issue-clusters:IC-10` (*
 shared checkout is unrecoverable after the fact*) applying to verification rather than to
 authorship. A gate claim would need the tree hash it ran against to be checkable at all.
 
+**This instance was itself captured, two minutes after being written** — into `3a5aec7a`, whose
+subject is the remedy withdrawal and which does not mention it. Milder than the IC-6 capture
+because it is at least the same file on the same subject, but the same defect: `git log -S'the
+captured side'` attributes Instance 5 to a commit about something else. Recorded here rather
+than as Instance 6 because the count is no longer the interesting variable — **on a contended
+file the capture rate approaches one**, and a session cannot write the record of this mechanism
+without the record being taken by it. That is the argument for remedy (2) stated as strongly as
+it can be stated.
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because
