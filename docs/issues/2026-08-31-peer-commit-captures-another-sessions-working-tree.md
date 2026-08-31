@@ -69,6 +69,43 @@ happens once one of them does: discovery would have let this session *know*, but
 fully-informed peer running `git add -A` would still have captured these files. The two
 need different fixes, which is why they are separate records.
 
+## Instance 3 — it fired again during the commit of this file, which changes the remedy
+
+The file you are reading was captured by the mechanism it describes, ~4 minutes after
+being written. This session staged it path-scoped and ran
+`git commit -F … -- <that one path>`. Git answered **`nothing to commit, working tree
+clean`**: the peer's next commit, `9741e418` (*"close BL-50 — the zero that could not
+answer the question it was asked"*), had already taken it.
+
+So the count for one session is **three** — the work-queue repair, `HY-23`, and this bug
+file — and the third arrived under active guard against it.
+
+**This falsifies remedy (1) as written.** Path-scoped committing is a discipline the
+*writing* session applies to its own commits, and the capture is performed by the *other*
+session's `git add -A`. A session cannot protect its own uncommitted files by being
+careful about how it commits them; by the time it commits, the window has already passed.
+Remedy (1) is real but it is **collective** — it only works if every session on the
+checkout adopts it, which is unenforceable and, per the sibling discovery bug, not even
+observable.
+
+**Remedy (2), a worktree, is the only unilateral defense**, because it removes the shared
+working tree rather than coordinating access to it. Re-rank accordingly: (2) is the
+remedy, (1) is a courtesy that reduces how often *you* are the capturing party, and (3)
+is noise.
+
+One consolation worth stating so the severity is not over-read: because the capture is a
+plain `git add`, the *content* is committed intact every time. Nothing here is a
+data-loss report. All three instances are provenance corruption, and the fix has no
+urgency beyond the next reader of the log.
+
+### Why this instance is the useful one
+
+The first two were noticed retrospectively, by a session checking `git status` for an
+unrelated reason. This one was observed **prospectively** — the remedy was chosen, applied
+and defeated inside four minutes. That is the difference between a hazard someone believes
+in and one whose mitigation has been tested; the belief-only version had already produced
+the wrong remedy ranking above, and it took the live failure to correct it.
+
 ## Candidate remedies
 
 1. **Path-scoped commits as standing practice** — `git commit -- <explicit paths>`, never
@@ -96,4 +133,3 @@ once its own writes returned `ok`. That asymmetry is the `OB-N` shape; see
 
 Decide remedy (1) vs (2) and record it in `docs/RELEASE.md` § git workflow, which today
 says nothing about concurrent sessions in one checkout.
-
