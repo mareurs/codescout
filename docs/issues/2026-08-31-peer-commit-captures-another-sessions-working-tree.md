@@ -228,11 +228,22 @@ silences the check and is the wrong habit.
 ### Re-ranking, third time
 
 1. **A worktree** — still the only unilateral defence, since it removes the shared working
-   tree instead of coordinating access to it.
-2. **`git add` then a bare `git commit`** — replaces the old remedy (1). Protects the peer
-   from you. Does *not* protect you from their `add -A`.
+   tree instead of coordinating access to it. **Strengthened 2026-09-01**: it is the only
+   remedy that changes *what is shared* rather than the order in which a shared thing is
+   touched — see *Remedy (2) is a capture vector too* below, which falsifies (2) exactly as (1)
+   was falsified, on the index instead of the working tree.
+2. ~~**`git add` then a bare `git commit`**~~ — **withdrawn 2026-09-01.** It was promoted here
+   as "protects the peer from you"; it does the opposite. `git add` writes to the one shared
+   `.git/index`, so a peer's bare commit — this exact prescription — carries your staged work.
+   Observed at `1b40dabd`, and the `unreviewed-content` gate reads such a commit as clean
+   **by construction**, because nothing about it is unstaged.
 3. ~~Path-scoped `git commit -- <paths>`~~ — **withdrawn.** It reads the working tree, so it
    is a capture vector wearing the costume of a mitigation.
+
+**All three commit-side remedies are now withdrawn, and they failed for one reason:** each
+operates on state that is per-**checkout** (the working tree, the index) or on timing the sender
+does not control (message delivery). Git has no concept of a session, so no commit-side
+discipline can express "mine". Only (1) removes the sharing.
 
 **Remedy (1) is not merely insufficient — it is scoped to the wrong axis, and instance 5 is the
 proof.** The capturing session reports it did **not** use `git add -A` for `e0525462`: it staged
@@ -310,6 +321,78 @@ file's own `wc -c` — compare against `git show HEAD:<path> | wc -c` rather tha
 **Not a criticism of the hooks.** They close the write half, which is the half that had
 already cost three captures. This is the cost side of that trade, it is small, and it is
 only dangerous while undocumented.
+
+## Remedy (2) is a capture vector too — third falsification, and the shipped gate cannot see this one
+
+2026-09-01, commit `1b40dabd` (*DC-4 — four deferral rationales outlived the counts beneath
+them*). It carries this session's `OB-6` promotion in full — 31 lines of `observer-blindness.md`
+and 20 of `issue-clusters.md`, verified by three distinct marker strings each present exactly
+once in the commit — under a subject about neither.
+
+**The vector is new, and it is the remedy.** Every previous instance was a *working-tree*
+capture. This one is an **index** capture: `git add` writes to `.git/index`, and a checkout has
+exactly one. The capturing session reports running `git add <one path>` and then `git commit`
+with no pathspec — the precise form *Re-ranking, third time* promoted as remedy (2) — and a bare
+commit commits **the whole index**, not the paths named to `add`. None of the three files in
+`1b40dabd` overlaps the two sessions' edits at all: they had correctly avoided each other's
+*files* this time, and sharing the index was enough on its own.
+
+**So remedy (1) fails at three distinct layers, which is a better statement than "the wrong
+axis".** Each layer is a different instance, and "stage explicitly" answers only the first:
+
+| layer | what defeats it | instance |
+|---|---|---|
+| `git add -A` sweeps untracked files | nothing was scoped at all | 3 (`9741e418`) |
+| explicit paths, **co-edited file** | both diffs merge in the working tree before `add` runs | 5 (`e0525462`) |
+| explicit paths, **peer pre-staged** | the index already holds their content and `commit` takes all of it | 6 (`1b40dabd`) |
+
+**And the gate does not fire — but "blind" understates it: the gate steers you off the safe
+form.** `unreviewed-content` refuses *a pathspec commit carrying unstaged content*. The
+capturing run printed `Passed`, correctly, because it was **not** a pathspec commit. Now note
+the inversion: this session was **refused** minutes earlier for `git commit -- <paths>` — and a
+pathspec commit **ignores the index**, so it is precisely the form that would have prevented
+this capture. The hook guards a real and different hazard (committing working-tree content
+nobody reviewed), but the two hazards pull in opposite directions, and the consequence is
+concrete: **a session holding unstaged content in its own target paths currently cannot use the
+index-safe form.** Its only route is stage-then-bare-commit, which is the vector above.
+
+That tension is not resolvable by tuning either check, and neither session should resolve it
+unilaterally — recorded here as an open design question. What would close both at once is the
+same per-session provenance named under *Mechanism status*: with a record of what this session
+wrote, a pathspec commit could be allowed when the unstaged content in those paths is its own,
+and a bare commit refused when the index holds anyone else's.
+
+**The self-inflicted half, which generalises furthest.** The capturing session did run
+`git diff --cached --name-only`, and it did print all three files — but it was chained to the
+commit in one `&&` sequence, so the output arrived *after* the decision was made and could only
+be read in the transcript afterwards. **A verification chained to its own action with `&&` is
+decoration: it produces evidence and cannot act on it.** The remedy is ordering rather than
+care — stage, stop, read `--cached`, then commit as a separate call.
+
+**But ordering closes only the outbound half, and this session is the evidence.** It staged,
+stopped, read the cached diff in its own call, confirmed 6 hunks all its own — and was captured
+anyway, because `1b40dabd` landed in the gap between that read and its `commit`. Correct
+ordering prevents *you* committing content you never reviewed; nothing about it prevents a peer
+committing content *you* staged. The two halves need different fixes, and only the outbound one
+is a discipline.
+
+That makes three remedies falsified by the mechanism they were proposed against, each in the
+form *the thing you were told to do is how it happens*:
+
+| remedy | prescribed because | falsified by |
+|---|---|---|
+| `git commit -- <paths>` | excludes unrelated files | commits the **working tree** at those paths — no defence at all on a contended file (instance 4) |
+| announce via `SendMessage` | coordinate before the write | messages drain at the receiver's **next tool round**; a mid-turn peer never sees it, and the send returns `success: true` (instance 5) |
+| `git add` + bare `git commit` | "protects the peer from you" | writes to the **shared index**, which a peer's bare commit then takes — and the gate reads it as clean (this section) |
+
+The common shape, stated once: **every commit-side remedy operates on state that is
+per-checkout rather than per-session** — the working tree, the index, or delivery timing the
+sender does not control. A session is not a unit git knows about, so no commit-side discipline
+can express *mine*. That is why a worktree is not merely the best of these: it is the only one
+that changes **what is shared**, where the others rearrange who touches a shared thing first.
+
+**Not filed as instance 6.** The count stopped being the informative variable two instances ago;
+what this adds is a vector and a falsification, which is what the ranking consumes.
 
 ## Candidate remedies
 
