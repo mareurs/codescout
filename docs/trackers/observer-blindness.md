@@ -815,6 +815,36 @@ For the harness-scoped half add a fourth move, from `post_compact`'s design note
 
 **Only a worktree changes the quantity being shared.** Every other remedy rearranges who touches a shared thing first.
 
+**A THIRD direction, measured 2026-09-01, and it is not covered by the outbound/inbound split
+above: PUBLICATION.** Everything above is about *content* — whose hunks land in whose commit.
+This is about *reach*. Over six turns I told my user that six commits were "held local, yours to
+green-light", and declined a peer's implicit invitation to push on the grounds that one
+operator's approval is not standing permission. Then a peer pushed **its own** commit
+(`01791c67`), which sat directly on top of my last held one (`34606388`) — and git pushes
+**branches, not commits**, so all six went public in the same operation. Verified after the fact:
+`git merge-base --is-ancestor 34606388 01791c67` is true, and all six report `PUSHED`.
+
+> **Nobody did anything wrong, which is what makes it structural.** The peer's push was its own
+> work, approved by its own operator, on a branch both sessions legitimately share. My restraint
+> was correct and cost nothing to exercise. The defect is that **"I will hold this commit pending
+> approval" is not a capability a session has on a shared branch** — it reads as a decision and
+> is a wish. Any peer publishing anything above your commit publishes yours, and it needs no
+> knowledge of you, no error, and no shared file.
+
+**Why the blind party is structurally blind here:** at the moment of deciding to hold, the
+session knows its own intent and cannot know a peer's next push. Nothing changes locally when
+the publication happens — no file moves, no hook fires, `git status` is unchanged. I found it
+only because a later `git rev-list --count origin/experiments..experiments` returned `2` where I
+expected `8`, and I ran that for an unrelated reason. **The honest report to a user is
+therefore "committed, and publishable by any peer at any time", never "held"** — the second
+overstates a control the session does not have, and it overstates it to the one party who might
+otherwise have said "then push it" or "then don't commit it yet".
+
+**Mechanism, and it is the only one that actually holds:** do not commit to the shared branch.
+A local branch or a worktree is the sole thing that makes "held" true — the same conclusion the
+line above reaches for content, arriving independently for reach. Everything else is a
+statement about intent on a resource that has no owner field.
+
 **Instances:** the six recorded in the peer-capture bug file; `OB-2`'s `target/` clobber (the same class on a different resource, seen from the arming side); the `entry_high_water_<PREFIX>` cross-host collision; and the pre-commit hook's own whole-tree diff, which attributes by temporal proximity for exactly the reason described here and refused a push on a green run naming a file nothing under `src/` writes.
 
 **Status:** open — promoted from `IC-1` on 2026-09-01, which this entry also **falsifies in part**: `IC-1`'s claim contains a *therefore* (*"its peer listing reaches only peers sharing its config profile. Coordination is therefore impossible by construction"*) and the causal link is broken. Coordination failed with enumeration complete. `IC-1`'s visibility half stands on its own members — `cross-account-agents-cannot-see-each-other`, `listagents-omits-cross-profile-sessions`, `peer-sessions-never-compares-start-time-to-build-time` — and is a real class; it is simply **not the reason** the write side has no remedy. `OB-3` is the visibility half already promoted; this is the ownership half, and they are siblings rather than one class.
