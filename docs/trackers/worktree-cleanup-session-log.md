@@ -11,6 +11,7 @@ tags:
   - telemetry
   - cleanup
 entry_high_water_F: 1
+entry_high_water_W: 1
 ---
 
 # Session Log — Worktree Cleanup
@@ -74,7 +75,7 @@ entry_high_water_F: 1
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
+| W-1 | 2026-08-31 | high | Grep for CITATIONS of a path, not the object itself — liveness is a property of the reference graph | An irreversible 174M deletion of the pinned retrieval-benchmark corpus, on the agreement of three git instruments that all report it as debris (`git worktree list` omits it, `git status` is silenced by two .gitignore lines, the .git pointer names a repo that no longer exists). Recovery would have been move-then-add plus a 163M re-index. | validated |
 
 ---
 
@@ -321,6 +322,71 @@ quoted in that file's *Fix* section.
 `usage.db` rows in the worktree, compare against `project_root` groups in the
 main db, copy out any delta, THEN remove. Only the third step is currently
 documented anywhere.
+
+## W-1 — Grepping for citations, not inspecting the object, is what separated a live corpus from dead siblings
+
+**Observed:** 2026-08-30/31, auditing `.worktrees/` after removing the three registered
+worktrees. Four other sessions were live in the same checkout.
+
+**Pattern:** To decide whether a directory is safe to delete, grep the repo for
+**citations of its path** — `scripts/`, `docs/`, `*.toml`, CI — rather than inspecting the
+directory or asking git about it. Liveness is a property of the reference graph, not of
+the object.
+
+**Counterfactual, concrete.** `.worktrees/` held eight directories. Three shared one
+dangling gitdir pointing at `code-explorer`, a repo that no longer exists. Two of those
+three were genuinely dead and were deleted (184 MB reclaimed). The third,
+`.worktrees/bench`, is the pinned retrieval-benchmark corpus at `ede25e69`, 174 MB, and
+`scripts/run-tc-benchmark.sh:18`, `scripts/sweep-bm25-boost.sh`, `docs/PROBES.md` and
+`docs/trackers/retrieval-benchmark.md` all resolve against it. Deleting it costs a
+move-then-add plus a **163 MB re-index**. The citation grep is the only check that
+separated it from its two siblings.
+
+**Why the obvious instruments all failed, which is the transferable part.** Three
+independent-looking git signals agreed the directory was debris:
+
+- `git worktree list` — the canonical instrument for *what worktrees exist here* — reports
+  only the main checkout. Bench is absent entirely.
+- `git status` is silent: `.worktrees/` is gitignored twice (`.gitignore:7` and `:117`).
+- the `.git` file points at a repository that does not exist.
+
+**All three consult git, and the corpus's liveness is not a git fact.** A peer's
+formulation: *instruments sharing a substrate are one instrument*, and their agreement
+carries no more evidence than any one alone. This is the more dangerous shape than a
+single misleading signal, because agreement reads as corroboration — and it means the
+*careful* reader, who reaches for `git worktree list` rather than eyeballing the pointer,
+gets a clean and confident wrong answer.
+
+**Confirming data points:**
+
+1. This session — the grep kept `bench` and authorised the other two deletions.
+2. A peer's independent re-derivation: 78–84 citations across 16 files, both script line
+   references read directly rather than taken from my report.
+3. A second peer verified the corpus intact at `ede25e69` by **set difference**, not by
+   counting: 851 tracked paths, `comm -23` returns 0 tracked-but-absent. Their first
+   attempt *counted* 778 present against 851 and read as "73 missing, corpus damaged" —
+   the opposite of the truth, and an argument for deleting. They had pruned `.codescout/`,
+   where 61 tracked paths live.
+
+**Impact:** high — the counterfactual is an irreversible 174 MB deletion of a load-bearing
+measurement corpus, taken on the agreement of three instruments.
+
+**Promote-when:** a second work stream where a citation grep overrides an agreeing set of
+native instruments. At two datapoints this is craft-shaped, not project-shaped — *count
+distinct substrates, not distinct commands, when corroborating a negative* — and belongs in
+the reconnaissance SKILL.md beside the negative-results law, not in a codescout memory.
+
+**Status:** validated — single stream, three independent verifications within it, no
+promotion yet.
+
+**Valid:** dated 2026-08-31
+
+The instrument-blindness is a fact about this repo's layout and git's design, not about an
+instant; the citation counts are as measured that night.
+
+**Rests on:** `observer-blindness:OB-4` (the three-blind-instruments analysis and the
+shared-substrate rule) and `F-1` in this log, which is the same lesson one layer down —
+merge state is a claim about commits and says nothing about gitignored state.
 
 ## Template for new entries
 

@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 143
+entry_high_water_R: 144
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-144 | 2026-08-31 | miss → rule (3 instances, one stream) | **A tripwire aimed at a FABRICATED fixture cannot detect the change it was written to detect.** A test meant to notice a future change must assert on a value the system PRODUCES; given a literal it holds equally in the world where the change landed and the world where it did not, so it is silent in both. Three instances, escalating: (1) `RoutedEchoTool { name: "memory" }` supplied the `selector_key` production `Memory` lacked, so the whole operator-rules suite was green while every triggered rule was dead — fixed `2447f709`; (2) a regression test asserted `by_check.get(…).is_none()` to mean *found nothing here*, encoding the exact ambiguity it guarded, and passing under BOTH conflated world-states — fixed `09cd1b46`; (3) worst, `op_4s_path_predicate_cannot_fire_against_a_write_response_today` **advertised itself as a detector** — *"when this test starts failing, that is the fix landing"* — and did not fail when the fix landed at `a6b4fc35`, because its fixture was a hand-written response bound to a variable named `observed`. It bought a tripwire's confidence and delivered none; a fabricated fixture is what a reader skims past, because it looks like setup. **Tell:** a literal beside an assertion about production behaviour — ask *did anything under test produce this value?* **Runnable:** a test naming a future condition must obtain its fixture from the pipeline it watches, or say in its doc that it cannot. | this session, all three fixed; sibling of `observer-blindness:OB-5` (which covers the vocabulary half — this covers whether the fixture was produced at all); kin R-139 |
 | R-141 | 2026-08-31 | miss → rule (2 instances sourced, sibling of R-140) | **The referent you did not open is the part that gets EXECUTED — and a lineage anchor names lineage, not authorship.** One session relayed a `git worktree add` they had not run; another cited `R-3` for a clause it does not contain. Both had checked the surrounding prose. A shell command reads as *mechanical* and an id as a *pointer*, so **neither reads as an assertion needing support** — and an id additionally reads as *precise*, which reads as *verified*, making a wrong id more persuasive than a vague gesture at the same wrong idea. The composite case is worse and is a designed trade: the SKILL.md bullet carrying the positive-control instruction ends `(R-3 → R-113 → R-77 …)`, and **`R-3`'s own Promoted-to field says the back-citation was chosen OVER a verbatim quote so it survives rewrites** — i.e. it survives by not tracking which clause came from where. So *"R-3 says X"* can be false while *"the bullet R-3 anchors says X"* is true, with nothing in the citation's surface distinguishing them. Remedy is unconditional, not vigilant: **all three sessions were actively writing about unverified relaying at the time.** |
 | R-140 | 2026-08-31 | miss → rule (2 instances, one direction) | **A warning that prescribes an action must state its recovery cost, DERIVED — understating it licenses the thing warned against.** An overstated cost fails safe; an understated one converts a warning into permission, so the error and the harm point the SAME direction. Instance 1, verified here: the `.worktrees/bench` warning stated recovery as one `git worktree add --detach`, which fails — the path holds 24 entries and bench is not a registered worktree, so real recovery is move-then-add plus a **163M re-index**. Instance 2, reported first-hand: the relaying session verified the warning's DESCRIPTIVE claims and never ran the command, so their operator got the understated cost with a verification wrapped round it — confirmation of one half reading as confirmation of the whole. The tempting symmetric second direction (*omit* the cost and it gets discounted) is recorded as an **untested PREDICTION with its own promote-when**, because asking its supposed source first-hand revealed no incident behind it — an argument in the past habitual, read as a report. Writing it as a pairing would have manufactured symmetry inside an entry about warnings that mislead. |
 | R-139 | 2026-08-30 | miss → rule (parent of R-138) | **The parameter your own context supplies for free is the one you will omit — and it is invisible to you SPECIFICALLY.** Four instances in one evening across three sessions, every one found by review and none by self-review: a count published without its counting rule (4 off a trimmed view / 8 verbs / **9** lines with clap's auto-`help`); a query published without its key (fenced blocks containing `cargo test` — missed a parenthetical fifth site); a second query without its key (`cargo clippy` — unreachable for the wrapper form `scripts/build-windows.sh clippy …`); and an instruction without naming which part is the evidence (*"verify positively with `artifact --help`"* — the author's own probe discarded output and tested only the exit code, so nothing in their practice could surface the ambiguity). Result is never an error, always a **confident wrong answer**, so nothing downstream catches it. **Why peer review works where care does not:** the missing parameter is invisible precisely to whoever holds it, making a second reader a different INSTRUMENT rather than a redundancy — and it predicts which reader, one who does not share the author's context, not a more careful one. Test: *what did I know that the reader will not, that made this unambiguous to me?* Publish a number's **derivation** ("8-or-nothing because the `#[cfg]` sits on the whole variant") not the number; report a count **with the key searched for**; name which half of an instruction is the evidence. **Do not budget for vigilance** — all four were committed by authors actively writing about this class, one reintroducing a bare integer *in the commit fixing a bare integer*; what caught the wrapper was an unconditional policy (verify before contradicting a peer). Corollary: consolidating N copies removes the redundancy that could have caught an error in them — keep the derivation, not the copies | this session + `codescout-ae` + `git-travel-augmentation-shape`; `334cf64b`, `2f412a1c`, `bdfd7a62`, `610e132a`; kin R-138, law B |
@@ -5889,6 +5890,73 @@ values for one quantity, neither stating a rule — found **outside** a discussi
 class. Clause 1 already has its instances and needs no more. If it fires, the remedy to
 promote is not "count carefully" but a standing convention that any published count in a
 tracker carries its command, which is checkable by grep and therefore mechanisable.
+
+## R-144 — A tripwire aimed at a fabricated fixture cannot detect the change it was written to detect
+
+**Verdict:** miss → rule. Three instances in one work stream, the third found only
+because the first two had taught me to look.
+
+**The law.** A test whose stated purpose is to notice a *future* change must assert on a
+value the system **produces**. Given a fabricated fixture it asserts a fact about the
+author's imagination, and it holds equally in the world where the change landed and the
+world where it did not — so the tripwire is silent in both.
+
+**Instance 1 — the stub that supplied what the real tool lacked.**
+`src/tools/core/tests.rs` defined `RoutedEchoTool { name: "memory", … }`, a stub *named
+for* the real tool, projecting the `{tool}.{action}` selector key that production `Memory`
+did not implement. The whole operator-rules routing suite was green against it while every
+triggered rule was dead in production. Its own doc comment said so. A green suite and a
+dead feature stayed consistent for as long as the stub was the only caller.
+Fixed `2447f709`; the stub is retained, recast as a test double.
+
+**Instance 2 — the regression test that encoded the ambiguity it guarded.**
+`doctor`'s `by_check` omitted a key for any check that ran clean, conflating that with
+"never ran". `call_reports_entry_validity_scoped_out_rows_in_catalog_health` asserted
+`by_check.get(…).is_none()` to mean *found nothing here* — reading absence as a positive
+signal, which is the defect, inside the suite meant to guard it. The assertion passed
+under **both** world-states it conflated. Fixed `09cd1b46`; the assertion is now `== 0`,
+which distinguishes them.
+
+**Instance 3 — the pin explicitly written to detect its own repair, which could not.**
+`op_4s_path_predicate_cannot_fire_against_a_write_response_today` carried the instruction
+*"When this test starts failing, that is the fix landing. Delete it and assert delivery
+instead; close the bug file."* The fix landed at `a6b4fc35`. **It did not fail.** Its
+fixture was a hand-written `json!({"status":"ok","wrote_to":…})` bound to a variable named
+`observed` — so it asserted against a response no tool returns, and could see neither the
+defect nor the repair. Removed per its own instruction; delivery is now asserted on a
+response that came back out of `call_content`.
+
+**Why instance 3 is the worst of the three.** The first two were ordinary tests that
+happened to use a stand-in. This one *advertised itself as a detector*, named its own
+trigger condition, and told a future reader what to do when it fired. It bought the
+confidence of a tripwire and delivered none, and the fabricated fixture is exactly what a
+reader skims past — it looks like setup.
+
+**The tell, which is cheap.** A fixture written as a literal beside an assertion about
+production behaviour. Ask: *did anything under test produce this value?* If not, the test
+constrains the literal, not the system.
+
+**Runnable form.** A test that names a future condition — a pin, a tripwire, a
+"when this starts failing" — must obtain its fixture from the pipeline it is watching.
+Where that is genuinely impractical, say so in the doc comment, because a reader is
+otherwise entitled to believe the trigger works.
+
+**Status:** open — three instances, all in one stream, all fixed. Not yet promoted.
+
+**Promote-when:** one further instance from a different work stream. At that point this is
+skill-shaped rather than project-shaped (it is a property of tests, not of this repo) and
+belongs in the reconnaissance SKILL.md alongside the vacuous-assertion guidance, not in a
+codescout memory.
+
+**Valid:** dated 2026-08-31
+
+The law is not time-bound; the three instances are facts about this stream.
+
+**Rests on:** `R-139` (knowing a class does not prevent it) and
+`observer-blindness:OB-5`, whose write-up generalises the sibling half — that a suite
+guarding an *ambiguous* signal is a likely carrier of that ambiguity, because tests are
+written in the same vocabulary as the code. This entry is the other half: not the
+vocabulary the fixture is written in, but whether the fixture was produced at all.
 
 ## Template for new entries
 
