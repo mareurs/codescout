@@ -1041,10 +1041,10 @@ Full detail for every entry stays in params: `artifact(action="get", id="e12cd7e
 
 
 
-#### PV-9 — M6 stale-drift: specs rarely change after code derives from them, at any horizon that matters
-`gap` · **settled** · repo-gated weak NO · heading added 2026-08-28; title AUTHORED from the round-2 table, not recovered — see the row's `note`
+#### PV-9 — DONE — M6 measured: spec churn is same-session, not long-horizon drift
+`gap` · **settled** · repo-gated weak NO · heading added 2026-08-28; title RECOVERED-VERBATIM 2026-08-31 from the desktop catalog, replacing an AUTHORED title that asserted a different claim ("at any horizon that matters" vs same-session churn)
 #### PV-11 — `unrecorded` dominates only at whole-repo scope, not at working-diff scope
-`gap` · **settled** · resolves to PV-17 · heading added 2026-08-28; title AUTHORED from the round-2 table, not recovered — see the row's `note`
+`gap` · **settled** · resolves to PV-17 · heading added 2026-08-28; title confirmed RECOVERED-VERBATIM 2026-08-31 — the 2026-08-28 authored text matched the canonical in substance
 #### PV-25 — Metric granularity is a free parameter, so pre-register the unit with the threshold
 `hazard` · **settled**
 
