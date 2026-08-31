@@ -107,6 +107,30 @@ rather than re-derive them:
 
 **Fix idea / Pointer:** correct `OB-7`'s `Mechanism status` family-1 bullet and `IC-3`'s matching text in one edit; both carry the same sentence.
 
+**Sharpened 2026-09-01, by the peer session, and it is worse than "no negative control".** The
+nine probes were **monotone under the exact failure the check is for**. A symbol reached only
+via `dyn Trait`, a function pointer, a macro or a re-export alias has zero textual non-test hits
+— it presents as the **dead** state. Every one of the nine presented as *has-callers*, and a
+symbol with visible textual callers is **by construction not the case that misclassifies**. So
+the population was not merely missing a negative control; it was selected such that no member
+could be one. Nine confirmations of a proposition none of them could have falsified — which is
+`CLAUDE.md` § *Testing Discipline*'s monotone law applied to a probe population rather than to
+an assertion, and the two are the same defect.
+
+**What would close it:** seed the probe from the **dispatch** side rather than the symbol side
+— enumerate `impl Tool` implementors and `Arc<dyn …>` construction sites, then ask the checker
+whether it calls them dead. If it does, the false-positive mode is *demonstrated* rather than
+reasoned. If it does not, that is the first genuine negative control.
+
+**Severity is `med` only while nothing reads the mechanism, and should be re-read rather than
+inherited when a consumer arrives.** The failure mode is not a wrong report — it is a deletion,
+because a false *dead-in-production* finding authorises removal on a negative search result.
+
+**Where the correction landed:** `IC-3`'s half is in codescout `77d4da06`, a **peer's** commit
+about `IC-11` backfilling — the edits were staged in the shared index when it committed, and the
+warning message was in flight while it did. `OB-7`'s half is in `8ceb9ea9`. Recorded because the
+ledger prose cites this entry, so a reader following the correction arrives here and would
+otherwise find no pointer back to the commit that carries it.
 ## Template for new entries
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:

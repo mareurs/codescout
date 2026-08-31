@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 7
+entry_high_water_OB: 8
 entry_prefix: OB
 ---
 
@@ -126,6 +126,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-8 | 2026-09-01 | a shared resource carries no owner, so seeing the peer does not help — four captures in 34 min with enumeration complete | the writing session | wrong instrument | **partial** — outbound gate shipped; inbound not closeable per-session |
 | OB-7 | 2026-09-01 | a declaration is well-formed, and nothing in production reaches it — including for the compiler, which cannot lint `pub` in a lib crate | the author of the declaration | wrong instrument | **partial** — decidable for 1 of 3 families |
 | OB-6 | 2026-09-01 | a gate collapses "cannot observe" into the confident answer — three states exist, two are offered | the gate, and every reader of its output | wrong instrument | **designed** — exemplar shipped at `b9cc75b4` |
 | OB-5 | 2026-08-31 | a summary keyed only by findings cannot say which checks RAN — absence reads as a clean bill of health | the reader of the report | wrong instrument | **none yet** — designed, 3 lines |
@@ -649,6 +650,38 @@ For the harness-scoped half add a fourth move, from `post_compact`'s design note
 **Instances:** the 18 members of `cluster/declared-not-wired`, spanning the embedder chunk budget, the live Qdrant payload (579,311 chunks with empty `ast_kind`/`ast_header`), `grep`'s overflow hints, `link_scan`'s bucket split, `audit_doc_refs`' stubbed-off LSP, the operator-rule router, the constitution glob, librarian's error downcast, the CLI's `doctor`, and a CI lane that compiled no tests behind `server-stack`. `OB-5`'s *Known-open residual* is this class seen from the reporting side — a check whose `extend()` line is deleted still reports `0`, because the enum still declares it — and the two should be cited across rather than merged: `OB-5` is about a summary that cannot say what **ran**, this is about a capability nothing **reaches**.
 
 **Status:** open — promoted from `IC-3` on 2026-09-01 at n=18, the second-largest class in the corpus. **The `IC-15` boundary was raised before the archive tagging pass and settled during it**, on a remedy test reducible to one question: *was a caller-supplied value accepted?* Yes — the path ran and discarded it, remedy is round-trip or refuse, `IC-15`. No — the capability exists and no call site reaches it, remedy is find a caller, `IC-3`. Exactly two members moved; `cli-doctor-exposes-no-fix-flag` stayed because the flag does not exist at the boundary at all, so nothing is accepted to be dropped. Worth carrying beyond this pair: every one of these reads as *"declares X but does not do X"*, a sentence fitting at least four classes here — matching on it is how `IC-9` acquired two misfits, and the **remedy**, never the description, is the discriminator.
+
+## OB-8 — a shared resource carries no owner, so seeing the peer does not help
+
+**Valid:** invariant
+
+**Rests on:** `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` (six instances); `issue-clusters:IC-1`, whose stated falsification condition this entry records as **fired**.
+
+**Class:** a resource shared by construction carries **no ownership record**, so the question *"is anyone else holding this right now?"* has no representation to consult. Not a missing lock — a missing **field**. Nothing models the resource as owned, so there is nothing for a careful party to read.
+
+**Blind party:** the writing session, and the reason is the sharp part. It is **not** that the peer cannot be seen. `git status` and `git diff --cached` return a complete, correct listing of every change at those paths, and **nothing in that listing marks which changes are yours**. The session is not missing the peer; it is missing an attribute the substrate never had. Git has no session dimension, so "mine" is not expressible in the one place the decision is made.
+
+**Who can see it:** nobody, from inside the checkout, after the fact — which is why the remedy is isolation rather than inspection. The only party who can distinguish the changes is the *other* session, and only while it still holds the memory of writing them. That is `OB-1`'s structure at one remove: the parameter that would resolve it is held by someone who is not being asked.
+
+**Plausible-answer property:** the commit succeeds, `--stat` looks reasonable, the hook prints `Passed`, and the resulting history attributes a peer's work to your subject line. A clean commit and a captured one are byte-indistinguishable at every point where a decision is available.
+
+**Vigilance:** wrong instrument, and this entry has the strongest evidence in the ledger for that, because **enumeration was not the binding constraint**. `IC-1` claimed coordination was impossible *because* the peer listing is scoped narrower than the sharing, and stated its own falsifier: *an instance where the writing session could enumerate the peer and still collided*. On 2026-08-31/09-01 two sessions **did** enumerate each other — `ListAgents` named both, and they exchanged eight messages about this precise mechanism — and collided **four times in 34 minutes**: `e0525462` (23:53), `3a5aec7a` (23:55), `1b40dabd` (00:06), `77d4da06` (00:27). The fourth happened with a warning message **in flight**. Every capture post-dates mutual enumeration. Visibility was complete and changed nothing, because knowing who your peer is does not tell you which lines in a shared tree are theirs.
+
+**The shared surfaces, enumerated — the inventory is the useful part:** the **working tree** (a pathspec commit reads it, so path-scoping is no defence on a contended file); the **git index** (`git add` writes to the one per-checkout index, so a peer's bare `git commit` takes your staged work — found 2026-09-01 and absent from every prior remedy discussion); `target/` (`OB-2`); the committed `entry_high_water_<PREFIX>` allocator; the pre-commit **stash cache**; and the machine-local librarian **catalog**. Each is written by whoever acts and read by path, and not one carries a writer.
+
+**Mechanism status:** partial, and the boundary is the finding.
+
+- **Shipped, outbound half:** `scripts/pre-commit-unreviewed-content.sh` refuses a pathspec commit whose content was never staged, forcing the committer to *read* what they are about to commit. It fired correctly on the session that documented the class.
+- **It does not close "looked and could not tell."** Reading `git diff --cached` on a co-edited file shows hunks with nothing marking whose they are. The gate closes *committed without looking*; the harder half needs per-hunk provenance the tree does not carry.
+- **It creates a tension nobody should resolve unilaterally:** the gate refuses the **pathspec** form, and a pathspec commit **ignores the index** — so it is exactly the form that prevents the index capture. A session holding unstaged content in its own target paths therefore cannot use the index-safe form, and is pushed onto the vector.
+- **The inbound half is not closeable by any per-session behaviour at all.** Stage, stop, read `--cached`, then commit as a separate call is correct and was followed; the capture landed in the gap between the read and the commit, with no action of that session's in between. It is a time-of-check-to-time-of-use window on state a peer writes and this session can neither observe nor lock.
+- **Two structural candidates, named and NOT recommended, because neither has been probed:** per-session index isolation via `GIT_INDEX_FILE`, and the pathspec form above. Both need a probe first — three of that night's wrong claims were unprobed mechanisms, and two of those were remedies.
+
+**Only a worktree changes the quantity being shared.** Every other remedy rearranges who touches a shared thing first.
+
+**Instances:** the six recorded in the peer-capture bug file; `OB-2`'s `target/` clobber (the same class on a different resource, seen from the arming side); the `entry_high_water_<PREFIX>` cross-host collision; and the pre-commit hook's own whole-tree diff, which attributes by temporal proximity for exactly the reason described here and refused a push on a green run naming a file nothing under `src/` writes.
+
+**Status:** open — promoted from `IC-1` on 2026-09-01, which this entry also **falsifies in part**: `IC-1`'s claim contains a *therefore* (*"its peer listing reaches only peers sharing its config profile. Coordination is therefore impossible by construction"*) and the causal link is broken. Coordination failed with enumeration complete. `IC-1`'s visibility half stands on its own members — `cross-account-agents-cannot-see-each-other`, `listagents-omits-cross-profile-sessions`, `peer-sessions-never-compares-start-time-to-build-time` — and is a real class; it is simply **not the reason** the write side has no remedy. `OB-3` is the visibility half already promoted; this is the ownership half, and they are siblings rather than one class.
 
 ## Template for new entries
 
