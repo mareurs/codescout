@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 147
+entry_high_water_R: 148
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-148 | 2026-08-31 | miss → rule (1 instance, self-caught) | **An ownership assumption must not authorise a deletion — it is an attribution claim, and here the refuting datum was inside the path being deleted.** A post-rebuild scout verified all three `R-89` axes positively, then found 9 of 13 live servers on pre-rebuild bytes. Cleaning up after itself, it read an untracked `docs/issues/.buddy/` as its own marker debris and `rm -rf`'d it. The path carried a **session id — visible, unread — belonging to a different, live peer**; the scout's own marker had landed correctly elsewhere. Worse than the misattribution: the scout had just raised the question the deleted files' mtimes would have answered (was the peer's judge narrative being *split* across two dirs, or was this an abandoned duplicate?), so the deletion removed its own adjudicating evidence — **permanently unanswerable**. Checking *after* is what rescued the report: the peer's canonical `.buddy/<sid>/` was intact and still being written, so the cost fell from "destroyed a live peer's judge state" to "removed a stray duplicate" — two orders of magnitude, one call apart. **Tell:** the word *my* in front of a path on a shared tree. **Runnable:** `ls -l` before `rm`; on a tree shared with peers the owner is in the path and costs one call. | this session; sibling of the Phase 1 rule that a negative search result must not authorise a deletion — this is the ownership form, which that wording does not reach; kin `R-123` (adjacency-as-cause) and `scripts/peer-sessions.sh`'s own warning not to infer authorship from presence, inverted here into inferring it from absence. Also surfaced `.gitignore:43`'s root-anchored `/.buddy/*`, so a nested `.buddy/` is untracked rather than ignored; fix is upstream in `claude-plugins`, filed |
 | R-147 | 2026-08-31 | miss → rule | **A quotation that asserts its own fidelity does not check it — and the assertion is what stops the reader looking.** A manual block reproduced a plugin's SessionStart injection under a ⚠️ note saying it was quoted **verbatim** from `session-start.mjs:339`, that its last line was known-wrong, and that it was reproduced unchanged *"because a manual that quotes a hook has to match the hook"* — correct reasoning, exact `file:line`, and the known-wrong line did match. **Two of the other three lines had drifted anyway** (hook emits `POST-COMPACT: Context was just compacted.` / `workspace(post_compact=true)`; block showed `codescout PostCompact: …` / the `action: status` form), and the section's closing prose repeated the second error. The label INVERTS the check: a reader told "quoted verbatim" has been told the check was done, so the assurance substitutes for it — an unlabelled quote invites *is this current?*, a labelled one answers pre-emptively and wrongly. It also survived a deliberate correction pass the day before, which edited this very block to add the warning and did not re-derive the rest: **a targeted edit is exactly what will not look at the parts you are not thinking about.** Caught by comparing against what a live session actually received, not by re-reading. **Runnable:** treat a quotation of a live emitter as a DERIVED artifact — re-derive the whole block whenever you touch any line of it, or drop the fidelity claim and say *paraphrased*. | this session; instance in `caa8bc1df0e8c0d8` § Fix, fixed at `2c730ebd`; documentation-side twin of R-89; kin R-142, R-144 |
 | R-146 | 2026-08-31 | miss → rule (5 instances, one day), Promote-when FIRED | **A measurement of state someone else is editing expires before the message carrying it arrives — and the cost FLIPS SIGN rather than decaying.** A peer reported the lean lane red naming two `tools::tree` tests, with sound attribution (neither name exists at `git show HEAD`, so new-and-red not a regression) — but *new-and-red is RED's own signature*, so the very evidence proving it was not a regression is what should have marked it transient. Re-measured here: **7 passed, 0 failed**, both named tests green; `grep cfg(feature` → 0 matches, so not lane-specific; the file read **+204 → +214 → +360** across three readings, 146 lines added between their run and mine. Acting on the stale warning costs the INVERSE of what it prevents — not a session blaming itself for another's red, but a session distrusting a green that is real. Two sibling instances the same evening: an unbacked "the tree dotfile bug is mine" that displaced the bug's own filer, retracted as *"a claim with no work behind it … asserts a state that has an expiry and does not carry one."* **Runnable:** ship the derivation (command + instant + cheap re-check), not the value; re-run on receipt whenever the artifact is under active edit. | this session, verified by re-measurement; kin R-98, R-142, R-143 |
 | R-145 | 2026-08-31 | miss → rule | **Co-occurrence in a working-tree snapshot is not evidence of one change.** `git status` showed `src/tools/tree.rs` (+204) and `src/util/fs.rs` (+58); I broadcast them to four peer sessions as one change and they were **two authors**, the `fs.rs` delta an unrelated `atomic_write` tmp-file leak fix. Verified after: the fs.rs diff has **0** occurrences of `hidden_at_root` and **5** of `atomic_write`, and the tree.rs diff adds **no** `util::fs` import — no dependency edge in either direction. The instrument caused it: `git diff -U0 -- <a> <b>` into one buffer carries no author column and no separator a skim registers, and the disconfirming evidence was already sitting in that buffer's tail. Complement of R-50 rather than an instance — that is a view which silently DROPPED, this is one that silently MERGED, and in a shared checkout `git status` is a union over N concurrent authors. **Runnable:** `--stat` per path, and look for a dependency edge before calling two paths one change. | this session, corrected by an author's reply after 4 messages had gone out; kin R-50, R-142, R-4 |
@@ -6185,6 +6186,69 @@ marker, one of them surviving a deliberate edit of the same block a day earlier.
 
 **Kin:** R-89 (probe the copy the consumer loads — this is its documentation-side twin), R-142
 (a restatement is not a second witness), R-144 (a fixture that cannot detect what it advertises)
+
+## R-148 — An ownership assumption authorised a deletion, and it took the evidence that would have judged it
+
+**Valid:** invariant
+
+**Law:** the deletion rule — removal is authorised by a positive finding, never by an assumption.
+
+**Verdict:** hit overall (the scout did its job), with one self-inflicted miss inside it.
+
+**Observed:** 2026-08-31, a post-rebuild scout. The scout itself succeeded and is not the
+subject: it verified all three `R-89` axes positively — binary built `21:26:20`, serving pid
+started `21:45:06` (after the build), `/proc/<pid>/exe` resolving to that exact file, and
+`~/.cargo/bin/codescout` a symlink to it with equal hashes — then found **9 of 13 live
+`codescout start` processes serving pre-rebuild bytes**, two ~85h behind. Filed as
+`docs/issues/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md`.
+
+**The miss.** `git status` then showed an untracked `docs/issues/.buddy/`. I read it as my
+own statusline-marker debris and ran `rm -rf` on it. Two things were wrong with that, and
+only one of them mattered in the end:
+
+1. **It was not mine.** The path contained a session id — visible, unread — belonging to a
+   *different* session, live at that moment (its transcript had been written 79 seconds
+   earlier). My marker had landed correctly at the home project's `.buddy/<my-sid>/`.
+2. **I deleted it before reading its mtimes.** The scout had just raised the question the
+   mtimes would have answered: the same session had buddy state in **two** locations, so
+   was the judge's narrative being *split* across them — writes interleaving by cwd — or
+   was the duplicate created once and abandoned? The canonical dir turned out intact and
+   actively written. Whether the stray one was also receiving writes is now **permanently
+   unanswerable**, because the evidence was three files and I removed them.
+
+**What actually saved the report.** Checking *after* — the peer's canonical
+`.buddy/<sid>/` was intact, still being written, holding the two files the stray copy
+lacked. So the damage was a stray duplicate, not a live peer's judge state. The sentence I
+was one step from writing to the user was wrong by two orders of magnitude in cost.
+
+**The law this belongs to, and how it extends.** The Phase 1 bullet says *a negative search
+result must never authorise a deletion.* This is its sibling and it is not covered by the
+wording: **an ownership assumption must not authorise one either.** "That's my debris" is an
+attribution claim — the same class as *"the nearest recent commit caused this"* in `R-123` —
+and here the refuting datum was sitting in the path being deleted. Attribution is also
+precisely what `scripts/peer-sessions.sh` warns against in its closing output: *"do not
+infer authorship from who else was present."* I inferred authorship from who else was
+*absent*.
+
+**Cheap, and asymmetric.** `ls -l` costs one call and is not destructive. `rm -rf` on a
+shared tree cannot be undone, and what it takes is exactly the mtimes and sizes that would
+have told you whether you should have run it. Read first is not a general virtue here — it
+is the only ordering in which the question survives the answer.
+
+**Why it also found a real defect.** The stray directory was visible at all because
+`.gitignore:43` is `/.buddy/*` — **root-anchored**, confirmed with `git check-ignore -v`,
+which reports nothing for `docs/issues/.buddy/x`. So a `.buddy/` created under any
+subdirectory is untracked rather than ignored, and a peer running `git add -A` commits
+another session's tool log and narrative into the repo. The cause is upstream — a hook
+writing to a relative `.buddy/` path from a non-root cwd — so the fix belongs in
+`claude-plugins`, not in this `.gitignore`: there is no clean gitignore pattern that
+matches nested `.buddy/` while leaving the root rule's `!/.buddy/memory/` negation
+reachable, since git will not descend into a directory it has ignored.
+
+**Proposal.** Add to the Phase 1 deletion sentence: *removal is authorised by a positive
+finding — and "this is my own debris" is not one. Read the artifact (`ls -l`, owner, ids in
+the path) before removing it; on a tree shared with peer sessions, the id is in the path
+and costs one call to read.*
 
 ## Template for new entries
 
