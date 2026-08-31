@@ -102,6 +102,47 @@ and defeated inside four minutes. That is the difference between a hazard someon
 in and one whose mitigation has been tested; the belief-only version had already produced
 the wrong remedy ranking above, and it took the live failure to correct it.
 
+## Instance 4 — path-scoped committing failed, in a way this file said it would not
+
+2026-08-31 23:34, commit `cab5c9e3`. **The capturing party this time was the session that had
+spent the evening writing about this mechanism**, ten minutes after filing `IC-10` (*authorship
+on a shared checkout is unrecoverable after the fact*) and while committing a bug file about a
+different silent-corruption class.
+
+It used the remedy this file recommends. `git commit -F - -- <two explicit paths>` — no `-a`,
+no `add -A`, no directory pathspec. One of those paths was `docs/trackers/issue-clusters.md`,
+where the session had changed a single table cell. Between that edit and the commit, a peer
+added a complete new entry to the same file: `## IC-11`, its index row, and the
+`entry_high_water_IC` bump. All of it landed inside a commit whose subject is a frontmatter
+bug, and whose body does not mention `IC-11`.
+
+**This is a mechanism the file did not previously cover, and it narrows remedy (1) further.**
+`git commit -- <path>` does not commit the index; it commits the **working tree** at that path.
+So path-scoping defends against sweeping in *unrelated* files, and gives no defence at all when
+a peer is editing *the same file you are committing*. The earlier instances were all
+unrelated-file captures, which is why the remedy looked sufficient. On a shared checkout there
+is no commit-side discipline that protects a shared **file**: by the time you commit, the peer's
+edit is already in the tree you are reading, and it is indistinguishable from your own.
+
+So the ranking stands as Instance 3 left it, for a second and independent reason. **(2) a
+worktree is the only unilateral defence** — it is the only option that stops you and a peer
+sharing a working tree at all. (1) path-scoped committing is now demonstrated to be *narrower*
+than it looked: a courtesy that reduces unrelated captures, and no protection whatsoever on
+contended files. (3) remains noise.
+
+One thing this instance does add in mitigation: the captured content was **complete and
+correct** — `IC-11`'s heading, index row and high-water mark were internally consistent, and
+`link_scan` resolves the token. As with the first three, this is provenance corruption and not
+data loss. The cost is that `git log` now attributes a taxonomy addition to a bug-file commit,
+and `git log -S'IC-11'` answers the question "why was this class added?" with the wrong story.
+
+**Detection was luck, and that is the part to fix.** The capture was noticed only because the
+commit's `--stat` reported 32 changed lines in a file where one cell had been edited, and the
+session happened to read it. Nothing warns. A pre-commit check comparing each staged path's
+working-tree hash against the hash the session last wrote would catch it — but this checkout's
+`core.hooksPath` is broken (`docs/issues/2026-08-30-core-hookspath-points-at-pre-rename-path.md`),
+so no hook fires here at all.
+
 ## Candidate remedies
 
 1. **Path-scoped commits as standing practice** — `git commit -- <explicit paths>`, never
