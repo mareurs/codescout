@@ -301,6 +301,21 @@ postdates the compaction, hence could only carry `bcc98c22`. Three independent c
 > and the same referent passed on decays into someone else's defended finding. And when you
 > receive a premise you cannot check, say which part of your conclusion rests on it, so the
 > party who can check it knows to.
+>
+> **The receiving end supplies the mechanism, and it is worse than "they could not check it"**
+> — reported by `codescout-8a`, which is the only party that could observe this. Three
+> properties made the premise ride: it arrived **labelled as verified** (*"the session this one
+> was compacted from"*, stated as fact rather than as inference); it was **unfalsifiable from
+> that side** (a peer cannot read my `CLAUDE_CODE_SESSION_ID`); and it slotted in as
+> **background rather than as claim**, so it was never a candidate for checking at all.
+>
+> The consequence is the part to keep: **checkable claims attract the verification effort, and
+> unchecked premises ride along beside them.** The unchecked premise is not merely unexamined
+> — it is *protected* by the checkable material next to it, because a diligent recipient
+> spends their effort where effort can land and finishes feeling they verified the message.
+> More rigour on the recipient's part makes this **worse**, not better: it raises confidence in
+> a conclusion whose weakest input was never in scope. Which is why the fix has to sit with the
+> sender — the one party for whom the premise *is* checkable.
 
 ### Sub-pattern — mark provenance at the WRITE, because nobody downstream can
 
