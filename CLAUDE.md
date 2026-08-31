@@ -320,6 +320,40 @@ Some defect classes are invisible to the party best placed to catch them **by co
 
 Record classes as `OB-N` in **[`docs/trackers/observer-blindness.md`](docs/trackers/observer-blindness.md)** (artifact `3922c2a0fd0dfcfc`) — admission tests, the field block, and the mining greps live in the file; the one-line index is `docs/TAXONOMY.md`. **An instance is a bug file, an `F-N` or an `R-N`; only the class is an `OB`.** A row reading `**Mechanism status:** none yet` is a design worklist item, and is exactly what `H-N` (hooks) and `I-N` (`docs/trackers/test-escape-hardening.md`) consume — that tracker reached the same conclusion from the cost side, *"lenses must move LEFT into standing mechanisms so they catch by default without a human remembering"*, and the two are complements rather than copies.
 
+## Parsers Over a Namespace — owe an escape and a disambiguator
+
+A parser that interprets every token in its namespace is correct on every input it *accepts*; the
+defect is the input it makes **unrepresentable**. That is why ordinary testing does not reach this
+class — you cannot write a test for a case you cannot express, so the suite exercises the inputs
+the grammar admits and passes. Promoted 2026-08-31 from `issue-clusters:IC-6` at **27 instances
+across five subsystems** (file-format navigation, markdown editing, the citation resolver, four
+shell gates, symbol navigation) — the largest class in this corpus, and one that sat at n=2 until
+the archive was counted.
+
+**Two halves, and a parser owes both.** *No escape*: `---` read as frontmatter wherever it
+appears; a nested triple-backtick fence closing an enclosing quadruple one; content whose first
+line looks like a heading deleting the heading it was replacing; a documentation example of
+citation syntax counted as a real citation. *No disambiguator*: two byte-identical headings, both
+permanently unaddressable; two symbols sharing a `name_path`; three ledgers owning one prefix,
+kept apart by zero-padding alone; a qualified citation truncated at 31 characters so two file
+stems become one. They fail in opposite directions — the first **refuses** work you can describe,
+the second silently does it to the **wrong target** — so answering one is not answering the other.
+
+**The heredoc tell.** Four independent shell gates — IL-3's pipe limiter, the dangerous-command
+gate, the source-file gate, and `run_command`'s pipe instrumentation — each separately decided a
+heredoc body was command text, and each was fixed separately. A construct that exists *precisely*
+to mean "this is data, not syntax" will be misread by every scanner in the process, on its own
+schedule. Ask what your parser's heredoc is.
+
+**Before shipping one, answer two questions in the code rather than in your head:** how does a
+caller write this token literally, and what happens when two collide? *"It cannot happen"* is a
+claim about today's corpus and decays with it — three ledgers sharing a prefix was impossible
+until the third existed. Where no escape is affordable, say so **at the refusal site**: a
+documented limitation and a silent reinterpretation cost a reader very different amounts. The
+corpus states the point better than this section can — an entry id cannot be *mentioned* without
+citing it, the only escape being a fenced block, so
+`docs/issues/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md` is this class
+holding about the very ledger that records it.
 ## Design Principles
 
 codescout's conventions and design principles live in memory (auto-listed at session start) — read them when writing codescout code:

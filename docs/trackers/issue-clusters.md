@@ -136,27 +136,51 @@ grep -L 'cluster/' docs/issues/2026-*.md
 > Hand-maintained reading surface. The `## IC-N — <title>` headings are what define the tokens
 > and what `link_scan` resolves; this table is for scanning. `n` is a snapshot — re-run the
 > `**Members:**` query before trusting it.
+>
+> **When a count moves, re-derive every judgement that quotes it, in the same pass.** The
+> 2026-08-31 backfill updated `**Members:**` and this table but not `**Promotes to:**` — the
+> field that records the *decision* — so four entries carried a correct count beside a judgement
+> reasoned from the superseded one, `IC-6` reading `not yet — n=2, below threshold` while holding
+> the largest count in the corpus at 27. Because the ledger's own mining query is
+> `grep -B4 'not yet'`, the effect is a class surfacing as owed-a-rule next to a reason telling
+> the reader to dismiss it. Repaired for IC-4, IC-5, IC-6, IC-7 and IC-9; the sentence below the
+> table carried the same defect, reading "six" through three rewrites because each rewrite listed
+> only the classes it was adjudicating.
+>
+> **Re-derive against `git ls-files docs/issues`, not a bare recursive grep.** `docs/issues/` also
+> holds untracked session-log directories (`.buddy/`, `.codescout/`) whose tool logs quote
+> `cluster/<slug>` verbatim from the commands that counted them, so a recursive grep can read its
+> own measurement back as corpus — observed 2026-08-31 inflating three cells at once. `git
+> ls-files` is also the definition `tests/issue_clusters.rs` enforces, so it is the one that
+> matches the gate.
 
 | id | class | slug | n | promotes to | mechanism |
 |---|---|---|---:|---|---|
 | IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 18 | `OB` (OB-2, OB-3) | partial |
 | IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB` (OB-4) | none yet |
 | IC-3 | declaration is not execution | `declared-not-wired` | 20 | `OB` (OB-5 residual) | none yet |
-| IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | not yet — routing unsettled | none yet |
+| IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | `OB` — passes admission test; hook owed | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | `H` — six subsystems; mechanism owed | none yet |
-| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | `CLAUDE.md` — escape + disambiguator | shipped (partial) |
+| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 27 | `CLAUDE.md` § Parsers Over a Namespace — **landed** | shipped (partial) |
 | IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | 4 | not yet — 2 of 4 unconfirmed | shipped (partial) |
 | IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 5 | `DC` | none yet |
-| IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 1 | not yet — two tags withdrawn as misfits | designed |
+| IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 1 | not yet — two tags withdrawn as misfits | none yet |
 | IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
 | IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 1 | not yet — n=1 taggable | none yet |
 
-**Six of eleven clear the count threshold** (IC-1, IC-2, IC-3, IC-4, IC-5, IC-6). **IC-5 and IC-6
+**Eight of eleven clear the count threshold** (IC-1 through IC-8), and **IC-6 is the
+first to land its rule** — `CLAUDE.md` § *Parsers Over a Namespace*, 2026-08-31. **IC-5 and IC-6
 are now adjudicated rather than flagged**, and both route away from `OB` — each declares
 `Blind party: none`, which fails OB's admission test, so the count was never the only thing
 stopping them. IC-5 spans six subsystems (cargo feature config, wine, shell env, workspace
 resolution, toolchain, ambient embedder config), seven of its eleven members outside the
-Windows/wine lane its old note said contained all of them. IC-6 spans five. IC-7 still fails on
+Windows/wine lane its old note said contained all of them. IC-6 spans five. **IC-4 routes the
+other way on the same test**, adjudicated 2026-08-31: it names a blind party — the operator who
+made the edit, whose successful check of the value that landed is *positive evidence for the
+wrong proposition* — and it fails with a plausible answer rather than an error, so it satisfies
+the routing table's first row. Its old field doubted this by conflating the recording surface
+with the remedy; the `H` hook that diffs intended against effective config is the mechanism it
+owes, not an alternative home. IC-7 still fails on
 premise confidence, IC-8 routes to `DC` regardless of n, and IC-10 / IC-11 are newly opened at
 n=1.
 
@@ -260,7 +284,7 @@ The reason ordinary testing does not catch this class is structural rather than 
 **Claim:** Configuration propagates as an overlay rather than a replace. An added or changed key lands; a **removed** key, or a **renamed** path, does not — and the change that does land is read as confirmation that the whole edit applied.
 **Members:** `filter={"tags": {"contains": "cluster/config-propagation-is-additive"}}` — n=8, 2026-08-31, by query after archive backfill.
 **Blind party:** the operator who made the edit. They verify the change they can see — the new value — and that verification is *positive evidence for the wrong proposition*. Nothing in the successful check distinguishes "the edit applied" from "the additive half of the edit applied".
-**Promotes to:** `not yet` — the class has three instances across three subsystems (MCP env, shell env, git config) and clears the threshold, but the routing field is unsettled: it is arguably `H` (a hook that diffs intended vs effective config) rather than `OB`. Decide before promoting.
+**Promotes to:** `OB` — `docs/trackers/observer-blindness.md`, adjudicated 2026-08-31. This field read *"three instances across three subsystems (MCP env, shell env, git config)"* until then — a count from before the archive backfill. It is **8**, spanning MCP env, shell env, git config, worktree gitdir, hook scripts, sweep scripts, the env-copy flow and memory keys. **Unlike `IC-5` and `IC-6`, this class passes OB's admission test**: `Blind party:` names one — the operator who made the edit — and the failure is a plausible answer (the additive half landing) rather than an error, which is the routing table's first row. The earlier *"arguably `H` rather than `OB`"* conflated *where the class is recorded* with *what the remedy is*: an `H` hook diffing intended against effective config is the mechanism this class owes, and `IC-1`/`IC-2`/`IC-3` likewise sit in `OB` with mechanisms outstanding. Record in `OB`; build the hook.
 **Mechanism status:** none yet.
 **Valid:** dated 2026-08-31
 
@@ -296,7 +320,7 @@ This class is deliberately kept even though it does not currently promote. Its v
 **Claim:** An addressing scheme interprets every token in its namespace and provides no way to write one literally, or to disambiguate two that collide. The scheme is correct on every input it accepts; the defect is the input it makes unrepresentable.
 **Members:** `filter={"tags": {"contains": "cluster/addressing-without-an-escape-hatch"}}` — n=27, 2026-08-31, by query.
 **Blind party:** `none — ordinary design defect`. The gap is visible to anyone who tries the unrepresentable input; nobody is structurally prevented from seeing it. Recorded so it is not mis-promoted to `OB`.
-**Promotes to:** `CLAUDE.md` — adjudicated 2026-08-31 after the archive backfill took it from n=2 to n=27, the largest class in the corpus. **Not `OB`**: `Blind party:` is `none`. It is codescout-specific engineering discipline, statable as one rule — *a parser over a namespace owes an escape for writing a token literally, and a disambiguator for two that collide.* Five subsystems: file-format navigation (`json_path`, `toml_key`), markdown editing (fences, heading-shaped content), the link/citation resolver (frontmatter delimiters, qualifiers, prefix collisions, doc-examples-read-as-citations), shell command gates (IL-3, dangerous-command, source gate, `run_command` — four separate gates, every one of them on heredocs), and symbol navigation (`name_path` with no disambiguator). Unlike IC-5 this one has partial mechanism already shipped, so the rule has something behind it.
+**Promotes to:** `CLAUDE.md` § *Parsers Over a Namespace — owe an escape and a disambiguator* — **landed 2026-08-31**. Adjudicated the same day, after the archive backfill took it from n=2 to n=27, the largest class in the corpus. **Not `OB`**: `Blind party:` is `none`. It is codescout-specific engineering discipline, statable as one rule — *a parser over a namespace owes an escape for writing a token literally, and a disambiguator for two that collide.* Five subsystems: file-format navigation (`json_path`, `toml_key`), markdown editing (fences, heading-shaped content), the link/citation resolver (frontmatter delimiters, qualifiers, prefix collisions, doc-examples-read-as-citations), shell command gates (IL-3, dangerous-command, source gate, `run_command` — four separate gates, every one of them on heredocs), and symbol navigation (`name_path` with no disambiguator). Unlike IC-5 this one has partial mechanism already shipped, so the rule has something behind it.
 **Mechanism status:** `shipped (partial)` — `edit_markdown` and `artifact(get)` gained an `occurrence` selector, closing the heading half for librarian-managed files. The `link_scan` half has no escape syntax at all.
 **Valid:** dated 2026-08-31
 
@@ -314,7 +338,7 @@ The generalisable point is that **an interpreting scheme owes a quoting mechanis
 **Claim:** Work deferred to first use is charged to whichever call arrives first, and that caller has no way to distinguish "cold" from "broken" — so the bill can surface as a timeout or as a negative result that looks like an answer.
 **Members:** `filter={"tags": {"contains": "cluster/lazy-warmup-bills-the-first-caller"}}` — n=4, 2026-08-31, by query after archive backfill.
 **Blind party:** the caller. It receives `symbol not found` or `0 matches` — well-formed, plausible results that are *indistinguishable from the true answer*. This is the property `docs/adrs/2026-08-27-negative-results-name-their-scope.md` exists to address, which makes the class an argument for that ADR rather than a new one.
-**Promotes to:** `not yet` — the count is met but two of three members are `zombie` with unconfirmed root causes, so promoting now would rest a rule on unresolved premises.
+**Promotes to:** `not yet` — the count is met but two of four members are `zombie` with unconfirmed root causes, so promoting now would rest a rule on unresolved premises. (This field read *"two of three"* until 2026-08-31, from before the archive backfill; the fraction moved, the argument did not.)
 **Mechanism status:** `shipped (partial)` — a false-zero guard covers the cold-start path for `references`; the deliberate cold-start reproduction showed the guard *does* fire there, which refuted the original filing.
 **Valid:** conditional — either zombie member recurs
 
@@ -350,19 +374,19 @@ This is filed as a class of one deliberately rather than folded into `DC`. The t
 **Claim:** An assertion whose haystack embeds environment-controlled text — a path, a tempdir name, a hostname, a timestamp — can be satisfied by coincidence. It fails **open**: it passes on almost every machine and almost every run, so the green tick is evidence of luck rather than of the property.
 **Members:** `filter={"tags": {"contains": "cluster/assertion-satisfiable-by-accident"}}` — n=1, 2026-08-31, by query. Went to 3 in the archive backfill and back to 1 the same evening: two of those tags were misfits and were withdrawn, see **Promotes to**.
 **Blind party:** `none — ordinary design defect`, but with an unusually strong *detection* asymmetry: at ~1-in-800 the failure is unreachable by local reproduction, so the author's evidence is necessarily circumstantial. The file records that honestly in its own `unverified:` field.
-**Promotes to:** `not yet` — n=1. When it moves, the target is `I` (`docs/trackers/test-escape-hardening.md`), because the remedy is a standing grep rather than a rule anyone remembers.
+**Promotes to:** `not yet` — n=1. When it moves, the target is `I` (`docs/trackers/test-escape-hardening.md`), because the remedy is a standing check rather than a rule anyone remembers — but see **Mechanism status**: the check is not the grep this entry used to name.
+**Mechanism status:** `none yet`. This field read `designed` until 2026-08-31, on the reading that the member *"names the check"*. The member names it and **records it as insufficient**: it ran the grep — 466 hits across 99 files under `src/` — and concluded *"not a worklist … the defect needs the haystack to embed environment text, which the regex cannot see. Recorded so the next person knows the bare grep does not narrow it and does not repeat the measurement."* Whether a haystack interpolates a `Path` is a dataflow question, so no text search can decide it; the starting population is not the finding set. **The mis-stated field cost exactly what the member predicted**: a reader took `designed` at face value on 2026-08-31 and re-ran the measurement (120 hits at the narrower `assert!(!x.contains(` form) before reaching the member that says not to. A real mechanism has to start from the emitting side — which formatters interpolate a `Path` — and work outward to their assertions.
+**Valid:** dated 2026-08-31
 
 **Two tags were withdrawn on 2026-08-31, and the mistake is instructive.** The archive backfill put `ollama_large_batch_exceeding_batch_size` and `cross-process-write-lock-test-passes-when-it-does-not-run` in here, taking n to 3 and appearing to meet the threshold. Neither instantiates the claim: the first was vacuous the day it was written and the second is vacuous when skipped, and **neither turns on environment-controlled text**, which is the entire content of this class. They were matched from their titles — both read as *"a test that passes when it shouldn't"*, which is true of this class and true of a wider one. That is precisely how a class inflates past its threshold on members that do not instantiate it, which is the failure this ledger's own *"a wrong class corrupts the counts that promotion reads"* names. Their real family, *an assertion that cannot fail*, is recorded as a candidate class in the Index; their own `vacuous-assertion` and `green-proves-nothing` tags already said so.
-**Mechanism status:** `designed` — the member names the check: *negative `contains` assertions over anything that interpolates a `Path`*. Nobody has run it corpus-wide.
-**Valid:** dated 2026-08-31
 
 The single member states its own general form better than a summary would: *"This is not 'a flaky test'; it is an assertion whose input contains environment-controlled text. Any `!haystack.contains(needle)` where the haystack embeds a path, a hostname, a timestamp or a temp name has the same defect, and it always fails open."*
 
 The direction matters and is the reason this is not a duplicate of `CLAUDE.md` § *Testing Discipline*'s monotone rule. That rule says an assertion cannot detect a change it is monotone under, and prescribes mutating the other way. This class is narrower and concerns the **haystack** rather than the assertion's direction: the positive form (`assert contains`) is safe here, because a coincidental match makes it pass *when it should already pass*. Only the negative form can be satisfied by an accident that the property being tested does not license. The two are complements, and the monotone rule is the more general of the two.
 
-Kept as a class of one for the same reason as `IC-8`: the bug corpus is where the second instance will arrive, and a defined slug is what lets it find the first. The prescribed grep is cheap enough that running it once would either promote this class or close it.
+Kept as a class of one for the same reason as `IC-8`: the bug corpus is where the second instance will arrive, and a defined slug is what lets it find the first.
 
-**Falsified by** the corpus grep returning no other negative `contains` over interpolated paths, which would make this a one-off rather than a class.
+**Falsified by** an emitting-side sweep finding no other negative `contains` over an interpolated path, which would make this a one-off rather than a class.
 
 ## IC-10 — authorship on a shared checkout is unrecoverable after the fact, so every party infers it from proximity
 
