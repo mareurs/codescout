@@ -173,6 +173,13 @@ localises the churn to a single session. Replace the title and relabel the prove
 `PV-11`'s authored title matches its canonical in substance (differing only in case and a
 `RESOLVED —` prefix). Keep the text; drop the `AUTHORED` caveat.
 
+**Correction 2026-08-31 (fix round 1) — this judgement was wrong.** A substance match
+does not license a `RECOVERED-VERBATIM` label; verbatim means exact, byte for byte.
+`PV-11`'s title is installed from the canonical instead, not kept and re-labelled:
+*"RESOLVED — `unrecorded` dominates only at whole-repo scope, NOT at working-diff scope"*.
+This is the same defect class the task exists to fix — a near-miss captioned as
+recovered/verbatim.
+
 ### 1.5 Correct the CM entries
 
 - `CM-2` — status `open` → `fixed`, citing the recovery. Retire "permanently"; its own

@@ -745,6 +745,15 @@ artifact(action="update", id="e12cd7e0060ed9b8", patch={"body_edits": [
 ]})
 ```
 
+**Correction 2026-08-31 (fix round 1) — the PV-11 edit above was wrong.** Its `new_string`
+kept the 2026-08-28 approximation (*"`unrecorded` dominates only at whole-repo scope, not
+at working-diff scope"*) and labelled it "confirmed RECOVERED-VERBATIM" on the strength of
+a substance match. A substance match does not license a verbatim label — verbatim means
+exact, byte for byte. The canonical title was installed instead, missing `RESOLVED — `
+prefix and lowercased `NOT` corrected: *"RESOLVED — `unrecorded` dominates only at
+whole-repo scope, NOT at working-diff scope"*. See the fix-round commit for the actual
+`body_edits` call applied.
+
 - [ ] **Step 4: Verify the correction landed and the caveats are gone**
 
 ```bash
@@ -834,7 +843,7 @@ artifact(action="update", id="f4923e5e894de62f", patch={"body_edits": [
 artifact(action="update", id="f4923e5e894de62f", patch={"body_edits": [
  {"heading": "## CM-3 — four PV rows have no defining heading", "action": "edit",
   "old_string": "**Valid:** dated 2026-08-28",
-  "new_string": "**Valid:** dated 2026-08-31\n\n**Update 2026-08-31.** The AUTHORED titles this entry describes were replaceable after all — PV-9's and PV-11's canonical titles were in the desktop catalog. PV-9's authored text asserted a materially different claim and has been replaced; PV-11's matched in substance and only its caveat was dropped. The VERBATIM/AUTHORED/DERIVED distinction this entry introduced is what made the divergence findable, and it stays."}
+  "new_string": "**Valid:** dated 2026-08-31\n\n**Update 2026-08-31.** The AUTHORED titles this entry describes were replaceable after all — PV-9's and PV-11's canonical titles were in the desktop catalog. Both were replaced with the canonical text byte-for-byte: PV-9's authored text asserted a materially different claim, and PV-11's authored text merely *approximated* the canonical (missing the `RESOLVED — ` prefix, `NOT` lowercased) — a substance match discovered in fix round 1 not to license a `RECOVERED-VERBATIM` label, so it too was replaced rather than kept and re-labelled. The VERBATIM/AUTHORED/DERIVED distinction this entry introduced is what made both divergences findable, and it stays."}
 ]})
 ```
 
