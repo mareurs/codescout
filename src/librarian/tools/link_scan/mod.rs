@@ -47,6 +47,18 @@ struct Args {
     /// Cap on artifacts scanned.
     #[serde(default)]
     limit: Option<usize>,
+    /// Skip this many findings per array before filling it. Default 0.
+    ///
+    /// Named `findings_*` rather than the bare `offset`/`limit` the bug file proposed,
+    /// because `limit` on this action is already taken and means something else entirely
+    /// — the cap on *artifacts scanned*. A bare `limit` meaning "artifacts" for one
+    /// caller and "findings" for the next is a silent misread, not an error: both are
+    /// integers, both plausible, and the response shape is identical either way.
+    #[serde(default)]
+    findings_offset: Option<usize>,
+    /// Cap on findings carried per array. Defaults to [`FINDINGS_CAP`].
+    #[serde(default)]
+    findings_limit: Option<usize>,
 }
 
 /// One shape for every finding array: `src_id`, `raw`, `kind`, `line`, plus whatever the
@@ -81,13 +93,61 @@ fn finding(src_id: &str, c: &extract::Citation, extra: Value) -> Value {
     out
 }
 
-/// Push into a findings array unless it is already at [`FINDINGS_CAP`].
-/// Totals are counted separately so capped arrays never hide the true
+/// A window into a findings array: skip `offset` findings, then keep up to `limit`.
+///
+/// The arrays are capped for budget reasons and the population was not reachable any
+/// other way. Measured on this repo 2026-08-30: `dangling` produced 637 findings into a
+/// 50-entry array — **7.8%** — so a reader who searched a bucket and found nothing had
+/// searched almost none of it. `4c063b4e` made that truncation *visible*; the window
+/// makes the remainder *reachable*, which is the step (3) that bug file left open
+/// (`docs/issues/archive/2026-08-30-link-scan-truncation-is-accurate-and-unreachable.md`).
+///
+/// `_by_source` is deliberately NOT windowed: it is the only complete view of the
+/// distribution, and it is what lets a *zero* be answered without paging at all.
+#[derive(Clone, Copy)]
+struct FindingWindow {
+    offset: usize,
+    limit: usize,
+}
+
+/// Record one finding: advance that array's own total, then keep the value if it falls
+/// inside `w`.
+///
+/// **`seen` is the total, and this function owns it.** Each of the five call sites used
+/// to increment its `*_total` by hand on the line above its push — and the total doubles
+/// as the finding's zero-based index, which is the only thing that makes an offset
+/// expressible. Two hand-maintained values that must agree, at five sites, is the shape a
+/// sixth arm gets wrong silently: the array would still fill, and only the count beside
+/// it would be off.
+///
+/// That is also why this takes `&mut usize` rather than an index: an index parameter
+/// would put the same ordering hazard back at the call site, one argument to the left,
+/// and `total - 1` is exactly the off-by-one nobody would see — a stale total is not a
+/// crash, it is a plausible number.
+///
+/// Totals stay counted separately from the array, so a windowed view never hides the true
 /// distribution (the report-the-verdict-not-the-distribution trap).
-fn push_capped(v: &mut Vec<Value>, val: Value) {
-    if v.len() < FINDINGS_CAP {
+fn push_windowed(v: &mut Vec<Value>, seen: &mut usize, w: FindingWindow, val: Value) {
+    let index = *seen;
+    *seen += 1;
+    if index >= w.offset && v.len() < w.limit {
         v.push(val);
     }
+}
+
+/// Are there findings past the end of the window the caller received?
+///
+/// This is the `truncated` flag's meaning, and it is deliberately NOT `total > shown`.
+/// The two agree only while `offset == 0`, which is why the older form survived: every
+/// call was the first page. With paging they diverge exactly where it matters — on the
+/// last page of 637 at `offset = 600`, `total > shown` is true while nothing remains, so
+/// a caller who paged all the way to the end would be told the list was still cut. The
+/// flag would then be wrong only for the reader who did the most work to trust it.
+///
+/// Saturating because `offset` is caller-supplied and may exceed `total`; the sum must
+/// not wrap into a "more beyond" answer on a window that is entirely past the end.
+fn more_beyond(w: FindingWindow, total: usize, shown: usize) -> bool {
+    w.offset.saturating_add(shown) < total
 }
 
 /// The `entry_cite.dst_ref` for a resolved citation — entry grain where the citation
@@ -248,6 +308,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let cat = ctx.catalog.lock();
     let limit = args.limit.unwrap_or(MAX_ARTIFACTS_DEFAULT);
+    let window = FindingWindow {
+        offset: args.findings_offset.unwrap_or(0),
+        limit: args.findings_limit.unwrap_or(FINDINGS_CAP),
+    };
     let cutoff_ms = crate::librarian::catalog::gc::visibility_cutoff_ms(
         &cat.conn,
         chrono::Utc::now().timestamp_millis(),
@@ -504,10 +568,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     }
                 }
                 Some(resolve::Outcome::Ambiguous { candidates, total }) => {
-                    ambiguous_total += 1;
                     *ambiguous_by_source.entry(src_rel.clone()).or_insert(0) += 1;
-                    push_capped(
+                    push_windowed(
                         &mut ambiguous,
+                        &mut ambiguous_total,
+                        window,
                         finding(
                             &row.id,
                             c,
@@ -516,14 +581,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     );
                 }
                 Some(resolve::Outcome::Dangling) => {
-                    dangling_total += 1;
                     *dangling_by_source.entry(src_rel.clone()).or_insert(0) += 1;
-                    push_capped(&mut dangling, finding(&row.id, c, json!({})));
+                    push_windowed(
+                        &mut dangling,
+                        &mut dangling_total,
+                        window,
+                        finding(&row.id, c, json!({})),
+                    );
                 }
                 Some(resolve::Outcome::CrossRepo) => {
-                    cross_repo_total += 1;
                     *cross_repo_by_source.entry(src_rel.clone()).or_insert(0) += 1;
-                    push_capped(&mut cross_repo, finding(&row.id, c, json!({})));
+                    push_windowed(
+                        &mut cross_repo,
+                        &mut cross_repo_total,
+                        window,
+                        finding(&row.id, c, json!({})),
+                    );
                 }
                 Some(resolve::Outcome::MalformedQualifier) => {
                     let outer = c.raw.split(':').next().unwrap_or("");
@@ -534,20 +607,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     // default when we cannot confirm a self-reference, since claiming
                     // "genuinely cross-repo" is the stronger assertion.
                     if !self_names.is_empty() && !self_names.contains(&outer) {
-                        cross_repo_file_qualified_total += 1;
                         *cross_repo_file_qualified_by_source
                             .entry(src_rel.clone())
                             .or_insert(0) += 1;
-                        push_capped(
+                        push_windowed(
                             &mut cross_repo_file_qualified,
+                            &mut cross_repo_file_qualified_total,
+                            window,
                             finding(&row.id, c, json!({})),
                         );
                     } else {
-                        malformed_qualifier_total += 1;
                         *malformed_qualifier_by_source
                             .entry(src_rel.clone())
                             .or_insert(0) += 1;
-                        push_capped(&mut malformed_qualifier, finding(&row.id, c, json!({})));
+                        push_windowed(
+                            &mut malformed_qualifier,
+                            &mut malformed_qualifier_total,
+                            window,
+                            finding(&row.id, c, json!({})),
+                        );
                     }
                 }
                 None => {} // suppressed noise / foreign-jurisdiction links
@@ -609,11 +687,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         tx.commit()?;
     }
 
-    // Human-reviewable edge lists (capped), with rel_paths for readability.
+    // Human-reviewable edge lists (windowed), with rel_paths for readability.
+    // Paged by the same window as the finding arrays: these were capped too, and a
+    // caller who can reach every dangling citation but only the first 50 stale edges has
+    // been handed the same defect in a quieter place.
     let edge_view = |pairs: &[(String, String)]| -> Vec<Value> {
         pairs
             .iter()
-            .take(FINDINGS_CAP)
+            .skip(window.offset)
+            .take(window.limit)
             .map(|(s, t)| {
                 json!({
                     "src_id": s, "dst_id": t,
@@ -670,16 +752,33 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // docs/issues/archive/2026-08-27-cross-repo-file-qualified-citation-unsupported.md
             "cross_repo_file_qualified": cross_repo_file_qualified_total,
             "prefix_conflicts": prefix_conflicts.len(),
+            // The window a caller actually received, so `truncated` and the array
+            // lengths are interpretable without the caller re-deriving them from the
+            // arguments they happened to send. Absent from the request, present in the
+            // response: a default is a value, and a reader who assumes 0/50 is guessing.
+            "findings_window": { "offset": window.offset, "limit": window.limit },
             // `len(dangling) == FINDINGS_CAP` reads identically whether the true count is
             // exactly the cap or 100x it — this states which arrays actually got cut, so a
             // reader never has to compare a count against an array length to find out.
+            //
+            // It means MORE BEYOND THIS WINDOW, not `total > shown` — those differ exactly
+            // where paging is used. On the last page of 637 with offset 600, `total > len`
+            // is true while nothing remains, which would report every final page as cut and
+            // make the flag useless precisely for the caller who paged to reach the end.
             "truncated": {
-                "ambiguous": ambiguous_total > ambiguous.len(),
-                "dangling": dangling_total > dangling.len(),
-                "cross_repo": cross_repo_total > cross_repo.len(),
-                "malformed_qualifier": malformed_qualifier_total > malformed_qualifier.len(),
-                "cross_repo_file_qualified": cross_repo_file_qualified_total
-                    > cross_repo_file_qualified.len(),
+                "ambiguous": more_beyond(window, ambiguous_total, ambiguous.len()),
+                "dangling": more_beyond(window, dangling_total, dangling.len()),
+                "cross_repo": more_beyond(window, cross_repo_total, cross_repo.len()),
+                "malformed_qualifier": more_beyond(
+                    window,
+                    malformed_qualifier_total,
+                    malformed_qualifier.len(),
+                ),
+                "cross_repo_file_qualified": more_beyond(
+                    window,
+                    cross_repo_file_qualified_total,
+                    cross_repo_file_qualified.len(),
+                ),
             },
         },
         "edges_missing": edge_view(&d.to_add),
@@ -1272,6 +1371,152 @@ mod tests {
             out["counts"]["truncated"]["ambiguous"],
             json!(false),
             "an array at or under its cap (here: empty) must not read as truncated: {out:#?}"
+        );
+    }
+
+    /// Fixture for the window tests: `F-2..F-(count+1)` cited from one source, with
+    /// `F-1` DEFINED in a second file.
+    ///
+    /// That definition is the load-bearing detail. It is what makes the `F` prefix
+    /// *known*, which is what makes `F-2…` resolve as **dangling** rather than as
+    /// unrecognised prose — and unrecognised prose is reported nowhere at all, so
+    /// without it every assertion below would read zero findings and pass vacuously
+    /// under any mutation to the window.
+    fn dangling_corpus(tmp: &std::path::Path, count: usize) -> ToolContext {
+        let cat = Catalog::open_in_memory().unwrap();
+
+        let dst = tmp.join("target.md");
+        std::fs::write(&dst, "## F-1 — anchor entry\n\nbody\n").unwrap();
+        seed_scan_artifact(&cat, "dst", &dst, "target");
+
+        let mut body = String::new();
+        for n in 2..=(count + 1) {
+            body.push_str(&format!("See F-{n}.\n"));
+        }
+        let src = tmp.join("source.md");
+        std::fs::write(&src, &body).unwrap();
+        seed_scan_artifact(&cat, "src", &src, "source");
+
+        let root = tmp.to_path_buf();
+        TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build()
+    }
+
+    /// Paging reaches the WHOLE population, and each page is disjoint from the last.
+    ///
+    /// This is the defect the truncation warning could only describe: `4c063b4e` made
+    /// `dangling[50 of 637]` visible, and the other 587 stayed unreachable by any
+    /// argument. Asserting that a single offset returns *something* would not test that
+    /// — it is the union over pages equalling the population that says the findings are
+    /// reachable, and the absence of duplicates that says the pages are a partition
+    /// rather than overlapping prefixes.
+    ///
+    /// Mutations that must kill this: drop `.skip`/the `index >= w.offset` guard (every
+    /// page returns the same prefix — duplicates, and a short union); ignore
+    /// `findings_limit` (page one swallows everything, later pages come back empty).
+    #[tokio::test]
+    async fn findings_offset_pages_the_whole_population_without_repeats() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = dangling_corpus(tmp.path(), 51);
+
+        let mut seen: Vec<String> = Vec::new();
+        let mut last_truncated = true;
+        for page in 0..6 {
+            let out = call(
+                &ctx,
+                json!({ "write": false, "findings_offset": page * 10, "findings_limit": 10 }),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                out["counts"]["findings_window"],
+                json!({ "offset": page * 10, "limit": 10 }),
+                "the response must echo the window it applied, so a reader never has to \
+                 re-derive it from the arguments they happened to send: {out:#?}"
+            );
+
+            for f in out["dangling"].as_array().unwrap() {
+                seen.push(f["raw"].as_str().unwrap().to_string());
+            }
+            last_truncated = out["counts"]["truncated"]["dangling"].as_bool().unwrap();
+        }
+
+        let unique: std::collections::BTreeSet<&String> = seen.iter().collect();
+        assert_eq!(
+            unique.len(),
+            51,
+            "every dangling finding must be reachable by paging — got {} distinct of 51: {seen:?}",
+            unique.len()
+        );
+        assert_eq!(
+            seen.len(),
+            51,
+            "pages must PARTITION the population, not overlap: {} rows for {} distinct",
+            seen.len(),
+            unique.len()
+        );
+        assert!(
+            !last_truncated,
+            "the page that reaches the end must report truncated=false, or a caller who \
+             paged all the way is told the list is still cut and pages forever"
+        );
+    }
+
+    /// The window changes what is SHOWN and never what is COUNTED.
+    ///
+    /// `push_windowed` owns the total that used to be incremented by hand beside each
+    /// push, so a window bug and a counting bug are now the same edit — which is the
+    /// point, but it also means the count needs its own assertion. A total that tracked
+    /// the array would make `truncated` and every `_by_source` figure agree with each
+    /// other and with nothing real.
+    ///
+    /// Mutation that must kill this: move `*seen += 1` inside the `if`, so only kept
+    /// findings count. `counts.dangling` drops to the page size and every page reports
+    /// a complete-looking scan.
+    #[tokio::test]
+    async fn the_window_never_changes_the_totals_or_the_per_source_distribution() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = dangling_corpus(tmp.path(), 51);
+
+        let full = call(&ctx, json!({ "write": false })).await.unwrap();
+        let paged = call(
+            &ctx,
+            json!({ "write": false, "findings_offset": 40, "findings_limit": 5 }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(full["counts"]["dangling"], json!(51));
+        assert_eq!(
+            paged["counts"]["dangling"], full["counts"]["dangling"],
+            "the total is a fact about the corpus, not about the page: {paged:#?}"
+        );
+        assert_eq!(
+            paged["dangling_by_source"], full["dangling_by_source"],
+            "`_by_source` is the only complete view and is what lets a ZERO be answered \
+             without paging at all — windowing it would remove the one instrument that \
+             needs no pagination: {paged:#?}"
+        );
+        assert_eq!(
+            paged["dangling"].as_array().unwrap().len(),
+            5,
+            "the page itself is windowed: {paged:#?}"
+        );
+        assert_eq!(
+            paged["counts"]["truncated"]["dangling"],
+            json!(true),
+            "40 + 5 < 51, so more remains beyond this window: {paged:#?}"
         );
     }
 

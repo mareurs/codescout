@@ -119,22 +119,22 @@ impl Tool for Artifact {
                 },
                 "augment": {
                     "type": "object",
-                    "description": "create: attach the augmentation atomically. Accepts every caller-controlled augmentation field, so a tracker needs no follow-up artifact_augment call. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
+                    "description": "create: attach the augmentation atomically, so a tracker needs no follow-up call. Fields below are artifact_augment's — see that tool for what each means. Unknown keys are REJECTED, not ignored — a typo here fails loudly rather than silently dropping the field.",
                     "properties": {
-                        "prompt": { "type": "string", "description": "Required. Persistent instruction: what to maintain and how to format it." },
-                        "params": { "type": "object", "description": "Initial params payload." },
-                        "render_template": { "type": "string", "description": "MiniJinja template projecting params into the librarian(context) [LIVE] block. Omit and the tracker contributes no live state there." },
-                        "params_schema": { "type": "object", "description": "JSON Schema validating params on every merge." },
-                        "entry_collection": { "type": "string", "description": "Names the params array holding filterable entry rows; enables artifact(get, entry_filter=...)." },
-                        "append_mode": { "type": "boolean", "description": "artifact_update prepends a new dated section instead of replacing the body." },
-                        "history_cap": { "type": "integer", "description": "Max dated sections retained; oldest dropped beyond the cap." }
+                        "prompt": { "type": "string" },
+                        "params": { "type": "object" },
+                        "render_template": { "type": "string" },
+                        "params_schema": { "type": "object" },
+                        "entry_collection": { "type": "string" },
+                        "append_mode": { "type": "boolean" },
+                        "history_cap": { "type": "integer" }
                     },
                     "required": ["prompt"],
                     "additionalProperties": false
                 },
                 "patch": {
                     "type": "object",
-                    "description": "REQUIRED for action='update' — an update with no `patch` fails with the bare serde message `missing field 'patch'`, which names the field but not the action that wanted it. Fields to change. Accepted keys: status, title, owners, tags, topic, time_scope, extra, body, body_edits, params (any other key returns RecoverableError). Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}]` for surgical per-section edits (mirrors edit_markdown's batch shape, applied atomically, RECOMMENDED for tracker maintenance) — action is one of replace|insert_before|insert_after|remove|edit: use action='edit' for a scoped text swap (heading + old_string + new_string), action='replace' to overwrite an entire section body (heading + content); pass occurrence=N (1-indexed) when the heading appears more than once; (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic/time_scope. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — use null values to delete keys. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
+                    "description": "REQUIRED for action='update' — an update with no `patch` fails with the bare serde message `missing field 'patch'`, which names the field but not the action that wanted it. Fields to change. Accepted keys: status, title, owners, tags, topic, time_scope, extra, body, body_edits, params (any other key returns RecoverableError). Body editing — three modes: (1) `body_edits: [{heading, action, content?|old_string+new_string?, at?, occurrence?, replace_all?, include_subsections?}]` for surgical per-section edits — edit_markdown's batch shape exactly, including its action semantics and occurrence rule; applied atomically, RECOMMENDED for tracker maintenance; (2) `body` for total overwrite, gated by the 50% shrink guard unless `force=true` is passed at top level; (3) frontmatter-only changes via status/title/owners/tags/topic/time_scope. `body` and `body_edits` are mutually exclusive. `params` is RFC 7396 merge-patched into the augmentation params — use null values to delete keys. Body mutations emit `field_patch` events (kind=field_patch, payload.field=body)."
                 },
                 "force": {
                     "type": "boolean",

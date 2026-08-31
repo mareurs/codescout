@@ -1295,8 +1295,8 @@ impl Tool for EditMarkdown {
                         "properties": {
                             "heading": { "type": "string" },
                             "occurrence": { "type": "integer", "minimum": 1, "description": "1-indexed selector when this entry's `heading` matches several sections." },
-                            "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"], "description": "Per-edit operation. 'replace' OVERWRITES the entire body of the named section (see top-level `action` for full semantics) — prefer 'insert_after' for adjacent sections, 'edit' with old_string/new_string for in-section surgical mods." },
-                            "content": { "type": "string", "description": "Per-edit content (body only — heading preserved on replace). For 'replace', this REPLACES the entire existing section body." },
+                            "action": { "type": "string", "enum": ["replace", "insert_before", "insert_after", "remove", "edit"], "description": "Per-edit operation; semantics exactly as top-level `action` above." },
+                            "content": { "type": "string", "description": "Per-edit content; as top-level `content` above." },
                             "at": { "type": "string", "enum": ["end-of-section", "after-heading-line"] },
                             "old_string": { "type": "string" },
                             "new_string": { "type": "string" },

@@ -543,6 +543,19 @@ fn finding_truncation_summary(result: &Value) -> Option<String> {
     let counts = result.get("counts")?.as_object()?;
     let truncated = counts.get("truncated")?.as_object()?;
 
+    // The window the caller actually received. Without it a paged response renders
+    // `dangling[37 of 637]` at offset 600 — a true-looking understatement of exactly the
+    // kind this line exists to prevent, and one that gets MORE wrong the further a caller
+    // has paged, i.e. the more work they did to be sure.
+    //
+    // Absent (any pre-window producer, or a non-link_scan action adopting `counts`) reads
+    // as 0, which is what an unpaged response means and keeps that rendering unchanged.
+    let offset = counts
+        .get("findings_window")
+        .and_then(|w| w.get("offset"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+
     let mut cut: Vec<String> = Vec::new();
     for (name, was_cut) in truncated {
         if was_cut.as_bool() != Some(true) {
@@ -557,7 +570,10 @@ fn finding_truncation_summary(result: &Value) -> Option<String> {
         let Some(total) = counts.get(name).and_then(Value::as_u64) else {
             continue;
         };
-        cut.push(format!("{name}[{shown} of {total}]"));
+        cut.push(match offset {
+            0 => format!("{name}[{shown} of {total}]"),
+            n => format!("{name}[{shown} from {n} of {total}]"),
+        });
     }
 
     if cut.is_empty() {
@@ -1011,6 +1027,49 @@ mod tests {
         assert!(
             librarian_compact_summary("librarian", &result).is_none(),
             "an untruncated scan must leave the slot to the generic describer"
+        );
+    }
+
+    /// A paged response must say WHERE its window sits, not only how big it is.
+    ///
+    /// At `offset` 600 of 637 the unpaged rendering reads `dangling[10 of 637]` — true
+    /// as arithmetic and false as a report: it implies 627 are unseen when 600 of them
+    /// are precisely what the caller has already paged through. The error grows with how
+    /// far the reader paged, which is to say with how much work they did to be sure. That
+    /// is the worst possible direction for a line whose entire job is to stop a premature
+    /// "nothing here" reading.
+    ///
+    /// The offset-0 rendering is deliberately unchanged and is pinned by
+    /// `compact_summary_names_the_real_total_for_a_truncated_finding_array` — so this
+    /// test would not catch a regression that dropped the window lookup *and* the old
+    /// form together, and that one would.
+    ///
+    /// Mutation that must kill this: drop the `findings_window` lookup, so `offset`
+    /// reads 0 and the unpaged form renders unconditionally.
+    #[test]
+    fn compact_summary_names_the_offset_when_the_caller_paged() {
+        let rows = |n: usize| -> Vec<Value> {
+            (0..n)
+                .map(|i| json!({ "token": format!("R-{i}") }))
+                .collect()
+        };
+        let result = json!({
+            "scope": "project",
+            "dangling": rows(10),
+            "counts": {
+                "dangling": 637,
+                "findings_window": { "offset": 600, "limit": 10 },
+                "truncated": { "dangling": true },
+            },
+        });
+
+        let summary = librarian_compact_summary("librarian", &result)
+            .expect("a cut array is an incompleteness signal whether or not it was paged");
+
+        assert!(
+            summary.contains("dangling[10 from 600 of 637]"),
+            "a paged window must state its offset, or 10-of-637 reads as 627 unseen when \
+             600 of those were already returned to this caller: {summary}"
         );
     }
 

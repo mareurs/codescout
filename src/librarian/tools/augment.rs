@@ -232,13 +232,9 @@ impl Tool for ArtifactAugment {
          On merge=false ALL seven caller-controlled fields — prompt, params, render_template, \
          params_schema, append_mode, history_cap, entry_collection — are overwritten with the call's values; \
          fields you omit silently reset to None / false on the stored row. To change only some \
-         fields, use merge=true — it RFC 7396 merge-patches params and overlays any sibling field \
-         you provide (prompt, render_template, params_schema, append_mode, history_cap, \
-         entry_collection), preserving every field you omit. \
+         of them, use merge=true — see that param. \
          Idempotent — safe to call on already-augmented artifacts. \
-         Params too large to pass inline (≳9 KB)? Write the JSON to a file and pass \
-         params_path (read server-side) instead of params; CLI equivalent is \
-         `codescout artifact-augment <id> --params @<file> [--merge]`. \
+         Params too large to pass inline (≳9 KB)? Use params_path. \
          Replaces artifact_update_params."
     }
 
@@ -270,7 +266,7 @@ impl Tool for ArtifactAugment {
                 },
                 "merge": {
                     "type": "boolean",
-                    "description": "When true, patch only the fields you provide onto the existing augmentation: params is RFC 7396 merge-patched; any sibling field you pass (prompt, render_template, params_schema, append_mode, history_cap, entry_collection) is overlaid; omitted fields are preserved. prompt is not required. Requires an existing augmentation."
+                    "description": "When true, patch only the fields you provide onto the existing augmentation: params is RFC 7396 merge-patched, any sibling field you pass is overlaid, omitted fields are preserved. prompt is not required. Requires an existing augmentation."
                 },
                 "append_mode": {
                     "type": "boolean",
