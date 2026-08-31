@@ -83,6 +83,50 @@ it at all.
 
 Not diagnosed: the hook source has not been read, so this names the shape of the defect and
 not its cause.
+
+### Third measured occurrence, 2026-09-01 — and this one did NOT stop at a near-miss
+
+The entry above says the banner *"nearly converted a correct denial of authorship into a false
+confession."* On 2026-09-01 the same read went further, and the escalation is the part worth
+adding rather than the recurrence.
+
+**What happened.** This session's banner read `from=c0ab9bc4-…`. I read it as *"the session this
+one was compacted from"*, and — investigating a commit-trailer mechanism — passed that to a peer
+session **as fact**, in support of a possible defect. `c0ab9bc4` is not this session's
+predecessor; it is the concurrently-live hooks session's own id, exactly as this bug describes.
+
+**Three checks would each have closed it alone, and none was run.** `CLAUDE_CODE_SESSION_ID`
+reads `bcc98c22-…`; the commits carrying `c0ab9bc4` touch `scripts/install-hooks.sh` and
+siblings, which this session never edited; and every stamped commit postdates the 02:00 hook
+install, hence postdates the compaction, so it *could only* carry `bcc98c22`. The last is
+decisive on its own — the id and the install window are mutually exclusive.
+
+**Why it is worse than the 2026-08-30 occurrence.** That one was caught inside the session that
+held it. This one **crossed a party boundary**. The receiving peer did everything right —
+verified against real commits, reasoned carefully, reached the *correct* conclusion — and
+attached a **wrong attribution** to it, because the premise came from me and was not among the
+things it could check. It reported the mechanism from its own side afterwards: the premise
+arrived *labelled as verified*, was *unfalsifiable from there* (a peer cannot read my
+`CLAUDE_CODE_SESSION_ID`), and slotted in as *background rather than as claim*, so it was never a
+candidate for checking at all.
+
+**Containment:** the wrong attribution never reached a committed artifact — verified, zero
+matches for `pre-compaction`, `c0ab9bc4` or `bcc98c22` in the peer's bug file. It lived in chat
+and was corrected within three messages, by the only party who could falsify it.
+
+**Severity argument this adds.** The `## Why this one is worse than its siblings` section below
+reasons from a *self*-misattribution. The failure mode is larger than that: the banner's output
+is **quotable**, and a false premise sourced from it is laundered by a diligent recipient into a
+conclusion they can defend. The blast radius is not one session's self-model; it is every party
+that session talks to, and their verification effort lands on the checkable parts beside it.
+
+Cross-filed as the fourth instance of `observer-blindness:OB-1` § *Sub-pattern — resolve the
+referent from the artifact, never from the sentence pointing at it* (`a552cf83`, receiving-end
+mechanism at `da379e1a`). Note the relation: `OB-1` records the **reader's** failure to check,
+this bug records the **banner's** manufacture of a claim that does not invite checking. Both are
+real and neither excuses the other — but a reader is being asked to distrust a line that is
+formatted as provenance metadata, which is why the remedy belongs upstream in `buddy` and not in
+a resolution to read more carefully.
 ## Reproduction
 
 Not reduced to steps. Observed once, on this machine, with four concurrent
