@@ -49,3 +49,31 @@ excludes this form **by design** (SQL string literals cannot match the Rust call
 greps for), so nothing enforces it — the sites are held together by "mirrors" comments. All
 four are currently correct. Tracked as SD-2 in
 `docs/trackers/structural-debt-refactor.md`.
+
+## `length()` on TEXT counts CHARACTERS, not bytes
+
+`length(params)` is a character count; `length(CAST(params AS BLOB))` is the byte count.
+Measured 2026-08-31 on one augmentation row: **25,455 characters / 25,521 bytes** — a 66-byte
+gap from multi-byte punctuation, which is exactly the size of discrepancy someone will read
+as evidence of a truncating write. Six wrong "N bytes" claims in one session came from this,
+one of which reached a committed tracker before it was caught. Say which unit you measured,
+or report both.
+
+## Auditing `usage.db` — two traps that return a number rather than an error
+
+Both measured 2026-08-31 while trying to prove a cross-machine task had not written to the
+wrong host.
+
+- **`called_at` is UTC.** A window built from local wall-clock time silently selects the
+  wrong hours. On a UTC+2 host that is a two-hour shift — enough to make a task's own calls
+  look absent and another task's look like yours.
+- **A query containing a host's IP SELF-MATCHES.** Searching the call log for
+  `'%192.168.1.162%'` to find `ssh` calls also matches the audit query you just ran, because
+  that query is itself logged with the IP in its arguments. The count is therefore always at
+  least one, and the extra row looks exactly like a real call.
+
+And the boundary that makes both worse: **`usage.db` records only MCP calls.** Work done
+through native `Bash` is invisible to it, so a task that ran entirely on shell tools audits
+as *zero activity* — indistinguishable from a task that did nothing. When a brief names
+`usage.db` as the audit path for host-safety, substitute target-side forensics instead:
+`artifact.updated_at`, the event log's authorship, and `git reflog` on the remote checkout.

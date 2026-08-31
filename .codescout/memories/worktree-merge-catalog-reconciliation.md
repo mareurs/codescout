@@ -111,3 +111,11 @@ Full design and the rejected alternatives:
 `docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md`
 (§ 1.3a is this deadlock). Recovery plan and its 47 steps:
 `docs/superpowers/plans/2026-08-31-cross-machine-catalog-recovery.md`.
+
+**A catalog-only task leaves no git anchor unless its event carries one.** When a task's
+entire output is catalog-side — params restored, shape migrated, nothing written to a file —
+there is no commit, so `artifact_event`'s `anchor_commit` / `head_commit` are the only thing
+that can place the work in repo history. Measured 2026-08-31: two events recording a
+cross-host schema migration were written with both fields empty, leaving a wall-clock
+timestamp as the sole locator. Pass `head_commit` explicitly on any event whose task will not
+produce a commit.
