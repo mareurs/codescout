@@ -217,12 +217,29 @@ re-partition is the clearest argument for re-running the query rather than trust
 whatever the gate last allowed through, and there is no number here to go stale. It fired on its
 first run and caught two files committed within the hour.
 
-The **archive is deliberately outside the gate**: 78 of the 357 files dated 2026-07-01 or later
-are tagged and 279 are deliberately untagged, because the classes were derived from the open
-backlog and forcing a fit would corrupt the counts promotion reads. A further 137 pre-July files
-are unbackfilled. **Every `n` above therefore remains a floor.** Covering the archive would need
-an explicit `cluster/unclassified` slug meaning *looked, nothing fits* — a taxonomy decision,
-not a gate one.
+The **archive is deliberately outside the gate**, because the classes were derived from the open
+backlog and forcing a fit would corrupt the counts promotion reads. **Re-derive the coverage
+rather than read it here.** This paragraph published four figures and a partition, and every one
+moved inside a single evening:
+
+```
+git grep -l -E 'cluster/[a-z0-9-]+' -- ':(glob)docs/issues/archive/*.md' | wc -l   # tagged
+git ls-files ':(glob)docs/issues/archive/*.md' | wc -l                             # total
+```
+
+`git grep -l` is the load-bearing form: it counts **files**, where `grep -o | sort | uniq -c`
+counts **occurrences**, and a bug file that names its own slug in prose as well as in frontmatter
+is then counted twice. That is not hypothetical — it is why `cluster/config-propagation-is-additive`
+reads as 9 by occurrence against a true membership of 8
+(`docs/issues/2026-08-30-core-hookspath-points-at-pre-rename-path.md` names it in both places).
+Every `n` in the table above is a **file** count.
+
+Snapshot 2026-09-01: **118 tagged of 495.** This read *"78 of the 357 files dated 2026-07-01 or
+later are tagged and 279 are deliberately untagged … a further 137 pre-July files are
+unbackfilled"* until then — four figures and a two-way partition, moved by `13226bda`, `77d4da06`
+and `0dea2246` within one evening, and re-derived by none of the three commits that moved them.
+**Every `n` above therefore remains a floor.** Covering the archive would need an explicit
+`cluster/unclassified` slug meaning *looked, nothing fits* — a taxonomy decision, not a gate one.
 
 **The candidate queue is now empty — all five became classes on 2026-09-01, and every one opened
 at n=0.** `IC-13`, `IC-14` and `IC-15` are the backfill's three remaining shapes; `IC-12` is the
