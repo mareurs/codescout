@@ -80,6 +80,18 @@ rather than re-derive them:
 
 ---
 
+**This log is written by several sessions, and its entries are NOT attributable to whoever
+created the file.** Recorded because the inference was already made: on 2026-09-01 a peer read
+`F-2` here, addressed it to the session that opened the log, and built `F-3` on that
+attribution. `F-3`'s *finding* survives — the sentence it narrows was genuinely refuted — but
+its authorship premise did not. The session that created this file appended `F-1` and `W-1`
+only; `F-2` and `W-2` arrived from elsewhere and their author is not recoverable from the file,
+from `git` (one author string for every session), or from the catalog.
+
+So: **do not address an entry here to a session, and do not infer one from proximity or from
+file ownership.** Ask, or cite the entry rather than a party. That is `issue-clusters:IC-10`
+applying to this tracker specifically — and the instance above is the class compounding, since
+the misattribution was made *while* reading a ledger about misattribution.
 ## F-1 — OB-7's mechanism cites an LSP-verified result to justify a text-search check, and the substrate gap is a deletion-authorising false positive
 
 **Observed:** 2026-09-01, post-commit reconnaissance of `a2aedd49` (IC-3 → OB-7). Scouting three checkable claims I had committed and reported to the user as verified.
