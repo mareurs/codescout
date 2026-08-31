@@ -1,7 +1,7 @@
 ---
-id: '531f24e980262065'
+id: c82b237fef2e40d1
 kind: bug
-status: open
+status: fixed
 title: 'BUG: atomic_write''s tmp path REPLACES the extension, so same-stem files share one tmp path — concurrent writes corrupt across files'
 tags:
 - atomic-write
@@ -9,7 +9,7 @@ tags:
 - shared-checkout
 - data-loss
 - latent
-closed: ''
+closed: 2026-08-31
 opened: 2026-08-31
 owner: marius
 related:
@@ -125,6 +125,17 @@ fix does not touch the path derivation.
 
 ## Fix
 
+**Fixed 2026-08-31 on `experiments` at `8001f61c`**, patch-id
+`cba3952d2889f8245f939990e4c1b70e9cd946fd`. The derivation was first extracted into
+`staging_path()` as a pure refactor *with the buggy body*, so the contract could be asserted
+and the assertion watched to fail — `'Cargo.lock' and 'Cargo.toml' both stage through
+/repo/Cargo.tmp` — before the append was applied.
+
+One addition the plan did not have: the `None` branch (`path.file_name()` absent — a bare root,
+or a path ending in `..`) **preserves the old `with_extension` derivation deliberately**.
+Appending to an empty filename yields a writable `<root>/.tmp`, which would turn an operation
+that used to fail harmlessly into one that creates a stray file at the filesystem root.
+
 Make the staging path a function of the whole filename, not the stem. The minimal form:
 
 ```rust
@@ -149,7 +160,7 @@ Everything that currently depends on the tmp-path shape (`grep` over `*.rs`/`*.t
 | site | depends how | survives the change? |
 |---|---|---|
 | `src/util/fs.rs:63` | the derivation itself | this is the change |
-| `src/util/fs.rs:469` | a test computing the expected tmp path via `with_extension` | **needs updating** — belongs to the leak fix now in flight |
+| `src/util/fs.rs:469` | a test computing the expected tmp path via `with_extension` | **yes, unchanged — corrected at fix time.** That fixture's target is *extensionless* (`"target"`), and for an extensionless path the two derivations agree exactly: both give `target.tmp`. Verified passing before and after the change. The original "needs updating" was read off the call site rather than run. |
 | `src/tools/guide_ledger.rs:639` | `.filter(\|n\| n.ends_with(".tmp"))` | **yes** — `x.md.tmp` still ends with `.tmp` |
 
 So one test to update and nothing else. The `ends_with` predicate is the shape that makes this
@@ -158,12 +169,27 @@ been.
 
 ## Tests added
 
-None yet. The regression test should assert **distinctness** rather than a literal name —
-`tmp_path("x.md") != tmp_path("x.rs")` — because a literal assertion pins the format and would
-need rewriting for any future change to the suffix scheme, while distinctness is the actual
-contract. A demonstration of the interleaving is harder and probably not worth it; the
-distinctness assertion dies on the unfixed function, which is the discrimination that matters.
+Both in `src/util/fs.rs`, and both were watched to fail or to discriminate before being kept.
 
+- `staging_paths_are_distinct_for_files_that_share_a_stem` — asserts **distinctness** across the
+  four real collision groups (`Cargo.toml`/`Cargo.lock`, `source.md`/`source.rs`, the five
+  `.env.*` variants, and extensionless `target`/`target.md`), never a literal name: a literal
+  pins the suffix scheme and would need rewriting for any later change to it, while distinctness
+  is the contract that protects the caller. Confirmed RED against the unfixed function, naming
+  the collision in its own failure message. The extensionless group is load-bearing — it was not
+  anticipated at filing time, and dropping it lets a fix that special-cases only dotted filenames
+  pass.
+- `the_staging_path_stays_beside_its_target` — pins the staging path as a **sibling** of the
+  target. Separate from the distinctness test because uniqueness alone is trivially satisfiable
+  by moving the file: a fix buying distinctness with a process-unique path under `/tmp` would
+  pass the first test and make every rename fail with `EXDEV`, since `std::fs::rename` cannot
+  cross filesystems. It passes both before and after by design — it guards against a *bad fix*,
+  not against the bug.
+
+A demonstration of the interleaving was considered and not written: it needs two writers racing
+on one staging file, which no test can schedule deterministically, so it would pass or fail by
+luck. The distinctness assertion dies on the unfixed function, which is the discrimination that
+matters.
 ## Workarounds
 
 None available to a caller — the path derivation is internal and not parameterised. Avoiding
@@ -172,11 +198,22 @@ enforceable across sessions.
 
 ## Resume
 
-Apply the `with_file_name` change at `src/util/fs.rs:63`, update the expected-path computation
-at `src/util/fs.rs:469` (coordinate with whoever is finishing the leak fix — that file had 78
-uncommitted lines at filing time), and add the distinctness assertion. Confirm it dies on the
-unfixed function rather than assuming.
+N/A — fixed and verified. Gate green in the documented order at fix time: `fmt` 0 diffs, `clippy
+--workspace --all-targets --features local-embed` 0 warnings, lean `--no-default-features` 3403
+passed / 0 failed (third), default `--workspace` 4961 passed / 0 failed (last).
 
+**Deliberately still open, and not a residual of this fix:** `atomic_write` is *not* race-free.
+Two writers to the **same** target still race, which is inherent to write-then-rename without a
+lock. This fix removes only the cross-file case, where the damage lands on a file the caller
+never named. A per-writer unique suffix (pid, counter) would go further and is a separate
+decision that nobody has needed yet.
+
+**Class enumerated, and it is closed.** The two sibling `with_extension` derivations —
+`memkill_path_for_lock` (`src/lsp/mux/mod.rs`) and `pid_path` (`src/retrieval/index_lock.rs`) —
+are **not** instances: both take an internally-constructed `*.lock` path
+(`codescout-<language>-mux-<hash>.lock`, `codescout-index-<hash>.lock`), so their input
+namespace holds exactly one extension and no two inputs can share a stem. Checked rather than
+assumed, since a fix that names a population asserts that population is non-empty.
 ## References
 
 - `docs/issues/archive/2026-08-28-atomic-write-leaks-its-temp-file-on-failure.md` — the other defect in

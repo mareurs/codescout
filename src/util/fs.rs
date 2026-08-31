@@ -65,7 +65,8 @@ pub fn read_utf8(path: &Path) -> Result<String> {
 /// a stem, including `Cargo.toml`/`Cargo.lock`, five `.env.*` variants, and
 /// `src/prompts/source.md`/`source.rs` — the last a prompt surface with three consumers that
 /// must stay consistent, written through `edit_markdown` and `edit_code`, both of which route
-/// here. `docs/issues/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`.
+/// here.
+/// `docs/issues/archive/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`.
 ///
 /// **This does not make `atomic_write` race-free and must not be read as doing so.** Two
 /// writers to the *same* target still race — inherent to write-then-rename without a lock.
