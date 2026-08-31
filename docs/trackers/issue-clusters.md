@@ -376,16 +376,26 @@ Note the pattern is `OB-1`'s — *"the author, specifically"*. All three attribu
 ## IC-11 — documentation denies a capability the code has since gained, because the prose was true when written
 
 **Slug:** `cluster/doc-contradicted-by-code`
-**Claim:** A document states a behaviour the code contradicts. The statement was *true when written*; the code later gained or lost the capability, and nothing re-checks prose against code, so the document goes on asserting the old world with undiminished confidence. Unlike a wrong statement, this one has no authoring defect to find — it decayed.
+**Claim:** A document states a behaviour the code contradicts. The statement was *true when written*; the code later gained or lost the capability. Nothing checks prose against code systematically, and the corrective pass that *does* happen is a hand-enumerated sweep whose completeness is unfalsifiable — it reports the surfaces it changed, never the ones it missed. Unlike a wrong statement, this defect has no authoring error to find.
 **Members:** `filter={"tags": {"contains": "cluster/doc-contradicted-by-code"}}` — n=1, 2026-08-31. Three or more further instances are known to sit in the untagged 279 archived files: this is the third of the four candidate shapes recorded above the `IC-1` entry, promoted to a class here because a taggable instance arrived and the gate has no escape hatch for "looked, nothing fits".
 **Blind party:** the *reader*, routed to the document by its own scope claim and given no signal to cross-check. The author of the prose is not blind — they wrote something true. The author of the *code* change is differently blind: gaining a capability gives you no reason to search prose for sentences your feature just falsified.
 **Promotes to:** `not yet` — n=1 taggable. The likely target is `DC` (`docs/trackers/claim-decay.md`): a true-when-written claim that silently decayed is that ledger's subject, and this class is the bug-corpus entry point to it rather than a competitor — the same relationship `IC-8` declares.
 **Mechanism status:** none yet, and the nearest existing mechanism does not cover it. `librarian(action="audit_doc_refs")` lints *references* — paths, symbols, line numbers, link targets — so a document may cite every path correctly and still assert the opposite of what the code at those paths does. The remedy would have to check claims, not refs.
 **Valid:** dated 2026-08-31
 
-Seed instance: `2026-08-31-librarian-runtime-guide-denies-the-augmentation-sidecar`. The served `librarian-runtime` guide states augmentation has *"**No** — there is no on-disk representation"* and that sharing it is *"local-only by design"*, three months after `src/librarian/augmentation_sidecar.rs` shipped the sidecar. Both sentences were accurate when written. The guide mentions `sidecar`/`expects_augmentation` zero times; `tracker-conventions` mentions them thirteen.
+Seed instance: `2026-08-31-librarian-runtime-guide-denies-the-augmentation-sidecar`. The served `librarian-runtime` guide states augmentation has *"**No** — there is no on-disk representation"* and that sharing it is *"local-only by design"*. Both sentences were accurate when written. The sidecar shipped as `e799f29d` on 2026-08-30, and a deliberate sweep the **same day** — `e1b91221`, *"state that augmentation shape now travels, in the three places that said otherwise"* — corrected `CLAUDE.md`, `docs/conventions/cross-machine-catalog-resume.md` and `tracker-conventions.md`. Not this guide. So the drift is **one day old**, and the mechanism is an enumeration produced from memory, not neglect: "three places" reads as a finding and is a list. The guide mentions `sidecar`/`expects_augmentation` zero times; `tracker-conventions` mentions them thirteen.
 
 **The cost is not that a reader is misinformed — it is that the reader stops.** A sentence saying a capability does not exist terminates the search that would have found it. Measured downstream the same day: a consumer repo held two augmentations in a machine-local catalog with no sidecar and no declaration, one clone away from silent loss, because the guide consulted for exactly that question said there was nothing to export. `doctor`'s `augmentation_declared_but_absent` could not report it either — that check fires only on a *declared* sidecar that is missing, so undeclared-and-unexported reads identically to nothing-to-declare.
+
+**The same guide, the same section, fifteen days earlier — and it is already tagged.**
+`docs/issues/archive/2026-08-16-librarian-runtime-guide-claims-move-preserves-id.md` is
+`status: fixed`, and reports that this *same* § *Where catalog state lives* section claimed
+`artifact(action="move")` "preserves `id`" when a move necessarily re-keys the row. It
+carries the tag `doc-vs-code` — the shape had an informal label before it had a class, which
+is the ordinary way a class announces itself. It stays untagged for `cluster/` purposes under
+the archive policy, so it does not raise the count. Two of the three open files carrying
+`doc-vs-code` are correctly filed under `IC-2`; the tag is a secondary descriptor there, not
+the primary defect.
 
 **Kept apart from `IC-3` and `IC-8` on their own falsifiers, not on judgement.** `IC-3` is a surface declaring a capability production never reaches; this is its mirror — production reaches a capability the surface denies — and `IC-3`'s falsifier explicitly ejects the mirror case (*"the wiring existed and the declaration was merely wrong, which is an ordinary bug rather than this class"*). `IC-8` is an assertion written at the moment of intent and read forever after as outcome; this prose was not intent, it was correct observation, which is why no plausibility check catches either one.
 
