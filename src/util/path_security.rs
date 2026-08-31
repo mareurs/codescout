@@ -789,11 +789,18 @@ fn shell_tokens(cmd: &str) -> Vec<String> {
 /// `raw_only_matches_are_still_caught`. The sibling helpers in this file cannot use
 /// that argument and do not: see [`shell_tokens`].
 ///
-/// This was `posix_tokenize`'s first production call site; the second is
-/// [`shell_tokens`]. Before them the tokenizer written for exactly this job had
-/// none, and the security layer and the executing shell disagreed about what a
-/// command said — live on Windows since the cmd.exe -> Git Bash switch. See
-/// `docs/issues/archive/2026-08-08-security-layer-tokenizes-unlike-the-shell.md`.
+/// **Heredoc bodies are deliberately NOT stripped, unlike in [`detect_il3_violation`] and
+/// [`check_source_file_access`].** Those gates analyse *syntax*, where a body is never a
+/// pipeline stage or a filename argument, so removing it is sound. This gate asks what will
+/// EXECUTE, and a body executes whenever the command consuming it is an interpreter —
+/// `bash <<'EOF' … rm -rf / … EOF` runs its body. Adopting the siblings' carve-out here
+/// would hide a real deletion behind a fix written for a false positive.
+///
+/// What the false positive gets instead is a **discriminating reason**: when a pattern
+/// matched only inside a body, the description says so and quotes the opener, so
+/// acknowledging is a judgement rather than a reflex. The stripped text below decides only
+/// *where* a match was, never *whether* there was one.
+/// (`docs/issues/archive/2026-08-31-dangerous-command-gate-scans-heredoc-body.md`.)
 pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Option<String> {
     if config.profile == SecurityProfile::Root {
         return None;
@@ -804,6 +811,22 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
     if let Some(n) = normalized.as_deref() {
         haystacks.push(n);
     }
+
+    // The same two haystacks with heredoc bodies removed — the "executable position" view.
+    // Consulted ONLY after a match, to describe it. Never in the match decision itself.
+    let stripped = strip_heredoc_bodies(command);
+    let stripped_norm = shell_normalized(stripped.as_ref());
+    let mut executable: Vec<&str> = vec![stripped.as_ref()];
+    if let Some(n) = stripped_norm.as_deref() {
+        executable.push(n);
+    }
+    let locate = |re: &Regex| -> String {
+        if executable.iter().any(|h| re.is_match(h)) {
+            String::new()
+        } else {
+            heredoc_body_note(command)
+        }
+    };
 
     // Check built-in dangerous patterns (cached).
     static DANGEROUS_REGEXES: std::sync::OnceLock<Vec<(Regex, &'static str)>> =
@@ -816,7 +839,7 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
     });
     for (re, description) in cached.iter() {
         if haystacks.iter().any(|h| re.is_match(h)) {
-            return Some(description.to_string());
+            return Some(format!("{description}{}", locate(re)));
         }
     }
 
@@ -824,12 +847,52 @@ pub fn is_dangerous_command(command: &str, config: &PathSecurityConfig) -> Optio
     for pattern in &config.shell_dangerous_patterns {
         if let Ok(re) = Regex::new(pattern) {
             if haystacks.iter().any(|h| re.is_match(h)) {
-                return Some(format!("matches custom pattern: {}", pattern));
+                return Some(format!("matches custom pattern: {pattern}{}", locate(&re)));
             }
         }
     }
 
     None
+}
+
+/// The note appended when a dangerous pattern matched ONLY inside a heredoc body.
+///
+/// Quotes the **opener line verbatim** rather than naming "the consuming command". Naming it
+/// would mean a first-token parse, which `env FOO=1 bash <<'EOF'` and `time bash <<'EOF'`
+/// both defeat — and a confidently wrong command name is worse here than none, because the
+/// entire purpose of the note is to let a reader decide whether the body is inert. The
+/// opener line cannot be wrong; it is the text that was there.
+fn heredoc_body_note(command: &str) -> String {
+    let re = heredoc_opener();
+    let openers: Vec<String> = command
+        .lines()
+        .map(str::trim)
+        // `<<<word` is a here-string with no body, excluded exactly as the two heredoc
+        // scanners exclude it — a third opinion here would be the divergence
+        // `heredoc_opener` was extracted to prevent.
+        .filter(|l| !l.contains("<<<") && re.is_match(l))
+        .map(|l| {
+            let mut head: String = l.chars().take(80).collect();
+            if l.chars().count() > 80 {
+                head.push('…');
+            }
+            head
+        })
+        .collect();
+
+    let opened_by = if openers.is_empty() {
+        String::new()
+    } else {
+        format!(" Opened by: {}.", openers.join(" | "))
+    };
+
+    format!(
+        " — matched ONLY inside a heredoc body, never in executable position. A body is \
+         inert data unless the command consuming it is an interpreter (bash, sh, zsh, ssh, \
+         python …), in which case it runs and this flag is real.{opened_by} This gate \
+         cannot tell those two apart, so it flags both rather than stripping bodies the way \
+         the IL3 and source-file gates safely can. Read the opener, then acknowledge."
+    )
 }
 
 /// Remove heredoc bodies from a command before IL3 inspects it.
@@ -2705,6 +2768,93 @@ mod tests {
         assert!(
             is_dangerous_command("grep 'rm' '-rf' notes.txt", &config).is_some(),
             "normalization rejoins the tokens; this is the documented cost"
+        );
+    }
+
+    /// A match found ONLY inside a heredoc body is still flagged, but says so.
+    ///
+    /// The sibling gates (`detect_il3_violation`, `check_source_file_access`) strip heredoc
+    /// bodies before looking, and it is safe there because they analyse *syntax* — a pipe in
+    /// a body is not a pipeline stage, a `.rs` in a body is not a filename argument. This
+    /// gate cannot copy that: a heredoc body is inert data only when the command consuming
+    /// it is not an interpreter, and `bash <<'EOF' … rm -rf / … EOF` executes its body. So
+    /// stripping here would hide a real deletion, which is why the carve-out is absent by
+    /// design and pinned by the test above.
+    ///
+    /// The complaint in
+    /// `docs/issues/2026-08-31-dangerous-command-gate-scans-heredoc-body.md` is therefore
+    /// answered by making the flag DISCRIMINATING rather than by removing it: the reason
+    /// names where the match was, so acknowledging is a judgement instead of a reflex.
+    #[test]
+    fn a_heredoc_only_match_is_flagged_and_the_reason_says_where_it_matched() {
+        let config = PathSecurityConfig::default();
+        let command = "cat > notes.txt <<'EOF'\nwe removed it with rm -rf\nEOF\nwc -l notes.txt";
+
+        let reason = is_dangerous_command(command, &config)
+            .expect("still flagged — the gate must not go quiet on a body it cannot classify");
+        assert!(
+            reason.contains("heredoc body"),
+            "the reason must locate the match, or the reader learns to acknowledge without \
+             reading — the one habit this gate depends on not forming: {reason}"
+        );
+        assert!(
+            reason.contains("cat > notes.txt <<'EOF'"),
+            "and it must quote the opener verbatim, which is what lets the reader decide \
+             whether the body is data or is about to be executed: {reason}"
+        );
+    }
+
+    /// Non-vacuity: a real dangerous command must NOT get the heredoc note.
+    ///
+    /// Without this, the test above is equally satisfied by appending the note to every
+    /// reason unconditionally — which would restore exactly the reflex-acknowledgement the
+    /// note exists to prevent, while passing.
+    #[test]
+    fn a_match_in_executable_position_carries_no_heredoc_note() {
+        let config = PathSecurityConfig::default();
+
+        let reason = is_dangerous_command("rm -rf /tmp/foo", &config).expect("flagged");
+        assert!(
+            !reason.contains("heredoc"),
+            "nothing about this command is a heredoc; saying so would make the note noise \
+             and destroy its signal: {reason}"
+        );
+
+        // The same command with an UNRELATED heredoc present: the match is still in
+        // executable position, so the note must stay off. This is the case a naive
+        // "does the command contain <<" check would get wrong.
+        let mixed = "cat > m.txt <<'EOF'\njust a message\nEOF\nrm -rf /tmp/foo";
+        let reason = is_dangerous_command(mixed, &config).expect("flagged");
+        assert!(
+            !reason.contains("heredoc body"),
+            "the rm is outside the body — the presence of a heredoc elsewhere must not \
+             excuse it: {reason}"
+        );
+    }
+
+    /// The security property the filed fix would have broken.
+    ///
+    /// `bash <<'EOF'` EXECUTES its body. Had this gate adopted the sibling gates'
+    /// `strip_heredoc_bodies` carve-out, this command would pass unflagged — a real
+    /// `rm -rf /` hidden by a fix written for a false positive. It is flagged, and the note
+    /// is honest about the ambiguity rather than reassuring.
+    #[test]
+    fn an_interpreter_heredoc_is_still_flagged_because_its_body_executes() {
+        let config = PathSecurityConfig::default();
+        let command = "bash <<'EOF'\nrm -rf /tmp/whatever\nEOF";
+
+        let reason = is_dangerous_command(command, &config).expect(
+            "a body fed to an interpreter executes — stripping bodies before this gate \
+             would hide a real deletion",
+        );
+        assert!(
+            reason.contains("interpreter"),
+            "the note must name the case in which a body is NOT data, or it reads as an \
+             all-clear on exactly the command that is dangerous: {reason}"
+        );
+        assert!(
+            reason.contains("bash <<'EOF'"),
+            "quoting the opener is what makes the interpreter case visible: {reason}"
         );
     }
 
