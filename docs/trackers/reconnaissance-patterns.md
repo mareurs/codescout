@@ -4516,6 +4516,30 @@ and the block killed the **whole** command — including the restore that had be
 first for safety. *A cleanup step chained ahead of a blockable step is not protected by
 being first; the block takes the command, not the step.* Put restores in their own call.
 
+**The remedy, supplied 2026-08-31 by `codescout-ae` and validated by a real near-miss.**
+"Put restores in their own call" identified the problem and does not solve it: a separate
+restore call still never runs if the session is killed, times out, or is interrupted before
+reaching it. Their first attempt at the gate-order mutations ran through `cargo test`, hit
+the 30s timeout **mid-sequence**, and the shell died with `CLAUDE.md` possibly mutated — in a
+checkout five sessions share, any of which could have committed it.
+
+What saved it was a `trap … EXIT` installed **before the first `sed`**, and they verified it
+had fired with `cmp` rather than assuming.
+
+> **A mutation of a shared file needs its restore installed BEFORE the mutation and
+> INDEPENDENT of the happy path** — because the failure mode that gets you is the one where
+> your cleanup line never runs at all.
+
+The lesson is explicitly *not* "use a longer timeout". A longer timeout shrinks the
+probability and leaves the mechanism intact; `trap` removes the state in which the mutation
+can outlive the process. Same shape as `R-141`'s *omit rather than promise* — prefer the
+variant that cannot fail over the variant that usually succeeds.
+
+A second technique from the same run, worth having: they ran the mutations against the
+**already-compiled test binary**, since `CLAUDE.md` is read at runtime. No recompile between
+mutations, which cut the exposure window on a shared file from minutes to milliseconds. Where
+the thing under test is data rather than code, the window is a choice.
+
 **First application, ~1 hour after writing — and it is a PARTIAL confirmation, which is the
 useful kind.** `codescout-ae` opened a mutation window on `doctor.rs` and announced it
 first, naming the two tests that would go red and their expected duration. I held my gate
@@ -5129,6 +5153,19 @@ comm -23 tracked ondisk | wc -l     # 0 — every tracked path present
 **`comm` cannot be wrong about this in the way a count can**, because it compares the two
 sets the question is about rather than summarising either. A count summarises, and a summary
 discards exactly the structure the question needs.
+
+**And the defect shipped INTO the probe that warns about it — the best specimen of the set.**
+`scripts/peer-sessions.sh`'s new summary read *"ListAgents shows 2 of the 7 live sessions. 2
+are invisible"*. Under a cwd filter, 2 + 2 + self = **5**, not 7: the counters increment
+*after* the filter's `continue` and are therefore filtered, while `$live` is not — a filtered
+numerator over an unfiltered denominator, in the line whose entire purpose is warning about
+counts that answer a different question. Caught by running the probe **both ways** rather than
+once. The fix carries the measurement in a comment so the next editor cannot re-derive the
+bug by accident.
+
+From the same rewrite, the positive form: unreadable `environ` yields `?` rather than
+defaulting to the default profile, because *"we could not look"* and *"it is `~/.claude`"* are
+different facts — collapsing them would have the probe committing the sin it exists to expose.
 
 Two more from the same hour, both `codescout-ae`'s, both the same shape:
 
