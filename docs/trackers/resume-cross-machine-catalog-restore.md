@@ -148,11 +148,12 @@ table. A reader who takes an authored title as recovered would be citing an
 invention, so each heading's metadata line says which it is and points at the row's
 `note` for the full argument.
 
-Also 2026-08-31: this entry's **Status** line above is no longer current in one respect. `entry_without_definition` reads **1** again today, naming `e12cd7e0060ed9b8` — Task 2's restore of the 38 `items` rows brought them back into the check's count, expected and not a regression. The check's accompanying claim that the 31 cited ids "resolve to nothing right now" is false as of Task 1 and is filed as `docs/issues/2026-08-31-entry-without-definition-claims-broken-refs-that-resolve.md`: `scan_undefined_entries` reads only the ledger's own body, and the 38 are now defined in `docs/trackers/archive/provenance-subsystem-recovered-entries.md`. So the count is 1, the count is expected, and the count is misleading — three separate claims, none of which the 2026-08-28 Status line anticipated.
+Also 2026-08-31: this entry's **Status** line above is no longer current in one respect. `entry_without_definition` reads **1** again today, naming `e12cd7e0060ed9b8` — Task 2's restore of the 38 `items` rows brought them back into the check's count, expected and not a regression. The check's accompanying claim that the 31 cited ids "resolve to nothing right now" was false as of Task 1 and was filed as `docs/issues/archive/2026-08-31-entry-without-definition-claims-broken-refs-that-resolve.md`: `scan_undefined_entries` read only the ledger's own body, and the 38 are defined in `docs/trackers/archive/provenance-subsystem-recovered-entries.md`. So the count is 1, the count is expected, and the count was misleading — three separate claims, none of which the 2026-08-28 Status line anticipated.
+
+**That third claim is now fixed** — `4ef91c82`, patch-id `3b624f30488ba42be7301d047cbad0d62fac710f`. The check consults the corpus-wide definition set rather than the ledger's own body alone, so a token defined in the archive companion is reported as resolving via a named sibling instead of as broken. The count stays 1 and stays expected; it no longer misleads. Left in past tense above rather than deleted, because what this entry recorded was true when written and the sequence is the point.
 
 Note this closes a citation break, not a cosmetic gap: those four ids were cited
 from outside and resolved to **nothing**.
-
 ## CM-4 — body_keeps_snapshot: one predicate, both errors
 
 **Status:** fixed 2026-08-28 — `experiments` `16b5b243`, patch-id

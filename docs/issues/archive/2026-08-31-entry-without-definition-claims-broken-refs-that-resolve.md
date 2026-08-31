@@ -1,11 +1,18 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- doctor
+- entry-definition
+- cross-file
+- misleading-output
+closed: 2026-08-31
 opened: 2026-08-31
-severity: low
 owner: marius
 related: []
-tags: [librarian, doctor, entry-definition, cross-file, misleading-output]
-kind: bug
+severity: low
+unverified: Not yet re-verified against a rebuilt live MCP — the running server still emits the pre-fix wording. Both branches are test-guarded by a pair of fixtures differing by one artifact, so this is a freshness caveat rather than a coverage gap.
 ---
 
 # BUG: entry_without_definition claims citations "resolve to nothing" after a sibling artifact defines them
@@ -99,25 +106,76 @@ only in what it asserts follows from that count.
 
 ## Fix
 
-Not implemented.
+**Fixed on `experiments` at `4ef91c82`** — patch-id
+`3b624f30488ba42be7301d047cbad0d62fac710f`.
 
-Smallest correct change: keep the count ledger-scoped, and make the **consequence** clause
-consult the same resolution `link_scan` uses before claiming a reference is broken. Where a
-sibling defines the token, say so and name the definer — a reader following the current
-text would add a duplicate heading to the live body and create an ambiguous token, which is
-the opposite of the repair intended.
+This section offered a *smallest correct* fix (consult the same resolution `link_scan` uses)
+and a *cheaper interim* (soften the clause to name its scope). The correct one shipped,
+because the deciding question the § *Resume* posed resolved in its favour.
 
-Cheaper interim: soften the clause to name its scope — "no heading **in this file**" — so
-the finding stops asserting a graph property it did not check. This is the
-negative-results-name-their-scope rule
-(`docs/adrs/2026-08-27-negative-results-name-their-scope.md`) applied to a positive claim.
+**That question was: does the scan already have a resolved-definer map, or must it build
+one?** Neither, exactly — it was already **computing and discarding** one.
+`corpus_cited_tokens` reads every artifact in the catalog and calls `extract()`, keeping
+`.citations` and dropping `.definitions` from the same `DocExtract`. So the corpus-wide
+definition set costs no extra I/O and no second pass; it is the half of a value the loop was
+already producing. The interim wording was never needed.
 
+### What changed
+
+The ledger-scoped **count** is untouched and still correct — the heading really is absent
+from that body. The **consequence** clause now partitions the cited-and-locally-undefined set
+into three states rather than asserting one:
+
+| state | reported as |
+|---|---|
+| cited, defined **nowhere** | broken — same wording, same count semantics as before |
+| cited, defined in a **sibling** | not broken; the definer is **named** |
+| uncited | unchanged |
+
+**Naming the definer is load-bearing, not decoration.** A reader following the old text would
+add the heading to the live body — creating a *second* definer, which is an **ambiguous**
+token, which resolves to nothing. The advice manufactured the break it claimed to have found,
+so the finding has to say which case a reader is in, not merely stop lying about it.
+
+Self is excluded explicitly rather than assumed away: the local defined-set comes from the
+catalog's stored `body` and the definer map from a fresh read of the file. Those are two
+reads, and a disagreement between them must not become a claim about the graph.
 ## Tests added
 
-None — no fix written. A regression test should define a ledger's entry in a **second**
-artifact and assert the finding does not claim the references are broken. A test using a
-single artifact is monotone under this defect and passes either way.
+Two, in `src/librarian/tools/doctor.rs`, exactly the shape this section prescribed before the
+fix existed — *"define a ledger's entry in a **second** artifact"*, because a single-artifact
+fixture is monotone under this defect and passes either way.
 
+- `a_cited_entry_defined_in_a_sibling_artifact_is_not_called_broken` — RED first, printing the
+  false claim verbatim. It asserts both halves: the finding must not say *"resolve to
+  nothing"*, **and** it must name the definer.
+- `a_cited_entry_defined_nowhere_is_still_reported_as_broken` — the non-vacuity twin. Without
+  it the fix is satisfied by never claiming a break at all, silencing the check's entire
+  actionable half while passing. It was green before the fix as well as after, which is
+  correct: its job is to fail against an over-broad fix, not against the pre-fix code.
+
+The two fixtures **differ by exactly one artifact**, matching the shape this check's existing
+cited/uncited pair already uses — and the load-bearing detail is annotated on the line that
+carries it: move `BL-3`'s heading into the ledger body and it leaves `undefined` altogether,
+so the test would pass while exercising none of this.
+
+All seven pre-existing tests for this check pass unchanged. The `"Cited despite that: N"`
+wording was deliberately kept rather than reworded — it stays accurate, now counted over the
+genuinely-broken set — so no existing assertion had to be edited to accommodate the fix. An
+assertion changed to fit a fix is one that stopped guarding it.
+
+Counts: default 4977 → **4979**; lean unchanged at 3412, correctly — `doctor.rs` sits behind
+the `librarian` feature.
+
+### On the verification that preceded this
+
+Worth recording because the first attempt was wrong in a way that reads as evidence. Checking
+"do the `PV-` tokens dangle?" by grepping the `link_scan` report hit a **truncated** buffer —
+50 of 572 dangling — whose own header says *absence from a cut list is not evidence*. That
+zero describes the sample. The answer came instead from the citation graph: the archive
+companion carries live incoming entry links for 38 distinct `PV-` tokens, three of them among
+the eight `doctor` named. That is a positive finding rather than an absence, which is what the
+claim needed.
 ## Workarounds
 
 Cross-check `link_scan`'s `dangling` / `dangling_by_source` before acting on an
