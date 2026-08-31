@@ -37,7 +37,7 @@
 |---|---|---|
 | `docs/trackers/archive/provenance-subsystem-recovered-entries.md` | **Create.** The durable record of all 38 recovered `PV` rows. This is the artifact that makes `CM-2` non-recurring. | 1 |
 | `docs/augmentations/docs-trackers-provenance-subsystem.yaml` | **Modify.** Widen the `status` enum to admit `superseded`. | 2 |
-| `docs/trackers/provenance-subsystem.md:1044-1047` | **Modify.** Replace `PV-9`'s authored title; drop `PV-11`'s AUTHORED caveat. | 5 |
+| `docs/trackers/provenance-subsystem.md:1044-1047` | **Modify.** Replace `PV-9`'s and `PV-11`'s authored titles with their canonical text, installed verbatim. | 5 |
 | `docs/trackers/resume-cross-machine-catalog-restore.md` | **Modify.** Correct `CM-1`, close `CM-2`, update `CM-3`. | 6 |
 | Both hosts' `catalog.db` | **Modify.** Params only, via the CLI. Not a tracked file. | 2, 3, 4 |
 
@@ -788,6 +788,15 @@ git status --short
 git add docs/trackers/provenance-subsystem.md
 git commit -F $SP/msg.txt
 ```
+
+**Correction 2026-08-31 (fix round 2) — this commit message shipped with the same wrong
+claim.** `84512bc8`'s message (reproduced verbatim above) said *"PV-11's authored text
+matched its canonical in substance, so only the AUTHORED caveat is dropped there."* That
+commit is immutable and is not being rewritten — history is history. But this plan is
+executable documentation: replayed as written, it would reinstate the claim. It was
+wrong for the reason given at Step 3's correction above — a substance match does not
+license a verbatim label. Fix round 1 (commit `220794b8`) installed PV-11's canonical
+title byte-for-byte instead of keeping the approximation.
 
 ---
 
