@@ -66,33 +66,20 @@ prompt: |-
   there.
 entry_collection: items
 params_schema:
-  type: object
-  required:
-  - items
   properties:
     items:
-      type: array
       items:
-        type: object
-        required:
-        - id
-        - type
-        - status
-        - title
         properties:
+          detail:
+            type:
+            - string
+            - 'null'
           id:
-            type: string
             pattern: ^PV-[0-9]+$
-          type:
             type: string
-            enum:
-            - finding
-            - gap
-            - decision
-            - hazard
-            - task
+          note:
+            type: string
           status:
-            type: string
             enum:
             - settled
             - open
@@ -100,19 +87,36 @@ params_schema:
             - descoped
             - carried
             - killed
+            - superseded
+            type: string
           title:
             type: string
-          detail:
-            type:
-            - string
-            - 'null'
-          note:
+          type:
+            enum:
+            - finding
+            - gap
+            - decision
+            - hazard
+            - task
             type: string
+        required:
+        - id
+        - type
+        - status
+        - title
+        type: object
+      type: array
+  required:
+  - items
+  type: object
 render_template: |-
-  **PV-N ledger — {{ items | length }} rows, RECONSTRUCTED 2026-08-28.** The original params held 68 (PV-1..PV-68); the other 38 were lost with the machine-local catalog and are not recoverable. Programme status: CLOSED, nothing to build (PV-63).
+  ## PV-N — live index
 
-  | ID | type | status | title |
-  |---|---|---|---|
-  {% for it in items -%}
-  | {{ it.id }} | `{{ it.type }}` | **{{ it.status }}** | {{ it.title }} |
+  **{{ items | length }} rows (PV-1..PV-68), complete.** 38 entries were absent from this catalog between 2026-08-28 and 2026-08-31 and were recovered verbatim from the desktop catalog. Those 38 have no defining heading in this file by design — they are defined in `docs/trackers/archive/provenance-subsystem-recovered-entries.md`. Programme status: CLOSED, nothing to build (PV-63).
+
+  | ID | Type | Status | Pri | Title | Gated on |
+  |----|------|--------|-----|-------|----------|
+  {% for i in items -%}
+  | {{ i.id }} | {{ i.type }} | {{ i.status }} | {{ i.priority }} | {{ i.title }} | {{ i.gated_on }} |
   {% endfor %}
+  **Counts:** {{ items | length }} total · {{ items | selectattr("type", "eq", "finding") | list | length }} finding · {{ items | selectattr("type", "eq", "gap") | list | length }} gap · {{ items | selectattr("type", "eq", "decision") | list | length }} decision · {{ items | selectattr("type", "eq", "hazard") | list | length }} hazard · {{ items | selectattr("type", "eq", "task") | list | length }} task
