@@ -1450,6 +1450,62 @@ mod tests {
         }
     }
 
+    /// A doctor result routes AWAY from `librarian`, so the `fix=` repair modes
+    /// must be documented on the schema — the surface a doctor caller receives.
+    ///
+    /// Both halves are asserted together because either alone is reassuring and
+    /// wrong. `d94dd53d` moved the six modes into a `serves: librarian.doctor`
+    /// guide section and shipped them unreachable: `relevant_guide_topic` picks
+    /// the topic from the RESULT's content via `names_tracker_path`, which scans
+    /// `path` inside `violations`, and a real scan names tracker files — measured
+    /// 2026-08-31, 128 of 138. So the section was never consulted. Restored in
+    /// `c7d66f94`.
+    ///
+    /// The existing gate `every_observed_shape_of_a_declaring_topic_has_a_section`
+    /// cannot catch this and is not the place to try: it skips non-declaring
+    /// topics, and `tracker-conventions` declares no sections at all, so the
+    /// routing destination is invisible to it by construction.
+    ///
+    /// Mutations that must kill this: move any mode's semantics out of the `fix`
+    /// description again; or make `names_tracker_path` ignore `violations[].path`,
+    /// which would silently re-point doctor at `librarian` and make the first
+    /// assertion false.
+    #[test]
+    fn doctor_results_route_away_from_librarian_so_fix_modes_stay_in_the_schema() {
+        use crate::librarian::tools::Tool as _;
+
+        // Shaped like a real doctor response: violations carrying tracker paths.
+        let doctor_result = json!({
+            "violations": [{ "check": "missing_file", "path": "docs/trackers/x.md" }]
+        });
+        assert!(
+            names_tracker_path(&doctor_result),
+            "this predicate is what sends a doctor result to `tracker-conventions` \
+             instead of `librarian`; if it stops firing, librarian.md's doctor \
+             sections become reachable and this test's premise is stale"
+        );
+
+        let schema = crate::librarian::tools::librarian::Librarian.input_schema();
+        let desc = schema["properties"]["fix"]["description"]
+            .as_str()
+            .expect("fix must carry a description");
+        for mode in [
+            "prune_missing",
+            "reseat_worktree",
+            "rehome",
+            "repair_frontmatter_id",
+            "mint_slugs",
+            "export_augmentations",
+        ] {
+            assert!(
+                desc.contains(mode),
+                "`{mode}` must be explained in the fix description, not only listed in \
+                 the enum — the enum names the modes, the description is what says what \
+                 each DOES, and a doctor caller reaches no guide that carries it"
+            );
+        }
+    }
+
     /// Seed a catalog holding one row for `abs`, at `status`, with `tags`/`title`.
     ///
     /// The id is computed from the CANONICALIZED path because that is what the syncer

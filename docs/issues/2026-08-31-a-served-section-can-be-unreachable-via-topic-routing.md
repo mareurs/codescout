@@ -136,9 +136,36 @@ Candidate fixes, none chosen:
   This is the cheap one — it would have failed on the commit that introduced the section,
   which is the point.
 
-The third is worth doing regardless of which of the first two lands, because the class is
-*silent*: a declaration that never routes costs nothing at authoring time and produces no
-error at run time.
+**Correction, 2026-08-31 — the third is NOT cheap, and calling it "the cheap one" above was
+wrong.** Attempted, and it cannot catch this by construction:
+`every_observed_shape_of_a_declaring_topic_has_a_section` skips any topic where
+`GUIDE_INDEX.declares(topic)` is false, and `tracker-conventions.md` carries **0** `serves:`
+declarations — so the very topic a doctor result routes to is invisible to that gate. The
+gate is scoped to declaring topics on purpose; widening it means confronting what a
+whole-topic destination should owe, which is the same design question as the first two
+options rather than a cheap alternative to them.
+
+Two things did land from the attempt, and neither closes the hole:
+
+- The gate now pairs **each probe with the topic IT routes to**, instead of
+  `find_map`-ing the first `Some` (the empty probe, which yields `Some("librarian")`
+  unconditionally, so coverage was only ever evaluated against `librarian`). More faithful
+  to the runtime relation; guards the case where a currently-whole-topic guide later adopts
+  `serves:`. It does not catch today's bug and is not claimed to.
+- A probe shaped like a real doctor response (`violations[].path`) was added, because
+  without one the content branch of `names_tracker_path` is unreachable from the test.
+
+**What actually guards this now** is a targeted invariant, not a general gate:
+`doctor_results_route_away_from_librarian_so_fix_modes_stay_in_the_schema`
+(`src/librarian/adapter.rs`) asserts both halves together — that a doctor-shaped result
+trips `names_tracker_path`, *and* that all six modes are explained in the `fix` description.
+Mutation-verified: restoring the `get_guide` pointer in place of the modes fails it on
+`prune_missing`. It asserts the **reachable surface** rather than the guide, because the
+guide side is exactly what passed while the modes were undocumented.
+
+The class remains *silent* in general — a declaration that never routes costs nothing at
+authoring time and produces no error at run time. One shape is now pinned; the mechanism
+is not.
 
 ## Tests added
 

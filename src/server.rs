@@ -3247,10 +3247,19 @@ mod tests {
         let census = include_str!("prompts/shape_census.txt");
         let (_dir, server) = make_server().await;
 
+        // Each probe stands for a RESULT SHAPE a real call returns, because
+        // `relevant_guide_topic` reads the result's content to pick the topic. The
+        // doctor-shaped probe is not decoration: `names_tracker_path` scans `path`
+        // inside a `violations` array, and a real doctor scan names tracker and bug
+        // files (measured 2026-08-31: 128 of 138), so without it the content branch
+        // is unreachable from this test and every `serves: librarian.doctor`
+        // declaration reads as covered while never being delivered.
+        // docs/issues/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md
         let probes = [
             serde_json::json!({}),
             serde_json::json!({"abs_path": "docs/issues/x.md"}),
             serde_json::json!({"abs_path": "docs/trackers/x.md"}),
+            serde_json::json!({"violations": [{"path": "docs/trackers/x.md"}]}),
         ];
 
         for line in census
@@ -3262,24 +3271,33 @@ mod tests {
             let Some(tool) = server.tools.iter().find(|t| t.name() == tool_name) else {
                 continue;
             };
-            let Some(topic) = probes.iter().find_map(|p| tool.relevant_guide_topic(p)) else {
-                continue;
-            };
-            if !GUIDE_INDEX.declares(topic) {
-                continue;
+            // Pair each probe with the topic IT routes to, rather than fixing one
+            // topic for all of them. `find_map` took the first `Some`, and the empty
+            // probe yields `Some("librarian")` unconditionally — so coverage was only
+            // ever evaluated against `librarian`, and a shape whose real results route
+            // elsewhere was never checked against the topic it actually reaches.
+            // That is the runtime relationship this gate exists to model.
+            for probe in &probes {
+                let Some(topic) = tool.relevant_guide_topic(probe) else {
+                    continue;
+                };
+                if !GUIDE_INDEX.declares(topic) {
+                    continue;
+                }
+                let covered = !GUIDE_INDEX
+                    .match_sections(topic, Some(shape), probe)
+                    .is_empty();
+                let waived = crate::prompts::SECTION_WAIVERS
+                    .iter()
+                    .any(|(t, _, r)| *t == topic && r.contains(shape));
+                assert!(
+                    covered || waived,
+                    "call shape `{shape}` routes to declaring topic `{topic}` on a result \
+                 shaped like {probe}, but no section there serves it. Add a `serves:` \
+                 declaration in that topic, or a SECTION_WAIVERS entry naming the shape \
+                 and saying why. An undeclared shape gets only the preamble."
+                );
             }
-            let covered = probes
-                .iter()
-                .any(|p| !GUIDE_INDEX.match_sections(topic, Some(shape), p).is_empty());
-            let waived = crate::prompts::SECTION_WAIVERS
-                .iter()
-                .any(|(t, _, r)| *t == topic && r.contains(shape));
-            assert!(
-                covered || waived,
-                "call shape `{shape}` routes to declaring topic `{topic}` but no section \
-             serves it. Add a `serves:` declaration, or a SECTION_WAIVERS entry naming \
-             the shape and saying why. An undeclared shape gets only the preamble."
-            );
         }
     }
 
