@@ -376,6 +376,10 @@ impl LibrarianAdapter {
             artifact_store: self.ctx.artifact_store.clone(),
             current_project,
             lsp: Arc::clone(&self.ctx.lsp),
+            // Carried over rather than re-resolved: this rebuilds a per-call context from
+            // the long-lived one, and re-reading the environment here would reintroduce
+            // the ambient dependency the field exists to remove.
+            temp_guard: self.ctx.temp_guard.clone(),
         })
     }
 }

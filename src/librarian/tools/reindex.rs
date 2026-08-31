@@ -236,7 +236,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     {
         let cat = ctx.catalog.lock();
         for target in &targets {
-            super::temp_write_guard::guard_temp_workspace_write(target, &cat.conn)?;
+            super::temp_write_guard::guard_temp_workspace_write(
+                target,
+                &cat.conn,
+                &ctx.temp_guard,
+            )?;
         }
     }
 
@@ -1119,6 +1123,7 @@ mod tests {
             catalog: ctx_all.catalog.clone(),
             workspace: ctx_all.workspace.clone(),
             rules: ctx_all.rules.clone(),
+            temp_guard: ctx_all.temp_guard.clone(),
             embedding: None,
             artifact_store: None,
             current_project: Some(Arc::new(
@@ -1181,18 +1186,24 @@ mod tests {
 
     #[tokio::test]
     async fn reindex_refuses_temp_root_into_real_catalog() {
-        // Catalog OUTSIDE the OS temp dir; workspace root UNDER it. With no current
-        // project, reindex defaults to scope=All and walks the workspace roots — so
-        // the guard fires on the temp root before any file walk. (No rules / fixtures
-        // needed: the refusal happens before classification.)
-        let outside = tempfile::TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
-        let cat = Catalog::open(&outside.path().join("catalog.db")).unwrap();
-        let ws = TempDir::new().unwrap(); // under the OS temp dir
+        // Catalog outside the guard's temp root; workspace root under it. With no current
+        // project, reindex defaults to scope=All and walks the workspace roots — so the
+        // guard fires on the temp root before any file walk. (No rules / fixtures needed:
+        // the refusal happens before classification.)
+        //
+        // Both dirs are physically under the OS temp dir; `synthetic_temp` explains why the
+        // guard's notion of temp is injected rather than inherited.
+        let (_scratch, env, inside, outside) =
+            crate::librarian::tools::temp_write_guard::synthetic_temp();
+        let cat = Catalog::open(&outside.join("catalog.db")).unwrap();
+        let ws = inside.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
         let ctx = TestToolContextBuilder::new(cat)
             .with_root(Root {
                 name: "r".into(),
-                path: ws.path().to_path_buf(),
+                path: ws,
             })
+            .with_temp_guard(env)
             .build();
 
         let err = call(&ctx, json!({})).await.expect_err(

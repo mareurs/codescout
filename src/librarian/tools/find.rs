@@ -1070,6 +1070,7 @@ mod tests {
                 umbrellas: vec![],
             }),
             rules: Arc::new(vec![]),
+            temp_guard: crate::librarian::tools::TempGuardEnv::from_env(),
             embedding: Some(svc),
             // Exercise the semantic path against the in-memory artifact_vec via
             // the sqlite-vec backend (no Qdrant daemon in tests).

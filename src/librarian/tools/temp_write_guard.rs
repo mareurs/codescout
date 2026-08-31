@@ -3,9 +3,45 @@
 //! that polluted the global catalog with /tmp probe rows.
 //! See docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const ALLOW_ENV: &str = "CODESCOUT_ALLOW_TEMP_WORKSPACE";
+
+/// The process-environment inputs this guard needs, resolved **once, at the edge**.
+///
+/// Its whole reason for existing is that the decision must never re-read the environment
+/// mid-call, so a test can *state* what counts as temp instead of inheriting the machine's.
+/// `docs/conventions/test-env-isolation.md` forbids the alternative outright: `set_var` is
+/// process-global and `#[serial]` only locks against tests that opt in, so a guard-plus-serial
+/// shape narrows the race without closing it (option B, "NOT VIABLE"). This is option A —
+/// resolve at the edge, pass the result inward — the same shape as `LibrarianEnv::from_env`.
+///
+/// The concrete failure that forced it: the wiring tests built their "outside-temp" catalog
+/// under `std::env::current_dir()`, which silently becomes an *inside*-temp catalog when the
+/// cwd is itself under the OS temp dir. `should_refuse` then correctly declined to fire and
+/// `expect_err` panicked with a message blaming the guard — an unmet premise reported as a
+/// guard defect. `docs/issues/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
+#[derive(Clone, Debug)]
+pub struct TempGuardEnv {
+    /// What counts as "the OS temp dir" for this decision, canonicalized.
+    pub temp_dir: PathBuf,
+    /// Whether the caller explicitly opted out of the guard.
+    pub opted_in: bool,
+}
+
+impl TempGuardEnv {
+    /// The only place this module reads the process environment.
+    pub fn from_env() -> Self {
+        // Value-based opt-in: only an explicit truthy value disables the guard, so a
+        // stray `CODESCOUT_ALLOW_TEMP_WORKSPACE=0` can't silently defeat prevention.
+        let opted_in = std::env::var(ALLOW_ENV)
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let temp_dir =
+            std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+        Self { temp_dir, opted_in }
+    }
+}
 
 /// Pure decision: refuse iff the workspace `root` is under `temp_dir`, the
 /// catalog is the real one (file-backed AND its file is outside `temp_dir`), and
@@ -26,13 +62,8 @@ fn should_refuse(root: &Path, catalog_db: Option<&Path>, temp_dir: &Path, opted_
 pub(crate) fn guard_temp_workspace_write(
     root: &Path,
     conn: &rusqlite::Connection,
+    env: &TempGuardEnv,
 ) -> anyhow::Result<()> {
-    // Value-based opt-in: only an explicit truthy value disables the guard, so a
-    // stray `CODESCOUT_ALLOW_TEMP_WORKSPACE=0` can't silently defeat prevention.
-    let opted_in = std::env::var(ALLOW_ENV)
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-    let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
     // Fail-open: if `root` cannot be canonicalized (e.g. it does not exist), fall
     // back to the raw path. create/reindex roots exist at guard time, so this only
     // risks a false-ALLOW on a symlinked temp dir for a nonexistent root — never a
@@ -40,12 +71,12 @@ pub(crate) fn guard_temp_workspace_write(
     let root_c = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let catalog_db = crate::librarian::catalog::catalog_db_path(conn)
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
-    if should_refuse(&root_c, catalog_db.as_deref(), &temp, opted_in) {
+    if should_refuse(&root_c, catalog_db.as_deref(), &env.temp_dir, env.opted_in) {
         return Err(crate::librarian::tools::RecoverableError::with_hint(
             format!(
                 "refusing to write an artifact rooted under the system temp dir ({}) into the \
                  shared persistent catalog — this is how probe/test runs pollute the catalog",
-                temp.display()
+                env.temp_dir.display()
             ),
             format!(
                 "Use an isolated catalog (under the temp dir, or in-memory) for tests, or set \
@@ -54,6 +85,41 @@ pub(crate) fn guard_temp_workspace_write(
         ));
     }
     Ok(())
+}
+
+/// A synthetic temp root for tests that must exercise a REFUSAL.
+///
+/// Returns `(scratch, env, inside, outside)` where `inside` is under the guard's
+/// `temp_dir` and `outside` is not — **both physically under the OS temp dir**. That
+/// inversion is the entire point: what makes one "inside" and the other "outside" is the
+/// injected `temp_dir`, not where the suite happens to be running from.
+///
+/// A refusal needs a catalog the guard classifies as outside-temp, and **no directory is
+/// guaranteed to sit outside `std::env::temp_dir()` on disk**, so it cannot be built by
+/// choosing a location. These tests used to derive one from `std::env::current_dir()`,
+/// which silently becomes an *inside*-temp catalog whenever the cwd is under the OS temp
+/// dir; the guard then correctly declined and `expect_err` panicked with a message blaming
+/// the guard. Measured 2026-08-31 — same binary, same source, cwd the only variable: 3
+/// failed from a `/tmp` cwd, 3 passed from the checkout.
+/// `docs/issues/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
+///
+/// Keep `scratch` alive for the duration of the test; dropping it removes both directories.
+/// Both paths are canonicalized because the guard canonicalizes what it compares — on a host
+/// whose temp dir is a symlink, an uncanonicalized prefix would not match and the fixture
+/// would silently stop discriminating.
+#[cfg(test)]
+pub(crate) fn synthetic_temp() -> (tempfile::TempDir, TempGuardEnv, PathBuf, PathBuf) {
+    let scratch = tempfile::TempDir::new().unwrap();
+    let root = std::fs::canonicalize(scratch.path()).unwrap();
+    let temp_dir = root.join("temp");
+    let outside = root.join("real");
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let env = TempGuardEnv {
+        temp_dir: temp_dir.clone(),
+        opted_in: false,
+    };
+    (scratch, env, temp_dir, outside)
 }
 
 #[cfg(test)]
@@ -118,30 +184,31 @@ mod tests {
     fn wrapper_allows_temp_workspace_with_temp_catalog() {
         // A file-backed catalog under temp (the test shape) must be allowed by
         // the real wrapper, proving it wires the probes correctly.
-        let dir = tempfile::tempdir().unwrap(); // under the OS temp dir
-        let cat = Catalog::open(&dir.path().join("librarian.db")).unwrap();
-        let ws = dir.path().join("workspace");
+        let (_scratch, env, inside, _outside) = synthetic_temp();
+        let cat = Catalog::open(&inside.join("librarian.db")).unwrap();
+        let ws = inside.join("workspace");
         std::fs::create_dir_all(&ws).unwrap();
-        assert!(guard_temp_workspace_write(&ws, &cat.conn).is_ok());
+        assert!(guard_temp_workspace_write(&ws, &cat.conn, &env).is_ok());
     }
 
     #[test]
     fn wrapper_allows_in_memory_catalog_with_temp_workspace() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_scratch, env, inside, _outside) = synthetic_temp();
         let cat = Catalog::open_in_memory().unwrap();
-        assert!(guard_temp_workspace_write(dir.path(), &cat.conn).is_ok());
+        assert!(guard_temp_workspace_write(&inside, &cat.conn, &env).is_ok());
     }
 
     #[test]
     fn wrapper_refuses_temp_workspace_into_real_outside_temp_catalog() {
-        // Catalog OUTSIDE the OS temp dir (a temp dir under the repo cwd, auto-cleaned);
-        // workspace UNDER the OS temp dir. This is the real pollution shape and the only
-        // way to build an outside-temp catalog in a test without leaking files.
-        // (Assumes the repo checkout is not itself under the OS temp dir, which holds here.)
-        let outside = tempfile::TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
-        let cat = Catalog::open(&outside.path().join("catalog.db")).unwrap();
-        let ws = tempfile::TempDir::new().unwrap(); // under the OS temp dir
-        let err = guard_temp_workspace_write(ws.path(), &cat.conn)
+        // The real pollution shape: catalog outside the guard's temp root, workspace
+        // under it. Both live under the OS temp dir on disk — see `synthetic_temp` for
+        // why that is deliberate rather than sloppy.
+        let (_scratch, env, inside, outside) = synthetic_temp();
+        let cat = Catalog::open(&outside.join("catalog.db")).unwrap();
+        let ws = inside.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let err = guard_temp_workspace_write(&ws, &cat.conn, &env)
             .expect_err("temp workspace + real (outside-temp) catalog must be refused");
         assert!(
             err.downcast_ref::<crate::librarian::tools::RecoverableError>()
@@ -151,6 +218,39 @@ mod tests {
         assert!(
             err.to_string().contains("temp dir"),
             "unexpected error: {err}"
+        );
+    }
+
+    /// Non-vacuity for the three refusal tests above: the SAME fixture is allowed once the
+    /// caller opts in.
+    ///
+    /// Without this, a fixture that quietly stopped satisfying the refusal precondition —
+    /// the failure this whole change exists to fix — would turn every refusal test green
+    /// again, and green is what they report when they are working. Flipping one input and
+    /// requiring the verdict to flip with it is what pins the refusal to the guard's
+    /// decision rather than to an accident of the fixture. Deliberately a fixture flip and
+    /// not a source mutation: the tree is shared with concurrent sessions, and a transient
+    /// edit to `should_refuse` would show up in their test runs as an unexplained red.
+    #[test]
+    fn the_same_fixture_is_allowed_once_the_caller_opts_in() {
+        let (_scratch, env, inside, outside) = synthetic_temp();
+        let cat = Catalog::open(&outside.join("catalog.db")).unwrap();
+        let ws = inside.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let opted_in = TempGuardEnv {
+            opted_in: true,
+            ..env.clone()
+        };
+        assert!(
+            guard_temp_workspace_write(&ws, &cat.conn, &opted_in).is_ok(),
+            "opting in must allow the very fixture the refusal tests reject"
+        );
+        // And the un-opted-in verdict on the identical fixture is still a refusal, so the
+        // assertion above cannot be passing because the fixture went inert.
+        assert!(
+            guard_temp_workspace_write(&ws, &cat.conn, &env).is_err(),
+            "the same fixture without opt-in must still be refused"
         );
     }
 }

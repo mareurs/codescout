@@ -272,7 +272,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     // Prevention: refuse writing a temp-dir-rooted artifact into the real shared
     // catalog. See docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
-    super::temp_write_guard::guard_temp_workspace_write(&base_dir, &ctx.catalog.lock().conn)?;
+    super::temp_write_guard::guard_temp_workspace_write(
+        &base_dir,
+        &ctx.catalog.lock().conn,
+        &ctx.temp_guard,
+    )?;
 
     validate_rel_path(&a.rel_path)?;
     a.rel_path = crate::librarian::util::normalize_rel_path(&a.rel_path);
@@ -1107,19 +1111,21 @@ mod tests {
 
     #[tokio::test]
     async fn create_refuses_temp_workspace_into_real_catalog() {
-        // The real pollution shape: catalog OUTSIDE the OS temp dir, workspace UNDER
-        // it. `TempDir::new_in(current_dir())` puts the catalog under the repo cwd
-        // (outside /tmp) and auto-cleans on drop — the only way to construct an
-        // outside-temp catalog in a test without leaking files. (Assumes the repo
-        // checkout is not itself under the OS temp dir, which holds here.)
-        let outside = tempfile::TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
-        let cat = Catalog::open(&outside.path().join("catalog.db")).unwrap();
-        let ws = TempDir::new().unwrap(); // under the OS temp dir
+        // The real pollution shape: catalog outside the guard's temp root, workspace under
+        // it. Both are physically under the OS temp dir — `synthetic_temp` explains why
+        // that is deliberate, and why deriving "outside" from `current_dir()` (what this
+        // test used to do) inverts silently from a cwd under /tmp.
+        let (_scratch, env, inside, outside) =
+            crate::librarian::tools::temp_write_guard::synthetic_temp();
+        let cat = Catalog::open(&outside.join("catalog.db")).unwrap();
+        let ws = inside.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
         let ctx = TestToolContextBuilder::new(cat)
             .with_root(Root {
                 name: "r".into(),
-                path: ws.path().to_path_buf(),
+                path: ws,
             })
+            .with_temp_guard(env)
             .build();
 
         let err = call(

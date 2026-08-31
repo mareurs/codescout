@@ -210,6 +210,7 @@ pub async fn build_tool_context_with(
         artifact_store,
         current_project,
         lsp,
+        temp_guard: tools::temp_write_guard::TempGuardEnv::from_env(),
     })
 }
 

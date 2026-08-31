@@ -100,6 +100,18 @@ pub struct ToolContext {
     /// docs/issues/archive/2026-07-05-audit-doc-refs-lsp-stubbed-off.md for why this
     /// field exists and why reuse (not duplication) is load-bearing.
     pub lsp: Arc<dyn crate::lsp::LspProvider>,
+    /// What the temp-write guard treats as "the OS temp dir", plus the opt-out —
+    /// resolved from the environment once, here, and never re-read inside the
+    /// decision.
+    ///
+    /// A field rather than an ambient read because the guard's premise is
+    /// otherwise inherited from the machine: a test could not construct an
+    /// "outside-temp" catalog without a writable directory outside
+    /// `std::env::temp_dir()`, and no such directory is guaranteed to exist.
+    /// Deriving one from `current_dir()` inverts silently when the cwd is itself
+    /// under temp. See
+    /// `docs/issues/2026-08-30-temp-guard-tests-fail-from-a-tmp-checkout.md`.
+    pub temp_guard: crate::librarian::tools::temp_write_guard::TempGuardEnv,
 }
 #[cfg(test)]
 pub(crate) struct TestToolContextBuilder {
@@ -110,6 +122,10 @@ pub(crate) struct TestToolContextBuilder {
     embedding: Option<Arc<crate::librarian::embedding::EmbeddingService>>,
     artifact_store: Option<Arc<dyn crate::librarian::artifact_store::ArtifactVectorStore>>,
     current_project: Option<Arc<crate::librarian::current_project::CurrentProject>>,
+    /// `None` means "inherit the machine's", which is right for the ~100 tests that
+    /// do not care. The temp-guard wiring tests set it, because inheriting is
+    /// exactly what made them fail from a cwd under `/tmp`.
+    temp_guard: Option<crate::librarian::tools::temp_write_guard::TempGuardEnv>,
 }
 
 #[cfg(test)]
@@ -123,7 +139,23 @@ impl TestToolContextBuilder {
             embedding: None,
             artifact_store: None,
             current_project: None,
+            temp_guard: None,
         }
+    }
+
+    /// State what counts as "temp" for the write guard instead of inheriting it.
+    ///
+    /// Needed by any test that must produce a REFUSAL, because a refusal requires a
+    /// catalog the guard classifies as outside-temp — and there is no directory
+    /// guaranteed to be outside `std::env::temp_dir()` on disk. Injecting a synthetic
+    /// temp root makes "inside" and "outside" properties of the fixture rather than of
+    /// the machine the suite happens to run on.
+    pub(crate) fn with_temp_guard(
+        mut self,
+        temp_guard: crate::librarian::tools::temp_write_guard::TempGuardEnv,
+    ) -> Self {
+        self.temp_guard = Some(temp_guard);
+        self
     }
 
     pub(crate) fn with_root(mut self, root: Root) -> Self {
@@ -192,6 +224,9 @@ impl TestToolContextBuilder {
             embedding: self.embedding,
             artifact_store: self.artifact_store,
             current_project: self.current_project,
+            temp_guard: self
+                .temp_guard
+                .unwrap_or_else(crate::librarian::tools::temp_write_guard::TempGuardEnv::from_env),
         }
     }
 }
@@ -351,6 +386,11 @@ pub(crate) mod worktree;
 // Not a registered `Tool` — an internal prevention guard (refuse
 // temp-workspace writes into the real catalog) consumed by `create`/`reindex`.
 pub(crate) mod temp_write_guard;
+/// Re-exported because `ToolContext::temp_guard` is a public field of a public
+/// struct, so any out-of-crate test constructing a context must be able to name
+/// its type. The module itself stays crate-private — the guard function is not
+/// public API, only the resolved inputs are.
+pub use temp_write_guard::TempGuardEnv;
 
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![
