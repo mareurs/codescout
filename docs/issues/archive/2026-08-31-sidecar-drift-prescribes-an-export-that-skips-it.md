@@ -1,12 +1,19 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- librarian
+- doctor
+- augmentation
+- sidecar
+- misleading-remedy
+- no-op-reports-success
+closed: 2026-08-31
 opened: 2026-08-31
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [librarian, doctor, augmentation, sidecar, misleading-remedy, no-op-reports-success]
-kind: bug
+severity: medium
+unverified: Not yet re-verified against a rebuilt live MCP — the running server still answers from the pre-fix binary. Both sites ARE test-guarded (the remedy string directly, the skipped[] response shape through the tool's own call() entry point), so this is a freshness caveat rather than a coverage gap.
 ---
 
 # BUG: sidecar_shape_drift prescribes `fix="export_augmentations"`, which by construction skips every artifact that check can fire on
@@ -139,38 +146,75 @@ per-field argument.
 
 ## Fix
 
-Not yet implemented.
+**Fixed on `experiments` at `e9d3525b`** — patch-id
+`b2ddd98e7311ea770c656dde4e5f32e292fd2785`.
 
-Plan: amend the `sidecar_shape_drift` detail at `src/librarian/tools/doctor.rs:4378` so the
-catalog-is-right branch names the delete step, mirroring `:4353`. Something like *"delete the
-sidecar and re-run `librarian(action="doctor", fix="export_augmentations")`"*. Prefer copying
-the sibling's phrasing over inventing a new one, so the two present-sidecar remedies cannot
-drift apart again — which is the same failure mode one layer up.
+Two halves, and this file's own *Fix* section had them the wrong way round: it proposed the
+string edit first and the reporting change as a "consider separately". The reporting change
+is the one that matters, and the project's Observer Blindness doctrine says why — a prose
+remedy asks the reader to check harder, where a reported skip is the check that runs when
+nobody is worried.
 
-Consider separately whether `export_augmentations` should **report** the artifacts it skipped
-rather than silently omitting them. `exported: 0` is the honest count of what it wrote and a
-truthful answer to a question the caller did not ask; a `skipped: [...]` alongside it would
-make the no-op legible without changing the idempotence that the skip exists to provide. That
-is the more general fix, and it is the one that would have surfaced this without a reader
-noticing the contradiction by hand.
+**Mechanism.** `export_augmentation_sidecars` returns a third bucket; the response carries
+`skipped[]` and `totals.skipped`, each row naming the path, the sidecar, and the reason. The
+`hint` gains an all-skipped arm placed **first**, because that is where a misled reader
+actually lands: it states that the fix creates rather than refreshes, that every
+`sidecar_shape_drift` finding has a sidecar by construction, and what to do instead.
+Idempotence is untouched — `exported` still reports `0` on a second run, and the pinned test
+that asserts it still passes.
 
+**Prose.** The catalog-is-right branch now names the delete step, matching what
+`sidecar_unparseable` — the same scanner's other present-sidecar case — has always said 25
+lines above.
+
+### Corrected while fixing: `artifact_augment` is not an alternative remedy
+
+This file did not claim it was, but the reasoning was worth closing off, because
+`write_through`'s own doc comment makes it look like one — it renders the catalog's shape
+and byte-compares against disk, so it *would* repair a catalog-is-right drift if it ran.
+
+It does not run. Both `sidecar_write_through` call sites in `src/librarian/tools/augment.rs`
+(`:218`, `:431`) sit inside branches that **write the augmentation row**, and the
+params-only merge path below them does not call it at all. So reaching it means re-supplying
+shape, which is the thing you are trying to avoid when the catalog is already correct.
+
+That makes delete-then-export the actual remedy rather than a workaround, and it is why the
+fix is a corrected instruction rather than a redirect to a different call:
+
+| path | behaviour on a catalog-is-right drift |
+|---|---|
+| `export_augmentations` | skips — `declared_already && sidecar_abs.is_file()` |
+| `write_through` | never reached without a shape-writing call |
+| `reindex` | attaches only when the row is **absent** |
 ## Tests added
 
-None yet — the fix is not written.
+Two, both RED first, in `src/librarian/tools/doctor.rs`.
 
-The regression test should assert the two present-sidecar remedies agree, and must be able to
-fail in the direction of the bug: assert `sidecar_shape_drift`'s detail **contains the delete
-instruction**, not merely that it mentions `export_augmentations`. A presence assertion on the
-token alone is monotone under exactly this defect — the current, wrong string contains it too
-— and would have passed throughout (CLAUDE.md § *Testing Discipline*).
+- `the_drift_remedy_names_the_delete_step_without_which_the_export_is_a_no_op` — asserts the
+  detail contains the **delete instruction**, never the token `export_augmentations`. This
+  file predicted that trap before the fix existed and the prediction held: the shipped wrong
+  string contains that token too, so a presence check on it is monotone under this exact
+  defect and would have passed throughout. The RED printed the whole shipped string, which is
+  what made it obvious the assertion was aimed correctly.
+- `an_already_exported_artifact_is_reported_as_skipped_not_silently_omitted` — drives the
+  real tool through `call(&ctx, …)`, so it guards the **response shape**, not just an
+  internal return value. RED was `totals.skipped` returning `Null`.
 
-`a_present_sidecar_and_a_missing_one_get_opposite_advice`
-(`src/librarian/tools/doctor.rs:5621-5689`) is the right shape to copy but does **not** cover
-this: it exercises `scan_augmentation_declared_but_absent`, a different check. Its assertion
-`!present.contains("export_augmentations")` encodes precisely the principle broken here —
-present sidecar, so do not send the reader to a plain export — which is further evidence this
-is an oversight, and a reason to extend that test rather than write a new one from scratch.
+**The drift fixture's load-bearing detail is annotated on its own line:** the committed
+prompt must *differ* from the row's, because that is what makes `drifting_fields` non-empty
+and so what makes the check fire at all. Match the two and the test reports nothing and
+asserts nothing — passing, and blind. The `.git` marker is annotated for the same reason;
+without it `lookup_git_root` fails and the artifact takes the `continue`.
 
+**Both sites are guarded, unlike the previous fix in this session.** The remedy string is
+covered directly, and the `skipped[]` shape is covered through the tool's own entry point —
+so re-hardcoding either one fails a test rather than only a live check. What is *not* yet
+done is verification against a rebuilt binary; the frontmatter's `unverified:` records that
+as a freshness caveat rather than a coverage gap.
+
+Counts confirm the placement: the default lane went 4970 → **4972**, the lean lane stayed at
+3409. That is correct rather than a miss — `doctor.rs` is behind the `librarian` feature,
+which the lean lane has off.
 ## Workarounds
 
 For the catalog-is-right case, move the sidecar aside and then export — the export creates
