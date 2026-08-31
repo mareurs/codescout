@@ -13,7 +13,7 @@ closed: ''
 opened: 2026-08-31
 owner: marius
 related:
-- docs/issues/2026-08-28-atomic-write-leaks-its-temp-file-on-failure.md
+- docs/issues/archive/2026-08-28-atomic-write-leaks-its-temp-file-on-failure.md
 severity: high
 unverified: NO OBSERVED INSTANCE. The mechanism is measured (with_extension verified by running it; 7 collision groups enumerated from git ls-files) but no corruption has been seen in the wild, and no test yet demonstrates the interleaving. Severity high is a judgement about the consequence, not an observation of frequency.
 ---
@@ -119,7 +119,7 @@ function of the **stem and directory only**, discarding the one component that d
 unique per target, and the rename is unconditional.
 
 Measured 2026-08-31 by the probe above. Note this is **not** the same defect as
-`docs/issues/2026-08-28-atomic-write-leaks-its-temp-file-on-failure.md`, which is about the
+`docs/issues/archive/2026-08-28-atomic-write-leaks-its-temp-file-on-failure.md`, which is about the
 initial write's failure path in the same function; that one is being fixed separately and its
 fix does not touch the path derivation.
 
@@ -179,9 +179,8 @@ unfixed function rather than assuming.
 
 ## References
 
-- `docs/issues/2026-08-28-atomic-write-leaks-its-temp-file-on-failure.md` — the other defect in
+- `docs/issues/archive/2026-08-28-atomic-write-leaks-its-temp-file-on-failure.md` — the other defect in
   the same function, found in the same sweep, being fixed separately. Kept apart deliberately:
   the leak fix is behaviour-preserving on the success path and this is not.
 - `docs/trackers/bug-fix-session-log.md` — `W-87`, the sweep that surfaced this by reading the
   code rather than the record.
-

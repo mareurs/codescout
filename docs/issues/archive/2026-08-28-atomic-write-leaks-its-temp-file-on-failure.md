@@ -1,12 +1,16 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- atomic-write
+- disk-full
+- tmp-file-leak
+closed: 2026-08-31
 opened: 2026-08-28
-closed:
-severity: low
 owner: marius
 related: []
-tags: [atomic-write, disk-full, tmp-file-leak]
-kind: bug
+severity: low
+unverified: The full gate was RED when this was committed — server::tests::tool_surface_under_budget, driven by an unrelated uncommitted src/tools/tree.rs (+353) left in the shared checkout by a session that has since exited. Not caused by this change (util/fs.rs advertises no tool schema; an earlier run tonight was green while tree.rs was clean), and absent from the commit because tree.rs is uncommitted — but this fix has NOT been observed under a fully green gate. Re-confirm when the tree.rs situation resolves.
 ---
 
 # BUG: `atomic_write` leaks its `.tmp` file when the initial write fails (e.g., disk full)
@@ -122,20 +126,69 @@ whether `edit_code`'s write path shares it"): **yes, it shares it**, unmodified.
    **Evidence link:** Evidence § Shared helper.
 
 ## Fix
-Not implemented, per this fix-wave item's scope. The mechanism suggests the smallest correct
-fix is to wrap the `std::fs::write(&tmp, content)?` call the same way the `rename` call
-already is — e.g.
-`std::fs::write(&tmp, content).inspect_err(|_| { let _ = std::fs::remove_file(&tmp); })?;` —
-but that has not been written, reviewed, or tested here.
 
-- SHA: N/A (not fixed)
-- patch-id: N/A (not fixed)
+**Fixed 2026-08-31.** The `std::fs::write` call now carries the same `inspect_err`
+cleanup the `rename` below it already had:
 
+```rust
+std::fs::write(&tmp, content).inspect_err(|_| {
+    let _ = std::fs::remove_file(&tmp);
+})?;
+```
+
+- **SHA:** `f671c3a1` (on `experiments`)
+- **patch-id:** `a4ca9f56c791c604e68205bac2b1fd2d32a3b3a0`
+
+**Why the partial guard was the trap, and not merely an omission.** A reader skimming
+`atomic_write` for "is there cleanup?" *finds* cleanup. The defect lived in the one path
+that had none. Reading for the presence of a remedy is not reading for the absence of the
+defect, and only the second answers the question — which is why this survived in a
+sixteen-line function that had been read many times.
+
+**A sibling defect in the same two lines is deliberately NOT fixed here**, and is filed
+separately as `docs/issues/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`:
+`path.with_extension("tmp")` *replaces* the extension rather than appending, so `x.md` and
+`x.rs` in one directory both resolve to `x.tmp`. Different severity class — it is
+cross-file corruption rather than a leak — and it changes a filename, so it deserves its
+own reproduction rather than riding along here.
 ## Tests added
-None. This item is diagnosis-only per its brief ("Do NOT implement the fix"). The existing
-`atomic_write_preserves_exec_bit` test (`src/util/fs.rs:421-432`) is the only test touching
-this function, and it does not exercise either failure path (it never induces an I/O error).
 
+`atomic_write_removes_its_tmp_file_when_the_write_itself_fails` — `src/util/fs.rs`,
+beside the existing `atomic_write_preserves_exec_bit`. Linux-only
+(`#[cfg(target_os = "linux")]`): `/dev/full` does not exist on macOS and CI runs a macOS
+lane.
+
+**The reproduction this file originally prescribed could not reproduce the bug.** The old
+Resume proposed forcing the write to fail "e.g. write to a directory instead of a file, or
+a read-only tmp path". Both make `File::create` fail — and if create fails, nothing is
+created, so nothing leaks and the test **passes against the unfixed function**. That is a
+vacuous regression test, specified by the artifact meant to prevent the bug. Recorded
+because a record can carry a defect forward with more authority than no record: the next
+reader implements what it says.
+
+The leak needs create to **succeed** and `write_all` to **fail** — the ENOSPC shape. A
+symlink at the tmp path pointing to `/dev/full` gives exactly that: the open succeeds,
+every write returns ENOSPC. Verified at the shell before any Rust was written.
+
+Four properties are pinned, each with the mutation it dies on named in a comment:
+
+| # | assertion | the mutation it catches |
+|---|---|---|
+| 1 | `Err` is returned (`expect_err`) | a version swallowing the error and returning `Ok` would satisfy cleanup while breaking the function's purpose |
+| 2 | `raw_os_error() == Some(28)` | **positive control** — a mechanism that began yielding EACCES would satisfy 3 and 4 while exercising a different path |
+| 3 | target **byte-identical** | pins "not modified if present", not merely "not created if absent" — the atomicity guarantee, previously pinned by nothing on the failure path |
+| 4 | tmp entry gone (`symlink_metadata`) | the leak itself. `exists()` follows the link and would report on `/dev/full`, which always exists |
+
+Plus a loud-absence guard: a missing `/dev/full` **asserts** rather than skipping, because a
+graceful skip is a clean `0 passed` character-identical to real coverage.
+
+**Demonstrated, not claimed.** With the fix, 30/30 in `util::fs`. With the fix reverted,
+the test FAILS at assertion (4): *"atomic_write leaked /tmp/.tmpQ0RXKJ/target.tmp after the
+write failed"*. Assertions (1)–(3) **pass** against the unfixed function — the broken
+version really does return `Err`, really does return ENOSPC, and really does leave the
+target intact. Only cleanup is missing, so the test discriminates on the defect rather than
+incidentally. The source mutation ran under a `trap … EXIT` installed *before* it, and the
+restore was verified by hash rather than assumed.
 ## Workarounds
 Stray `<name>.tmp` files left by this bug are always zero-length (or partially written) and
 safe to delete manually once free disk space is confirmed; the real target file is never
@@ -143,15 +196,17 @@ touched by this failure mode, so no data recovery is needed. `git status` will s
 they land inside a tracked directory that isn't `.gitignore`d for `*.tmp`.
 
 ## Resume
-Decide and implement the smallest fix: wrap `std::fs::write(&tmp, content)?` in
-`.inspect_err` cleanup mirroring the existing `rename` handling, then add a regression test
-that forces the write step to fail (e.g. write to a directory instead of a file, or a
-read-only tmp path) and asserts the `.tmp` sibling does not survive. Also decide whether to
-extend the fix to the (unrelated, pre-existing) profile-write path's own doc comment
-(`src/operator_rules/mod.rs:76-79`), which already documents "crash or disk-full mid-write
-must not be able to truncate" — that documented guarantee is currently only true for the
-`rename` step, not the initial `write`.
 
+N/A — fixed at `f671c3a1` with a regression test that is demonstrated to fail against the
+unfixed function.
+
+One thread deliberately left open and owned elsewhere: the `with_extension` tmp-path
+collision, filed as
+`docs/issues/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`.
+
+One caveat carried in `unverified:` rather than here, so a query can read it: this fix has
+not been observed under a fully green gate, because an unrelated uncommitted `tree.rs` was
+failing `tool_surface_under_budget` at commit time.
 ## References
 - `src/util/fs.rs:62-77` — `atomic_write`
 - `src/util/fs.rs:421-432` — `atomic_write_preserves_exec_bit` (only existing test)
