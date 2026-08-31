@@ -48,11 +48,18 @@ Keep `BL-66` above rather than swapping it out: that is the **alarm** shape, a `
 arrives at, and it is the harder half to see. This is the **feature** shape, and it is cleaner in
 exactly one way — `BL-66` had an out-of-tree consumer to argue about, and these have none, so the
 green tick protects precisely nothing. Note what the unit is: the defect is the *tests*, not the
-tools. **Derive the count, don't cite it** — the bug file
-(`docs/issues/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md`) says 15 where
-`symbols(path="src/tools/ast.rs")` gives 19 functions in `mod tests` less one helper, and the
-discrepancy is unresolved. Two counts of one population, which is § *Observer Blindness*'s
-closing rule firing on the very example added to illustrate it.
+tools. **Derive the count, don't cite it** — one population yielded **three** defensible numbers inside
+an hour, and each is the right answer to a different question. **18** tests live in `mod tests`
+(19 functions less the `project_ctx_with_file` fixture). **13** exercise the tools by name — 12
+there, plus `tests/integration.rs::workflow_analyze_ast`. **17** guard unreachable code, because
+the four formatter tests cover `format_list_functions` / `format_list_docs`, whose only
+production caller is `ListFunctions::format_compact` at `src/tools/ast.rs:84`. A first pass
+published **15**: 13 with two wrong inclusions — a JSON fixture containing the *string*
+`"ListFunctions"`, and an e2e helper (`run_list_functions`, reached from `run_single`'s
+`"list_functions"` arm) mistaken for a test. None of these is a mistake about the code; they are
+four different units. **A count of a defect population must arrive with its unit or not at all**
+— and note that 13, 15, 17 and 18 are near enough to each other that no reader would query any of
+them, which is § *Observer Blindness*'s closing rule firing on the example added to illustrate it.
 
 **Annotate a fixture's load-bearing detail, on the fixture line.** The assertion states what
 must be true; nothing states which part of the *setup* is what makes the test able to tell.
