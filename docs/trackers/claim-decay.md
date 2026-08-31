@@ -421,6 +421,53 @@ world, so it needs no threshold, which is the property `premature_archive_citati
 also chosen for. It would have caught four of the five, and none of the excluded one — correctly,
 since that one states a count no query disagrees with, only a derivation nobody ran.
 
+## DC-5 — A count of this class's own instances is itself a member of it — "third time tonight" was false within the hour
+
+**Valid:** invariant
+
+**Site:** `c7be203f`'s commit message — *"Third time tonight across two sessions"* — and the same
+sentence sent to a peer. Immutable in both surfaces. The general form is any tally of an **open**
+defect class published where nothing re-reads it.
+
+**What decayed:** the number, within roughly forty minutes, by two independent routes. The peer
+found a fourth instance in `CLAUDE.md` § *Testing Discipline* (`01791c67`); and three more were
+already sitting in `42376ac2` and `c7be203f` — **my own fixes, from the same hour, uncounted by
+the sentence counting them.**
+
+**The derivation, since the whole entry is about not publishing a bare figure.** Unit: *a claim
+in a committed artifact, true when written, false after a later change, with nothing re-reading
+it, found 2026-09-01.*
+
+| # | claim | invalidated by |
+|---|---|---|
+| 1 | bug-file frontmatter `title:` still "15" | the H1 corrected to 13 |
+| 2 | `cluster-promotion-session-log:F-1` — *"correction not yet written to `OB-7`"* | `a2aedd49` writing it |
+| 3 | `OB-7` — *"fifteen tests"* | the bug file's derivation moving to 13 |
+| 4 | `IC-3` — `dyn Trait` named as the blind spot | `OB-7`'s dispatch-side probe refuting it |
+| 5 | `OB-9` — *"and nothing does"* | a peer doing it, within the hour |
+| 6 | peer's *"the discrepancy is unresolved"* (`7a2f14aa`) | the discrepancy being resolved (`fe085987`) |
+| 7 | peer's *"All four were measured 2026-08-30"* | its own addition of a fifth law (`01791c67`) |
+
+**Seven under that unit; I published three and the peer published four.** Neither figure carried
+its unit, so the two are not reconcilable without re-deriving both — which is `CLAUDE.md`'s *"a
+count of a defect population must arrive with its unit or not at all"*, arriving as a bill rather
+than as advice.
+
+**Why this is not repairable and what to do instead.** There is no fixed point. A count of this
+class's instances is a claim of exactly the kind it counts, so it decays by the same mechanism,
+and **authoring the entry that documents it confers no protection** — both tallies above were
+written by parties actively writing about the class. A commit message cannot be amended after
+the fact and an open population admits no settling query, so no `doctor` check is proposed here.
+The remedy is at the write and it is one sentence: **for an open class, publish the unit and the
+derivation, never the tally.** A dated derivation ages honestly; a bare number just becomes
+wrong.
+
+**Note on this row's own fields.** `found_by` is recorded as `incidental` because the schema's
+enum has no `peer` value — the finding came from a cross-session exchange, which is now this
+corpus's most productive discovery channel and is not expressible in the vocabulary. Small gap,
+recorded rather than worked around silently. The schema did fire correctly on two invented
+values in the first append attempt, which is the guard working.
+
 ## Template for new entries
 
 Copy the shape below; the server assigns the id.
