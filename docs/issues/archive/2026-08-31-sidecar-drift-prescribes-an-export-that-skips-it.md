@@ -13,7 +13,7 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: medium
-unverified: Not yet re-verified against a rebuilt live MCP — the running server still answers from the pre-fix binary. Both sites ARE test-guarded (the remedy string directly, the skipped[] response shape through the tool's own call() entry point), so this is a freshness caveat rather than a coverage gap.
+unverified: 'The MECHANISM half is confirmed live 2026-08-31 (skipped[] with 9 rows, totals.skipped 9, the all-skipped hint) against server e25850d6. The PROSE half — the corrected sidecar_shape_drift remedy — is test-guarded but was not observed live, because there is no drift left to trigger it: this session''s fix took sidecar_shape_drift to 0. Absence of a live observation here is a consequence of the repair, not a gap in it.'
 ---
 
 # BUG: sidecar_shape_drift prescribes `fix="export_augmentations"`, which by construction skips every artifact that check can fire on
@@ -215,6 +215,35 @@ as a freshness caveat rather than a coverage gap.
 Counts confirm the placement: the default lane went 4970 → **4972**, the lean lane stayed at
 3409. That is correct rather than a miss — `doctor.rs` is behind the `librarian` feature,
 which the lean lane has off.
+### Confirmed live 2026-08-31 — the mechanism half
+
+Against the rebuilt binary (server `git_sha` `e25850d6`, pid 4024625). The same call that
+opened this report — `librarian(action="doctor", fix="export_augmentations")` — now returns:
+
+```
+"totals": { "exported": 0, "failed": 0, "skipped": 9 }
+"skipped": [ { "path": "docs/trackers/provenance-subsystem.md",
+               "sidecar": "docs/augmentations/docs-trackers-provenance-subsystem.yaml",
+               "reason": "already exported and declared — this fix CREATES sidecars and
+                          never refreshes them. To republish a shape this catalog owns,
+                          delete the sidecar and re-run." }, … 8 more ]
+"hint": "Nothing written: every augmented artifact in scope already has a declared
+         sidecar … If you arrived here from sidecar_shape_drift, note that all of its
+         findings have a sidecar on disk — so this call could not have repaired one …"
+```
+
+`exported: 0` is unchanged and still correct. What is gone is the silence around it: the
+run now names all nine artifacts it declined to touch and states, unprompted, the exact fact
+this report had to be reconstructed by hand from source — that a `sidecar_shape_drift`
+finding can never be repaired by this call.
+
+**The prose half was NOT observed live, and the reason is a good one.** The corrected
+`sidecar_shape_drift` remedy needs a live drift to appear in, and this session's repair took
+`sidecar_shape_drift` to **0**. So the absence of a live observation here is a consequence
+of the fix rather than a gap in it. That half is covered by
+`the_drift_remedy_names_the_delete_step_without_which_the_export_is_a_no_op`, which asserts
+on the delete instruction rather than on the token — deliberately, since the shipped wrong
+string contained the token too.
 ## Workarounds
 
 For the catalog-is-right case, move the sidecar aside and then export — the export creates

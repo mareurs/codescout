@@ -12,7 +12,6 @@ owner: marius
 related:
 - docs/issues/archive/2026-07-28-il3-gate-matches-pipes-inside-heredoc-text.md
 severity: low
-unverified: Not yet re-verified against a rebuilt live MCP — the running server still answers with the bare pre-fix reason (observed doing exactly that on this fix's own commit). All three sites are test-guarded, so this is a freshness caveat rather than a coverage gap.
 ---
 
 # BUG: the dangerous-command gate scans heredoc bodies, so a commit message that mentions `rm -rf` needs an ack
@@ -175,6 +174,34 @@ Counts: lean 3409 → **3412**, default 4972 → **4975**. Both lanes, because
 Zero-failures rests on `cargo test`'s exit code 0 in both lanes rather than on a buffer
 grep — the `@cmd_*` temp files had already been reaped when the grep ran, and it printed a
 `No such file` to stderr rather than a count.
+### Confirmed live 2026-08-31
+
+Against the rebuilt binary — server `git_sha` `e25850d6`, pid 4024625 (up from 3786819),
+so a fresh process. Re-running this file's own *Reproduction* returns:
+
+```
+reason: "rm with --force or --recursive — matched ONLY inside a heredoc body, never in
+         executable position. A body is inert data unless the command consuming it is an
+         interpreter (bash, sh, zsh, ssh, python …), in which case it runs and this flag
+         is real. Opened by: cat > /tmp/…-ad2…. This gate cannot tell those two apart, so
+         it flags both rather than stripping bodies the way the IL3 and source-file gates
+         safely can. Read the opener, then acknowledge."
+```
+
+The flag is unchanged — still a `pending_ack`, still one round trip. What changed is that
+the reason now answers the question the reader had, which is the whole fix.
+
+The interpreter case is **deliberately not** exercised live. It would return a
+`pending_ack` without executing, so a probe is safe in principle, but it is fully covered
+by `an_interpreter_heredoc_is_still_flagged_because_its_body_executes` and there is no
+reason to type a destructive command to watch a gate refuse it.
+
+**One edge observed while verifying, recorded rather than filed.** The opener is truncated
+at 80 characters, and this reproduction's opener was a long scratch path, so the trailing
+`<<'EOF'` was cut. The note still worked, because the decision-relevant token is the
+**leading command** — `cat` here — and truncation from the right always preserves it. Worth
+knowing before someone "fixes" it by truncating the middle, which would trade a harmless
+loss for the one part that matters.
 ## Workarounds
 
 Acknowledge the `@ack_*` handle, having read the command. Or write the message with
