@@ -15,11 +15,7 @@ hash = "5c4fee790143e89fedbc076e12c1fa5508aefe663a6eb8024ef182ea89669684"
 
 [[anchors]]
 path = "src/librarian/tools/augment.rs"
-hash = "0e8f7840bcf9dae8281eeaf1b0b296096196d8e954e955f1542ca319b034b54d"
-
-[[anchors]]
-path = "docs/issues/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md"
-hash = "b0d87b96cc7f3beceaa101b1d1aaaa3cf8df2ac48ca9b55404f9a56b81951fe7"
+hash = "711f7d299c86b882776a2468e8ba94efcb50cf10825027fe516fdc3ffe0a80b5"
 
 [[anchors]]
 path = "src/librarian/tools/append_entry.rs"
@@ -31,7 +27,7 @@ hash = "9dde6a21683d7170ea958c4010436743a9b1dca0969ea0de8b2fd79182b12298"
 
 [[anchors]]
 path = "docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md"
-hash = "17663e753e9fa18b7763e56566e3649d48884cdb4ff3e7eb0a0a22a15f439f99"
+hash = "2bc1b7d3e964adbc42701482d2e5481e387dd3b9a2b2a94f88ec91eefaed0341"
 
 [[anchors]]
 path = "docs/superpowers/plans/2026-08-31-cross-machine-catalog-recovery.md"

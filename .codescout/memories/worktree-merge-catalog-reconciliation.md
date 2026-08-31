@@ -80,14 +80,20 @@ called at `:370`, comment-tagged `F-5`) validates merged params against *the sch
 this call supplies*. So a single `artifact_augment(merge=true, …)` carrying params and
 `params_schema` together is fully validated against the target schema — not slipped
 past a guard. The three-call alternative (permissive schema → params → real schema)
-touches shape fields twice, doubling exposure to the write-through bug below.
+writes shape fields twice for no gain — and did, until 2026-08-31, additionally risk the
+write-through clobber described below.
 
 **Two hazards that bite here specifically.**
 
-- **`artifact_augment` republishes the WHOLE augmentation row**, so a call changing
-  one field publishes its stale siblings over a correct sidecar. Open bug:
-  `docs/issues/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`.
-  This is why fewer, atomic calls are safer than more, narrower ones.
+- **`artifact_augment` used to republish the WHOLE augmentation row**, so a call changing
+  one field published its stale siblings over a correct sidecar. **Fixed 2026-08-31 at
+  `eab7fca3`** — the write-through now refuses to republish a field the calling merge never
+  authored; archived at
+  `docs/issues/archive/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`.
+  The fix's own framing is the part worth keeping: this mechanism sits directly in front of
+  `sidecar_shape_drift`, whose design position is that when row and committed file disagree
+  **the direction is undecidable without a human** — and the write-through was silently
+  deciding it. Prefer atomic calls anyway, for the schema reason above rather than this one.
 - **`append_entry`'s high-water mark collides across hosts.** It already refuses id
   allocation from a *worktree* (`src/librarian/tools/append_entry.rs:97`) on exactly
   these grounds, but `is_main_checkout_artifact` cannot see a second clone. Measured:
