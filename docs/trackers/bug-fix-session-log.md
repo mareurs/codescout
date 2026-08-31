@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 85
+entry_high_water_F: 86
 entry_high_water_W: 89
 ---
 
@@ -135,6 +135,7 @@ entry_high_water_W: 89
 | F-83 | 2026-09-01 | high | codescout-tool | open | `artifact(get)` carries `updated_at` per response but nothing says "changed since your last read", so two reads of one artifact 5.7 min apart composed a contradiction present in neither commit either side of it (75085 vs 78448 bytes = `13226bda^` vs `13226bda`). Five false "the ledger contradicts itself" findings were one step from a user-facing report; the natural reading blames the FILE, not the read |
 | F-84 | 2026-09-01 | med | codescout-tool | open | A rebuild + `/mcp` refreshes the SERVER but not its LSP mux delegates. A `$PPID` walk proves this session fresh (pid 2695653, 15s post-build, `/proc/exe` with no ` (deleted)`), while six siblings ran the replaced inode — including this repo's own rust-analyzer mux, started 00:04:55, half an hour before the build. Binary mtime, the `~/.cargo/bin` symlink, a clean tree, the last source commit and the reconnect itself ALL read green; only `/proc/<pid>/exe` did not. R-89's fourth axis: delegate |
 | F-85 | 2026-09-01 | med | self-friction | open | Committed the exact IC-10 attribution error I had corrected a peer for eight minutes earlier, in the next message, about that class. On a shared checkout git author is identical and `git status` shows the UNION of all sessions' work, so author / adjacency / dirty-file lists carry ZERO ownership signal by construction — not a care problem, no heuristic extracts it. Five wrong attributions across three sessions in 15 min; all five resolved by asking the session, and only by asking. That protocol is the mechanism IC-10 lacks |
+| F-86 | 2026-09-01 | high | process | open | A guard's ABORT path is an unscoped write. My commit guard's success branch was scoped to one explicit path; its failure branch was a bare `git reset`, i.e. `--mixed HEAD` over the whole shared index. It fires exactly when a peer is active, because a foreign staged path is what trips it. Provable margin: the 16 staged paths landed as 0dea2246 at 00:44:39, my commit at 00:45:17 — any run of the old guard inside that window would have unstaged a batch its owner committed seconds later. The two runs that passed did so because nothing foreign happened to be staged, which is luck and reads identically to correctness. Remedy is to delete the branch, not scope it: `git commit -F <msg> -- <path>` has no mismatch to detect |
 
 ## Wins Index
 
@@ -8476,6 +8477,83 @@ policy tied to a trigger that happens anyway, which `CLAUDE.md` § *Observer Bli
 the second-best mechanism shape — and it is the one thing that worked five times out of five
 tonight. Offered to `IC-10`'s owner rather than written there, since two sessions are actively
 editing that ledger.
+
+## F-86 — A guard's abort path is an unscoped write — my `git reset` fallback would have unstaged a peer's 16-file batch under a minute before they committed it
+
+**Observed:** 2026-09-01 00:45, on being warned by `codescout-d9` that 16 files belonging to
+another session were staged in the shared index.
+
+**When:** About to run a third commit with the same guard that had wrapped the previous two
+(`5d405b67` at 00:33:36 and `c385b9d6` at 00:38:54):
+
+```
+git add docs/trackers/bug-fix-session-log.md
+staged=$(git diff --cached --name-only)
+if [ "$staged" = "docs/trackers/bug-fix-session-log.md" ]; then
+    git commit -F $S/msg.txt
+else
+    echo "ABORT — staged set was: $staged"; git reset
+fi
+```
+
+**Expected:** the guard is the careful half of the procedure. Its success branch is scoped to a
+single explicit path precisely so a concurrent peer's work cannot be swept in.
+
+**Got:** the **failure** branch is `git reset` — bare, therefore `--mixed HEAD`, therefore
+**unstaging every path in the index, not the one the guard is about**. The success branch
+inherited the scoping; the abort branch inherited none of it. So the branch that exists to
+prevent damaging a peer is the only one in the block that damages a peer, and it fires
+*exactly* when a peer is active, because a foreign staged file is what trips it.
+
+**The counterfactual is provable and the margin was under a minute.** The 16 staged paths were
+committed by their owner as `0dea2246` at **00:44:39**; my own inspection listing those same 16
+necessarily preceded it, and my `git add` — which found the index already down to one file —
+necessarily followed it. My commit landed at **00:45:17**. Had that third run used the old
+guard at any point in the window ending 00:44:39, `staged` would have held 17 paths, the
+comparison would have failed, and the block would have printed `ABORT` while unstaging a batch
+its owner committed seconds later. The two runs that did use it passed only because no foreign
+path happened to be staged at 00:33 or 00:38 — which is luck, and reads identically to
+correctness.
+
+**Probable cause:** the index is shared state and `git reset` takes no pathspec in this
+formulation, but the deeper cause is that **nobody reviews an abort path**. It is the branch
+labelled with the cautious word; it is read as "do nothing and stop". Here it is the only
+unscoped write in the procedure.
+
+**Workaround — remove the branch rather than scope it.** `git commit -F <msg> -- <path>`
+commits the working tree at that path and ignores the index for every other path, so there is
+no mismatch to detect and nothing to undo. Stage first (`git add <path>`) so the committing
+blob equals the staged blob, which is what satisfies the `refuse a pathspec commit carrying
+unstaged content` hook — the two hazards are simultaneously satisfiable, and the pathspec form
+needs no failure branch at all. Mechanism established by `codescout-d9` (`08d72a6e`); the
+abort-path defect is mine.
+
+**Severity:** high — not for the content, which is safe (`--mixed` leaves the working tree
+untouched), but for the **curation and the silence**. A peer who deliberately staged 16 of 21
+dirty paths loses which 16, with no notification: `git reset`'s "Unstaged changes after reset"
+listing prints into *my* session, never theirs. Their next bare `git commit` then fails or
+commits the wrong set, at a moment they have no reason to connect to another session.
+
+**Status:** open
+
+**Valid:** dated 2026-09-01
+
+The timing argument is a fact about one instant; the structural claim about abort paths is not
+and does not decay with it.
+
+**Rests on:** `git reset` with no pathspec defaulting to `--mixed HEAD` over the whole index —
+a property of git, not of this repo; and on the commit ordering above, which is fixed by
+`0dea2246`'s timestamp rather than by recollection.
+
+**Fix idea / Pointer:** the portable form is **a guard's abort path is a write, and it inherits
+none of the scoping applied to its success path** — so scope the failure branch explicitly, or
+choose a primitive that has none. Note the relationship to `IC-14` is *inverted*: that class is
+a guard whose coverage is **narrower** than its name, this is a guard whose **blast radius is
+wider than its scope**, and the two need opposite tests ("what input satisfies the name but not
+the implementation?" versus "what does the failure branch touch that the success branch was
+careful about?"). Cluster is `IC-1`/`IC-17` territory — a write reaching past the peers you can
+see — but `IC-17` was minted minutes ago (`0dea2246`) and I have not read it, so the
+classification is deliberately left to that ledger's owner rather than guessed at here.
 
 ## Template for new entries
 
