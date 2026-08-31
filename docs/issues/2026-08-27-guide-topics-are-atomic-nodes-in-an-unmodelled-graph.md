@@ -9,7 +9,7 @@ tags:
 - get_guide
 - progressive-disclosure
 - proposal
-unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27 on branch sdd/get-guide-section-grain, and the USE probe this file''s own `Not yet done` asked for RAN the same day, resolving the delivered-vs-used gap it was blocked on. What remains is proposal work, not a defect: directions (b) and (c) are gated on a DISTRIBUTION probe -- which sections of tracker-conventions are cited back or acted on across a real sample -- because the two sessions measured so far were selected by talking to each other, not by any sampling rule, and both arms would survive a bad sampling design. Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that reads as settled because someone who knows the file stated it, and it needs re-costing before anyone builds on it. Added 2026-08-30 by a verify-open sweep: this was the only one of twelve open bugs with no queryable disposition. Added 2026-08-31: two defects IN the shipped Phase 1 mechanism were found and fixed (50590b6c, 8364e472) -- see the Phase 1.5 section -- and one gives Phase 2 a SECOND blocker, independent of the 17,378 B decomposition: topic_declaring made `serves:` a CROSS-TOPIC namespace, so tracker-conventions cannot declare a shape librarian.md already declares without a specificity rule, and the build gate no_two_topics_declare_an_overlapping_shape fails on exactly that, deliberately.'
+unverified: 'PARTIALLY SHIPPED, and `open` alone does not say so. Phase 1 (section-grain get_guide) SHIPPED 2026-08-27 on branch sdd/get-guide-section-grain, and the USE probe this file''s own `Not yet done` asked for RAN the same day. The DISTRIBUTION probe that directions (b)/(c) were gated on RAN 2026-08-31 -- n=166 sessions across two machines, instrument scripts/probe_guide_section_use.py -- so that gate is now SATISFIED; see the Phase 2 section. It changed the recommendation: the largest lever is subagent delivery (92.5% of delivered bytes never engaged, 2.3x the main-session waste) and it is orthogonal to BOTH Phase 2 blockers, so it needs no decomposition and no addressing work. Still outstanding: the 17,378 B decomposition and cross-topic shape disambiguation (topic_declaring made `serves:` a cross-topic namespace, and no_two_topics_declare_an_overlapping_shape fails the build on the collision, deliberately). Also outstanding and explicitly NOT a measurement: `tracker-conventions is really six topics` is an authoring judgement that reads as settled because someone who knows the file stated it, and it needs re-costing before anyone builds on it.'
 ---
 
 ## Symptom
@@ -355,6 +355,84 @@ ships `tracker-conventions` whole. Reachability was fixed; cost was not. And **9
 topics still declare nothing** — only `librarian.md` carries `serves:`, 13 declarations — so any
 call routing to one of the nine pays its full body. Phase 1's containment property and the shape
 of what is left to do are the same fact.
+## The DISTRIBUTION probe ran — 2026-08-31, n=166 sessions, two machines
+
+Directions (b) and (c) were gated on this, because the sessions measured before were
+selected by talking to each other. It has now run under a stated rule, on a second
+observer, and **it changes the recommendation**.
+
+Instrument: `scripts/probe_guide_section_use.py` (PROBES.md row names its blind spots).
+It counts **section-attributable mechanism activity after delivery** — `artifact*` /
+`librarian*` calls whose *structural* input matches what a section governs. That is
+**relevance, not causation**, and it is asymmetric on purpose: a section with zero
+activity certainly was not used, while a section with activity merely might have been.
+**Every conclusion below runs in the zero direction.**
+
+### The 2026-08-27 frame could not be re-read, and that is a finding
+
+**76 of its 106 `tracker-conventions` sessions were gone from disk within four days**, and
+the attrition is severely structured: 4.8% survival in `.claude` against 71.1% in
+`.claude-sdd`, with the guide-heavy tail preferentially dead (max 21 injections among the
+gone, max 8 among survivors). **9 of the 10 scored transcripts are gone**, and the
+survivor received zero injections of this topic — so the calibration overlap is empty and
+PROBES rule 1 cannot be satisfied against that study. Drawing from the survivors would
+have run cleanly and returned a ~90%-one-profile convenience sample. This is a fresh
+frame reported as its own period, never a continuation.
+
+### Result — main sessions (n=79 across both machines)
+
+| section | bytes | % of topic | laptop | desktop | **both** |
+|---|---|---|---|---|---|
+| Entry-level standard | 17,323 | 44.6% | 56% | 61% | **59%** |
+| Bug files | 11,319 | 29.1% | 56% | 61% | **59%** |
+| Declaring an augmentation | 4,098 | 10.5% | 33% | 21% | **24%** |
+| Cross-linking | 2,086 | 5.4% | 39% | 48% | **46%** |
+| **Querying with the librarian** | **1,965** | **5.1%** | **89%** | **82%** | **84%** |
+| Tracker artifacts | 1,416 | 3.6% | 50% | 49% | **49%** |
+
+**Never engaged: 45.2% of delivered bytes** (laptop 47.1%, desktop 44.6%). Median session
+engages 4 of 6 sections; 9 of 79 engage none.
+
+**The size ranking and the use ranking are inverted.** The most-engaged section is the
+second-smallest — 1,965 B, 5.1% of the topic, engaged by 84% — while the two giants
+carrying 73.7% of the bytes are engaged by 59%. Any decomposition argument reasoning from
+size alone would target the wrong section first.
+
+### Result — subagents (n=87) are a different population, and the biggest lever
+
+**92.5% of delivered bytes never engaged** (laptop 90.1%, desktop 93.5%). Median 1 of 6
+sections; **38 of 87 engage nothing at all**; `Cross-linking` is engaged by zero.
+
+Subagents are **half the population** and their waste is **2.3× the main-session waste**
+— 3.13 MB of 4.52 MB total across this corpus. **And that lever is orthogonal to both
+Phase 2 blockers**: not injecting (or minimally injecting) `tracker-conventions` into
+subagent sessions needs no decomposition and no cross-topic addressing. Iron Law 6
+already assigns briefing to the parent, so the guidance path exists.
+
+### What it decides
+
+1. **Do the subagent lever first.** Largest saving, no blocker, no new mechanism.
+2. **`Querying with the librarian` is the section worth serving at section grain** — 84%
+   engagement for 5.1% of the bytes. And it is exactly the collision case: verified live
+   this session, `librarian.md` declares `<!-- serves: artifact.find -->` and
+   `<!-- serves: artifact.get, artifact.create -->`, which are the very shapes that
+   section governs. So the highest-value section to serve is the one that most needs the
+   `path~` specificity rule — the two findings meet on the same fix.
+3. **Decomposing `Entry-level standard` is NOT the first move.** It is the biggest
+   section, but at 59% engagement it is neither the least-used nor the best return.
+
+### What this is not
+
+Section grain still flatters — the 08-27 study measured ~0.06 utilisation at *subsection*
+grain against 0.469 at section grain, and nothing here reaches inside a section. A 17 KB
+section scored "engaged" on one `append_entry` call is credited whole. So **45.2% is a
+floor on main-session waste**, not an estimate of it.
+
+And a near-miss worth recording: blending the two populations gives 71.7% never-engaged,
+which matches the 08-27 study's 71% for this topic almost exactly and reads as a striking
+cross-instrument convergence. It is not one — split, the populations are 45% and 92%, and
+the agreement is an artifact of the mix. The blend was checked only because the project
+breakdown looked odd.
 ## Measured — USE, 2026-08-27 (the probe `Not yet done` asked for)
 
 This section answers the question the rest of the file could only frame: delivery
