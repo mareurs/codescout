@@ -156,7 +156,7 @@ grep -L 'cluster/' docs/issues/2026-*.md
 
 | id | class | slug | n | promotes to | mechanism |
 |---|---|---|---:|---|---|
-| IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 18 | `OB` (OB-2, OB-3) | partial |
+| IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 18 | `OB-8` (+ OB-2, OB-3) — 2026-09-01 | partial; **split proposed** |
 | IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
 | IC-3 | declaration is not execution | `declared-not-wired` | 18 | `OB-7` — promoted 2026-09-01 | partial (1 of 3 families, by-name only) |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | `OB` — passes admission test; hook owed | none yet |
@@ -230,14 +230,21 @@ withdrawal exposed. The fourth backfill shape needed no entry — it had already
 `IC-11` on 2026-08-31, forced by a taggable instance arriving against a gate with no
 `cluster/unclassified` escape hatch, rather than by its count.
 
-**Every one of the five carries `n=0`, and that is the honest reading rather than a defect.**
-Three were opened on a peer's backfill count this session did not independently verify, one on a
-single instance written up inside another bug file, and one on a rule that exists in `CLAUDE.md`
-with no corpus ever indexed against it. The ledger stores a query, so a class whose members are
-not yet tagged reports zero — and the `**Members:**` field of each says exactly whose count it
-rests on. **Do not read those zeros as evidence of rarity.** The work they name is tagging, and
-until it happens no judgement should rest on them; `**Promotes to:** not yet` is set on all five
-for that reason and not on spread.
+**Four of the five have since been tagged; `IC-12` alone still reports zero — read the `n` column,
+not this sentence.** All five *opened* at n=0, and this paragraph asserted that in the **present
+tense** until `13226bda` (2026-09-01) tagged the members of `IC-13`–`IC-16` and left the claim
+standing beside a table that already contradicted it. That is the defect this section's own
+preamble names, committed inside the section that names it — and nothing reported it: `doctor`'s
+entry-validity checks are gated on `EXPOSURE_THRESHOLD = 5` citing files
+(`src/librarian/tools/doctor.rs:2682`), which day-old entries never clear, so the four fired
+conditionals below were invisible to every instrument until a human read them.
+
+The zeros were never evidence of rarity. The ledger stores a query, so a class whose members are
+not yet tagged reports zero, and the `**Members:**` field of each says whose count it rests on.
+`IC-12`'s remaining zero is the one kind that *is* evidence — it survived an archive pass that
+looked, rather than waiting for one (see below). For the four that moved, `**Promotes to:** not
+yet` now rests on **spread**, never on tagging, and every one is still single-party
+classification.
 
 `IC-16` inverts the usual direction and is worth reading for that alone: the rule came first, from
 an SDD run, and lives in `CLAUDE.md` § *Testing Discipline* already. What never happened is
@@ -284,8 +291,8 @@ were left in `IC-3` as genuinely arguable rather than moved on a coin-flip.
 **Claim:** A session's writes reach every peer sharing the filesystem; its peer listing reaches only peers sharing its config profile. Coordination is therefore impossible by construction, and the listing reports the short population as a definite count.
 **Members:** `filter={"tags": {"contains": "cluster/blast-radius-exceeds-visibility"}}` — n=18, 2026-08-31, by query after archive backfill (8 confirmed, 2 consistent-but-unproven among the 10 pre-backfill members).
 **Blind party:** the session doing the writing. Not carelessness — it *holds* the listing that would reveal the peer, and the listing is scoped narrower than the sharing. `ListAgents` answering *"Peer sessions (2)"* is a confident small number, which survives review in a way a suspicious zero would not.
-**Promotes to:** `OB` — `docs/trackers/observer-blindness.md`. Partly there already: `OB-2` (shared `target/` left feature-clobbered) and `OB-3` (a peer listing is arbitrary w.r.t. the real population) are both members of this class seen from the observer side.
-**Mechanism status:** partial — OS enumeration shipped for `OB-3`; the gate reorder shipped for `OB-2`. Nothing covers the *write* side: no ownership protocol on `target/`, the working tree, the git index, or the `entry_high_water_<PREFIX>` allocator.
+**Promotes to:** `OB-8` — *a shared resource carries no owner, so seeing the peer does not help*, promoted 2026-09-01 for the **write** side this entry named as uncovered. The read and arm sides were already there: `OB-3` (a peer listing is arbitrary w.r.t. the real population) and `OB-2` (shared `target/` left feature-clobbered). Three rows, three standpoints, one substrate.
+**Mechanism status:** partial — OS enumeration shipped for `OB-3`, the gate reorder for `OB-2`, and an outbound `unreviewed-content` pre-commit gate for `OB-8`. The **inbound** half of the write side is not closeable by any per-session behaviour, and no ownership protocol exists on `target/`, the working tree, the git index, or the `entry_high_water_<PREFIX>` allocator.
 **Valid:** dated 2026-08-31
 
 What the instances share is not concurrency in the ordinary sense — there is no lock to take, because nothing models the resource as shared at all. `target/debug/codescout` is written by feature set and read by path; the working tree is written by whoever runs an editor and read by whoever runs `git commit -a`; `entry_high_water_IC` is read-modify-written by each host from its own committed copy. In every case a second writer is *representable* and simply not *represented*.
@@ -298,6 +305,38 @@ Two members are **suspected, not proven**: `workspace-read-only-flips-mid-sessio
 
 **This class was demonstrated during its own writing.** The open corpus grew from 30 to 31 files while this entry was being drafted — a peer session in the same checkout filed `peer-sessions-never-compares-start-time-to-build-time`, and the measuring session had no signal that its count had changed. The new file is also a member on its own merits: `scripts/peer-sessions.sh` prints each peer's start time but never compares it to the served binary's build time, so **9 of 13 live processes serving pre-rebuild bytes read as healthy** (measured 2026-08-31T21:47). Same shape as `listagents-omits-cross-profile-sessions` — a peer instrument presenting an incomplete characterisation as a sufficient one.
 
+**This entry's falsification condition FIRED on 2026-09-01, and the class should split.** The
+condition was stated here as: *an instance where the writing session could enumerate the peer
+and still collided — that would move the defect from visibility to coordination and split this
+class in two.*
+
+It fired **four times in 34 minutes**. Two sessions enumerated each other — `ListAgents` named
+both, and they exchanged eight messages about this exact mechanism — and collided at
+`e0525462` (23:53), `3a5aec7a` (23:55), `1b40dabd` (00:06) and `77d4da06` (00:27). Every one
+post-dates mutual enumeration; the fourth landed with a warning message **in flight**.
+Enumeration was complete and changed nothing.
+
+**What that breaks is the *therefore* in this entry's own Claim.** The claim reads *"its peer
+listing reaches only peers sharing its config profile. Coordination is **therefore** impossible
+by construction"* — asserting the short listing is what makes coordination impossible. It is
+not. Coordination failed with the listing complete, because knowing **who** your peer is does
+not tell you **which lines in a shared tree are theirs**: `git status` returns a correct,
+complete listing with nothing marking whose changes are whose. The binding constraint is a
+missing **ownership field**, not a missing peer.
+
+**So the two halves need separating, and they have different remedies** — the same test that
+kept `IC-1`/`IC-2` and `IC-3`/`IC-15` apart. *Visibility*: the peer cannot be enumerated —
+`cross-account-agents-cannot-see-each-other`, `listagents-omits-cross-profile-sessions`,
+`peer-sessions-never-compares-start-time-to-build-time`; remedy is a better instrument, and
+`OB-3` already carries it. *Coordination/ownership*: the peer **is** enumerable and the shared
+resource has no owner — the six peer-capture instances, `entry_high_water_<PREFIX>`, `target/`;
+remedy is isolating the resource, and `OB-8` carries it.
+
+**The `OB` side of the split is done; the `IC` side is proposed, not taken.** Minting `IC-17`
+re-partitions a class whose 18 members were backfilled hours earlier by another session, so the
+count and the member list both move — and this ledger's own `IC-10` note records that a
+re-partition is exactly when a steady-looking count stops meaning what it did. Left for the
+party holding the classification lists, with the evidence above.
 ## IC-2 — a gate keyed on an event it cannot observe substitutes a proxy, and the proxy fails silently
 
 **Slug:** `cluster/gate-keyed-on-unobservable-event`
@@ -649,9 +688,9 @@ Measured 2026-08-31, within a minute of git hooks being enabled on this shared c
 **Claim:** A result is truncated by a limit — a page size, a byte budget, a display cap — and returned without a marker saying so. The caller reads a partial answer as the whole answer, and a **zero** from a capped scan reads as "not present" rather than "not reached".
 **Members:** `filter={"tags": {"contains": "cluster/capped-result-presented-as-complete"}}` — n=16, 2026-09-01, by query after the archive backfill pass. Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), which I have not independently verified.** The count is a peer's, the membership is unassigned, and the query is honest about that: it returns nothing until the files are tagged.
 **Blind party:** the caller, who has no way to distinguish a short list from a complete one. Also the *author of a downstream count*, since an aggregate computed over a capped scan is wrong in a direction nothing signals.
-**Promotes to:** `not yet` — opened on an unverified count; needs its members tagged before any judgement rests on it.
+**Promotes to:** `not yet` — the count is met (n=16); the **spread is unadjudicated**, and that is now the only bar. Members were tagged at `13226bda` (2026-09-01), discharging the *"needs its members tagged"* condition this field used to carry; nobody has yet counted the subsystems they span, and the classification remains single-party (see the Index caveat).
 **Mechanism status:** none yet, though the shape of one is known — `link_scan` already carries a per-array `counts.truncated` flag, and `run_command`'s buffer envelope carries `unfiltered_truncated`. Both are the pattern to copy.
-**Valid:** conditional — the archive members are tagged, at which point the count becomes real and this entry should be re-adjudicated
+**Valid:** dated 2026-09-01
 
 This class is opened deliberately **before** its membership exists, which is a departure worth stating. The ledger's rule is that a member list rots and a query does not; the cost of that rule is that a class identified but not yet tagged reads as n=0. Recording the provenance in `**Members:**` is the compromise — a reader sees both the claim and the fact that nothing has been assigned to it yet, and cannot mistake the zero for evidence of rarity.
 
@@ -665,9 +704,9 @@ The archived instances are not yet cited here because I have not read them. What
 **Claim:** A guard's name states the property; its implementation covers a subset of it. Everything the name promises is believed protected, the uncovered remainder is protected by nothing, and the guard's own green result is what conceals the gap.
 **Members:** `filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}}` — n=7, 2026-09-01, by query after the archive backfill pass. Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me.**
 **Blind party:** everyone downstream of the name. The implementer knows the scope at the moment they write it; every later reader knows only the name, and the name is what they reason with. This is `OB-1`'s shape — the parameter the author's context supplied for free.
-**Promotes to:** `not yet` — opened on an unverified count.
+**Promotes to:** `not yet` — the count is met (n=7); the **spread is unadjudicated**, and that is now the only bar. Members were tagged at `13226bda` (2026-09-01), so the count is no longer unverified — it is unaudited: single-party classification, see the Index caveat.
 **Mechanism status:** none yet.
-**Valid:** conditional — the archive members are tagged
+**Valid:** dated 2026-09-01
 
 Distinguish this carefully from `IC-3` (*declaration is not execution*), which they are easy to merge and should not be. In `IC-3` the mechanism is **never reached** — a selector production does not emit, a CLI flag that does not exist. Here the mechanism runs, does real work, and returns a true result about a **smaller domain than its name claims**. `IC-3` fails at zero coverage; this fails at partial coverage, which is strictly harder to see because the guard demonstrably works every time you test it.
 
@@ -683,9 +722,9 @@ Two live examples visible from this session without consulting the archive. `car
 **Claim:** A parameter is accepted at the boundary — it validates, the call succeeds — and some path downstream discards it. The caller has positive evidence the value was set, because nothing rejected it, and no later observation distinguishes "applied" from "accepted and dropped".
 **Members:** `filter={"tags": {"contains": "cluster/accepted-parameter-silently-dropped"}}` — n=15, 2026-09-01, by query after the archive backfill pass (13 newly tagged, 2 moved from `IC-3`). Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me.**
 **Blind party:** the caller, and specifically because acceptance is the only feedback the interface gives. Rejection is loud; silent discard is indistinguishable from success at every point they can observe.
-**Promotes to:** `not yet` — opened on an unverified count.
+**Promotes to:** `not yet` — the count is met (n=15); the **spread is unadjudicated**, and that is now the only bar. Members were tagged at `13226bda` (2026-09-01) — 13 newly tagged plus the two moved from `IC-3` on the remedy test — so the count is no longer unverified, it is unaudited: single-party classification, see the Index caveat.
 **Mechanism status:** none yet.
-**Valid:** conditional — the archive members are tagged
+**Valid:** dated 2026-09-01
 
 The class is well-attested in this repo outside the backfill. `artifact(create)`'s `augment` silently discarded five of its seven fields; the CLI's `artifact create`/`update` dropped `time_scope` and `extra`; `read_file`'s `force=true` was silently discarded on whole-file reads; `update_entry`'s entry-param guard fired only when `fields` was absent. All closed, all the same claim — a value the caller passed and the system took, then did not use.
 
@@ -701,9 +740,9 @@ Note the asymmetry that makes this worth a class rather than a bug-by-bug fix: t
 **Claim:** An assertion has **no input that would make it fail**. It is not weak coverage — it is zero coverage wearing a passing test's clothes, and it is added most often in the very commit that closes a missing-guard finding.
 **Members:** `filter={"tags": {"contains": "cluster/assertion-that-cannot-fail"}}` — n=2, 2026-09-01, by query — the two members the `IC-9` withdrawal identified, now tagged here. Below threshold. Single-party classification — see the Index caveat. Named as a candidate by the 2026-08-31 backfill and by the `IC-9` tag withdrawal; at least two archive members are identified (`ollama_large_batch_exceeding_batch_size`, vacuous the day it was written; `cross-process-write-lock-test-passes-when-it-does-not-run`, vacuous when skipped) and `CLAUDE.md` records four more from a single SDD run.
 **Blind party:** the reviewer, structurally — a passing test is the evidence they are given, and vacuity is invisible in exactly that evidence. `CLAUDE.md` measures it: of four found in one run, *"the fourth only because the final reviewer was told to hunt for one."* Care does not find these; a changed question does.
-**Promotes to:** `not yet` for the ledger's purposes, but note it is **already promoted in substance** — `CLAUDE.md` § *Testing Discipline* and § *SDD Rulings* both carry it (*"Ask 'what mutation would make this test fail?', never 'does it pass?'"*, and *demand a deliberate break*). What is missing is the membership query, not the rule.
+**Promotes to:** `not yet` — **below threshold at n=2**, which is now the only bar it fails. It is **already promoted in substance** — `CLAUDE.md` § *Testing Discipline* and § *SDD Rulings* both carry it (*"Ask 'what mutation would make this test fail?', never 'does it pass?'"*, and *demand a deliberate break*). This field read *"what is missing is the membership query, not the rule"* until `13226bda` (2026-09-01) tagged the two identified members: the query now answers, and what is missing is a third instance.
 **Mechanism status:** `designed` — the rule exists and is written down; nothing enforces it. Mutation testing per guarded site is the mechanism, applied by hand today.
-**Valid:** conditional — the identified members are tagged
+**Valid:** dated 2026-09-01
 
 **Boundary against `IC-9`, which is a strict sub-case and must not absorb this.** `IC-9`'s assertion *can* fail — roughly 1-in-800, when a random tempdir name happens to contain the needle. Its mechanism is environment-controlled text in the haystack. This class is the harder one: **no input fails it at all**, so no run frequency, no environment and no amount of CI time will ever surface it. An `IC-9` member is a flake; a member here is a permanent zero.
 
