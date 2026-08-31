@@ -12,7 +12,7 @@ tags:
 - references
 - doc-vs-behavior
 - timeout
-unverified: 'PARTIAL. Shipped: the in-repo hint now prices the flush, plus the manual. NOT shipped: (a) the prewarm, deliberately deferred — its prescribed form is a no-op for this bug''s own Rust reproduction, and the mux makes the cold window much narrower than this record assumed. NOT shipped and still emitting: the actually-false sentence, which lives in claude-plugins/codescout-companion/hooks/session-start.mjs:339, a different repo. Status stays open because that last one is the half this file calls the worse one.'
+unverified: 'PARTIAL. The false sentence is now FIXED AT SOURCE (claude-plugins:02ac8f3, patch-id 798f7d6fb9fc9f3cd1f36e123660a563ab69a377) but is NOT LIVE: the plugin cache is version-keyed and all three profiles still serve 1.19.8, so every session keeps receiving the old text until a bump + reinstall. That bump is owned by the claude-plugins session, not this one — do not re-derive it. NOT shipped: (a) the prewarm, deliberately deferred — its prescribed form is a no-op for this bug''s own Rust reproduction, and the mux makes the cold window much narrower than this record assumed. Status stays open on the not-live half plus (a); close it only after probing the SERVED copy, never the source.'
 ---
 
 ## Summary
@@ -241,6 +241,42 @@ repo cannot fix it. The exact replacement it needs is the hint's own wording: na
 cost, name that a concurrent session in the same workspace may absorb it, name `re-run`
 as the remedy. Update `docs/manual/src/concepts/post-compact-cache-flush.md`'s quoted
 block in the same commit that lands there — the manual carries a marker saying so.
+
+### Shipped 2026-08-31 — the cross-repo sentence, at source but not yet served
+
+**Done.** The sentence this file calls the worse half is fixed where it lives:
+`claude-plugins:02ac8f3`, patch-id `798f7d6fb9fc9f3cd1f36e123660a563ab69a377`. It now carries
+the runtime hint's own wording — the cost, the condition that removes it (a concurrent session
+in the same workspace holding the mux warm), and `re-run` as the remedy. Verified it had exactly
+one executable home before editing: a repo-wide grep returned a single hit. `node --check` passes.
+
+The manual's quoted block moved in the same landing, as its marker required — `2c730ebd`.
+
+**Reproduced first, and it took no setup.** The false sentence was in this session's own
+SessionStart context, received verbatim at a post-compaction start on 2026-08-31, while the
+`workspace(post_compact=true)` call in the same turn returned the *corrected* in-repo hint. Both
+halves of the split this file documents, observable in one turn.
+
+**A finding the update surfaced, worth more than the edit.** The manual's block carried a warning
+asserting it was quoted **verbatim** from the hook — and two of its three lines had silently
+drifted anyway. The hook emits `POST-COMPACT: Context was just compacted.` and
+`workspace(post_compact=true)`; the block showed `codescout PostCompact: context was compacted.`
+and the `action: status` form, and the section's closing sentence repeated that second error. It
+was caught by reading what a live session *actually received*, not by re-reading the block. **A
+quotation that asserts its own fidelity does not check it, and the assertion is what stops a
+reader looking** — the same shape as this bug's original defect one level up. The replacement note
+tells the next editor to re-read the emitting file rather than trust the marker.
+
+**Still open, and this is the whole reason.** The plugin cache is version-keyed —
+`<profile>/plugins/cache/sdd-misc-plugins/codescout-companion/<version>/hooks/` — and all three
+profiles hold `1.19.7` and `1.19.8`, serving 1.19.8. **The commit changes nothing any session
+loads.** A bump plus `scripts/bump-cache.sh codescout-companion <version>` (which seeds all three
+profiles, and refuses to run if `plugin.json` has not been bumped first) is what makes it real.
+That work is owned by the claude-plugins session and is deliberately not duplicated here.
+
+Close this bug only after probing the **served** copy — the cached file's own bytes, or a fresh
+post-compaction session's injected text. Commit, install record and directory listing all read
+green in the broken world; `reconnaissance-patterns:R-89`.
 ## Tests added
 
 `post_compact_hint_prices_the_flush_rather_than_only_describing_the_mechanism`
