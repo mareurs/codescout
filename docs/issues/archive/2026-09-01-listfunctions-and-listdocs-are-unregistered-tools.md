@@ -1,5 +1,5 @@
 ---
-id: '7b468a9f8c201641'
+id: e7180ae5e5195d0e
 kind: bug
 status: fixed
 title: ListFunctions and ListDocs implement Tool, are guarded by 13 tests, and no agent can reach either

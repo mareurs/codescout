@@ -165,7 +165,7 @@ re-export-only aliases**, neither of which the tool registry uses.
 not produce.** `ListFunctions` and `ListDocs`: `impl Tool`, 25 identifier hits across four
 files, **every non-definition hit test code**, zero registration, zero production call sites.
 Fifteen tests guarding two tools no agent can reach. Filed as
-`docs/issues/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md`. So the state
+`docs/issues/archive/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md`. So the state
 the check exists to detect is now *observed*, not merely reasoned — and the first observation
 of it was a true positive.
 

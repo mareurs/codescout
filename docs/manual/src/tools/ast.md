@@ -8,7 +8,7 @@ They had been documented here as *"still registered for backward compatibility"*
 sentence was wrong in a way worth recording: they were never registered at all. Both
 implemented the `Tool` trait and neither was ever added to the registry in `src/server.rs`,
 so no agent could reach either one — while 13 tests exercised them by name and passed. See
-[`docs/issues/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md`](https://github.com/mareurs/codescout/blob/master/docs/issues/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md)
+[`docs/issues/archive/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md`](https://github.com/mareurs/codescout/blob/master/docs/issues/archive/2026-09-01-listfunctions-and-listdocs-are-unregistered-tools.md)
 and CLAUDE.md § *Testing Discipline*, where this is the worked example of a green suite
 guarding code no observer can reach.
 
