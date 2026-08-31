@@ -36,6 +36,14 @@
 #   scripts/install-hooks.sh --with-session-id   # ...and the Session-Id trailer
 #   scripts/install-hooks.sh --check             # report only, change nothing
 #
+# PER-CLONE AND PER-MACHINE, AND THAT IS THE DANGEROUS PART.
+# `.git/hooks/` is not version-controlled. A fresh clone gets this script and NONE of
+# its effects, silently — same shape as the machine-local catalog layers in
+# docs/conventions/cross-machine-catalog-resume.md, where nothing fails and you quietly
+# get less. The failure mode is a session that believes it is covered. Run
+# `scripts/install-hooks.sh --check` after any clone, and do not infer from the
+# presence of these scripts that the hooks are live.
+#
 # THE TRAILER IS OPT-IN, AND THE ASYMMETRY IS THE WHOLE REASON.
 # The index guard is REVERSIBLE: uninstall it and nothing it did persists. The
 # Session-Id trailer is NOT. Uninstalling removes the hook and leaves every trailer it
@@ -161,6 +169,42 @@ SHIM
 
 install_shim post-index-change scripts/post-index-change-stage-log.sh
 
+# SEED THE STAGE LOG, and only when it does not exist.
+#
+# At install time the index may already hold staged paths — put there by sessions that
+# never ran this hook, because it did not exist yet. The recording hook attributes any
+# pair it has no row for to whoever is running it, so the FIRST run after install would
+# claim all of that inherited state for the installer.
+#
+# That is not a cosmetic mis-label. A guard that reads a peer's staged file as yours is
+# silent on exactly the capture it exists to refuse, and silence is the failure nobody
+# observes. Measured 2026-09-01, on this repo's own first install: the index held
+# `docs/trackers/observer-blindness.md`, staged by a peer, and the first hook run took
+# it. Repaired by hand then; this is the repair made structural.
+#
+# Seed with `-` (unknown) rather than with the installer's id. The direction is
+# deliberate: `unknown` OVER-refuses until those pairs churn out of the index, which a
+# reader recovers from by reading a message; `mine` UNDER-refuses silently, which
+# nobody recovers from because nothing is emitted. Prefer the noisy wrong answer when
+# the quiet one is unobservable.
+#
+# Never overwrite an existing log — that would discard real attributions.
+seed_log="$git_dir/session-stage-log"
+if [ "$check_only" = "1" ]; then
+    if [ -e "$seed_log" ]; then
+        echo "ok      stage log             present"
+    else
+        echo "MISSING stage log             run without --check"
+    fi
+elif [ -e "$seed_log" ]; then
+    echo "ok      stage log             present, left alone"
+else
+    git diff --cached --raw 2>/dev/null |
+        awk -F'\t' '{ split($1, a, " "); print "-\t" a[4] "\t" $2 }' > "$seed_log"
+    seeded="$(grep -c . "$seed_log" 2>/dev/null || echo 0)"
+    echo "ok      stage log             seeded, $seeded inherited pair(s) marked unknown"
+fi
+
 if [ "$with_session_id" = "1" ]; then
     install_shim prepare-commit-msg scripts/prepare-commit-msg-session-id.sh
 else
@@ -184,7 +228,13 @@ if [ "$with_session_id" = "1" ]; then
     cat <<'EOF'
     git commit --allow-empty -m 'hook probe'
     git log -1 --format='%(trailers:key=Session-Id)'   # <- must print your session id
-    git reset --hard HEAD~1                            # <- discard the probe
+    git reset --soft HEAD~1                            # <- discard the probe
+
+`--soft`, NOT `--hard`. On a shared checkout `git reset --hard` discards every
+session's uncommitted work, not just yours — it is the single most destructive
+command in this document, and it would be run here in the name of tidying up after
+a safety check. The probe commit is empty, so `--soft` moves the branch pointer and
+touches nothing in the working tree.
 EOF
 else
     cat <<'EOF'

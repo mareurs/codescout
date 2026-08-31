@@ -39,8 +39,13 @@
 #     for one in a script; a commit message is the same leak into a surface that test
 #     does not scan. CLAUDE.md already holds that per-machine paths must not be
 #     committed, because they read as FALSE to anyone on another machine.
-#   - The pid is recyclable and the socket dies with the session, so both are rotting
-#     pointers written into a permanent record.
+#   - The pid is recyclable, and — measured 2026-09-01 — it is not even present on
+#     half the commit paths in this repo: `CLAUDE_PID` is set in native Bash and
+#     UNSET in codescout's `run_command`, while `CLAUDE_CODE_SESSION_ID` is identical
+#     in both. A hook keyed on the pid would have stamped an empty field for every
+#     codescout-side commit while working perfectly wherever it was tested from Bash.
+#     The socket dies with the session. Both are rotting pointers in a permanent
+#     record; one of them is also intermittently absent.
 #
 # The uuid alone answers the question that actually failed — "is this hunk from my
 # session or another?" — and it answers it without any lookup at all. Resolving an id

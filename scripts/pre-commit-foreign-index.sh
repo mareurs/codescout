@@ -101,6 +101,30 @@ git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
 log="$git_dir/session-stage-log"
 [ -s "$log" ] || exit 0
 
+# Resolve a session id to a LIVE session, printing "<pid>|<name>" or nothing.
+#
+# Without this the refusal can only DESCRIBE the dead-incarnation case while being
+# unable to detect one, which is a gate keyed on an event it cannot observe — the very
+# class this repo tracks as IC-2, shipped inside a guard against capture.
+#
+# The registry record carries `sessionId` alongside `pid` and `name`, and the file is
+# named for the pid, so this is a direct lookup rather than a scan of anything. The
+# `comm` check guards pid reuse the same way scripts/peer-sessions.sh does: a recycled
+# pid running something else must not be reported as a live peer.
+resolve_session() {
+    _rs_id="$1"
+    for _rs_f in "$HOME"/.claude*/sessions/*.json; do
+        [ -f "$_rs_f" ] || continue
+        grep -q "sessionId\"[[:space:]]*:[[:space:]]*\"$_rs_id\"" "$_rs_f" 2>/dev/null || continue
+        _rs_pid="$(basename "$_rs_f" .json)"
+        [ -r "/proc/$_rs_pid/comm" ] || continue
+        [ "$(tr -d '\0' < "/proc/$_rs_pid/comm")" = "claude" ] || continue
+        _rs_name="$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_rs_f")"
+        printf '%s|%s\n' "$_rs_pid" "${_rs_name:-?}"
+        return
+    done
+}
+
 mine=()
 theirs=()
 foreign_owners=()
@@ -157,17 +181,31 @@ done < <(git diff --cached --raw 2>/dev/null |
     echo
     echo "Staged by:"
     for owner in "${foreign_owners[@]-}"; do
-        echo "      $owner"
+        if [ "$owner" = "-" ]; then
+            echo "      (unrecorded) — staged before this guard was installed, so no"
+            echo "          session claimed it. Unknown is deliberate: it over-refuses"
+            echo "          until the pair churns out, where claiming it would have gone"
+            echo "          silent. Find the owner by asking, not by assuming it is yours."
+            continue
+        fi
+        info="$(resolve_session "$owner")"
+        if [ -n "$info" ]; then
+            echo "      $owner"
+            echo "          LIVE — ${info#*|} (pid ${info%%|*})"
+            echo "          SendMessage(to: \"uds:/run/user/$(id -u)/cc-socks/${info%%|*}.sock\")"
+        else
+            echo "      $owner"
+            echo "          NOT LIVE — a dead incarnation, not an abandoned file."
+            echo "          Compaction and resume mint a NEW id for the same agent doing"
+            echo "          the same work, so the owner is often alive under a different"
+            echo "          one. Read \$HOME/.claude*/projects/<encoded>/$owner.jsonl"
+            echo "          before concluding anything, and do not read an unreachable id"
+            echo "          as permission to take the file."
+        fi
     done
     echo
-    echo "ASK that session rather than assuming. scripts/peer-sessions.sh prints an"
-    echo "address for every live session, including the ones ListAgents hides."
-    echo
-    echo "If the id is not among them, it is a DEAD INCARNATION — not an abandoned"
-    echo "file. A compaction or a resume mints a NEW session id for the same agent"
-    echo "doing the same work, so the owner is often alive under a different id."
-    echo "Read ~/.claude*/projects/<encoded>/<id>.jsonl before concluding anything,"
-    echo "and do not treat an unreachable id as permission to take the file."
+    echo "ASK before assuming. scripts/peer-sessions.sh lists every live session,"
+    echo "including the ones ListAgents hides from you."
     echo
     echo "\`--no-verify\` also works and is the wrong habit."
 } >&2
