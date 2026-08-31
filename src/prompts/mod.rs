@@ -1963,6 +1963,81 @@ mod tests {
         }
     }
 
+    /// The gate's four commands must stay in their documented order, because the
+    /// order is load-bearing: the lean lane leaves a librarian-less binary in the
+    /// shared `target/`, so ending on it arms a trap for the next session. See
+    /// CLAUDE.md § Development Commands and
+    /// `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`.
+    ///
+    /// Two traps this test is shaped around, both measured against CLAUDE.md on
+    /// 2026-08-31 rather than reasoned about:
+    ///
+    /// 1. **Prefix collision.** `cargo test --workspace` is a prefix of
+    ///    `cargo test --workspace --no-default-features`, so a bare-substring
+    ///    `find()` for the default lane returns the LEAN lane's offset. An ordering
+    ///    assertion built that way compares the lean lane against itself — `n < n`,
+    ///    which fails on a correct file, or passes unconditionally if written the
+    ///    other way round. Either way it never tests the order. The needles below
+    ///    are backtick-DELIMITED; the closing backtick is what discriminates them.
+    /// 2. **Repeated mentions.** File-wide, `cargo test --workspace` matches 4
+    ///    times and the lean form 3, because the prose after the directive
+    ///    discusses both at length. Any whole-file index read is therefore
+    ///    arbitrary. So this scopes to the directive sentence FIRST, then asserts
+    ///    order within that slice.
+    ///
+    /// Mutations it must die on, both demonstrated rather than assumed:
+    /// swapping the last two commands (ordering assertion), and deleting the
+    /// directive line outright (the `expect` on START) — two distinct failures,
+    /// because "the gate line is missing" must never read as "the order is fine".
+    #[test]
+    fn claude_md_gate_lists_its_four_commands_in_the_load_bearing_order() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/CLAUDE.md");
+        let claude_md =
+            std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
+
+        // Scope first — see trap 2 above.
+        const START: &str = "**Run `cargo fmt`";
+        const END: &str = "before completing any task.**";
+
+        let start = claude_md.find(START).unwrap_or_else(|| {
+            panic!(
+                "CLAUDE.md has no gate directive: expected a run beginning {START:?}. \
+                 The gate is the contract every session pays on every task, so if it \
+                 moved, move this test with it — do not delete it."
+            )
+        });
+        let rest = &claude_md[start..];
+        let end = rest.find(END).unwrap_or_else(|| {
+            panic!("CLAUDE.md's gate directive begins with {START:?} but never reaches {END:?}")
+        });
+        let directive = &rest[..end];
+
+        // Then order. Sequential cursor: each command must appear AFTER the
+        // previous one, which is what makes this an ordering assertion rather than
+        // a presence one. A presence check would survive the exact swap this exists
+        // to catch.
+        const GATE: [&str; 4] = [
+            "`cargo fmt`",
+            "`cargo clippy --workspace --all-targets --features local-embed -- -D warnings`",
+            "`cargo test --workspace --no-default-features`",
+            "`cargo test --workspace`",
+        ];
+
+        let mut cursor = 0usize;
+        for needle in GATE {
+            let offset = directive[cursor..].find(needle).unwrap_or_else(|| {
+                panic!(
+                    "gate directive does not list {needle} after byte {cursor}. \
+                     The four commands must appear in GATE order, and the lean lane \
+                     ({lean}) must come immediately before the default one. \
+                     Directive as found: {directive:?}",
+                    lean = GATE[2],
+                )
+            });
+            cursor += offset + needle.len();
+        }
+    }
+
     /// The `get_guide` bodies are the fourth prose surface the model reads, and
     /// until now the only one with no drift gate at all:
     /// `prompt_surfaces_reference_only_real_tools` builds its `surfaces` list from
