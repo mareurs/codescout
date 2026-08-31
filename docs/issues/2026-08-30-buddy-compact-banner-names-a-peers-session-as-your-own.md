@@ -2,7 +2,7 @@
 kind: bug
 status: open
 tags:
-- cluster/blast-radius-exceeds-visibility
+- cluster/authorship-unrecoverable-after-the-fact
 - companion-plugin
 - buddy
 - attribution

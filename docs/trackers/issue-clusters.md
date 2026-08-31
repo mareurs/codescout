@@ -13,7 +13,7 @@ tags:
 - mineable
 topic: issue clusters and rule promotion
 entry_prefix: IC
-entry_high_water_IC: 9
+entry_high_water_IC: 10
 ---
 
 > **Prefix:** `IC-N` — one **defect class** the bug corpus instantiates. Declared ledger; the
@@ -144,24 +144,37 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-3 | declaration is not execution | `declared-not-wired` | 20 | `OB` (OB-5 residual) | none yet |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | not yet — routing unsettled | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | **re-adjudicate** — its own condition fired | none yet |
-| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 25 | **re-adjudicate** — now the largest class | shipped (partial) |
+| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 26 | **re-adjudicate** — now the largest class | shipped (partial) |
 | IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | 4 | not yet — 2 of 4 unconfirmed | shipped (partial) |
 | IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 5 | `DC` | none yet |
 | IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 3 | **re-adjudicate** — count now met | designed |
+| IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
 
-**Six of nine now clear the count threshold** (IC-1, IC-2, IC-3, IC-4, IC-5, IC-6), and three of
+**Six of ten now clear the count threshold** (IC-1, IC-2, IC-3, IC-4, IC-5, IC-6), and three of
 those changed status on the backfill rather than on new evidence — which is the ledger working:
 the counts were floors, and the judgements resting on them were provisional. **IC-5, IC-6 and
 IC-9 are flagged `re-adjudicate` rather than promoted**, because promotion is a reading of the
 spread as well as the count, and this pass supplied only the count. IC-7 still fails on premise
-confidence and IC-8 routes to `DC` regardless of n.
+confidence, IC-8 routes to `DC` regardless of n, and IC-10 is newly opened at n=1.
 
-**Coverage, 2026-08-31 (backfilled):** 32 of 32 catalogued open bug files, plus **78 of the 357
-archived files dated 2026-07-01 or later**. Catalog and on-disk counts agree in both directions.
-The remaining 279 in that window are deliberately untagged: the nine classes were derived from
-the open backlog, and forcing a fit would corrupt the counts that promotion reads. **The pre-July
-archive (137 files) is still unbackfilled, so every `n` remains a floor** — smaller than before,
-and still a floor.
+**IC-10 was split out of IC-1 on the remedy test**, not on a count. `IC-1` wants an ownership
+protocol over a shared resource; `IC-10` wants a provenance channel. The
+`buddy-compact-banner` bug moved with it, so IC-1's 18 is a different 18 than the backfill
+reported — one gained (`nested-hook-state`), one lost. A count that holds steady across a
+re-partition is the clearest argument for re-running the query rather than trusting the cell.
+
+**Coverage, 2026-08-31.** The open corpus is no longer maintained by hand: `tests/issue_clusters.rs`
+(shipped `522675a6`) fails when any **tracked** file directly under `docs/issues/` declares no
+`cluster/` tag, more than one, or a slug this ledger does not define. So open-corpus coverage is
+whatever the gate last allowed through, and there is no number here to go stale. It fired on its
+first run and caught two files committed within the hour.
+
+The **archive is deliberately outside the gate**: 78 of the 357 files dated 2026-07-01 or later
+are tagged and 279 are deliberately untagged, because the classes were derived from the open
+backlog and forcing a fit would corrupt the counts promotion reads. A further 137 pre-July files
+are unbackfilled. **Every `n` above therefore remains a floor.** Covering the archive would need
+an explicit `cluster/unclassified` slug meaning *looked, nothing fits* — a taxonomy decision,
+not a gate one.
 
 Four recurring shapes in the untagged 279 reached three or more instances and match no existing
 class — a capped result presented as complete; a guard whose coverage is narrower than its name;
@@ -331,6 +344,30 @@ The direction matters and is the reason this is not a duplicate of `CLAUDE.md` �
 Kept as a class of one for the same reason as `IC-8`: the bug corpus is where the second instance will arrive, and a defined slug is what lets it find the first. The prescribed grep is cheap enough that running it once would either promote this class or close it.
 
 **Falsified by** the corpus grep returning no other negative `contains` over interpolated paths, which would make this a one-off rather than a class.
+
+## IC-10 — authorship on a shared checkout is unrecoverable after the fact, so every party infers it from proximity
+
+**Slug:** `cluster/authorship-unrecoverable-after-the-fact`
+**Claim:** On a shared checkout there is no attribution channel, so authorship cannot be recovered after the fact. Every party therefore infers it from proximity — who else was active, which file appeared when — and proximity is not evidence.
+**Members:** `filter={"tags": {"contains": "cluster/authorship-unrecoverable-after-the-fact"}}` — n=1, 2026-08-31. The seed narrative below is not a bug file and is not counted.
+**Blind party:** every party equally, which is what makes it different from an ordinary mistake. The information does not exist to be careless with: `git` collapses all sessions into one author string, and an untracked file carries no origin at all.
+**Promotes to:** `not yet` — n=1. When it moves the target is likely `H` (a provenance channel is a mechanism, not a discipline), not `OB`.
+**Mechanism status:** none yet.
+**Valid:** dated 2026-08-31
+
+**Split from `IC-1` deliberately, on the remedy test.** `IC-1` claims a write reaches further than the set of peers you can see, and its remedy is an ownership protocol over the shared resource. This class claims something narrower and later: once the write has happened, *who did it* is not recoverable. Its remedy is a provenance channel. Same substrate, different missing thing — which is the same test that keeps `IC-1` and `IC-2` apart despite both reducing to "a component reasoning about a scope it cannot observe". `buddy-compact-banner-names-a-peers-session-as-your-own` was filed under `IC-1` and is moved here: its defect is that `from=<sid>` names another live session as your own predecessor, which is misattribution, not blast radius.
+
+**Seed evidence — an exchange between two sessions produced three misattributions, all while reasoning about this class.** Sessions `codescout-kat` and `codescout-23`, 2026-08-31, both actively working the `IC` ledger:
+
+1. `codescout-kat` told `codescout-23` "your nested-hook-state bug reasons that session 3a6d634e… wrote `.buddy/`". The reasoning is in that file, but the file is not `codescout-23`'s.
+2. `codescout-kat` warned `codescout-23` that "your untracked librarian-runtime bug file" would red the cluster gate. Also not theirs.
+3. `codescout-23`, correcting the above, argued the file was `codescout-kat`'s because *"your own `2ed2e716` calls it 'my nested-hook-state bug'"*. `codescout-kat` authored exactly two commits that session, `351836a8` and `522675a6`; `2ed2e716` is neither.
+
+The file belongs to a third session neither had enumerated. `git log` shows why the dispute was unresolvable from inside it: `2ed2e716`, `e14b230e`, `351836a8` and `522675a6` all read the same author and email, because git has no session dimension — the field is a constant and carries zero information. The one channel that did work was accidental: `.buddy/by-ppid/<pid>/session_id` on disk, which exists for unrelated reasons and is untracked.
+
+Note the pattern is `OB-1`'s — *"the author, specifically"*. All three attributions were made by parties who had just read the evidence, in messages *about* attribution failure. Knowing the class prevented none of them, which is the standing argument against answering this kind of defect with care rather than mechanism.
+
+**Falsified by** an attribution dispute on a shared checkout that a party could settle from committed state alone.
 
 ## Template for new entries
 
