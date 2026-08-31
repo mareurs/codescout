@@ -51,6 +51,21 @@ repos:
   - repo: local
     hooks:
       # ---- commit stage: no build, no target/ lock ----------------------------
+      #
+      # `stages:` IS PINNED ON EVERY HOOK, AND SHOULD STAY THAT WAY.
+      # This file sets no `default_stages`, and pre-commit then defaults an unpinned
+      # hook to EVERY stage — `repository.py:123-124` falls back to
+      # `root_config['default_stages']`, which `clientlib.py:515` sets to all of
+      # `STAGES`. That is invisible today, because pre-commit's generated shim exists
+      # only at `.git/hooks/pre-commit`, so no other stage ever invokes it. It becomes
+      # visible the moment anyone runs `pre-commit install --hook-type <other>`: an
+      # unpinned `always_run: true` hook fires there too and re-prints its refusal.
+      # Pinning costs one line and keeps "configured for" equal to "runs at".
+      #
+      # The `prepare-commit-msg` and `post-index-change` hooks this repo installs are
+      # deliberately NOT routed through this file — see scripts/install-hooks.sh for
+      # why (pre-commit stashes all unstaged work once per installed stage, and cannot
+      # host `post-index-change` at all: it is absent from `clientlib.py`'s HOOK_TYPES).
 
       - id: unreviewed-content
         name: refuse a pathspec commit carrying unstaged content
@@ -58,6 +73,15 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+        stages: [pre-commit]
+
+      - id: foreign-index
+        name: refuse an index commit carrying another session's staged paths
+        entry: scripts/pre-commit-foreign-index.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
 
       - id: cargo-fmt
         name: cargo fmt --check
@@ -65,3 +89,4 @@ repos:
         language: system
         pass_filenames: false
         types: [rust]
+        stages: [pre-commit]

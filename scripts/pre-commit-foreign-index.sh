@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+#
+# Refuse an INDEX commit that would carry another session's staged paths.
+#
+# WHY THIS EXISTS
+# ---------------
+# `git commit` with no pathspec commits the WHOLE index, and a checkout has exactly
+# one index shared by every session working it. So `git add <one file>` followed by a
+# bare `git commit` takes whatever any peer left staged, under your message.
+#
+# This is the INDEX-commit twin of scripts/pre-commit-unreviewed-content.sh, which
+# guards PATHSPEC commits. Neither covers the other's form, and the two hazards pull
+# in opposite directions — the pathspec form is the one that ignores the shared index,
+# and it is the form that hook refuses when your content is unstaged. Together they
+# cover both, and the safe composition is to satisfy both at once:
+#
+#     git add <paths>            # staging is what satisfies unreviewed-content
+#     git commit -- <same paths> # the pathspec is what ignores the shared index
+#
+# Measured 2026-09-01, in this repo: a `git add` on one file joined an index that
+# already held 16 foreign staged files, and a peer's entire OB-6 promotion was
+# committed inside a commit about something else. Both are this guard's case.
+#
+# WHAT THIS GUARD DOES NOT COVER — and it is the incident people will assume it does
+# ------------------------------------------------------------------------------------
+# It does NOT catch `d617051b`, the capture that prompted this work. Established by a
+# peer review on 2026-09-01 rather than by its author, which is the point.
+#
+# Two different axes:
+#
+#   CROSS-path  my index holds YOUR file      -> this guard
+#   INTRA-path  my file holds YOUR lines      -> nothing here
+#
+# In `d617051b` the committing session verified `git diff` on one path, then ran
+# `git add` on that same path ~40s later, and a peer wrote INTO that file during the
+# window. The path was staged by the committing session, legitimately; the stage log
+# records them as its stager; a bare commit sees only their own staged path and this
+# guard exits 0. It would have passed. Path ownership was never in dispute — the
+# contamination was inside a path both parties agree is yours, so no ownership check
+# can see it.
+#
+# The remedy for that half is a time-of-check/time-of-use guard: record each path's
+# blob at `git add`, re-hash at pre-commit, refuse if it moved. Not built here. Say so
+# out loud, because the next session to hit that race will otherwise have been told
+# this covered them — which is the guard-narrower-than-its-name defect
+# (docs/trackers/issue-clusters.md IC-14) shipped inside a guard against capture.
+#
+# Full record of both shapes:
+#   docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md
+#
+# MECHANISM
+# ---------
+# scripts/post-index-change-stage-log.sh records `<owner>\t<blob>\t<path>` for every
+# staged blob as it appears. This reads that log, keyed on the same (blob, path) pair,
+# and refuses when any currently-staged pair is owned by a different session id.
+#
+# WHAT THIS DOES NOT CATCH
+# ------------------------
+# Everything the stage log cannot see. Its fail-open race is documented at the top of
+# that script and is inherited here unchanged: where the log mis-attributes a pair to
+# this session, this guard stays SILENT. It under-reports and never over-reports, so a
+# clean run is not proof the index is yours — it is proof nothing recorded says
+# otherwise. `git diff --cached --name-only` read in its own call remains the check
+# that answers the question directly.
+#
+# With no CLAUDE_CODE_SESSION_ID this exits silently rather than refusing. A commit
+# from a plain terminal is a deliberate human act, and this guard has no id to
+# discriminate with — blocking it would be a false alarm, and a guard that fires on
+# ordinary work teaches `--no-verify`, which disarms the quiet one that works.
+
+set -uo pipefail
+
+me="${CLAUDE_CODE_SESSION_ID:-}"
+[ -n "$me" ] || exit 0
+
+# A PATHSPEC commit gets a temporary index named `next-index-<pid>.lock` and IGNORES
+# the shared index entirely, so it cannot capture staged content and needs no guard.
+# This is the same discriminator scripts/pre-commit-unreviewed-content.sh uses, read
+# in the opposite direction.
+idx="${GIT_INDEX_FILE:-}"
+case "${idx##*/}" in
+    next-index-*) exit 0 ;;
+esac
+
+git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+log="$git_dir/session-stage-log"
+[ -s "$log" ] || exit 0
+
+mine=()
+theirs=()
+foreign_owners=()
+
+while IFS=$'\t' read -r blob path; do
+    [ -n "$path" ] || continue
+    owner="$(awk -F'\t' -v b="$blob" -v p="$path" \
+        '$2 == b && $3 == p { print $1; exit }' "$log")"
+    if [ -n "$owner" ] && [ "$owner" != "$me" ]; then
+        theirs+=("$path")
+        case " ${foreign_owners[*]-} " in
+            *" $owner "*) ;;
+            *) foreign_owners+=("$owner") ;;
+        esac
+    else
+        mine+=("$path")
+    fi
+done < <(git diff --cached --raw 2>/dev/null |
+    awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }')
+
+((${#theirs[@]})) || exit 0
+
+{
+    echo
+    echo "Refusing a bare commit: the index holds paths staged by another session."
+    echo
+    echo "  theirs:"
+    for path in "${theirs[@]}"; do
+        echo "      $path"
+    done
+    if ((${#mine[@]})); then
+        echo
+        echo "  yours:"
+        for path in "${mine[@]}"; do
+            echo "      $path"
+        done
+    fi
+    echo
+    echo "\`git commit\` with no pathspec commits the WHOLE index, and this checkout"
+    echo "shares one index across every session working it. Committing now would file"
+    echo "their work under your message, where it is durable and no longer theirs to"
+    echo "attribute."
+    echo
+    echo "Commit your own paths by pathspec — that form ignores the shared index:"
+    echo
+    if ((${#mine[@]})); then
+        echo "    git commit -- ${mine[*]}"
+    else
+        echo "    git commit -- <your paths>   # <- none of the staged paths look like yours"
+    fi
+    echo
+    echo "Leave theirs staged; it is not yours to unstage either. \`git reset\` here"
+    echo "would take their work out of the index seconds before they commit it."
+    echo
+    echo "Staged by:"
+    for owner in "${foreign_owners[@]-}"; do
+        echo "      $owner"
+    done
+    echo
+    echo "ASK that session rather than assuming. scripts/peer-sessions.sh prints an"
+    echo "address for every live session, including the ones ListAgents hides."
+    echo
+    echo "If the id is not among them, it is a DEAD INCARNATION — not an abandoned"
+    echo "file. A compaction or a resume mints a NEW session id for the same agent"
+    echo "doing the same work, so the owner is often alive under a different id."
+    echo "Read ~/.claude*/projects/<encoded>/<id>.jsonl before concluding anything,"
+    echo "and do not treat an unreachable id as permission to take the file."
+    echo
+    echo "\`--no-verify\` also works and is the wrong habit."
+} >&2
+
+exit 1

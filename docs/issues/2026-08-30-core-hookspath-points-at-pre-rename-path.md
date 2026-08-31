@@ -13,7 +13,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md
 severity: medium
-unverified: 'The stale pointer is now genuinely unset (measured 2026-08-31 23:47 — the previous closure on 2026-08-30 recorded a fix that had not been applied; see the Correction section). Hooks STILL do not run: `.git/hooks` holds only `.sample` files and `pre-commit` is not installed as a tool on this machine, so `.pre-commit-config.yaml` cannot execute and CONTRIBUTING.md still describes it in the present tense. `pre-commit install` is deliberately not run — it changes commit behaviour for every session on this shared checkout. The fix is an untracked-config change with NO commit, so there is no SHA or patch-id to cite and no regression test is possible; re-measure with `git config --get core.hooksPath` rather than trusting this field.'
+unverified: The stale pointer is genuinely unset (measured 2026-08-31 23:47 — the 2026-08-30 closure recorded a fix that had not been applied; see the Correction section). The fix is an untracked-config change with NO commit, so there is no SHA or patch-id to cite and no regression test is possible — re-measure with `git config --get core.hooksPath` rather than trusting this field. What this field USED to add — that hooks still do not run, that `.git/hooks` holds only `.sample` files, and that pre-commit is not installed on this machine — was true when written and is false since `4e5f060e`; see Resume.
 ---
 
 # BUG: `core.hooksPath` points at the pre-rename repo path, so no git hook runs in this checkout
@@ -215,22 +215,31 @@ unaffected, since it never uses local hooks.
 
 ## Resume
 
-The stale pointer is removed; what remains is a **decision**, not an investigation.
+**Resolved 2026-09-01 — both end states were taken, and this section is corrected rather than rewritten.**
 
-`.git/hooks/` holds only `.sample` files, so no hook runs even now. Two coherent end states,
-and nobody has picked one:
+This section previously reported that `.git/hooks/` held only `.sample` files, that no hook
+ran even after the unset, and that a decision between two options was outstanding. All three
+were true when written and are false now:
 
-1. Run `pre-commit install` and let the tracked `.pre-commit-config.yaml` fire. Verify
-   POSITIVELY — `git commit --allow-empty` and observe hook output — because
-   `pre-commit install` reporting success is compatible with the hook never running, which
-   is the exact shape this bug had.
-2. Correct `CONTRIBUTING.md:41`, which describes the `cargo-test` hook in the present
-   tense, and leave hooks uninstalled. Defensible: the hook (`cargo test --lib`) is strictly
-   weaker than the four-command gate `CLAUDE.md` already mandates, which is why nothing
-   broke and nobody noticed.
+- **Option (1) was taken.** `4e5f060e` (2026-08-31 23:52) installed pre-commit 4.6.2 and
+  landed the generated shim at `.git/hooks/pre-commit`. `core.hooksPath` is unset at all
+  three config levels, so `.git/hooks/` is live.
+- **Option (2)'s doc fix also landed**, separately: `CONTRIBUTING.md` no longer describes a
+  `cargo-test` hook. That line was *doubly* stale — it named a hook `5fbc65fb` had already
+  deleted, under a mechanism that could not run. Two independent defects in one sentence is
+  why neither was noticed: each made the other unfalsifiable by reading.
+- **`scripts/install-hooks.sh` now owns the install**, refuses to run while `core.hooksPath`
+  is set, and prints the positive probe this section demanded. It is the closest thing to a
+  regression test this defect admits, since untracked git config is unreachable from the
+  suite — a *refusal* keyed on the exact condition, rather than an assertion about it.
 
-Do not do (1) silently in this checkout — several sessions are live in it, and installing a
-hook changes what everyone's `git commit` does.
+Two lines from the original that outlived the resolution and should not be deleted:
+
+- **Verify POSITIVELY.** `pre-commit install` reporting success is compatible with the hook
+  never running, which is the exact shape this bug had. `install-hooks.sh` prints the probe
+  for that reason.
+- **Do not install silently in this checkout.** Several sessions are live in it, and
+  installing a hook changes what everyone's `git commit` does.
 ## References
 
 - `docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md` — same

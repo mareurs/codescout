@@ -17,6 +17,45 @@ The Rust version is pinned in [`rust-toolchain.toml`](rust-toolchain.toml), so t
 comment explains why it is pinned and how to bump it. Note it is **not** the MSRV; that is
 `rust-version` in `Cargo.toml`, checked separately by CI.
 
+## Git Hooks
+
+```bash
+scripts/install-hooks.sh            # install / repair
+scripts/install-hooks.sh --check    # report only
+```
+
+Three hooks, installed by two different routes because one of them cannot go through
+the framework at all:
+
+| hook | route | what it does |
+|---|---|---|
+| `pre-commit` | pre-commit.com | `cargo fmt --check`, plus two shared-checkout guards |
+| `prepare-commit-msg` | direct shim | stamps `Session-Id: <uuid>` into the commit |
+| `post-index-change` | direct shim | records which session staged each blob |
+
+The last two exist because several agent sessions routinely share this working tree
+and all commit as the same git author, so `%an`, commit adjacency and the dirty-file
+list carry **zero** ownership signal — they are constant across sessions by
+construction. The trailer makes authorship recoverable from the commit itself; the
+stage log lets the `foreign-index` guard refuse a bare `git commit` that would sweep
+a peer's staged paths into your commit. Both are no-ops outside an agent session:
+with no `CLAUDE_CODE_SESSION_ID` in the environment, nothing is stamped and nothing
+is refused.
+
+`post-index-change` is a direct shim because pre-commit 4.6.2 cannot host it — it is
+absent from `HOOK_TYPES` in its `clientlib.py`. `prepare-commit-msg` is a direct shim
+by choice: the framework stashes every unstaged change in the checkout while its
+hooks run, including other sessions', so each installed stage adds a window in which
+a peer's in-flight work transiently reverts to HEAD and `git status` reports it clean.
+
+**Verify positively.** A successful install is compatible with the hook never
+running — that is exactly how the last hooks defect stayed invisible for a day, with
+`core.hooksPath` pointing at a pre-rename path that no longer existed and git
+declining to warn. `install-hooks.sh` refuses to run while that config is set, and
+prints the probe to confirm the hooks actually fire.
+
+If you work this checkout alongside other sessions, tell them before installing:
+these hooks change every session's `git commit`, not just yours.
 ## Retrieval Stack
 
 `semantic_search` (and the rest of the retrieval surface) defaults to a Qdrant + TEI
@@ -38,9 +77,11 @@ Tuning knobs live in `.env.example` with matrix-validated defaults
 
 ## Local Embedding (ONNX) Tests
 
-The pre-commit hook's `cargo-test` runs bare `cargo test --lib`, without
-`local-embed`, so it never compiles these tests in and this section does not
-apply to it. It applies when *you* run a `--features local-embed` verification
+No pre-commit hook compiles anything, so none of them compiles these tests in and
+this section does not apply to one. That is deliberate rather than incidental:
+anything that builds takes the shared `target/` lock and serialises every concurrent
+session's commits, which `.pre-commit-config.yaml` records as measured. This section
+applies when *you* run a `--features local-embed` verification
 pass — `cargo test --features local-embed` — which then exercises a real ONNX
 model against real weights
 (`crates/codescout-embed/src/local.rs`: `from_dir_produces_a_stable_384d_vector` and
