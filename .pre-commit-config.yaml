@@ -1,11 +1,29 @@
 # Pre-commit hooks for codescout.
-# Install with: pre-commit install
-# CI already runs the same gate; this just catches issues before push.
 #
-# Tests run on pre-push only (slow); fmt + clippy run on every commit.
+# Install both stages:
+#   pre-commit install
+#   pre-commit install --hook-type pre-push
+#
+# CI runs the same gate; this catches issues earlier.
+#
+# STAGE CHOICE IS LOAD-BEARING ON A SHARED CHECKOUT.
+# Anything that COMPILES takes the shared `target/` lock, so a commit-stage cargo
+# build serialises every concurrent session's commits — `Blocking waiting for file
+# lock` was observed here on 2026-08-31 with four sessions active. Only checks that
+# do not build may run at commit stage. `cargo fmt` parses without compiling and is
+# therefore safe; clippy and test are not, and moved to pre-push.
 repos:
   - repo: local
     hooks:
+      # ---- commit stage: no build, no target/ lock ----------------------------
+
+      - id: unreviewed-content
+        name: refuse a pathspec commit carrying unstaged content
+        entry: scripts/pre-commit-unreviewed-content.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: cargo-fmt
         name: cargo fmt --check
         entry: cargo fmt --check
@@ -13,17 +31,29 @@ repos:
         pass_filenames: false
         types: [rust]
 
+      # ---- push stage: compiles, takes the shared target/ lock ----------------
+
       - id: cargo-clippy
         name: cargo clippy -D warnings
         entry: cargo clippy --lib -- -D warnings
         language: system
         pass_filenames: false
         types: [rust]
+        stages: [pre-push]
 
+      # `always_run`, deliberately, and NOT `types: [rust]`.
+      #
+      # This suite contains repo-hygiene tests that gate MARKDOWN — tests/issue_clusters.rs
+      # fails when a bug file under docs/issues/ declares no `cluster/` tag. Filtering on
+      # `types: [rust]` would skip it for exactly the commits it exists to check, and the
+      # hook would report a pass it never ran. The same trap one level up is why this entry
+      # is `--workspace` rather than the `--lib` it replaced: `--lib` builds only the library
+      # target, so every test under `tests/` — including that gate — is invisible to it
+      # (verified 2026-08-31: `cargo test --lib -- --list` matches it 0 times).
       - id: cargo-test
-        name: cargo test --lib
-        entry: cargo test --lib
+        name: cargo test --workspace
+        entry: cargo test --workspace
         language: system
         pass_filenames: false
-        types: [rust]
+        always_run: true
         stages: [pre-push]
