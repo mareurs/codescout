@@ -1,13 +1,14 @@
 ---
 id: '7b468a9f8c201641'
 kind: bug
-status: open
+status: fixed
 title: ListFunctions and ListDocs implement Tool, are guarded by 13 tests, and no agent can reach either
 tags:
 - cluster/declared-not-wired
 - tools
 - dead-code
 - mcp-registry
+closed: 2026-09-01
 opened: 2026-09-01
 owner: marius
 severity: low
@@ -150,36 +151,61 @@ the latter, plus this.
 
 ## Fix
 
-Not taken — this is a **product decision, not a repair**, and the two options differ in what
-they preserve:
+**Taken: option (2), delete both — plus a third instance and a standing guard.**
 
-1. **Register them.** They become reachable, and 15 existing tests become meaningful. But
-   `symbols` already covers "list the functions in this file" and `include_docs` covers
-   docstrings, so this adds two tools to a surface with a documented description-byte cap.
-2. **Delete both, and their 13 tests.** Honest if `symbols` genuinely subsumes them. Note
-   the tests are not evidence *for* keeping them — a test of an unreachable tool is exactly
-   what this class produces.
+Fixed at `0f28fc28` on `experiments` (patch-id
+`467338e4428601351a0801348f2f8419b853c33d`). 18 files, 536 insertions, 1003 deletions.
 
-Whoever decides should check whether `tests/e2e/harness.rs`'s `run_list_functions` is load-
-bearing for the e2e lane's coverage of the AST path, since deleting it may remove the only
-non-`symbols` exercise of that code.
+- **`ListFunctions` / `ListDocs` deleted**, with `src/tools/ast.rs` and its `pub mod ast;`
+  declaration. `symbols(path=…)` already returns functions with 1-indexed lines and
+  `include_docs=true` returns docstrings, so the capability was subsumed rather than lost.
+  `symbols_include_docs_returns_docstrings` was relocated to `src/tools/symbol/tests.rs`
+  with its fixture — it covers the *replacement* and only lived in that file because the
+  helper did.
+- **`GetUsageStats` resolved and deleted.** This file recorded it as *checked-and-unresolved*;
+  it is a third instance of the identical shape — `impl Tool` at `src/tools/usage.rs:9`,
+  re-exported at `src/tools/mod.rs`, registered nowhere, zero callers outside its own six
+  inline tests.
+- **The e2e question in the old text is answered: `run_list_functions` WAS load-bearing.**
+  `[list_functions_signatures]` fans out across all five language e2e binaries, and because
+  `prime_lsp` warms the LSP before every other scenario it was the lane's only exercise of
+  `codescout::ast::extract_symbols` — live code reached from ~30 call sites. The runner was
+  **retargeted, not deleted**: it now calls `extract_symbols` directly and is renamed
+  `tree_sitter_signatures`. Assertion, fixture and five-language fan-out unchanged.
+- **A vacuous assertion fell out of the deletion.** `pinnable` in `src/server.rs`'s test is
+  built from `server.tools` — the live registry — so
+  `assert!(!pinnable.contains("get_usage_stats"))` could never fail: the tool was never in
+  the set, and the assertion passed for the wrong reason. Removed. That is `IC-16`
+  (`cluster/assertion-that-cannot-fail`), a third live instance of that class.
 
+**Collateral the tools' absence would otherwise have left wrong**, several of which no cargo
+gate reports: `src/fs/mod.rs`'s unsupported-file-type hint recommended `list_functions` to
+users; `tests/mcp-smoke-{rust,kotlin}.sh` *call* the tool over MCP and would have broken at
+runtime; `CLAUDE.md` cited `src/tools/ast.rs:10-11` as live line refs, which `audit_doc_refs`
+gates; `docs/manual/src/tools/ast.md` claimed both were *"still registered for backward
+compatibility"*, which was never true.
 ## Resume
 
-Decide (1) or (2). **`GetUsageStats` is no longer unresolved** — the sweep ran and it is a third
-instance (see § *Evidence*), so whichever way (1)/(2) goes it should be decided for **three**
-tools, not two, and `Tool::pinnable()`'s dead `"get_usage_stats"` arm goes with it.
+Nothing outstanding. Both follow-ups this section asked for are done.
 
-**The standing test is now clearly worth it, and its shape is settled by what the sweep found.**
-It is a set difference over two lists the code already holds — every `impl Tool for X` against
-`CodeScoutServer::new`'s registry — and it must be written *structurally*, not by grepping
-`Arc::new(ShortName)`: `GetGuide` registers as
-`Arc::new(crate::tools::guide::GetGuide::new())` and a textual probe reports it unregistered.
-Build the registry side from `server.tools` at runtime (`.iter().map(|t| t.name())`) and the
-declaration side from the source, so neither half is a pattern that can rot.
+**The registry-vs-`impl Tool` diff shipped** as `tests/tool_reachability.rs`, so the question
+*"is any other tool unreachable?"* is now a test rather than a probe someone has to remember
+to run. It diffs every `impl … Tool for X` against the types reachable by `Arc::new(X)`
+registration or a `=> X.call(` delegation arm, tolerating the seven genuine delegation-only
+types behind a two-way tripwire.
 
-**And it must not be an absence assertion.** `src/server.rs:3106` is the cautionary case in this
-very file: `!pinnable.contains(name)` is monotone under removal, so it passed for an unregistered
-tool and would have passed had the mechanism it guards been deleted. Assert the **positive** —
-every `impl Tool` type appears in the registry, naming the ones that do not — so the test fails
-by exhibiting the gap rather than by staying quiet about it.
+Two things in it were established by measurement rather than argument, and both are the
+reason to trust it:
+
+- **It was verified against this bug.** Restoring the real pre-deletion `src/tools/ast.rs`
+  and re-running makes the guard name `ListDocs` and `ListFunctions`. It would have caught
+  this.
+- **Its first draft would NOT have.** That draft accepted any `X.call(`, which is textually
+  what these tools' own tests did — so it marked all three reachable and passed green on the
+  corpus containing the defect. Requiring the match-arm `=>` is what separates a delegation
+  from a test call, and `the_scan_discriminates` pins that exact case.
+
+Also closed: `IndexVerify` is declared `impl crate::tools::Tool for IndexVerify`, a qualified
+path that a bare `impl Tool for` scan misses — and it is a *seventh* delegation-only type
+beyond the six usually listed. `the_scan_finds_qualified_impls` fails the moment that
+tolerance is simplified away.
