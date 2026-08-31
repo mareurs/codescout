@@ -52,7 +52,14 @@ nav-eval-rust, edit-eval-rust) have no separate semantic index.
 `kotlin-language-server` circuit-breaker trips when two codescout instances target the same
 Kotlin project concurrently. `symbols(include_body=true)` will fail with "circuit-breaker open".
 **Workaround:** use `grep` as fallback.
-See `docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md`.
+The original docs/issues/2026-03-24-kotlin-lsp-concurrent-instances.md (deliberately
+un-code-spanned — this is a statement of absence, not a citation, per CLAUDE.md § Docs and
+`docs/superpowers/specs/2026-05-06-doc-audit-design.md` § 1a) was **pruned as a
+duplicate** (`c6184884`), not archived — so it resolves nowhere. Its content survives in two
+archived files: `docs/issues/archive/2026-04-24-find-symbol-kotlin-multi-session.md` (the
+"Multiple editing sessions" lock contention and the 8 s per-language budget) and
+`docs/issues/archive/2026-05-30-cross-worktree-kotlin-jvm-shared-system-path.md` (the
+per-instance system-path fix). The circuit-breaker itself landed in `dc44ac3d`.
 
 ## eval Fixture Workspace Isolation
 

@@ -1,6 +1,6 @@
 ## Resolved 2026-07-08 — doc updated, 3 live captures, 2 manual kills
 
-Wrote up the full live-capture session into `docs/issues/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`
+Wrote up the full live-capture session into `docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`
 (new "### Live capture 2026-07-08" evidence subsection + updated "## Resume").
 Key corrected finding now documented there: the doc's prior assumption that
 `-Xmx2g` "collapses the heap component... leaving only the small native residual"

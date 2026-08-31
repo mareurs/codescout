@@ -2,35 +2,63 @@
 
 ## Module Structure (src/)
 
+Verified against the tree 2026-08-31. **`src/tools/` is grouped into subdirectories by
+concern, not flat** — the earlier version of this section listed a flat layout in which 12 of
+17 paths no longer resolved.
+
 ```
 src/
   server.rs          — CodeScoutServer (MCP ServerHandler), tool registry, request dispatch
+  main.rs, lib.rs    — binary entry + library root
   agent/             — Agent, ActiveProject, project state, write locking, per-project config
   tools/
-    core/            — Tool trait, ToolContext, OutputGuard, RecoverableError, path_strip (PATH_KEYS/ROOT_KEYS allowlist walker)
-    symbols.rs       — symbol navigation (LSP + tree-sitter)
-    references.rs    — find all references via LSP
-    call_graph.rs    — transitive call graph (BFS, configurable direction + depth)
-    edit_code.rs     — structural code editing (LSP-aware; action=replace/insert/remove/rename)
-    edit_file.rs     — exact string replacement in files
-    edit_markdown.rs — heading-addressed markdown editing
-    create_file.rs   — new file creation
-    semantic_search.rs — vector search (Qdrant + optional cross-encoder reranker)
-    memory.rs        — per-project markdown memory (read/write/list/semantic)
-    librarian.rs     — artifact registry operations (find/get/update/event/refresh)
-    onboarding.rs    — project onboarding + system prompt generation + ONBOARDING_VERSION
-    workspace.rs     — workspace activate/status/list
-    index.rs         — semantic index build/status/cancel
-    tree.rs          — filesystem exploration (glob + recursive listing)
-    grep.rs          — regex search across files
-    run_command.rs   — shell command execution
-    output.rs        — OutputGuard (progressive disclosure enforcement)
+    mod.rs           — the module list; read this first, it is the authoritative index
+    core/            — Tool trait, ToolContext (types.rs), OutputGuard (guards.rs),
+                       RecoverableError, params.rs, path_strip.rs (PATH_KEYS/ROOT_KEYS
+                       allowlist walker), write_ack.rs
+    symbol/          — symbols.rs, references.rs, edit_code.rs, symbol_at.rs,
+                       call_graph/, call_edges/, list_overview.rs, display.rs
+    semantic/        — semantic_search.rs, index.rs
+    markdown/        — read_markdown.rs, edit_markdown.rs, frontmatter.rs
+    memory/          — per-project markdown memory (read/write/list/remember/recall)
+    config/          — workspace activate/status/list  ← the `workspace` tool lives HERE
+    edit_file/       — exact string replacement
+    run_command/     — shell execution
+    file_summary/    — file overview / heading maps
+    create_file.rs, read_file.rs, grep.rs, tree.rs, ast.rs, output.rs, output_buffer.rs,
+    guide.rs, guide_ledger.rs, library.rs, onboarding.rs (+ ONBOARDING_VERSION),
+    usage.rs, probe.rs, peer.rs, rendezvous.rs, approve_write.rs, progress.rs,
+    section_coverage.rs, command_summary.rs, edit_repair.rs, file_group.rs,
+    format.rs, session_key.rs
+  librarian/         — artifact catalog + the librarian/artifact tool family
+    catalog/         — SQLite store, migrations, augmentation, worktree overlay
+    tools/           — one file per verb: artifact.rs, find.rs, get.rs, create.rs,
+                       update.rs, mv.rs, delete.rs, graft.rs, link.rs, graph.rs,
+                       append_entry.rs, update_entry.rs, augment.rs, artifact_event.rs,
+                       event_create.rs, artifact_refresh.rs, refresh.rs, refresh_stale.rs,
+                       gather.rs, reindex.rs, context.rs, doctor.rs, link_scan/,
+                       audit_doc_refs/, legibility_scan/, merge_worktree.rs,
+                       tracker_design.rs, state_at.rs, workspace_state_at.rs, timeline.rs,
+                       schema_validate.rs, constitution_check.rs, goal_aggregation.rs,
+                       worktree.rs, scope.rs, render.rs, temp_write_guard.rs
+    augmentation_sidecar.rs, classify.rs, filter.rs, freshness.rs, frontmatter.rs,
+    ids.rs, indexer.rs, statements.rs, workspace.rs, preview/, prompts/
   lsp/               — LSP client, mux, per-language servers, circuit breaker
-  librarian/         — SQLite artifact catalog (find.rs, get.rs, update.rs, events.rs, refresh.rs)
-  prompts/           — source.md (two surfaces), builders.rs, source.rs (slice extractor)
+  retrieval/         — vector backends, embedding config, reranker, transport
+  prompts/           — source.md (TWO slices), builders.rs, source.rs (slice extractor),
+                       guide_index.rs, guides/, workspace_onboarding_prompt.md, README.md
   embed/             — embedding integration (delegates to codescout-embed crate)
+  operator_rules/    — operator profiles + compiled-in rule ledger
+  usage/             — usage.db recorder (MCP calls only — Bash work is invisible to it)
+  ast/ symbol/ git/ fs/ config/ memory/ library/ legibility/ peer/ platform/
+  migrate/ dashboard/ mcp_resources/ util/ cli/ bin/
 ```
 
+**Do not navigate from this listing — navigate with `symbols`.** A directory tree in prose
+is a dated snapshot, and this one had rotted through a whole reorganisation without anything
+failing. `src/tools/mod.rs` is the live index; `symbols(name=X)` finds a symbol wherever it
+now lives. This section is here for orientation — which concern owns which subtree — not as
+a path source.
 ## Key Abstractions
 
 - **`CodeScoutServer`** (`server.rs`) — MCP `ServerHandler` impl; owns the tool registry;

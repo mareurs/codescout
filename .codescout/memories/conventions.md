@@ -2,12 +2,37 @@
 
 ## Pre-Commit Requirements
 
+Four commands, and **the order is load-bearing** — not a checklist you may reorder:
+
 1. `cargo fmt`
-2. `cargo clippy -- -D warnings`
-3. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` — the only form that lints `#[test]` code and `codescout-embed`'s feature-gated `local` module. CI runs both (`ci.yml:50`, `:61`); the narrow one passing proves nothing about this one.
-4. `cargo test`
+2. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`
+3. `cargo test --workspace --no-default-features` — the **LEAN** lane, runs **THIRD**
+4. `cargo test --workspace` — the default lane, runs **LAST**
+
 All four must pass. No exceptions.
 
+**The bare `cargo clippy -- -D warnings` is not a gate step.** It lints only the root
+package's non-test targets with default features, so it passes trees CI fails. CI runs both
+forms (`ci.yml:50` narrow, `:61` wide — verified 2026-08-31); only the wide one reaches
+`#[test]` code and `codescout-embed`'s feature-gated `local` module. Running the narrow one
+locally buys nothing the wide one does not already cover.
+
+**Why the lean lane runs third and the default lane last.** The workspace shares one
+`target/`, and `tests/cli_artifact.rs` resolves `target/debug/codescout` by path at run
+time. The lean lane leaves a librarian-less binary there, so a later default-features run
+execs it and fails 10 of 11 tests with `unrecognized subcommand 'artifact'` — reading
+exactly like a feature-gating regression in whatever you just committed. Ending on the
+default lane rebuilds it correctly, so following the gate cannot leave the trap armed for
+the next session. Costs ~8s.
+
+**Both test lanes carry `--workspace`, and the lean one is `test` not `check`.** Bare
+`cargo test` builds only the root package's targets, so every workspace-member test is
+invisible to it — an inline `#[cfg(test)]` module included, not just `tests/`. A `check`
+compiles the lean targets without running them, so a lean-only *runtime* failure never
+surfaces.
+
+Full evidence and measurements: CLAUDE.md § *Development Commands*. Executable summary with
+the build commands and the binary-freshness probe: memory `development-commands`.
 ## Error Handling
 
 - `RecoverableError` for expected, input-driven failures → `isError: false` (sibling calls survive)
@@ -59,7 +84,8 @@ Sibling of Agent-Agnostic Design, and the same question one layer down: users ru
   1. *Compatibility constants* — a wrong value means **broken**, not degraded, and there is nothing to calibrate. `model_dim` `unwrap_or(768)` (`src/retrieval/config.rs`) must match the embedding model or nothing works. **Out of scope.**
   2. *Degradation deadlines* — a wrong value costs one slower or coarser call and self-heals on the next. `LSP_FIRST_CALL_BUDGET` (2 s, `src/lsp/mod.rs`): over budget, callers fall back to tree-sitter marked `"lsp": "warming"` while the start continues detached. **Out of scope**, provided the fallback is documented at the constant.
   3. *Tuning constants* — a wrong value silently returns **worse results**, with no error and no self-healing, and the value was calibrated against a specific model / corpus / hardware. **The only class the rule targets.**
-  Discriminating question: *would a wrong value raise an error, or quietly degrade output?* Quietly degrade ⇒ in scope. Swept 2026-08-07: exactly one in codescout (`bm25_boost`), four in researcher (all `src/config.rs`).
+  Discriminating question: *would a wrong value raise an error, or quietly degrade output?* Quietly degrade ⇒ in scope. Swept 2026-08-07: exactly one in codescout (`bm25_boost`), four in researcher (all `researcher:src/config.rs` — a sibling repo, so the path does not
+  resolve from here).
 - **Labelling is a legitimate fix, and usually the right one.** The rule is not "no constants", it is "no *unlabelled* constant presented as a universal default". A number that names the model/corpus/hardware it was measured on and points at the probe that re-derives it has discharged the obligation; changing the value is a separate decision needing its own evidence. Worked example of the fixed shape: the `CODESCOUT_BM25_BOOST` block in `.env.example`. **A contradiction between two labels is the tell that neither was written as an observation** — `.env.example` said "Tuned to 3.0", `.env.gpu` said "5.0 was the measured peak (35/75)", and both were true of different sweeps.
 
 ## Testing Patterns

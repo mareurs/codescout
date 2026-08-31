@@ -35,11 +35,11 @@ hash = "4ebd75a0368ed5caf79461702af7d69dc37976f6e34626e2129b7fc74b4c18d0"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "071368de06acccb428cba30ed69c1315a44468fc8c8d6b22f71c3aa792e888f0"
+hash = "c0ba221088c1fb79e35bdff0ff405715e4704e7b16e4bfbb75d80f4d72f780f4"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "5b38467ccee52ad89c579f8c31997ccb2c13f4e74308f3d34723ea8e395571b5"
+hash = "34e422b9cb37995c6891543f050de3c994f6a710c4f4e1fd6330ac1b45ac34d1"
 
 [[anchors]]
 path = "src/memory/anchors.rs"
@@ -51,8 +51,8 @@ hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "fb7651b774eeb9aae6559f91cedaff3662a6cad62aa246ee4a3002a21dd2833d"
+hash = "53b988f75f8f3e2104b384367a95d08b30a440c4debc61af5a14d534c8859aa8"
 
 [[anchors]]
 path = ".codescout/system-prompt.md"
-hash = "7b4656d4ab6fe1eedeb100311aca542c4d209b3bdbae6ed30e217e11f4425beb"
+hash = "2885f333521e3ac752918d12e8ae0549e39e677ebf94e3652468676bb87c8082"

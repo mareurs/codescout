@@ -2,46 +2,45 @@
 
 ## Entry Points
 
-- `src/server.rs::CodeScoutServer::from_parts` — all tools registered here; start for tool inventory
+- `src/server.rs::CodeScoutServer::from_parts` (:307) — all tools registered here; start for tool inventory
 - `src/tools/core/types.rs` — `Tool` trait + `ToolContext`; read before adding or modifying any tool
-- `src/agent/mod.rs::Agent::new` — project activation and state wiring
+- `src/tools/mod.rs` — the LIVE module index. `src/tools/` is grouped (`symbol/`, `semantic/`, `markdown/`, `memory/`, `config/`, `edit_file/`, `run_command/`), not flat
+- `src/agent/mod.rs::Agent::new` (:444) — project activation and state wiring
+- `src/librarian/tools/` — one file per artifact verb: `find.rs`, `get.rs`, `update.rs`, `artifact_event.rs`, `doctor.rs`, `link_scan/`
 - `crates/codescout-embed/src/lib.rs` — embedding factory + chunk size formula
-- `src/librarian/` — SQLite artifact catalog (find.rs, get.rs, update.rs, events.rs)
 
 ## Key Abstractions
 
-- `Tool` trait + `ToolContext` (`src/tools/core/`) — every tool implements `call()`; `call_content()` is the MCP entry point
+- `Tool` + `ToolContext` (`src/tools/core/`) — every tool implements `call()`; `call_content()` is the MCP entry point
 - `OutputGuard` (`src/tools/output.rs`) — enforces exploring/focused two-mode progressive disclosure
-- `RecoverableError` — maps to `isError: false`; prevents sibling parallel tool call abort
-- `Agent` / `ActiveProject` (`src/agent/mod.rs`) — project state; tools access via `ctx.agent.with_project()`
-- `CodeScoutServer` (`src/server.rs`) — MCP `ServerHandler`; all `CallToolRequest`s flow through `call_tool_inner()`
+- `RecoverableError` (`src/tools/core/`) — maps to `isError: false`; prevents sibling parallel-call abort
+- `Agent` / `ActiveProject` (`src/agent/mod.rs`) — project state; tools access via `ctx.agent.with_project()` (:1107)
+- `CodeScoutServer` (`src/server.rs`) — MCP `ServerHandler`; every call flows through `call_tool_inner()` (:1014)
 
 ## Search Tips
 
-- Good queries: "OutputGuard cap_items", "route_tool_error", "RecoverableError", "strip_paths_in_value"
-- codescout-embed: "Embedder trait backend", "chunk_size_for_model", "RemoteEmbedder batching"
-- Librarian: "FilterNode compile SQL", "artifact find hidden statuses", "audit_doc_refs"
-- Avoid: "tool", "error", "file" (too broad)
-- For a specific tool: `symbols("src/tools/<category>.rs")` + `symbols(name=..., include_body=true)`
-- Fixture projects have no semantic index — use `grep(pattern, path="tests/fixtures/<name>/src")` or `symbols(path=...)` directly
-- `symbols(path)` routes to LSP when available; to verify a tree-sitter extractor fix, use `edit_code` on the target symbol — LSP output masks AST extractor bugs
+- Good queries: "OutputGuard cap_items", "route_tool_error", "RecoverableError", "strip_paths_in_value", "FilterNode compile SQL", "chunk_size_for_model"
+- Avoid: "tool", "error", "file" — too broad
+- **Locate by name, not by path**: `symbols(name=X)` finds a symbol wherever it now lives. Guessing `src/tools/<file>.rs` fails — the tree has been regrouped
+- Fixture projects have no semantic index — use `grep(pattern, path="tests/fixtures/<name>/src")` or `symbols(path=...)`
+- To verify a tree-sitter extractor fix, use `edit_code` on the target: `symbols(path)` routes to LSP and masks AST extractor bugs
 
 ## Navigation Strategy
 
-1. New task on a tool → `symbols("src/tools/<file>.rs")` + `symbols(name=..., include_body=true)`
-2. Cross-cutting change → `semantic_search` across `src/` + check all 3 prompt surfaces
-3. Before any refactor → `call_graph(symbol, path, direction="callers")` for blast radius; `direction="callees"` for flow tracing
-4. Bug in symbol editing → check `docs/issues/` for open trackers first
-5. LSP behavior question → `symbols("src/lsp/")` then targeted body reads
-6. Embedding question → `symbols("crates/codescout-embed/src/")` first
-7. Fixture inspection → `symbols("tests/fixtures/<lang>-library/src/")` — read-only targets
+1. Know the name → `symbols(name=X)`; then `symbols(name_path=..., include_body=true)` for the body
+2. Know only the concept → `semantic_search(query)`; exact string → `grep(pattern, glob=...)`
+3. Who calls it → `references(symbol, path)`, never `grep`
+4. Before any refactor → `call_graph(symbol, path, direction="callers")` for blast radius; `direction="callees"` to trace flow
+5. Bug or regression work → `artifact(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})` before filing anything new
+6. Markdown → `read_markdown` / `edit_markdown`; librarian-managed trackers refuse direct edits, use `artifact(action="update", patch={body_edits: [...]})`
+7. Cross-cutting change → check all 3 prompt surfaces (`src/prompts/source.md` ×2 slices + `builders.rs`)
 
 ## Project Rules
 
-- `cargo fmt && cargo clippy -- -D warnings && cargo test` before every completion — use `cargo test`, NOT `--lib` (integration tests live in `tests/`)
+- **The gate is FOUR commands and the ORDER is load-bearing**: `cargo fmt` → `cargo clippy --workspace --all-targets --features local-embed -- -D warnings` → `cargo test --workspace --no-default-features` (lean, THIRD) → `cargo test --workspace` (default, LAST). The bare narrow forms pass trees CI fails; the lean lane last would leave a librarian-less binary in the shared `target/`. Detail: memory `development-commands`
 - Dashboard tests require `--features dashboard`; `cargo test --lib` silently skips them
 - Write tools return `json!("ok")` only — never echo content back
 - `RecoverableError` for expected failures, `anyhow::bail!` for genuine bugs
-- Use `edit_code` for all structural code edits; `edit_markdown` for `.md` files
-- Tool rename/addition: update all 3 prompt surfaces + bump `ONBOARDING_VERSION` only for `onboarding_prompt` surface changes
-- Subagents MUST restore home project after activating a different workspace project
+- Tool rename/addition: update all 3 prompt surfaces; bump `ONBOARDING_VERSION` only for `onboarding_prompt` changes
+- Subagents MUST restore the home project after activating a different workspace project
+- Cite a fix by SHA **and** patch-id — `experiments` is rebased routinely and the SHA dies

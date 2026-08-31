@@ -3,23 +3,23 @@
 
 [[anchors]]
 path = "src/tools/core/path_strip.rs"
-hash = "125d6955f4a98ae419a2d6b98492484ae3ad9dc1c5f2e4a37ca288ea215fd245"
+hash = "53e6e26163c8155d1d50af1598444221181e428ad4597aa45efe0a6d5cacacce"
 
 [[anchors]]
 path = "src/prompts/source.md"
-hash = "8e308dd3cf3a208e785b5b4ea42ae03e47138f10af95deb6e32f5fd5c3ea67bb"
+hash = "3408577ed6e045a56396aea45e94d5f6ec4697ae099f925327c13d3428d738e9"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "fb7651b774eeb9aae6559f91cedaff3662a6cad62aa246ee4a3002a21dd2833d"
+hash = "53b988f75f8f3e2104b384367a95d08b30a440c4debc61af5a14d534c8859aa8"
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "34353cf8021dc144d167b67cc5096b2f34439e4a40980a7c90bb6d039ccca6f2"
+hash = "877da71d94ff8de17a44f3deefc6a2340250d7d30f8e0a78ff75c8d216a1d271"
 
 [[anchors]]
 path = "src/tools/core/types.rs"
-hash = "4c6a2087a4eda86ea0554e873ee53259bb137ef18fa13b9d60b3f59951d242cd"
+hash = "7319b6b24a7e3068b09bc6177b10da8b14e1037cbbd74f1b293ed574660e6d1b"
 
 [[anchors]]
 path = "src/tools/output.rs"
@@ -27,7 +27,7 @@ hash = "580156d6e5fd836bc495a9b01d60ee51ad02381cbe28bd298650d520f9ebfed3"
 
 [[anchors]]
 path = "src/agent/mod.rs"
-hash = "e63e13b66ed0965bf28de7f3be6c9faeac724b46706d3189ce6508f1eec79ccf"
+hash = "db293a6d7933a182ef4c5816d52af547b27035a1cccc37a80ed632375ef5ccf2"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
@@ -35,7 +35,7 @@ hash = "4c12308497e11e1057d1e9ae97503ac5fda307026f29134155a802f73c3503e6"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "cc318c6d0c916b4f49599f11cbae4af6d72b2f873c44211a6e75d0637a42825b"
+hash = "34e422b9cb37995c6891543f050de3c994f6a710c4f4e1fd6330ac1b45ac34d1"
 
 [[anchors]]
 path = ".codescout/workspace.toml"
@@ -43,15 +43,15 @@ hash = "689f9a8d3e05faee1daf220f1827ac4151214ce3abb9d19192a5fcdd464f4a1e"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "2cf9e079985d01f02008044435f09eb428f33b72ce41e1fc63473c2fe3ceb771"
+hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "b17928ac91ea8469bb290ff8bb13d203d172f2a4ebe438d06fb45234d15fbbee"
+hash = "6ecf2977d29063c7ff02047c915039ad158a5a80333bca43b3d2a8f8d8596efc"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "0dc6783046e2457108dbf16aaccae87687a5d7321d9969fbce2676e856149b46"
+hash = "02a9636e103462cb234c7bfbc7b245fdbfabe686e3330a7fc304337683a82086"
 
 [[anchors]]
 path = "src/agent/write_guard.rs"
@@ -67,11 +67,11 @@ hash = "299cc710929e49e6dcaead85f654d22518b5d6268a0ca361e1cb0da98ea0a2b1"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "6cbd60e47aff987673ea897372853e5fec74ebaddd2d02b1d031ea6de98e597b"
+hash = "c0ba221088c1fb79e35bdff0ff405715e4704e7b16e4bfbb75d80f4d72f780f4"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "01f25e4f70c5bee53063528933cf9e15b0a38e2f112cd3de6df9e17b42c41504"
+hash = "721e31973913a5404766990f819fdb5b893fd9150707f51b1d8cd0a8932adb0e"
 
 [[anchors]]
 path = "src/tools/section_coverage.rs"
@@ -79,11 +79,11 @@ hash = "2c06d7198e7678c5c941b4a97586593e2e89ed4b71d5d7fb37278a6671a1d538"
 
 [[anchors]]
 path = "src/library/auto_register.rs"
-hash = "ce65ba955c97384cf1ee7298b1ffc46f79137895986e04aa7f877e6ee8994f4f"
+hash = "6a2781daed325953afabc327add312c6827df3e12bf96287198a64831c54f522"
 
 [[anchors]]
 path = "src/tools/usage.rs"
-hash = "9da50fc3ff62c8879c97dd36136d65f080708964f003aee12345683b5f587651"
+hash = "aa78df37e4d8b993e49fbeb03e6d219050622720938369fd9f48a66d340b606d"
 
 [[anchors]]
 path = "src/tools/ast.rs"
@@ -95,11 +95,11 @@ hash = "748135f9053c87de8b8908c6a2b813d57f0e3ebafb60999d7d4878d5185bcac7"
 
 [[anchors]]
 path = "src/lsp/manager.rs"
-hash = "59d7d548758c9a5c91dffd4a867ed9f1d27febc2bbce6591c42bcf62e285add2"
+hash = "8e25c2b777f1b3285481904508c10e4b9990590abe2e25423ef8cc68ab01ee8b"
 
 [[anchors]]
 path = ".codescout/system-prompt.md"
-hash = "7b4656d4ab6fe1eedeb100311aca542c4d209b3bdbae6ed30e217e11f4425beb"
+hash = "2885f333521e3ac752918d12e8ae0549e39e677ebf94e3652468676bb87c8082"
 
 [[anchors]]
 path = "src/memory/classify.rs"
@@ -107,4 +107,4 @@ hash = "30ff0aa1b4aa14154992e63220a0a03ad18894c3c6931324377def53676877bf"
 
 [[anchors]]
 path = "src/tools/library.rs"
-hash = "46b0f64f9218f351a67a9b4daf1afdd40f8cd8dbf576ac6a93c35bb8fc36594b"
+hash = "906b7df57659411fceb8fff41dbb9698f114c2706bd48459b2dc1022c9918508"

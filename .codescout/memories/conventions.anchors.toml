@@ -11,19 +11,19 @@ hash = "580156d6e5fd836bc495a9b01d60ee51ad02381cbe28bd298650d520f9ebfed3"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
-hash = "14e9e33376883d046fb8fbc12dcb9fa089c731df9e07cc018a84ae2899505dfa"
+hash = "ea7af4233f1d2995b8111145ee00a8184f54382000b869e8e0a479bf318f66c5"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "b45ab8f9a68885a75b1ad3853fa9a84ee325fa095066e2a9bdfc606f85b4a79e"
+hash = "721e31973913a5404766990f819fdb5b893fd9150707f51b1d8cd0a8932adb0e"
 
 [[anchors]]
 path = "docs/trackers/release-promotion-session-log.md"
-hash = "d75de2e7510a5a33277b53e2054a06052b0509f124cc068db1e12e8048e6c48e"
+hash = "06f47870bb7b42081103561fbe530be7e91c1ccf26db5fc9e4552df008679bb0"
 
 [[anchors]]
 path = "src/lsp/client.rs"
-hash = "c178aaafd9ea04266eb65070770e63e62d90c753283153e549280f7500edfa2e"
+hash = "4ebd75a0368ed5caf79461702af7d69dc37976f6e34626e2129b7fc74b4c18d0"
 
 [[anchors]]
 path = "docs/conventions/test-env-isolation.md"
@@ -31,23 +31,23 @@ hash = "eae83a755b25ad656ff3be87f1cfc8323242a121f1a6eed69c6e329bf275b248"
 
 [[anchors]]
 path = "docs/trackers/reconnaissance-patterns.md"
-hash = "45c5b294a666fd13e39f15bed7b108dddcd18172d62439575d9b673dff820f07"
+hash = "bea9e394151abfd07e76cfd1d349ac15532752e08f0f1d86d85430d04c75783f"
 
 [[anchors]]
 path = "src/prompts/README.md"
-hash = "8b81125e68a865a61c6762a2cd744952adf7c87a9f8ce41800ebcaa1f8f2208c"
+hash = "34ce6c9af7f0dabd0d03ab2201960160c3d5cbffdf5f2eba483ad84439619b45"
 
 [[anchors]]
 path = "docs/RELEASE.md"
-hash = "bd353d320b14a38f95d53acd644235ac86a6b3da95e25ab158729d4364a09897"
+hash = "416ca4f0ade9f304e6ecc8e765321a423152d40946a92bf004cab417654640e5"
 
 [[anchors]]
 path = "src/lib.rs"
-hash = "34353cf8021dc144d167b67cc5096b2f34439e4a40980a7c90bb6d039ccca6f2"
+hash = "877da71d94ff8de17a44f3deefc6a2340250d7d30f8e0a78ff75c8d216a1d271"
 
 [[anchors]]
 path = "src/tools/core/types.rs"
-hash = "e64f6da6955f17d92e188553054ff63ae3f0625d67c02e97b9b29a1e24611b30"
+hash = "7319b6b24a7e3068b09bc6177b10da8b14e1037cbbd74f1b293ed574660e6d1b"
 
 [[anchors]]
 path = "src/lsp/mock.rs"
@@ -55,7 +55,7 @@ hash = "5e38aee933f1d372bc3b096bbe320262a1f15bdd144df6f3685fc67c7cd01052"
 
 [[anchors]]
 path = "src/prompts/source.md"
-hash = "8e308dd3cf3a208e785b5b4ea42ae03e47138f10af95deb6e32f5fd5c3ea67bb"
+hash = "3408577ed6e045a56396aea45e94d5f6ec4697ae099f925327c13d3428d738e9"
 
 [[anchors]]
 path = "src/prompts/builders.rs"
@@ -63,19 +63,19 @@ hash = "530ed2c6d013bdee49dd3e46833996a310cfc750d7fa32d10688ef5da8253d0d"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "41365b4cf4456c8cc612eb865fc3e577b72893f46ca50c682abc9c6de12c6c9d"
+hash = "53b988f75f8f3e2104b384367a95d08b30a440c4debc61af5a14d534c8859aa8"
 
 [[anchors]]
 path = "src/tools/onboarding.rs"
-hash = "6bf550a0f371d0a94e809bc7b65b5d87610167d29e8fbe4c3ab666e308b2b944"
+hash = "b12c5b27c5cf7e59b4122f6782b66ed0da8c05e8116b069e5b3c2cb66b80f860"
 
 [[anchors]]
 path = "src/util/path_security.rs"
-hash = "4b1c61beb55374912dd76e0685ca953b7ef9a8a2471d4a930ce501f62998a7b8"
+hash = "c0ba221088c1fb79e35bdff0ff405715e4704e7b16e4bfbb75d80f4d72f780f4"
 
 [[anchors]]
 path = "docs/manual/src/experimental/index.md"
-hash = "5419a182bdd5b2dceec1509c2e28cd9a1e9578e445d3f11db9ac125d58900e81"
+hash = "bdc7a3e692a3cbdd45f9719834351b0ff9a966afe0efb9afdeaf22f5740a7b1b"
 
 [[anchors]]
 path = "docs/trackers/archive/experiments-to-master.md"
@@ -83,20 +83,16 @@ hash = "cb57b5fd62bc7af6f134589c1ff9b8aa9037a8b38d4551c17ab0646e6d473b8c"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "2cf9e079985d01f02008044435f09eb428f33b72ce41e1fc63473c2fe3ceb771"
+hash = "f45100b8fb58e9941e4d819fa7226d2a193665ef87fa09b425486548c53a1aa1"
 
 [[anchors]]
 path = ".codescout/project.toml"
-hash = "cc318c6d0c916b4f49599f11cbae4af6d72b2f873c44211a6e75d0637a42825b"
+hash = "34e422b9cb37995c6891543f050de3c994f6a710c4f4e1fd6330ac1b45ac34d1"
 
 [[anchors]]
 path = ".codescout/libraries.json"
-hash = "4720f35a8a733d78c580691846610828ada8063b64f39207ac50fa62dca9cb25"
+hash = "a221fb4da03ded8bc4d9b4af860d73d51dd97ee4c01b2cdd3695a7e5f4d6a652"
 
 [[anchors]]
 path = ".codescout/write.lock"
 hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-
-[[anchors]]
-path = ".codescout/tmp/onboarding-workspace-synthesis.md"
-hash = "fe659cd13acc9313e09e1ef816f32f383518b118ebff5c309fe750d9b0e2e93d"

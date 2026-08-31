@@ -17,7 +17,7 @@
 > pre-feature (unregistered) rows. Branch commits: 4450f20f..c2104e90. Design:
 > `docs/superpowers/specs/2026-07-17-worktree-overlay-design.md`; plan:
 > `docs/superpowers/plans/2026-07-17-worktree-overlay.md`; session log:
-> `docs/trackers/worktree-overlay-session-log.md` (F-1..F-4, W-1).
+> `docs/trackers/archive/worktree-overlay-session-log.md` (F-1..F-4, W-1).
 
 When merging a git worktree branch that created/updated **librarian trackers**, the
 catalog needs explicit reconciliation — `git merge` moves file *content* but is blind
