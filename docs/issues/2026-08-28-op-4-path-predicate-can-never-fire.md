@@ -1,12 +1,17 @@
 ---
-status: open
-opened: 2026-08-28
-closed:
-severity: medium
-owner: marius
-related: []
-tags: [operator-rules, routing]
 kind: bug
+status: fixed
+tags:
+- operator-rules
+- routing
+closed: 2026-08-31
+opened: 2026-08-28
+owner: marius
+related:
+- docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md
+- docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md
+severity: medium
+unverified: 'The end-to-end test drives the REAL call_content pipeline — path-stripper, both annotations, then route() — but the tool body is WriteEchoTool named "edit_file", not EditFile::call. So no test performs an actual edit_file write to a ~/.claude path and asserts OP-4 arrives; what is asserted is that the pipeline produces a matching response and that the real EditFile supplies the selector (2447f709), which is two tests meeting at a value both check rather than one call proving the whole. Also: the path is captured from input["path"] specifically, so a write tool using a different key for its target gets no annotation and any rule serving it would be dead the same way — edit_file and create_file both use `path`, so no live rule is affected today.'
 ---
 
 # BUG: OP-4's `path~/.claude` predicate can never fire against a real write response
@@ -134,6 +139,30 @@ response field that names the real written path. Reverted immediately after this
    `src/operator_rules/route.rs`, which pins this permanently.
 
 ## Fix
+
+**Fixed 2026-08-31 at `a6b4fc35`** (patch-id `2d962f961ed764458b74ed5d0b67ed197945b957`),
+after the routing precondition landed at `2447f709`. Both were needed: without the
+selector, `route()` never ran; without the path, the predicate had nothing to match.
+
+`annotate_write_path` in `call_content` names the written path as `abs_path` (or
+`rel_path` when relative — `names_path_containing` scans both, and a relative path filed
+under `abs_path` would be a lie the matcher happens not to notice). Sibling to
+`annotate_write_root` rather than folded into it, and gated on `is_write` alone: that
+one's `workspace_override` gate exists because a pinned call already named its checkout,
+which says nothing about which file it wrote.
+
+Rationale, the rejected alternative and its measurement, and the scope of the no-echo
+exception are in `docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md`.
+No tool's `call` return changed, so none of the 44 `json!("ok")` assertions moved.
+
+**The pin could not fire, which is the finding this file should carry forward.**
+`op_4s_path_predicate_cannot_fire_against_a_write_response_today` was written to detect
+this exact fix — *"when this test starts failing, that is the fix landing"* — and it did
+not fail, because its fixture was a hand-written response bound to a variable named
+`observed`. A tripwire aimed at a fabricated input can see neither the defect nor its
+repair. Removed per its own instruction and replaced by
+`op_4_routes_on_a_write_response_the_pipeline_produced`, which routes on a response the
+pipeline produced, with a negative control for a path outside `~/.claude`.
 
 **Update 2026-08-31 — the routing precondition is now closed; this bug is not.**
 `2447f709` gives `edit_file` and `create_file` a `selector_key`, so `route()` is now
