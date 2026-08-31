@@ -1,8 +1,9 @@
 # Pre-commit hooks for codescout.
 #
-# Install both stages:
+# Install:
 #   pre-commit install
-#   pre-commit install --hook-type pre-push
+#
+# There is no pre-push stage — see the block below before adding one.
 #
 # CI runs the same gate; this catches issues earlier.
 #
@@ -11,7 +12,41 @@
 # build serialises every concurrent session's commits — `Blocking waiting for file
 # lock` was observed here on 2026-08-31 with four sessions active. Only checks that
 # do not build may run at commit stage. `cargo fmt` parses without compiling and is
-# therefore safe; clippy and test are not, and moved to pre-push.
+# therefore safe.
+#
+# THERE IS NO PUSH STAGE, DELIBERATELY. Read this before re-adding one.
+# ---------------------------------------------------------------------------------
+# `cargo clippy` and `cargo test --workspace` ran here at pre-push from 2026-08-31
+# until 2026-09-01, and were withdrawn after refusing a push on a GREEN test run.
+#
+# pre-commit fails a hook when the working tree changes across it:
+#
+#     diff_after = _get_diff()
+#     files_modified = diff_before != diff_after      # commands/run.py:203-206
+#
+# That is an unconditional WHOLE-TREE diff with no per-hook opt-out (verified in the
+# installed 4.6.2 source). It assumes the hook is the only writer. On a shared
+# checkout that assumption is false: any file ANY session writes during the hook's
+# runtime lands in the after-snapshot and is attributed to the hook. The observed
+# failure named `docs/trackers/claim-decay.md`, which nothing under src/ writes —
+# `claim-decay` appears there exactly three times, all citations in comments.
+#
+# The window scales with hook duration. It is sub-second for the commit-stage checks
+# below and 30-80s for `cargo test --workspace`, which on a four-session checkout
+# fires often and fires on green.
+#
+# Two reasons not to simply tune it. CI runs exactly these commands and is
+# authoritative. And a noisy pre-push hook teaches `--no-verify`, which also disarms
+# the quiet commit-stage hook that works — a false alarm that trains people to
+# disable the true alarm is a net-negative guard.
+#
+# A second, independent defect showed up in the same run: pre-commit raised
+# `BlockingIOError: [Errno 11]` writing ~2300 lines of cargo output to a non-blocking
+# pipe. Any verbose hook here will reproduce it; `--quiet` or redirect-and-print-on-
+# failure is the mitigation if one is ever added.
+#
+# The full gate stays where it is documented and where it is run deliberately:
+# CLAUDE.md § Development Commands, four commands in a load-bearing order.
 repos:
   - repo: local
     hooks:
@@ -30,30 +65,3 @@ repos:
         language: system
         pass_filenames: false
         types: [rust]
-
-      # ---- push stage: compiles, takes the shared target/ lock ----------------
-
-      - id: cargo-clippy
-        name: cargo clippy -D warnings
-        entry: cargo clippy --lib -- -D warnings
-        language: system
-        pass_filenames: false
-        types: [rust]
-        stages: [pre-push]
-
-      # `always_run`, deliberately, and NOT `types: [rust]`.
-      #
-      # This suite contains repo-hygiene tests that gate MARKDOWN — tests/issue_clusters.rs
-      # fails when a bug file under docs/issues/ declares no `cluster/` tag. Filtering on
-      # `types: [rust]` would skip it for exactly the commits it exists to check, and the
-      # hook would report a pass it never ran. The same trap one level up is why this entry
-      # is `--workspace` rather than the `--lib` it replaced: `--lib` builds only the library
-      # target, so every test under `tests/` — including that gate — is invisible to it
-      # (verified 2026-08-31: `cargo test --lib -- --list` matches it 0 times).
-      - id: cargo-test
-        name: cargo test --workspace
-        entry: cargo test --workspace
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
