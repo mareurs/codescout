@@ -83,9 +83,43 @@ explicit named delegation (`"activate" => ActivateProject.call(…)`,
 `"register" => RegisterLibrary.call(…)`, `"status" => IndexStatus.call(…)`). They are the
 consolidated-tool pattern working correctly. These two have no such arm.
 
-`GetUsageStats` is a third candidate and is **not** claimed here: it is re-exported at
-`src/tools/mod.rs:29` and the sweep for it was not run to completion. Recorded so the next
-reader knows the difference between "checked and clear" and "not checked".
+**`GetUsageStats` — RESOLVED 2026-09-01, and it IS a third instance.** This paragraph previously
+read *"a third candidate and **not** claimed here — the sweep was not run to completion"*. The
+sweep has now been run. (It also cited `src/tools/mod.rs:29`; the re-export is at **`:28`**.)
+Three layers, all green, all unreachable:
+
+1. **`impl Tool for GetUsageStats`** (`src/tools/usage.rs:9`) — **never registered.** Established
+   *positively*, by reading `CodeScoutServer::new`'s whole registry (`src/server.rs:322-362`):
+   21 unconditional entries plus `PeerTool`, `ProbeTool` and the librarian block. `GetUsageStats`
+   appears in **none**, and a `GetUsageStats` grep over `src/server.rs` returns zero. Its only
+   constructions are four test bodies (`:143`, `:165`, `:192`, `:213`).
+2. **`Tool::pinnable()`'s `"get_usage_stats"` arm** (`src/tools/core/types.rs:754`) — a **matcher
+   that can never match**, since `self.name()` is only ever evaluated for *registered* tools and
+   none returns that string. That is `IC-3`'s third family sitting inside its first.
+3. **`src/server.rs:3106` asserts the behaviour of both, and the assertion is VACUOUS for this
+   name.** The `pinnable` set is built from `server.tools` — the registry — so
+   `assert!(!pinnable.contains("get_usage_stats"))` passes because the tool is **absent**, not
+   because `pinnable()` excludes it. Delete the arm in (2) and the test still passes. **The same
+   loop line is live for its two neighbours** (`"workspace"` and `"get_guide"` are both
+   registered, so removing their arms would fail it) and vacuous for the third — which is
+   exactly why it reads as covered. `CLAUDE.md`'s monotone law, precisely: `!contains` is
+   monotone under **removal**, so it cannot distinguish *correctly excluded* from *not there at
+   all*.
+
+**Tests: 6**, and here the count has one defensible value rather than four. `mod tests` holds 7
+functions less the `ctx_with_project` fixture; **all six** exercise the tool or its formatter by
+name — four construct `GetUsageStats`, two call `format_get_usage_stats`, whose sole production
+caller is `format_compact` at `:55`, on the unreachable impl. The units coincide *because* every
+test in the module touches the dead code; for `ListFunctions`/`ListDocs` they did not, which is
+the whole reason that population needed its unit stated.
+
+**The probe nearly returned a false method, and the positive control caught it.** A first pass
+grepped `Arc::new\((Grep|GetUsageStats|…)` and found `Grep`, `Onboarding`, `Workspace` but **not
+`GetGuide`** — which is demonstrably live. `GetGuide` is registered as
+`Arc::new(crate::tools::guide::GetGuide::new())`: qualified path plus a constructor call. So
+*"absent from `Arc::new(ShortName)`"* is **not** evidence of non-registration, and had the
+control not been in the pattern the sweep would have produced a confident wrong answer by the
+same method. Reading the registry in full is what the finding rests on.
 
 ## Why the test suite cannot catch this
 
@@ -132,6 +166,20 @@ non-`symbols` exercise of that code.
 
 ## Resume
 
-Decide (1) or (2). Then re-run the same probe against the **remaining** unregistered types —
-`GetUsageStats` is unresolved above — and consider whether the registry-vs-`impl Tool` diff
-is worth a standing test, since it is a set difference over two lists the code already holds.
+Decide (1) or (2). **`GetUsageStats` is no longer unresolved** — the sweep ran and it is a third
+instance (see § *Evidence*), so whichever way (1)/(2) goes it should be decided for **three**
+tools, not two, and `Tool::pinnable()`'s dead `"get_usage_stats"` arm goes with it.
+
+**The standing test is now clearly worth it, and its shape is settled by what the sweep found.**
+It is a set difference over two lists the code already holds — every `impl Tool for X` against
+`CodeScoutServer::new`'s registry — and it must be written *structurally*, not by grepping
+`Arc::new(ShortName)`: `GetGuide` registers as
+`Arc::new(crate::tools::guide::GetGuide::new())` and a textual probe reports it unregistered.
+Build the registry side from `server.tools` at runtime (`.iter().map(|t| t.name())`) and the
+declaration side from the source, so neither half is a pattern that can rot.
+
+**And it must not be an absence assertion.** `src/server.rs:3106` is the cautionary case in this
+very file: `!pinnable.contains(name)` is monotone under removal, so it passed for an unregistered
+tool and would have passed had the mechanism it guards been deleted. Assert the **positive** —
+every `impl Tool` type appears in the registry, naming the ones that do not — so the test fails
+by exhibiting the gap rather than by staying quiet about it.
