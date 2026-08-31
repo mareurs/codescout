@@ -12,7 +12,6 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: low
-unverified: Not yet re-verified against a rebuilt live MCP — the running server still emits the pre-fix wording. Both branches are test-guarded by a pair of fixtures differing by one artifact, so this is a freshness caveat rather than a coverage gap.
 ---
 
 # BUG: entry_without_definition claims citations "resolve to nothing" after a sibling artifact defines them
@@ -176,6 +175,35 @@ zero describes the sample. The answer came instead from the citation graph: the 
 companion carries live incoming entry links for 38 distinct `PV-` tokens, three of them among
 the eight `doctor` named. That is a positive finding rather than an absence, which is what the
 claim needed.
+### Confirmed live 2026-08-31, on the instance this file was opened for
+
+Against the rebuilt binary — server `git_sha` `179ba3d7`, pid 317169, a fresh process.
+`librarian(action="doctor")` against `docs/trackers/provenance-subsystem.md` now reports:
+
+```
+38 of 68 `items` entries have no `## <ID> — <title>` heading IN THIS FILE: PV-1, PV-3,
+PV-6, PV-10, PV-12, PV-16, PV-17, PV-19 … (+23 more). All 31 of the cited ones are
+defined in a sibling artifact (e.g. PV-1 in `…/docs/trackers/archive/
+provenance-subsystem-recovered-entries.md`), so `link_scan` resolves them and no
+reference is broken. That is the supported end state of the compaction ladder in
+get_guide("tracker-conventions") § Compaction and archival — "live body → archived
+section (heading kept)" — not an omission. Do NOT add a heading here to close this: a
+second definer makes the token ambiguous, and an ambiguous token resolves to nothing,
+which would manufacture the break this finding used to claim. Uncited: 7.
+```
+
+Against the *Symptom* section's *"whose references resolve to nothing right now. Fix those
+first"*. This is the **discriminating** case rather than a confirmatory one: the same 31
+tokens, the same ledger, the same commit range — the only thing that changed is the check.
+
+`entry_without_definition` still reads **1**, and that is correct and expected. The count was
+never the defect, and a fix that silenced the finding would have removed a true statement
+along with the false one.
+
+**The count of 38 with 31 cited is also the guard against over-correction here**: had the
+fix simply stopped classifying anything as broken, this instance would read identically. The
+7 uncited are still separated out, and the paired test asserts a nowhere-defined token is
+still called broken.
 ## Workarounds
 
 Cross-check `link_scan`'s `dangling` / `dangling_by_source` before acting on an

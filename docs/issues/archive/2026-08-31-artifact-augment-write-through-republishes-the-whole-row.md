@@ -11,7 +11,7 @@ owner: marius
 related:
 - '689fb62e40557480'
 severity: medium
-unverified: Not yet re-verified against a rebuilt live MCP — the running server still answers from the pre-fix binary. Both paths are test-guarded through the tool's own call() entry point, so this is a freshness caveat rather than a coverage gap.
+unverified: 'Live-probed against rebuilt server 179ba3d7 and found NOTHING TO OBSERVE, which is the correct outcome: sidecar_shape_drift reads 0, so no unauthored-field disagreement exists for the refusal to fire on. Observing it live would mean manufacturing the exact hazard the fix prevents — deliberately drifting a committed sidecar on a real tracker — so the guard stays the test pair, which drives ArtifactAugment.call() rather than the internal function. Not a coverage gap; a case with no safe live trigger.'
 ---
 
 # BUG: `artifact_augment`'s sidecar write-through republishes the entire row, not the field you patched
@@ -243,6 +243,28 @@ the `librarian` feature, which the lean lane has off.
 
 Clippy caught a redundant `.into()` that both test lanes passed over — the long
 `--all-targets` form earning its place in the gate again.
+### Live probe 2026-08-31: nothing to observe, and that is the right answer
+
+Probed against the rebuilt binary — server `git_sha` `179ba3d7`, pid 317169.
+`librarian(action="doctor")` reports `sidecar_shape_drift: 0`, so **no unauthored-field
+disagreement exists anywhere for the refusal to fire on.**
+
+Recording the non-result rather than leaving the `unverified:` line vague, because the reason
+matters: **the only way to observe this refusal live is to manufacture the hazard it
+prevents** — deliberately drift a committed sidecar on a real tracker, then patch a different
+field. That is the destructive operation the fix exists to intercept, and running it to watch
+the interception work is not a proportionate probe. (Note the asymmetry with the sibling fix
+verified the same evening: that one had a *pre-existing* real instance to point at, so a live
+check cost nothing.)
+
+The guard is therefore the test pair, and what makes that acceptable is **where** it sits:
+both drive `ArtifactAugment.call(…)`, the tool's own entry point, not the internal
+`write_through`. So they cover the `RecoverableError` a caller actually receives, the field
+naming in its message, and — the assertion that matters — that the sidecar still holds its
+original value after the refusal.
+
+This is a case with no safe live trigger, not a coverage gap. The distinction is worth
+keeping crisp: both read as "unverified" in a status field, and only one of them is owed work.
 ## Workarounds
 Before any `merge=true` `artifact_augment` call that touches only some shape fields,
 diff the sidecar immediately after the call and confirm every field that wasn't
