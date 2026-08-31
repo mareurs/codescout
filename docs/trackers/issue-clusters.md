@@ -157,7 +157,7 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | id | class | slug | n | promotes to | mechanism |
 |---|---|---|---:|---|---|
 | IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 18 | `OB` (OB-2, OB-3) | partial |
-| IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB` (OB-4) | none yet |
+| IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
 | IC-3 | declaration is not execution | `declared-not-wired` | 20 | `OB` (OB-5 residual) | none yet |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | `OB` — passes admission test; hook owed | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | `H` — six subsystems; mechanism owed | none yet |
@@ -270,8 +270,8 @@ Two members are **suspected, not proven**: `workspace-read-only-flips-mid-sessio
 **Claim:** A gate whose condition is an event outside its observation boundary substitutes a proxy — a caller-supplied flag, a monotone stamp, a per-process map — and the substitution fails silently, because a proxy returns a plausible answer rather than an error.
 **Members:** `filter={"tags": {"contains": "cluster/gate-keyed-on-unobservable-event"}}` — n=16, 2026-08-31, by query after archive backfill.
 **Blind party:** the gate itself, and therefore every reader of its output. The server process cannot see a compaction, a dead hook, a `/clear`, or what a parent session already holds; each of those is a *conversation*-scoped or *harness*-scoped event, and the gate is process-scoped.
-**Promotes to:** `OB` — `docs/trackers/observer-blindness.md`. `OB-4` (*a liveness marker with a good hit rate spends the trust it earned*) is this class's rendezvous half already.
-**Mechanism status:** none yet for the class. Individual members have partial fixes; nothing addresses the shared shape.
+**Promotes to:** `OB-6` — *a gate collapses "cannot observe" into the confident answer*, `docs/trackers/observer-blindness.md`, promoted 2026-09-01 at n=16. **The `OB-4` reference this field used to carry was loose and is corrected here**: `OB-4` is about the `.worktrees/bench` liveness marker and never mentions the rendezvous gate, so it was never "this class's rendezvous half". The two are siblings on one axis — `OB-4` asks *why a proxy is trusted* (an accuracy record it later spends), `OB-6` asks *what the proxy does when wrong* (returns the confident value rather than admitting it cannot tell) — and their remedies differ, so neither subsumes the other.
+**Mechanism status:** `designed`, with a shipped exemplar rather than a sketch. `b9cc75b4` (patch-id `5a5c761072c44b54dc80f224d89355dd2d31e498`) closed one member and demonstrates the three moves `OB-6` prescribes: a **third state** for *indeterminate* rather than defaulting to the strong claim; **omit rather than zero** an unmeasured quantity; and **extract the proxy→claim mapping into a pure function**, which is the check itself — the hardcoded `"up_to_date"` survived because its arm sat behind a live client constructor no test could reach, and a pure function admits a table test whose `None` row is the one that was missing. Nothing yet applies the pattern corpus-wide.
 **Valid:** dated 2026-08-31
 
 Every member is one substitution. `workspace(post_compact=true)` cannot check that a compaction happened, so it trusts the caller's flag and clears the whole ledger on a mistaken `/mcp` reconnect. The rendezvous gate cannot check that the companion hook is still alive, so it trusts a monotone stamp that nothing can un-set — and its twin defect is the same stamp never landing, which leaves the gate shut for the life of the process. The subagent ledger cannot see what the parent holds, so 84% of measured subagent sessions re-receive a topic their parent already has. `get_guide` cannot see which section a caller needs, so it serves the topic — or, since section grain shipped, serves the section attached to the response of the call it was meant to inform.
@@ -282,6 +282,20 @@ Note the shape shared with `cluster/blast-radius-exceeds-visibility`: both are *
 
 **Falsified by** a member whose proxy failure surfaced as an error rather than a plausible result; that would belong to an ordinary-correctness class instead.
 
+**The 16 members split on one question, and the split predicts their fate: does the substrate
+that would answer the gate exist at all?** **Filesystem/repo-scoped (7)** — git sync, index
+coverage, lock state, an external checkout, a `build.rs` snapshot, a worktree flag, a test-mode
+env var — are cases where the process *could* have looked and did not. **All seven are closed**
+(six fixed, one wontfix). **Harness/peer-scoped (9)** — a compaction, a `/clear`, an `/mcp`
+reconnect, what a parent session holds, whether a companion hook is alive — are cases where the
+process holds no channel to the fact. **Five of those nine are still live**, including all four
+open members and the one `investigating`.
+
+That asymmetry is the argument for `OB-6`'s first move rather than an excuse for the backlog.
+Where the substrate exists, this class is an ordinary bug and the corpus fixes it. Where it does
+not, **a third state is still available even when the event is not** — a gate that cannot tell
+can say so, and the harness-scoped members are open precisely because each one instead picked a
+proxy and reported its output as knowledge.
 ## IC-3 — declaration is not execution — a surface declares a capability production never reaches
 
 **Slug:** `cluster/declared-not-wired`

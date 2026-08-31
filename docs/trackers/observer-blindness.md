@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 5
+entry_high_water_OB: 6
 entry_prefix: OB
 ---
 
@@ -126,6 +126,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-6 | 2026-09-01 | a gate collapses "cannot observe" into the confident answer — three states exist, two are offered | the gate, and every reader of its output | wrong instrument | **designed** — exemplar shipped at `b9cc75b4` |
 | OB-5 | 2026-08-31 | a summary keyed only by findings cannot say which checks RAN — absence reads as a clean bill of health | the reader of the report | wrong instrument | **none yet** — designed, 3 lines |
 | OB-4 | 2026-08-31 | a liveness marker with a good hit rate (2/3) spends the trust it earned — and three git-based instruments agreeing is **one** instrument | the session doing cleanup | wrong instrument | **none yet** — worklist |
 | OB-3 | 2026-08-31 | a peer/agent listing is arbitrary w.r.t. the real population | the session reading the listing | wrong instrument | shipped (OS enumeration) |
@@ -591,6 +592,34 @@ outside the enum. Not this session's work; recorded so the entry and the fix do 
 
 **Status:** validated — two instances, one closed by the right mechanism, both verified in
 source; instance 1 under active repair
+
+## OB-6 — a gate collapses "cannot observe" into the confident answer
+
+**Valid:** invariant
+
+**Rests on:** `issue-clusters:IC-2` (`cluster/gate-keyed-on-unobservable-event`, n=16 at promotion); the shipped exemplar is `index_envelope`'s doc comment in `src/tools/config/mod.rs`, which states the remedy at the site.
+
+**Class:** a gate whose condition is an event **outside its observation boundary** substitutes a proxy — a caller-supplied flag, a monotone stamp, a per-process map, a chunk count — and then maps the proxy's *unknown* onto its *confident* value. The proxy is not the defect; collapsing three states into two is.
+
+**Blind party:** the gate, and therefore every reader of its output. The reason is scope, not care: the event is conversation-scoped (a compaction, a `/clear`), harness-scoped (an `/mcp` reconnect, what a parent session already holds), or peer-process-scoped (whether a companion hook is still alive), and the gate is process-scoped. It holds no handle to the scope that would answer the question. **No amount of care inside the process reaches a fact the process has no channel to** — which is the admission test, and it is why this is not "someone forgot to check".
+
+**Who can see it:** an instrument on the **event's own side of the boundary**. For the filesystem-scoped half that is the filesystem itself — `git_sync_status`, a file count, an mtime — and the gate simply never looked. For the harness-scoped half it must be a **positive signal written by the party that can observe the event**: the companion hook already reads Claude Code's `input.source` enum (`{startup, resume, clear, compact}`) and throws it away one line from where `post_compact` needs it. Note what does *not* work: `hook_at` looks like a liveness signal and is not, measured across five healthy sessions at ages 0.6 h–25.0 h, so a staleness window would have to exceed ~25 h to avoid false-deactivating a healthy session — it detects nothing. A proxy that is *nearly* the right substrate is the most expensive kind.
+
+**Plausible-answer property:** an extra guide body, an open gate, a shut gate, a re-cleared ledger, `up_to_date` on an index 286 commits behind HEAD. Nothing throws, so nothing downstream fires. The shipped `chunks > 0 → "up_to_date"` mapping is the class in one line: *a statement about non-emptiness wearing the name of a statement about currency*.
+
+**Vigilance:** wrong instrument — and the rendezvous gate is the proof, because **one gate produced three separate members**: it latches open when the hook goes quiet, it can never be stamped again if it misses its `SessionStart`, and an `/mcp` reconnect leaves it permanently inactive. Three ways for one proxy to be wrong, found separately across twelve days by people who already knew about the previous one. Care applied to a proxy sharpens a wrong answer rather than correcting it.
+
+**Mechanism status:** designed, with a shipped exemplar — `b9cc75b4` (patch-id `5a5c761072c44b54dc80f224d89355dd2d31e498`) closed one member and demonstrates all three moves.
+
+1. **Three states, because three exist.** `up_to_date | behind | indexed`, where `indexed` means *populated, freshness indeterminate*. Defaulting the unknown arm to the strong claim is exactly how the original went wrong, and `unwrap_or("indexed")` makes the unrecognised-shape fallback the weak word too.
+2. **Omit rather than zero.** `behind_commits` is absent in the indeterminate arm, because a `0` nobody measured is indistinguishable from one that was.
+3. **Extract the proxy→claim mapping into a pure function — this is the check, not merely tidiness.** The hardcoded string survived because its arm sat behind a live `RetrievalClient::from_env` call that no test could reach; the suite was green over the half that works. A pure `index_envelope(chunks, files, git_sync)` admits a table test with a row for the `None` input, and **the `None` row is precisely the one that was missing**. That check runs unprompted, because it is an ordinary unit test rather than something a reader has to remember.
+
+For the harness-scoped half add a fourth move, from `post_compact`'s design note: **degrade to current behaviour on absence, never refuse on missing evidence.** Act on a positive signal that the event did *not* happen; treat no-signal as today's blunt path. This mirrors `inherited_stamp`'s existing philosophy and keeps hookless clients working.
+
+**Instances:** the 16 members of `cluster/gate-keyed-on-unobservable-event`. They split by whether the substrate that would answer the question exists at all, and the split predicts their fate. **Filesystem/repo-scoped (7)** — `workspace-status-claims-up-to-date-without-checking-git-sync`, `index-status-claims-complete-without-checking-coverage`, `index-status-lock-contention-reads-as-failed`, `symbols-stale-after-external-git-checkout`, `worktree-write-guard-is-dead-code-in-production`, `companion-test-suite-stamped-live-rendezvous-slots`, `buildrs-source-md-outdir-snapshot-staleness`: **all seven are closed** (six fixed, one wontfix). **Harness/peer-scoped (9)** — the three rendezvous members, `post-compact-clears-the-ledger-with-no-compaction-check`, `served-guide-sections-arrive-after-the-call-they-inform`, `subagents-receive-guides-their-parent-already-holds`, `guide-topics-are-atomic-nodes-in-an-unmodelled-graph`, `path-relative-banner-not-rearmed-after-compaction`, `mcp-reconnect-does-not-refresh-server-instructions`: **five are still live.** Where the substrate exists the class is an ordinary bug and gets fixed; where it does not, the members accumulate — which is the argument for move (1), since a third state is available even when the event is not.
+
+**Status:** open — promoted from `IC-2` on 2026-09-01 at n=16 spanning index status, the LSP cache, `build.rs`, companion hook scripts, the guide ledger and the workspace write guard. Sibling to `OB-4`: that entry asks *why a proxy is trusted* (an accuracy record it later spends), this one asks *what the proxy does when wrong* (returns the confident value rather than admitting it cannot tell). Kept apart because the remedies differ — `OB-4` wants you to change instrument, this one wants the instrument to have a third answer.
 
 ## Template for new entries
 

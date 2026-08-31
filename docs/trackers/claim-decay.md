@@ -378,6 +378,49 @@ and that is a checkable class, not a discipline problem.
 **Rests on:** `711a25cf` (2026-08-21) being the commit that declared `CTX`, measured with
 `git log --diff-filter=A` and `git log -S` this session.
 
+## DC-4 — Four IC-N deferral rationales kept their verdicts after the counts beneath them moved
+
+**Site:** `docs/trackers/issue-clusters.md`, the `**Promotes to:**` fields of `IC-4`, `IC-5`,
+`IC-6`, `IC-7`. Same shape in a bug file: `## Candidate remedies` in
+`docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` still ranked
+path-scoping first as *"cheapest, degrades safely"* while `### Re-ranking, third time` in the
+same file had already withdrawn it.
+
+**Measured 2026-08-31.** The four fields were written at 22:39 and were all true then. An
+archive backfill at 22:49 added 78 `cluster/` tags, and by 23:39 every one of them still stated
+its original count: `IC-6` said *"n=2, below threshold"* against 27; `IC-5` said *"all three sit
+in the Windows/wine lane"* against 11 across six subsystems, seven of them outside that lane;
+`IC-4` said *"three instances across three subsystems"* against 8; `IC-7` said *"two of three"*
+against four. Each survived at least one later edit to its own entry — the `n` column and the
+`**Members:**` line were both refreshed while the sentence reasoning from them was not.
+
+**The property, and why review does not catch it: the premise and the conclusion live in the
+same record, and only the premise is maintained.** A count is obviously data and gets updated;
+the sentence that reasoned from it is prose and reads as settled. Nothing diffs a file against
+itself, so a reader who came for the number sees a current number and a reader who came for the
+verdict sees a verdict, and neither is looking at both. That is also why five surfaced within
+90 minutes: one backfill moved many premises at once, and every conclusion resting on them held
+still.
+
+**One instance was excluded by the inclusion test, and it was mine.** The same file's
+*"Six of nine clear the count threshold"* looks like a fifth member and is not. The mandatory
+probe (`git log -S 'clear the count threshold'` / `'clear the promotion threshold'`) puts its
+introduction at `ba7d0af1`, which is where I replaced the original *"Three of nine clear the
+**promotion** threshold"* — correct, since promotion reads count **and** spread — with a
+count-only predicate, and kept a hand-listed set of six. Nine classes sat at n≥3 at that moment.
+So it was **false when written**, and no substrate change could have made it true; counts only
+grew. That is `never-true`, which this ledger routes to `F-N` as an authoring error rather than
+decay. Recorded here because it presents as decay from the prose and separates only on history —
+the exact trap § *The inclusion test* warns about, met on the filer's own claim.
+
+**The check proposed in `detectable_by` is deliberately narrow.** It does not try to detect stale
+prose; it fires only where a field states a number that a live query can re-derive — parse
+`n=(\d+)` out of `**Promotes to:**` / `**Mechanism status:**` and compare against the entry's own
+membership query. A field naming a count that disagrees with its own tracker is wrong in every
+world, so it needs no threshold, which is the property `premature_archive_citation` (`DC-2`) was
+also chosen for. It would have caught four of the five, and none of the excluded one — correctly,
+since that one states a count no query disagrees with, only a derivation nobody ran.
+
 ## Template for new entries
 
 Copy the shape below; the server assigns the id.
