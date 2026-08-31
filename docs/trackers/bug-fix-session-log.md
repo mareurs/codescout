@@ -8495,6 +8495,36 @@ the second-best mechanism shape — and it is the one thing that worked five tim
 tonight. Offered to `IC-10`'s owner rather than written there, since two sessions are actively
 editing that ledger.
 
+**Amended 2026-09-01 01:00 — an instrument existed, it was correctly indexed, and it would not
+have saved me.** `scripts/peer-sessions.sh` has shipped since `188ab791` (2026-08-30 20:08) and
+is listed at `docs/PROBES.md:144`, on a page whose header reads *"start here before answering a
+question with a number"*, under a row saying verbatim: **"Run it before any 'who else is here'
+or 'who wrote this' reasoning."** Neither `codescout-d9` nor I ran it. So the sentence above
+about the population being unenumerable is **wrong as written**: it was enumerable all night by
+one command, and the ~25%-observability figure measures `ListAgents`, not the world.
+
+**The correction does not rescue the remedy — it hardens it.** That probe **bounds the
+population and does not attribute a write**; its own row and commit message both say so, and add
+the part that matters here: *elimination over a complete set is still elimination, and a bigger
+correct set makes a wrong conclusion more persuasive rather than less.* My error was elimination
+("fc is the only other busy session"). Run the probe and I would have eliminated over 20 instead
+of 4, reached the same wrong answer, and held it with more confidence. **Asking remains the only
+discriminator**, unchanged, and is now the discriminator *even when the population is fully
+known* — which is a stronger claim than the entry originally made.
+
+**The real finding is a placement failure at the SECOND attempt, and it is measured twice.**
+`188ab791`'s commit message records that on 2026-08-30 **six** authorship misattributions were
+made in one afternoon, each *"a correct elimination over a population short by at least two"* —
+and that the mitigation until then "existed only as prose inside the bug file, so it fired when
+someone opened the bug rather than when someone was about to attribute a write." The fix was to
+move it to `docs/PROBES.md` precisely so it would be reached at the moment of need. Tonight,
+five misattributions across three sessions, and it was reached by nobody. That is the
+reconnaissance skill's **Unreachable** audit category exactly: *general enough, still not
+fetched, and the remedy is placement rather than rewording* — now with two rounds of placement
+improvement behind it and no change in outcome. A probe nobody runs and a prose paragraph nobody
+opens are the same artifact with different line numbers. Whatever closes this is not another
+relocation.
+
 ## F-86 — A guard's abort path is an unscoped write — my `git reset` fallback would have unstaged a peer's 16-file batch under a minute before they committed it
 
 **Observed:** 2026-09-01 00:45, on being warned by `codescout-d9` that 16 files belonging to
