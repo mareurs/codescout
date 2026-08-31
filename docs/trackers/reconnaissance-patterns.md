@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 144
+entry_high_water_R: 146
 entry_prefix: R
 expects_augmentation: true
 ---
@@ -289,6 +289,8 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-146 | 2026-08-31 | miss → rule (3 instances, one evening) | **A measurement of state someone else is editing expires before the message carrying it arrives — and the cost FLIPS SIGN rather than decaying.** A peer reported the lean lane red naming two `tools::tree` tests, with sound attribution (neither name exists at `git show HEAD`, so new-and-red not a regression) — but *new-and-red is RED's own signature*, so the very evidence proving it was not a regression is what should have marked it transient. Re-measured here: **7 passed, 0 failed**, both named tests green; `grep cfg(feature` → 0 matches, so not lane-specific; the file read **+204 → +214 → +360** across three readings, 146 lines added between their run and mine. Acting on the stale warning costs the INVERSE of what it prevents — not a session blaming itself for another's red, but a session distrusting a green that is real. Two sibling instances the same evening: an unbacked "the tree dotfile bug is mine" that displaced the bug's own filer, retracted as *"a claim with no work behind it … asserts a state that has an expiry and does not carry one."* **Runnable:** ship the derivation (command + instant + cheap re-check), not the value; re-run on receipt whenever the artifact is under active edit. | this session, verified by re-measurement; kin R-98, R-142, R-143 |
+| R-145 | 2026-08-31 | miss → rule | **Co-occurrence in a working-tree snapshot is not evidence of one change.** `git status` showed `src/tools/tree.rs` (+204) and `src/util/fs.rs` (+58); I broadcast them to four peer sessions as one change and they were **two authors**, the `fs.rs` delta an unrelated `atomic_write` tmp-file leak fix. Verified after: the fs.rs diff has **0** occurrences of `hidden_at_root` and **5** of `atomic_write`, and the tree.rs diff adds **no** `util::fs` import — no dependency edge in either direction. The instrument caused it: `git diff -U0 -- <a> <b>` into one buffer carries no author column and no separator a skim registers, and the disconfirming evidence was already sitting in that buffer's tail. Complement of R-50 rather than an instance — that is a view which silently DROPPED, this is one that silently MERGED, and in a shared checkout `git status` is a union over N concurrent authors. **Runnable:** `--stat` per path, and look for a dependency edge before calling two paths one change. | this session, corrected by an author's reply after 4 messages had gone out; kin R-50, R-142, R-4 |
 | R-144 | 2026-08-31 | miss → rule (3 instances, one stream) | **A tripwire aimed at a FABRICATED fixture cannot detect the change it was written to detect.** A test meant to notice a future change must assert on a value the system PRODUCES; given a literal it holds equally in the world where the change landed and the world where it did not, so it is silent in both. Three instances, escalating: (1) `RoutedEchoTool { name: "memory" }` supplied the `selector_key` production `Memory` lacked, so the whole operator-rules suite was green while every triggered rule was dead — fixed `2447f709`; (2) a regression test asserted `by_check.get(…).is_none()` to mean *found nothing here*, encoding the exact ambiguity it guarded, and passing under BOTH conflated world-states — fixed `09cd1b46`; (3) worst, `op_4s_path_predicate_cannot_fire_against_a_write_response_today` **advertised itself as a detector** — *"when this test starts failing, that is the fix landing"* — and did not fail when the fix landed at `a6b4fc35`, because its fixture was a hand-written response bound to a variable named `observed`. It bought a tripwire's confidence and delivered none; a fabricated fixture is what a reader skims past, because it looks like setup. **Tell:** a literal beside an assertion about production behaviour — ask *did anything under test produce this value?* **Runnable:** a test naming a future condition must obtain its fixture from the pipeline it watches, or say in its doc that it cannot. | this session, all three fixed; sibling of `observer-blindness:OB-5` (which covers the vocabulary half — this covers whether the fixture was produced at all); kin R-139 |
 | R-141 | 2026-08-31 | miss → rule (2 instances sourced, sibling of R-140) | **The referent you did not open is the part that gets EXECUTED — and a lineage anchor names lineage, not authorship.** One session relayed a `git worktree add` they had not run; another cited `R-3` for a clause it does not contain. Both had checked the surrounding prose. A shell command reads as *mechanical* and an id as a *pointer*, so **neither reads as an assertion needing support** — and an id additionally reads as *precise*, which reads as *verified*, making a wrong id more persuasive than a vague gesture at the same wrong idea. The composite case is worse and is a designed trade: the SKILL.md bullet carrying the positive-control instruction ends `(R-3 → R-113 → R-77 …)`, and **`R-3`'s own Promoted-to field says the back-citation was chosen OVER a verbatim quote so it survives rewrites** — i.e. it survives by not tracking which clause came from where. So *"R-3 says X"* can be false while *"the bullet R-3 anchors says X"* is true, with nothing in the citation's surface distinguishing them. Remedy is unconditional, not vigilant: **all three sessions were actively writing about unverified relaying at the time.** |
 | R-140 | 2026-08-31 | miss → rule (2 instances, one direction) | **A warning that prescribes an action must state its recovery cost, DERIVED — understating it licenses the thing warned against.** An overstated cost fails safe; an understated one converts a warning into permission, so the error and the harm point the SAME direction. Instance 1, verified here: the `.worktrees/bench` warning stated recovery as one `git worktree add --detach`, which fails — the path holds 24 entries and bench is not a registered worktree, so real recovery is move-then-add plus a **163M re-index**. Instance 2, reported first-hand: the relaying session verified the warning's DESCRIPTIVE claims and never ran the command, so their operator got the understated cost with a verification wrapped round it — confirmation of one half reading as confirmation of the whole. The tempting symmetric second direction (*omit* the cost and it gets discounted) is recorded as an **untested PREDICTION with its own promote-when**, because asking its supposed source first-hand revealed no incident behind it — an argument in the past habitual, read as a report. Writing it as a pairing would have manufactured symmetry inside an entry about warnings that mislead. |
@@ -5957,6 +5959,109 @@ The law is not time-bound; the three instances are facts about this stream.
 guarding an *ambiguous* signal is a likely carrier of that ambiguity, because tests are
 written in the same vocabulary as the code. This entry is the other half: not the
 vocabulary the fixture is written in, but whether the fixture was produced at all.
+
+## R-145 — Co-occurrence in a working-tree snapshot is not evidence of one change
+
+**Valid:** dated 2026-08-31
+
+**Verdict:** miss → rule · **Observed:** 2026-08-31, scouting the `tree(glob)` dotfile bug (P1) in a checkout shared by five concurrent sessions
+
+**Seam:** whether two paths reported modified by one `git status` belong to one change, by one author, for one purpose.
+
+`git status` showed `src/tools/tree.rs` (+204) and `src/util/fs.rs` (+58). I reported them as a
+single in-flight change — *"tree.rs +204 and fs.rs +58 for the tree/include_hidden bug"* — and
+broadcast that to four peer sessions before anyone contradicted it. They were **two authors**:
+the `fs.rs` delta was an unrelated `atomic_write` tmp-file leak fix, and its author had to write
+back to say so.
+
+Verified afterwards rather than conceded: the `fs.rs` diff has **0** occurrences of
+`hidden_at_root` and **5** of `atomic_write`, and the `tree.rs` diff adds **no** `util::fs`
+import — so not only are they separate, there is no dependency edge between them in either
+direction.
+
+**The mechanism is the instrument, not inattention.** I had run
+`git diff -U0 -- src/tools/tree.rs src/util/fs.rs` into a single buffer and read the result as
+one narrative. The disconfirming evidence was already inside that buffer — its tail was
+`atomic_write` assertions I had scrolled past — but a combined diff carries no author column and
+no separator a skim registers, so passing two paths to one command is what erased the boundary.
+The output is a valid answer to the question *"what changed in these two files"* and reads as an
+answer to *"what is this change"*, which is a different question I never asked.
+
+This is the complement of R-50 rather than an instance of it. R-50 is a view that silently
+**dropped** something; this is a view that silently **merged** things. Both produce a confident
+wrong answer with nothing raising, and in a shared checkout the merge direction is the live one:
+`git status` there is a **union over N concurrent authors** and has never claimed otherwise.
+
+**Tell:** a diff or status command naming more than one path, whose output you then summarise in
+the singular — "the change", "their work", "this branch".
+
+**Runnable:** before attributing two modified paths to one change, `git diff --stat` **per path**,
+and look for a dependency edge — a symbol, import or constant introduced in one and consumed by
+the other. Absent that edge, describe them as separate and say so. Adjacency in a snapshot is a
+fact about the snapshot.
+
+**Promote-when:** a second instance where co-occurrence in a status/diff/log listing is read as
+shared cause, in this repo or another.
+
+**Status:** open — 1 datapoint, which propagated into four peer messages before an author
+corrected it.
+
+**Kin:** R-50 (the view is not the set — the drop direction, where this is the merge direction), R-142, R-4
+
+## R-146 — A measurement of state someone else is editing expires before the message carrying it arrives
+
+**Valid:** dated 2026-08-31
+
+**Verdict:** miss → rule (3 instances, one evening, three sessions) · **Observed:** 2026-08-31, cross-session messages during a shared-checkout scout
+
+**Seam:** whether a fact measured about live state is still true at the moment a reader acts on it.
+
+A peer measured the lean lane **red** — `3250 passed, 2 failed`, naming
+`tools::tree::tests::include_hidden_lists_the_files_the_default_withholds` and
+`no_warning_when_the_hidden_paths_held_nothing_matching` — and warned that any session gating in
+this checkout would waste time blaming its own change. Their attribution step was **sound**:
+neither test name exists in `git show HEAD:src/tools/tree.rs`, so new-and-red rather than a
+regression from another tree.
+
+By the time I acted it was false. `cargo test --workspace tools::tree` → **7 passed, 0 failed**,
+both named tests green. Not a lane artefact either: `grep cfg(feature` in `src/tools/tree.rs`
+returns **0 matches**, so those tests compile and run identically in both lanes. The file measured
+**+204** at my scout, **+214** at theirs, **+360** at my check — 146 lines added between their run
+and mine. They had measured a **TDD red phase**, and *new-and-red* is precisely RED's signature,
+so the evidence that proved it was not a regression is the same evidence that should have marked
+it as transient.
+
+Two more instances the same evening, same shape, different surface. A session told another *"the
+tree dotfile bug is mine"* and then wrote no line of it while someone else went 214 lines in; that
+claim reached a **third** session — the one who had filed the bug — and made them stand down from
+their own work. Their own retraction names the class exactly: *"a claim with no work behind it is
+the same defect as a stale 'I am holding' — it asserts a state that has an expiry and does not
+carry one."*
+
+**What makes this worse than ordinary staleness is that the cost flips sign rather than decaying.**
+A stale warning does not fade into noise: acting on this one costs the *inverse* of what it was
+sent to prevent — instead of a session blaming its own change for someone else's red, a session
+distrusts a green that is real. Same message, same reader, opposite damage, and nothing in the
+message marks which side of the flip it is on. A claim to own a task fails the same way: unheeded
+it wastes a duplicate; heeded after it expires it **vacates** the work.
+
+**Tell:** a message reporting a measurement of state another party is actively changing — a diff
+stat, a test result, a lock, a claim to own a task.
+
+**Runnable:** ship the **derivation, not the value** — the command, the instant, and a cheap
+re-check the reader can run (a `--stat` line, an mtime, a SHA), so a reader can tell whether it
+still holds instead of inheriting a number. On receipt, re-run before acting whenever the
+underlying artifact is under active edit. And give any ownership claim an expiry or a commit;
+uncommitted work outranks an unbacked claim, which is the protocol these sessions converged on
+independently.
+
+**Promote-when:** a third instance in which a peer message's measurement had expired on arrival,
+**or** one in which re-running before acting demonstrably prevented the wrong action.
+
+**Status:** open — 3 datapoints in one evening (one red-lane report verified expired here; two
+ownership claims, one of which displaced the bug's own filer).
+
+**Kin:** R-98 (a max read at the start of a pass is stale by the time you write — a peer took R-97 with a four-minute margin), R-142, R-143 (ship the instrument, not the number), R-145
 
 ## Template for new entries
 
