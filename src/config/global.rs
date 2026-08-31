@@ -241,7 +241,6 @@ mod tests {
     // writes are GONE rather than coordinated. See
     // docs/issues/archive/2026-07-13-test-env-access-ub-nonserial-writers-race-build-tool-context.md
 
-    #[cfg(not(windows))]
     fn abs(p: &str) -> std::ffi::OsString {
         std::ffi::OsString::from(p)
     }
