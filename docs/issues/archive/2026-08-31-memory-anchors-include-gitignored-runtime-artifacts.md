@@ -1,12 +1,19 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- memory
+- anchors
+- staleness
+- false-positive
+- always-alarming
+- cross-machine
+closed: 2026-08-31
 opened: 2026-08-31
-closed:
-severity: low
 owner: marius
 related: []
-tags: [memory, anchors, staleness, false-positive, always-alarming, cross-machine]
-kind: bug
+severity: low
+unverified: The code fix is covered by six tests and a five-mutation matrix, but the live shape of memory(action="refresh_anchors")'s new dropped_machine_local report has not been observed against a rebuilt server — this session's is git_sha 179ba3d7, pre-fix. The data repair IS verified live (workspace status re-reads the sidecar per call). Discharge by rebuilding, reconnecting, and calling refresh_anchors on a topic whose sidecar still carries a gitignored anchor; note that after this commit no such sidecar exists in-repo, so the trigger has to be manufactured or found in a sibling repo.
 ---
 
 # BUG: memory anchors include gitignored runtime artifacts, so five memories are stale by construction
@@ -182,6 +189,9 @@ Anchor totals fell by exactly 4+3+2+2+1 = 12, and every surviving alarm names a 
 really changed — `CLAUDE.md` from `e0f98fcf`, `src/memory/anchors.rs` and
 `src/tools/memory/mod.rs` from this fix. The always-alarming direction is closed without
 closing the alarm.
+**Fixed at `4bafaa81` on `experiments`**, patch-id
+`3a7c54155b9f6f41953ed3398ae38931f20787da`. The SHA orphans when `experiments` is rebased;
+the patch-id is a content hash of the diff and survives both rebase and cherry-pick.
 ## Tests added
 
 Six, in `src/memory/anchors.rs`. The `## Resume` note this section replaces was right that
