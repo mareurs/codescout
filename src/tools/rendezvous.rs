@@ -191,11 +191,26 @@ fn parent_pid() -> u32 {
 /// The newest stamp any slot for `session` carries.
 ///
 /// This is what makes a `/mcp` reconnect survivable. The server publishes a fresh
-/// slot at construction with no stamp, and the ONLY writer of `hook_at` is the
-/// companion's `SessionStart` hook — which does not fire on a reconnect. Without
+/// slot at construction with no stamp, and no hook fires on a reconnect. Without
 /// this, `is_active()` reports false for the rest of the conversation with no path
 /// back, and `ActivateProject::call` then takes its blunt `GuideLedger::clear()`
 /// branch on every activation, re-sending every guide the conversation already holds.
+///
+/// **`hook_at` is a liveness stamp, NOT "when SessionStart last fired" — never read
+/// its AGE as evidence about compaction or session start.** This comment claimed
+/// SessionStart was its only writer until 2026-08-31; that has been false since the
+/// companion gained a throttled liveness refresher
+/// (`codescout-companion:hooks/lib.mjs`, `LIVENESS_THROTTLE_MS = 60_000`), added for
+/// `docs/issues/2026-08-19-rendezvous-gate-latches-open-when-the-hook-goes-quiet.md`.
+/// That refresher deliberately never stamps an unstamped slot, so it cannot open the
+/// gate — which keeps the *presence* test here correct while making the *age*
+/// meaningless. Measured 2026-08-31: a live slot reported `hook_at` 0 minutes old
+/// with no `SessionStart` for hours.
+///
+/// The stale wording is recorded rather than merely deleted because it made a refuted
+/// design look sound: a `post_compact` guard keyed on `hook_at` age was proposed from
+/// this very comment, and `lib.mjs` had already refuted that idea by measurement. See
+/// `docs/issues/2026-08-31-post-compact-clears-the-ledger-with-no-compaction-check.md`.
 ///
 /// Matched on the SESSION id, never on pid or cwd: a pid is useless as durable
 /// identity (see this module's own doc) and cwd would wrongly inherit between two
