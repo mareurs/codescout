@@ -747,6 +747,32 @@ source; instance 1 under active repair
 
 **Mechanism status:** designed, with a shipped exemplar — `b9cc75b4` (patch-id `5a5c761072c44b54dc80f224d89355dd2d31e498`) closed one member and demonstrates all three moves.
 
+**Second exemplar, 2026-09-01, and it is the generalisable one: a stateful guard installed
+mid-flight adopts the CURRENT state as its baseline, and the baseline is exactly what it exists
+to detect.** A peer shipped a session-attribution index guard that refuses a bare `git commit`
+carrying another session's staged paths. At install the shared index already held
+`docs/trackers/observer-blindness.md`, staged by **this** session; the hook's first run had no
+prior log to consult, could not observe who staged it, and recorded it as the **installing
+session's own**. A guard that reads a peer's staged file as yours is silent on precisely the
+capture it was built to refuse — and it is silent from birth, in its own first run, with nothing
+anywhere reporting a problem.
+
+> **The peer's manual repair had already found move (1) without naming it**: it hand-wrote the
+> owner as `-` rather than picking a session. That *is* the third state. What is owed is making
+> it what the **code** does — `install-hooks.sh` seeding every pre-existing staged pair as
+> **unknown owner**, never as the installer. Note which way the default must fall: `unknown`
+> makes the guard *over*-refuse until the pairs churn out, which is recoverable by reading a
+> message; `mine` makes it under-refuse silently, which is not recoverable at all because
+> nothing is emitted.
+
+**Why this generalises past git hooks:** every guard that decides by comparing against recorded
+history has an install moment at which it has no history, and the cheap thing to do is treat
+"present at install" as "baseline, therefore fine". Migrations that mark existing rows valid,
+linters baselined on the current tree, and quota trackers seeded from the current usage all take
+the same shortcut, and each is then blind to whatever was already wrong on day one. **Ask what
+your guard believes about the state it inherited, and prefer a third answer to an optimistic
+one.**
+
 1. **Three states, because three exist.** `up_to_date | behind | indexed`, where `indexed` means *populated, freshness indeterminate*. Defaulting the unknown arm to the strong claim is exactly how the original went wrong, and `unwrap_or("indexed")` makes the unrecognised-shape fallback the weak word too.
 2. **Omit rather than zero.** `behind_commits` is absent in the indeterminate arm, because a `0` nobody measured is indistinguishable from one that was.
 3. **Extract the proxy→claim mapping into a pure function — this is the check, not merely tidiness.** The hardcoded string survived because its arm sat behind a live `RetrievalClient::from_env` call that no test could reach; the suite was green over the half that works. A pure `index_envelope(chunks, files, git_sync)` admits a table test with a row for the `None` input, and **the `None` row is precisely the one that was missing**. That check runs unprompted, because it is an ordinary unit test rather than something a reader has to remember.
