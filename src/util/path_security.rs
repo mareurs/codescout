@@ -2554,7 +2554,6 @@ mod tests {
             "grep",
             "read_markdown",
             "symbols",
-            "list_functions",
             "onboarding",
             "workspace",
         ] {

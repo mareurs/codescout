@@ -5217,27 +5217,27 @@ fn symbols_overview_directory_mode() {
         "directory": "src/tools",
         "files": [
             {
-                "file": "src/tools/ast.rs",
+                "file": "src/tools/config.rs",
                 "symbols": [
-                    { "name": "ListFunctions", "symbol": "ListFunctions", "kind": "Struct", "start_line": 10, "end_line": 20 }
+                    { "name": "GetConfig", "symbol": "GetConfig", "kind": "Struct", "start_line": 5, "end_line": 15 }
                 ]
             },
             {
-                "file": "src/tools/config.rs",
+                "file": "src/tools/grep.rs",
                 "symbols": [
-                    { "name": "GetConfig", "symbol": "GetConfig", "kind": "Struct", "start_line": 5, "end_line": 15 },
-                    { "name": "ActivateProject", "symbol": "ActivateProject", "kind": "Struct", "start_line": 20, "end_line": 30 }
+                    { "name": "Grep", "symbol": "Grep", "kind": "Struct", "start_line": 20, "end_line": 30 },
+                    { "name": "SearchFiles", "symbol": "SearchFiles", "kind": "Struct", "start_line": 35, "end_line": 45 }
                 ]
             }
         ]
     });
     let result = format_overview_symbols(&val);
     assert!(result.starts_with("src/tools\n"));
-    assert!(result.contains("src/tools/ast.rs — 1 symbol\n"));
-    assert!(result.contains("src/tools/config.rs — 2 symbols\n"));
-    assert!(result.contains("ListFunctions"));
+    assert!(result.contains("src/tools/config.rs — 1 symbol\n"));
+    assert!(result.contains("src/tools/grep.rs — 2 symbols\n"));
     assert!(result.contains("GetConfig"));
-    assert!(result.contains("ActivateProject"));
+    assert!(result.contains("Grep"));
+    assert!(result.contains("SearchFiles"));
 }
 
 #[test]
@@ -8917,4 +8917,74 @@ fn auto_inline_preserves_existing_body() {
     })];
     super::symbols::auto_inline_small_bodies(&mut matches, dir.path());
     assert_eq!(matches[0]["body"], "ALREADY SET");
+}
+
+// ---------- symbols(include_docs) ----------
+//
+// Moved here 2026-09-01 when `src/tools/ast.rs` was deleted along with the unregistered
+// `ListFunctions` / `ListDocs` tools. This test never exercised either of them — it covers
+// `Symbols` with `include_docs`, which IS reachable — and it lived in that file only because
+// the fixture helper did. Everything else in that module tested code no agent could reach.
+
+/// A project containing exactly one file, for tests that need specific file content.
+///
+/// LOAD-BEARING: `[lsp.rust] mux = false` opts out of the mux so this needs no
+/// `codescout-mux` binary on PATH. Drop it and the test fails in CI, not here.
+async fn docs_project_ctx_with_file(
+    filename: &str,
+    content: &str,
+) -> (tempfile::TempDir, ToolContext) {
+    let dir = tempdir().unwrap();
+    let codescout_dir = dir.path().join(".codescout");
+    std::fs::create_dir_all(&codescout_dir).unwrap();
+    std::fs::write(
+        codescout_dir.join("project.toml"),
+        "[project]\nname = \"test-project\"\n\n[lsp.rust]\nmux = false\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join(filename), content).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    (
+        dir,
+        ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: buf(),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        },
+    )
+}
+
+#[tokio::test]
+async fn symbols_include_docs_returns_docstrings() {
+    let content = r#"
+/// A documented function.
+fn documented() {}
+
+fn undocumented() {}
+"#;
+    let (dir, ctx) = docs_project_ctx_with_file("test.rs", content).await;
+    let tool = crate::tools::symbol::Symbols;
+    let result = tool
+        .call(json!({ "path": "test.rs", "include_docs": true }), &ctx)
+        .await
+        .unwrap();
+    let docstrings = result["docstrings"]
+        .as_array()
+        .expect("docstrings field missing");
+    assert!(!docstrings.is_empty(), "expected at least one docstring");
+    assert!(
+        docstrings.iter().any(|d| d["symbol_name"]
+            .as_str()
+            .unwrap_or("")
+            .contains("documented")),
+        "expected docstring for 'documented'"
+    );
+    drop(dir);
 }

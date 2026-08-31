@@ -170,12 +170,12 @@ test_symbols_sealed_class() {
     fi
 }
 
-test_list_functions_calendar() {
-    call list_functions '{"path": "src/main/kotlin/edu/planner/service/CalendarService.kt"}'
+test_symbols_calendar() {
+    call symbols '{"path": "src/main/kotlin/edu/planner/service/CalendarService.kt"}'
     if assert_contains "getAvailableTeachingDays" && assert_contains "getVacationSummary"; then
-        pass 1 "list_functions returns CalendarService signatures"
+        pass 1 "symbols returns CalendarService signatures"
     else
-        fail 1 "list_functions returns CalendarService signatures" "missing expected functions"
+        fail 1 "symbols returns CalendarService signatures" "missing expected functions"
     fi
 }
 
@@ -183,7 +183,7 @@ test_symbols_overview_auth_service
 test_symbols_login
 test_symbols_with_body
 test_symbols_sealed_class
-test_list_functions_calendar
+test_symbols_calendar
 
 # ── Category 3: Search Workflows ────────────────────────────────────────────
 
@@ -278,9 +278,9 @@ test_explore_service_architecture() {
         return
     fi
     # Step 2: Overview a specific service
-    call list_functions '{"path": "src/main/kotlin/edu/planner/service/CalendarService.kt"}'
+    call symbols '{"path": "src/main/kotlin/edu/planner/service/CalendarService.kt"}'
     if assert_contains "getAvailableTeachingDays" && assert_contains "isInstitutionalVacation"; then
-        pass 2 "explore architecture: discover service layer (find files → list functions)"
+        pass 2 "explore architecture: discover service layer (find files → symbols)"
     else
         fail 2 "explore architecture: discover service layer (find files → list functions)" "functions not found"
     fi

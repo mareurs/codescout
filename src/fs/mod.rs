@@ -292,7 +292,7 @@ pub(crate) async fn get_lsp_client(
             format!("unsupported file type: {:?}", path),
             "LSP symbol analysis supports: rust, python, typescript, tsx, \
              javascript, jsx, go, java, kotlin, c, cpp, csharp, ruby. \
-             Use list_functions for a tree-sitter fallback on other file types.",
+             Use symbols(path) for a tree-sitter fallback on other file types.",
         )
     })?;
     let root = agent.require_project_root_for(workspace_override).await?;

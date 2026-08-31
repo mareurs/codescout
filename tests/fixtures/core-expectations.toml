@@ -206,27 +206,27 @@ tool = "get_symbols_overview"
   contains_symbols = ["MAX_RESULTS"]
 
 
-[list_functions_signatures]
-description = "list_functions returns function signatures"
-tool = "list_functions"
+[tree_sitter_signatures]
+description = "tree-sitter extracts function signatures without the LSP"
+tool = "tree_sitter_signatures"
 
-  [list_functions_signatures.rust]
+  [tree_sitter_signatures.rust]
   path = "src/services/catalog.rs"
   contains_functions = ["new", "add", "search", "stats", "create_default_catalog"]
 
-  [list_functions_signatures.python]
+  [tree_sitter_signatures.python]
   path = "library/services/catalog.py"
   contains_functions = ["add", "search", "stats", "create_default_catalog"]
 
-  [list_functions_signatures.typescript]
+  [tree_sitter_signatures.typescript]
   path = "src/services/catalog.ts"
   contains_functions = ["add", "search", "stats", "createDefaultCatalog"]
 
-  [list_functions_signatures.kotlin]
+  [tree_sitter_signatures.kotlin]
   path = "src/main/kotlin/library/services/Catalog.kt"
   contains_functions = ["add", "search", "stats", "createDefaultCatalog"]
 
-  [list_functions_signatures.java]
+  [tree_sitter_signatures.java]
   path = "src/main/java/library/services/Catalog.java"
   contains_functions = ["add", "search", "stats", "createDefault"]
 

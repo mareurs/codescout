@@ -373,17 +373,3 @@ Write tools (`edit_file`, `edit_code`, `create_file`) reject paths outside the a
 **Protected paths.** Sensitive locations such as `~/.ssh` and `~/.gnupg` are permanently blocked and cannot be approved regardless of the argument.
 
 **Overly broad paths are rejected.** Approving a root like `/home/user` or `/` is not allowed — the path must point to a specific subdirectory.
-
-## `get_usage_stats`
-
-Return aggregate usage counts for the active project. Backed by the per-project
-`.codescout/usage.db` sqlite store; one row per tool call, with timestamps.
-
-```json
-{ "tool": "get_usage_stats", "arguments": {} }
-```
-
-Returns a compact summary by tool name with call counts and a recent-call
-timestamp. Useful for spotting tools that have near-zero calls despite being
-advertised by the prompt surfaces — a signal that the prompt is not surfacing
-them effectively.

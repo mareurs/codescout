@@ -14,7 +14,7 @@ pub struct LangExpectation {
     pub contains_symbols: Option<Vec<String>>,
     /// Expected substrings in the symbol body (requires include_body=true).
     pub body_contains: Option<Vec<String>>,
-    /// Expected function names (for list_functions).
+    /// Expected function names, for the tree-sitter signature scenario.
     pub contains_functions: Option<Vec<String>>,
     /// Regex pattern (for search_for_pattern).
     pub pattern: Option<String>,

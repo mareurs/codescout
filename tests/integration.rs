@@ -109,68 +109,6 @@ async fn workflow_read_search_replace() {
 }
 
 // ---------------------------------------------------------------------------
-// Workflow: List functions → Extract docstrings (AST)
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn workflow_analyze_ast() {
-    use codescout::tools::ast::{ListDocs, ListFunctions};
-
-    let (dir, ctx) = project_with_files(&[
-        (
-            "math.rs",
-            "/// Add two numbers.\nfn add(a: i32, b: i32) -> i32 { a + b }\n\n\
-             /// Subtract two numbers.\nfn sub(a: i32, b: i32) -> i32 { a - b }\n",
-        ),
-        (
-            "util.py",
-            "def helper():\n    \"\"\"A helper function.\"\"\"\n    pass\n",
-        ),
-    ])
-    .await;
-
-    // Step 1: List functions in the Rust file
-    let list_result = ListFunctions
-        .call(json!({ "path": "math.rs" }), &ctx)
-        .await
-        .unwrap();
-    assert_eq!(list_result["total"], 2);
-    let func_names: Vec<&str> = list_result["functions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|f| f["name"].as_str().unwrap())
-        .collect();
-    assert!(func_names.contains(&"add"));
-    assert!(func_names.contains(&"sub"));
-
-    // Step 2: Extract docstrings
-    let doc_result = ListDocs
-        .call(json!({ "path": "math.rs" }), &ctx)
-        .await
-        .unwrap();
-    assert_eq!(doc_result["total"], 2);
-    let docs = doc_result["docstrings"].as_array().unwrap();
-    assert_eq!(docs[0]["symbol_name"], "add");
-    assert!(docs[0]["content"].as_str().unwrap().contains("Add two"));
-
-    // Step 3: Also works for Python
-    let py_list = ListFunctions
-        .call(json!({ "path": "util.py" }), &ctx)
-        .await
-        .unwrap();
-    assert_eq!(py_list["total"], 1);
-
-    let py_docs = ListDocs
-        .call(json!({ "path": "util.py" }), &ctx)
-        .await
-        .unwrap();
-    assert!(py_docs["total"].as_u64().unwrap() >= 1);
-
-    drop(dir);
-}
-
-// ---------------------------------------------------------------------------
 // Workflow: Activate project → Memory roundtrip → Config
 // ---------------------------------------------------------------------------
 

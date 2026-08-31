@@ -1,7 +1,7 @@
 use crate::e2e::expectations::{load_expectations, LangExpectation};
 use codescout::agent::Agent;
 use codescout::lsp::manager::LspManager;
-use codescout::tools::ast::ListFunctions;
+use codescout::lsp::symbols::SymbolKind;
 use codescout::tools::grep::Grep;
 use codescout::tools::symbol::{References, Symbols};
 use codescout::tools::{Tool, ToolContext};
@@ -212,7 +212,7 @@ async fn run_single(ctx: &ToolContext, exp: &LangExpectation, tool: &str) -> Res
         "get_symbols_overview" => run_symbols_overview(ctx, exp).await,
         "symbols" => run_symbols(ctx, exp).await,
         "find_referencing_symbols" => run_find_references(ctx, exp).await,
-        "list_functions" => run_list_functions(ctx, exp).await,
+        "tree_sitter_signatures" => run_tree_sitter_signatures(ctx, exp).await,
         "search_for_pattern" => run_search_pattern(ctx, exp).await,
         other => Err(format!("Unknown tool: {other}")),
     }
@@ -348,23 +348,66 @@ async fn run_find_references(ctx: &ToolContext, exp: &LangExpectation) -> Result
     Ok(())
 }
 
-async fn run_list_functions(ctx: &ToolContext, exp: &LangExpectation) -> Result<(), String> {
+/// Tree-sitter signature extraction, exercised WITHOUT the LSP.
+///
+/// LOAD-BEARING: this is the e2e lane's only non-LSP path. `prime_lsp` warms the
+/// language server before every other scenario, so every sibling runner reaches
+/// the tree-sitter layer only through an LSP-mediated tool, or not at all.
+/// Repoint this at `Symbols` and `codescout::ast::extract_symbols` loses all
+/// five-language end-to-end coverage while the suite stays green.
+///
+/// Retargeted from the deleted `list_functions` MCP tool, which `impl Tool` but was
+/// never registered. The assertion is unchanged — only the call path is.
+async fn run_tree_sitter_signatures(
+    ctx: &ToolContext,
+    exp: &LangExpectation,
+) -> Result<(), String> {
     let path = exp.path.as_deref().ok_or("Missing 'path'")?;
-    let result = ListFunctions
-        .call(json!({ "path": path }), ctx)
-        .await
-        .map_err(|e| format!("Tool error: {e}"))?;
+    let project_root = ctx
+        .agent
+        .project_root_for(ctx.workspace_override.as_deref())
+        .await;
+    let abs = match project_root {
+        Some(root) => root.join(path),
+        None => PathBuf::from(path),
+    };
+
+    let symbols = codescout::ast::extract_symbols(&abs)
+        .map_err(|e| format!("extract_symbols(\"{path}\") failed: {e}"))?;
+
+    let mut functions = Vec::new();
+    collect_function_signatures(&symbols, &mut functions);
 
     if let Some(expected) = &exp.contains_functions {
-        let result_str = serde_json::to_string(&result).unwrap_or_default();
+        let result_str = serde_json::to_string(&functions).unwrap_or_default();
         for needle in expected {
             if !result_str.contains(needle) {
-                return Err(format!("list_functions(\"{path}\") missing \"{needle}\""));
+                return Err(format!(
+                    "tree_sitter_signatures(\"{path}\") missing \"{needle}\" ({} functions found)",
+                    functions.len()
+                ));
             }
         }
     }
 
     Ok(())
+}
+
+/// Mirror of the deleted `ListFunctions` filter: functions and methods, nested ones
+/// included, in the same JSON shape the previous assertion matched against.
+fn collect_function_signatures(symbols: &[codescout::lsp::SymbolInfo], out: &mut Vec<Value>) {
+    for sym in symbols {
+        if matches!(sym.kind, SymbolKind::Function | SymbolKind::Method) {
+            let mut map = serde_json::Map::new();
+            map.insert("name".into(), json!(sym.name));
+            map.insert("name_path".into(), json!(sym.name_path));
+            if let Some(sig) = &sym.detail {
+                map.insert("signature".into(), json!(sig));
+            }
+            out.push(Value::Object(map));
+        }
+        collect_function_signatures(&sym.children, out);
+    }
 }
 
 async fn run_search_pattern(ctx: &ToolContext, exp: &LangExpectation) -> Result<(), String> {

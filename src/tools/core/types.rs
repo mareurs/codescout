@@ -751,7 +751,6 @@ pub trait Tool: Send + Sync {
             "workspace"
                 | "activate_project"
                 | "onboarding"
-                | "get_usage_stats"
                 | "get_guide"
                 | "__probe_description_cap__"
         )

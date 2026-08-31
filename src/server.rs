@@ -3103,7 +3103,7 @@ mod tests {
         for n in ["artifact", "librarian"] {
             assert!(pinnable.contains(n), "{n} must be pinnable");
         }
-        for n in ["workspace", "get_guide", "get_usage_stats"] {
+        for n in ["workspace", "get_guide"] {
             assert!(!pinnable.contains(n), "{n} must NOT be pinnable");
         }
     }

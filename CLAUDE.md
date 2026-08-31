@@ -64,26 +64,31 @@ tick gets read as protection. The tell: ask what an observer would *see differen
 were broken right now; if the answer is "nothing", the guard is decoration however loudly it
 is written.
 
-**The law reaches past guards, to features.** `ListFunctions` and `ListDocs`
-(`src/tools/ast.rs:10-11`) both `impl Tool` and are registered nowhere — `src/server.rs:326` is
-where a tool joins the registry (`Arc::new(Grep)`), and neither name occurs in that file. Their
-module holds **18 tests**, 12 of which call the two tools by name. No agent can reach any of it.
-Keep `BL-66` above rather than swapping it out: that is the **alarm** shape, a `panic!` nothing
-arrives at, and it is the harder half to see. This is the **feature** shape, and it is cleaner in
-exactly one way — `BL-66` had an out-of-tree consumer to argue about, and these have none, so the
-green tick protects precisely nothing. Note what the unit is: the defect is the *tests*, not the
-tools. **Derive the count, don't cite it** — one population yielded **three** defensible numbers inside
-an hour, and each is the right answer to a different question. **18** tests live in `mod tests`
-(19 functions less the `project_ctx_with_file` fixture). **13** exercise the tools by name — 12
-there, plus `tests/integration.rs::workflow_analyze_ast`. **17** guard unreachable code, because
-the four formatter tests cover `format_list_functions` / `format_list_docs`, whose only
-production caller is `ListFunctions::format_compact` at `src/tools/ast.rs:84`. A first pass
-published **15**: 13 with two wrong inclusions — a JSON fixture containing the *string*
-`"ListFunctions"`, and an e2e helper (`run_list_functions`, reached from `run_single`'s
-`"list_functions"` arm) mistaken for a test. None of these is a mistake about the code; they are
+**The law reaches past guards, to features.** `ListFunctions` and `ListDocs` each implemented
+the `Tool` trait and were **registered nowhere** — `src/server.rs` is where a tool joins the
+registry (`Arc::new(Grep)`), and neither name ever appeared in it. Their module carried a full
+test suite that passed for months while no agent could reach a line of it. Both were **deleted
+2026-09-01**; `src/tools/ast.rs` is gone and the tree-sitter layer it wrapped (`crate::ast`)
+was untouched and remains load-bearing. Keep `BL-66` above rather than treating this as its
+replacement: that is the **alarm** shape, a `panic!` nothing arrives at, and it is the harder
+half to see. This is the **feature** shape, and it is cleaner in exactly one way — `BL-66` had
+an out-of-tree consumer to argue about, and these had none, so the green tick protected
+precisely nothing. Note what the unit is: the defect was the *tests*, not the tools.
+**Derive the count, don't cite it** — one population yielded **three** defensible numbers inside
+an hour, and each was the right answer to a different question. **18** tests lived in `mod tests`
+(19 functions less the `project_ctx_with_file` fixture). **13** exercised the tools by name — 12
+there, plus `tests/integration.rs::workflow_analyze_ast`. **17** guarded unreachable code,
+because four formatter tests covered `format_list_functions` / `format_list_docs`, whose only
+production caller was the tools' own `format_compact`. A first pass published **15**: 13 with two
+wrong inclusions — a JSON fixture containing the *string* `"ListFunctions"`, and an e2e helper
+(`run_list_functions`) mistaken for a test. None of these was a mistake about the code; they were
 four different units. **A count of a defect population must arrive with its unit or not at all**
 — and note that 13, 15, 17 and 18 are near enough to each other that no reader would query any of
 them, which is § *Observer Blindness*'s closing rule firing on the example added to illustrate it.
+(The deletion removed 18 tests across two lanes, 3424 → 3406 lean and 4991 → 4973 default: 17
+from the module plus `workflow_analyze_ast`, with the one test that covered a *reachable*
+feature — `symbols(include_docs)` — moved to `src/tools/symbol/tests.rs` rather than lost. The
+matching delta on both lanes is what proves nothing else went with them.)
 
 **Annotate a fixture's load-bearing detail, on the fixture line.** The assertion states what
 must be true; nothing states which part of the *setup* is what makes the test able to tell.

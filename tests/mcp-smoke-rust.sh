@@ -213,12 +213,12 @@ test_symbols_with_body() {
     fi
 }
 
-test_list_functions() {
-    call list_functions '{"path": "src/lsp/transport.rs"}'
+test_symbols_transport() {
+    call symbols '{"path": "src/lsp/transport.rs"}'
     if assert_contains "read_message" && assert_contains "write_message"; then
-        pass 1 "list_functions returns signatures for transport.rs"
+        pass 1 "symbols returns signatures for transport.rs"
     else
-        fail 1 "list_functions returns signatures for transport.rs" "missing expected functions"
+        fail 1 "symbols returns signatures for transport.rs" "missing expected functions"
     fi
 }
 
@@ -252,7 +252,7 @@ test_symbols_name_path() {
 test_symbols_overview
 test_symbols
 test_symbols_with_body
-test_list_functions
+test_symbols_transport
 test_symbols_directory
 test_symbols_glob
 test_symbols_name_path
