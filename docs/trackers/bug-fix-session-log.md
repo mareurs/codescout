@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 84
+entry_high_water_F: 85
 entry_high_water_W: 89
 ---
 
@@ -134,6 +134,7 @@ entry_high_water_W: 89
 | F-78 | 2026-08-29 | low | self-friction | fixed-verified | Attributed a test failure to a peer's uncommitted file from a keyword count in its diff (19 × "timeout" across +137 lines). Wrong twice: the real cause was a `tokio::try_join!` race inside the test itself (`21174425`), and the "cheap decisive check" I first proposed — run it in isolation — PASSES, so it confirms the flake reading wrongly. The instrument whose subject was the failure was reading `embed_one_batch` |
 | F-83 | 2026-09-01 | high | codescout-tool | open | `artifact(get)` carries `updated_at` per response but nothing says "changed since your last read", so two reads of one artifact 5.7 min apart composed a contradiction present in neither commit either side of it (75085 vs 78448 bytes = `13226bda^` vs `13226bda`). Five false "the ledger contradicts itself" findings were one step from a user-facing report; the natural reading blames the FILE, not the read |
 | F-84 | 2026-09-01 | med | codescout-tool | open | A rebuild + `/mcp` refreshes the SERVER but not its LSP mux delegates. A `$PPID` walk proves this session fresh (pid 2695653, 15s post-build, `/proc/exe` with no ` (deleted)`), while six siblings ran the replaced inode — including this repo's own rust-analyzer mux, started 00:04:55, half an hour before the build. Binary mtime, the `~/.cargo/bin` symlink, a clean tree, the last source commit and the reconnect itself ALL read green; only `/proc/<pid>/exe` did not. R-89's fourth axis: delegate |
+| F-85 | 2026-09-01 | med | self-friction | open | Committed the exact IC-10 attribution error I had corrected a peer for eight minutes earlier, in the next message, about that class. On a shared checkout git author is identical and `git status` shows the UNION of all sessions' work, so author / adjacency / dirty-file lists carry ZERO ownership signal by construction — not a care problem, no heuristic extracts it. Five wrong attributions across three sessions in 15 min; all five resolved by asking the session, and only by asking. That protocol is the mechanism IC-10 lacks |
 
 ## Wins Index
 
@@ -8362,8 +8363,15 @@ queries is the one most likely to be running old code.
 **Workaround:** `readlink /proc/<pid>/exe` and look for the trailing ` (deleted)`. It is the
 only signal here that does not read green in the broken world — binary mtime, the
 `~/.cargo/bin/codescout` symlink, a clean `git status`, the last source commit and the
-reconnect itself **all** reported fresh while six stale images ran. To find the process serving
-*you* rather than guessing from `pgrep`, walk up from `$PPID` inside a `run_command` shell.
+reconnect itself **all** reported fresh while six stale images ran. **The `$PPID` walk and the sweep answer different questions, and must not be confused.**
+`run_command`'s shell is a child of your **server**, so walking up from `$PPID` tells you
+whether *your server* is fresh and nothing else. A mux is a **descendant** of some server, never
+an ancestor of your shell — verified 00:41: the Kotlin mux `2693964`'s parent is server
+`2693697`, which is **not** this session's server (`2695653`). So a mux cannot appear in your
+ancestry, may belong to another session entirely, and is reachable only by the full
+`pgrep -x codescout` sweep. A reader who runs the `$PPID` line, sees a live `exe` and concludes
+their muxes are fine has been misled. Correction owed to `codescout-fc`, which caught it in the
+first draft of this entry.
 
 **Severity:** med — no wrong result is attributed to it here: this session issued no
 `symbols` / `references` / `symbol_at` call after the rebuild, so the stale Rust mux served
@@ -8389,6 +8397,85 @@ that closes the "reconnect means fresh" reading. A stronger fix is a build-id ha
 attach: a mux whose build id differs from the connecting server's is asked to exit and
 respawn. That needs the mux's restart cost weighed first (a Kotlin mux respawn is expensive and
 `gotchas` already documents cold-start pain), so it is a proposal, not a prescription.
+
+**Corrected 2026-09-01 00:41, and the correction lowers the severity.** The headline example is
+gone: rust mux `2344690` has **exited**. It was alive 30 minutes past its `--idle-timeout 180`
+because it was in continuous use, and it died once that use stopped. So a stale mux is
+**self-healing** — the exposure window is bounded by "time since last use", not by the session.
+The mechanism in this entry stands (a reconnect does not refresh a live mux, and a fresh server
+attaches to whatever holds the socket), but the *inversion* is the whole of the risk: a session
+doing continuous Rust work keeps its own stale mux alive for exactly as long as it keeps
+querying, so the delegate is stale precisely while it is being used and healthy the moment
+nobody cares. That is worth stating plainly, because the first draft implied a persistent
+stale-process population and the truth is a use-coupled one.
+
+**Re-derived at 00:41, with pids, so the tag is checkable.** Five servers on a deleted image —
+`997544`, `1222694`, `1888275`, `1998675`, `3001659` — each parented by a distinct `claude`
+process, none of them this session's, `codescout-fc`'s or `codescout-d9`'s. Six live —
+`2693697`, `2693964` (Kotlin mux), `2695653` (mine), `2697016` (fc's, confirmed by fc
+independently), `2699287`, `2701461` (d9's). `codescout-fc` reported four deleted and missed
+`3001659`; two independent sweeps of the same population disagreeing by one is itself the
+reason to record pids rather than a count.
+
+## F-85 — Committed the exact attribution error I had corrected a peer for eight minutes earlier — the signals I used carry zero ownership information by construction
+
+**Observed:** 2026-09-01 00:39, in a message to `codescout-fc` disclosing two pre-commit stash
+windows.
+
+**When:** Eight minutes after correcting `codescout-d9` for attributing commits `77d4da06` /
+`a2aedd49` and a session log to me on the basis of commit proximity — a correction whose text
+named `IC-10` explicitly and quoted its claim that *every party infers it from proximity*.
+
+**Expected:** Having just named the class, in writing, to the party that had instantiated it, I
+would not instantiate it myself in the very next message.
+
+**Got:** I told `codescout-fc` *"your in-flight backfill"* and *"your 16 modified files … +110
+lines across issue-clusters.md"*. `codescout-fc` has made **zero** edits in this checkout this
+session; all its work tonight is in `prompt-engineering`. Those hunks belong to a session
+neither of us has identified. My evidence was (a) `codescout-d9`'s report that fc authored the
+IC-1/OB-8 work — itself an unverified attribution, and one fc had **already denied to d9** —
+and (b) `git status` adjacency plus fc being the only other *busy* codescout session in
+`ListAgents`. Both are precisely the proximity signal I had just told d9 was worthless.
+
+**Probable cause — structural, not attentional.** `codescout-fc`'s formulation is better than
+mine and is the durable part of this entry: on a shared checkout every session commits as the
+**same git author**, and `git status` reports the **union** of every session's uncommitted work.
+Author, adjacency and dirty-file lists are therefore **constant across sessions by
+construction** — they carry zero ownership signal, so no amount of checking extracts one. This
+is `CLAUDE.md` § *Observer Blindness* holding exactly as written: *"every one was committed by
+an author actively writing about that class … Knowing the class prevented none of the four."*
+Five wrong attributions ran between three sessions in under fifteen minutes — d9→me ×3, d9→fc
+×1, me→fc ×1 — and **every one was resolved by asking the session, and only by asking.**
+
+**Workaround:** ask. `SendMessage` the session and let it answer for itself. That is `W-71`'s
+*replace the question, don't tighten the answer* in a second domain: "who wrote this hunk"
+needs an exhaustive population and fails silently, while "did you write this hunk" has a
+population of one and cannot. Never write an ownership claim about a peer's work into a message
+or a ledger without that confirmation.
+
+**Severity:** med — it reached a peer message and would have reached an `IC-10` tag naming the
+wrong session as the instance's subject. It reached no commit. The cost of this class is not
+the individual error but that the **correcting** party is the most confident one, so the error
+travels inside a message whose subject is correctness.
+
+**Status:** open
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the structural argument, which needs no session's cooperation — author-constancy
+and the `git status` union are properties of the substrate. It does **not** rest on fc's
+self-report of idleness; that report is corroborated only in identity (its server pid `2697016`
+is parented by `claude` pid `2081267`, matching the socket its messages arrive on), which
+establishes who is speaking, not what they did.
+
+**Fix idea / Pointer:** this is the mechanism `IC-10` is missing — its `**Mechanism status:**`
+reads *"none yet"*. The mechanism is not a better provenance heuristic but the admission that
+none exists, plus a cheap standing protocol: **an ownership claim about another session's work
+requires that session's confirmation, and is otherwise not written.** That is an unconditional
+policy tied to a trigger that happens anyway, which `CLAUDE.md` § *Observer Blindness* names as
+the second-best mechanism shape — and it is the one thing that worked five times out of five
+tonight. Offered to `IC-10`'s owner rather than written there, since two sessions are actively
+editing that ledger.
 
 ## Template for new entries
 
