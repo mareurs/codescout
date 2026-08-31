@@ -4,7 +4,7 @@ kind: bug
 status: zombie
 title: SDD ledger directory and this work-stream's catalog rows both vanished between sessions
 tags:
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 - librarian
 - catalog
 - sdd

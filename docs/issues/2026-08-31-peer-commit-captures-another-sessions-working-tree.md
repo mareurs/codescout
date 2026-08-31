@@ -4,7 +4,7 @@ kind: bug
 status: open
 title: A peer session's commit captured this session's in-flight working-tree changes, filing them under an unrelated message
 tags:
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 - concurrency
 - shared-checkout
 - git

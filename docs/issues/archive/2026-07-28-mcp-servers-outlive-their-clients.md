@@ -8,7 +8,7 @@ tags:
 - lifecycle
 - resource-leak
 - gpu
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 topic: process lifecycle
 closed: 2026-08-07
 ---

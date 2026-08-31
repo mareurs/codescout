@@ -6,7 +6,7 @@ tags:
 - guide-ledger
 - usage-db
 - claude-code
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 closed: 2026-08-18
 opened: 2026-08-18
 owner: marius

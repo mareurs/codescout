@@ -2,7 +2,7 @@
 kind: bug
 status: open
 tags:
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 - librarian
 - append_entry
 - entry-id

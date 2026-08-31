@@ -7,7 +7,7 @@ tags:
 - session-attribution
 - concurrency
 - analytics-integrity
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 closed: 2026-08-16
 opened: 2026-08-16
 owner: marius

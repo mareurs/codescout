@@ -9,7 +9,7 @@ tags:
 - subagents
 - session-state
 - progressive-disclosure
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 closed: 2026-08-27
 opened: 2026-08-26
 owner: marius

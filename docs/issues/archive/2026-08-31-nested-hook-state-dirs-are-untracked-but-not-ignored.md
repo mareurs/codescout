@@ -1,12 +1,12 @@
 ---
-id: 03ead8db9900e24b
+id: '03ead8db9900e24b'
 kind: bug
 status: wontfix
 title: 'KNOWN/duplicate: nested hook state is untracked but not ignored — root cause filed in claude-plugins, and the fix proposed here is refuted'
 owners:
 - marius
 tags:
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 - git
 - gitignore
 - companion-hooks

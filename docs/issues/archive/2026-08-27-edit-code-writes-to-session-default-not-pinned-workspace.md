@@ -8,7 +8,7 @@ tags:
 - workspace-pin
 - silent-corruption
 - regression
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 closed: 2026-08-27
 unverified: By design, the `guard_worktree_write` session latch is unchanged — an unpinned write still routes to the session default, it now just says so. Live verification of the annotation itself is COMPLETE (2026-08-27, see § Live verification); nothing else is outstanding.
 ---

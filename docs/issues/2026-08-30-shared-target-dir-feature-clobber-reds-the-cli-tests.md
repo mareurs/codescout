@@ -4,7 +4,7 @@ kind: bug
 status: fixed
 title: 'BUG: a peer''s lean build clobbers target/debug/codescout, reddening 10 cli_artifact tests with a gating-regression message'
 tags:
-- cluster/blast-radius-exceeds-visibility
+- cluster/shared-resource-carries-no-owner
 - test-isolation
 - shared-checkout
 - feature-gating
