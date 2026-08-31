@@ -787,7 +787,25 @@ readers who were, at that moment, writing about this class.
 > not shared: **widening the sample fixes member-selection and does nothing at all for
 > observation-selection.** A larger corpus of ledger entries still contains zero catches-by-
 > reading, and would at any size. Only instrumenting the act itself — recording the doubt, not
-> the correction — could measure it, and nothing does.
+> the correction — could measure it.
+>
+> **"And nothing does" stood here for one hour and was falsified by a peer doing it**
+> (`codescout-e8`, 2026-09-01). It re-derived a "19 open bugs" figure it had published without a
+> derivation, found the number **stood** — nothing older than the 14-day threshold — and *said so
+> out loud* rather than moving on. That narration is the entire instrument: a null result is
+> recordable exactly when someone states it, and it is otherwise indistinguishable from never
+> having checked. **Practice, and it is the cheapest mechanism in this ledger:** when a
+> re-derivation confirms, publish the confirmation. Nobody is inclined to — there is no finding
+> to report — which is precisely why the negative case has no record.
+>
+> **One correction to how that datapoint was offered, because it changes what it is evidence
+> for.** It was framed as telling against the "0 caught by inspection" figure. It does not: a
+> re-derivation that *confirms* is not a catch, and the case never entered the wrong-number
+> population at all. What it is instead is the first recorded **negative** — an unqualified
+> number that was simply right — which bears on the class's **base rate**, a quantity this entry
+> does not claim and cannot estimate from four positives. Worth the distinction: absorbing it as
+> a near-catch would have made the population look self-correcting when what it gained was a
+> denominator.
 
 **Plausible-answer property:** definitional rather than incidental. Plausibility is not a side
 effect of this failure, it *is* the failure.
