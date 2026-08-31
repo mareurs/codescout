@@ -57,11 +57,26 @@
 # WHAT THIS DOES NOT CATCH
 # ------------------------
 # Everything the stage log cannot see. Its fail-open race is documented at the top of
-# that script and is inherited here unchanged: where the log mis-attributes a pair to
-# this session, this guard stays SILENT. It under-reports and never over-reports, so a
-# clean run is not proof the index is yours — it is proof nothing recorded says
-# otherwise. `git diff --cached --name-only` read in its own call remains the check
-# that answers the question directly.
+# that script and is inherited here unchanged: where the log mis-attributes a peer's
+# pair to THIS session, this guard stays SILENT.
+#
+# Name the direction precisely, because the short form of this sentence is the part
+# that travels into a commit message or an IC entry. The mechanism OVER-attributes
+# ownership to SELF, and that over-attribution is exactly what produces the silence.
+# It under-reports FOREIGN paths, and raises no foreign-path false alarms — which
+# sounds like the safe direction and is not, because a missing refusal emits nothing
+# while a false alarm would at least print something a reader could act on. So a clean
+# run is not proof the index is yours; it is proof that nothing recorded says
+# otherwise.
+#
+# (Corrected 2026-09-01 after peer review. This paragraph read "it under-reports and
+# never over-reports", which is true only with "foreign paths" as the referent and
+# resolves the reassuring way on a skim. The reviewer's argument for bothering was
+# that a short reassuring clause is the one that gets pasted onward, at which point a
+# reader concludes the silence is the safe failure and stops looking.)
+#
+# `git diff --cached --name-only`, read in its own call before you commit, remains the
+# check that answers the question directly and depends on none of this.
 #
 # With no CLAUDE_CODE_SESSION_ID this exits silently rather than refusing. A commit
 # from a plain terminal is a deliberate human act, and this guard has no id to
