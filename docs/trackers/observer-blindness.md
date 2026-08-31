@@ -65,6 +65,18 @@ effort: **for a class in this ledger, "be careful" is not a weak remedy, it is t
 instrument.** A reader who converts an `OB-N` back into "remember to check X" has
 discarded the finding. Say so in the entry.
 
+**And a sharper form, measured 2026-09-01 across two sessions in one night: a better
+*instrument* is not the remedy either, when the failure is on an axis no instrument was
+pointed at.** The tally is the argument — **zero arithmetic errors between the two sessions,
+and roughly a dozen wrong sentences.** Every wrong claim was a **referent error** (a correct
+measurement of the wrong object) or a **stale premise** (a claim true when written, false an
+hour later, with nothing downstream re-reading it). Neither is detectable by measuring more
+carefully or by measuring with a better tool, because in both the measurement is *already
+correct*. Sharpening the instrument sharpens a right answer to the wrong question. So when an
+`OB-N` prompts "what should I have used instead?", the honest answer is often *nothing on that
+axis* — check the referent, or re-read the premise, both of which are lookups rather than
+measurements. (`codescout-e8`, reaching this entry's law from the opposite direction.)
+
 The corollary tells you what to build instead: **a check that runs when nobody is
 worried.** Three shapes, in descending order of preference —
 
@@ -174,6 +186,15 @@ about the class.
   was wrong. Had I accepted it, I would have withdrawn an accurate claim — **worse than
   accepting a wrong one, because a withdrawal ends the thread and nothing later re-reads it.**
   The trigger is *about to change your position on a peer's say-so*, in either direction.
+  **The counterfactual is what makes this load-bearing rather than a courtesy, and it was
+  named by the peer whose correction it defeated.** Both of that night's productive findings
+  — a misattribution that yielded a rule, and a referent error that yielded `OB-4`'s limit —
+  existed *only because the receiving party checked before moving*. Being wrong produced
+  neither; being **converted** did. A version of the exchange in which each side accepted the
+  other's correction politely is not a slower version with the same output, it is one that
+  produces **nothing** — both corrections absorbed silently, both underlying claims left
+  wrong. Politeness and verification look identical from outside and differ entirely in what
+  they leave behind.
 - **Not yet mechanised:** nothing gates a bare integer in a doc. Candidate `H-N`.
 
 ### Sub-pattern — the remedy is the part that escapes verification
