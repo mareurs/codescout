@@ -1,7 +1,7 @@
 ---
-id: bcb93414c507da24
+id: 43a4abe4f4397663
 kind: bug
-status: open
+status: fixed
 title: 'BUG: link_scan caps its finding arrays at 8% of the population and reports the truncation somewhere nobody reads — so absence from a bucket looks like a clean result'
 tags:
 - librarian
@@ -9,6 +9,7 @@ tags:
 - negative-results
 - silent-truncation
 - progressive-disclosure
+closed: 2026-08-31
 found_by: codescout-f0 (pid 807989), filed here at their offer
 opened: 2026-08-30
 owner: marius
@@ -100,24 +101,85 @@ the examined scope is **8%**.
 
 ## Fix
 
-Not applied. The information already exists; only its placement is wrong. In rough
-order of value:
+**Fixed 2026-08-31 in `4c063b4e`** (patch-id `c3adf9515a5a0b70292c1d973b993a1151affdcb`),
+on `experiments`.
 
-1. **Put it in `hint`** — the one field a caller always reads.
-   `"dangling: showing 50 of 637 (truncated) — absence from this list is not evidence."`
-2. **Put it in the `summary` array line**: `dangling[50 of 637]` rather than
-   `dangling[50]`.
-3. Consider a `limit`/`offset` on the finding arrays so a caller who needs the whole
-   population can page it, rather than being silently handed a prefix.
+`librarian_compact_summary` (`src/librarian/adapter.rs`) now leads with a
+`finding_truncation_summary` line naming every **cut** array as `name[shown of total]`.
+Live output after `cargo rb` + `/mcp`:
 
-(1) alone closes the incident above and is a one-line change to the envelope.
+```
+TRUNCATED: ambiguous[50 of 551], dangling[50 of 637] — absence from a cut list is not evidence.
+  18 keys: scope, write, counts, edges_missing, …
+  arrays: edges_missing[2], edges_stale[0], ambiguous[50], dangling[50], …
+```
 
+It **leads** because `truncate_compact` cuts from the tail, so anything below can be
+lost — the ordering rule was already documented on `librarian_compact_summary` and this
+is simply the strongest incompleteness signal a librarian result carries. The generic
+shape line survives **below** it rather than being displaced, per the same doc: returning
+`Some` must not drop the key list a `json_path` is aimed with.
+
+Keyed on **shape** (`counts.truncated`) rather than on the tool name, so any librarian
+action adopting the convention is covered without a second edit, and it stays inert for
+artifact-shaped results.
+
+### The ranking below was wrong on the mechanism, and that is the useful part
+
+The original list is kept verbatim because the error is instructive — the diagnosis in
+this file was measured at the bytes, the remedy was not checked at all. Recorded against
+`observer-blindness:OB-1` § *the remedy is the part that escapes verification*.
+
+> 1. **Put it in `hint`** — the one field a caller always reads.
+> 2. **Put it in the `summary` array line**: `dangling[50 of 637]`.
+> 3. Consider a `limit`/`offset` on the finding arrays.
+>
+> *(1) alone closes the incident above and is a one-line change to the envelope.*
+
+**(1) would not have worked.** `link_scan`'s `hint` is a key *inside the payload*
+(`link_scan/mod.rs`), so it is buffered away by the very overflow that creates this
+defect. Writing the warning there places it in the one location the caller demonstrably
+does not read — and a test asserting on it would **pass while the bug stayed live**,
+which is precisely the failure this file warns about two sections down for `counts`.
+
+**(2) is right in effect but named the wrong owner.** `dangling[50]` is produced by the
+shared generic describer in `src/tools/format.rs`, which renders every array for every
+tool as `{k}[{len}]` and knows nothing of `counts.truncated`. Editing it there carries
+repo-wide blast radius; the per-tool `format_compact` hook is the correct seam and
+already existed.
+
+**(3) remains open and unclaimed** — paging the finding arrays is still the only way a
+caller can reach the other 92%. This fix makes the truncation *visible*; it does not make
+the population *reachable*. `dangling_by_source` is complete (191 sources summing to 637)
+and is the current workaround.
 ## Tests added
 
-None yet. A regression test should assert that a truncated bucket's truncation appears
-in the **caller-visible** envelope, not merely in `counts` — the whole defect is that
-asserting on `counts` passes while the bug is live.
+Two, in `src/librarian/adapter.rs`, both asserting on the **summary string** rather than
+on the payload — which is what this section originally demanded, and the reason the
+original fix (1) could not have been tested honestly.
 
+- `compact_summary_names_the_real_total_for_a_truncated_finding_array`
+- `compact_summary_is_silent_when_no_finding_array_was_cut`
+
+Three mutations, each killing its own assertion:
+
+| mutation | dies |
+|---|---|
+| remove the `cut.is_empty()` guard | the **silence** test |
+| emit `name[shown]` without the total | `"50 of 637"`, printing `TRUNCATED: dangling[50]` beside the generic `arrays: dangling[50]` — the bug's own signature |
+| accept any bool instead of `true` | the exclusion assertion |
+
+**The silence mutation was run first, deliberately.** That test passed *vacuously* in RED
+— the function returned `None` for every input — so its ability to fail was the thing in
+doubt, not its result.
+
+**The third mutation found a vacuous assertion and changed the fixture.** The original
+result carried only a `dangling` array, so `ambiguous` was excluded by the
+**missing-array** guard rather than by the truncated flag, and `!contains("551")` could
+not fire under any mutation — it passed in GREEN *and* under the exact mutation it existed
+to catch. `ambiguous` is now present and complete, so the flag is the only thing that can
+exclude it, and the assertion reads the `TRUNCATED` line specifically rather than the
+whole summary.
 ## Workarounds
 
 Always read `$.counts.truncated` before drawing any conclusion from a finding array,
@@ -139,4 +201,3 @@ figures and the `truncated` map are from my own run, not relayed.
 - `docs/PROBES.md` rule 3 (*a zero is evidence about the search*) and rule 6
   (*propositional adjacency wants a positive control*) — this is an instance of both,
   produced by a tool rather than by a person.
-

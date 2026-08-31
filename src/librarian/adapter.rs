@@ -519,7 +519,7 @@ fn overflow_hint(result: &Value) -> Option<String> {
 /// **7.8%** of the population with nothing on the surface saying so. Measured 2026-08-30
 /// on this repo: `dangling` 50 of 637, `ambiguous` 50 of 551 — the two buckets a reader
 /// is most likely to interrogate are the two truncated hardest.
-/// `docs/issues/2026-08-30-link-scan-truncation-is-accurate-and-unreachable.md`.
+/// `docs/issues/archive/2026-08-30-link-scan-truncation-is-accurate-and-unreachable.md`.
 ///
 /// **Why here and not in `link_scan`'s own `hint`,** which the bug file proposed as the
 /// cheapest fix: that `hint` is a key *inside* the payload (`link_scan/mod.rs`), so it is
