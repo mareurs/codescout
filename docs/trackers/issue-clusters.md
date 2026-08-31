@@ -139,31 +139,40 @@ grep -L 'cluster/' docs/issues/2026-*.md
 
 | id | class | slug | n | promotes to | mechanism |
 |---|---|---|---:|---|---|
-| IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 10 | `OB` (OB-2, OB-3) | partial |
-| IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 6 | `OB` (OB-4) | none yet |
-| IC-3 | declaration is not execution | `declared-not-wired` | 3 | `OB` (OB-5 residual) | none yet |
-| IC-4 | config propagation is additive | `config-propagation-is-additive` | 3 | not yet — routing unsettled | none yet |
-| IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 3 | not yet — one subsystem | none yet |
-| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 2 | not yet — below threshold | shipped (partial) |
-| IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | 3 | not yet — 2 of 3 unconfirmed | shipped (partial) |
-| IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 1 | `DC` | none yet |
-| IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 1 | not yet — below threshold | designed |
+| IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 18 | `OB` (OB-2, OB-3) | partial |
+| IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 16 | `OB` (OB-4) | none yet |
+| IC-3 | declaration is not execution | `declared-not-wired` | 20 | `OB` (OB-5 residual) | none yet |
+| IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | not yet — routing unsettled | none yet |
+| IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | **re-adjudicate** — its own condition fired | none yet |
+| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | 25 | **re-adjudicate** — now the largest class | shipped (partial) |
+| IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | 4 | not yet — 2 of 4 unconfirmed | shipped (partial) |
+| IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 5 | `DC` | none yet |
+| IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 3 | **re-adjudicate** — count now met | designed |
 
-**Three of nine clear the promotion threshold** (IC-1, IC-2, IC-3) and all three route to
-`OB`, where two-and-a-half already have partial entries. The six that do not clear it fail on
-different conditions — subsystem spread (IC-5), count (IC-6, IC-8, IC-9), premise confidence
-(IC-7), unsettled routing (IC-4) — and each records which, so the next reader does not
-re-derive the judgement under a rule of their own choosing.
+**Six of nine now clear the count threshold** (IC-1, IC-2, IC-3, IC-4, IC-5, IC-6), and three of
+those changed status on the backfill rather than on new evidence — which is the ledger working:
+the counts were floors, and the judgements resting on them were provisional. **IC-5, IC-6 and
+IC-9 are flagged `re-adjudicate` rather than promoted**, because promotion is a reading of the
+spread as well as the count, and this pass supplied only the count. IC-7 still fails on premise
+confidence and IC-8 routes to `DC` regardless of n.
 
-**Coverage, 2026-08-31:** 32 of 32 open bug files carry exactly one `cluster/` tag; the
-catalog query returns the same counts as the on-disk tags. The archive (494 files) is not yet
-backfilled, so every `n` above is a floor — the `concurrency` topic tag alone reaches 14 rows
-once `archive/` is included, against 10 live in IC-1.
+**Coverage, 2026-08-31 (backfilled):** 32 of 32 catalogued open bug files, plus **78 of the 357
+archived files dated 2026-07-01 or later**. Catalog and on-disk counts agree in both directions.
+The remaining 279 in that window are deliberately untagged: the nine classes were derived from
+the open backlog, and forcing a fit would corrupt the counts that promotion reads. **The pre-July
+archive (137 files) is still unbackfilled, so every `n` remains a floor** — smaller than before,
+and still a floor.
+
+Four recurring shapes in the untagged 279 reached three or more instances and match no existing
+class — a capped result presented as complete; a guard whose coverage is narrower than its name;
+documentation stating a behaviour the code contradicts; and an accepted parameter silently
+dropped on some path. They are recorded here as candidates only. Adding them is a taxonomy
+decision, not a backfill one.
 ## IC-1 — the blast radius of a write is wider than the set of peers you can see
 
 **Slug:** `cluster/blast-radius-exceeds-visibility`
 **Claim:** A session's writes reach every peer sharing the filesystem; its peer listing reaches only peers sharing its config profile. Coordination is therefore impossible by construction, and the listing reports the short population as a definite count.
-**Members:** `filter={"tags": {"contains": "cluster/blast-radius-exceeds-visibility"}}` — n=10 (8 confirmed, 2 consistent-but-unproven), 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/blast-radius-exceeds-visibility"}}` — n=18, 2026-08-31, by query after archive backfill (8 confirmed, 2 consistent-but-unproven among the 10 pre-backfill members).
 **Blind party:** the session doing the writing. Not carelessness — it *holds* the listing that would reveal the peer, and the listing is scoped narrower than the sharing. `ListAgents` answering *"Peer sessions (2)"* is a confident small number, which survives review in a way a suspicious zero would not.
 **Promotes to:** `OB` — `docs/trackers/observer-blindness.md`. Partly there already: `OB-2` (shared `target/` left feature-clobbered) and `OB-3` (a peer listing is arbitrary w.r.t. the real population) are both members of this class seen from the observer side.
 **Mechanism status:** partial — OS enumeration shipped for `OB-3`; the gate reorder shipped for `OB-2`. Nothing covers the *write* side: no ownership protocol on `target/`, the working tree, the git index, or the `entry_high_water_<PREFIX>` allocator.
@@ -183,7 +192,7 @@ Two members are **suspected, not proven**: `workspace-read-only-flips-mid-sessio
 
 **Slug:** `cluster/gate-keyed-on-unobservable-event`
 **Claim:** A gate whose condition is an event outside its observation boundary substitutes a proxy — a caller-supplied flag, a monotone stamp, a per-process map — and the substitution fails silently, because a proxy returns a plausible answer rather than an error.
-**Members:** `filter={"tags": {"contains": "cluster/gate-keyed-on-unobservable-event"}}` — n=6, 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/gate-keyed-on-unobservable-event"}}` — n=16, 2026-08-31, by query after archive backfill.
 **Blind party:** the gate itself, and therefore every reader of its output. The server process cannot see a compaction, a dead hook, a `/clear`, or what a parent session already holds; each of those is a *conversation*-scoped or *harness*-scoped event, and the gate is process-scoped.
 **Promotes to:** `OB` — `docs/trackers/observer-blindness.md`. `OB-4` (*a liveness marker with a good hit rate spends the trust it earned*) is this class's rendezvous half already.
 **Mechanism status:** none yet for the class. Individual members have partial fixes; nothing addresses the shared shape.
@@ -201,7 +210,7 @@ Note the shape shared with `cluster/blast-radius-exceeds-visibility`: both are *
 
 **Slug:** `cluster/declared-not-wired`
 **Claim:** A surface declares a capability that production never reaches. Every piece is individually correct — the selector, the matcher, the ledger entry, the schema — and no call site connects them, so the declaration reads as a shipped feature and tests pass in isolation.
-**Members:** `filter={"tags": {"contains": "cluster/declared-not-wired"}}` — n=3, 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/declared-not-wired"}}` — n=20, 2026-08-31, by query after archive backfill.
 **Blind party:** the author of the declaration, specifically. They hold the mental model in which the wiring exists — writing `**Serves:** edit_file(path~/.claude)` *is* the act of believing it is served. A more careful version of the same author writes the same line.
 **Promotes to:** `OB` — `docs/trackers/observer-blindness.md`. `OB-5` already carries this as its *"Known-open residual — declaration is not execution"*; this class is the instance side of that residual and the two should be linked rather than duplicated.
 **Mechanism status:** none yet. The remedy is a reachability check — for each declared selector, assert some production path emits it — and nothing implements one.
@@ -219,7 +228,7 @@ The reason ordinary testing does not catch this class is structural rather than 
 
 **Slug:** `cluster/config-propagation-is-additive`
 **Claim:** Configuration propagates as an overlay rather than a replace. An added or changed key lands; a **removed** key, or a **renamed** path, does not — and the change that does land is read as confirmation that the whole edit applied.
-**Members:** `filter={"tags": {"contains": "cluster/config-propagation-is-additive"}}` — n=3, 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/config-propagation-is-additive"}}` — n=8, 2026-08-31, by query after archive backfill.
 **Blind party:** the operator who made the edit. They verify the change they can see — the new value — and that verification is *positive evidence for the wrong proposition*. Nothing in the successful check distinguishes "the edit applied" from "the additive half of the edit applied".
 **Promotes to:** `not yet` — the class has three instances across three subsystems (MCP env, shell env, git config) and clears the threshold, but the routing field is unsettled: it is arguably `H` (a hook that diffs intended vs effective config) rather than `OB`. Decide before promoting.
 **Mechanism status:** none yet.
@@ -237,7 +246,7 @@ The generalisation worth extracting: **a config surface that supports removal ne
 
 **Slug:** `cluster/repro-env-diverges-from-gate-env`
 **Claim:** The environment built so failures can be reproduced locally is not the environment that gates. While the two agree the divergence is invisible; when they disagree the local run is authoritative-looking and wrong, and a genuine platform defect is indistinguishable from an environment gap.
-**Members:** `filter={"tags": {"contains": "cluster/repro-env-diverges-from-gate-env"}}` — n=3, 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/repro-env-diverges-from-gate-env"}}` — n=11, 2026-08-31, by query after archive backfill.
 **Blind party:** `none — ordinary design defect`. A careful engineer comparing wine versions catches this; nobody is structurally prevented from seeing it. Recorded so the class is not mis-promoted to `OB`, whose admission test it fails.
 **Promotes to:** `not yet` — clears the count but not the subsystem spread; all three sit in the Windows/wine lane, so under this ledger's threshold rule they are *a broken subsystem*, not a mechanism. Revisit if a fourth lands outside it.
 **Mechanism status:** none yet. `scripts/build-windows.sh` could assert the wine version CI packages, which would convert the divergence from silent to loud at ~3 lines.
@@ -255,7 +264,7 @@ This class is deliberately kept even though it does not currently promote. Its v
 
 **Slug:** `cluster/addressing-without-an-escape-hatch`
 **Claim:** An addressing scheme interprets every token in its namespace and provides no way to write one literally, or to disambiguate two that collide. The scheme is correct on every input it accepts; the defect is the input it makes unrepresentable.
-**Members:** `filter={"tags": {"contains": "cluster/addressing-without-an-escape-hatch"}}` — n=2, 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/addressing-without-an-escape-hatch"}}` — n=25, 2026-08-31, by query after archive backfill.
 **Blind party:** `none — ordinary design defect`. The gap is visible to anyone who tries the unrepresentable input; nobody is structurally prevented from seeing it. Recorded so it is not mis-promoted to `OB`.
 **Promotes to:** `not yet` — n=2, below threshold.
 **Mechanism status:** `shipped (partial)` — `edit_markdown` and `artifact(get)` gained an `occurrence` selector, closing the heading half for librarian-managed files. The `link_scan` half has no escape syntax at all.
@@ -273,7 +282,7 @@ The generalisable point is that **an interpreting scheme owes a quoting mechanis
 
 **Slug:** `cluster/lazy-warmup-bills-the-first-caller`
 **Claim:** Work deferred to first use is charged to whichever call arrives first, and that caller has no way to distinguish "cold" from "broken" — so the bill can surface as a timeout or as a negative result that looks like an answer.
-**Members:** `filter={"tags": {"contains": "cluster/lazy-warmup-bills-the-first-caller"}}` — n=3, 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/lazy-warmup-bills-the-first-caller"}}` — n=4, 2026-08-31, by query after archive backfill.
 **Blind party:** the caller. It receives `symbol not found` or `0 matches` — well-formed, plausible results that are *indistinguishable from the true answer*. This is the property `docs/adrs/2026-08-27-negative-results-name-their-scope.md` exists to address, which makes the class an argument for that ADR rather than a new one.
 **Promotes to:** `not yet` — the count is met but two of three members are `zombie` with unconfirmed root causes, so promoting now would rest a rule on unresolved premises.
 **Mechanism status:** `shipped (partial)` — a false-zero guard covers the cold-start path for `references`; the deliberate cold-start reproduction showed the guard *does* fire there, which refuted the original filing.
@@ -291,7 +300,7 @@ So the class is real and its evidence is thin in a specific way: one confirmed i
 
 **Slug:** `cluster/record-asserts-an-unchecked-completion`
 **Claim:** A record states that an action completed, and nothing is scheduled to re-check it. The assertion is written at the moment of *intent* and read forever after as *outcome*, so a step that silently did not happen leaves a closure note that reads exactly like a successful one.
-**Members:** `filter={"tags": {"contains": "cluster/record-asserts-an-unchecked-completion"}}` — n=1, 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/record-asserts-an-unchecked-completion"}}` — n=5, 2026-08-31, by query after archive backfill.
 **Blind party:** the reader of the record, who has no signal distinguishing a verified closure from an asserted one. The author is not blind — they simply wrote what they intended to do.
 **Promotes to:** `DC` — `docs/trackers/claim-decay.md`, whose `undecidable-green` and `premature-assertion` types already name this shape. This class is the bug-corpus entry point to that ledger, not a competitor.
 **Mechanism status:** none yet.
@@ -309,7 +318,7 @@ This is filed as a class of one deliberately rather than folded into `DC`. The t
 
 **Slug:** `cluster/assertion-satisfiable-by-accident`
 **Claim:** An assertion whose haystack embeds environment-controlled text — a path, a tempdir name, a hostname, a timestamp — can be satisfied by coincidence. It fails **open**: it passes on almost every machine and almost every run, so the green tick is evidence of luck rather than of the property.
-**Members:** `filter={"tags": {"contains": "cluster/assertion-satisfiable-by-accident"}}` — n=1, 2026-08-31, by read-through; the query is authoritative once backfill lands.
+**Members:** `filter={"tags": {"contains": "cluster/assertion-satisfiable-by-accident"}}` — n=3, 2026-08-31, by query after archive backfill.
 **Blind party:** `none — ordinary design defect`, but with an unusually strong *detection* asymmetry: at ~1-in-800 the failure is unreachable by local reproduction, so the author's evidence is necessarily circumstantial. The file records that honestly in its own `unverified:` field.
 **Promotes to:** `not yet` — n=1. When it moves, the target is `I` (`docs/trackers/test-escape-hardening.md`), because the remedy is a standing grep rather than a rule anyone remembers.
 **Mechanism status:** `designed` — the member names the check: *negative `contains` assertions over anything that interpolates a `Path`*. Nobody has run it corpus-wide.
