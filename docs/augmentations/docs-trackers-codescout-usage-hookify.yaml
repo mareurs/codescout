@@ -1,0 +1,13 @@
+schema_version: 1
+prompt: |-
+  **Codescout hookify candidates (H-N)**: proposals for codescout-companion hooks — warn→deny criteria, new gate ideas, false-positive carve-outs.
+
+  **To read:** entries are `### H-N — <title>` sections, and the headings ARE the index; this ledger keeps no index table. Each entry should name the *criterion* a hook would fire on, not just the annoyance — a candidate without a decidable trigger is a wish.
+
+  **To add:** `artifact(action="append_entry", id="e522954737601d13", id_prefix="H")` — omit `entry_collection`; entries are body sections, not params rows. The server assigns the id atomically; never compute it from a grep, and never suffix it (`H-8b` is not a valid entry token).
+
+  Then write the section with `artifact(action="update", id="e522954737601d13", patch={body_edits:[…]})` — `edit_markdown` is refused, this ledger is augmented. The heading must be `### H-N — <title>` exactly, or `link_scan` records no definition for the token and citations of it dangle.
+
+  **Promotes to:** a shipped hook in `claude-plugins/codescout-companion/hooks/`. Record the hook file and commit in the entry when it ships, and note the false-positive rate you measured — a gate shipped without one is the next carve-out entry.
+
+  **Readers:** the maintenance rules above are not yours.

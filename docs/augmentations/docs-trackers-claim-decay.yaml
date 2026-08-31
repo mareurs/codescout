@@ -1,0 +1,111 @@
+schema_version: 1
+prompt: 'Maintain the DC-N ledger of durable claims that decayed with no scheduled repair. Each entry is BOTH a structured row in params.claims (what entry_filter reads) AND a `## DC-N — <title>` body section (the only shape link_scan accepts as a definition) — never one without the other. Rows carry the queryable facts; body sections carry the site, the measurement, and a citation to the F-N / R-N / bug file that narrates it in full. Do not duplicate the narrative here. When a decay_kind accumulates instances and an instrument could catch it, propose a check (status: check-proposed) and flip to check-shipped via update_entry once it lands, recording the check name in detectable_by. Keep the ledger honest about detection: found_by records how the instance surfaced, and a population dominated by recon-scout means detection still depends on a human invoking a skill.'
+entry_collection: claims
+params_schema:
+  type: object
+  properties:
+    claims:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        - date
+        - title
+        - site
+        - decay_kind
+        - surface
+        - repair_trigger
+        - status
+        properties:
+          id:
+            type: string
+          date:
+            type: string
+          title:
+            type: string
+          site:
+            type: string
+          decay_kind:
+            type: string
+            enum:
+            - measured-value-drift
+            - premature-assertion
+            - stale-pointer
+            - deferral-rationale
+            - status-zombie
+            - freshness-gap
+            - undecidable-green
+            - prohibition-false
+          surface:
+            type: string
+            enum:
+            - code-comment
+            - test
+            - guide
+            - tracker-entry
+            - bug-file
+            - doc
+            - claude-md
+            - skill
+            - ci-config
+            - memory
+            - commit-message
+          repair_trigger:
+            type: string
+            enum:
+            - none
+            - event-never-fires
+            - fires-but-unwired
+            - manual-only
+            - gate-exists-but-capped
+          automatable:
+            type: string
+            enum:
+            - 'yes'
+            - partial
+            - 'no'
+            - unknown
+          found_by:
+            type: string
+            enum:
+            - recon-scout
+            - measurement
+            - reader-followed-link
+            - gate
+            - incidental
+            - user-report
+          cost:
+            type: string
+            enum:
+            - low
+            - med
+            - high
+          status:
+            type: string
+            enum:
+            - open
+            - check-proposed
+            - check-shipped
+            - recurring
+            - fixed-once
+            - wontfix
+          asserted:
+            type: string
+          actual:
+            type: string
+          magnitude:
+            type: string
+          detectable_by:
+            type: string
+          narrated_in:
+            type: string
+          first_written:
+            type: string
+render_template: |-
+  **Claim decay ledger** — {{ claims | length }} entries
+
+  | id | decay_kind | surface | repair_trigger | auto | status |
+  |---|---|---|---|---|---|
+  {% for c in claims %}| {{ c.id }} | {{ c.decay_kind }} | {{ c.surface }} | {{ c.repair_trigger }} | {{ c.automatable | default('?') }} | {{ c.status }} |
+  {% endfor %}

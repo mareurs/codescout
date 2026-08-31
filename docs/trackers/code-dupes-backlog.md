@@ -9,7 +9,7 @@ tags:
 - code-quality
 - duplication
 - refactor
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-code-dupes-backlog.yaml
 ---
 
 ## Audit scope and methodology

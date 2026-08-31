@@ -1,0 +1,17 @@
+schema_version: 1
+prompt: |-
+  Dated **audit record** of Iron-Law gate FIRING CORRECTNESS, keyed GF-N. One pass over codescout-only `.codescout/usage.db` on 2026-08-16.
+
+  Readers — the read/act contract: this audit answers *"should the gate have fired?"*, NOT *"did the agent recover?"*. The recovery question was settled by TU-7 in `docs/trackers/2026-08-15-tool-usage-investigation.md`, which found `il3_pipe_to_trimmer` HEALTHY (85% recovery, 3% immediate repeat) and warned against re-litigating it by count. This audit replicates TU-7 and does not dispute it. To act: take the highest-severity `open` GF-N row, read its body section, and verify the cited code against current source before changing anything — `is_unbounded_lhs` is at `src/util/path_security.rs:906` and line numbers drift. The § Refactor data pack is the reusable part for the IL-3 change; § Baselines are its acceptance tests, and GF-7 is a negative result that must stay at 0% after any change.
+
+  Readers: the maintenance rules below are not yours.
+
+  Maintenance: this is a SNAPSHOT, not live state — do not rewrite body sections and do not re-run the numbers into it; a later audit gets its own dated document. Update a GF-N row's `status` only when its fix lands or its filed bug changes state, via `artifact(action="update_entry", entry_collection="findings", entry_id="GF-N", fields={...})` — never a whole-params patch, which replaces the collection. Keep `findings` under 20 rows; new evidence opens a new audit rather than extending this one.
+entry_collection: findings
+render_template: |-
+  **Audited:** {{ investigated_on }} · **Corpus:** {{ corpus }}, {{ window }} · {{ total_calls }} calls / {{ errors }} errors ({{ iron_law_errors }} Iron-Law, {{ unclassified }} unclassified) · **Findings:** {{ findings|length }} ({{ findings|selectattr("status","equalto","open")|list|length }} open)
+
+  | ID | Finding | Sev | Status | Target |
+  |---|---|---|---|---|
+  {% for f in findings %}| {{ f.id }} | {{ f.title }} | {{ f.severity }} | {{ f.status }} | `{{ f.target }}` |
+  {% endfor %}

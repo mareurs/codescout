@@ -10,7 +10,7 @@ tags:
 - benchmark
 - qdrant
 - embedding
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-retrieval-benchmark.yaml
 ---
 
 ## Why this tracker exists

@@ -1,0 +1,7 @@
+schema_version: 1
+prompt: |-
+  This is a **reflective** tracker (prose-driven, not state-driven): a pre-plan home for proposed codescout capabilities, keyed CAP-N.
+
+  Readers: treat each CAP-N as an idea under consideration, NOT a commitment or a roadmap item. The `Substrate check` line in each entry is the load-bearing part — it states what already exists at path:line and what is genuinely missing. Re-verify it before acting on an entry; substrate moves and a stale check turns a proposal into a wrong instruction. Entries graduate by becoming a spec + plan in docs/superpowers/, or are marked rejected with the reason kept.
+
+  Refreshers: do NOT rewrite body sections. Only update `status` and the Index table row when a human explicitly changes an entry's state. New entries are appended by humans or by agents at a human's request; augmentation refresh here should be rare.

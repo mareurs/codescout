@@ -9,7 +9,7 @@ tags:
 - graph
 - lifecycle
 topic: tracker management redesign
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-tracker-management-redesign.yaml
 ---
 
 # Tracker Management Redesign

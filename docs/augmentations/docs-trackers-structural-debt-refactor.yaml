@@ -1,0 +1,89 @@
+schema_version: 1
+prompt: |-
+  Maintain the SD-N table in params; keep per-finding prose in the body as `### SD-N — <title>` sections.
+
+  Rules:
+  - Append new findings with artifact(action="append_entry", id_prefix="SD", entry_collection="items") — never hand-assign an id.
+  - A finding flips to `fixed` only with a commit SHA in `closed_by`, cited per docs/TAXONOMY.md § Citation format (`experiments:<sha>, not-yet-on-master` or `master:<sha>`). Never a bare SHA.
+  - `fixed` → `verified` requires the baseline re-run recorded in the body History section: test count, clippy, audit-doc-refs. A colour is not a baseline; record the number.
+  - If a finding turns out to produce wrong behaviour, promote it to a bug file under docs/issues/ and flip the row to `superseded` with the bug path in `notes`. Do not fix it here.
+  - Never duplicate a row owned by docs/trackers/legibility-backlog.md (cd886c414f6751b4) — cite it in `notes` instead.
+  - Do not delete rows. Closed findings are the record of what this stream did.
+entry_collection: items
+params_schema:
+  type: object
+  required:
+  - items
+  properties:
+    baseline:
+      type: object
+      properties:
+        commit:
+          type: string
+        tests_passed:
+          type: integer
+        tests_failed:
+          type: integer
+        tests_ignored:
+          type: integer
+        feature_graph:
+          type: string
+    items:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        - title
+        - kind
+        - severity
+        - status
+        properties:
+          id:
+            type: string
+            pattern: ^SD-\d+$
+          title:
+            type: string
+          kind:
+            type: string
+            enum:
+            - law-leak
+            - coverage-gap
+            - over-budget-body
+            - stale-surface
+            - boundary-leak
+          severity:
+            type: string
+            enum:
+            - high
+            - med
+            - low
+          status:
+            type: string
+            enum:
+            - open
+            - in-progress
+            - fixed
+            - verified
+            - wontfix
+            - superseded
+            - blocked-on-decision
+          sites:
+            type: array
+            items:
+              type: string
+          evidence:
+            type: string
+          fix:
+            type: string
+          closed_by:
+            type: string
+          notes:
+            type: string
+render_template: |-
+  _**Baseline:** `{{ baseline.commit }}` — {{ baseline.tests_passed }} passed / {{ baseline.tests_failed }} failed / {{ baseline.tests_ignored }} ignored ({{ baseline.feature_graph }})._
+
+  | ID | Finding | Kind | Sev | Status | Sites |
+  |---|---|---|---|---|---:|
+  {% for i in items %}| {{ i.id }} | {{ i.title }} | {{ i.kind }} | {{ i.severity }} | {{ i.status }}{% if i.closed_by %} ({{ i.closed_by }}){% endif %} | {{ i.sites | length if i.sites is defined else 0 }} |
+  {% endfor %}

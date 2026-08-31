@@ -1,0 +1,7 @@
+schema_version: 1
+prompt: |-
+  This is a dated **investigation record**, not a live-state tracker: one empirical pass over merged `.codescout/usage.db` corpora on 2026-08-15, keyed TU-N.
+
+  Readers: the Baselines table is the reusable part — those numbers are acceptance tests for the fixes filed from TU-1..TU-4, and a re-run should compare against them **on a single project**, because § Method caveats records that month-over-month comparison is project-confounded. Do not treat the findings index as current state: each TU-N's disposition was true on 2026-08-15, and the filed bugs are the live record. TU-7 is a negative result — two high-volume guards that are healthy — recorded specifically so it is not re-litigated by someone ranking error families by count.
+
+  Refreshers: do NOT rewrite body sections. This is a snapshot; a later investigation gets its own dated document rather than editing this one. Only update a TU-N row's disposition when its filed bug changes status.

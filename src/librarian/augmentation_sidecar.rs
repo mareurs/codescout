@@ -551,7 +551,7 @@ mod tests {
             );
 
             // Checked on the PARSED key set, never the text: `params_schema` contains the
-            // substring `params`, so a grep-shaped check passes on all nine of these files.
+            // substring `params`, so a grep-shaped check passes on every one of these files.
             let raw: std::collections::BTreeMap<String, serde_yml::Value> =
                 serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
             assert!(

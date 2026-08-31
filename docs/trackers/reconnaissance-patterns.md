@@ -8,7 +8,7 @@ tags:
 - scout
 entry_high_water_R: 147
 entry_prefix: R
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
 
 # Reconnaissance patterns

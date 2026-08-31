@@ -1,0 +1,15 @@
+schema_version: 1
+prompt: |-
+  **Tracker hygiene log (HY-N)**: findings from the `codescout-companion:tracker-hygiene` sweep — detector hits, misses, and proposals for new detectors.
+
+  **To read:** start at `## Detector trust state`. That table, not this prompt, decides whether a detector's findings are gated individually or in batch: a detector enters `batch` only after two consecutive sweeps where it fired and every finding was approved, and any reject resets it. Entries are `## HY-N — <title>` sections; the headings ARE the index, and there is no index table. The sweep cadence lives in frontmatter (`next-sweep-due`, `sweep-interval-days`), not in params.
+
+  **To add an HY-N entry — ONE call:** `artifact(action="append_entry", id="7e498b6dcb45b924", id_prefix="HY", anchor_heading="## Template for new entries", title=…, body=…)` — omit `entry_collection`; entries are body sections. Passing `anchor_heading` + `title` + `body` **together** is what makes the server write the section; omit any of the three and it only reserves the id. The heading it writes is `## HY-N — <title>`, the only shape link_scan defines a token in. Never compute the id, never suffix it. (Superseded 2026-08-20: this used to be reserve-then-write via a second `body_edits` call — an instance-level workaround, fixed at the source in codescout-companion 1.16.15.)
+
+  **To add a SWEEP entry:** a sweep has no monotonic id — it is dated, not `HY-N` — so it goes through a plain body edit, with the cadence bump in the same call: `artifact(action="update", id="7e498b6dcb45b924", patch={body_edits:[{heading:"## Template for new entries", action:"insert_before", content:"## Sweep YYYY-MM-DD\n…"}], extra:{"next-sweep-due":"<today + sweep-interval-days>"}})`. `edit_markdown` is refused on both paths: the ledger declares `entry_prefix`.
+
+  **Entry types:** a `hit` (a detector caught real drift), a `miss` (drift the detectors structurally cannot see), or a `proposal` (a new detector, with its Fires-when / Evidence-pair / Proposed-fix / Confidence / Cost table). The skill's own rule is that a miss is how a v2 detector earns its way in — so a miss entry is the mechanism, not a complaint.
+
+  **Two conditions every detector proposal must carry**, both learned by getting them wrong: filter findings to the sweep's scope (`doctor` and `link_scan` both span every repo on the machine, and both cap their reported arrays, so a raw count is a sample not a census); and state that a finding is not automatically a fix, because a tracker can be deliberately shaped the way the detector flags.
+
+  **Readers:** the maintenance rules above are not yours.

@@ -15,7 +15,7 @@ tags:
 topic: iron-law-gate-firing
 entry_high_water_GF: 8
 entry_prefix: GF
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-2026-08-16-iron-law-gate-firing-audit.yaml
 ---
 
 # Iron-Law Gate Firing Audit — 2026-08-16

@@ -1,0 +1,10 @@
+schema_version: 1
+prompt: 'Backlog of process/tooling interventions that harden codescout against untested-seam defects — the class where a green test suite hides a real bug (all five entry-graph Stage-2 defects were this shape). To act: take the highest-value `proposed` intervention with mechanical=true first — those are one-time gates that pay forever; read its body rationale under ''## Interventions'', confirm it is not already shipped, then implement. Each intervention names the Stage-2 defect(s) it catches and the defense LAYER (static-gate | mutation-at-ship | standing-lens | durable-recall | cheap-detector) that holds it. Maintenance: append via artifact(append_entry, entry_collection="interventions", id_prefix="I"); never renumber. Status vocab: proposed | in-progress | done | deferred. Structured state (id/title/defects/layer/home/mechanical/status) lives in params; rationale prose in the body; dated events under ''## History''. When params and body disagree on a status, params win. Readers: the maintenance rules are not yours.'
+entry_collection: interventions
+render_template: |-
+  **Source:** {{ source }} · **Interventions:** {{ interventions|length }} ({{ interventions|selectattr("status","equalto","done")|list|length }} done / {{ interventions|selectattr("status","equalto","proposed")|list|length }} proposed / {{ interventions|selectattr("status","equalto","in-progress")|list|length }} in-progress)
+
+  | ID | Intervention | Defects | Layer | Mech | Status |
+  |---|---|---|---|:---:|---|
+  {% for i in interventions %}| {{ i.id }} | {{ i.title }} | {{ i.defects|join(", ") }} | {{ i.layer }} | {{ "✓" if i.mechanical else "—" }} | {{ i.status }} |
+  {% endfor %}

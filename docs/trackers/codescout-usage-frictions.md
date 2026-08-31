@@ -8,7 +8,7 @@ tags:
 - usage
 entry_high_water_U: 50
 entry_prefix: U
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-frictions.yaml
 ---
 
 # Codescout Usage Frictions — U-N Log

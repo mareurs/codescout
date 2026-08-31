@@ -4,7 +4,7 @@ status: active
 title: Artifact augmentation - followups and enhancement roadmap
 entry_high_water_AA: 21
 entry_prefix: AA
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-artifact-augmentation-followups.yaml
 ---
 
 # Artifact augmentation — followups

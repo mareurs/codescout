@@ -1,0 +1,15 @@
+schema_version: 1
+prompt: |-
+  Per-project **R-N reconnaissance ledger**: observations about the recon skill itself — hits, misses, and the rules distilled from them.
+
+  **To read:** start at `## The seven laws`. It is the distillation, and most entries are an instance of one law rather than a separate lesson. `## Index` is a five-column table (ID | Date | Verdict | Pattern | Evidence) carrying one row per body entry.
+
+  **To add an entry — ONE call:** `artifact(action="append_entry", id="5696563f06b2c222", id_prefix="R", anchor_heading="## Template for new entries", title=…, body=…)` — omit `entry_collection`, because entries are `## R-N` body sections, not params rows. Passing `anchor_heading` + `title` + `body` **together** is what makes the server write the section itself; omit any of the three and it only reserves the id. The id is assigned atomically under a transaction — never compute it yourself, and never suffix one. `R-72b` is not a valid entry token at all: link_scan's grammar is `\b[A-Z]{1,3}-\d+\b`, and digit→letter is not a word boundary, so suffixed ids can never be defined or cited.
+
+  The heading shape is load-bearing, which is why the server writes it: link_scan defines a token only as `def_re` = `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, so `## R-99` alone defines nothing and every citation of it dangles. Then add the Index row in a **second** call, using the id `append_entry` returned — never before, since the allocator counts an id claimed by an index row. `## Template for new entries` carries a `comm` check that verifies no body entry lacks one. (Superseded 2026-08-20: this used to be reserve-then-write-via-`body_edits`, an instance-level workaround from when `append_entry` wrote nothing without `entry_collection`. Fixed at the source in codescout-companion 1.16.15.)
+
+  **Required fields:** Verdict, Observed, Seam, narrative, Promote-when, Status, Kin. `Status` is not optional — it is the disposition field and the only thing that makes a fired Promote-when harvestable; 39 of 57 entries carried none for three months. When a criterion fires, UPDATE the Status line; recording the firing only in prose leaves it invisible to every field-presence sweep, which is how R-89/R-90/R-91 sat fully adjudicated and uncounted.
+
+  **Compaction:** promoted or superseded entries move to `docs/trackers/archive/reconnaissance-patterns-archived-entries.md` as headed sections — never reduced to a bare index row. Row-reduction destroys the token's definition; it produced ~30 of this project's 39 sampled dangling citations before the 2026-08-17 migration.
+
+  **Readers:** the maintenance rules above are not yours. Take the lesson and move on.

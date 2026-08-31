@@ -1,0 +1,13 @@
+schema_version: 1
+prompt: |-
+  Design tracker for the next-generation tracker-management approach (graph model / external service / lifecycle policies). To act as a reader: check the TMR-N requirements table in params — `accepted` rows are binding constraints on any design proposal; `proposed` rows need a decision; then read the body's Survey Evidence section before challenging any requirement (each one is empirically grounded, with sources). Readers: the maintenance rules below are not yours.
+
+  Maintenance: append new requirements via artifact(append_entry, entry_collection="requirements", id_prefix="TMR") — never renumber existing rows. Status vocabulary for rows: proposed | accepted | rejected | superseded. Evidence and rationale prose belongs in the body (one subsection per TMR-N under '## Requirements rationale'); the params row holds only id, title, status, evidence_refs. When body and params disagree on a row's status, params win. New survey data goes under '## Survey evidence' as a dated subsection. Design-direction debate goes under '## Candidate directions'. Keep params under 40 rows; keep each body rationale subsection under 40 lines. Log each working session as '### YYYY-MM-DD — <event>' under '## History'.
+entry_collection: requirements
+render_template: |-
+  **Last survey:** {{ last_survey }} · **Requirements:** {{ requirements|length }} ({{ requirements|selectattr("status","equalto","accepted")|list|length }} accepted / {{ requirements|selectattr("status","equalto","proposed")|list|length }} proposed)
+
+  | ID | Requirement | Status |
+  |---|---|---|
+  {% for r in requirements %}| {{ r.id }} | {{ r.title }} | {{ r.status }} |
+  {% endfor %}

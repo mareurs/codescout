@@ -1,0 +1,36 @@
+schema_version: 1
+prompt: 'Refresh this tracker''s state. Update params.phases[].status from the ## Phase status table. Check the ## Tasks table for any newly completed tasks (AA-19, AA-20 are the active ones). If any acceptance checkboxes in Phase 3 or Phase 4 sections have been ticked, update the corresponding phase status to "partial" or "done". Keep everything else unchanged.'
+params_schema:
+  type: object
+  required:
+  - phases
+  properties:
+    phases:
+      type: array
+      items:
+        type: object
+        required:
+        - id
+        - title
+        - status
+        properties:
+          id:
+            type: number
+          title:
+            type: string
+          status:
+            enum:
+            - done
+            - partial
+            - open
+            - blocked
+            - dropped
+        additionalProperties: false
+    gather_from:
+      type: array
+  additionalProperties: false
+render_template: |-
+  | Phase | Title | Status |
+  |------:|-------|--------|
+  {% for p in phases %}| {{ p.id }} | {{ p.title }} | {{ p.status }} |
+  {% endfor %}

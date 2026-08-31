@@ -14,7 +14,7 @@ tags:
 topic: refactoring
 entry_high_water_SD: 11
 entry_prefix: SD
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-structural-debt-refactor.yaml
 ---
 
 ## Why this exists

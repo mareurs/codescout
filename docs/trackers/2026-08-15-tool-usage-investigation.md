@@ -12,7 +12,7 @@ tags:
 - agent-guidance
 - baselines
 topic: tool-usage-investigation
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-2026-08-15-tool-usage-investigation.yaml
 ---
 
 > **Prefix:** `TU-N` — a finding from this investigation. Work-stream-scoped, defined here, not a

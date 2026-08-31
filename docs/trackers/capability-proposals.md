@@ -13,7 +13,7 @@ tags:
 topic: capability-proposals
 entry_high_water_CAP: 11
 entry_prefix: CAP
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-capability-proposals.yaml
 ---
 
 ## Why this exists

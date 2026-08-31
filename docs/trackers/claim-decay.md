@@ -10,6 +10,7 @@ tags:
 - doctor-candidates
 topic: claim decay, unrepaired assertions, drift detection
 entry_prefix: DC
+expects_augmentation: docs/augmentations/docs-trackers-claim-decay.yaml
 ---
 
 # Claim Decay — durable claims with no scheduled repair

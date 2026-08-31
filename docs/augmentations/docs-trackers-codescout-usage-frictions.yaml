@@ -1,0 +1,13 @@
+schema_version: 1
+prompt: |-
+  **Codescout usage frictions (U-N)**: friction met while *using* codescout's tools — tool slips, prompt drift, hook false positives.
+
+  **To read:** entries are `### U-N — <title>` sections, and the headings ARE the index — this ledger keeps no index table, deliberately. Numbering has gaps where entries were promoted or archived; that is expected, not damage.
+
+  **To add:** `artifact(action="append_entry", id="c43df94e69ca915f", id_prefix="U")` — omit `entry_collection`, because entries are body sections rather than params rows. The server assigns the id atomically under a transaction: never compute it from a grep, and never suffix it (`U-40b` is not a valid entry token — the grammar is `\b[A-Z]{1,3}-\d+\b`, and digit→letter is not a word boundary).
+
+  Then write the section with `artifact(action="update", id="c43df94e69ca915f", patch={body_edits:[…]})`. `edit_markdown` is refused here — this ledger is augmented. The heading must be `### U-N — <title>` exactly: `link_scan`'s `def_re` is `^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`, so a heading without the dash-and-title defines no token and every citation of the entry dangles.
+
+  **Promotes to:** an H-N hookify rule, a CLAUDE.md note, or a `src/prompts/source.md` edit. When a promotion lands, say so in the entry and cite the commit — a friction fixed silently reads as still-open to the next sweep.
+
+  **Readers:** the maintenance rules above are not yours. Take the friction and move on.

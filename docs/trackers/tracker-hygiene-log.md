@@ -7,9 +7,9 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
-entry_high_water_HY: 22
+entry_high_water_HY: 23
 entry_prefix: HY
-expects_augmentation: true
+expects_augmentation: docs/augmentations/docs-trackers-tracker-hygiene-log.yaml
 next-sweep-due: 2026-09-24
 sweep-interval-days: 30
 ---
@@ -1724,6 +1724,79 @@ to check, not a conclusion.
    the *declared* caveats; the undeclared ones — the population this entry found by hand —
    are still uncounted, and no detector can count them, because there is nothing to key on.
    That asymmetry is worth a detector proposal, but it is not this one's bug.
+
+## HY-23 — Miss: the queue holds THREE representations, and no detector compares the two that drifted
+
+**Verdict:** miss — a drift class no live detector can see, found only because a repair
+walked into it.
+
+**Valid:** dated 2026-08-31
+
+**Rests on:** `get_guide("tracker-conventions")` § *One entry format, never two*; this
+sweep's repair of `open-issue-work-queue.md` (`9a892c2a5976e296`).
+
+## What happened
+
+`open-issue-work-queue.md` carries **three** representations of every `BL-N`, not two:
+
+1. `params.tasks` rows (catalog-only, gitignored),
+2. a `## Queue — rendered snapshot` **table row**,
+3. a `### BL-N — <title>` **per-entry section** with its own `**Status:**` line.
+
+`doctor` compares (1)↔(2). `params_behind_body` compares id **sets** across (1) and the
+body. **Nothing compares (2)↔(3)** — and that is where the corpus had actually drifted:
+8 of the 24 sections disagreed with their table row, the table being the maintained side
+in every case.
+
+## Why it is worse than it sounds
+
+The section is the representation a reader lands on. `artifact(get, heading=…)` and every
+`grep` for `**Status:**` return the section; the table is 900 lines away under a heading
+dated `2026-08-18` that makes it *look* like the stale one. So the sweep's own
+verify-open pass, run from the sections, concluded that **BL-45 was open awaiting an
+operator decision** when its table row had recorded it `done` — shipped at `22f8b8d5`,
+five tests, live since the 2026-08-29 rebuild. A report was one step from carrying that
+claim.
+
+The inverse error was equally available: six sections *were* genuinely stale in the
+other direction (BL-48/50/51/60/66/67, all resolved 2026-08-30), so a reader trusting
+sections over table would have re-done finished work. Direction is not a property of the
+artifact — the same file drifted both ways at once, which is the same conclusion
+`sidecar_shape_drift`'s first live run reached (see BL-50's cell).
+
+## Why the existing checks are blind by construction
+
+`params_status_drift` is a params-anchored check: it iterates `params` rows and looks for
+each one's status in the body. An entry with **no params row cannot be iterated**, so all
+24 backfilled entries were invisible to it — and once the rows existed it reported 4, not
+8, because it locates the *table row* and never reads the section. The two checks
+compose to leave (2)↔(3) uncovered at every id.
+
+## Proposed detector — D12 section-vs-table status drift
+
+| | |
+|---|---|
+| **Fires when** | A ledger renders both a table row and a `### <ID>` section for one id, and the section's `**Status:**` token differs from the table cell's leading verdict |
+| **Evidence pair** | *"table row states `done`; section states `open`"* |
+| **Proposed fix** | A judgment gate, never an auto-align — which side is canonical is per-ledger, and here it was the table, contrary to `tracker-conventions`' stated preference for headings |
+| **Confidence** | high (syntactic), but the *verdict* is low-confidence by design |
+| **Cost** | Same locator `scan_params_status_drift` already has; it resolves both regions today and simply never compares them to each other |
+
+Two conditions this proposal must carry, per this ledger's standing rule. Scope findings
+to the sweep's project — the locator is shared with checks that span every repo on the
+machine. And state that a finding is not automatically a fix: a ledger may deliberately
+keep a terse table token beside a section that qualifies it in prose, which is precisely
+what BL-49 and BL-58 do.
+
+## The standing-mechanism reading
+
+This is an `OB`-shaped class and belongs in that conversation. The party who cannot see
+it is the author *updating* an entry: they edit the representation they are looking at,
+and the edit succeeds, and the tool reports success. `body_edits` moves one region with
+no surface reporting the other two. BL-44's cell already recorded the params half of this
+(*"self-inflicted by the documented workflow"*); the section half is the same defect one
+representation over, and it went unrecorded because the check written in response to
+BL-44 was scoped to the pair that had just failed.
 
 ## Template for new entries
 
