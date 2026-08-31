@@ -822,6 +822,8 @@ Expected: hits in `CM-1` and the `CM-2` heading — the three claims this task r
 `CM-2`'s `Status:` is `open` and `Valid: invariant`. The invariant is false, so
 both change. Note the heading itself says "permanently" and must change too.
 
+> **Superseded 2026-08-31.** The heading these selectors name no longer exists — the final-review fix wave appended `— RETRACTED 2026-08-31` to it, so both `"heading"` values below are stale by exactly that suffix. Kept verbatim as the record of what the plan asked for. A selector written as full heading text is a by-text positional reference and breaks on any title edit; this is the sixth site of that class in this run.
+
 ```
 artifact(action="update", id="f4923e5e894de62f", patch={"body_edits": [
  {"heading": "## CM-2 — provenance-subsystem is missing 38 rows, permanently",

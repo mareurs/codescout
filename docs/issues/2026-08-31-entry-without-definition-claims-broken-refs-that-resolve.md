@@ -69,7 +69,7 @@ reads the citation graph, so the split is measured rather than assumed"* — whi
 the **cited / uncited** split it computes, and not true of the resolves-to-nothing claim it
 attaches to that split.
 
-*Mechanism located during Task 1 review at `src/librarian/tools/doctor.rs:3222` and `:3236`
+*Mechanism located during Task 1 review at `src/librarian/tools/doctor.rs:3227` and `:3240`
 (`body_defined_indices`); symptom measured independently by running `doctor` and
 `link_scan` back to back at `9ac9e6d5`.*
 
@@ -133,7 +133,7 @@ correct fix costs a lookup or a second pass.
 
 ## References
 
-- `src/librarian/tools/doctor.rs:3169` — `scan_undefined_entries`; `:3222`, `:3236` —
+- `src/librarian/tools/doctor.rs:3169` — `scan_undefined_entries`; `:3227`, `:3240` —
   `body_defined_indices`
 - `src/librarian/tools/link_scan/extract.rs:319-322` — `def_re`, the shared definition shape
 - `docs/issues/archive/2026-08-19-entry-without-definition-asserts-omission-without-checking-citations.md`

@@ -85,7 +85,7 @@ is read by every agent that meets a tracker cold — purely to clear a check. An
 `expects_augmentation` firing is a *precise* signal; filling it with reconstruction
 converts it into a false all-clear.
 
-**Correction 2026-08-31 — the premise below is false.** All five have live augmentations in the desktop's `catalog.db`: `structural-debt-refactor` (11 `items`, 25,455 bytes of params), `test-escape-hardening` (7 `interventions`), `retrieval-benchmark`, `code-dupes-backlog`, `2026-08-15-tool-usage-investigation`. Restoration is therefore possible and would **not** be invention. This does not overturn the entry's decision — the argument that restoring an augmentation purely to clear a check converts a precise signal into a false all-clear still stands, and the `[LIVE]` block is still read by every agent meeting the tracker cold. Only the impossibility claim is withdrawn. Original text follows.
+**Correction 2026-08-31 — the premise below is false.** All five have live augmentations in the desktop's `catalog.db`: `structural-debt-refactor` (11 `items`, 25,455 characters / 25,521 bytes of params), `test-escape-hardening` (7 `interventions`), `retrieval-benchmark`, `code-dupes-backlog`, `2026-08-15-tool-usage-investigation`. Restoration is therefore possible and would **not** be invention. This does not overturn the entry's decision — the argument that restoring an augmentation purely to clear a check converts a precise signal into a false all-clear still stands, and the `[LIVE]` block is still read by every agent meeting the tracker cold. Only the impossibility claim is withdrawn. Original text follows.
 
 Five of the 13 have **no provenance anywhere**: `2026-08-15-tool-usage-investigation`,
 `code-dupes-backlog`, `retrieval-benchmark`, `structural-debt-refactor`,
@@ -94,7 +94,7 @@ Five of the 13 have **no provenance anywhere**: `2026-08-15-tool-usage-investiga
 **Next:** nothing, until someone writes a query against one. Then restore that one
 per § 7, and only that one.
 
-## CM-2 — provenance-subsystem is missing 38 rows, permanently
+## CM-2 — provenance-subsystem is missing 38 rows, permanently — RETRACTED 2026-08-31
 
 **Status:** fixed 2026-08-31 — recovered in full from the desktop catalog
 **Valid:** dated 2026-08-31
@@ -147,6 +147,8 @@ question/answer cells because no canonical title survived the catalog loss. Ever
 table. A reader who takes an authored title as recovered would be citing an
 invention, so each heading's metadata line says which it is and points at the row's
 `note` for the full argument.
+
+Also 2026-08-31: this entry's **Status** line above is no longer current in one respect. `entry_without_definition` reads **1** again today, naming `e12cd7e0060ed9b8` — Task 2's restore of the 38 `items` rows brought them back into the check's count, expected and not a regression. The check's accompanying claim that the 31 cited ids "resolve to nothing right now" is false as of Task 1 and is filed as `docs/issues/2026-08-31-entry-without-definition-claims-broken-refs-that-resolve.md`: `scan_undefined_entries` reads only the ledger's own body, and the 38 are now defined in `docs/trackers/archive/provenance-subsystem-recovered-entries.md`. So the count is 1, the count is expected, and the count is misleading — three separate claims, none of which the 2026-08-28 Status line anticipated.
 
 Note this closes a citation break, not a cosmetic gap: those four ids were cited
 from outside and resolved to **nothing**.

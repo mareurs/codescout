@@ -301,6 +301,8 @@ problem with zero measured instances.
 the same entry between syncs, where neither side is a superset. At that point this becomes
 the right answer and the `merge_worktree` machinery is already built.
 
+**That condition fired the same day, 2026-08-31.** `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md` records two hosts allocating the same `R-147` for different entries — desktop high-water 146, laptop 147 unpushed, neither side a superset. So "zero measured instances" above is no longer true and this section's rejection now rests only on its other two reasons (no natural fork event, and the transport requirement). Note the counterexample is an *allocator* collision rather than a params three-way, which is the narrower thing `merge_host` would have to cover.
+
 ### 2.4 Rejected as the answer, adopted as a stopgap
 
 Routine `sqlite3 .backup` of `catalog.db` to a synced location, plus a documented

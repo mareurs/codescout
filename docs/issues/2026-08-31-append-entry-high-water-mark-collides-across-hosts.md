@@ -140,7 +140,7 @@ push.
 
 Price the three fix options above. Start by reading how `append_entry` reaches its refusal
 for worktrees (`references` on the worktree guard from
-`src/librarian/catalog/augmentation.rs`) and check whether that refusal site has access to
+`src/librarian/tools/append_entry.rs:97`) and check whether that refusal site has access to
 git upstream state, since option 1's cost is dominated by that question.
 
 ## References

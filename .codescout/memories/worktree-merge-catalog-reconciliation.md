@@ -53,3 +53,61 @@ on hand-copying params. `reseat`/`graft` re-point events/observations/links/even
 Tools shipped on `experiments` (commits 49214372..bc1119c9 + 89fd089b); a companion
 orchestration skill was investigated and REFUTED by baseline (tools + schema
 discoverability suffice). Design: `docs/superpowers/specs/2026-07-10-worktree-merge-tracker-safety-design.md`.
+
+## Cross-machine (two clones, not a worktree) — schema and params are mutually gating
+
+Measured 2026-08-31 reconciling this desktop's catalog against the laptop's. The
+worktree flow above does not cover it: a worktree has a `worktree_fork` creation
+event to three-way against, and a second clone has none.
+
+**The trap.** When two hosts have both migrated an augmentation's `params_schema`
+AND its `params` to a new field shape, you cannot restore one field-group at a time
+in either order. `artifact_augment` validates merged params against the schema, so:
+
+- old stored schema **rejects** new params, and
+- new schema **rejects** the old stored params.
+
+Measured on `research/README` (`5086e3c7c0b9d83c`): stored schema had
+`required: [file, …]` **plus `additionalProperties: false`**, while the incoming rows
+carried `path` — so they failed on **two** counts at once (missing `file`, unexpected
+`path`). Sanity checks confirmed old/old and new/new both accept, so the
+incompatibility is exactly the swapped field. `fable-tuning-findings`
+(`35de33286cd34f87`) showed the same mutual rejection on `claim` vs `title`.
+
+**The escape is one atomic call, and it is a designed affordance rather than a
+bypass.** `validate_merged_against_schema` (`src/librarian/tools/augment.rs:36-52`,
+called at `:370`, comment-tagged `F-5`) validates merged params against *the schema
+this call supplies*. So a single `artifact_augment(merge=true, …)` carrying params and
+`params_schema` together is fully validated against the target schema — not slipped
+past a guard. The three-call alternative (permissive schema → params → real schema)
+touches shape fields twice, doubling exposure to the write-through bug below.
+
+**Two hazards that bite here specifically.**
+
+- **`artifact_augment` republishes the WHOLE augmentation row**, so a call changing
+  one field publishes its stale siblings over a correct sidecar. Open bug:
+  `docs/issues/2026-08-31-artifact-augment-write-through-republishes-the-whole-row.md`.
+  This is why fewer, atomic calls are safer than more, narrower ones.
+- **`append_entry`'s high-water mark collides across hosts.** It already refuses id
+  allocation from a *worktree* (`src/librarian/tools/append_entry.rs:97`) on exactly
+  these grounds, but `is_main_checkout_artifact` cannot see a second clone. Measured:
+  desktop `entry_high_water_R: 146`, laptop `147` unpushed, and both desktop allocator
+  inputs resolved to 147. Open bug:
+  `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
+
+**Establish sync direction empirically, never by heuristic.** "Longer field = newer"
+was wrong on 5 of 9 `render_template`s — the other host had *condensed* them. What
+settled it was byte-comparing one host's catalog against the committed sidecars.
+
+**Prefer a field-level union to a wholesale copy.** Two hosts' row counts matching
+(30 vs 32) says nothing about per-field content: 10 rows carried a `verdict` on one
+host and `<none>` on the other, so copying either side's params would have erased ten
+fields while every count looked healthy.
+
+**`length()` on TEXT is CHARACTERS, not bytes** — `length(CAST(x AS BLOB))` is bytes.
+Six wrong "N bytes" claims in one session came from this.
+
+Full design and the rejected alternatives:
+`docs/superpowers/specs/2026-08-31-cross-machine-catalog-integration-design.md`
+(§ 1.3a is this deadlock). Recovery plan and its 47 steps:
+`docs/superpowers/plans/2026-08-31-cross-machine-catalog-recovery.md`.
