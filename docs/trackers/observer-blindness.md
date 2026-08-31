@@ -468,6 +468,29 @@ callers. The independent substrate is `/proc/<pid>/cwd`, which is what supplies 
 (5 live sessions rooted in this checkout) and which neither `ListAgents` run could have produced.
 Count distinct substrates, not distinct sessions.
 
+**Third instance, 2026-09-01, and it is the sharpest limit on this entry's own remedy: agreement
+between instruments verifies the MEASUREMENT and never the REFERENT.** A peer moved to correct a
+reported commit stat, and reported having *"confirmed on two instruments before saying so"* —
+`git show --stat` and `--numstat`, which agreed exactly. Both were correct. Both read
+`42376ac2`, whose prediction of `16/3` matched its actual `16/3` perfectly; the claim under
+discussion was about `c7be203f`, predicted `17/2` against an actual `19/1`. The instruments were
+not the failure and neither was the arithmetic — **the object was**, and instrument agreement is
+structurally incapable of detecting that, because both were handed the same wrong referent and
+agreed about it faithfully.
+
+> So *"count distinct substrates"* is necessary and not sufficient. It disciplines **how** you
+> measure and says nothing about **what**. Before citing agreement as corroboration, state the
+> object each instrument was pointed at and check it is the one under discussion — a step that
+> feels redundant precisely because the referent is the part you are not thinking about while
+> choosing instruments. The failure returns a confident, internally consistent, fully verified
+> wrong answer, which is this ledger's defining property arriving through the verification step
+> itself.
+
+Recorded as the class, not the incident: it is structurally available to anyone, and the session
+writing it up had committed a purer form of it hours earlier — quoting a commit SHA (`2dd5e4d3`)
+read off `git show --stat HEAD | tail -4`, output that confirms a commit while never containing
+its identifier. Same shape, one instrument instead of two: the referent was never checked.
+
 **Mechanism status:** none yet — this is the open worklist row.
 
 - **Practice, effective immediately:** before deleting anything large, grep for **citations**
