@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 83
+entry_high_water_F: 84
 entry_high_water_W: 89
 ---
 
@@ -133,6 +133,7 @@ entry_high_water_W: 89
 | F-79 | 2026-08-30 | low | cross-session | mitigated | Told a peer a shared file was clean, kept editing it, and their explicit-path `git add` swept my BL-51/BL-52 re-statusing into a commit about archiving a different bug. Not `W-69`'s committer-side check but its missing sender-side half: "clean" is a claim with an expiry only the sender can see, so an all-clear should name a SHA or be retracted the moment you touch the file again |
 | F-78 | 2026-08-29 | low | self-friction | fixed-verified | Attributed a test failure to a peer's uncommitted file from a keyword count in its diff (19 × "timeout" across +137 lines). Wrong twice: the real cause was a `tokio::try_join!` race inside the test itself (`21174425`), and the "cheap decisive check" I first proposed — run it in isolation — PASSES, so it confirms the flake reading wrongly. The instrument whose subject was the failure was reading `embed_one_batch` |
 | F-83 | 2026-09-01 | high | codescout-tool | open | `artifact(get)` carries `updated_at` per response but nothing says "changed since your last read", so two reads of one artifact 5.7 min apart composed a contradiction present in neither commit either side of it (75085 vs 78448 bytes = `13226bda^` vs `13226bda`). Five false "the ledger contradicts itself" findings were one step from a user-facing report; the natural reading blames the FILE, not the read |
+| F-84 | 2026-09-01 | med | codescout-tool | open | A rebuild + `/mcp` refreshes the SERVER but not its LSP mux delegates. A `$PPID` walk proves this session fresh (pid 2695653, 15s post-build, `/proc/exe` with no ` (deleted)`), while six siblings ran the replaced inode — including this repo's own rust-analyzer mux, started 00:04:55, half an hour before the build. Binary mtime, the `~/.cargo/bin` symlink, a clean tree, the last source commit and the reconnect itself ALL read green; only `/proc/<pid>/exe` did not. R-89's fourth axis: delegate |
 
 ## Wins Index
 
@@ -8323,6 +8324,71 @@ not yet reached.
 the busy peer `codescout-fc [a90dcf]` is what made a re-read obviously worth its cost rather
 than paranoia. Without a liveness signal the same discipline still applies but has no cheap
 trigger, which is the open half of this win.
+
+## F-84 — A rebuild plus `/mcp` refreshes the server but not its LSP mux delegates — six stale-image processes stayed live, one of them this repo's rust-analyzer mux
+
+**Observed:** 2026-09-01 00:35, immediately after a `cargo rb` release build (binary mtime
+00:34:16) and an `/mcp` reconnect.
+
+**When:** Scouting whether this session's tool calls were being served by the rebuilt binary —
+`R-89`'s freshness law, which names **build**, **process** and **distribution** as three
+independent axes that `mtime` answers none of.
+
+**Expected:** memory `gotchas` § *MCP Binary Symlink* states the whole remedy in one line —
+*"After a release build, run `/mcp` to reconnect."* Read plainly, a reconnect makes the
+session fresh.
+
+**Got:** The reconnect refreshes the **server** and nothing else. Probing the copy that
+actually serves this session — `run_command`'s shell is a child of the serving process, so
+`$PPID` *is* it — gives pid 2695653, started 00:34:31, with `/proc/2695653/exe` resolving to
+`target/release/codescout` and **no ` (deleted)` suffix**: genuinely fresh, 15 s after the
+build. But six sibling `codescout` processes were still live on the **replaced inode**, which
+the kernel reports for free as `(deleted)`. Five are `start --debug` servers belonging to other
+sessions/profiles (Aug 31 11:20, 11:38, 14:46, 21:45, 22:20). The sixth is the one that
+matters: **`2344690`, the rust-analyzer mux for this very project** —
+`--socket …codescout-rust-mux-7e868829c00fa9b2.sock`, `--cwd` this repo — started 00:04:55,
+half an hour before the build.
+
+**Probable cause:** a mux is keyed by project hash and shared across sessions, so a freshly
+started server **attaches to whatever mux already holds the socket** rather than spawning its
+own. The reconnect therefore cannot reach it. Observed, not inferred: the Kotlin mux is fresh
+(2693964, started 00:34:23) while the Rust mux is not, and their command lines carry
+`--idle-timeout 300` and `--idle-timeout 180` respectively. I have **not** proved why one
+lapsed and the other did not — what is proved is that a rebuild plus a reconnect does not
+refresh a mux that stays alive. If the mechanism is idle-lapse, the inversion is the finding:
+the busier a language's mux, the likelier it is to be stale, so the delegate serving the most
+queries is the one most likely to be running old code.
+
+**Workaround:** `readlink /proc/<pid>/exe` and look for the trailing ` (deleted)`. It is the
+only signal here that does not read green in the broken world — binary mtime, the
+`~/.cargo/bin/codescout` symlink, a clean `git status`, the last source commit and the
+reconnect itself **all** reported fresh while six stale images ran. To find the process serving
+*you* rather than guessing from `pgrep`, walk up from `$PPID` inside a `run_command` shell.
+
+**Severity:** med — no wrong result is attributed to it here: this session issued no
+`symbols` / `references` / `symbol_at` call after the rebuild, so the stale Rust mux served
+nothing. The cost is that *"I reconnected"* is currently read as proof of freshness across the
+whole tool surface, and the delegate axis is invisible to every documented check. Cross-session
+corollary, live this evening: peers `codescout-fc` and `codescout-d9` are on stale images, so
+tool-behaviour findings exchanged between sessions are not automatically comparable.
+
+**Status:** open
+
+**Valid:** dated 2026-09-01
+
+A process list is a fact about an instant — re-derive with the `/proc/<pid>/exe` sweep rather
+than trusting these pids.
+
+**Rests on:** `R-89`'s three-axis freshness law, of which this is a fourth axis —
+**delegate**; and on the kernel's `(deleted)` marker being an image-identity signal that no
+userspace bookkeeping can falsify.
+
+**Fix idea / Pointer:** memory `gotchas` § *MCP Binary Symlink* should say that the reconnect
+does not reach muxes, and name the `/proc/<pid>/exe` sweep as the check — a one-line doc fix
+that closes the "reconnect means fresh" reading. A stronger fix is a build-id handshake at mux
+attach: a mux whose build id differs from the connecting server's is asked to exit and
+respawn. That needs the mux's restart cost weighed first (a Kotlin mux respawn is expensive and
+`gotchas` already documents cold-start pain), so it is a proposal, not a prescription.
 
 ## Template for new entries
 
