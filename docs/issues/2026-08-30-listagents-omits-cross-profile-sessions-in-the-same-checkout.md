@@ -13,7 +13,7 @@ closed: 2026-08-30
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: Root cause UNFIXED and unfixable here — ListAgents' profile-scoped registry is a harness defect. Only the local mitigation shipped (scripts/peer-sessions.sh + PROBES.md row). Nothing prevents a session from trusting ListAgents' count instead of running the probe; the placement makes it reachable, not mandatory. Re-open if the harness changes, or if a seventh misattribution occurs despite the probe existing — that would mean placement was not enough and the count needs to be wrong LOUDLY rather than quietly.
+unverified: Root cause is now MEASURED (registry files on disk, n=7, both cells) but still UNFIXED and unfixable here — the profile-scoped registry is a harness defect. Only the local mitigation shipped (scripts/peer-sessions.sh + PROBES.md row). Nothing prevents a session from trusting ListAgents' count instead of running the probe; the placement makes it reachable, not mandatory. Re-open if the harness changes, or if a seventh misattribution occurs despite the probe existing — that would mean placement was not enough and the count needs to be wrong LOUDLY rather than quietly.
 ---
 
 > **Not a codescout bug.** `ListAgents` is a Claude Code harness tool; its source
@@ -450,6 +450,44 @@ established relationship to the question. Reasoning harder would not have helped
 > What survives unchanged: **elimination over visible peers is still wrong**, since the
 > visible set is a profile, not a population. What dies is the claim that no correction is
 > possible — the correction is one `/proc` read per process.
+###### Superseded 2026-08-31 — it is not arbitrary, it is profile-scoped
+
+The reading above is **wrong**, and is kept rather than deleted because the reasoning that
+produced it is the point. The discriminator is `CLAUDE_CONFIG_DIR`, measured across all
+seven live sessions from both cells — see § *Root cause*.
+
+**Why "arbitrary" was the honest conclusion from the data available.** Each observer sees
+their own profile, so the two views are irreconcilable *from inside*: `codescout-f0` saw
+2-of-2 outside this checkout and 1-of-4 inside; 801487 saw 0-of-2 outside and 2-of-4
+inside. Same rule, opposite-looking evidence. Neither could derive it alone, and no amount
+of care applied to one observer's data would have produced the answer.
+
+`codescout-f0`'s compression is the durable lesson, and it is better than the claim it
+replaces: **"arbitrary is what two irreconcilable single-observer views look like from
+inside."** That is R-136's *sampling* row, whose prescribed check is literally *second
+observer* — the taxonomy named the resolving instrument before anyone reached for it.
+
+**The remedy improves rather than merely changing.** "Arbitrary" implied the population
+was unrecoverable and socket addressing was the only method. A profile partition is
+**enumerable**: one `/proc/<pid>/environ` read per session tells you exactly whom you are
+blind to. Socket addressing stays correct — delivery is unfiltered, discovery is not — but
+it is no longer a fallback from an unknowable set, and the probe can now report which half
+of the population its caller's `ListAgents` cannot see.
+
+**And the topology was on record the whole time, which is the uncomfortable part.**
+`~/.claude/CLAUDE.md` opens by stating this machine runs three instances with independent
+config dirs, naming all three. Five sessions spent an evening deriving a partition from
+behaviour while that sat in every one of their contexts.
+
+One precision, because it changes the remedy: CLAUDE.md documents the **topology**, not the
+**consequence** — that peer discovery is scoped to the config dir is a real inference, not a
+lookup, and grepping CLAUDE.md for `ListAgents` returns nothing. So this is not a search
+failure and "search harder" would not have helped. It is a **relevance-recognition**
+failure: nothing about a peer-visibility question looks like a config-topology question.
+The actionable form is narrower and worth stating as a rule — *when an observed partition
+has no explanation, check whether the ENVIRONMENT already partitions along some axis
+before theorising about the instrument.* Knowing three profiles existed would have made
+profile-scoping the first hypothesis rather than the third.
 ##### A third observer, and the "inverted" reading does NOT hold
 
 `codescout-f0` offered a sharper figure than arbitrariness — that the view is
@@ -547,11 +585,73 @@ reader has no way to tell those apart. Compare
 more than it has established.
 ## Root cause
 
-**Inferred, not read** — the source is not in this repo. Discovery appears scoped to
-the calling session's profile root while the socket directory is machine-global. The
-fix shape is to enumerate `/run/user/<uid>/cc-socks/` rather than a profile-local
-registry, or failing that to say what was searched.
+**MEASURED 2026-08-31** — upgraded from "inferred, not read". Claude Code's source is
+still not in this repo, but the mechanism is visible on disk, and it is **two layers with
+different scopes**.
 
+**Layer 1 — the registry (discovery), PER-PROFILE:**
+
+```
+~/.claude/sessions/       801487.json  803654.json  810953.json
+~/.claude-sdd/sessions/   790936.json  807989.json  2053449.json  3954769.json
+```
+
+**Layer 2 — the socket (delivery), PER-USER and shared:**
+
+```
+/run/user/1000/cc-socks/  {790936,801487,803654,807989,810953,2053449,3954769}.sock
+                          + 21781.sock  (stale — no process)
+```
+
+3 + 4 = 7 = every live session. `ListAgents` from a `~/.claude` session lists exactly
+801487 and 810953 — **its own profile's registry minus itself**. Confirmed from the other
+cell by `codescout-f0` (807989, `~/.claude-sdd`), whose list is exactly the three other
+`.claude-sdd` sessions. Both directions, no exceptions, n=7.
+
+A session record, read from `~/.claude/sessions/803654.json` (mode 644):
+
+```json
+{"pid":803654,"name":"codescout-ae","nameSource":"derived","kind":"interactive",
+ "status":"busy","cwd":"/home/marius/work/claude/codescout",
+ "startedAt":1788077411740,"procStart":"6083097",
+ "messagingSocketPath":"/run/user/1000/cc-socks/803654.sock",
+ "pidDomain":"linux:44ac14c3…:pid:[4026531836]","peerProtocol":1,
+ "peerFeatures":["notify_idle","reply_across_default_dirs","artifact_yield"],
+ "version":"2.1.251"}
+```
+
+Every column `ListAgents` renders — `name`, `kind`, `status`, `startedAt` — is a field
+here. The tool is rendering this file.
+
+**This restates the bug.** `peerFeatures` declares **`reply_across_default_dirs`**:
+cross-config-dir replying is a *supported capability*, not an accident. So the defect is
+NOT that cross-profile messaging is broken — it is that **discovery is profile-scoped
+while delivery is deliberately not**. Different bug, different fix. The title's "omits …
+sessions" is right; any reading of "cannot reach them" is wrong, and § *Invisible is NOT
+unreachable* was correct before anyone knew why.
+
+**Two design details worth keeping**, because they constrain what a mitigation may do:
+
+- **`procStart` beside `pid` is PID-reuse defence.** A PID alone is recyclable, so a stale
+  record could address an unrelated process. That is what lets the probe classify
+  `21781.sock` as stale rather than silently messaging a stranger. `pidDomain`
+  (`linux:<machine-id>:pid:[<ns-inode>]`) does the same across namespaces, and is why the
+  `[ref]` disambiguator exists at all.
+- **The permission split is the design in miniature.** `803654.json` is `644`; the sibling
+  `803654.<hash>.key` is `600`. Knowing WHO EXISTS and being able to SPEAK AS THEM are
+  separated at the filesystem layer — so a probe that reads the registry needs no
+  privilege it should not have.
+
+**Fix shape — unchanged, but now justified rather than guessed:** enumerate
+`/run/user/<uid>/cc-socks/`, the profile-blind layer, rather than a profile-local
+registry; or, failing that, name the scope searched. That is exactly what
+`scripts/peer-sessions.sh` does, which is why it sees all seven and why it cannot be
+scoped by config dir even in principle.
+
+*(One boundary, stated rather than glossed: I have not read Claude Code's source. "ListAgents
+reads these files" rests on an exact correspondence — 3/3 and 4/4, both directions, two
+observers — plus the record containing every field the tool renders. That is strong, and it
+is not the same as having read it.)*
 ## Fix
 
 Ranked, and (b) is the one that matters even if (a) never happens.
