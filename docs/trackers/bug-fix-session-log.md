@@ -8274,6 +8274,23 @@ to tag yet"* — but it differs from `IC-12`'s git-hook exemplar on the diagnost
 merely goes uncorrelated. Not filed as a bug file yet: the `cluster/` slug set is being
 rewritten by the peer session right now and `tests/issue_clusters.rs` gates on it.
 
+**Second instance, independent, reported by `codescout-d9` 2026-09-01 and cited as theirs.**
+Two `artifact(get)` calls against the same artifact a minute apart returned **658** then **675**
+lines, straddling commit `a2aedd49`. Different session, different artifact read, same tear —
+which is what makes it independent rather than a retelling of mine.
+
+**It does NOT advance `W-89`'s counter, and the distinction is the point.** `W-89`'s
+`Promote-when` asks for a third instance in which *comparing `updated_at` catches* a torn read.
+`codescout-d9` never ran that comparison: they read the line growth as "the peer is writing" and
+re-derived their counts from git rather than the catalog, which is why their numbers held. They
+reached the right **action** by a different route and, in their own words, "did not recognise it
+as a tear until you named it". So this is a second datapoint for **the defect** (`F-83`) and
+zero datapoints for **the check** (`W-89`) — an outcome that looks like a confirmation and is
+not one. Counting it would be the exact error this tracker's own discipline warns against: name
+the proposition a result proves, then ask whether a broken world produces the same result. A
+session that never compares `updated_at`, and happens to re-derive from git, produces this
+identical clean outcome.
+
 ## W-89 — Comparing `updated_at` across two reads of one tracker killed five false findings before they reached the user
 
 **Observed:** 2026-09-01, at the end of a *"check all issue clusters"* audit of

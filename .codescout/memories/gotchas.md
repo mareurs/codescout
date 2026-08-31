@@ -71,6 +71,18 @@ git-tracked or restore silently no-ops and mutations leak between eval cases.
 After a release build, run `/mcp` to reconnect. If the symlink is missing after `cargo clean`,
 recreate: `ln -sf "$(pwd)/target/release/codescout" ~/.cargo/bin/codescout`.
 
+**But the reconnect refreshes the SERVER, not the LSP muxes it attaches to.** A mux is keyed by
+project hash and shared across sessions, so a freshly started server attaches to whichever mux
+already holds the socket. Sweep with `readlink /proc/<pid>/exe` over `pgrep -x codescout`: the
+kernel appends ` (deleted)` when a running image has been replaced, and that marker is the only
+signal here that does not read green in the broken world — binary mtime, this symlink, a clean
+`git status`, the last source commit and the reconnect itself all report fresh while stale
+images run. `$PPID` inside a `run_command` shell names your own **server** only; a mux is a
+*descendant* of some server (possibly another session's), never an ancestor of your shell, so
+it is reachable by the sweep alone. A stale mux self-heals once idle past its `--idle-timeout`
+(180s Rust, 300s Kotlin), so the exposure is use-coupled — stale exactly while it is being
+queried, healthy the moment nobody cares. (F-84 in `bug-fix-session-log`.)
+
 ## RemoteEmbedder Dimensions
 
 `RemoteEmbedder.dimensions()` returns `0` until after the first successful `embed()` call
