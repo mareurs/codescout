@@ -85,6 +85,8 @@ is read by every agent that meets a tracker cold — purely to clear a check. An
 `expects_augmentation` firing is a *precise* signal; filling it with reconstruction
 converts it into a false all-clear.
 
+**Correction 2026-08-31 — the premise below is false.** All five have live augmentations in the desktop's `catalog.db`: `structural-debt-refactor` (11 `items`, 25,455 bytes of params), `test-escape-hardening` (7 `interventions`), `retrieval-benchmark`, `code-dupes-backlog`, `2026-08-15-tool-usage-investigation`. Restoration is therefore possible and would **not** be invention. This does not overturn the entry's decision — the argument that restoring an augmentation purely to clear a check converts a precise signal into a false all-clear still stands, and the `[LIVE]` block is still read by every agent meeting the tracker cold. Only the impossibility claim is withdrawn. Original text follows.
+
 Five of the 13 have **no provenance anywhere**: `2026-08-15-tool-usage-investigation`,
 `code-dupes-backlog`, `retrieval-benchmark`, `structural-debt-refactor`,
 `test-escape-hardening`. For those, restoration is not possible, only invention.
@@ -94,8 +96,8 @@ per § 7, and only that one.
 
 ## CM-2 — provenance-subsystem is missing 38 rows, permanently
 
-**Status:** open
-**Valid:** invariant
+**Status:** fixed 2026-08-31 — recovered in full from the desktop catalog
+**Valid:** dated 2026-08-31
 
 **Observed.** `e12cd7e0060ed9b8` recovered **30 of 68**. The 38 lost are
 enumerated by id in its augmentation prompt (PV-1, PV-3, PV-6, PV-10, PV-12..PV-24,
@@ -107,7 +109,9 @@ The original count of 68 is stated **nowhere on disk except two commit messages*
 (`f5f602e6`, `a20b492c`). Without them the restore would have reported success at
 44% completeness.
 
-**Next:** do not fabricate them from the prose that cites them — that prose is a
+**Done 2026-08-31.** All 38 recovered, ids matching this entry's enumeration exactly, 38 of 38. Projected verbatim from `artifact_augmentation.params` into `docs/trackers/archive/provenance-subsystem-recovered-entries.md`; both hosts' catalogs now hold all 68 rows and agree id for id. The `Next:` line below named this exact path and conditioned it on the desktop's `catalog.db` still existing — it did. Retained for the record:
+
+**Superseded Next:** do not fabricate them from the prose that cites them — that prose is a
 citation, not a record. If the desktop's `catalog.db` still exists, a targeted
 export of `artifact_augmentation.params` for this one id is the only real recovery
 path. Otherwise this is closed as permanent loss.
@@ -117,7 +121,9 @@ path. Otherwise this is closed as permanent loss.
 **Status:** fixed 2026-08-28 — body edit only, no code. Verified live: `doctor`'s
 `entry_without_definition` went from 1 to **absent from `by_check` entirely**, and
 `provenance-subsystem` now returns zero findings.
-**Valid:** dated 2026-08-28
+**Valid:** dated 2026-08-31
+
+**Update 2026-08-31.** The AUTHORED titles this entry describes were replaceable after all — PV-9's and PV-11's canonical titles were in the desktop catalog. Both were replaced with the canonical text byte-for-byte: PV-9's authored text asserted a materially different claim, and PV-11's authored text merely *approximated* the canonical (missing the `RESOLVED — ` prefix, `NOT` lowercased) — a substance match discovered in fix round 1 not to license a `RECOVERED-VERBATIM` label, so it too was replaced rather than kept and re-labelled. The VERBATIM/AUTHORED/DERIVED distinction this entry introduced is what made both divergences findable, and it stays.
 
 **Observed.** `doctor` reports `entry_without_definition: 1` against
 `e12cd7e0060ed9b8`: PV-9, PV-11, PV-40, PV-46 exist as params rows and as a table's
