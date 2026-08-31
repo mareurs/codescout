@@ -139,9 +139,18 @@ fn escaping_sites() -> Vec<(String, String, String)> {
                     "{}:{line}",
                     file.strip_prefix(&root).unwrap_or(&file).display()
                 );
+                // Forward slashes, because the oracle speaks them. This string is matched
+                // against `cargo package --list`, which emits `docs/PROGRESSIVE_…` on every
+                // platform, while `Path::display()` is native — so on Windows this produced
+                // `docs\PROGRESSIVE_…` and NOTHING matched: both tests failed there while
+                // passing on Linux and macOS (CI run 33435797552).
+                //
+                // The failure had been latent since this test landed. `cargo test`
+                // fail-fasts across test binaries, and the lib target was already failing
+                // on the Windows lanes, so this binary never ran until that was fixed.
                 let pkg_rel = target
                     .strip_prefix(&pkg_root)
-                    .map(|p| p.display().to_string())
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
                     .unwrap_or_else(|_| format!("OUTSIDE-PACKAGE:{}", target.display()));
                 found.push((site, pkg.clone(), pkg_rel));
             }

@@ -793,23 +793,20 @@ mod tests {
         );
     }
 
-    /// The seeded tracker's path, spelled with NATIVE separators.
+    /// The seeded tracker's path. Spelling is free here — the LOOKUPS normalise.
     ///
-    /// Do not inline this as `root.join("docs/trackers/t.md")`. `Path::join` appends a
-    /// slash-bearing string VERBATIM, so on Windows that yields
-    /// `C:\...\docs/trackers/t.md` while the walker stores `C:\...\docs\trackers\t.md`.
-    /// `aug_for` and the row lookups below compare `abs_path` as an exact string
-    /// (`SELECT id FROM artifact WHERE abs_path = ?1`), so the two spellings simply do
-    /// not match and the row reads as absent — `row must exist`, on three tests, on the
-    /// three Windows lanes and wine, while passing on Linux and macOS where the two
-    /// spellings are byte-identical (CI run 33433055755).
+    /// The catalog stores `abs_path` in forward-slash form on every platform:
+    /// `RepoPath` (src/util/fs.rs) is the write/storage type and guarantees no backslash
+    /// byte, which is the invariant `doctor`'s `backslash_in_abs_path` check enforces. So
+    /// a lookup must normalise the same way the writer did, and `aug_for` now does.
     ///
-    /// Writing through the slash form works fine on Windows; only the COMPARISON breaks.
-    /// The helper covers both anyway, so the path has one spelling in this file.
-    /// Same class as
-    /// docs/issues/archive/2026-08-26-doctor-entry-validity-tests-spell-paths-natively-on-windows.md.
+    /// Recorded because the obvious fix is the wrong one, and was tried: spelling this
+    /// path with NATIVE separators (`join("docs").join("trackers")`) makes the Windows
+    /// lookup ask for `C:\...\docs\trackers\t.md` against a stored
+    /// `C:/.../docs/trackers/t.md` — further from matching, not closer. Native joins are
+    /// right for touching the filesystem and wrong for addressing the catalog.
     fn tracker_path(root: &std::path::Path) -> std::path::PathBuf {
-        root.join("docs").join("trackers").join("t.md")
+        root.join("docs/trackers/t.md")
     }
 
     /// Build a repo whose single tracker declares a sidecar, and write that sidecar.
@@ -839,6 +836,14 @@ mod tests {
         .unwrap();
     }
 
+    /// Look an augmentation up by path, normalising the way the WRITER does.
+    ///
+    /// `abs_path` is stored via `RepoPath`, i.e. forward-slash form on every platform, and
+    /// this compares it as an exact string. Passing `to_string_lossy()` straight through
+    /// therefore matched only where the native separator already IS `/` — green on Linux
+    /// and macOS, and on Windows it asked for `C:\...\docs\trackers\t.md` against a stored
+    /// `C:/.../docs/trackers/t.md`, so the row read as absent: `row must exist`, on three
+    /// tests, on all three Windows lanes and wine (CI runs 33433055755 and 33435797552).
     fn aug_for(
         cat: &Catalog,
         abs: &std::path::Path,
@@ -847,7 +852,7 @@ mod tests {
             .conn
             .query_row(
                 "SELECT id FROM artifact WHERE abs_path = ?1",
-                [abs.to_string_lossy().to_string()],
+                [crate::util::fs::RepoPath::from(abs).as_str().to_string()],
                 |r| r.get(0),
             )
             .ok()?;
@@ -970,7 +975,9 @@ mod tests {
                 .conn
                 .query_row(
                     "SELECT id FROM artifact WHERE abs_path = ?1",
-                    [tracker_path(root).to_string_lossy().to_string()],
+                    [crate::util::fs::RepoPath::from(&tracker_path(root))
+                        .as_str()
+                        .to_string()],
                     |r| r.get(0),
                 )
                 .unwrap();
