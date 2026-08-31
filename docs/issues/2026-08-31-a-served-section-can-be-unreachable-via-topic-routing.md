@@ -24,6 +24,10 @@ the `violations` array, and a doctor scan of any real catalog names tracker and 
 So **every `serves: librarian.doctor` declaration in `librarian.md` is unreachable in
 practice.**
 
+And the withheld section is not simply missing: the content-chosen topic is delivered in
+its stead, **whole**, at 26× the size of the section it displaced. Measured at runtime —
+see § *Runtime confirmation* below.
+
 ## Symptom (Effect)
 
 `librarian.md` § *doctor repairs — what each `fix=` mode does* declares
@@ -83,6 +87,48 @@ gate 1 chose `tracker-conventions`. Not inferred — the counts are from the buf
 of the failing call.
 
 ## Evidence
+
+### Runtime confirmation — what arrives INSTEAD, and what it costs
+
+Filed from source reading plus an empty-ledger observation. Confirmed at runtime
+2026-08-31 08:59:09Z against the release binary built 11:56 local, which postdates every
+commit through `801767d7`.
+
+The probe was clean rather than lucky. Before the call the session ledger held exactly two
+keys — `librarian#librarian(action=...) — Reference` and `project-activation-bootstrap` —
+so `tracker-conventions` had never been served this session and could not be suppressed as
+a duplicate. A single `librarian(action="doctor")` (139 violations, live catalog) then
+injected **`get_guide('tracker-conventions')` in full**.
+
+So the defect is not only that the declared section is withheld. **A different, larger
+topic is delivered in its place.**
+
+| | bytes | lines |
+|---|---|---|
+| `librarian.md` § *doctor repairs* — declared for this call | 1,490 | 19 |
+| `tracker-conventions.md` — actually injected | 39,106 | 707 |
+
+A **26× overshoot into the wrong topic**, paid on the first `doctor` call of every session.
+
+**The ledger key shape records which mode fired**, so this is checkable after the fact
+without re-running anything: a section-grain delivery keys as `topic#heading`, a
+whole-topic one as bare `topic`. The post-call ledger reads
+`tracker-conventions:2026-08-31T08:59:09Z` — no `#`, hence whole-topic.
+
+**The two defects compound, and the second one is structural.**
+`tracker-conventions.md` contains **zero** `serves:` declarations, so `declares()` is false
+for it and that topic can only ever deliver whole. Section-grain is what made `librarian`
+affordable to serve; the router lands doctor on the one guide with none of it. Counted
+across the guide set the same day — `for f in src/prompts/guides/*.md; do grep -c 'serves:'
+$f; done` — only `librarian.md` declares any sections (13). **9 of 10 topics are
+whole-topic**, so any mis-route pays its destination's full price, and closing this for
+`doctor` alone leaves the shape live everywhere else.
+
+*Derivation shipped because the first attempt was wrong.* `awk '/^### doctor
+repairs/,/^### [^d]/'` does not stop at `##`-level headings and over-captured by 5×
+(7,372 B). The 1,490 figure comes from `awk '/^### doctor repairs/{f=1} f&&/^#{1,3}
+/&&!/^### doctor repairs/{exit} f'`, whose first and last captured lines were read back
+before the number was published.
 
 ### The guard that exists does not cover this
 
@@ -186,8 +232,18 @@ the gate that fails.
 
 Decide between "declaration beats content" and "several candidate topics" in
 `Tool::relevant_guide_topic` (`src/tools/core/types.rs` calls it; `src/librarian/adapter.rs`
-implements the librarian one). Then add the converse gate beside `src/server.rs:3272` so
-the next undeliverable declaration fails at commit time rather than at a reader's expense.
+implements the librarian one).
+
+**The runtime confirmation constrains that choice.** The destination here declares no
+sections at all, so any fix phrased as "prefer the topic whose sections match the call"
+must still say what happens when the content-chosen topic is whole-topic — today's answer
+is to silently pay 39,106 bytes. With 9 of 10 topics whole-topic, that is the common case,
+not the exotic one.
+
+A commit-time gate is still wanted, but it is **not** the converse of `src/server.rs:3272`:
+that gate is scoped to declaring topics and cannot see this bug (§ *Fix*). Whatever is built
+has to start from the declaration side — for each declared shape, assert that some plausible
+result routes to its declaring topic.
 
 ## References
 
