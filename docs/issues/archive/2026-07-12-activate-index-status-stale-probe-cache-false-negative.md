@@ -1,9 +1,6 @@
 ---
-id: null
 kind: bug
 status: fixed
-title: null
-owners: []
 tags:
 - activation
 - index-status
@@ -11,10 +8,9 @@ tags:
 - cache
 - false-negative
 - ux
-topic: null
-time_scope: null
-closed: '2026-07-13'
-opened: '2026-07-12'
+- cluster/lazy-warmup-bills-the-first-caller
+closed: 2026-07-13
+opened: 2026-07-12
 owner: marius
 related: []
 severity: low

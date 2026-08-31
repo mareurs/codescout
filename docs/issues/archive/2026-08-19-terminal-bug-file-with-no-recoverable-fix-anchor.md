@@ -1,5 +1,5 @@
 ---
-id: 53e35aaefb9f7c71
+id: '53e35aaefb9f7c71'
 kind: bug
 status: fixed
 title: 'BUG: no check detects a terminal bug file with no recoverable fix anchor, and an observation SHA reads as one'
@@ -11,6 +11,7 @@ tags:
 - trackers
 - provenance
 - record-legibility
+- cluster/record-asserts-an-unchecked-completion
 topic: record-legibility
 closed: 2026-08-19
 opened: 2026-08-19

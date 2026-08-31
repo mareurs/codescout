@@ -10,6 +10,7 @@ tags:
 - rendezvous
 - companion-plugin
 - context-cost
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-08-19
 opened: 2026-08-19
 owner: marius

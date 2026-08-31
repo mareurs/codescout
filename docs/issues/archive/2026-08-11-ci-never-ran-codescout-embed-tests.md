@@ -11,6 +11,7 @@ tags:
 - cargo
 - tests-that-cannot-fail
 - codescout-embed
+- cluster/repro-env-diverges-from-gate-env
 closed: 2026-08-14
 ---
 

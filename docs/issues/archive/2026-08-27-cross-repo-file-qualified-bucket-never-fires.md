@@ -7,6 +7,7 @@ tags:
 - librarian
 - citations
 - test-design
+- cluster/declared-not-wired
 closed: 2026-08-28
 fix_patch_id: 235b5b833777a2b3a04fe43f515e94b01b58d205
 fix_sha: 03618605 (experiments)

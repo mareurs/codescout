@@ -1,17 +1,18 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-30
+tags:
+- ci
+- retrieval
+- feature-gates
+- lean-build
+- cluster/repro-env-diverges-from-gate-env
 closed: 2026-08-30
-severity: high
+opened: 2026-08-30
 owner: marius
 related:
-  - docs/trackers/resume-embedding-transport-stages-1-3.md
-tags:
-  - ci
-  - retrieval
-  - feature-gates
-  - lean-build
-kind: bug
+- docs/trackers/resume-embedding-transport-stages-1-3.md
+severity: high
 ---
 
 # BUG: ET-2's transport gating left CI's `no-features` test lane red, and no local gate command can see it

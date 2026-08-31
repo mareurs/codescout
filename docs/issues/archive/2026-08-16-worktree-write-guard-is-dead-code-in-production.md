@@ -11,6 +11,7 @@ tags:
 - dead-code
 - doc-vs-code-drift
 - workspace-activation
+- cluster/gate-keyed-on-unobservable-event
 opened: 2026-08-16
 owner: marius
 severity: medium

@@ -11,6 +11,7 @@ tags:
 - heuristic
 - silent-wrong-answer
 - markdown-parsing
+- cluster/addressing-without-an-escape-hatch
 topic: record-legibility
 closed: 2026-08-19
 opened: 2026-08-19

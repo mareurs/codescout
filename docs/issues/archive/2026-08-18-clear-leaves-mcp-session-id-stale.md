@@ -1,12 +1,17 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-18
+tags:
+- session-identity
+- guide-ledger
+- usage-db
+- claude-code
+- cluster/blast-radius-exceeds-visibility
 closed: 2026-08-18
-severity: high
+opened: 2026-08-18
 owner: marius
 related: []
-tags: [session-identity, guide-ledger, usage-db, claude-code]
-kind: bug
+severity: high
 ---
 
 # BUG: `/clear` mints a new Claude Code session id without respawning the MCP subprocess, so codescout serves the new conversation under the old session id

@@ -5,6 +5,7 @@ tags:
 - server
 - compaction
 - progressive-disclosure
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-08-26
 opened: 2026-08-21
 owner: marius

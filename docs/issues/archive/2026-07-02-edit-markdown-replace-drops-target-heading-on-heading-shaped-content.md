@@ -1,12 +1,20 @@
 ---
-status: fixed
-opened: 2026-07-02
-closed: 2026-07-02
-severity: high
-owner: marius
-related: ["2026-05-26-edit-markdown-insert-after-fuses-heading", "2026-05-26-edit-markdown-scoped-edit-fuses-heading"]
-tags: [edit_markdown, markdown, replace, heading-loss, silent-corruption]
 kind: bug
+status: fixed
+tags:
+- edit_markdown
+- markdown
+- replace
+- heading-loss
+- silent-corruption
+- cluster/addressing-without-an-escape-hatch
+closed: 2026-07-02
+opened: 2026-07-02
+owner: marius
+related:
+- '2026-05-26-edit-markdown-insert-after-fuses-heading'
+- '2026-05-26-edit-markdown-scoped-edit-fuses-heading'
+severity: high
 ---
 
 # BUG: `edit_markdown(action="replace")` deletes the target heading line whenever the new content's first line happens to look like a heading

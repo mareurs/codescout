@@ -8,6 +8,7 @@ tags:
 - run_command
 - false-failure
 - embedder
+- cluster/repro-env-diverges-from-gate-env
 closed: 2026-08-28
 opened: 2026-08-27
 owner: marius

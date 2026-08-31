@@ -1,5 +1,5 @@
 ---
-id: 6ff4394bb3b18d86
+id: '6ff4394bb3b18d86'
 kind: bug
 status: fixed
 title: 'BUG: reindex_cli is test-only and carries a broken copy of a DELETE that was deliberately removed for causing data loss'
@@ -9,6 +9,7 @@ tags:
 - dead-code
 - latent-data-loss
 - cli-parity
+- cluster/declared-not-wired
 closed: 2026-08-30
 opened: 2026-08-30
 owner: marius

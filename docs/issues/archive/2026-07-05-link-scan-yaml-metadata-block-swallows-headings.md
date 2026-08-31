@@ -1,12 +1,17 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-07-05
+tags:
+- librarian
+- link-scan
+- markdown-parsing
+- pulldown-cmark
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-07-05
-severity: high
+opened: 2026-07-05
 owner: marius
 related: []
-tags: [librarian, link-scan, markdown-parsing, pulldown-cmark]
-kind: bug
+severity: high
 ---
 
 # BUG: link_scan's `extract()` treats any pair of bare `---` lines as YAML frontmatter, silently swallowing headings between them

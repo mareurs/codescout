@@ -6,6 +6,7 @@ tags:
 - dangerous-command-gate
 - heredoc
 - false-positive
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-31
 opened: 2026-08-31
 owner: marius

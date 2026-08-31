@@ -1,5 +1,5 @@
 ---
-id: 0de2778e6adac220
+id: '0de2778e6adac220'
 kind: bug
 status: fixed
 title: 'BUG: run_command''s pipe instrumentation rewrites pipes inside heredoc content, corrupting written files'
@@ -8,6 +8,7 @@ tags:
 - shell
 - output-buffer
 - data-corruption
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-19
 opened: 2026-08-19
 owner: marius

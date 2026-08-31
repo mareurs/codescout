@@ -10,6 +10,7 @@ tags:
 - link-scan
 - citations
 - cross-repo
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-27
 opened: 2026-08-27
 owner: marius

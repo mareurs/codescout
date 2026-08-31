@@ -6,6 +6,7 @@ tags:
 - config-staleness
 - index-state
 - concurrency
+- cluster/blast-radius-exceeds-visibility
 closed: 2026-08-30
 opened: 2026-08-26
 owner: marius

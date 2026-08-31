@@ -1,5 +1,5 @@
 ---
-id: 95ba3264eeb92117
+id: '95ba3264eeb92117'
 kind: bug
 status: mitigated
 title: 'BUG: documentation examples of citation syntax are indistinguishable from citations, inflating link_scan''s diagnostic counts'
@@ -8,6 +8,7 @@ tags:
 - link-scan
 - citations
 - diagnostics
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-21
 opened: 2026-08-19
 owner: marius

@@ -1,5 +1,5 @@
 ---
-id: 2104fc471db2f769
+id: '2104fc471db2f769'
 kind: bug
 status: fixed
 title: link_scan extract() loses a heading swallowed by a preceding HTML comment block
@@ -9,6 +9,7 @@ tags:
 - pulldown-cmark
 - citation-graph
 - html-block
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-21
 ---
 

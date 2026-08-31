@@ -7,6 +7,7 @@ tags:
 - discoverability
 - byte-cap
 - guide-delivery
+- cluster/declared-not-wired
 closed: null
 opened: 2026-08-16
 owner: marius

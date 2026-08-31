@@ -6,6 +6,7 @@ tags:
 - index
 - staleness
 - misleading-report
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-08-31
 opened: 2026-08-31
 owner: marius

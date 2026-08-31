@@ -1,12 +1,20 @@
 ---
-status: fixed
-opened: 2026-07-01
-closed: 2026-07-01
-severity: high
-owner: marius
-related: ["docs/issues/2026-05-09-read-file-json-path-array-elements.md", "docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md"]
-tags: ["read_file", "json_path", "file_summary", "footgun", "friction"]
 kind: bug
+status: fixed
+tags:
+- read_file
+- json_path
+- file_summary
+- footgun
+- friction
+- cluster/addressing-without-an-escape-hatch
+closed: 2026-07-01
+opened: 2026-07-01
+owner: marius
+related:
+- docs/issues/2026-05-09-read-file-json-path-array-elements.md
+- docs/issues/2026-05-17-read-file-jsonpath-negative-slice.md
+severity: high
 ---
 
 # BUG: `read_file` json_path cannot address object keys containing `.` (or any key needing bracket-quoting) — quoted `["key"]` / `['key']` are rejected outright

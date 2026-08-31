@@ -6,6 +6,7 @@ tags:
 - indexing
 - status
 - silent-failure
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-08-27
 last_observed: 2026-08-26
 opened: 2026-08-26

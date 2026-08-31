@@ -1,5 +1,5 @@
 ---
-id: 2a9fd7654cf82013
+id: '2a9fd7654cf82013'
 kind: bug
 status: fixed
 title: 'BUG: grep''s file-diversity round-robin never runs, so overflow hints name walk-order files, not hot ones'
@@ -7,6 +7,7 @@ tags:
 - grep
 - progressive-disclosure
 - file_group
+- cluster/declared-not-wired
 closed: 2026-08-16
 opened: 2026-08-16
 owner: marius

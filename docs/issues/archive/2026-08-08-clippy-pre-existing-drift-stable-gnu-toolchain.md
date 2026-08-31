@@ -5,6 +5,7 @@ tags:
 - clippy
 - toolchain
 - ci
+- cluster/repro-env-diverges-from-gate-env
 closed: 2026-08-15
 opened: 2026-08-08
 owner: marius

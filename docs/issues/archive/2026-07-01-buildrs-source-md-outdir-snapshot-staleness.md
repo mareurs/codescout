@@ -7,6 +7,7 @@ tags:
 - snapshot
 - incremental-build
 - false-pass
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-07-20
 last_observed: 2026-07-01
 opened: 2026-07-01

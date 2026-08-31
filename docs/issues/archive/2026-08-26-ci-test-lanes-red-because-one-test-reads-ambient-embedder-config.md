@@ -1,5 +1,5 @@
 ---
-id: 52f65564a09fd8f6
+id: '52f65564a09fd8f6'
 kind: bug
 status: fixed
 title: 'BUG: every CI Test lane is red because one test builds an embedder from ambient config, and the local gate is green only because a dev env var is set'
@@ -9,6 +9,7 @@ tags:
 - embeddings
 - false-green
 - gate
+- cluster/repro-env-diverges-from-gate-env
 closed: 2026-08-26
 opened: 2026-08-26
 owner: marius

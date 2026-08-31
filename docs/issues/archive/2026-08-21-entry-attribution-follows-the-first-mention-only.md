@@ -2,6 +2,8 @@
 kind: bug
 status: fixed
 title: entry-grain attribution follows a token's FIRST mention, so a passing reference above an entry consumes the real one
+tags:
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-21
 ---
 

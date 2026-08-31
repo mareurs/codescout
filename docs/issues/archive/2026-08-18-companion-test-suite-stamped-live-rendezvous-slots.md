@@ -1,12 +1,17 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-18
+tags:
+- companion-plugin
+- test-isolation
+- rendezvous
+- xdg
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-08-18
-severity: high
+opened: 2026-08-18
 owner: marius
 related: []
-tags: [companion-plugin, test-isolation, rendezvous, xdg]
-kind: bug
+severity: high
 ---
 
 # BUG: the companion hook's test suite stamped LIVE rendezvous slots, because `${VAR-}` is not `${VAR:-}`

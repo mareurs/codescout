@@ -11,6 +11,7 @@ tags:
 - trackers
 - record-legibility
 - process
+- cluster/record-asserts-an-unchecked-completion
 topic: record-legibility
 closed: 2026-08-21
 opened: 2026-08-19

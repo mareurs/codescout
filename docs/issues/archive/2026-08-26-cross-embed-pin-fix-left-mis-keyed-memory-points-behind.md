@@ -1,5 +1,5 @@
 ---
-id: 313c01e373d2a752
+id: '313c01e373d2a752'
 kind: bug
 status: fixed
 title: 'BUG: the workspace-pin cross-embed fix shipped without a back-fill, so memories written during the defect window are still keyed to the wrong project'
@@ -9,6 +9,7 @@ tags:
 - workspace-pin
 - data-integrity
 - backfill
+- cluster/config-propagation-is-additive
 closed: 2026-08-27
 opened: 2026-08-26
 owner: marius

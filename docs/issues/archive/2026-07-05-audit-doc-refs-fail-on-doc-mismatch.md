@@ -1,17 +1,13 @@
 ---
-id: null
 kind: bug
 status: fixed
-title: null
-owners: []
 tags:
 - librarian
 - audit_doc_refs
 - doc-drift
-topic: null
-time_scope: null
-closed: '2026-07-06'
-opened: '2026-07-05'
+- cluster/declared-not-wired
+closed: 2026-07-06
+opened: 2026-07-05
 owner: marius
 related: []
 severity: low

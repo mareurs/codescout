@@ -1,17 +1,13 @@
 ---
-id: null
 kind: bug
 status: fixed
-title: null
-owners: []
 tags:
 - ci
 - feature-flags
 - cli
-topic: null
-time_scope: null
-closed: '2026-07-06'
-opened: '2026-07-06'
+- cluster/repro-env-diverges-from-gate-env
+closed: 2026-07-06
+opened: 2026-07-06
 owner: marius
 related: []
 severity: medium

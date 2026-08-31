@@ -1,5 +1,5 @@
 ---
-id: 0e623bae045db6b5
+id: '0e623bae045db6b5'
 kind: bug
 status: fixed
 title: 'BUG: /mcp reconnect refreshes tool schemas but not server_instructions — a prompt-surface change cannot be verified in the session that made it'
@@ -8,6 +8,7 @@ tags:
 - verification
 - mcp
 - tooling
+- cluster/gate-keyed-on-unobservable-event
 closed: ''
 opened: 2026-08-17
 owner: marius

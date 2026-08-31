@@ -7,6 +7,7 @@ tags:
 - librarian
 - doctor
 - doc-example-hazard
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-26
 opened: 2026-08-26
 owner: marius

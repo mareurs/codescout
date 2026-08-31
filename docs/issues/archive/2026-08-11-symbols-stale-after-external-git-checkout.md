@@ -8,6 +8,7 @@ tags:
 - lsp
 - staleness
 - tool-friction
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-08-15
 opened: 2026-08-11
 owner: marius

@@ -11,6 +11,7 @@ tags:
 - markdown-parser
 - body_edits
 - fenced-code
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-14
 ---
 

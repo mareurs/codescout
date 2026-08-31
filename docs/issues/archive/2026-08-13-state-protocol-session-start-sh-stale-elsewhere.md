@@ -7,6 +7,7 @@ tags:
 - docs
 - state-protocol
 - drift
+- cluster/config-propagation-is-additive
 closed: 2026-08-14
 opened: 2026-08-13
 owner: marius

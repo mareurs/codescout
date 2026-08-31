@@ -1,13 +1,19 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-31
+tags:
+- guides
+- section-grain-delivery
+- topic-routing
+- librarian
+- silent-non-delivery
+- cluster/declared-not-wired
 closed: 2026-08-31
-severity: high
+opened: 2026-08-31
 owner: marius
 related: []
-tags: [guides, section-grain-delivery, topic-routing, librarian, silent-non-delivery]
-kind: bug
-unverified: "Cost, not correctness. Reachability is fixed, mutation-verified, and confirmed live 2026-08-31 09:49Z. What remains: a session's FIRST tracker-path-naming call still ships tracker-conventions WHOLE (39,106 B) and no section — deliberate, since that route closed 32736ca0 — so the 26x overshoot stands on that one call until tracker-conventions adopts `serves:`. See § Resume item 1."
+severity: high
+unverified: 'Cost, not correctness. Reachability is fixed, mutation-verified, and confirmed live 2026-08-31 09:49Z. What remains: a session''s FIRST tracker-path-naming call still ships tracker-conventions WHOLE (39,106 B) and no section — deliberate, since that route closed 32736ca0 — so the 26x overshoot stands on that one call until tracker-conventions adopts `serves:`. See § Resume item 1.'
 ---
 
 # BUG: a guide section can declare a call's shape, pass every test, and still never be delivered — because the TOPIC router picks a different topic from the result's content

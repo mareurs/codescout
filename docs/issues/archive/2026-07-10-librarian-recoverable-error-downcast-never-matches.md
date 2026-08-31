@@ -1,12 +1,18 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-07-10
+tags:
+- error-handling
+- recoverable-error
+- librarian
+- mcp
+- routing
+- cluster/declared-not-wired
 closed: 2026-07-10
-severity: high
+opened: 2026-07-10
 owner: marius
 related: []
-tags: [error-handling, recoverable-error, librarian, mcp, routing]
-kind: bug
+severity: high
 ---
 
 # BUG: librarian's own RecoverableError type never matches route_tool_error's downcast — every recoverable librarian error surfaces as isError:true

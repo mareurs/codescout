@@ -7,6 +7,7 @@ tags:
 - git
 - silent-absence
 - claude-md-drift
+- cluster/record-asserts-an-unchecked-completion
 closed: 2026-08-30
 opened: 2026-08-30
 owner: marius

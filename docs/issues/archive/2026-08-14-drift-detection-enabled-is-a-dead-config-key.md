@@ -12,6 +12,7 @@ tags:
 - drift
 - cross-repo
 - legacy-retrieval
+- cluster/declared-not-wired
 closed: 2026-08-15
 opened: 2026-08-14
 owner: marius

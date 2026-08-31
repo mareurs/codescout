@@ -8,6 +8,7 @@ tags:
 - indexing
 - concurrency
 - resource-exhaustion
+- cluster/blast-radius-exceeds-visibility
 closed: 2026-07-28
 last_observed: 2026-07-27
 opened: 2026-07-25

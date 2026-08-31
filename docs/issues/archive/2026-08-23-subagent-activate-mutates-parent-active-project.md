@@ -6,6 +6,7 @@ tags:
 - subagents
 - concurrency
 - write-guard
+- cluster/blast-radius-exceeds-visibility
 closed: 2026-08-25
 opened: 2026-08-23
 owner: marius

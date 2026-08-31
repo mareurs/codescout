@@ -1,5 +1,5 @@
 ---
-id: 05a0548d57664984
+id: '05a0548d57664984'
 kind: bug
 status: fixed
 title: 'BUG: index(action="status")''s indexing.status stays "failed" from a stale lock-contention race while real progress (chunk_count, GPU) continues'
@@ -10,6 +10,7 @@ tags:
 - misleading-status
 - concurrency
 - codescout-tool
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-08-24
 opened: 2026-08-24
 owner: marius

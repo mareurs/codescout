@@ -11,6 +11,7 @@ tags:
 - machine-specific
 - dead-path
 - live-verified-2026-08-14
+- cluster/config-propagation-is-additive
 closed: 2026-08-15
 opened: 2026-08-14
 owner: marius

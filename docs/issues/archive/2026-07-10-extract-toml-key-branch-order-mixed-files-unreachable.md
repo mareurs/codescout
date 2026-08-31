@@ -1,13 +1,19 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-07-10
+tags:
+- read_file
+- file_summary
+- toml
+- yaml
+- correctness
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-07-10
-severity: high
+opened: 2026-07-10
 owner: marius
 related:
 - docs/issues/2026-07-10-toml-yaml-key-false-not-found-past-summary-cap.md
-tags: [read_file, file_summary, toml, yaml, correctness]
-kind: bug
+severity: high
 ---
 
 # BUG: extract_toml_key branch order makes top-level keys and dotted paths unreachable in any TOML file containing a [table]; YAML nested keys unsupported entirely

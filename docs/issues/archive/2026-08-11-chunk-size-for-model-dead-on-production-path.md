@@ -8,6 +8,7 @@ tags:
 - embeddings
 - dead-code
 - retrieval
+- cluster/declared-not-wired
 closed: 2026-08-14
 opened: 2026-08-11
 owner: marius

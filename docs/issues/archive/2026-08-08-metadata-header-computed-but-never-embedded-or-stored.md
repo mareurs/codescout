@@ -8,6 +8,7 @@ tags:
 - chunker
 - dead-feature
 - silent-quality-loss
+- cluster/declared-not-wired
 closed: 2026-08-08
 opened: 2026-08-08
 owner: marius

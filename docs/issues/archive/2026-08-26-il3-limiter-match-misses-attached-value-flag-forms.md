@@ -1,5 +1,5 @@
 ---
-id: 7f18aaf9d68c0b24
+id: '7f18aaf9d68c0b24'
 kind: bug
 status: fixed
 title: 'BUG: the IL-3 limiter table matches whole tokens, so git''s attached-value flag forms (--porcelain=v1, --stat=200, -n5) are refused as unbounded'
@@ -8,6 +8,7 @@ tags:
 - path-security
 - gate
 - false-positive
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-26
 opened: 2026-08-26
 owner: marius

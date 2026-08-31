@@ -1,16 +1,12 @@
 ---
-id: null
 kind: bug
 status: fixed
-title: null
-owners: []
 tags:
 - librarian
 - constitution-tracker
-topic: null
-time_scope: null
-closed: '2026-07-06'
-opened: '2026-07-06'
+- cluster/declared-not-wired
+closed: 2026-07-06
+opened: 2026-07-06
 owner: marius
 related: []
 severity: medium

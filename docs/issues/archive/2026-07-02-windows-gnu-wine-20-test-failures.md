@@ -1,19 +1,15 @@
 ---
-id: null
 kind: bug
 status: mitigated
-title: null
-owners: []
 tags:
 - windows-gnu
 - wine
 - ci
 - test-portability
-topic: null
-time_scope: null
+- cluster/repro-env-diverges-from-gate-env
 closed: null
 guide_hint_cluster: fixed-2026-07-05
-opened: '2026-07-02'
+opened: 2026-07-02
 owner: marius
 related:
 - docs/trackers/windows-platform-support.md

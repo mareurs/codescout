@@ -1,5 +1,5 @@
 ---
-id: 76ef2915909f94a9
+id: '76ef2915909f94a9'
 kind: bug
 status: fixed
 title: 'BUG: experiments HEAD fails `cargo check --no-default-features`, and the documented local gate runs only with default features — fourth instance of this class in one day'
@@ -9,6 +9,7 @@ tags:
 - no-default-features
 - pre-commit-gate
 - recurrence
+- cluster/repro-env-diverges-from-gate-env
 closed: 2026-08-27
 ---
 

@@ -1,5 +1,5 @@
 ---
-id: 94e449c896beb016
+id: '94e449c896beb016'
 kind: bug
 status: mitigated
 title: 'BUG: an archived bug file''s fix SHA orphans when experiments is rebased, and nothing re-reads archive/ to notice'
@@ -9,6 +9,7 @@ tags:
 - citations
 - provenance
 - patch-id
+- cluster/record-asserts-an-unchecked-completion
 closed: 2026-08-19
 opened: 2026-08-19
 owner: marius

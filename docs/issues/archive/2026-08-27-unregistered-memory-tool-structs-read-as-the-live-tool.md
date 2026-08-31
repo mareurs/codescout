@@ -1,5 +1,5 @@
 ---
-id: 2cdc5815808a6634
+id: '2cdc5815808a6634'
 kind: bug
 status: fixed
 title: 'BUG: four unregistered `impl Tool` blocks in the memory module read as the live tool, and a bug investigation stated a false root cause from them'
@@ -8,6 +8,7 @@ tags:
 - dead-code
 - tools
 - misleading-source
+- cluster/declared-not-wired
 closed: 2026-08-27
 opened: 2026-08-27
 owner: marius

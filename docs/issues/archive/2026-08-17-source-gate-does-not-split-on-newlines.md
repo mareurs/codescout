@@ -7,6 +7,7 @@ tags:
 - run-command
 - path-security
 - bypass
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-17
 opened: 2026-08-17
 owner: marius

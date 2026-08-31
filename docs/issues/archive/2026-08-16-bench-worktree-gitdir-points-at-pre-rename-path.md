@@ -8,6 +8,7 @@ tags:
 - benchmark
 - measurement-validity
 - stale-ground-truth
+- cluster/config-propagation-is-additive
 closed: 2026-08-16
 unverified: 'The `## Fix` section''s deletion did NOT take effect on this machine. Verified 2026-08-30: `.worktrees/bench` is still present at exactly the 174M/163M this file records as reclaimed, with dir mtime 2026-05-12 (three months BEFORE this closure) and a gitdir still naming the pre-rename `code-explorer` path — so it is the original directory, never removed and never recreated. The orphaned-gitdir defect this file describes therefore remains live for `bench`. Successor owns the lifecycle: docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md'
 ---

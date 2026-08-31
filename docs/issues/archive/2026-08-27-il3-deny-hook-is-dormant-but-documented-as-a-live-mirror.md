@@ -8,6 +8,7 @@ tags:
 - companion-plugin
 - dead-code
 - cross-repo
+- cluster/declared-not-wired
 ---
 
 ---

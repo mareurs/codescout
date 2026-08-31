@@ -11,6 +11,7 @@ tags:
 - entry-identity
 - namespace
 - latent
+- cluster/addressing-without-an-escape-hatch
 topic: tracker-entry-identity
 closed: 2026-08-18
 unverified: 'Item (4) of the Fix is still open and handed off: renaming `researcher`''s prefix in docs/trackers/langfuse-tracing-roadmap.md. Downgraded from urgent — unpadded T-1/T-2 now have no codescout definer, since tool-usage-patterns spells those T-001/T-002 — so a backfill there cannot create ambiguity. Recorded 2026-08-28 (tracker-hygiene-log:HY-22): the caveat was stated in prose only, so no query could reach it while status reads `fixed`.'

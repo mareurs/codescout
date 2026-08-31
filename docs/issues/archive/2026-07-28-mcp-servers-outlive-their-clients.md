@@ -8,6 +8,7 @@ tags:
 - lifecycle
 - resource-leak
 - gpu
+- cluster/blast-radius-exceeds-visibility
 topic: process lifecycle
 closed: 2026-08-07
 ---

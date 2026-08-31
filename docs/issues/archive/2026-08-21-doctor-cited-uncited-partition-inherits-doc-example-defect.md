@@ -1,5 +1,5 @@
 ---
-id: 9db5ca19fb9b1a4c
+id: '9db5ca19fb9b1a4c'
 kind: bug
 status: fixed
 title: doctor's entry_without_definition inherits the doc-example-looks-like-a-citation defect, with no breakdown to mitigate it
@@ -9,6 +9,7 @@ tags:
 - doctor
 - citations
 - diagnostics
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-25
 opened: 2026-08-21
 owner: marius

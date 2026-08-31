@@ -8,6 +8,7 @@ tags:
 - configuration
 - docs
 - retrieval
+- cluster/config-propagation-is-additive
 closed: 2026-08-06
 opened: 2026-07-25
 owner: marius

@@ -7,6 +7,7 @@ tags:
 - edit-code
 - name-resolution
 - tool-friction
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-15
 opened: 2026-08-11
 owner: marius

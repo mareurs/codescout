@@ -1,12 +1,16 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-18
+tags:
+- librarian
+- link-scan
+- citations
+- cluster/addressing-without-an-escape-hatch
 closed: 2026-08-19
-severity: medium
+opened: 2026-08-18
 owner: marius
 related: []
-tags: [librarian, link-scan, citations]
-kind: bug
+severity: medium
 ---
 
 # BUG: a qualified citation is silently truncated when the file stem exceeds 31 characters
