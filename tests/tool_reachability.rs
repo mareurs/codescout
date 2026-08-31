@@ -78,10 +78,67 @@ fn collect_rs(dir: &std::path::Path, out: &mut Vec<(PathBuf, String)>) {
                 continue;
             }
             if let Ok(text) = std::fs::read_to_string(&path) {
-                out.push((path, text));
+                out.push((path, strip_cfg_test_modules(&text)));
             }
         }
     }
+}
+
+/// Remove every `#[cfg(test)]`-attributed block, by brace matching from the attribute.
+///
+/// `collect_rs` excludes `tests/` directories and `tests.rs` files, and its comment states
+/// the principle those two carriers implement: *"test files must not be able to confer
+/// reachability either."* The third carrier is the one this repo uses most — an inline
+/// `#[cfg(test)] mod tests { … }` at the foot of a production file — and it was not covered.
+///
+/// Measured 2026-09-01: `src/mcp_resources/tool_guide.rs` constructs `Arc::new(EditMarkdown)`
+/// and `Arc::new(SymbolAt)` inside exactly such a module, putting both types into the
+/// reachable set on the strength of test code. Both are genuinely registered today, so
+/// nothing was misreported — but the path is live, and it is the half of the scan that had
+/// no discipline on it. `reachable_tool_types` guards its `.call(` side with the
+/// load-bearing `=>`; its `Arc::new(` side had no counterpart at all.
+///
+/// **Both error directions are acceptable here and one is loud**, which is why brace
+/// matching suffices without a Rust parser. Over-deleting (a `{` inside a string or comment
+/// ending the span early) drops production code, so a real tool loses its registration and
+/// `every_impl_tool_type_is_reachable` fails *by name*. Under-deleting leaves today's
+/// behaviour. There is no silently-wrong direction.
+fn strip_cfg_test_modules(text: &str) -> String {
+    const ATTR: &str = "#[cfg(test)]";
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+
+    while let Some(rel) = text[i..].find(ATTR) {
+        let at = i + rel;
+        let Some(open_rel) = text[at..].find('{') else {
+            break;
+        };
+        let open = at + open_rel;
+
+        let mut depth = 0usize;
+        let mut end = None;
+        for (j, b) in bytes.iter().enumerate().skip(open) {
+            match b {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(j + 1);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else { break };
+
+        out.push_str(&text[i..at]);
+        i = end;
+    }
+
+    out.push_str(&text[i..]);
+    out
 }
 
 /// The last `::`-separated segment that starts with an uppercase letter.
@@ -298,6 +355,66 @@ fn the_scan_discriminates() {
         "the scan must flag the untethered type and only that one"
     );
 }
+
+#[test]
+fn an_inline_cfg_test_module_cannot_confer_reachability() {
+    // The one carrier `collect_rs`'s file/dir exclusions cannot reach. Both directions are
+    // asserted, because a strip that removed everything would pass the first half alone.
+    let orphan = strip_cfg_test_modules(
+        r#"
+            impl Tool for TestOnlyThing {}
+
+            #[cfg(test)]
+            mod tests {
+                fn build() { let v: Vec<Arc<dyn Tool>> = vec![Arc::new(TestOnlyThing)]; }
+                async fn go() { match k { "x" => TestOnlyThing.call(i, c).await, _ => () } }
+            }
+        "#,
+    );
+    let corpus = vec![(PathBuf::from("synthetic.rs"), orphan)];
+    assert!(
+        declared_tool_types(&corpus).contains_key("TestOnlyThing"),
+        "the impl block sits OUTSIDE the test module and must survive the strip — if it \
+         does not, the type vanishes from both sides and the orphan is hidden rather than \
+         caught"
+    );
+    assert!(
+        !reachable_tool_types(&corpus).contains("TestOnlyThing"),
+        "a type constructed or dispatched to only from an inline #[cfg(test)] module is \
+         NOT reachable; this is the shape tool_guide.rs exhibits in production code"
+    );
+
+    // Negative control: the identical construction outside a test module still confers it.
+    let prod = vec![(
+        PathBuf::from("prod.rs"),
+        strip_cfg_test_modules("impl Tool for ProdThing {}\nfn b() { Arc::new(ProdThing); }"),
+    )];
+    assert!(
+        reachable_tool_types(&prod).contains("ProdThing"),
+        "the strip must not eat production registrations — without this the test above \
+         passes for a strip that deletes the whole file"
+    );
+}
+
+#[test]
+fn the_inline_test_strip_is_not_filtering_an_empty_set() {
+    // Pins a real occurrence, mirroring `test_fixture_modules_are_excluded_from_both_sides`:
+    // if no production file carries an inline #[cfg(test)] module that constructs a tool,
+    // the strip is filtering nothing and the guard above is untested against reality.
+    let path = repo_root().join("src/mcp_resources/tool_guide.rs");
+    let raw = std::fs::read_to_string(&path).expect("tool_guide.rs must exist");
+    assert!(
+        raw.contains("#[cfg(test)]") && raw.contains("Arc::new(EditMarkdown)"),
+        "expected an inline #[cfg(test)] module constructing a real tool. If this moved, \
+         find another occurrence rather than deleting the test — its job is to prove the \
+         strip has something to strip."
+    );
+    assert!(
+        !strip_cfg_test_modules(&raw).contains("Arc::new(EditMarkdown)"),
+        "the strip left a test-module construction behind"
+    );
+}
+
 #[test]
 fn test_fixture_modules_are_excluded_from_both_sides() {
     let scanned = rust_sources();
