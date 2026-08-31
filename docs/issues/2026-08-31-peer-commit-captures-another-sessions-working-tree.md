@@ -234,6 +234,23 @@ silences the check and is the wrong habit.
 3. ~~Path-scoped `git commit -- <paths>`~~ — **withdrawn.** It reads the working tree, so it
    is a capture vector wearing the costume of a mitigation.
 
+**Remedy (1) is not merely insufficient — it is scoped to the wrong axis, and instance 5 is the
+proof.** The capturing session reports it did **not** use `git add -A` for `e0525462`: it staged
+two explicit paths, which is exactly the remedy it had drawn from the first capture two hours
+earlier and told its user it had learned. *(That is its account of its own action, which git
+cannot confirm after the fact; the only corroboration available is that the commit touches
+exactly two files, consistent with explicit paths and not proof of them.)* It captured five of a
+peer's edits regardless — because explicit-path staging defends against sweeping in **other
+files**, and both sessions were editing **one file**. The two diffs are merged in the working
+tree before `git add` ever runs, so the pathspec never had anything to exclude.
+
+So a session following remedy (1) exactly, deliberately, immediately after being burned by its
+absence, still captured a peer. That is a stronger statement than "the remedy is weak": a weak
+defence fails sometimes, and this one **cannot** engage on the contended-file axis at all. Pair
+it with the read side — a session cannot write the record of this mechanism without the record
+being taken by it (instance 5's own capture) — and the two say the same thing from opposite
+ends: one names why the obvious fix does not reach the case, the other names how reliably the
+case arrives.
 ### Mechanism status: shipped, by the other session
 
 `scripts/pre-commit-unreviewed-content.sh` refuses a pathspec commit whose content differs
@@ -244,6 +261,16 @@ pathspec half. Worth noting who built it: the party who had just performed a cap
 the party who had just documented one. Neither session could have written it from its own
 evidence alone.
 
+**What it does not close, named by the party who walked into it.** The gate makes you *read*
+what you are about to commit; it does not make co-authored hunks **distinguishable**. Had the
+capturing session read `git diff --cached` on `e0525462`, it would have seen six hunks in a file
+it had itself edited three times that evening, with nothing in the diff marking which three were
+the peer's. The gate closes *committed without looking*. It does not close *looked and could not
+tell* — and on a contended file that is the harder half, because the reader is not being careless
+and more care does not help. Closing it needs per-hunk provenance the working tree does not
+carry, which is `issue-clusters:IC-10` (*authorship on a shared checkout is unrecoverable after
+the fact*) stated as a tooling gap rather than a narrative one. State the boundary wherever the
+gate is cited, so the next reader does not take it for more than it is.
 ## The read-side twin: during a peer's pre-commit run, your uncommitted work vanishes
 
 All of the above is about writes. There is a **read** hazard with the same root, and it was
@@ -285,6 +312,13 @@ already cost three captures. This is the cost side of that trade, it is small, a
 only dangerous while undocumented.
 
 ## Candidate remedies
+
+> **Superseded by *Re-ranking, third time* above — kept for the reasoning, not the ranking.**
+> This list was written after instance 1, when every observed capture was of an *unrelated*
+> file, and it ranks path-scoped commits first on exactly that evidence. Instances 4 and 5
+> falsified it: (1) is withdrawn, (2) is promoted to first. Preserved rather than rewritten
+> because the argument below was correct about the axis it could see — which is the point,
+> not an excuse for it.
 
 1. **Path-scoped commits as standing practice** — `git commit -- <explicit paths>`, never
    `-a` or a bare `add -A`, in any checkout that may host a second session. Cheapest, and
