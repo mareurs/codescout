@@ -301,6 +301,25 @@ librarian(action="context", anchor_id="<id>", max_tokens=N)  ← link-graph neig
 
 ---
 
+### doctor repairs — what each `fix=` mode does
+<!-- serves: librarian.doctor -->
+
+Every mode WRITES, is scoped (`root=` or the active project), and is a **dry run
+until `confirm=true`** — so reading this after your first call has cost you
+nothing, which is why it lives here rather than in the tool schema.
+
+| `fix=` | what it does |
+|---|---|
+| `prune_missing` | Drops `artifact` + `commits` rows under a dead/renamed root. |
+| `reseat_worktree` | Reseats no-collision worktree-scoped catalog rows to their main-repo path. Collisions are **reported, not reseated** — resolve those with `artifact(action="graft")`. |
+| `rehome` | Migrates a moved repo's rows from `old_root` to `new_root`, preserving ids and history. |
+| `repair_frontmatter_id` | Rewrites every `frontmatter_id_mismatch` file's `id:` to its catalog row's id, for every artifact under one root. A file with **no** frontmatter id is left alone rather than stamped — stamping one would newly subject it to the librarian guard. |
+| `mint_slugs` | Backfills `artifact.slug` where NULL. |
+| `export_augmentations` | Exports each augmentation's **shape** (never its `params`) to a committed sidecar and stamps `expects_augmentation:` to name it, so another machine's `reindex` re-attaches it. It can only export rows THIS catalog holds — run it on the machine that still has them. |
+
+Which params each mode needs is on `root` / `old_root` / `new_root` in the schema,
+because that is what you need to *form* the call.
+
 ## artifact_event — Event Log
 <!-- serves: artifact_event.create, artifact_event.list -->
 

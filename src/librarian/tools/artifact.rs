@@ -198,7 +198,7 @@ impl Tool for Artifact {
                 },
                 "anchor_heading": {
                     "type": "string",
-                    "description": "append_entry, prose ledgers: pass with `title` + `body` — all three or none, a partial set is refused naming what is missing — and the server writes the entry itself, formatting the heading as `## <ID> — <title>` at the ledger's own level and inserting it before this heading, in the same write that records the high-water mark. Prefer it to reserving an id and writing the section by hand: a heading missing its dash-and-title defines no token under link_scan, so every citation of the entry dangles. Must name a heading that exists verbatim; a bad anchor writes nothing at all."
+                    "description": "append_entry, prose ledgers: pass with `title` + `body` — all three or none, a partial set is refused naming what is missing — and the server writes `## <ID> — <title>` itself, before this heading, in the same write that records the high-water mark. Must name a heading that exists verbatim; a bad anchor writes nothing at all. Why prefer it over reserving an id: get_guide(\"tracker-conventions\") § Entry ids."
                 }
             }
         })

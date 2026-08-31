@@ -254,7 +254,7 @@ impl Tool for ArtifactAugment {
                 },
                 "params_path": {
                     "type": "string",
-                    "description": "Filesystem path to a JSON file holding the params payload, read server-side. Use when params are too large to pass inline: the MCP result buffer caps inline reads at ~9 KB, so a large array cannot be round-tripped through the model to rebuild the params argument. Write the JSON to a file via run_command, then pass its path here (absolute path recommended). Mutually exclusive with params. CLI equivalent: codescout artifact-augment <id> --params @<file> [--merge]."
+                    "description": "Filesystem path to a JSON file holding the params payload, read server-side (absolute path recommended). Mutually exclusive with params. Use when params are too large to pass inline (≳9 KB) — see get_guide(\"librarian\") § Augmentation Lifecycle."
                 },
                 "render_template": {
                     "type": "string",
