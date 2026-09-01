@@ -4,7 +4,7 @@ kind: bug
 status: open
 title: 'BUG: the citation-volume gate selects FOR the prose it exists to exclude — 8 of 14 findings are acronyms, and the top four by volume are all noise'
 tags:
-- cluster/assertion-satisfiable-by-accident
+- cluster/gate-keyed-on-unobservable-event
 - librarian
 - doctor
 - link-scan
