@@ -29,8 +29,36 @@ Spec: `docs/superpowers/specs/2026-08-27-operator-rules-engine-design.md`.
 
 One `always` rule against a 3–5 start band and a 5–10 ceiling, so there is real headroom —
 but headroom is not licence: Gate 3(a) binds independently of size, and all four `**Covers:**`
-slugs name distinct failure modes. The three `triggered` rules are recorded and validated now;
-they do not compile into any profile until Phase 2 builds the routing that reads `**Serves:**`.
+slugs name distinct failure modes.
+
+**Routing status, 2026-09-01 — supersedes "they do not compile into any profile until Phase 2
+builds the routing that reads `**Serves:**`".** That routing landed. `Tool::selector_key`'s
+default was inverted at `30b6fc41` so all 21 registered tools supply a selector, and
+`annotate_write_path` at `a6b4fc35` gave write responses a path for `path~` to match. Both
+`OP-3` and `OP-4` now route on a real call, each with an end-to-end test through its real tool
+(`tools::memory::tests::a_real_memory_write_call_delivers_op_3`,
+`tools::core::tests::a_real_edit_file_write_under_dot_claude_delivers_op_4`).
+
+**But routing is not the same as effectiveness, and for two of the three rules it is not even
+the binding constraint.** `OP-2` and `OP-4` are the honest cases at either end, and `OP-3` sits
+in between in a way worth stating precisely, because it looks solved:
+
+| rule | routes? | does the trigger see the VIOLATION? |
+|---|---|---|
+| `OP-4` | yes | **yes** — a config write under `~/.claude` is an `edit_file`/`create_file` call, so the rule fires on the act it governs |
+| `OP-3` | yes | **no** — it serves `memory.write` (*codescout's* tool), while the violation is a write to Claude Code's **built-in** store under `<config-dir>/projects/…/memory/`. The trigger fires when the agent is already doing the right thing |
+| `OP-2` | no | **no** — serves `Agent`/`Task`, harness tools that are not `crate::tools::Tool` implementors in this process at all |
+
+So `OP-3`'s resident copy in `~/.claude*/CLAUDE.md` is **not** made redundant by its routing,
+and must not be removed on that basis: it is the only copy reaching an agent *before* it
+chooses a store. The routed copy reinforces compliance; the resident copy prevents the failure.
+They are different jobs.
+
+**`OP-2` and `OP-3` therefore share one blocker and are one problem, not two:** the event that
+should trigger each never enters this process. Neither is reachable by any amount of
+`selector_key` work, and both want a companion-plugin hook — which `CAP-10` rejected on
+agent-agnosticism grounds, a rejection worth re-opening now that the alternative is measurably
+nothing. That is a design decision with an operator call in it, not routing work.
 
 ## OP-1 — Always verify before asserting
 

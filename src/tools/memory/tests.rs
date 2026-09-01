@@ -322,6 +322,26 @@ async fn write_and_read_roundtrip() {
 /// selector — which is not the same claim as the composition working. Every link can pass
 /// while the joint does not.
 ///
+/// **Delivery is not effectiveness, and this test proves only the first.** OP-3 forbids writing
+/// a durable fact to Claude Code's **built-in** memory (`<config-dir>/projects/.../memory/`,
+/// written by the harness's own tools). Its selector is `memory.write` — *codescout's* `memory`
+/// tool. Those are different mechanisms, so the trigger fires precisely when the agent is
+/// already doing the right thing, and cannot fire on the violation: an agent that reaches for
+/// the built-in store produces no call for `route()` to see, at all, ever.
+///
+/// So a green here means the routing chain works end to end. It does **not** mean OP-3 is
+/// effective, and it does **not** make the rule's resident copy in `~/.claude*/CLAUDE.md`
+/// redundant — that copy is the only one reaching an agent *before* it chooses a store.
+/// Removing it on the strength of this test would delete the preventive copy and keep the
+/// congratulatory one. Spelled out here because this is the site where that inference is most
+/// tempting: the test is named for OP-3 and it passes.
+///
+/// OP-3 shares its real blocker with OP-2, and they are one problem rather than two: in both
+/// cases the event that should trigger the rule never enters this process. OP-2 serves
+/// `Agent`/`Task`, harness tools that are not `crate::tools::Tool` implementors here; OP-3's
+/// violation is a native write to a path codescout is never called about. Neither is reachable
+/// by any amount of `selector_key` work, and both want a companion-plugin hook.
+///
 /// **It must be `call_content`, not `call`.** `call` returns the tool's own JSON and never
 /// consults the router at all: the selector projection, the `if selector.is_some()` guard,
 /// the once-per-session ledger stamp and the block rendering all live in `call_content`. A

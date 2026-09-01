@@ -3509,6 +3509,152 @@ mod tests {
              truncated registry and would otherwise pass vacuously"
         );
     }
+    /// Every `triggered` rule must name a tool that can actually deliver it — or declare, by
+    /// id, that it cannot.
+    ///
+    /// **The trap this closes.** A `triggered` rule whose selector names something this process
+    /// never sees is not merely unwired; it fires for **nobody, forever**, and produces no
+    /// error, no empty result and no log line while doing so. The ledger still reports
+    /// `Status: active`. Every other signal agrees with it: `parse_shape` accepts the selector
+    /// (`Agent` is a valid identifier), the router's own tests pass against synthetic corpora,
+    /// the delivery tests for its *siblings* are green, and the ledger's index can honestly say
+    /// "routing landed". So the defect is invisible from every direction at once — which is
+    /// `observer-blindness:OB-7`, and is exactly the state `OP-2` has been in since it was
+    /// written.
+    ///
+    /// The exemption list is keyed by rule id and carries a reason, so adding a rule that
+    /// cannot fire requires **writing down that it cannot**. That is the whole mechanism: not a
+    /// prohibition, an admission. A one-entry list is defensible where an acquired allowlist
+    /// would not be — and `no_stale_exemptions` below is what stops it becoming one, by
+    /// reddening when an exempted rule *becomes* routable rather than quietly covering for it.
+    ///
+    /// **What this gate cannot see, stated so its green is not over-read.** It checks that a
+    /// rule's trigger is *reachable*, never that the trigger observes the **violation** the
+    /// rule forbids. `OP-3` passes here and routes on a real call, yet its selector is
+    /// `memory.write` — *codescout's* memory tool — while the violation it forbids is a write to
+    /// Claude Code's built-in store, which never enters this process. So `OP-3` fires precisely
+    /// when the agent is already complying. That distinction is recorded in the ledger's own
+    /// index and in `crate::tools::memory::tests::a_real_memory_write_call_delivers_op_3`, and
+    /// it is the reason `OP-3`'s resident copy in `~/.claude*/CLAUDE.md` is **not** made
+    /// redundant by its routing. No test can check that; it needs a reader.
+    ///
+    /// **Mutations, per arm — a single kill would establish only one of them
+    /// (`reconnaissance-patterns:R-164`).**
+    ///
+    /// | arm | mutation | result |
+    /// |---|---|---|
+    /// | unregistered tool | empty `HARNESS_BLOCKED` | fires, naming `OP-2` and `Agent` |
+    /// | stale exemption | add `OP-9` to `HARNESS_BLOCKED` | fires, naming `OP-9` |
+    /// | selector precondition | — | **not exercised here.** A tool returning `None` reds `every_registered_tool_supplies_a_selector_key` too, so this arm is a second, better-located signal rather than the only one |
+    /// | action enum | — | **NOT exercised, and left unclaimed.** Reaching it means mutating `Serves:` in the live ledger, a guarded artifact and a real corpus. The arm is written and untested; do not read this gate's green as covering it |
+    #[tokio::test]
+    async fn every_triggered_rule_names_a_tool_that_can_deliver_it() {
+        use crate::operator_rules::rule::{Binding, Status};
+
+        // Deliberate, reasoned exemptions — never an acquired allowlist. An entry here is an
+        // admission that the rule reaches no one, not permission to ship it.
+        const HARNESS_BLOCKED: &[(&str, &str)] = &[(
+            "OP-2",
+            "serves `Agent` / `Task`, which are Claude Code HARNESS tools and not \
+             `crate::tools::Tool` implementors in this process, so no `selector_key` work in \
+             this codebase could ever route them — it needs a companion-plugin hook",
+        )];
+
+        let (_dir, server) = make_server().await;
+
+        let mut checked = 0usize;
+        let mut blocked_seen: Vec<String> = Vec::new();
+
+        for rule in crate::operator_rules::corpus::OPERATOR_RULES.iter() {
+            if rule.binding != Binding::Triggered || rule.status != Status::Active {
+                continue;
+            }
+            for sel in &rule.serves {
+                let Some(tool) = server.tools.iter().find(|t| t.name() == sel.tool) else {
+                    let exempt = HARNESS_BLOCKED.iter().find(|(id, _)| *id == rule.id);
+                    assert!(
+                        exempt.is_some(),
+                        "{} declares `serves: {}`, but no tool by that name is registered, so \
+                         this rule can never be delivered to anyone — silently, with every \
+                         other signal reporting healthy. Either point it at a real tool, or \
+                         add it to HARNESS_BLOCKED with the reason it is unreachable. Do NOT \
+                         change its status to hide it: a `triggered` rule that fires for \
+                         nobody is the defect this gate exists to surface.",
+                        rule.id,
+                        sel.tool
+                    );
+                    blocked_seen.push(rule.id.clone());
+                    continue;
+                };
+
+                // Routing precondition: `call_content` gates `route()` on
+                // `if selector.is_some()`, so a tool returning `None` makes every rule
+                // serving it undeliverable.
+                assert!(
+                    tool.selector_key(&serde_json::json!({})).is_some(),
+                    "{} serves `{}`, which is registered but returns `None` from \
+                     `selector_key` — `Shape::matches` reads that as \"cannot match\", so \
+                     `route()` is never consulted and this rule is dead. See \
+                     `every_registered_tool_supplies_a_selector_key`.",
+                    rule.id,
+                    sel.tool
+                );
+
+                // If the selector names an action, that action must be real, or the shape
+                // matches nothing. Same oracle as the guide-side Gate 6: the tool's own
+                // schema, so a new action needs no edit here.
+                if let Some(action) = &sel.action {
+                    let allowed: Vec<String> = tool
+                        .input_schema()
+                        .get("properties")
+                        .and_then(|p| p.get("action"))
+                        .and_then(|a| a.get("enum"))
+                        .and_then(|e| e.as_array())
+                        .map(|v| {
+                            v.iter()
+                                .filter_map(|x| x.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    assert!(
+                        allowed.iter().any(|a| a == action),
+                        "{} declares `serves: {}.{action}`, which is not one of `{}`'s real \
+                         actions ({}). It parses, and it matches no call.",
+                        rule.id,
+                        sel.tool,
+                        sel.tool,
+                        if allowed.is_empty() {
+                            "that tool exposes no action enum".to_string()
+                        } else {
+                            allowed.join(", ")
+                        }
+                    );
+                }
+                checked += 1;
+            }
+        }
+
+        // No stale exemptions. An id listed here that no longer needs listing means the rule
+        // became routable and the entry is now suppressing a live check — the good failure.
+        for (id, why) in HARNESS_BLOCKED {
+            assert!(
+                blocked_seen.iter().any(|seen| seen == id),
+                "{id} is exempted as harness-blocked ({why}), but every tool it serves is now \
+                 registered — delete the exemption and let this gate check it for real. This \
+                 is the GOOD failure: it means the rule became deliverable."
+            );
+        }
+
+        // Anti-vacuity floor, not a total: the loop is silent if the corpus fails to load or
+        // every rule is `always`, which are the states this gate is least useful in and most
+        // likely to be read as green. Two deliverable selectors exist today (`memory.write`
+        // for OP-3, and `edit_file` + `create_file` for OP-4), and rules only grow.
+        assert!(
+            checked >= 2,
+            "the gate checked only {checked} deliverable selectors — it is reading an empty or \
+             `always`-only corpus and would otherwise pass vacuously"
+        );
+    }
 
     /// A declaring topic must have at least one LIVE route from a real call to at least
     /// one of its declared sections. Gate 7.
