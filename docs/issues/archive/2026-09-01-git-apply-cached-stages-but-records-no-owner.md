@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/declared-not-wired
 closed: null
@@ -11,6 +11,20 @@ severity: medium
 ---
 
 # BUG: `git apply --cached` stages content the recorder can never attribute, so the guard refuses your own commit
+
+**Fixed** at `92dfa4e4`, patch-id `53cfd23a6ce03bc2f4d9fb38c11b6fc1607edaf7`.
+Verified on `experiments`: gate green (fmt clean, clippy 0, lean 3413/0, default 5022/0),
+`tests/hooks-discrimination.sh` 32 → 41, and the filed reproduction re-run returns the session
+id where it returned `-`.
+
+> **`stash` is named in *Root cause* as sharing the grammar mismatch, and it is — but it has no
+> observable consequence, so it is deliberately not fixed.** Probed 2026-09-01 rather than
+> reasoned about: `git stash push -- s.txt` and bare `git stash push` each produce **no log rows
+> at all**, because stash clears the index, `git diff --cached --raw` comes back empty, and the
+> log is rewritten with nothing in it. There is no (blob, path) pair to claim or mis-claim. The
+> verb's presence in `staging_op()`'s list is therefore inert rather than wrong. Recorded because
+> the root cause reads as naming two defects and only one of them can be observed — the same
+> loudness question this fix asked of its own deleted guards, turned on the bug file.
 
 ## Summary
 
@@ -159,6 +173,76 @@ Options, unranked — each needs the reproduction run first.
 
 Deliberately not proposed: relaxing `names_path()`. Its strictness is the thing standing
 between this guard and the silent false-claim failure it was built after.
+
+## Resolution — 2026-09-01
+
+Option 3 (read the patch's own headers). **Option 1's stated cost was wrong, and running the
+reproduction is what showed it.** That option reads *"derive the paths from the index diff, not
+from argv … cost: the hook would need the previous index state"* — but the hook **already**
+iterates `git diff --cached --raw` (`:256`), and the failing row carried the correct path
+(`-\t62c7bd5\tf.txt`) all along. argv was never the path *source*. It is the **restriction**: the
+set this invocation intended to stage, which is what stops a session's `git add a.txt` claiming a
+peer's already-staged `b.txt` sitting in the same `--raw` output.
+
+So Option 1 is not blocked on plumbing — it is unsafe, because dropping the restriction re-opens
+the false-claim failure `names_path()` exists to prevent. Right conclusion, wrong reason, and the
+wrong reason would have justified the change had the plumbing turned out to be cheap. Option 3 is
+correct for the reason Option 1 is not: a patch's `+++ b/<p>` / `--- a/<p>` headers are the same
+**kind** of thing argv is for `add`.
+
+### The fix
+
+A `patch_paths()` helper reading default-prefix headers only, and `argv_paths()` routing `apply`'s
+positionals through it. Strict by the same asymmetry as `names_path()`: a `--no-prefix` patch
+emits nothing and degrades to `-`. Loose matching would let a stray `--- ` line inside a patch's
+own **content** — a diff of a diff, which this repo produces — name a path the invocation never
+touched.
+
+### Two mechanisms were written, then deleted for failing the loudness law
+
+The first version also carried a bail on `-p<n>` / `--directory`, plus output buffering to let
+that bail fire when the flag followed the patch file. **Mutation testing killed zero tests for
+either**, and no reachable caller could be named:
+
+- a `--no-prefix` patch fails the `a/` match and emits nothing already;
+- where a prefixed patch under an odd `-p` could reach `names_path()`, the existing-owner lookup
+  (`:295`) resolves the row first;
+- the buffering existed only to serve the bail.
+
+Both deleted rather than given tests to justify them — *a guard nothing reaches is decoration
+however loudly it is written*. The reasoning is recorded at the site so the absence reads as a
+decision.
+
+**One mutant survives and is annotated rather than tested.** Deleting `sub(/^[ab]\//, "", p)`
+kills nothing, because `names_path()` suffix-matches and `a/f.txt` still matches target `f.txt`.
+No killing case was constructible. It stays as a **contract** line, not a guard: `names_path`
+documents its input as a repo-relative path, and if it ever tightens to exact matching — the
+direction its own comment leans — the line becomes load-bearing with no test to notice its
+removal. Said at the site, so the green tick is not read as coverage.
+
+### Tests — `tests/hooks-discrimination.sh` § *apply --cached claims what the PATCH names*
+
+32 → 41 cases. Nine, covering the claim (single, new-file `--- /dev/null`, deletion
+`+++ /dev/null`, multi-file), the restriction that must survive it (a co-staged path the patch
+never named stays with its stager), and two over-refusals (`-p0`, stdin).
+
+**One fixture was broken and produced a false RED that outlived the fix.** `git diff --cached
+doomed.txt` after `git rm` is ambiguous — the path is gone from the working tree — so git errors,
+the patch is empty, `apply` fails with *"No valid patches in input"*, and the assertion fails
+against a case that never ran. It reads exactly like a defect in `patch_paths`. The `--` is now
+annotated on the fixture line with what breaks without it.
+
+Mutation-verified per site: matching nothing kills 6, loosening the header match kills 1, printing
+the filename again kills 6, not recording the verb kills 6.
+
+### Verification
+
+The filed reproduction, re-run against the fix — same repo shape, same blob:
+
+```
+apply --cached  ->  REPRO-SESSION-ID   62c7bd5   f.txt      (was `-`)
+control (add)   ->  REPRO-SESSION-ID   bedc259   g.txt
+```
 
 ## Tests added
 

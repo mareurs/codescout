@@ -173,7 +173,13 @@ eq "a real add still claims normally" "$(owner_of s1.txt)" "$A"
 # is ONE token, but `-C <path>` and `--git-dir <path>` put the value in its own argv slot.
 # A parser that skips the flag and then classifies the next token reads a PATH as the
 # subcommand. Every add below is the same operation by the same session as the one above.
-# `git -C` matters most: codescout-companion's worktree guard mandates that exact form.
+# `git -C` matters most because it is the form a session reaches for in a multi-worktree
+# checkout. It is NOT mandated for staging: an earlier version of this comment said the
+# companion's worktree guard requires it, which was wrong and was retracted at the hook
+# source (F-90) while this copy was missed. Probed directly 2026-09-01 against
+# git-worktree-guard.mjs: it triggers only on the commit family
+# (commit/push/reset --hard/rebase/merge/checkout -b), so a bare `git add` passes. The
+# parse bug these cases guard is real regardless of the guard's scope.
 echo formC > formC.txt
 CLAUDE_CODE_SESSION_ID="$A" git -C "$PWD" add formC.txt
 eq "-C <path> add is a staging op" "$(owner_of formC.txt)" "$A"
@@ -292,7 +298,7 @@ has "names the file" "$out" "f.txt"
 rm -rf "$T"
 
 # ------------------------------------------ 6. `git apply --cached` names paths in the PATCH
-# docs/issues/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
+# docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
 #
 # `apply` sits in staging_op()'s verb list, so the write is eligible to claim -- but
 # argv_paths() emits the POSITIONAL, which for `apply` is the PATCH FILE and never a staged

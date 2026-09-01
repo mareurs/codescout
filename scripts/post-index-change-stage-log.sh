@@ -161,7 +161,7 @@ staging_op() {
 # staged path, so without this the verb sits in staging_op()'s list while argv_paths() feeds
 # names_path() a filename that can never match -- every `apply --cached` records `-` and the
 # foreign-index guard then refuses the stager's own commit
-# (docs/issues/2026-09-01-git-apply-cached-stages-but-records-no-owner.md).
+# (docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md).
 #
 # STRICT for the same reason names_path is: only DEFAULT-PREFIX headers are read. A patch
 # written with --no-prefix, or applied with -p0, emits nothing and the write degrades to `-`.
