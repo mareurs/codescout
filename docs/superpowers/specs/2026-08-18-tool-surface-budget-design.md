@@ -3,6 +3,8 @@ id: '0e0316e9036d7f16'
 kind: spec
 status: active
 title: Tool Surface Budget — bounding the per-request prompt payload
+owners:
+- marius
 tags:
 - prompt-surfaces
 - budget
@@ -10,14 +12,6 @@ tags:
 - gate
 - schema
 topic: prompt-surfaces
----
-
----
-kind: spec
-status: draft
-title: Tool Surface Budget — bounding the per-request prompt payload
-owners: [marius]
-tags: [prompt-surfaces, budget, tools-list, gate, schema]
 ---
 
 # Tool Surface Budget — bounding the per-request prompt payload

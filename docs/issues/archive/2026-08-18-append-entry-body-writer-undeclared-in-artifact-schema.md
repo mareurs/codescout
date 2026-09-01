@@ -1,5 +1,5 @@
 ---
-id: 10df47a34b5b3fe7
+id: '10df47a34b5b3fe7'
 kind: bug
 status: fixed
 title: 'BUG: append_entry''s server-side body writer is undeclared in the artifact schema, so the one path that cannot produce an uncitable entry is invisible'
@@ -10,17 +10,12 @@ tags:
 - schema
 topic: prompt-surfaces
 closed: 2026-08-18
----
-
----
-status: open
 opened: 2026-08-18
-closed:
-severity: high
 owner: marius
-related: ["docs/issues/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md", "docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md"]
-tags: [prompt-surface, librarian, append_entry, schema]
-kind: bug
+related:
+- docs/issues/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md
+- docs/issues/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
+severity: high
 ---
 
 # BUG: `append_entry`'s server-side body writer is undeclared in the `artifact` schema, so the one path that cannot produce an uncitable entry is invisible

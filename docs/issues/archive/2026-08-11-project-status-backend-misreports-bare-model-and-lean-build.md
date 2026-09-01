@@ -9,22 +9,9 @@ tags:
 - diagnostics
 - retrieval
 closed: 2026-08-14
-severity: medium
----
-
----
-status: open
 opened: 2026-08-11
-closed:
-severity: low
 owner: marius
-related: []
-tags:
-  - embedding
-  - status
-  - diagnostics
-  - retrieval
-kind: bug
+severity: medium
 ---
 
 # BUG: ProjectStatus's embedding backend classifier misreports two configs that backend_is_local doesn't recognize

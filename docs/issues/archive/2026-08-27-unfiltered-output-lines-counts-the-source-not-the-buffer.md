@@ -11,13 +11,6 @@ tags:
 - cluster/capped-result-presented-as-complete
 ---
 
----
-kind: bug
-status: open
-closed:
-unverified:
----
-
 # `unfiltered_output_lines` describes the stream, sits next to a handle, and the truncated buffer it points at answers greps silently-partially
 
 **Found:** 2026-08-27, from `claude-plugins`, by a consumer of this API.

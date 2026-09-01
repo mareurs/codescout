@@ -11,13 +11,6 @@ tags:
 - buffers
 ---
 
----
-kind: bug
-status: open
-closed:
-unverified:
----
-
 # IL-3 blocks pipelines that already collapsed to one line, misclassifies field-selectors as trimmers, and routes the caller to a truncated buffer that yields a silently WRONG hash
 
 **Found:** 2026-08-27, from `claude-plugins`, while recording a fix's `patch-id` — the

@@ -11,12 +11,6 @@ tags:
 closed: 2026-08-21
 ---
 
----
-kind: bug
-status: open
-owners: []
----
-
 ## Summary
 
 `docs/templates/session-log.md`'s `## Index` and `## Wins Index` tables ship a

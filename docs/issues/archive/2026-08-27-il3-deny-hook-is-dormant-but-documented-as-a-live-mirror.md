@@ -11,13 +11,6 @@ tags:
 - cluster/declared-not-wired
 ---
 
----
-kind: bug
-status: open
-closed:
-unverified:
----
-
 # `il3-deny-hook.sh` is dormant, has its own test suite, and was documented as a live mirror to keep in sync
 
 **Found:** 2026-08-27, incidentally, while fixing

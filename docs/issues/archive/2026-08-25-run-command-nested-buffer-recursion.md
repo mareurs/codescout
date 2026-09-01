@@ -12,11 +12,6 @@ tags:
 closed: 2026-08-25
 ---
 
----
-kind: bug
-status: open
----
-
 ## Summary
 
 When `run_command`'s stdout exceeds the inline budget (~9-10KB) and gets
