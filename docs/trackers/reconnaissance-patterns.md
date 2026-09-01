@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 168
+entry_high_water_R: 169
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -7512,6 +7512,63 @@ something a two-minute probe refutes. **Cost incurred:** four throwaway-repo pro
 **Promote-when:** a second instrument in this corpus is found whose report expires rather than
 being narrow — at which point the ask above earns a place beside the recording law in
 `CLAUDE.md` § *Testing Discipline*.
+
+## R-169 — Running the peer enumeration supplied the confidence to attribute a write by adjacency
+
+**Valid:** invariant
+
+**Rests on:** CLAUDE.md § *Reaching a Peer Session* ("Never route by adjacency") and
+§ *Observer Blindness*; `codescout-companion:reaching-peer-sessions` § *Two readings to
+get right*.
+
+I ran `/codescout-companion:reaching-peer-sessions`, got the correct socket-scoped table
+(16 sessions across 3 profiles, 6 in this checkout — 5 peers plus me), and then attributed
+file authorship **by adjacency anyway**: I took everything in `git status` that I had not
+written and labelled it "the peer's", meaning the one peer I happened to know about,
+because its fix-queue file names itself.
+
+Three of the six files were a different session's. `scripts/file-provenance.py` partitions
+them cleanly into two author ids — one holding `src/server.rs`,
+`src/tools/memory/tests.rs`, `docs/trackers/operator-rules.md`, the other holding the three
+`scripts/pre-commit-*` edits and two untracked `commit-sequence` files. I shipped the wrong
+partition to my user *and* to the peer, in a message whose stated purpose was
+shared-checkout hygiene.
+
+**What makes this an R-N rather than a slip.** The enumeration ran, succeeded, and was
+reported accurately. It answered *who is present*. I then used it for *who wrote this*,
+which is a different question with a different instrument — and the successful first answer
+is what supplied the confidence for the second. **Running the population check can make the
+attribution error more likely, not less**, because it retires the feeling of not having
+checked. The skill's own text says so in as many words — *"Enumerating a complete set still
+only bounds who was present — it does not attribute a write. To attribute one, ask."* — and
+I had that text in context when I wrote the message.
+
+That is the § *Observer Blindness* signature exactly: the author was actively working
+inside the class while committing an instance of it. Care was not the missing ingredient
+and would not have supplied the answer; a one-command instrument would have.
+
+**The correction did not come from the enumeration either — it came from the misattributed
+party reading its own name.** No gate fires on a wrong author claim: `git status` names no
+author, the provenance script is opt-in, and a false attribution is a *plausible sentence*
+rather than an error. So the detector here was a peer noticing a claim about itself, which
+only works when the wronged party is (a) still alive, (b) messaged, and (c) inclined to
+reply after being told "no reply needed". All three held; none is structural.
+
+**Change:** when about to name *who* wrote an uncommitted change — in a message, a commit,
+a tracker, or a report to the user — run `python3 scripts/file-provenance.py <paths>` and
+paste what it says. Never derive authorship from `git status`, diff proximity, or "the peer
+I know about". Two properties to carry rather than take on trust: it is **windowed** (it
+prints the window per path; an older edit is invisible), and it answers *who wrote these
+bytes*, not *whose work this is* — co-edited files exist and are resolved by asking.
+
+**And keep the two halves of an identification separate when reporting.** I verified from
+my own run that the eight files partition into two author ids and that none is mine. That
+`6524892b` is `codescout-b7` came from `codescout-b7` quoting its own id, which is the
+prescribed positive method. That `3e275c54` is `compact-root-claude-md` is that session's
+inference about a third party, which I have not confirmed — `/proc/<pid>/environ` carries
+no `CLAUDE_CODE_SESSION_ID`, so the id→name mapping is not independently checkable from
+here. Report the id when only the id is established. Attaching a name costs nothing and
+is precisely how the original error propagated.
 
 ## Template for new entries
 
