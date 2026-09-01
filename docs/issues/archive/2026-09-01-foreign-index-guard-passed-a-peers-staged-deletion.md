@@ -2,7 +2,7 @@
 kind: bug
 status: fixed
 tags:
-- cluster/guard-narrower-than-its-name
+- cluster/authorship-unrecoverable-after-the-fact
 closed: 2026-09-01
 opened: 2026-09-01
 owner: marius
@@ -144,8 +144,12 @@ The safe composition documented in the hook's own header: `git add <paths>` then
 
 N/A — root cause measured, fixed and pinned by a regression suite.
 
-One thing deliberately **not** claimed as covered, since this file's tag is
-`cluster/guard-narrower-than-its-name` and that is the trap: the guard covers **CROSS-path**
+One thing deliberately **not** claimed as covered. **Retagged 2026-09-01** from
+`cluster/guard-narrower-than-its-name` to `cluster/authorship-unrecoverable-after-the-fact` by an
+independent blind second read, on the § *Root cause* measurement above: the guard's implementation
+was never narrower than its name — it consumed a corrupted log correctly — so the old tag
+described the disclaimer below rather than this incident's defect. The disclaimer still stands as
+a property of the **guard**: it covers **CROSS-path**
 capture only — my index holding your file. It does not cover **INTRA-path** capture, where
 a path is legitimately yours and its *content* gained a peer's lines, and it cannot cover a
 `git add -A` under your own id, where every path reads as yours by construction. Both are

@@ -6,7 +6,7 @@ tags:
 - silent-failure
 - api-ergonomics
 - follow-up
-- cluster/accepted-parameter-silently-dropped
+- cluster/guard-narrower-than-its-name
 closed: 2026-08-16
 opened: 2026-08-16
 owner: marius

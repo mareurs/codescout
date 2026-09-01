@@ -5,7 +5,7 @@ tags:
 - librarian
 - data-loss
 - progressive-disclosure
-- cluster/capped-result-presented-as-complete
+- cluster/guard-narrower-than-its-name
 closed: 2026-08-29
 opened: 2026-08-28
 owner: marius

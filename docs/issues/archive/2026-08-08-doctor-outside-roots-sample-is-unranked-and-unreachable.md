@@ -10,7 +10,7 @@ tags:
 - doctor
 - progressive-disclosure
 - catalog
-- cluster/capped-result-presented-as-complete
+- cluster/accepted-parameter-silently-dropped
 closed: 2026-08-14
 ---
 
