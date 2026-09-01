@@ -30,14 +30,17 @@ use rusqlite::Connection;
 
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via shard::export")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via shard::export"
+    )
 )]
 pub(crate) const AUDIT_DIR: &str = ".codescout/audit";
 #[cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "consumed by Task 2 (writer) via resolve_host_id, the only writer of this key"
+        reason = "consumed by Task 4 (production wiring) via resolve_host_id, the only writer of this key"
     )
 )]
 pub(crate) const HOST_META_KEY: &str = "audit_host_id";
@@ -47,7 +50,10 @@ pub(crate) const HOST_META_KEY: &str = "audit_host_id";
 /// prefix — and the prefix is a courtesy, not the correctness.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via resolve_host_id")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via resolve_host_id"
+    )
 )]
 fn candidate_name() -> String {
     for key in ["CODESCOUT_AUDIT_HOST", "COMPUTERNAME", "HOSTNAME"] {
@@ -69,7 +75,10 @@ fn candidate_name() -> String {
 /// Namespace).
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via mint_host_id")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via mint_host_id"
+    )
 )]
 fn sanitize(raw: &str) -> String {
     let mut out = String::new();
@@ -97,7 +106,10 @@ fn sanitize(raw: &str) -> String {
 /// increasing counter is mixed in as a third, always-distinct source.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via suffix")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via suffix"
+    )
 )]
 static MINT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -109,7 +121,10 @@ static MINT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 /// principle vary in exactly the bits the counter also touches.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via suffix")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via suffix"
+    )
 )]
 static SUFFIX_NANOS: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -128,7 +143,10 @@ static SUFFIX_NANOS: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
 /// foundation for a collision guard.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via mint_host_id")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via mint_host_id"
+    )
 )]
 fn suffix() -> String {
     use std::sync::atomic::Ordering;
@@ -146,7 +164,10 @@ fn suffix() -> String {
 /// environment or a catalog connection.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via resolve_host_id")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via resolve_host_id"
+    )
 )]
 pub(crate) fn mint_host_id(candidate: &str) -> String {
     format!("{}-{}", sanitize(candidate), suffix())
@@ -157,7 +178,10 @@ pub(crate) fn mint_host_id(candidate: &str) -> String {
 /// design — all the logic that needs testing lives in `mint_host_id`.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via shard::export")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via shard::export"
+    )
 )]
 pub(crate) fn resolve_host_id(conn: &Connection) -> Result<String> {
     if let Some(existing) = gc::get_meta(conn, HOST_META_KEY)? {
@@ -174,7 +198,10 @@ pub(crate) fn resolve_host_id(conn: &Connection) -> Result<String> {
 /// size, and host keeps two machines off each other's lines entirely.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via shard::export")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via shard::export"
+    )
 )]
 pub(crate) fn shard_file_name(host: &str, at_ms: i64) -> String {
     format!("{host}-{}.jsonl", month_key(at_ms))
@@ -184,7 +211,10 @@ pub(crate) fn shard_file_name(host: &str, at_ms: i64) -> String {
 /// calendar so it agrees with `at_ms` on every platform.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via shard_file_name")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via shard_file_name"
+    )
 )]
 pub(crate) fn month_key(at_ms: i64) -> String {
     let days = at_ms.div_euclid(86_400_000);
@@ -196,7 +226,10 @@ pub(crate) fn month_key(at_ms: i64) -> String {
 /// this crate free of a chrono dependency for one date field.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by Task 2 (writer) via month_key")
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via month_key"
+    )
 )]
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;

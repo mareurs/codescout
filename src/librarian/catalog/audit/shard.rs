@@ -26,7 +26,7 @@ use std::path::Path;
     not(test),
     expect(
         dead_code,
-        reason = "consumed by shard::export/unexported_count, not yet wired to a live (non-test) caller until Task 2's integration point lands"
+        reason = "consumed by shard::export/unexported_count, not yet wired to a live (non-test) caller until Task 4's integration point lands"
     )
 )]
 pub(crate) const WATERMARK_KEY: &str = "audit_exported_through_seq";
@@ -119,7 +119,7 @@ fn watermark(conn: &Connection) -> Result<i64> {
     not(test),
     expect(
         dead_code,
-        reason = "consumed by doctor.rs's audit_health reporting once Task 2 wires it in; not yet wired to a live (non-test) caller"
+        reason = "consumed by doctor.rs's audit_health reporting once Task 4 wires it in; not yet wired to a live (non-test) caller"
     )
 )]
 pub(crate) fn unexported_count(conn: &Connection) -> Result<i64> {
@@ -135,14 +135,13 @@ pub(crate) fn unexported_count(conn: &Connection) -> Result<i64> {
     not(test),
     expect(
         dead_code,
-        reason = "consumed by a CLI/reindex integration point that lands after Task 2; not yet wired to a live (non-test) caller"
+        reason = "consumed by Task 4's CLI/reindex integration point; not yet wired to a live (non-test) caller"
     )
 )]
 pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport> {
     let host_id = host::resolve_host_id(conn)?;
     let from = watermark(conn)?;
     let dir = repo_root.join(AUDIT_DIR);
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
 
     let mut stmt = conn.prepare(
         "SELECT seq, at_ms, tbl, op, row_id, actor, verb, payload
@@ -172,6 +171,14 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     let mut by_month: BTreeMap<String, (i64, Vec<String>)> = BTreeMap::new();
 
     for (seq, at_ms, tbl, op, row_id, actor, verb, payload) in rows {
+        // Must advance past a skip-only row too (commits, pure churn) — the
+        // watermark tracks position in the SOURCE table, not export outcome.
+        // Moving this below the two `continue`s below leaves it stuck behind
+        // skip-only rows forever, a permanent phantom backlog in doctor's
+        // `unexported_count`; see commits_rows_are_never_exported and
+        // reindex_churn_updates_are_never_exported, both of which now assert
+        // `unexported_count == 0` after a skip-only export (Important 2,
+        // task-2 review).
         report.through_seq = report.through_seq.max(seq);
         if tbl == "commits" {
             report.skipped_commits += 1;
@@ -190,9 +197,14 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
             row_id,
             actor,
             verb,
-            payload: payload
-                .as_deref()
-                .and_then(|p| serde_json::from_str(p).ok()),
+            // A payload that fails to parse as JSON is still audit data — do
+            // not let it vanish silently. `skip_serializing_if` only omits a
+            // genuine `None`, so falling back to a string preserves the raw
+            // bytes in the shard line instead of dropping the field with no
+            // error and no counter (small fix 8, task-2 review).
+            payload: payload.as_deref().map(|p| {
+                serde_json::from_str(p).unwrap_or_else(|_| serde_json::Value::String(p.to_string()))
+            }),
         };
         by_month
             .entry(host::month_key(at_ms))
@@ -203,6 +215,12 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     }
 
     if !by_month.is_empty() {
+        // Only created when there is something to write — a no-op export
+        // (everything skipped, or nothing past the watermark) must not touch
+        // the filesystem at all (small fix 10, task-2 review). The test
+        // helper `lines()` was updated to tolerate a missing directory so it
+        // no longer forces this to run unconditionally.
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         for (representative_at_ms, lines) in by_month.values() {
             // Ruling 4: the filename convention has exactly one definition —
             // host::shard_file_name — so Task 1's shard_names_round_trip test
@@ -212,23 +230,45 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
             let path = dir.join(&name);
             // One exclusive lock per file: two sessions reindexing at once must
             // not interleave partial lines into a file that is about to be
-            // committed. Same primitive as src/retrieval/index_lock.rs.
+            // committed. Same primitive as src/retrieval/index_lock.rs. Armed
+            // for Task 4's production wiring — no test here exercises actual
+            // contention, since `export` has no non-test caller yet and
+            // cannot race itself within one test process.
             let mut f = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(&path)
                 .with_context(|| format!("opening {}", path.display()))?;
             FileExt::lock_exclusive(&f)?;
-            let body = lines.join("\n");
-            let r = writeln!(f, "{body}").and_then(|_| f.sync_all());
+            // A single `write_all` over one already-newline-terminated buffer,
+            // not `writeln!`, which lowers to two separate `write_all` calls
+            // (body, then "\n") — a kill between them leaves a torn line with
+            // no trailing newline, and the next export's append then
+            // concatenates its first JSON object onto that unterminated line
+            // (small fix 3, task-2 review). One write_all is one syscall; a
+            // partial write of it still can't interleave a second object onto
+            // the same physical line the way two calls can.
+            let r = f
+                .write_all(format!("{}\n", lines.join("\n")).as_bytes())
+                .and_then(|_| f.sync_all());
             let _ = FileExt::unlock(&f);
             r.with_context(|| format!("appending to {}", path.display()))?;
             report.files.push(name);
         }
+        // Best-effort: fsync the directory too, so the dirent linking a
+        // newly-created shard file is durable. Without this, a power loss
+        // can durably advance the watermark (SQLite fsyncs its own commit)
+        // while the shard file's directory entry never lands — the exact
+        // silent-loss mode the append-then-watermark ordering exists to
+        // prevent (small fix 4, task-2 review). Best-effort and ignored on
+        // platforms/filesystems that refuse to open or sync a directory.
+        if let Ok(dir_handle) = std::fs::File::open(&dir) {
+            let _ = dir_handle.sync_all();
+        }
     }
 
-    // Only after every append is durable — see the module-level ordering note
-    // on this function, and
+    // Only after every append (and, best-effort, its directory entry) is
+    // durable — see the module-level ordering note on this function, and
     // a_failed_append_never_advances_the_watermark/a_crash_between_append_and_
     // watermark_duplicates_rather_than_loses below, which pin it from both
     // directions.
@@ -250,7 +290,17 @@ mod tests {
 
     fn lines(dir: &std::path::Path) -> Vec<ShardLine> {
         let mut out = Vec::new();
-        for e in std::fs::read_dir(dir.join(super::super::host::AUDIT_DIR)).unwrap() {
+        // export() now only creates the audit directory when it actually has
+        // something to write (small fix 10, task-2 review) — a no-op export,
+        // or a test that never calls export at all, leaves it absent. That is
+        // a valid "nothing exported yet" state, not an error, so tolerate it
+        // here rather than forcing export to create the directory unconditionally.
+        let entries = match std::fs::read_dir(dir.join(super::super::host::AUDIT_DIR)) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return out,
+            Err(e) => panic!("reading audit dir: {e}"),
+        };
+        for e in entries {
             let p = e.unwrap().path();
             for l in std::fs::read_to_string(&p).unwrap().lines() {
                 out.push(serde_json::from_str(l).unwrap());
@@ -264,11 +314,46 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         seed(&cat, "a1");
+        let host_id = host::resolve_host_id(&cat.conn).unwrap();
+        // Pin the full line shape against the actual source row, not just its
+        // presence — a mutation probe found `at_ms`/`actor`/`verb`/`payload`
+        // all survived being zeroed at the struct literal because nothing
+        // read them back (Important 1, task-2 review).
+        let (src_at_ms, src_actor, src_verb, src_payload): (
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = cat
+            .conn
+            .query_row(
+                "SELECT at_ms, actor, verb, payload FROM catalog_audit
+                 WHERE tbl='artifact' AND row_id='a1' AND op='insert'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
         let r = export(&cat.conn, tmp.path()).unwrap();
         assert!(r.exported >= 1, "{r:?}");
         assert!(r.through_seq > 0);
         let got = lines(tmp.path());
-        assert!(got.iter().any(|l| l.row_id == "a1" && l.tbl == "artifact"));
+        let line = got
+            .iter()
+            .find(|l| l.row_id == "a1" && l.tbl == "artifact")
+            .expect("the seeded artifact's insert row must be exported");
+        assert_eq!(
+            line.host, host_id,
+            "the line's host must match the exporting host's own id, not just be non-empty"
+        );
+        assert_eq!(line.at_ms, src_at_ms);
+        assert_eq!(line.actor, src_actor);
+        assert_eq!(line.verb, src_verb);
+        assert_eq!(
+            line.payload,
+            src_payload
+                .as_deref()
+                .and_then(|p| serde_json::from_str(p).ok())
+        );
         assert!(
             got.iter().all(|l| !l.host.is_empty()),
             "every line names its host"
@@ -306,6 +391,12 @@ mod tests {
         let r = export(&cat.conn, tmp.path()).unwrap();
         assert_eq!(r.skipped_commits, 1, "{r:?}");
         assert!(lines(tmp.path()).iter().all(|l| l.tbl != "commits"));
+        // The watermark must advance past a skip-only row too, or it sits
+        // behind the row forever and doctor reports a permanent phantom
+        // backlog (Important 2, task-2 review) — moving the `through_seq`
+        // update below the `continue`s left every other assertion in this
+        // suite green.
+        assert_eq!(unexported_count(&cat.conn).unwrap(), 0);
     }
 
     #[test]
@@ -323,6 +414,9 @@ mod tests {
         let r = export(&cat.conn, tmp.path()).unwrap();
         assert_eq!(r.skipped_churn, 1, "{r:?}");
         assert_eq!(r.exported, 0);
+        // Same phantom-backlog guard as commits_rows_are_never_exported: a
+        // churn-only row must not sit past the watermark forever.
+        assert_eq!(unexported_count(&cat.conn).unwrap(), 0);
     }
 
     #[test]
@@ -376,11 +470,19 @@ mod tests {
         // first, advance the watermark second: a crash in between re-exports
         // rows already on disk, and readers dedupe on (host, seq). The inverse
         // order would LOSE rows with no signal anywhere.
+        //
+        // Two artifacts are seeded, not one: with a single row, `n == 1` and
+        // `seqs.len() == n` is `1 == 1` for ANY value of `seq` — replacing
+        // `seq` with a constant at the struct literal leaves this green
+        // (Important 1, task-2 review). With two distinct seqs the set only
+        // has cardinality `n` if both are preserved and distinct.
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         seed(&cat, "a1");
+        seed(&cat, "a2");
         export(&cat.conn, tmp.path()).unwrap();
         let n = lines(tmp.path()).len();
+        assert!(n >= 2, "expected at least the two seeded rows, got {n}");
         // Simulate the crash: the file is written, the watermark never advanced.
         gc::set_meta(&cat.conn, WATERMARK_KEY, "0").unwrap();
         export(&cat.conn, tmp.path()).unwrap();
@@ -430,8 +532,17 @@ mod tests {
         // than assume, and degrade to a no-op if the precondition never
         // triggers (same pattern as
         // rendezvous::tests::publish_degrades_to_none_on_filesystem_failure).
+        // This is the SOLE guard of a load-bearing ordering invariant, so the
+        // skip must be loud: silent degradation here would read identically
+        // to a real pass on a CI runner that happens to run as root (small
+        // fix 5, task-2 review).
         let probe_ok = std::fs::File::create(audit_dir.join("probe")).is_ok();
         if probe_ok {
+            eprintln!(
+                "a_failed_append_never_advances_the_watermark: SKIPPED — this \
+                 environment's filesystem does not enforce 0o500 (likely running \
+                 as root), so the ordering invariant was NOT exercised by this run"
+            );
             let _ = std::fs::remove_file(audit_dir.join("probe"));
             let _ = std::fs::set_permissions(&audit_dir, std::fs::Permissions::from_mode(0o700));
             return;
@@ -441,9 +552,18 @@ mod tests {
         let result = export(&cat.conn, tmp.path());
         let _ = std::fs::set_permissions(&audit_dir, std::fs::Permissions::from_mode(0o700));
 
+        let err =
+            result.expect_err("append into an unwritable directory must fail, not silently no-op");
+        // Pin WHICH failure this is, not just that some error occurred — an
+        // earlier failure (e.g. at create_dir_all) would also make `result`
+        // an `Err` without ever reaching the append step this test targets,
+        // which would pass without exercising the ordering claim at all
+        // (small fix 6, task-2 review).
+        let chain = format!("{err:#}");
         assert!(
-            result.is_err(),
-            "append into an unwritable directory must fail, not silently no-op"
+            chain.contains("opening "),
+            "expected the failure to originate at export's file-open step \
+             (context \"opening <path>\"), got: {chain}"
         );
         let after = gc::get_meta(&cat.conn, WATERMARK_KEY).unwrap();
         assert_eq!(
