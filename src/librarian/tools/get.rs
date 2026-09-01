@@ -90,14 +90,21 @@ const HEADINGS_OMITTED_NOTE: &str =
 
 /// Strip the heavy fields from a preview when the caller already named what they wanted.
 ///
-/// Key-driven rather than shape-driven, so a preview shape this function does not know
-/// about (`plan`, `spec`, `memory`) keeps its current behaviour rather than silently
-/// losing a field: the worst case is no improvement, never a regression.
+/// Key-driven, but gated on `headings` actually being an ARRAY — not merely present. A
+/// preview shape with no `headings` array at all (`memory`, `src/librarian/preview/memory.rs`,
+/// which emits no `headings` key) is returned UNCHANGED rather than falling into the strip
+/// loop below and losing `summary` for a key that was never there to save: there is no large
+/// array to save on that shape, so there is nothing to strip. This is what makes "never a
+/// regression" true by construction rather than true by coincidence of key naming — before
+/// this guard, a memory-kind artifact's body-selected read silently lost `summary` with
+/// nothing marking the loss, because the `"summary" => {}` arm below used to fire
+/// unconditionally while the `"headings" =>` arm only fires when the key exists. `plan` and
+/// `spec` both carry a `headings` array, so this guard changes nothing for either of them.
 ///
 /// `line_count`, `total_headings` and `headings_truncated` are RETAINED deliberately —
 /// they report the magnitude withheld, so a caller who needs the map learns it exists and
 /// how big it is. Reporting only its absence would be the `IC-21` shape.
-/// docs/issues/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
+/// docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
 ///
 /// This is one side of a cross-file contract with `LibrarianAdapter::section_headings_summary`
 /// (`src/librarian/adapter.rs`, doc comment above its definition): that function's whole job is
@@ -125,10 +132,17 @@ fn stub_preview(full: &Value) -> Value {
     let Some(obj) = full.as_object() else {
         return full.clone();
     };
-    let heading_count = obj
+    // No `headings` ARRAY means there is nothing large to save by stubbing — return the
+    // preview untouched rather than stripping `summary` for free. This is the guard that
+    // makes the doc comment above true for `memory` (no `headings` key at all) as well as
+    // for `plan` / `spec` (both carry a `headings` array and are unaffected by this check).
+    let Some(heading_count) = obj
         .get("headings")
         .and_then(|h| h.as_array())
-        .map(|arr| arr.len());
+        .map(|arr| arr.len())
+    else {
+        return full.clone();
+    };
     let mut stub = serde_json::Map::with_capacity(obj.len());
     for (k, v) in obj {
         match k.as_str() {
@@ -142,9 +156,7 @@ fn stub_preview(full: &Value) -> Value {
         }
     }
     if !stub.contains_key("total_headings") {
-        if let Some(n) = heading_count {
-            stub.insert("total_headings".to_string(), json!(n));
-        }
+        stub.insert("total_headings".to_string(), json!(heading_count));
     }
     Value::Object(stub)
 }
@@ -933,6 +945,102 @@ mod tests {
         assert!(hint.contains("Top"), "hint lists top-level headings");
     }
 
+    /// Pins a deliberate behavioural choice (final review, "one behavioural question"):
+    /// `full=true` sets `body_selected`, so a full read whose body trips the soft cap still
+    /// gets a STUBBED preview. `stub_this_preview` is never corrected to `false` on this
+    /// branch the way it is on a `heading` MISS — `full=true` did resolve (the body was
+    /// truncated, not left unfound), so the premise "the caller already named what they
+    /// wanted" still holds. The caller is pointed at `overflow.hint` to narrow, and
+    /// `total_headings` still reports the magnitude of what the stub withheld. This was
+    /// previously untested, so the behaviour was accidental rather than deliberate; this
+    /// test makes it deliberate without changing it.
+    #[tokio::test]
+    async fn full_true_over_cap_still_stubs_the_preview() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        let mut body = String::from("---\nkind: spec\n---\n\n");
+        body.push_str("# Top\n\n");
+        body.push_str("## Section One\n\n");
+        for i in 0..600 {
+            body.push_str(&format!("Line {i}\n"));
+        }
+        body.push_str("## Section Two\n");
+        fs::write(dir.path().join("a.md"), body).unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "full": true})).await.unwrap();
+        assert!(
+            v["overflow"].as_object().is_some(),
+            "must actually overflow for this pin to mean anything"
+        );
+        assert_eq!(
+            v["preview"]["headings"].as_str(),
+            Some(HEADINGS_OMITTED_NOTE),
+            "full=true resolved (truncated, not missing) — stub_this_preview stays true"
+        );
+        assert!(
+            v["preview"]["total_headings"].as_u64().unwrap() > 0,
+            "the withheld map's magnitude must still be reported"
+        );
+    }
+
+    /// M4/Important-2 fix: direct unit test over `stub_preview` itself, not routed through
+    /// `call`. `memory` (`src/librarian/preview/memory.rs`) emits `{shape, observation_count,
+    /// latest_observations, summary, line_count}` — no `headings` key at all. Before this
+    /// guard, `stub_preview` still ran its strip loop on any object: the `"summary" => {}`
+    /// arm fired unconditionally and dropped `summary`, while the `"headings" =>` arm never
+    /// fired (there was no such key) so no `HEADINGS_OMITTED_NOTE` was ever inserted in its
+    /// place — a field silently lost with nothing marking the loss, the exact regression the
+    /// doc comment's "never a regression" claimed could not happen.
+    ///
+    /// Mutation-test note: removing the `let Some(heading_count) = … else { return
+    /// full.clone(); }` guard makes this test fail (the loop below would still drop
+    /// `summary`) while leaving `stub_preview_still_strips_a_default_shape_with_a_headings_array`
+    /// passing (that shape's `heading_count` is `Some` either way) — the guard is killed by
+    /// this test and only this test.
+    #[test]
+    fn stub_preview_passes_through_a_shape_with_no_headings_array_untouched() {
+        let full = json!({
+            "shape": "memory",
+            "observation_count": 2,
+            "latest_observations": [{"text": "an observation", "created_at": 1}],
+            "summary": "some memory prose",
+            "line_count": 4
+        });
+
+        let stubbed = stub_preview(&full);
+
+        assert_eq!(
+            stubbed, full,
+            "no headings array to strip — the preview must come back byte-identical"
+        );
+    }
+
+    /// The `default`-shape twin of the test above: a preview that DOES carry a `headings`
+    /// array must still be stubbed exactly as before this fix — the new guard only widens
+    /// the untouched case, it must not narrow the stubbed one.
+    #[test]
+    fn stub_preview_still_strips_a_default_shape_with_a_headings_array() {
+        let full = json!({
+            "shape": "default",
+            "headings": [
+                {"level": 1, "text": "One"},
+                {"level": 2, "text": "Two"}
+            ],
+            "summary": "some prose",
+            "line_count": 10
+        });
+
+        let stubbed = stub_preview(&full);
+
+        assert_eq!(stubbed["headings"].as_str(), Some(HEADINGS_OMITTED_NOTE));
+        assert!(
+            stubbed.get("summary").is_none(),
+            "summary is still dropped when there is a headings array to justify stubbing"
+        );
+        assert_eq!(stubbed["total_headings"], 2);
+    }
+
     #[tokio::test]
     async fn heading_targeted_read_returns_single_section() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -973,7 +1081,7 @@ mod tests {
     /// Stubbing on a miss inverted the whole point of the change — the caller got nothing
     /// back in `body` and had *also* lost the heading map that would tell them the real
     /// heading, costing a second round-trip instead of saving one.
-    /// docs/issues/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
+    /// docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
     #[tokio::test]
     async fn heading_miss_keeps_the_full_preview_not_the_stub() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -1256,7 +1364,7 @@ mod tests {
     /// A scoped read already named what it wanted. Shipping the whole heading map with it
     /// answers a question the caller did not ask — measured 2026-09-01 at ~2,611 bytes of
     /// preview against a 3,210-byte requested section.
-    /// docs/issues/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
+    /// docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
     ///
     /// Heading count is deliberately pushed past `default::MAX_HEADINGS` (20): `total_headings`
     /// is only stamped by `headings::stamp_truncation` when the cap actually bites
