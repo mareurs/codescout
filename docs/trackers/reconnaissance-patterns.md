@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 165
+entry_high_water_R: 166
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,10 +289,11 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-166 | 2026-09-01 | miss, self-inflicted, surfaced by a DISAGREEMENT (1 instance) | **A finding parked in a commit message has no citable home, so the next session that needs it cites something adjacent.** I judged a clean near-miss — a grep whose **context window stopped one line short** of the tag it was checking for, so a present tag read as absent — *"worth recording in the message since it did not earn an entry"*, and put it in `8b24df96`'s message. Seventeen minutes later `codescout-b7` needed exactly that case as the **type-B exemplar** in `R-162`'s addendum, found it in no entry, and cited `R-163` — which contains no zero at all. Their sweep confirmed the vacuum: `clipped` / `context window` / `one line short` occur nowhere in the ledger but their own table. **Two halves:** (a) a commit message is durable but **not addressable** — `link_scan` binds a token to a `## PREFIX-N — title` heading and nothing else, so a lesson there is re-narratable but not citable, and *"this doesn't earn an entry"* is judged by the author, the party least able to know who will need it; (b) **a citation is evidence about the citer's model of the target, never about the target, until the target is read** (`codescout-b7`'s line — `R-3`'s twin, disciplining the writer of a *reference* where `R-3` disciplines the reader of a *result*). **What caught it was not a check.** Re-homing the citation from `R-163` to `R-165` on scope grounds is what sent them to open `R-163`; had I cited from `R-163` as originally offered, their table would have **agreed** with my citation and nothing would have surfaced — two independently-wrong claims pointing at each other, indistinguishable at the point of use from two right ones. **Remedy:** if a finding is worth a paragraph in a commit message it is worth an entry (one call vs a fabricated citation — and an unwritten entry produces no error, no gap report and no dangling citation, because a citation that was never possible cannot dangle); and open an entry before resting a *particular* proposition on it. | `R-162` addendum + its same-hour correction; `8b24df96` message (where the case was stranded); `R-165` scope note (the disagreement); kin `R-3`, `R-163`, `R-161` |
 | R-165 | 2026-09-01 | miss, peer-caught (1 instance) | **A deletion's stale references point INWARD from files the diff never touched, so reviewing the change cannot find them.** `30b6fc41` deleted four `selector_key` overrides; I corrected the four doc comments it falsified and reported the sweep complete. A **fifth** survived in `action_selector_key`'s own doc — naming a deleted symbol, explaining a deferral that no longer applied, and prescribing an adoption that had already happened. **The two directions:** comments that *lived in* the deleted code appear in the diff (that is how four were found); comments that *pointed at* it sit in untouched files and are **structurally absent from it**. Reading the diff harder cannot reach them — a coverage failure, not a thoroughness one. Proximity did not help either: the fifth was one function from the change. **Pairs with `R-162` as the mirror instrument:** grepping the deleted token is guaranteed-zero and useless; grepping the deleted symbol's NAME is exactly right and non-zero *because* the references survive. Same technique, opposite value, discriminated by which side of the deletion you stand on. Neither is an `R-3` instance — both queries were well-formed and correctly scoped. **Remedy:** grep the tree for the deleted name before claiming a sweep is complete, and state the sweep's scope ("every falsified comment in the diff" ≠ "in the tree") — I published the stronger reading of the weaker act, `R-161` a third time. | found by `codescout-b7`; fixed at the site in `action_selector_key`'s doc; **the table in this row is superseded by `R-162`'s addendum**, which adds the asymmetric timing (Type A decidable *before* the query, Type B only after and only by a differently-scoped instrument) and the trap that B's standard remedy — widen the window — is a **no-op** against A; mechanisable as an `audit_doc_refs` extension resolving `Type::method` in Rust doc comments — candidate `I-N`, unfiled |
 | R-164 | 2026-09-01 | near-miss, self-caught (3rd of family in one session) | **A mutation's kill COUNT answers a different question than necessity, and the reassuring number establishes least.** Verifying `30b6fc41`: the canonical mutation (trait default returns `None`) killed **11** tests; the per-site mutation (one `None` override on `ReadFile` alone) gave **4826 pass, exactly 1 fail**, naming `read_file`. I had the 11 in hand and was composing it as the new gate's justification — but **10 of the 11 pre-existed**, so it establishes that the *inversion* matters and says nothing about the gate. **Why the number actively misleads:** a mutation answers "is this line guarded?", not "is MY guard load-bearing?"; the kill count measures the existing guard population at that site, which is **largest at the canonical site** because prominence is what got it covered. The count is anti-correlated with the information wanted, and a big number is what does not prompt a second look. **Distinct from `R-158`** (which case to mutate) **and from the standing per-site law** (how many sites) — this is how to read the result, and it bites even when both are obeyed. **Remedy:** never report a kill count without naming the proposition it establishes; the reportable form is "mutating a site this guard uniquely covers left M others green and reddened only this one." | `30b6fc41` patch-id `db34821395d6257eb37562bb779ed9ab4eba091e`, whose message records both mutations and states the 11-kill is not evidence for the gate; kin `R-158` |
 | R-163 | 2026-09-01 | miss, reporter-retracted within the hour (1 instance) | **A peer's observation and its attributed CAUSE are two claims, and the real number makes the inferred condition read as measured.** A peer reported two flake reproductions *plus* a condition ("6 live sessions **and** a concurrent cargo holding the target lock — moved the rate from ~1-in-N to 2-of-2"). I had verified an unrelated numeric claim of theirs the same hour (byte arithmetic, `+3 −1 = +2`, exact) and took this one whole — into a durable bug record, into its **queryable `unverified:` field** as "bisect now feasible", and into a specified next probe. Retracted by the reporter from their own buffers: run 1's lock-waits were at *build start*, run 2 had **zero** and failed anyway. Their words: *"I had a coincidence and named a mechanism for it."* **Not `R-160`/`R-117`:** the figure was REAL — two runs did fail — and only the *condition* was inferred, so the observation lent its credibility to the attribution riding along with it. **What defeated an engaged reflex:** I hedged the **causal** reading ("candidate, not a finding") while recording the **observational** claim as fact — care applied one level from where it was needed. Unused tell: "2-of-2" is a denominator over a population the reporter selected. **Cost asymmetry:** it reached a field a triage query returns, not a sentence a reader re-reads. **Remedy:** one question — *"how did you establish that?"* | `ee9d8d80ad5ecdc8` § *RETRACTED, same day, by the reporter*, which preserves the superseded text and the corrected `unverified:`; kin `R-160`, `R-117`, `R-161`, `R-162` |
-| R-162 | 2026-09-01 | miss, peer-caught (1 instance) | **A DELETION cannot introduce the token you grep for, so the zero is guaranteed before you run the query.** Screening a subagent's collision warning on `src/librarian/adapter.rs`, I grepped the staged file for `action_selector_key`, got **0**, and overruled the subagent. Measured on `30b6fc41`: that token occurs **0 times both before and after** the peer's change — the query returned the same answer in both worlds, zero bits. The discriminating query was one line away (`fn selector_key` goes **2 → 1**); `git diff --cached`, which the peer ran, named both authors immediately. **Not R-3 again:** R-3's three ways a zero lies — scope, shape, encoding — are properties of how the *query* was written, and mine was well-formed, correctly scoped, right file. This is a property of the **hypothesis**: the proposition has a direction and a token search reads only one of them, so it is blind to half the space, silently. Widening corpus, glob or pattern fixes none of it. It is CLAUDE.md § Testing Discipline's recording-filter law arriving at a peer-coordination check instead of a test. **The escalation is the expensive part:** the instrument did not merely fail to inform, it **outranked a correct signal** — a subagent had already found the collision by the right method. The asymmetry that made it feel safe: a positive hit *would* have been evidence, so a one-outcome query felt like a two-outcome test. **Rule:** to detect a peer's change in a file, diff the file; you cannot know which direction their change ran. **Addendum:** two ways to hold a well-formed zero — the query that *could not* have returned non-zero (hypothesis has a direction) vs. one that *could* but whose window excluded the answer (`R-163`). Type A is decidable **before** running it and free to prevent; type B only after, and only by a second instrument of different scope. **The trap: "widen the sample", the reflex remedy, is correct for B and a no-op for A at any corpus size.** No instrument reports which one you hold. | this session; `30b6fc41` patch-id `db34821395d6257eb37562bb779ed9ab4eba091e`; sub-shape named by `compact-root-claude-md`; parent `R-3` |
+| R-162 | 2026-09-01 | miss, peer-caught (1 instance) | **A DELETION cannot introduce the token you grep for, so the zero is guaranteed before you run the query.** Screening a subagent's collision warning on `src/librarian/adapter.rs`, I grepped the staged file for `action_selector_key`, got **0**, and overruled the subagent. Measured on `30b6fc41`: that token occurs **0 times both before and after** the peer's change — the query returned the same answer in both worlds, zero bits. The discriminating query was one line away (`fn selector_key` goes **2 → 1**); `git diff --cached`, which the peer ran, named both authors immediately. **Not R-3 again:** R-3's three ways a zero lies — scope, shape, encoding — are properties of how the *query* was written, and mine was well-formed, correctly scoped, right file. This is a property of the **hypothesis**: the proposition has a direction and a token search reads only one of them, so it is blind to half the space, silently. Widening corpus, glob or pattern fixes none of it. It is CLAUDE.md § Testing Discipline's recording-filter law arriving at a peer-coordination check instead of a test. **The escalation is the expensive part:** the instrument did not merely fail to inform, it **outranked a correct signal** — a subagent had already found the collision by the right method. The asymmetry that made it feel safe: a positive hit *would* have been evidence, so a one-outcome query felt like a two-outcome test. **Rule:** to detect a peer's change in a file, diff the file; you cannot know which direction their change ran. **Addendum:** two ways to hold a well-formed zero — the query that *could not* have returned non-zero (hypothesis has a direction) vs. one that *could* but whose window excluded the answer (`R-163`). Type A is decidable **before** running it and free to prevent; type B only after, and only by a second instrument of different scope. **The trap: "widen the sample", the reflex remedy, is correct for B and a no-op for A at any corpus size.** No instrument reports which one you hold. **Correction (same day):** the addendum's table first named `R-163` as the type-B entry; it is not — `R-163` inherited a *real* figure with an inferred cause, no zero and no window, so neither half of the discriminator reaches it. The type-B case is a peer-reported near-miss written up nowhere. The miscitation was the addendum committing `R-163`'s own law while generalising it: **a citation is evidence about the citer's model of the target, not about the target, until the target is read.** | this session; `30b6fc41` patch-id `db34821395d6257eb37562bb779ed9ab4eba091e`; sub-shape named by `compact-root-claude-md`; parent `R-3` |
 | R-161 | 2026-09-01 | hit ×2, neither by method (2 instances) | **The weaker act wears the stronger act's appearance, so completing it feels like completing the stronger one.** Two unrelated-looking cases, one shape; care is fully engaged on the weaker act, which is why the substitution is invisible. **(a) Checking a warning is not clearing a change.** `codescout-b7` verified all three facts of a peer warning, found a fourth that made them inapplicable, and moved to dispatch — the warning was discharged, the change was never reviewed. An unrelated scout stopped them; their words: *"luck of sequencing, not method."* The change carried **two** defects neither party had named. **(b) A present fixture reads as coverage.** Gate 7's `output_id` probe exercises real branches in `symbols`/`references`/`call_graph` and is **inert** for the only declaring topic, whose router never reads that key — not wrong, and indistinguishable from load-bearing from outside. **Remedy for (b) is the INVERSE of an existing law:** CLAUDE.md says annotate a fixture's *load-bearing* detail so a tidy-up cannot silently remove it; this says annotate a fixture as *inert* so nobody credits it with coverage it lacks. One guards silent removal, the other silent credit, and the second is worse — false coverage stops the next person looking. **Proposals:** (a) Phase 2 — discharging a warning is not an outcome, name what remains unchecked; (b) CLAUDE.md § Testing Discipline, operator's call, not filed by this entry — and state the ASYMMETRY rather than the pairing: false coverage stops the next person looking, silent removal does not. **Addendum:** 4th instance (declining to message a running implementer — "one more thing" wears the appearance of fixing the task), and remedy (b) has a gap: a property jointly covered by N files has N candidate annotation sites and no owner, so annotate-at-the-fixture-line has nothing to fire at. | worked example shipped at `b4fa1be6`; `response-envelope-session-log:F-1` (b7's withdrawal); kin `R-159` — mechanism-vs-reachability is the same substitution one layer down |
 | R-160 | 2026-09-01 | miss, peer-caught (1 instance) | **Partial success is the camouflage: one pattern over a heterogeneous population misses its odd member.** Probing five keys of a session-registry file with one grep built as `"$k":"[^"]*"`, I reported four present and `pid` absent — then offered "pid is only the filename" to a peer as a refinement. Wrong: the bytes are `"pid":3624594`. Four keys are JSON **strings** and `pid` is a **number**, so the type-uniform pattern excluded exactly the one key typed differently. What made it persuasive is that the instrument was **visibly working** — a uniform 0/5 would have sent me to the pattern, where 4/5 made the blank read as a property of the data. The peer's own diagnosis (minified, no space after colon) was also wrong; `grep -c '": '` returns 0. Fourth false-negative filter of mine in one session, three in `cargo test`: a bare name with `--exact` matched 0 of 4820 and reported `ok`; `-- guide` matched 132 tests but not the gate under test; `-- valid_slugs` named no test at all. Each returned a well-formed plausible result, never an error. **Proposal:** `R-3` bullet — check the pattern against the population's ODD member, and treat a partial hit as a stronger warning than a total miss. | this session, verified in the bytes both ways; sibling of `R-158` — there the *control* was drawn from the most prominent member, here the *pattern* was fitted to the most typical one |
 | R-159 | 2026-09-01 | hit (1 instance) | **Verifying a MECHANISM is not verifying its REACHABILITY, and a clean mechanism check feels like the strong form of confirmation.** Refused to relay a peer's claim unverified (`R-154`) and checked all three load-bearing facts in the bytes: `Shape::matches` opening `let Some(sel) = sel else { return false }` (`guide_index.rs:179`), the trait default returning `None` (`types.rs:1439`), and exactly five `selector_key` override sites of six files. All three held; I relayed it as time-critical. **Correct, and moot** — the recipient found a fourth fact neither of us sought: `progressive-disclosure.md` carries **zero** `serves:` markers (`librarian.md` is the only declaring guide), so `guide_blocks_for` takes the `!GUIDE_INDEX.declares(topic)` branch at `types.rs:1019` and `Shape::matches` is **never consulted** for that topic. Every check asked how the code behaves *when entered*; none asked *is it entered*. This is § *Testing Discipline*'s "loudness is a property of a PATH" aimed at a claim rather than a guard — `BL-66` is an `abort!` nothing reaches, this is a verified blocker nothing reaches — and the remedy transposes: name the live configuration in which the mechanism fires. One `grep -l 'serves:' src/prompts/guides/*.md` answers it. **Not an argument against verifying before relaying:** reachability is a FOURTH question, and verifying the mechanism harder never reaches it. | mirror of `R-3` — that says prove your instrument can *find*, this says prove your finding can *fire*; sibling `R-154` (relay discipline, which worked) |
@@ -7057,16 +7058,36 @@ lived it.
 
 Written with `compact-root-claude-md`, who filed the second instance the same evening and
 offered to carry this; it stays here because the first instance is the one that needs the
-distinction. Cited from `R-163`.
+distinction. Cited from `R-165`, the instrument-versus-direction entry whose pairing table this
+generalises — not from `R-163`, which was the first home offered and the wrong one, for the
+reason recorded below.
 
 **Both instances are a well-formed query, correctly scoped, returning zero. They are different
 defects.**
 
-| | this entry (`R-162`) | `R-163` |
+| | this entry (`R-162`) | the type-B case |
 |---|---|---|
 | the query | *could not* have returned non-zero | *could* have |
 | what failed | the **hypothesis** — it has a direction, the instrument reads one of them | the instrument's **scope** — the window excluded the answer |
-| my case | a deletion cannot introduce the token grepped for | a context window clipped one line short of the tag |
+| the case | a deletion cannot introduce the token grepped for | a grep whose context window stopped one line short of the tag it was checking for |
+
+**Where the type-B case comes from, corrected 2026-09-01 within the hour.** This table first
+named `R-163` as the type-B entry. It is not: `R-163` is about a peer's *observation* arriving
+with an inferred *cause* attached, where the figure was real and only the attribution was
+unverified — no zero, no window, and neither half of this discriminator reaches it. `R-163`'s
+own `**Rests on:**` now says so explicitly, and the correction is `compact-root-claude-md`'s.
+
+The type-B case is real but **is not written up anywhere in this ledger**; it reached me as a
+peer's message and nothing else. Cited here as what it is.
+
+**And the miscitation was this addendum committing R-163's own law while generalising it.** I
+took a detail from a peer's message, inferred which entry carried it, and cited that entry
+without opening it — an observation and my attribution of it to a source, recorded as one
+claim. The general reflex was engaged and pointed elsewhere: I was verifying *their* commits by
+patch-id at the time. **`R-3`'s rule that a search's result is evidence about the search has a
+citation twin that this corpus had not stated — a citation is evidence about the citer's model
+of the target, never about the target, until the target is read.** Cheap to check: one
+`artifact(get, heading=…)` would have shown `R-163` contains no zero at all.
 
 **The discriminator, and its timing is the asymmetric part.**
 
@@ -7092,9 +7113,9 @@ re-running helps, while if it is B, nothing but re-running does.
 
 **Provenance is the uncomfortable part and belongs in the record.** Both instances were
 committed the same evening, by two sessions who were at that moment writing up laws about
-instruments that answer a narrower question than they appear to. `R-163`'s was filed *inside the
-entry citing this one*. Knowing the class prevented neither — which is the `OB-N` shape, and the
-reason the remedy here is a question asked at query-authoring time rather than a resolution to
+instruments that answer a narrower question than they appear to. The sharpest case is the
+correction above: a miscitation committed *inside the entry generalising the class*. Knowing the
+class prevented neither of us — which is the `OB-N` shape, and the reason the remedy here is a question asked at query-authoring time rather than a resolution to
 read zeros more carefully.
 ## R-163 — A peer's observation and its attributed CAUSE are two claims; the real number makes the inferred condition read as measured
 
@@ -7310,6 +7331,82 @@ you edited**, of which this is the doc-comment case.
 
 **Promote-when:** a second deletion whose surviving references were missed by a diff review. At
 two, the remedy is a gate rather than a habit — see the `audit_doc_refs` extension above.
+
+## R-166 — A finding parked in a commit message has no citable home, so the next session that needs it cites something adjacent
+
+**Valid:** invariant
+
+**Verdict:** miss, self-inflicted and peer-surfaced. A finding I deliberately declined to give
+an entry had no citable home; within the hour the next session that needed it invented a
+citation for it, against an entry that does not contain it. Caught by a *disagreement*, not by
+either party's checking.
+
+**Observed:** 2026-09-01. Investigating a suspected hole in
+`every_open_bug_file_declares_one_known_defect_class`, I reasoned wrongly twice and was
+saved by a third check. The near-miss had a clean shape — a grep whose **context window stopped
+one line short** of the `cluster/` tag it was checking for, so a present tag read as absent — and
+I judged it *"worth recording in the message since it did not earn an entry"* and wrote it into
+`8b24df96`'s commit message instead.
+
+Within the hour `codescout-b7` needed exactly that case, as the type-B exemplar in `R-162`'s
+addendum: two ways to hold a well-formed zero, one where the query *could not* have returned
+non-zero, one where its *window* excluded the answer. The second had no entry anywhere. So the
+table cited `R-163` for it — an entry which contains no zero at all, being about a peer's real
+figure with an inferred cause attached. Their own sweep confirmed the vacuum: `clipped`,
+`context window` and `one line short` occur **nowhere in the ledger** except in their table.
+They were citing an entry for a claim it does not make, and describing an instance the corpus
+does not hold. Corrected the same hour; this entry is the missing home.
+
+**Mechanism, and it has two halves that compose.**
+
+**(a) A commit message is durable but not addressable, so a finding parked there cannot be
+cited — only re-narrated.** `link_scan` binds a token to a `## PREFIX-N — title` heading and to
+nothing else, so a lesson in a commit message is reachable by whoever happens to read that
+commit and by no query. Worse, the judgement *"this doesn't earn an entry"* is made by the
+author at write time — the party least able to know who will need it, since the whole value of
+an entry is to a reader who has not had the experience. Mine was needed by another session,
+for a purpose I had not imagined, seventeen minutes later.
+
+**(b) A citation is evidence about the citer's model of the target, never about the target,
+until the target is read.** `codescout-b7`'s line, and it is `R-3`'s missing twin: `R-3`
+disciplines the reader of a *result*, this disciplines the writer of a *reference*. The cost of
+checking is one `artifact(action="get", heading=…)` — which is precisely the call that found the
+defect once someone finally made it.
+
+**What actually caught it, and it was not a check.** I had offered to cite the addendum from
+`R-163` and then re-homed the citation to `R-165` on scope grounds, adding a note that `R-163`
+is *outside* the discriminator's reach. That disagreement is what sent them to open `R-163`.
+**Had I cited from `R-163` as originally offered, their table would have agreed with my citation
+and nothing would have surfaced** — two independently-wrong claims pointing at each other, which
+at the point of use is indistinguishable from two right ones. CLAUDE.md § *Reaching a Peer
+Session* says check independence rather than agreement; here the independence arrived as a
+*disagreement*, and it was the only instrument in the exchange that could have fired.
+
+**Remedy — two, and the first is the one with teeth.**
+
+1. **If a finding is worth a paragraph in a commit message, it is worth an entry.** An entry
+   costs one `append_entry` call; no entry costs the next person a fabricated citation. Treat
+   *"this did not earn an entry"* as a decision that owes a reason, not a default — and note the
+   asymmetry: an unwritten entry produces no error, no gap report and no dangling citation,
+   because a citation that was never possible cannot dangle.
+2. **Open an entry before citing it for a specific claim.** Not before citing it at all — before
+   resting a *particular* proposition on it.
+
+**Status:** open. (2) is now practised by both sessions in this exchange; (1) is unmechanised,
+and probably unmechanisable — `doctor` can report an entry with no index row, but nothing can
+report a lesson that was never written down.
+
+**Rests on:** `R-162`'s addendum and its same-hour correction paragraph (`codescout-b7`);
+`8b24df96`'s commit message, which is where the type-B case was stranded; `R-165`'s scope note,
+which is the disagreement that surfaced it. Related: `R-3` (evidence about the search),
+`R-163` (an observation and its attribution recorded as one claim — which is also what the
+miscitation itself was), `R-161` (care fully engaged and aimed one level away: they were
+verifying my commits by patch-id in the same minutes).
+
+**Promote-when:** a second instance of a commit-message-only finding being miscited or lost. At
+two, the candidate home is the reconnaissance skill's Phase 3, whose current text says entries
+without ids do not compound — true, and this is the sharper form: a finding without an id gets
+*mis-attributed*, not merely forgotten.
 
 ## Template for new entries
 
