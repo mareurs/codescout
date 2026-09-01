@@ -14,6 +14,7 @@ entry_prefix:
   - F
   - W
 entry_high_water_F: 5
+entry_high_water_W: 1
 ---
 
 # Session Log — Design-Decision Backlog Triage
@@ -86,7 +87,7 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
-| W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
+| W-1 | 2026-09-01 | high | report that the shared index holds a path outside their stated list, and refuse to say whose | peer reports it would have committed by its stale list, risking a staged `adapter.rs` whose `selector_key` deletion is atomic with an unstaged `types.rs` default inversion — a red `experiments` for six sessions (mechanism verified; the would-have is their testimony) | validated |
 
 ---
 
@@ -594,6 +595,82 @@ true; echo pipeline_status=$?'` against `postgres:15`, `postgres:16-alpine`, and
 `rocm/llama.cpp:…ubuntu24.04_server`; `.github/workflows/ci.yml:37,70,88,241,273,306,500,519,542`
 (`runs-on: ubuntu-latest`); `src/platform/unix.rs:71-86`;
 `docs/trackers/run-command-pipeline.md` § *Rulings* R1.
+
+## W-1 — report that the shared index holds a path outside their list — and refuse to say whose
+
+**Valid:** dated 2026-09-01
+
+**Impact:** high · **Status:** validated
+
+**Pattern.** When you can see that a shared git index holds a path outside another session's
+stated ownership list, **report the discrepancy and refuse to attribute it.** Say "the index
+holds `X`, which your list does not name" — never "`X` is yours" or "`X` is theirs". Adjacency
+is not authorship (CLAUDE.md § *Observer Blindness*), and on a six-session checkout a guess
+costs a recipient a turn establishing a negative.
+
+**What happened.** `codescout-b7` (`.claude-sdd`, pid 2601241) sent an unsolicited advisory
+about shared-index commit hygiene, naming its own staged paths as `docs/issues/**`,
+`docs/trackers/issue-clusters.md`, `src/librarian/tools/get.rs`. Measuring
+`git diff --cached --name-only` before replying showed the index held
+**`src/librarian/adapter.rs`** and **no** `get.rs`. I reported both facts without saying whose
+`adapter.rs` was. They looked, and it changed their commit.
+
+**Verified mechanism** — read directly, not relayed:
+
+- Staged `src/librarian/adapter.rs` removes `fn selector_key(&self, input: &Value) ->
+  Option<String>` — `LibrarianAdapter`'s override.
+- Unstaged `src/tools/core/types.rs` **inverts the trait default** in the same breath:
+  `fn selector_key(…) { None }` → `{ action_selector_key(self.name(), input) }`, its new doc
+  comment reading *"Inverted 2026-09-01, and the previous default is why."*
+- The two are atomic in one direction only. Commit the staged deletion **without** the unstaged
+  inversion and `LibrarianAdapter` falls back to a default that is still `None`.
+- `every_registered_tool_supplies_a_selector_key` exists (`src/server.rs:3431`), so the result
+  is a **failing test**, not silently broken routing — louder than the peer's "kills guide
+  routing" framing, and worth stating precisely because loud-and-shared is its own harm.
+
+**Counterfactual — and the seam in it, named rather than smoothed over.** The *mechanism* above
+is verified. The *would-have* is *testimony*: `codescout-b7` reports that trusting its own list
+would have named `get.rs` (already committed by its own subagent in `61441b3d` — verified, 4
+files, includes `get.rs`) and *"might have swept `adapter.rs`."* I cannot verify another
+session's counterfactual intent, and I am not going to write it as though I could. What is
+established: the list was stale, the index held a path outside it, and that path was
+half of an atomic pair.
+
+**What would NOT have caught it.** The pre-commit hook `refuse a pathspec commit carrying
+unstaged content` (`scripts/pre-commit-unreviewed-content.sh`, `.pre-commit-config.yaml:71-76`)
+compares each *pathspec'd file* against its worktree copy. `adapter.rs` was staged with no
+worktree delta, so it passes — the hook has no notion of **cross-file** atomicity with an
+unstaged `types.rs`. The guard test would have fired, but only after the commit had landed on
+`experiments`, where five other sessions rebase onto it. That is the shape of
+`docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, whose fifth
+instance CLAUDE.md discusses at length; this would have been a sixth.
+
+**Second finding, from the same exchange: a NAME-keyed peer record decays, a PID-keyed one does
+not.** I recorded pid 3624594 as `codescout-17` at ~19:00; 45 minutes later the registry called
+it `compact-root-claude-md` — same pid, renamed mid-session, and the new name explains the
+CLAUDE.md rewrite that landed under me. `codescout-b7` had carried `codescout-17` *"for hours —
+taken from a relay, never checked."* Generalised: **relayed identity and remembered identity
+both decay; only the registry is current.** Re-read it at the moment it is load-bearing, and
+key durable notes to pid.
+
+**Third: an agreement I declined to bank.** `codescout-b7`'s six-session enumeration matched
+mine exactly. I volunteered, unprompted, that this is **not** independent corroboration — both
+readings come from `/run/user/1000/cc-socks/`, which is per-user, so vantage cannot differ. One
+instrument run twice, not two instruments; it could not detect a defect in the socket surface
+itself. The peer replied that the same confusion *"has cost this repo real money"* earlier the
+same evening, when two per-**profile** tools agreeing were cited as corroboration while sharing
+a blind spot. Declining to bank an agreement that favours you is the same discipline as
+`design-backlog-session-log:F-5`, pointed the other way.
+
+**Promote-when.** A third instance of report-don't-attribute changing another session's action.
+Then it belongs next to CLAUDE.md § *Observer Blindness*'s existing "never route by adjacency"
+— which today tells you what **not** to do and names no positive move for the case where you
+can see something the owner cannot.
+
+**Rests on:** `git diff --cached` on `src/librarian/adapter.rs` and `git diff` on
+`src/tools/core/types.rs`, read 2026-09-01; `src/server.rs:3431`;
+`.pre-commit-config.yaml:71-76`; commits `39f64a5b` (3 files, excludes `adapter.rs`) and
+`61441b3d` (includes `get.rs`); socket enumerations at ~19:00 and ~19:45.
 
 ## Template for new entries
 
