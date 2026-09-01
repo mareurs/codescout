@@ -83,6 +83,23 @@ it is reachable by the sweep alone. A stale mux self-heals once idle past its `-
 (180s Rust, 300s Kotlin), so the exposure is use-coupled — stale exactly while it is being
 queried, healthy the moment nobody cares. (F-84 in `bug-fix-session-log`.)
 
+**The self-heal above is a property of MUXES ONLY, and the sweep finds stale SERVERS too — for
+those the argument inverts.** `codescout start` takes no idle-timeout option (checked against
+`--help`, 2026-09-01), so a server lives exactly as long as the `claude` process that spawned
+it. A stale server therefore never recycles: it is not use-coupled, it does not heal when
+nobody cares, and only `/mcp` or that session exiting clears it — neither of which anything
+prompts. **Discriminate by parent, not by the `(deleted)` marker, which is identical for both:**
+`ps -o cmd= -p $(ps -o ppid= -p <pid>)` — a server's parent is `…/claude`, a mux's is another
+`codescout`, and the mux command line also carries `mux --socket …`.
+
+Measured 2026-09-01: a release build at 13:04:36 left **three** servers from 11:26–11:28 running
+the deleted image, still alive at 13:40 — one in this repo, two in another project. The in-repo
+one predated a 304-line `src/librarian/catalog/audit.rs` behaviour change, so its `artifact`
+writes were recording audit rows the superseded way with nothing to signal it.
+`/proc/<ppid>/environ` did **not** expose `CLAUDE_CODE_SESSION_ID`, so the sweep cannot name the
+session — `readlink /proc/<ppid>/cwd` is the discriminator that does work, and it is enough to
+tell a peer which window to reconnect.
+
 ## RemoteEmbedder Dimensions
 
 `RemoteEmbedder.dimensions()` returns `0` until after the first successful `embed()` call

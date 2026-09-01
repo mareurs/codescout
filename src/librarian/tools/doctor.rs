@@ -3529,6 +3529,26 @@ fn scan_cited_prefix_with_no_definer(
     // as a starting point, not a tuned constant.
     const MIN_CITATIONS: usize = 3;
     const MIN_FILES: usize = 2;
+    // DISPERSION ceiling, as a ratio of files to citations, held in integer form to keep the
+    // comparison exact: `files * 5 >= cites * 4` is `files / cites >= 0.8`.
+    //
+    // `MIN_FILES` is a FLOOR on spread — one file is a one-off. This is the CEILING, and the
+    // two are not redundant: a prefix cited once per file across many files is an incidental
+    // technical term (`UTF-8`, `SHA-256`, `RFC-7396`), where a real ledger namespace clusters,
+    // being cited repeatedly by the few documents that actually depend on it.
+    //
+    // Measured 2026-09-01 over all 14 live findings on this repo: suppresses 6 of 8 noise
+    // prefixes and loses ZERO real ones. Two limits, both deliberate and neither a defect:
+    //
+    //   * the cut is FITTED to that n=14, on one corpus. What the measurement supports is the
+    //     DIRECTION of the signal, not this number; a second corpus is what would establish it.
+    //   * 6/8 is a structural CEILING rather than a starting point. `GPT-N` (noise) and
+    //     `CC-N`/`O-N` (real) sit at exactly 0.50, so no cut on this signal alone separates
+    //     them — lowering it to catch `GPT-N` necessarily loses two real prefixes.
+    //
+    // docs/issues/2026-09-01-citation-volume-gate-selects-for-the-prose-it-excludes.md
+    const DISPERSION_NUM: usize = 5;
+    const DISPERSION_DEN: usize = 4;
 
     let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
     let paths: Vec<String> = stmt
@@ -3596,6 +3616,13 @@ fn scan_cited_prefix_with_no_definer(
         // The METRIC: is this a real, unowned namespace anywhere this catalog can see?
         let total: usize = by_file.values().sum();
         if total < MIN_CITATIONS || by_file.len() < MIN_FILES {
+            continue;
+        }
+        // Scattered roughly one-per-file: an incidental term, not a namespace. Applied to the
+        // GLOBAL counts only, because whether a prefix is a real namespace is a property of the
+        // corpus rather than of where the reader is standing — the same reasoning the doc
+        // comment gives for keeping the firing decision global and filtering only the report.
+        if by_file.len() * DISPERSION_NUM >= total * DISPERSION_DEN {
             continue;
         }
 
@@ -7708,6 +7735,110 @@ mod tests {
                 .0
                 .is_empty(),
             "a single incidental citation must not fire"
+        );
+    }
+
+    /// DISPERSION, not volume: a prefix whose citations are spread roughly one per file is an
+    /// incidental technical term (`UTF-8`, `SHA-256`, `RFC-7396`), and a real ledger namespace
+    /// clusters instead. Measured 2026-09-01 across all 14 live findings on this repo: gating on
+    /// `files / cites >= 0.8` suppressed 6 of 8 noise prefixes and lost **zero** real ones.
+    /// docs/issues/2026-09-01-citation-volume-gate-selects-for-the-prose-it-excludes.md
+    ///
+    /// **Both directions are in ONE fixture on purpose.** The suppression half alone is monotone
+    /// under "the check does nothing" and would pass against a stub that returns `vec![]`; the
+    /// clustered prefix is what makes this a discriminator rather than a control. Both clear
+    /// `MIN_CITATIONS` and `MIN_FILES`, so neither is decided by a pre-existing gate — mutate
+    /// either count below its floor and this test stops testing dispersion at all.
+    #[test]
+    fn cited_prefix_with_no_definer_suppresses_a_scattered_prefix_but_keeps_a_clustered_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // Scattered: 4 citations across 4 files == 1.00 files/cites. Incidental-term shape.
+        // Clustered: 6 citations across 2 files == 0.33. Ledger-namespace shape.
+        for (i, name) in ["s1", "s2", "s3", "s4"].iter().enumerate() {
+            let body = if i < 2 {
+                // The two clustered files carry BOTH prefixes, so the scattered one cannot be
+                // suppressed merely by living in different files from the clustered one.
+                "Encoded as UT-8 here. See CL-1, CL-2 and CL-3.\n".to_string()
+            } else {
+                "A passing mention of UT-8.\n".to_string()
+            };
+            seed_ledger(&cat, name, &tmp.path().join(format!("{name}.md")), &body);
+        }
+
+        let (v, _) = scan_cited_prefix_with_no_definer(&unscoped_ctx(), &cat.conn).unwrap();
+        let prefixes: Vec<&str> = v
+            .iter()
+            .map(|x| {
+                if x.detail.contains("`CL-") {
+                    "CL"
+                } else {
+                    "UT"
+                }
+            })
+            .collect();
+
+        assert!(
+            prefixes.contains(&"CL"),
+            "a clustered prefix (6 cites / 2 files) must still be reported: {v:?}"
+        );
+        assert!(
+            !prefixes.contains(&"UT"),
+            "a prefix cited once per file across 4 files is an incidental term, not a namespace: {v:?}"
+        );
+        assert_eq!(v.len(), 1, "exactly one finding expected: {v:?}");
+    }
+
+    /// PINS the dispersion constant from both sides. The test above proves the gate EXISTS —
+    /// it is the sole killer of "gate removed" — but it does not pin the number the gate
+    /// introduces, and those are different claims.
+    ///
+    /// Measured by `codescout-09` on 2026-09-01 via mutation, and confirmed by arithmetic over
+    /// this module's fixture ratios (`CL` 0.33, `T-N` 0.50, `ZZ-N` 0.667, `UT-N` 1.00): before
+    /// this test, the shipped 0.8 could be moved anywhere in **(0.667, 1.0]** with a fully green
+    /// suite. The only thing holding the lower end was `cited_prefix_reports_only_the_active_
+    /// projects_citers`, whose purpose is project SCOPING and whose 3-cites/2-files ratio is
+    /// incidental to it — so a tidy-up giving `ZZ-N` another citation (making it read more like
+    /// a real ledger) would have kept that test green and silently removed the last guard.
+    ///
+    /// Two cases bracket the constant tightly, and each dies in the opposite direction:
+    ///   * `LO-N` — 4 citations across 3 files == 0.75, just UNDER. Must still be reported;
+    ///     this fails if the threshold is lowered (0.7 suppresses it).
+    ///   * `HI-N` — 5 citations across 4 files == 0.80, exactly AT. Must be suppressed, which
+    ///     also pins the comparison as `>=` rather than `>`; this fails if the threshold is
+    ///     raised (0.9 keeps it).
+    ///
+    /// Together they admit only (0.75, 0.80]. Both clear `MIN_CITATIONS` and `MIN_FILES`, so
+    /// neither outcome is decided by a pre-existing gate.
+    #[test]
+    fn cited_prefix_dispersion_threshold_is_pinned_from_both_sides() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+
+        // LO: f1..f3 -> 4 cites / 3 files = 0.75. HI: f1..f4 -> 5 cites / 4 files = 0.80.
+        for (name, body) in [
+            ("f1", "LO-1 and LO-2. HI-1 and HI-2.\n"),
+            ("f2", "LO-3. HI-3.\n"),
+            ("f3", "LO-4. HI-4.\n"),
+            ("f4", "HI-5.\n"),
+        ] {
+            seed_ledger(&cat, name, &tmp.path().join(format!("{name}.md")), body);
+        }
+
+        let (v, _) = scan_cited_prefix_with_no_definer(&unscoped_ctx(), &cat.conn).unwrap();
+        let reported = |p: &str| v.iter().any(|x| x.detail.contains(&format!("`{p}-N`")));
+
+        assert!(
+            reported("LO"),
+            "0.75 is under the 0.80 threshold and must still be reported — this assertion is \
+             what fails if DISPERSION_DEN/NUM is lowered: {v:?}"
+        );
+        assert!(
+            !reported("HI"),
+            "0.80 is exactly at the threshold and must be suppressed, which also pins the \
+             comparison as `>=` rather than `>` — this assertion is what fails if the \
+             threshold is raised: {v:?}"
         );
     }
 
