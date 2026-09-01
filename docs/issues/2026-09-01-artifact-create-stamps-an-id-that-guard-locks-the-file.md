@@ -199,10 +199,9 @@ the `artifact(action="update", patch={status, tags})` route for frontmatter *and
 reads and body edits work directly. Without that, the narrowing would be invisible to the exact
 caller it was made for.
 
-SHA: `0933bc95` (message half) and this session's follow-up commit (behaviour half), both
-**`experiments`**.
-patch-id: `42c3dcd17a52ed55f082c14de843173f88a2fb2c` (message half); behaviour half recorded in
-the commit that lands it.
+SHA: `0933bc95` (message half) and `c26943b5` (behaviour half), both **`experiments`**.
+patch-id: `42c3dcd17a52ed55f082c14de843173f88a2fb2c` (message half),
+`f52fb2fc42fc03e58268187c0b1d4dc56b0b94d5` (behaviour half).
 
 ### Why direction (a) was rejected
 
