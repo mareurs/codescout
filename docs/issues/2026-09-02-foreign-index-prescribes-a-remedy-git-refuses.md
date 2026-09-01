@@ -1,0 +1,151 @@
+---
+id: b0f96b8e45f9d189
+kind: bug
+status: open
+title: foreign-index refuses a commit and prescribes a remedy git refuses too
+tags:
+- cluster/gate-keyed-on-unobservable-event
+topic: shared-checkout commit coordination
+closed: null
+opened: 2026-09-02
+owner: marius
+related: []
+severity: high
+---
+
+## Summary
+
+`scripts/pre-commit-foreign-index.sh` refuses a bare commit whose index holds paths it
+cannot attribute, and tells the caller to use the pathspec form instead. In a
+sequencer state (`CHERRY_PICK_HEAD` or `MERGE_HEAD` present) git **refuses the pathspec
+form outright**, so the guard's own prescribed remedy is unavailable and no commit form
+is left. The guard never checks that the route it names exists.
+
+Two independent things have to be true for the deadlock, and both were measured:
+
+1. The guard reads the caller's **own** staged content as foreign, because git plumbing
+   (rebase / cherry-pick replay) stages without writing a `session-stage-log` entry.
+2. The escape it prescribes is refused by git in exactly that state.
+
+## Symptom (Effect)
+
+Reported by `codescout-8a` (session `bf44ba81`) 2026-09-01, hit inside a private linked
+worktree during a `git rebase` that stopped mid-replay:
+
+```
+$ git commit -C 79a03aab
+  Refusing a bare commit: the index holds paths staged by another session.
+    theirs:  <the rebase's own replayed paths>
+    Staged by:
+      (unrecorded) — staged before this guard was installed, so no session claimed it.
+
+  Commit your own paths by pathspec — that form ignores the shared index:
+      git commit -- <path>
+
+$ git commit -C 79a03aab -- <path>
+fatal: cannot do a partial commit during a cherry-pick.
+```
+
+The reporter identified the staged content positively before proceeding —
+`git patch-id --stable` of the staged diff matched commit `79a03aab`'s own patch-id byte
+for byte — and used `--no-verify` for that one commit, disclosing it. That is the
+correct standard for the identification; it is recorded here because the *guard* left no
+compliant route, not as a finding against the caller.
+
+## Reproduction
+
+Measured 2026-09-02 in throwaway repos. **The precondition is not "a rebase is in
+progress"** — that was the reporter's generalisation from their own error string, and it
+is wider than the defect.
+
+```
+# A. conflicted `git rebase` INSIDE a linked worktree:
+#    $GIT_DIR/rebase-merge PRESENT, CHERRY_PICK_HEAD ABSENT
+git commit -m x -- f        ->  [detached HEAD b954c3f] x        # SUCCEEDS
+
+# B. conflicted `git cherry-pick`: CHERRY_PICK_HEAD PRESENT
+git commit -m x -- f        ->  fatal: cannot do a partial commit during a cherry-pick.
+git commit -C <sha>         ->  [master 90703f1] on-topic        # bare SUCCEEDS
+
+# C. conflicted `git merge`: MERGE_HEAD PRESENT
+git commit -m x -- f        ->  fatal: cannot do a partial commit during a merge.
+```
+
+So the refusal is keyed on `CHERRY_PICK_HEAD` / `MERGE_HEAD`, which a rebase sets in some
+stop modes and not others. **Pathspec is the only blocked form** — bare `git commit`
+works in the same state, which is precisely what makes the pair a deadlock rather than a
+stuck tree.
+
+## Environment
+
+codescout `experiments` @ `f75fc3b6`, 2026-09-02. git 2.x on Linux. Reported from a
+linked worktree (`.worktrees/audit-shards-t7`, since merged at `bbee621c` and removed).
+
+## Root cause
+
+Two layers, and only the second is new.
+
+**The attribution proxy (`IC-2`).** The guard cannot observe *who staged a path*, so it
+substitutes *"does `$git_dir/session-stage-log` claim it?"*. Content staged by git
+plumbing writes no log entry, so a session's own rebase replay reads as `(unrecorded)`
+and the guard reports it as another session's work. Confirmed at the source:
+`git rev-parse --git-dir` appears exactly once in the script, at line 100, solely to
+locate that log — there is no reference to `--git-common-dir`, worktree, rebase,
+`CHERRY_PICK_HEAD` or sequencer anywhere in the file.
+
+**The unchecked remedy (the part worth filing).** The refusal path is written once and
+names one escape. It is correct for the case the guard was built for — an entangled
+shared index during ordinary work — and it is *unsatisfiable* in a state the guard does
+not test for. A guard may refuse; what it may not do is refuse and then name a route git
+will reject.
+
+## Hypotheses tried
+
+1. **Hypothesis (reporter's):** per-session worktrees dissolve this, per
+   `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+   § *Fix* direction 3.
+   **Verdict: rejected, and this bug is the counter-example.** The deadlock occurred
+   inside a private linked worktree, by a different route than the entangled-ledger case
+   that file documents.
+
+2. **Hypothesis (reporter's):** exempt when `git rev-parse --git-dir` differs from
+   `--git-common-dir`, i.e. any linked worktree.
+   **Verdict: rejected — it would disarm the guard where it currently works.** That test
+   proves *linked worktree*, not *unshared index*. Two sessions working in the **same**
+   worktree share its index exactly as two share the main checkout's, and the guard
+   already handles that correctly, because `session-stage-log` lives at `$git_dir/…`
+   which is per-worktree. Sixteen sessions were live on this machine at the time with
+   worktrees as the isolation mechanism, so the co-located pair is not hypothetical.
+   Accepted by the reporter on review.
+
+3. **Hypothesis (reporter's):** exempt when `$GIT_DIR/rebase-merge` exists.
+   **Verdict: rejected as too wide.** Reproduction A above commits by pathspec with
+   `rebase-merge` present. During such a stop the guard's remedy works and it need not
+   stand down. Accepted by the reporter on review.
+
+## Fix
+
+**Designed, not applied — a pre-commit edit on a live shared checkout is the thing
+`docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` records,
+and this one is held for the operator's call.**
+
+Stand down on one condition: `CHERRY_PICK_HEAD` or `MERGE_HEAD` exists in `$GIT_DIR`.
+That is exactly the set where the prescribed remedy is unsatisfiable. It needs no
+worktree special-case, it is narrower than the `rebase-merge` test, and it leaves both
+the main checkout and shared worktrees fully guarded.
+
+The alternative shape — keep refusing, but *change the hint* to name a route that exists
+in that state — is worse here, because in a sequencer stop the only available form is the
+bare commit the guard is refusing. There is no third route to name.
+
+**A regression test is owed and is not free.** The guard's failing branch needs a repo in
+a `CHERRY_PICK_HEAD` state, which `tests/hooks-discrimination.sh` does not currently
+build. Without one, the fix is a line nothing exercises — `IC-16`.
+
+## Provenance
+
+Reported by `codescout-8a` via peer message, 2026-09-01. Reproductions, the
+precondition narrowing, and the rejection of hypotheses 2 and 3 were measured in this
+session (`0771abbc`) and accepted by the reporter. The reporter separately withdrew an
+adjacency-based authorship claim they had made about these scripts — see `IC-10`.
+
