@@ -1,3 +1,6 @@
+---
+status: active
+---
 # Plan — Per-Request Workspace Pinning (regime 3 real fix)
 
 **Status:** draft · **Opened:** 2026-05-30 · **Owner:** marius
