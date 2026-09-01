@@ -587,7 +587,22 @@ To change an augmentation afterwards use `artifact_augment(id=..., merge=true, .
 **`merge=true` matters:** `merge=false` overwrites all seven fields, resetting everything you omit.
 "#;
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args).unwrap_or_default();
+    // `unwrap_or_default()` here until 2026-09-01, which made ANY malformed argument
+    // discard EVERY argument and still return 200-with-the-menu: `archetype=[]` silently
+    // became `archetype=None`, and so did a perfectly good `intent` sent alongside it. The
+    // caller's only evidence was a successful response containing the menu they did not ask
+    // for. `IC-15`'s remedy is to refuse rather than to drop — refusing is loud, immediate,
+    // and tells the caller the truth. Found by
+    // `Librarian::every_action_labelled_schema_key_is_honored_by_that_action`, which flagged
+    // both fields as unhonored because a type error and an absent key were indistinguishable
+    // downstream.
+    let a: Args = serde_json::from_value(args).map_err(|e| {
+        RecoverableError::new(format!(
+            "tracker_design: could not read arguments — {e}. Valid params are `intent` \
+             (string) and `archetype` (string, one of: {}).",
+            archetype_names().join(", ")
+        ))
+    })?;
 
     // Named fetch: one archetype in full. Returns early — a caller who has already
     // chosen needs neither the teaching prompt again nor the catalog walk.
@@ -1237,6 +1252,46 @@ mod tests {
         assert!(
             !rule_3.contains("`note` is the only LLM-owned field"),
             "rule 3 must not claim note is the only LLM-owned field — date/evidence_* are also LLM-owned"
+        );
+    }
+
+    /// Regression for the `unwrap_or_default()` at the top of `call`, which made a type error
+    /// on ONE argument silently discard EVERY argument and return success.
+    ///
+    /// The assertion that matters is the second one. Asserting only that the bad call errors
+    /// would pass for a version that rejects everything; asserting only that the good call
+    /// succeeds would pass for the buggy version, which succeeded at all times. **The pair is
+    /// what discriminates**, and the buggy code fails the first half while passing the second
+    /// — so this test dies with the old line and lives with the new one.
+    #[tokio::test]
+    async fn a_malformed_argument_is_refused_rather_than_silently_dropped() {
+        let ctx = mk_ctx();
+
+        let bad = call(&ctx, json!({"action": "tracker_design", "archetype": []})).await;
+        let err = bad.expect_err(
+            "an array where a string is declared must be refused — under the old \
+             `unwrap_or_default()` this returned the archetype MENU with a 200, so a caller \
+             who mistyped `archetype` was told they had asked for the menu",
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("tracker_design"),
+            "the refusal must name the tool it came from, got: {msg}"
+        );
+
+        // Negative control: a well-formed call still works, so the fix refuses type errors
+        // rather than arguments in general. `action` is present here exactly as the
+        // dispatcher passes it through, and `Args` carries no `deny_unknown_fields`, so the
+        // extra key must remain harmless.
+        let good = call(
+            &ctx,
+            json!({"action": "tracker_design", "archetype": "task_list"}),
+        )
+        .await;
+        assert!(
+            good.is_ok(),
+            "a valid archetype must still resolve: {:?}",
+            good.err()
         );
     }
 }
