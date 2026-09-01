@@ -61,8 +61,11 @@
 # The sharpest demonstration to date: two `retrieval::index_lock` tests passed here while
 # failing on MSVC, because wine implements Windows byte-range locks permissively where real
 # Windows makes them MANDATORY — so wine could neither reproduce that defect nor verify its
-# fix (`ee9d9844`). Nor is a green run here a green wine LANE: CI installs ubuntu's wine
-# 9.0, typically two majors behind a dev box, and the two have already diverged twice —
+# fix (`ee9d9844`). Nor is a green run here a green wine LANE — though the gap narrowed on
+# 2026-09-02: the lane now PINS wine to 11.16 via the WineHQ apt repo, matching this box, so
+# the two are comparable rather than two majors apart. They can still diverge, because the pin
+# is a constant and a dev box tracks its distro; that is why the versions are printed below
+# rather than assumed equal. History:
 # `docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md`.
 # Check `wine --version` before trusting a local result against a CI failure.
 set -euo pipefail
@@ -117,8 +120,8 @@ case "$CMD" in
     # Print what THIS box runs, name where CI's is decided, and let the reader
     # compare two live values rather than one live and one remembered.
     echo ">>> wine here:  $(wine --version 2>/dev/null || echo unknown)" >&2
-    echo ">>> wine in CI: whatever 'apt-get install wine' gives ubuntu-latest" >&2
-    echo ">>>             (.github/workflows/ci.yml, step 'Install MinGW + wine')" >&2
+    echo ">>> wine in CI: pinned to 11.16 (WineHQ devel), .github/workflows/ci.yml WINE_PIN" >&2
+    echo ">>>             — a constant matched to this box on 2026-09-02, not a live read." >&2
     echo ">>> A green run here is NOT a green wine LANE — nor a green windows-latest." >&2
     echo ">>>   docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md" >&2
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER="wine"

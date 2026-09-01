@@ -308,10 +308,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install MinGW + wine
+        # WINE IS PINNED, and the pin is the point of this step rather than a detail.
+        #
+        # Ubuntu's own `wine` package gave this lane 9.0 while the local loop ran 11.16, and
+        # that divergence is IC-5 ("the reproduction environment is not the gating
+        # environment"): nine tests in group 6 below are skipped for hangs that do NOT
+        # reproduce locally, so the lane withholds coverage for a reason belonging to the
+        # emulator rather than to codescout. Un-skipping them is gated on this pin, not the
+        # other way round.
+        #
+        # `winehq-devel` and NOT `winehq-staging`: staging carries extra out-of-tree patches,
+        # and the local box runs vanilla wine (Arch `wine 11.16-1`), so devel is the build
+        # that actually matches. `winehq-devel` Depends on `wine-devel (= <exact>)`, so
+        # pinning the metapackage cascades and no sub-package needs naming.
+        #
+        # The codename is READ FROM THE RUNNER, never hardcoded — `ubuntu-latest` moves, and a
+        # baked-in `noble` would decay silently into an apt 404 blamed on WineHQ. The VERSION
+        # is hardcoded on purpose, because matching the local loop is the whole objective; it
+        # is a constant that WILL decay as local wine moves, so it names what it was matched
+        # to and when. Re-check with `wine --version` locally against `WINE_PIN`, and note
+        # scripts/build-windows.sh already prints the lane's wine at the top of every `test`
+        # run so a local and a lane log are directly comparable.
+        #   Matched to local `wine-11.16` (Arch, 2026-09-02).
+        #   Available for this dist as `winehq-devel=11.16~<codename>-1`.
+        env:
+          WINE_PIN: "11.16"
         run: |
+          set -euo pipefail
+          . /etc/os-release
           sudo dpkg --add-architecture i386
+          sudo mkdir -pm755 /etc/apt/keyrings
+          sudo wget -qO /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
+          sudo wget -qNP /etc/apt/sources.list.d/ \
+            "https://dl.winehq.org/wine-builds/ubuntu/dists/${UBUNTU_CODENAME}/winehq-${UBUNTU_CODENAME}.sources"
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 wine wine64 p7zip-full
+          sudo apt-get install -y gcc-mingw-w64-x86-64 p7zip-full
+          sudo apt-get install -y --install-recommends \
+            "winehq-devel=${WINE_PIN}~${UBUNTU_CODENAME}-1"
+          # WineHQ installs to /opt/wine-devel/bin and ships NO /usr/bin/wine — verified by
+          # extracting wine-devel_11.16~noble-1_amd64.deb, whose payload is entirely under
+          # ./opt/. Ubuntu's own `wine` package did put it on PATH, so this line is the whole
+          # difference between the pin working and the lane dying on `wine: not found`:
+          # build-windows.sh sets CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER="wine", a bare
+          # name resolved from PATH.
+          echo "/opt/wine-devel/bin" >> "$GITHUB_PATH"
+          # Fail loudly here rather than 40 minutes later in a test diff: an apt that resolved
+          # to some other wine makes every result below incomparable to a local run.
+          # Absolute path, because $GITHUB_PATH only reaches LATER steps, not this one.
+          got="$(/opt/wine-devel/bin/wine --version)"
+          echo ">>> wine pinned to: ${got}"
+          case "${got}" in
+            wine-"${WINE_PIN}"*) ;;
+            *) echo "::error::wine is ${got}, expected wine-${WINE_PIN} — the pin did not take"; exit 1 ;;
+          esac
       - uses: mozilla-actions/sccache-action@v0.0.7
       - uses: Swatinem/rust-cache@v2
         with:
@@ -382,7 +431,9 @@ jobs:
       #
       # MEASURED, in two passes, and the second pass is the one that counts.
       #   Locally (wine 11.16, zero skips): exactly these fail.
-      #   On THIS lane (wine 9.0, run 32975930504): dropping 22 stale entries passed 21 of
+      #   On THIS lane (wine 9.0 — the PRE-PIN lane; it runs 11.16 since 2026-09-02, so read
+      #   this row as history rather than as current state, run 32975930504): dropping 22
+      #   stale entries passed 21 of
       #   22 — so the local measurement transferred almost perfectly, and the ONE that did
       #   not turned out to share a cause with a skip already here (group 6).
       # Then WINEPATH retired 3 more (group 2 below), leaving 8.
@@ -487,10 +538,20 @@ jobs:
       # cases the bare assertion had been hiding it. (W-60,
       # docs/trackers/bug-fix-session-log.md)
       #
-      # Un-skip protocol — ONE change clears both: pin this lane's wine to a version matching
-      # the local loop (WineHQ apt repo), then drop both skips and re-measure. NOT by editing
-      # either test, and NOT by raising timeout_secs, which would only make a hang cost more
-      # wall-clock before failing the same way.
+      # Un-skip protocol — TWO passes, and collapsing them into one is the mistake to avoid.
+      #
+      #   PASS 1 (DONE, this commit): pin the lane's wine to the local loop's version via the
+      #   WineHQ apt repo — see the install step at the top of this job. Every skip below is
+      #   deliberately LEFT IN PLACE for this pass. The only question it answers is "does the
+      #   pin take, and does the lane stay green under a wine four majors newer", which is
+      #   worth isolating: the new wine can break things group 6 has nothing to do with.
+      #
+      #   PASS 2 (owed): drop the nine group-6 skips and re-measure. Do this ONLY after a
+      #   green pass-1 run, because a red lane with both changes in it cannot say whether the
+      #   pin broke something or the un-skipped tests still hang — two questions, one signal.
+      #
+      # NOT by editing either test, and NOT by raising timeout_secs, which would only make a
+      # hang cost more wall-clock before failing the same way.
       # docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md
       - name: Cross-test under wine (lib only)
         run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page --skip heredoc_body_pipes_are_not_rewritten_into_the_written_file --skip run_command_with_overflow_emits_progressive_hint_once --skip unfiltered_output_carries_a_line_count_and_explicit_empty_stdout --skip unfiltered_output_line_count_survives_inline_truncation --skip a_truncated_buffer_reports_the_count_it_will_actually_serve --skip a_truncated_buffer_ends_with_a_sentinel_naming_both_counts --skip a_grep_over_a_truncated_ref_carries_the_truncation_notice --skip a_complete_buffer_carries_no_sentinel_and_no_notice --skip read_file_renders_the_truncation_notice_not_just_carries_it
