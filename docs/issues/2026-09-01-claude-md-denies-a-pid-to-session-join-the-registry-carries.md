@@ -99,6 +99,30 @@ correction stops there, at *"not mine, and I cannot say whose"*. With the join i
 both writers are named, live and one message away. That is the difference between refuting an
 attribution and repairing one.
 
+### The same error, in both directions, twenty minutes apart
+
+Recorded because a one-sided version of this would read as the instrument vindicating its
+finder. Both sessions in the exchange made the adjacency error, at each other:
+
+- **The peer → me.** *"Your `…-peer-idle-timeout-…`"* — an untracked file sitting beside my
+  edits. Provenance: `PEER`, written by `3e275c54` and `bf44ba81`, neither of us.
+- **Me → the peer.** I wrote *"your `src/server.rs`"* in a message **and in the message of
+  commit `455184eb`**, on the same basis: it was dirty in a tree where they were the peer I
+  happened to be talking to. Provenance: `3e275c54` — `codescout-17`, a third session. They
+  had not opened the file.
+
+Neither of us was careless, and both of us knew the rule; one of us was *writing about the
+rule* at the time. That is the § *Observer Blindness* admission test passing on the nose —
+"be careful" is the wrong instrument, and what closed both was the same mechanical join.
+
+**The asymmetry that matters for repair:** their misattribution cost a message. Mine went
+into a **commit message**, where it is durable, pulled by every peer, and not correctable
+without rewriting a SHA others may hold. `455184eb`'s *"Their src/ work … left in the working
+tree"* is wrong about the owner and stands uncorrected in git; this file is the correction.
+An attribution is cheap to make and expensive to retract exactly in proportion to how durable
+the surface is — which argues for resolving one **before** it reaches a commit message, not
+for resolving it more carefully.
+
 ## Root Cause
 
 The sentence generalises from two sources to a namespace. Both are **process**-level
