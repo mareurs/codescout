@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 152
+entry_high_water_R: 155
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,8 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-154 | 2026-09-01 | hit (1 instance) | **A NUMBER inherited from a subagent report is a claim, and a floor carries no denominator to check it against.** Law *A* already names *"a subagent's report"* as a claim; what let this one through is that the claim was a **quantity**, and quantities read as measurements someone else already took. Two subagents auditing a different question each noted `IC-13`'s *"without a marker"* clause looked false for “at least four” members; that floor crossed three of my messages, a commit message and a tracker entry, and was about to ground a taxonomy ruling. Measuring it (16 files, one reader each, quote per verdict, expected answer withheld) gave **A=4 / B=5 / C=7** — the claim holds for 4, and the floor had been carried in the **opposite direction** to its meaning: read as bounding the members the claim *fails* for, it bounded the ones it *holds* for (true failure figure 12 of 16). Two properties made it durable: a floor has **no denominator**, so ≥4 is compatible with 4/16 and 4/4 — opposite rulings — and re-reading a bound tells you nothing new; and the **framing selected its meaning**, since “the claim is too narrow” predicts B, so the digits read as “4 B’s” when B is the *smallest* bucket. **Proposal:** Law *A* sub-shape — a number from another task is a claim; re-derive it, and demand its denominator before it bounds anything. | `cluster-promotion-session-log:F-5` (the 16 per-file verdicts, each quoting the file that settles it); kin `cluster-promotion-session-log:F-4` — a count cell stale by *concurrency* rather than provenance, so numbers here rot two ways with different remedies (re-derive vs gate) |
+| R-153 | 2026-09-01 | hit on the finding, **miss on the method** → proposal (1 instance) | **Every Phase 1 instrument the skill prescribes is READ-ONLY; mutation is the one that writes, and it collided with a peer.** Reading a test says what it asserts; only mutating the code says what it catches — the right instrument for law *D*, which this ledger already carries at 7%. Four runs proved a new dispersion constant unguarded across (0.667, 1.0], a result no reading produces. They also put a **disabled gate into a peer's staged index**, where it survived their review of the staged diff and was stopped only by an unrelated `unreviewed-content` hook. Care helped neither party: a mutation writes the same bytes an edit writes, so the peer's provenance probe returning `SHARED` was the *ceiling* on what any observer could learn. The skill already has a side-effect caveat for a read-only step (the `ytt`/`helm` transcript-disclosure bullet), so the category exists and the write case is missing from it. **Proposal:** Phase 1 bullet — mutation belongs in a worktree or against a committed base; `recon-active` says a scout is running, not which files are transiently untrustworthy. **Promoted-set audit recorded in the entry** (4 laws checked: 0 false, 0 obsolete, 1 outgrown-and-widened-here). | `bug-fix-session-log:F-94` (the finding), `bug-fix-session-log:F-95` (the collision); kin `R-150` — same shared-tree family, that one a destructive read-side step, this one a destructive write-side one |
 | R-150 | 2026-08-31 | miss → rule (1 instance, self-caught) | **An ownership assumption must not authorise a deletion — it is an attribution claim, and here the refuting datum was inside the path being deleted.** A post-rebuild scout verified all three `R-89` axes positively, then found 9 of 13 live servers on pre-rebuild bytes. Cleaning up after itself, it read an untracked `docs/issues/.buddy/` as its own marker debris and `rm -rf`'d it. The path carried a **session id — visible, unread — belonging to a different, live peer**; the scout's own marker had landed correctly elsewhere. Worse than the misattribution: the scout had just raised the question the deleted files' mtimes would have answered (was the peer's judge narrative being *split* across two dirs, or was this an abandoned duplicate?), so the deletion removed its own adjudicating evidence — **permanently unanswerable**. Checking *after* is what rescued the report: the peer's canonical `.buddy/<sid>/` was intact and still being written, so the cost fell from "destroyed a live peer's judge state" to "removed a stray duplicate" — two orders of magnitude, one call apart. **Tell:** the word *my* in front of a path on a shared tree. **Runnable:** `ls -l` before `rm`; on a tree shared with peers the owner is in the path and costs one call. | this session; sibling of the Phase 1 rule that a negative search result must not authorise a deletion — this is the ownership form, which that wording does not reach; kin `R-123` (adjacency-as-cause) and `scripts/peer-sessions.sh`'s own warning not to infer authorship from presence, inverted here into inferring it from absence. Also surfaced `.gitignore:43`'s root-anchored `/.buddy/*`, so a nested `.buddy/` is untracked rather than ignored; fix is upstream in `claude-plugins`, filed |
 | R-147 | 2026-08-31 | miss → rule | **A quotation that asserts its own fidelity does not check it — and the assertion is what stops the reader looking.** A manual block reproduced a plugin's SessionStart injection under a ⚠️ note saying it was quoted **verbatim** from `session-start.mjs:339`, that its last line was known-wrong, and that it was reproduced unchanged *"because a manual that quotes a hook has to match the hook"* — correct reasoning, exact `file:line`, and the known-wrong line did match. **Two of the other three lines had drifted anyway** (hook emits `POST-COMPACT: Context was just compacted.` / `workspace(post_compact=true)`; block showed `codescout PostCompact: …` / the `action: status` form), and the section's closing prose repeated the second error. The label INVERTS the check: a reader told "quoted verbatim" has been told the check was done, so the assurance substitutes for it — an unlabelled quote invites *is this current?*, a labelled one answers pre-emptively and wrongly. It also survived a deliberate correction pass the day before, which edited this very block to add the warning and did not re-derive the rest: **a targeted edit is exactly what will not look at the parts you are not thinking about.** Caught by comparing against what a live session actually received, not by re-reading. **Runnable:** treat a quotation of a live emitter as a DERIVED artifact — re-derive the whole block whenever you touch any line of it, or drop the fidelity claim and say *paraphrased*. | this session; instance in `d7072ed21959aca1` § Fix, fixed at `2c730ebd`; documentation-side twin of R-89; kin R-142, R-144 |
 | R-146 | 2026-08-31 | miss → rule (5 instances, one day), Promote-when FIRED | **A measurement of state someone else is editing expires before the message carrying it arrives — and the cost FLIPS SIGN rather than decaying.** A peer reported the lean lane red naming two `tools::tree` tests, with sound attribution (neither name exists at `git show HEAD`, so new-and-red not a regression) — but *new-and-red is RED's own signature*, so the very evidence proving it was not a regression is what should have marked it transient. Re-measured here: **7 passed, 0 failed**, both named tests green; `grep cfg(feature` → 0 matches, so not lane-specific; the file read **+204 → +214 → +360** across three readings, 146 lines added between their run and mine. Acting on the stale warning costs the INVERSE of what it prevents — not a session blaming itself for another's red, but a session distrusting a green that is real. Two sibling instances the same evening: an unbacked "the tree dotfile bug is mine" that displaced the bug's own filer, retracted as *"a claim with no work behind it … asserts a state that has an expiry and does not carry one."* **Runnable:** ship the derivation (command + instant + cheap re-check), not the value; re-run on receipt whenever the artifact is under active edit. | this session, verified by re-measurement; kin R-98, R-142, R-143 |
@@ -5445,8 +5447,6 @@ So the class is not *prose vs fenced block*. It is **any query keyed on a token 
 2. **Search for the narrowest token, not the construct** — `cargo clippy` rather than a fenced block containing it. A token appears in every form the proposition can take.
 3. **Treat two agreeing sweeps as one sweep** unless they used different *query shapes*. Independence of authorship is not independence of method, and the second sweep here inherited the first's blind spot without either session sharing a query.
 
-## R-139 — the parameter your own context supplies for free is the one you will omit
-
 
 **Third instance, 2026-09-01 — and the ratio is 15×, not 1.25×.** Mining the bug corpus for a
 candidate defect class, the proposition was *"bug files whose root cause is a selector narrower
@@ -5473,6 +5473,8 @@ The tell was not suspicion of the number. It was running the body query for a *d
 order of magnitude.
 
 **Valid:** invariant
+## R-139 — the parameter your own context supplies for free is the one you will omit
+
 **Valid:** invariant
 
 **Rests on:** a published claim is evaluated in the reader's context, not the author's. Any parameter the author's context supplies silently is one the author cannot perceive as missing — so the omission is invisible to the person best placed to fix it, and *only* to them.
@@ -6442,6 +6444,204 @@ currently has nowhere to go.
 **Rests on:** `codescout:catalog-audit-trail-session-log:F-4` and
 `codescout:catalog-audit-trail-session-log:W-3`, same session; and on `R-49`'s text as it
 stands today, re-read rather than recalled for this audit.
+
+## R-153 — Every Phase 1 instrument is read-only; mutation is the one that writes, and it collided with a peer
+
+**Verdict:** hit on the finding, **miss on the method** — and the miss is the entry.
+
+**What happened:** 2026-09-01. Scouting an uncommitted dispersion gate in
+`scan_cited_prefix_with_no_definer`, reading the test was not enough to answer *"does this
+test guard the constant it introduces?"* — the only instrument that answers it is mutation:
+change the code, run the suite, read which tests die. Four runs established the constant is
+unguarded across (0.667, 1.0] (`bug-fix-session-log:F-94`), which no amount of reading would
+have produced. It also put a **disabled gate into a peer's staged index**, where it passed
+their review and was stopped only by an unrelated pre-commit hook
+(`bug-fix-session-log:F-95`).
+
+**The gap in this skill:** every instrument Phase 1 prescribes is **read-only** — read the
+symbol body, read the callers, run the call once and inspect output, verify at the bytes,
+render one file not the directory. Mutation is the natural escalation for law *D — a test
+that cannot fail is not coverage*, which this ledger already carries at 7% of entries, and it
+is the first prescribed-adjacent step that **writes**. Nothing in Phase 1 marks that
+transition. The skill even has a *disclosure* caveat for one read-only step (the `ytt`/`helm`
+bullet: read-only against the cluster is not read-only against your transcript) — so the
+category "this scout step has a side effect" exists, and the write case is missing from it.
+
+**Why care did not help either party.** A mutation writes the same bytes an intentional edit
+writes. The peer's provenance probe correctly returned `SHARED` and named both sessions; that
+is the ceiling on what any observer could learn, because the semantics are not in the file.
+This is `OB`-shaped: the party who can see it (me) has the parameter — *these bytes are
+temporary* — and no channel carries it.
+
+**Proposal for `SKILL.md`:** a Phase 1 bullet, roughly — *A scout that MUTATES is no longer a
+scout, and the shared working tree is not yours. Reading a test tells you what it asserts;
+only changing the code tells you what it catches, so mutation is the right instrument for law
+D — but it writes, and a concurrent `git add` cannot distinguish your mutation from an edit.
+Make the mutate-and-restore window **un-interleavable**: backup, mutate, test, restore and
+verify — all inside ONE call, so it never spans a turn. Reach for a worktree or a committed
+base when you want the class eliminated rather than merely collapsed.*
+
+**Refined the same day by the peer this collided with, and the refinement inverts the emphasis
+this entry was drafted with.** My original proposal led with *worktree*. Theirs leads with
+*atomicity*, and theirs is better: what made my window collidable was not that the tree was
+shared — it is always shared — but that the window **spanned tool calls and therefore turns**,
+leaving a mutant on disk for minutes. One-call atomicity costs nothing, needs no worktree, and
+works in the shared checkout. The worktree remains the stronger form (eliminates vs collapses)
+and is right when a run is long or a rebuild is needed — it is what verified `F-94`'s closure
+an hour later, when the shared tree would not compile. So: **atomicity first, worktree when the
+work is long.** Both, not either.
+
+**Second lesson, and it is about the mutation POPULATION rather than the tree.** My four runs
+mutated the threshold's *value* (0.5, 0.6, 0.9) and never its *operator*. The shipped gate is
+`files * NUM >= total * DEN` — two dimensions, and I sampled one. The author's fix pins both,
+using a fixture sitting *exactly* on the boundary so that `>=` → `>` flips it. Generalised:
+**when mutating a comparison, mutate the operator as well as the constant, and place one
+fixture exactly on the boundary** — an off-boundary fixture cannot distinguish the two
+operators at any threshold. This is `Phase 1`'s population law (*a fix that names a population
+asserts that population is non-empty*) turned on the mutation set itself: I never asked what
+my mutations could not express.
+
+**Sharpened once more by the same peer, and this is the form to promote.** "Mutate the operator
+as well as the constant" states the remedy; the *reason* is stronger and generalises further:
+a boundary comparison has **two free parameters**, and a fixture placed off the boundary can
+only ever probe one of them. An off-boundary fixture cannot distinguish `>=` from `>` at **any**
+threshold whatsoever — so no amount of value-mutation reaches that axis, and a mutation run
+that only moves the constant will report the operator as covered by never asking. The rule that
+generalises is therefore about the FIXTURE, not the mutation: **put a fixture exactly on every
+boundary you introduce**, and the operator mutation then has something it can kill. Stated that
+way it is a design rule that fires when the guard is written, not a discipline that has to be
+remembered at mutation time — which is the `Observer Blindness` preference for a check that
+runs when nobody is worried.
+
+**Promote-when:** one further instance of a reconnaissance step writing to a shared checkout —
+mutation, a scratch fixture, a temporary `#[ignore]`, a bisect. At 2 datapoints, PR against
+`codescout-companion/skills/reconnaissance/SKILL.md` citing this `R-N` and `F-95`. Routing per
+§ *Promotion routing*: **craft-shaped** — it would not mislead another project, since it is a
+property of concurrent agents on one checkout rather than of this repo's dialect. It does not
+meet the session-opening-surface bar, which needs a measured base arm.
+
+**Audit of the promoted set** (required by § *Every promotion audits the promoted set*, and
+recorded so the next promotion inherits it rather than repeating it): checked the four Phase 1
+laws nearest this one. *Substrate/verdict* — **not false, not outgrown**; it disciplines which
+world an instrument reads and says nothing about writing to it. *Rendered read vs bytes* —
+**still true**, and it is what made the byte-exact `diff -q` restore the right check here.
+*Negative-search* — **unreachable is the risk, not falsity**; unchanged by this. *Green
+certifies the executed path* — **outgrown in one direction and this entry is the widening**:
+it tells you a green may prove nothing, and the way to find out is mutation, which the skill
+then never mentions. No law was found obsolete; none cut.
+
+**Status:** open — proposal at 1 datapoint.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** `bug-fix-session-log:F-94` and `bug-fix-session-log:F-95`, both of which carry
+their own verification commands; and this ledger's own law D, whose 7% share is what makes
+mutation a recurring need rather than a one-off.
+
+## R-154 — a NUMBER inherited from a subagent report is a claim, and a floor carries no denominator to check it against
+
+**Verdict:** hit — the scout ran before the ruling and inverted its conclusion.
+
+**Observed:** 2026-09-01, adjudicating `IC-13`'s claim text in `docs/trackers/issue-clusters.md`.
+
+**Seam:** a **number** carried across tasks. Two subagents, auditing a different question, each
+remarked in passing that `IC-13`'s *"without a marker"* clause looked false for some members — "at
+least four". That floor then travelled through three of my own messages, a commit message, and a
+tracker entry, and was about to be the basis of a taxonomy ruling.
+
+**Narrative.** Law A already covers this and names the exact artifact type: *"a subagent's
+report"* is a **claim**, not ground truth. What made it slip through is that the claim was a
+*number*, and numbers do not read as claims — they read as measurements that someone else already
+took. Nothing about "at least four" prompts the question "four out of how many, established how?"
+
+Measuring it (16 files, one reader each, quote per verdict, expected answer withheld) returned
+**A=4 / B=5 / C=7**: the claim holds for 4, and the floor had been carried in the **opposite
+direction** to its meaning — read as bounding the members the claim *fails* for, when it bounded
+the ones it *holds* for. The true failure figure is 12 of 16. The largest bucket, C at 7, was a
+category I had almost not offered, and two of its members disclaim the class **in their own text**.
+
+Two properties made this durable rather than a one-off slip, and both generalise:
+
+- **A floor has no denominator, so it cannot be checked by inspection.** "≥4" is compatible with
+  4/16 and 4/4, which imply opposite rulings. It survived every re-reading because re-reading a
+  bound tells you nothing new.
+- **The framing selected the number's meaning.** I was holding "the claim is too narrow" — a
+  wording problem, which predicts B — so ≥4 read as "4 B's". Under a membership framing the same
+  digits would have read as "4 C's". The number did not disambiguate; my hypothesis did.
+
+**Promote-when:** a second instance of a *quantity* (not a fact) inherited from a subagent report
+or an earlier session and used without re-derivation. At 2 datapoints, propose a Law A sub-shape:
+*a number from another task is a claim; re-derive it, and demand its denominator before it can
+bound anything.*
+
+**Status:** validated — single datapoint, caught before the ruling, cost was one measurement pass.
+
+**Kin:** Law A (*ground truth is the artifact; a subagent's report is a claim*), of which this is
+the quantity-shaped sub-case. Also `cluster-promotion-session-log:F-5`, the full working, and
+`cluster-promotion-session-log:F-4`, where a different number — a count cell — went stale by
+concurrency; the two together say that numbers in this repo rot both by *provenance* and by
+*time*, and that the remedies differ (re-derive vs gate).
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** `IC-13`'s 16 per-file verdicts, each quoting the bug file that settles it.
+
+## R-155 — a gate that reads the working tree certifies a state you may not be shipping
+
+**Verdict:** hit — the scout caught a bad `HEAD` that every gate had passed.
+
+**Observed:** 2026-09-01, post-rebuild reconnaissance after shipping a taxonomy ruling.
+
+**Seam:** the **commit boundary**. A green check, and a `HEAD` the check never read.
+
+**Narrative.** Law *B* says a result is evidence about the configuration that produced it before
+it is evidence about the code. The configuration axis here is neither build features nor which
+binary — it is **which git state the instrument read**. `every_index_count_matches_the_corpus`
+runs `git grep` over the **working tree**. It was green, correctly, and said nothing whatever
+about what got committed: six of seven retagged files were left unstaged, so three newly-opened
+classes published counts of 3, 1 and 2 against **zero members at `HEAD`**.
+
+The general form is worth more than the instance: **a gate that reads the working tree certifies
+the state on disk, and a partial commit ships a state that never existed on disk.** No amount of
+re-running it before or after helps, because the shipped state is not one it can address. The
+tell is a check whose input is "the tree" while the thing you are about to publish is "a subset of
+the tree".
+
+Two properties made it durable. It is **silent in the author's direction** — local green,
+CI red, surfacing to whoever pushes next. And the repository's own habit of running the gate
+before committing actively *reassures*: the check ran, it passed, and it answered a different
+question than the one the commit posed.
+
+**Runnable, and it cost one call:**
+
+```
+git grep -clE '<pattern>' -- '<paths>' | wc -l          # working tree
+git grep -clE '<pattern>' HEAD -- '<paths>' | wc -l     # what you actually shipped
+```
+
+Any divergence after a commit you believed complete is a partial commit. I only ran it because a
+peer had reported the same gate reddening for a reason its message could not express, which had
+made HEAD-vs-worktree the habit an hour earlier — so the credit is a peer's report, not
+carefulness.
+
+**Promote-when:** a second instance of a check whose input tree differs from the state being
+published — a linter over the working tree gating a commit, a test over `HEAD` gating a merge
+result, a formatter run on unstaged files. At 2 datapoints, propose a Law *B* sub-shape: *name the
+tree your instrument read, and check it is the tree you are shipping.*
+
+**Status:** validated — single datapoint, caught by the scout, repaired at `4f598b5b`; the
+preventing mechanism (a pre-commit hook deriving against the staged state) is proposed and not
+built.
+
+**Kin:** Law *B*. Sibling of `R-89` (freshness of the copy that serves you) — that one is *which
+build*, this is *which tree*, and both are the same question asked of a different substrate. Also
+`cluster-promotion-session-log:F-7`, the full working, and `IC-13`'s own gate, whose doc comment
+already recorded the narrower tracked-only form of this.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the measured HEAD-vs-worktree divergence, and on the gate's implementation reading
+the working tree.
 
 ## Template for new entries
 
