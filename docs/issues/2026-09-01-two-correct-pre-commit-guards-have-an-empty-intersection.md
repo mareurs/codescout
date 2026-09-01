@@ -183,8 +183,8 @@ as foreign. That is `IC-2` (a gate keyed on an event it cannot observe substitut
 than `IC-17`, and it means isolating the resource does not help while the proxy stays wrong.
 
 **Both of the guards they proposed were then MEASURED AND REJECTED, and what shipped is
-neither.** Superseded by `docs/issues/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md`
-(`b0f96b8e45f9d189`), fixed at `74b9cc67`, patch-id
+neither.** Superseded by `docs/issues/archive/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md`
+(`d5af3d3ceff1d08c`), fixed at `74b9cc67`, patch-id
 `0e7feedf232c5ed9e22fd975c6fe36baa109e1d2`. Read that file rather than the two bullets this
 paragraph used to carry:
 
@@ -239,8 +239,8 @@ owner-field direction is the only one left and this becomes a design task, not a
 
 ## References
 
-- `docs/issues/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md`
-  (`b0f96b8e45f9d189`) — the sequencer-stop route out of this deadlock, and the only one
+- `docs/issues/archive/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md`
+  (`d5af3d3ceff1d08c`) — the sequencer-stop route out of this deadlock, and the only one
   fixed so far (`74b9cc67`). It carries the reproductions that rejected both of the
   originally-proposed guards.
 - `docs/plans/archive/2026-09-01-shared-checkout-commit-sequence-guide.md` — the friction this bug

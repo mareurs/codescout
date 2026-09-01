@@ -410,7 +410,7 @@ CLAUDE_CODE_SESSION_ID="$A" git apply --cached < s.patch
 eq "a patch on stdin over-refuses (no filename in argv)" "$(owner_of s.txt)" "-"
 
 # ------------------------- 7. the guard stands down where git refuses its own remedy
-# docs/issues/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md
+# docs/issues/archive/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md
 #
 # The refusal names exactly ONE escape — `git commit -- <path>` — and git rejects that
 # form outright during a sequencer stop ("cannot do a partial commit during a

@@ -104,7 +104,7 @@ git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
 # there with "cannot do a partial commit during a cherry-pick", while the bare form
 # refused below is the only one it will accept. Refusing here leaves no compliant route
 # at all, which is what teaches `--no-verify`. See
-# docs/issues/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md.
+# docs/issues/archive/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md.
 #
 # Keyed on the sequencer HEADs, NOT on "a rebase is running": measured 2026-09-02, a
 # rebase stopped with rebase-merge/ present and CHERRY_PICK_HEAD absent commits by

@@ -1,5 +1,5 @@
 ---
-id: b0f96b8e45f9d189
+id: d5af3d3ceff1d08c
 kind: bug
 status: fixed
 title: foreign-index refuses a commit and prescribes a remedy git refuses too
