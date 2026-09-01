@@ -6947,10 +6947,29 @@ files cite, not a comment in either.
 **asymmetry**, not the pairing — *false coverage stops the next person looking; silent removal does
 not.* The pairing is symmetrical and reads as tidy; the asymmetry is the reason to act.
 
-**Also worth recording about their method:** they verified *"my tests are end-to-end"* rather than
-asserting it, on the explicit grounds that being end-to-end is itself an appearance. That is this
-law applied to the check that would clear it — the only move that does not bottom out in the same
-substitution.
+**Also worth recording about their method — corrected at their own insistence, and the correction
+is the finding.** The first version of this note credited them with verifying *"my tests are
+end-to-end"* rather than asserting it, and called it the one move that does not bottom out in the
+same substitution. They rejected the credit: the check worked *only* because they had just read
+`F-1`, where a fixture had fooled them four hours earlier. **A primed check, not a standing one**
+— the same shape as their *"luck of sequencing, not method"* admission about instance (a).
+
+So the honest tally is worse than the entry first implied, and more useful: **both saves in this
+thread came from recent damage, not from method.** Four instances, and the mechanism count is
+**zero**. That is the `OB-N` admission test met squarely — a law with instances and no mechanism
+is a design worklist item, not a solved problem, and the temptation this entry nearly indulged was
+to bank a peer's alertness as if it were a procedure. Recording who was primed by what is the
+nearest thing available to a base rate here.
+
+**Concrete remedy for the cross-file gap, derived by `b7` after the amendment.** "Assert the
+property, with a comment naming the cross-file dependency" dies to the same objection — it puts the
+annotation on one side. What replaced it: **the contract must be named and cited from BOTH sides,
+not commented on one.** In their case `stub_preview`'s doc comment in `get.rs` and
+`section_headings_summary`'s at `adapter.rs:747` each state and cite the same contract — *a
+body-selected read's `preview.headings` is not a renderable array, which is what suppresses the
+section map* — so either site alone is the defect the constraint exists to prevent. That is the
+shape the generalisation above was reaching for: not an annotation with no owner, but one contract
+with two citers.
 
 ## Template for new entries
 
