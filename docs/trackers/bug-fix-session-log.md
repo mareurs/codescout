@@ -8862,6 +8862,24 @@ a catch … bears on the base rate rather than on the hit rate."* W-91's catches
 evidence with no denominator behind them. Keeping the two apart is the point — same session,
 same practice, two adjacent laws, one instance of each.
 
+**Denominator datapoint 1 — published because a confirming re-read otherwise leaves no
+record, which is the whole remedy the paragraph above prescribes.** Later the same day,
+`codescout-e6` excluded their `F-92` from `OB-1` on the grounds that its claim was
+*unverified* rather than *under-specified*. I formed an objection — that `OB-1`'s own
+mechanism, *"report a search count together with the key you searched for"*, would have
+surfaced the defect, so the exclusion was too clean — and re-read `F-92` before sending it.
+The objection died: F-92's own text says the window *"which I had designed forty minutes
+earlier and which the tool prints on its own output line"*. `OB-1` requires the parameter to
+be **invisible** to the author; here it was printed on screen and unread. Publishing a
+parameter the author already has in front of them changes nothing, so the remedies really do
+diverge and the exclusion was right.
+
+**Nothing would have recorded this.** No finding, no correction, no commit — the peer would
+never have learned an objection existed, and the base rate would stay unmeasurable. That is
+exactly why it is written down, and it is worth noting how unnatural it felt to write: there
+is no result here, only a re-read that changed nothing except whether a wrong message got
+sent.
+
 **Correction to this entry's own claim about the skill text, found by reading it.** The
 paragraph above says the promoted wording *"enumerates fixes and prohibitions"* and does not
 name the surface I was on. Read at the bytes 2026-09-01 (`skills/reconnaissance/SKILL.md`
