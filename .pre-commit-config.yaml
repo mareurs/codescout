@@ -83,6 +83,33 @@ repos:
         always_run: true
         stages: [pre-commit]
 
+      # Reads the INDEX (`git ls-files` + `git show :<path>`), never the working tree, so it
+      # answers the question the COMMIT poses. `tests/issue_clusters.rs` structurally cannot:
+      # it reads the working tree, so it certifies the state on disk and stays GREEN while a
+      # partial commit ships a state that never existed there
+      # (`reconnaissance-patterns:R-155`). Measured at `461c037a`, which published counts of
+      # 3/1/2 against zero members at HEAD with the gate green throughout.
+      #
+      # Python, not `cargo test --test issue_clusters`, per the stage rule at the top of this
+      # file: that costs ~6.9s warm and takes the shared `target/` lock. This is <0.2s and
+      # builds nothing. The duplicated parse logic is held in sync by a MECHANISM rather than
+      # by care — `the_hook_script_agrees_with_this_gate` and
+      # `the_hook_script_agrees_on_both_yaml_tag_styles` red if the two derivations diverge.
+      # The second exists because the first cannot see it: no bug file in the corpus carries a
+      # `cluster/` tag in YAML flow style, so deleting that arm from the Python leaves the
+      # corpus-driven check passing. Verified by mutation, not assumed.
+      #
+      # Scoped by `files:` rather than `always_run` — a commit touching neither the ledger nor
+      # a bug file cannot break this invariant, and a hook that fires on every commit to say
+      # nothing is how `--no-verify` gets learned.
+      - id: ledger-counts
+        name: refuse a commit whose ledger counts disagree with its staged corpus
+        entry: scripts/pre-commit-ledger-counts.py
+        language: system
+        pass_filenames: false
+        files: ^(docs/trackers/issue-clusters\.md|docs/issues/.*\.md)$
+        stages: [pre-commit]
+
       - id: cargo-fmt
         name: cargo fmt --check
         entry: cargo fmt --check

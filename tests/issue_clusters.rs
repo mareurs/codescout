@@ -25,6 +25,7 @@
 //! silently under-count every class by its archived members.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -396,6 +397,106 @@ fn actual_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
 /// inside one session by peer sessions filing bugs into the same checkout, so a sweep's own
 /// result is falsified by the next commit and no amount of care holds it
 /// (`cluster-promotion-session-log:F-4`).
+/// The hook script reads BOTH YAML tag styles, like [`cluster_tags`] does.
+///
+/// Split from [`the_hook_script_agrees_with_this_gate`] because that one runs against the live
+/// corpus, and the corpus cannot reach this branch: measured 2026-09-01, **zero** bug files
+/// carry a `cluster/` tag in flow style (`tags: [a, b]`), so deleting the inline arm from the
+/// Python leaves the corpus-driven check **green**. Verified by mutation, not assumed — that
+/// deletion was made and the other test passed.
+///
+/// The fixtures are [`both_yaml_tag_styles_are_read`]'s, deliberately: the two tests must
+/// agree about what the corpus is allowed to contain, not merely each about itself.
+///
+/// Mutation that must kill this: drop either arm of the Python's `cluster_tags`.
+#[test]
+fn the_hook_script_agrees_on_both_yaml_tag_styles() {
+    let block = "---\nkind: bug\ntags:\n- cluster/alpha\n- x\n---\n\n# t\n";
+    let inline = "---\nkind: bug\ntags: [cluster/alpha, x]\n---\n\n# t\n";
+
+    for (label, fixture) in [("block", block), ("inline", inline)] {
+        let mut child = Command::new("python3")
+            .args(["scripts/pre-commit-ledger-counts.py", "--fixture-tags"])
+            .current_dir(repo_root())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("python3 failed to spawn");
+        child
+            .stdin
+            .take()
+            .expect("stdin piped")
+            .write_all(fixture.as_bytes())
+            .expect("write fixture");
+        let out = child.wait_with_output().expect("hook script failed");
+        assert!(out.status.success(), "{label}: script exited non-zero");
+
+        let theirs: Vec<String> =
+            serde_json::from_slice(&out.stdout).expect("script must emit a JSON list");
+        let mine = cluster_tags(frontmatter(fixture).expect("fixture has frontmatter"));
+        assert_eq!(
+            mine, theirs,
+            "{label} style: this gate and scripts/pre-commit-ledger-counts.py disagree about \
+             which cluster tags a frontmatter block declares"
+        );
+    }
+}
+
+/// The pre-commit hook script derives the same counts this gate does.
+///
+/// `scripts/pre-commit-ledger-counts.py` duplicates the parse logic above on purpose: a cargo
+/// invocation in the commit path costs ~7s warm and blocks unboundedly on the shared
+/// `target/` lock, which on a ten-session checkout is a worse failure than the one it guards.
+/// The duplication is the price; **this test is what stops it becoming drift.** Change either
+/// derivation and this reddens until you change the other — a mechanism, not a resolution to
+/// keep them in sync.
+///
+/// **Why `--source=worktree` and not the hook's own `index` mode.** The two answer different
+/// questions by design — the hook reads the INDEX, so it sees what a commit *ships*, which is
+/// exactly the state `every_index_count_matches_the_corpus` structurally cannot reach
+/// (`reconnaissance-patterns:R-155`). Comparing them against different substrates would make
+/// this test fail on any dirty tree, which is most of the time. Pointing both at the working
+/// tree isolates the thing actually at risk: the **parse logic**.
+///
+/// Mutation that must kill this: change `parse_index_counts` to read `cells[i + 2]`, or drop
+/// the inline-`[a, b]` arm from `cluster_tags`, in EITHER language.
+#[test]
+fn the_hook_script_agrees_with_this_gate() {
+    let out = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--source=worktree",
+            "--json",
+        ])
+        .current_dir(repo_root())
+        .output()
+        .expect("python3 failed to run — the hook script needs it, so this gate does too");
+    assert!(
+        out.status.success(),
+        "hook script exited {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let got: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("hook script must emit JSON under --json");
+
+    let valid = valid_slugs();
+    for (field, mine) in [
+        ("declared", declared_counts(&valid)),
+        ("actual", actual_counts(&valid)),
+    ] {
+        let theirs: BTreeMap<String, usize> =
+            serde_json::from_value(got[field].clone()).expect("map of slug -> count");
+        assert_eq!(
+            mine, theirs,
+            "`{field}` disagrees between this gate and scripts/pre-commit-ledger-counts.py.\n\
+             The two derivations have drifted — fix whichever is wrong, in BOTH languages.\n\
+             Reproduce: python3 scripts/pre-commit-ledger-counts.py --source=worktree --json"
+        );
+    }
+}
+
 #[test]
 fn every_index_count_matches_the_corpus() {
     let valid = valid_slugs();
