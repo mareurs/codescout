@@ -7,7 +7,7 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
-entry_high_water_HY: 24
+entry_high_water_HY: 25
 entry_prefix: HY
 expects_augmentation: docs/augmentations/docs-trackers-tracker-hygiene-log.yaml
 next-sweep-due: 2026-09-24
@@ -1870,6 +1870,110 @@ column.
 **Not proposed:** sweeping the 42. Absent a decision on what that directory is, flipping
 42 statuses is ceremony that also destroys the signal for whoever makes the decision
 later.
+
+## HY-25 — The verify-open cadence reaches 45% of frictions and 7% of bug files, and reports the shortfall as a clean backlog
+
+**Valid:** dated 2026-09-02
+
+**Verdict:** miss — the cadence ran, returned a small reassuring number, and the number was
+an artifact of two predicates I chose rather than a property of the corpus.
+
+**Observed:** 2026-09-02, running CLAUDE.md § *Session Intelligence Trackers*' verify-open
+cadence — *"before any 'what's open?' report or backlog triage, reconcile session-log
+entries with `Status: open` older than 14 days"* — after I had already told the user
+"30 open bugs" without running it.
+
+**What the sweep actually found is nothing: zero un-reconciled items.** Two entries needed
+flipping (`bug-fix-session-log:F-65`, `resume-embedding-transport-stages-1-3:ET-5`), both
+fixed weeks ago; all 30 open bug files reconcile. The corpus is healthy. **The instrument
+is not**, and that is this entry.
+
+### Defect 1 — `Status: open` is one token with two meanings, and the cadence cannot tell them apart
+
+155 live entries under `docs/trackers/` carry `**Status:** open`. **75 of them are `R-N`**,
+where `open` means *"not yet promoted into the served skill"* — a promotion state, not an
+unresolved friction. `R-4`'s own line reads `**Status:** open — verdict `miss` (Index row).
+Not promoted; not back-cited in the served `SKILL.md`.` Nothing about it is a task to
+reconcile against code, and no reconciliation could ever close it.
+
+Run the cadence's query literally and **48% of the population is a different question wearing
+the same word.** This is CLAUDE.md § *Parsers Over a Namespace*, the **no-disambiguator**
+half, applied to the tracker vocabulary rather than to a parser: one namespace, two
+semantics, no escape and no qualifier. The friction-style population is 69, not 155.
+
+### Defect 2 — the cadence is keyed on age, and most of its population has no date
+
+Of those 69 friction entries, **45 carry `**Valid:** dated`; 24 do not** — 5 in
+`observer-blindness.md`, 4 each in `bug-fix-session-log.md` and
+`prompt-surface-measurement-session-log.md`, the rest scattered. An undated entry is not
+"recently checked", it is **unreachable by a rule that filters on age** — and it exits the
+filter looking identical to a fresh one.
+
+Worse on the bug-file side: `last_verified:` is the field that answers *"how long since
+anyone checked?"*, and it is present on **2 of 30** open bug files. My first pass keyed on
+`opened:` instead, flagged 3 files as stale, and **2 of the 3 had been re-verified on
+2026-08-26** — 7 days earlier — with the stamp sitting in frontmatter I had not read. The
+predicate answered *"how old is this bug?"*, which is not the question.
+
+**Both defects fail in the same direction and it is the dangerous one.** Neither returns an
+error; both return a **small number**, which reads as *"the backlog is clean"* — the exact
+reassurance that stops the next person looking. `R-104`'s law, arriving as a full answer
+rather than as a zero.
+
+**Cost:** none realised — the corpus happened to be clean. The cost is counterfactual and
+recurring: any future run reports on ≤65% of frictions and ≤7% of bug files while sounding
+complete.
+
+### This is the second datapoint on `HY-2`'s proposal, and `HY-2` demonstrates the defect on itself
+
+`HY-2` (2026-08-06) closed with exactly the remedy this sweep needed and did not have:
+
+> *"when a detector reports zero findings, the sweep entry should record **when that surface
+> was last reconciled**, so a future reader can distinguish 'clean because maintained' from
+> 'clean because the detector missed'. Without that, a run of zero-finding sweeps is
+> indistinguishable from a broken detector."*
+
+It has stood `open`/unimplemented for 27 days, and today's run is the recurrence it
+predicted: I got a near-zero and had to reconstruct by hand — per file, from frontmatter
+and commit archaeology — which of the two it was. **That reconstruction is the whole cost,
+and it recurs every sweep.**
+
+**And `HY-2` is itself invisible to the cadence.** It carries `**Status:** open`, it is
+27 days old, and it has **no `**Valid:**` field** — so it is one of the 24 undated friction
+entries defect 2 counts, and my scan could not surface it. I found it by reading heading
+lines, not by querying. The entry proposing the fix for this blind spot sits inside the
+blind spot. That is not irony worth a sentence; it is the argument for option 3 over
+options 1 and 2, because a convention nobody can query is exactly what a gate is for.
+
+**Also confirmed against `HY-2`:** its reading of
+`2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md` as *correctly* open
+(Bug B unconfirmed) still holds — the file now carries `last_verified: 2026-08-26`, so it
+has been re-checked since, and my first pass mis-flagged it only because I keyed on
+`opened:`.
+
+**Mechanism status:** none yet. Three candidate shapes, cheapest first, none taken
+unilaterally because each touches a convention rather than a defect:
+
+1. **Give the cadence a population.** State in CLAUDE.md that it covers friction-style
+   ledgers (`F-N`/`W-N`/`ET-N`/`T-N`/…) and **not** `R-N`, whose `open` is a promotion
+   state. One sentence; closes defect 1 for a reader, not for a query.
+2. **Rename the R-N field.** `**Promotion:** open|promoted` disambiguates at the source and
+   makes the cadence's naive query correct by construction. Touches 120 entries — the kind
+   of population CLAUDE.md § *Observer Blindness* says to grep `tests/` and
+   `scripts/pre-commit-*` for before starting.
+3. **Make undated entries visible.** A gate asserting every `**Status:** open` friction
+   entry carries a `**Valid:**`, and every open bug file a `last_verified:`. Turns silence
+   into a failure. This is the only one that catches when nobody is worried.
+
+**Rests on:** `scratchpad/verify_open3.py` (prefix-split over `docs/trackers/**`, archived
+excluded) and `scratchpad/verify_bugs.py` (frontmatter field-presence over
+`docs/issues/*.md`), both 2026-09-02. Positive control on the `**Valid:**` grammar found
+**four** shapes where the skill documents two — `dated` 58, `NO_VALID_FIELD` 71,
+`invariant` 27, `conditional` 11, plus one malformed — so `invariant`, the third-largest,
+was a shape I did not predict and would have mis-binned as undated.
+
+**Status:** open — findings recorded, no mechanism built; option 1 is a one-sentence
+CLAUDE.md change and is the one to take first.
 
 ## Template for new entries
 

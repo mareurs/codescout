@@ -321,7 +321,10 @@ plan's § *Verification: the feature-delta measurement* has the method.
 
 ## ET-5 — The connect-error marker becomes a cross-crate string contract
 
-**Status:** open — lands with ET-3, decided in Stage 0
+**Status:** fixed-verified — **shipped 2026-08-30 at `6be58840`; closed 2026-09-02 by the verify-open sweep.** Both halves of the requested resolution landed, and more: `crates/codescout-embed/src/embedder.rs:42` defines `pub enum EmbedError` with `Connect { url, detail }`, `CONNECT_FAILED_MARKER` is a published `pub const` at `:19` exported from `lib.rs:24`, and — the part this entry said was missing — `semantic_search.rs:1158` constructs the **producer's real** `EmbedError::Connect` and drives it through the consumer's classifier (`the_crates_own_connect_error_routes_where_roots_does`), so the two sides now fail together across the crate boundary. The one-way dependency constraint holds: `codescout-embed` has no knowledge of `semantic_search.rs`.
+
+**Why this sat open for 33 days, which is the sweep's actual finding:** the fixing commit's subject is `fix(embed): publish the connect-failure contract as a type (T4 / ET-5)` — **it names this entry**. So this is not the zombie-open CLAUDE.md predicts ("a fix shipping under a message that does not name the tracker entry"). It is the *stronger* case: naming the entry in the commit subject changes nothing, because nothing reads commit subjects back into ledger status. A citation is not a write.
+
 **Valid:** dated 2026-07-25
 
 `src/retrieval/embedder.rs:221` emits `"dense embed connect failed: {url} — …"`.

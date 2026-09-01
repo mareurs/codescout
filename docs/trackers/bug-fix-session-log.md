@@ -4858,7 +4858,9 @@ three legal forms). Recorded because it is *systematic* rather than incidental:
 it fires for every agent that follows the documented instruction, and the fix is
 a two-line edit to the skill.
 
-**Status:** open — the fix belongs upstream in
+**Status:** fixed-verified — **closed 2026-09-02 by the verify-open sweep, not by anyone who set out to fix it.** The upstream fix landed and nothing flipped this entry. Verified at the copy that LOADS, not at source (`R-89`'s distribution axis): all three profiles serve `codescout-companion@1.20.0` per their `installed_plugins.json`, and `grep -rc 'Valid:\*\* dated [0-9-]* *—'` over each served `skills/reconnaissance/` returns **0**. `references/worked-examples.md:50,96` now show the bare `**Valid:** dated 2026-05-18`, and served `SKILL.md:97` states the rule outright — *"`dated` takes no trailing text"* — which is more than this entry asked for. One stale cache (`~/.claude/…/1.16.15`) still holds the refused form and is served to nobody; left alone deliberately, since deleting a cache on a negative search is what `R-104` forbids.
+
+**Original status line, kept because the sweep's finding is that it went unread:** *open — the fix belongs upstream in*
 `../claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
 (a different repo, so any fix commit needs the `<repo>:<sha>` citation prefix per
 CLAUDE.md). Not fixed here.
