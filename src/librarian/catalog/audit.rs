@@ -6,6 +6,20 @@
 //! this connection's rows. NEVER reference temp objects from the main triggers:
 //! probed 2026-09-01 — it creates silently, then REFUSES foreign writers'
 //! mutations at fire time ("no such table: main.audit_ctx").
+//!
+//! **Failure direction — stated narrowly, because the broad form was false.**
+//! Capture never blocks or mis-attributes a writer *for any value a column can
+//! hold*, BLOBs included (see `value_expr`'s first arm — `json_object()` raises
+//! on a BLOB, and a raising trigger aborts the caller's transaction, not just
+//! its audit row). It does NOT cover a NULL row-id expression: `catalog_audit`
+//! declares `row_id TEXT NOT NULL`, so a writer inserting a row whose key
+//! columns are all NULL would have its own write refused by the audit trigger.
+//! No current schema permits that — every audited table's key is `NOT NULL` or
+//! a PRIMARY KEY — so there is no caller to reach a guard, and per CLAUDE.md's
+//! loudness law a guard nothing reaches is decoration. It is documented here
+//! instead: a schema change that makes a key column nullable owes this file a
+//! `COALESCE` and a test that can fail.
+//! See docs/issues/2026-09-01-audit-trigger-can-abort-writer-on-null-key-or-blob.md.
 
 use anyhow::Result;
 use rusqlite::Connection;
@@ -73,11 +87,66 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(cols)
 }
 
-/// json_object('c1', OLD.c1, 'c2', OLD.c2, ...) — full row image.
+/// Chars above which an UPDATE diff stands a value in rather than copying it.
+const CLAMP_CHARS: usize = 512;
+/// Leading chars kept in a clamped stand-in — enough to say WHICH value it was.
+const HEAD_CHARS: usize = 120;
+
+/// A column value as it enters a payload.
+///
+/// The blob arm is not an optimisation and applies to BOTH payload kinds:
+/// `json_object('c', X'DEADBEEF')` raises "JSON cannot hold BLOB values", and a
+/// raising trigger aborts the WRITER's transaction — the caller's UPDATE fails,
+/// not merely its audit row. SQLite is dynamically typed, so any writer can put
+/// a BLOB in a TEXT column and nothing in the schema prevents it. It must be the
+/// FIRST arm: `length()` is blob-safe, `json_object()` is not.
+///
+/// `clamp` is true only for UPDATE diffs. DELETE images stay verbatim because
+/// the spec's payload-depth rule is "full OLD row on delete", and the bytes are
+/// not there anyway — measured 2026-09-01 on a 27,914-row trail: 19 artifact
+/// deletes averaged 740 chars, while 23 `artifact_augmentation` UPDATES held
+/// 88% of the whole trail's payload bytes (avg 34KB, max 104KB), because an
+/// update stores old AND new of a blob that is rewritten whole on every append.
+///
+/// No hash in the stand-in, deliberately: SQLite's bundled build has no hash
+/// function, and registering one with `create_scalar_function` would make these
+/// triggers raise for any FOREIGN connection that never registered it — the
+/// same writer-abort failure the blob arm exists to prevent. Built-ins only.
+/// A head is more useful than a hash regardless: a diff carries a column only
+/// when it changed, so "did it change" is already answered, and what a reader
+/// needs is which value it was.
+fn value_expr(side: &str, col: &str, clamp: bool) -> String {
+    let v = format!("{side}.\"{col}\"");
+    let blob =
+        format!("WHEN typeof({v}) = 'blob' THEN json_object('elided', 'blob', 'len', length({v}))");
+    if !clamp {
+        return format!("CASE {blob} ELSE {v} END");
+    }
+    format!(
+        "CASE {blob} WHEN length({v}) > {CLAMP_CHARS} \
+         THEN json_object('elided', 'oversize', 'len', length({v}), \
+         'head', substr({v}, 1, {HEAD_CHARS})) ELSE {v} END"
+    )
+}
+
+/// `OLD."c1" IS NOT NEW."c1" OR ...` — the UPDATE trigger's WHEN clause.
+///
+/// `IS NOT`, never `<>`: `<>` propagates NULL, so a NULL⇄value transition would
+/// evaluate NULL (falsy) and the change would be silently dropped in BOTH
+/// directions. Same operator the diff expression already uses, for the same
+/// reason.
+fn changed_predicate(cols: &[String]) -> String {
+    cols.iter()
+        .map(|c| format!("OLD.\"{c}\" IS NOT NEW.\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+/// json_object('c1', OLD.c1, 'c2', OLD.c2, ...) — full row image, blob-safe.
 fn old_image_expr(cols: &[String]) -> String {
     let pairs = cols
         .iter()
-        .map(|c| format!("'{c}', OLD.\"{c}\""))
+        .map(|c| format!("'{c}', {}", value_expr("OLD", c, false)))
         .collect::<Vec<_>>()
         .join(", ");
     format!("json_object({pairs})")
@@ -87,9 +156,10 @@ fn old_image_expr(cols: &[String]) -> String {
 fn update_diff_expr(cols: &[String]) -> String {
     let mut expr = String::from("'{}'");
     for c in cols {
+        let (old, new) = (value_expr("OLD", c, true), value_expr("NEW", c, true));
         expr = format!(
             "json_patch({expr}, CASE WHEN OLD.\"{c}\" IS NOT NEW.\"{c}\" \
-             THEN json_object('{c}', json_array(OLD.\"{c}\", NEW.\"{c}\")) ELSE '{{}}' END)"
+             THEN json_object('{c}', json_array({old}, {new})) ELSE '{{}}' END)"
         );
     }
     expr
@@ -145,6 +215,21 @@ fn install_in_txn(conn: &Connection) -> Result<()> {
     for t in AUDITED_TABLES {
         let cols = table_columns(conn, t.name)?;
         let (name, image, diff) = (t.name, old_image_expr(&cols), update_diff_expr(&cols));
+        // An UPDATE that writes the values a row already holds still fires
+        // AFTER UPDATE, and the diff then folds to a literal '{}'. Measured
+        // 2026-09-01 before this guard existed: 27,505 of 27,914 rows (98.5%)
+        // in a 1.74-hour window were exactly that, from reindex rewriting the
+        // commits table. They carry nothing, and they dilute `seq`, whose gaps
+        // this design names as its tamper signal.
+        // Empty is unreachable (`table_columns` bails on a column-less table),
+        // but an empty predicate would emit `WHEN BEGIN` — so fall back to no
+        // WHEN at all, failing toward recording MORE rather than a broken open.
+        let changed = changed_predicate(&cols);
+        let when = if changed.is_empty() {
+            String::new()
+        } else {
+            format!("WHEN {changed} ")
+        };
         conn.execute_batch(&format!(
             "DROP TRIGGER IF EXISTS audit_{name}_insert;
              CREATE TRIGGER audit_{name}_insert AFTER INSERT ON \"{name}\" BEGIN
@@ -152,7 +237,7 @@ fn install_in_txn(conn: &Connection) -> Result<()> {
                VALUES({NOW_MS}, '{name}', 'insert', {rid_new});
              END;
              DROP TRIGGER IF EXISTS audit_{name}_update;
-             CREATE TRIGGER audit_{name}_update AFTER UPDATE ON \"{name}\" BEGIN
+             CREATE TRIGGER audit_{name}_update AFTER UPDATE ON \"{name}\" {when}BEGIN
                INSERT INTO catalog_audit(at_ms, tbl, op, row_id, payload)
                VALUES({NOW_MS}, '{name}', 'update', {rid_new}, {diff});
              END;
@@ -332,18 +417,44 @@ pub(crate) fn prune_before(conn: &Connection, before_ms: i64) -> Result<usize> {
 /// `doctor`'s `catalog_health` block. `unknown_actor_rows` surfaces writers
 /// (foreign processes, direct SQL) that never identified themselves — see
 /// `resolve_actor` for how an identified writer sets `actor` instead.
+///
+/// Byte fields exist because a row COUNT under-communicates the cost: measured
+/// 2026-09-01, 23 rows out of 27,914 (0.08%) carried 88% of the payload bytes.
+/// `largest_payload_bytes` is what makes that concentration visible at all — a
+/// total alone reads as uniform growth. `CAST(payload AS BLOB)` because
+/// `length()` on TEXT counts CHARACTERS, not bytes (memory catalog-sql-hazards).
 pub(crate) fn health(conn: &Connection) -> Result<serde_json::Value> {
-    let (rows, min_ms, max_ms, unknown): (i64, Option<i64>, Option<i64>, i64) = conn.query_row(
+    let (rows, min_ms, max_ms, unknown, bytes, largest): (
+        i64,
+        Option<i64>,
+        Option<i64>,
+        i64,
+        Option<i64>,
+        Option<i64>,
+    ) = conn.query_row(
         "SELECT count(*), min(at_ms), max(at_ms),
-                count(*) FILTER (WHERE actor = 'unknown')
+                count(*) FILTER (WHERE actor = 'unknown'),
+                sum(length(CAST(payload AS BLOB))),
+                max(length(CAST(payload AS BLOB)))
          FROM catalog_audit",
         [],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        },
     )?;
     Ok(serde_json::json!({
         "rows": rows,
         "span_ms": min_ms.zip(max_ms).map(|(a, b)| serde_json::json!([a, b])),
         "unknown_actor_rows": unknown,
+        "payload_bytes": bytes.unwrap_or(0),
+        "largest_payload_bytes": largest.unwrap_or(0),
         "hint": "unknown_actor_rows counts writers that did not identify themselves (foreign processes). Query with librarian(action=\"audit_log\", actor=\"unknown\")."
     }))
 }
@@ -676,5 +787,184 @@ mod tests {
         assert!(h["rows"].as_i64().unwrap() >= 2);
         assert_eq!(h["unknown_actor_rows"], 1);
         assert!(h["span_ms"].is_array());
+    }
+
+    // ---- The WHEN guard: an UPDATE that moves nothing must record nothing ----
+    //
+    // These two are a PAIR and must stay adjacent. The suite's other update
+    // assertions are monotone under OVER-recording — a trigger that fires on
+    // every statement satisfies every one of them, which is how 27,505 empty
+    // rows (98.5% of the live trail) passed a green suite for a day. The first
+    // test below can only fail if the guard is missing; the second can only
+    // fail if the guard is too aggressive. Neither direction is covered by the
+    // other.
+
+    #[test]
+    fn an_update_that_changes_nothing_writes_no_audit_row() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1");
+        let before = audit_rows(&cat).len();
+        // Writes the value the row already holds. SQLite reports 1 row
+        // "changed" and fires AFTER UPDATE; nothing actually moved.
+        let n = cat
+            .conn
+            .execute("UPDATE artifact SET status='draft' WHERE id='a1'", [])
+            .unwrap();
+        assert_eq!(n, 1, "the UPDATE must really run, or this proves nothing");
+        assert_eq!(
+            audit_rows(&cat).len(),
+            before,
+            "an UPDATE that changes no column must leave no audit row"
+        );
+    }
+
+    #[test]
+    fn an_update_that_changes_one_column_still_writes_a_row() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1");
+        let before = audit_rows(&cat).len();
+        cat.conn
+            .execute("UPDATE artifact SET status='active' WHERE id='a1'", [])
+            .unwrap();
+        let rows = audit_rows(&cat);
+        assert_eq!(rows.len(), before + 1, "a real change must still record");
+        let diff: serde_json::Value =
+            serde_json::from_str(rows.last().unwrap().4.as_deref().unwrap()).unwrap();
+        assert_eq!(diff["status"], serde_json::json!(["draft", "active"]));
+    }
+
+    #[test]
+    fn a_null_to_value_transition_counts_as_a_change() {
+        // Discriminates `IS NOT` from `<>` in the WHEN predicate: `<>` is
+        // NULL-propagating, so `OLD.missing_since <> NEW.missing_since`
+        // evaluates to NULL — falsy — and the row would be silently skipped in
+        // BOTH directions. missing_since is NULL on a fresh artifact row.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1");
+        let before = audit_rows(&cat).len();
+        cat.conn
+            .execute("UPDATE artifact SET missing_since=123 WHERE id='a1'", [])
+            .unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET missing_since=NULL WHERE id='a1'", [])
+            .unwrap();
+        let rows = audit_rows(&cat);
+        assert_eq!(
+            rows.len(),
+            before + 2,
+            "NULL→value and value→NULL are both changes, got {rows:?}"
+        );
+        let out: serde_json::Value =
+            serde_json::from_str(rows[rows.len() - 2].4.as_deref().unwrap()).unwrap();
+        assert_eq!(out["missing_since"], serde_json::json!([null, 123]));
+        let back: serde_json::Value =
+            serde_json::from_str(rows.last().unwrap().4.as_deref().unwrap()).unwrap();
+        assert_eq!(back["missing_since"], serde_json::json!([123, null]));
+    }
+
+    // ---- Payload clamping: the other measured pair ----
+
+    #[test]
+    fn an_oversize_update_value_is_elided_with_its_length_and_head() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1");
+        let big = "x".repeat(2000);
+        cat.conn
+            .execute("UPDATE artifact SET title=?1 WHERE id='a1'", [&big])
+            .unwrap();
+        let rows = audit_rows(&cat);
+        let diff: serde_json::Value =
+            serde_json::from_str(rows.last().unwrap().4.as_deref().unwrap()).unwrap();
+        let new = &diff["title"][1];
+        assert_eq!(new["elided"], "oversize", "got {diff}");
+        assert_eq!(new["len"], 2000);
+        assert_eq!(
+            new["head"].as_str().unwrap().len(),
+            120,
+            "the head is what identifies WHICH value it was"
+        );
+        assert!(
+            rows.last().unwrap().4.as_deref().unwrap().len() < 600,
+            "the whole payload must be bounded, not just the field"
+        );
+    }
+
+    #[test]
+    fn a_small_update_value_is_recorded_verbatim() {
+        // Pair of the above: proves the clamp is not swallowing ordinary values.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1");
+        cat.conn
+            .execute("UPDATE artifact SET title='short title' WHERE id='a1'", [])
+            .unwrap();
+        let rows = audit_rows(&cat);
+        let diff: serde_json::Value =
+            serde_json::from_str(rows.last().unwrap().4.as_deref().unwrap()).unwrap();
+        assert_eq!(diff["title"][1], serde_json::json!("short title"));
+    }
+
+    #[test]
+    fn a_delete_image_keeps_oversize_values_verbatim() {
+        // DELETE images are NOT clamped — the spec's payload-depth rule is
+        // "full OLD row on delete", deletes are rare, and each stores ONE copy.
+        // Measured 2026-09-01: 19 artifact deletes averaged 740 chars, while 23
+        // augmentation UPDATES held 88% of the trail's bytes. Clamping the
+        // wrong one would cost evidence and save nothing.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1");
+        let big = "y".repeat(2000);
+        cat.conn
+            .execute("UPDATE artifact SET title=?1 WHERE id='a1'", [&big])
+            .unwrap();
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id='a1'", [])
+            .unwrap();
+        let rows = audit_rows(&cat);
+        let img: serde_json::Value =
+            serde_json::from_str(rows.last().unwrap().4.as_deref().unwrap()).unwrap();
+        assert_eq!(img["title"], serde_json::json!(big));
+    }
+
+    #[test]
+    fn a_blob_value_does_not_abort_the_writer() {
+        // Deliberate break for the blob half of
+        // docs/issues/2026-09-01-audit-trigger-can-abort-writer-on-null-key-or-blob.md.
+        // Probed 2026-09-01: `json_object('c', X'DEADBEEF')` raises "JSON cannot
+        // hold BLOB values", and a raising trigger aborts the WRITER's
+        // transaction — the artifact write fails, not merely its audit row.
+        // SQLite is dynamically typed, so any writer can put a BLOB in a TEXT
+        // column; nothing in the schema prevents it.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1");
+        cat.conn
+            .execute("UPDATE artifact SET title=X'DEADBEEF' WHERE id='a1'", [])
+            .expect("a BLOB in an audited column must not fail the writer's UPDATE");
+        let rows = audit_rows(&cat);
+        let diff: serde_json::Value =
+            serde_json::from_str(rows.last().unwrap().4.as_deref().unwrap()).unwrap();
+        assert_eq!(diff["title"][1]["elided"], "blob", "got {diff}");
+        assert_eq!(diff["title"][1]["len"], 4);
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id='a1'", [])
+            .expect("and the delete image must not fail either");
+    }
+
+    #[test]
+    fn health_reports_payload_bytes() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "a1");
+        cat.conn
+            .execute("UPDATE artifact SET status='active' WHERE id='a1'", [])
+            .unwrap();
+        let h = super::health(&cat.conn).unwrap();
+        let total = h["payload_bytes"].as_i64().expect("payload_bytes present");
+        let largest = h["largest_payload_bytes"]
+            .as_i64()
+            .expect("largest_payload_bytes present");
+        assert!(total > 0, "the update payload has bytes: {h}");
+        assert!(
+            largest > 0 && largest <= total,
+            "largest must be a real row's size, bounded by the total: {h}"
+        );
     }
 }

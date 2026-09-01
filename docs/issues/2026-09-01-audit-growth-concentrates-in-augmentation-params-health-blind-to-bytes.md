@@ -33,18 +33,35 @@ CHARACTERS; use `length(CAST(payload AS BLOB))` for bytes — memory `catalog-sq
 codescout experiments @ `10972335` (T-1 audit trail).
 
 ## Root cause
+
 Design-level, not a defect in a single line: whole-blob params rewrites (pre-existing) ×
 full old/new capture on update for changed columns (T-1, by design — `update_diff_expr`
 emits `[old, new]` pairs, and for `params` the changed column IS the whole blob).
 Inferred from `src/librarian/catalog/audit.rs` `update_diff_expr` + augmentation.rs UPDATE
-sites — not yet measured on a real append.
-
+sites — **now confirmed by measurement, see Evidence.**
 ## Evidence
 ### Final-review finding
 T-1 whole-branch review (Opus, 2026-09-01), Important 3: "the spec's volume analysis covers
 reindex and never reaches this path; retention is manual-only by design, and audit::health
 reports rows but no bytes."
 
+### Measured 2026-09-01 (discharges this file's Resume step)
+Live catalog, 1.74-hour window, 27,914 audit rows total:
+
+| statistic | value |
+|---|---:|
+| `artifact_augmentation` update rows | 23 |
+| min / avg / max payload chars | 170 / **34,207** / **104,613** |
+| total chars in those 23 rows | 786,771 |
+| share of **all** payload bytes in the table | **88%** |
+
+So the inference was right about direction and understated the size: the review's estimate
+was ~50KB per append against ~25KB params, and the observed maximum is 104KB in one row.
+Twenty-three rows out of 27,914 (0.08% by count) carry 88% of the bytes.
+
+`length()` here is characters, not bytes (memory `catalog-sql-hazards`); for these payloads
+the two are close because the content is ASCII JSON, but a byte figure needs
+`length(CAST(payload AS BLOB))`.
 ## Hypotheses tried
 None — filed on notice per capture discipline.
 
