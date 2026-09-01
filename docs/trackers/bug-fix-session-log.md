@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 90
-entry_high_water_W: 92
+entry_high_water_F: 91
+entry_high_water_W: 93
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -50,6 +50,7 @@ entry_high_water_W: 92
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-91 | 2026-09-01 | high | measurement | fixed-verified | A positive control certified the INCIDENT and was read as certifying the SUBSTRATE. The IC-10 calibration (`440dd773`) confirmed `cs_tool_log.jsonl` held the disputed writes, checked the other direction too (native writes: zero) and concluded "build it". It never asked whether that log retains records at all: `MAX_ENTRIES = 50` rolling (196 of 297 logs sit exactly at the cap), deleted on compact/resume/clear (`hook_helpers.py:244,420` — the calibrating session made **370** codescout calls and its own log held **1**), and `args` cut to 200 chars over unordered keys (11.5% of 1,920 write records carry no `path=`; 147 more carry a truncated one). The sample was the one session in the good state on all three axes. `wc -l .buddy/*/cs_tool_log.jsonl | sort -n | uniq -c` ends the design in one command. Nothing shipped — substrate rejected, channel built on transcripts, writer defect filed upstream |
 | F-1 | 2026-05-17 | low | plan-prose | fixed-verified | Bug-file Resume paths cite non-existent layout |
 | F-2 | 2026-05-17 | med | self-friction | fixed-verified | 2 of 3 buffer bugs likely stale — code reads correct |
 | F-3 | 2026-05-18 | med | plan-prose | fixed-verified | Plan test assertions cited non-existent `RecoverableError.hint` field |
@@ -146,6 +147,7 @@ entry_high_water_W: 92
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-93 | 2026-09-01 | high | A green fixture suite met real data and the correction was to the QUESTION, not the code — run the instrument against the corpus before believing its design, not merely before shipping it | `file-provenance.py` passed 34/34 fixtures, then answered its own motivating file with **fifteen** sessions, every one a genuine lifetime author. Not a bug: "who has ever written this?" is answerable and useless, while "this is dirty NOW and reds my build, is it mine?" is bounded by the path's last commit. No fixture could pose it — each had one write in an empty timeline, which is what a fixture author naturally writes. Three assertions in the same suite also passed VACUOUSLY, each differently: a marker matched its own fixture path name (`src/undated.rs`), a case was answered by an earlier section's write to the same path (`docs/new.md`), and a negative passed because its fixture source was out-of-tree and discarded before any logic ran | validated |
 | W-1 | 2026-05-17 | med | Scout helper-fn bodies before fixing reported bugs | Would have written instrumentation / "fix" for `extract_lines` and `extract_json_path` despite both being correct + having passing tests | promoted-to-permanent-docs |
 | W-2 | 2026-05-18 | med | Pre-dispatch recon scouts type accessors named in plan assertions | Task 2's first subagent would have failed `cargo check` on `err.hint.as_deref()` (no such field); 1+ wasted round-trip per test, controller drift mid-dispatch | validated |
 | W-3 | 2026-05-18 | high | `git merge --ff-only <sha>` for detached-HEAD recovery under concurrent work | Naive `git branch -f` would silently traverse a parallel session's commit (the F-13 failure mode); `--ff-only` errors loudly on stale tip instead | promotion-eligible |
@@ -9106,6 +9108,94 @@ one-sided evidence, not of this guard.
 
 **Rests on:** the probe (`git add --dry-run`, exit 0) rather than on the hook source, which
 CLAUDE.md explicitly says is not ground truth for this guard.
+
+## F-91 — A positive control certified the incident, not the substrate — and the substrate could not carry the feature
+
+**Valid:** dated 2026-09-01
+
+**Category:** measurement · **Status:** fixed-verified · **Valid:** dated 2026-09-01
+
+**Observed:** The IC-10 calibration (committed `440dd773`) asked *"would a provenance channel
+built on `.buddy/<sid>/cs_tool_log.jsonl` have answered the incident?"*, ran a two-directional
+positive control on the owning session's log, and concluded **build it**. The control was
+sound — that log really does hold the twelve `doctor.rs` writes, and the transcript really does
+show zero native repo writes.
+
+**Got:** The question the control does not answer is whether the log **retains records at all**.
+It does not, on three independent axes, and one `wc -l` over the corpus showed it:
+
+- `MAX_ENTRIES = 50`, a rolling cap — **196 of 297** logs sit exactly at it;
+- deleted on compact / resume / clear (`hook_helpers.py:244,420`) — the session running the
+  calibration had made **370** codescout calls and its own log held **1**;
+- `args` cut to 200 chars over unordered keys — **11.5%** of 1,920 write records carry no
+  `path=`, and 147 more carry a truncated one (`src/serve`, `src/lsp/m`).
+
+The sampled session had compacted zero times and its writes fell inside the surviving window:
+it was the one session in the good state **on all three axes at once**. Not a mistake about the
+data — a mistake about the population, and the report read as a green light.
+
+**Root limit:** this is *reconnaissance*'s "a green result certifies the path that actually
+EXECUTED", firing on a control I designed to be careful — I checked the **other direction**
+(native writes: zero) and reported that as the rigour, which is a check on the *inference* and
+not on the *substrate*. A two-directional control over one sample is still one sample.
+
+**Cheapest sufficient check, and it costs nothing:** before generalising from any sample of a
+log, measure the log's own retention — line-count distribution, deletion sites, field caps.
+`wc -l .buddy/*/cs_tool_log.jsonl | sort -n | uniq -c` would have shown a spike of 196 at
+exactly 50 and ended the design in one command.
+
+**Consequence:** none shipped. The substrate was rejected before any code was written, and the
+channel was built on Claude Code's own transcripts instead — which also turn out to see the
+`sed -i` / `cat >` writes the calibration had recorded as the channel's blind spot, because
+that blind spot was measured *from the transcripts* in the first place.
+
+**Fixed by:** `scripts/file-provenance.py` + `tests/file-provenance.sh` (43 cases).
+The writer defect is filed at
+`claude-plugins:docs/issues/2026-09-01-summarize-args-destroys-the-path-it-documents-preserving.md`.
+
+## W-93 — A green fixture suite met real data and the correction was to the question, not the code
+
+**Valid:** dated 2026-09-01
+
+**Category:** design · **Status:** validated · **Valid:** dated 2026-09-01
+
+**Observed:** `scripts/file-provenance.py` passed 34/34 fixture cases before it was ever run on
+real data. Every fixture had one or two writes in an otherwise empty timeline, so the suite was
+green on a tool that had no concept of time at all.
+
+**Counterfactual:** the first real-data run — the positive control on the file that motivated
+the bug — returned **fifteen sessions** for `src/librarian/tools/doctor.rs`, including the two
+that a naive mention-count had already wrongly ranked first. Nothing was broken. Every one of
+the fifteen had genuinely written the file at some point across its months-long life.
+
+**What it revealed was a defect in the QUESTION, not the query.** "Who has ever written this
+file?" is answerable and useless. "This file is dirty *now* and reds my build — is that mine?"
+is the question at a red build, and it is bounded: writes older than the path's last commit are
+baked into HEAD and say nothing about the working-tree delta. The default window became *since
+this path was last committed*, per path.
+
+**Why no test could have caught it.** The window is invisible to any fixture whose timeline
+holds a single write, and a fixture author writing "the" test for authorship naturally writes
+exactly that. This is not a coverage gap that a further case would have closed — it is a
+question the fixtures could not pose, which is the *Parsers Over a Namespace* shape at the level
+of test design: the suite exercises the inputs the fixture grammar admits.
+
+**Promote-when:** a second instance where a green fixture suite meets real data and the
+correction is to the *question* rather than the code. Pairs with F-91 — same session, same
+direction, both caught by contact with the corpus rather than by more careful thought.
+
+**Also caught by real data, worth recording separately:** three assertions in that suite passed
+**vacuously**, each for a different reason, and all three were found by reading output rather
+than by the suite failing —
+(a) `has "...flagged as unplaceable in time" "$out" "undated"` matched the substring `undated`
+in its own fixture **path name** `src/undated.rs`;
+(b) `has "git mv destination"` was answered by an earlier section's write to the same fixture
+path `docs/new.md`;
+(c) `hasnt "cp source is not a write"` passed because the fixture source was `/tmp/staged.rs`,
+which `normalize()` discards as out-of-tree before any verb logic runs.
+All three are the fixture-detail law: the assertion states what must be true, and nothing states
+which part of the **setup** is what makes it able to tell. Each fixture is now annotated on its
+own line with what breaks if the detail goes.
 
 ## Template for new entries
 

@@ -223,6 +223,89 @@ Rendering the first as "not mine" would be the exact failure this bug documents:
 limitation quietly substituting for an answer, which is the shape all three of the evening's
 misattributions had. `cs_tool_log.jsonl` supports the distinction — it is a per-session file, so
 "no session's log names this path" is directly checkable rather than inferred.
+## Implementation — built 2026-09-01, and the calibration's substrate was rejected
+
+`scripts/file-provenance.py`, 43 cases in `tests/file-provenance.sh`.
+
+### The calibration above reached the right verdict on the wrong substrate
+
+The *Calibration* section concluded "build it" from a positive control on
+`.buddy/<sid>/cs_tool_log.jsonl`, and that control is sound: `c2a08c22`'s log really does
+hold the twelve `doctor.rs` writes. What it never asked is whether that log **retains
+records in general**. It does not, on three independent counts, each of which fails silently:
+
+| loss | measured 2026-09-01 |
+|---|---|
+| rolling entry cap (`MAX_ENTRIES = 50`) | **196 of 297** logs sit exactly at it |
+| deleted on compact / resume / clear | `hook_helpers.py:244,420`. One session here made **370** codescout calls; its log retained **1** |
+| `args` cut to 200 chars over unordered keys | **11.5%** of 1,920 write records carry no `path=`; 147 more carry a truncated one — `src/serve`, `src/lsp/m`, `docs/issues/2026-05-18-il3-pipe-violation-subagent` |
+
+The sampled session had compacted zero times and its writes fell inside the surviving
+window, so it was the one session in the good state on all three axes. **The calibration
+was a positive control that certified only the path that executed** — the general question
+was never posed, and one `wc -l` over the corpus answered it.
+
+The third loss is a defect on its own terms and is filed where the code lives:
+`claude-plugins:docs/issues/2026-09-01-summarize-args-destroys-the-path-it-documents-preserving.md`.
+Its docstring promises *"file paths preserved"*; a blind `[:200]` tail cut over
+`tool_input.items()` means survival is decided by where the caller put the key. The
+existing test cannot catch it twice over — `assert len(result) <= 200` is monotone under
+further truncation, and the fixture writes `path` **first**, the one ordering under which
+the bug does not fire.
+
+### Substrate actually used: Claude Code's own transcripts
+
+One file per session, append-only, full untruncated tool inputs, read across **all three**
+profiles (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat` — one alone is a subset that reports
+as complete, BL-58 one layer down).
+
+This also **closes most of the blind spot the calibration measured**. Those 27 `sed -i` and
+107 `cat >` repo writes were counted *from the transcripts*, so they were never invisible —
+they were invisible to `cs_tool_log`. The channel now reads them directly. Residual, measured
+over this project's 1,903 Bash calls: **2.8%** carry a mutating verb the heuristic does not
+match (`patch`, `perl -i`, `python -c`, `git apply`) — and a miss degrades to `UNKNOWN`,
+which is the safe direction by construction.
+
+### The correction real data forced: authorship needs a WINDOW
+
+The first working version answered `src/librarian/tools/doctor.rs` with **fifteen sessions**,
+every one of which had legitimately written it at some point in its months-long life. Nothing
+was wrong with the query — the *question* was wrong. "Who has ever touched this?" is not the
+question anyone asks at a red build; "this file is dirty **now** and reds my build, is that
+mine?" is, and writes older than the path's last commit are baked into HEAD.
+
+So the default window is **since the path was last committed**, per path, with `--since` and
+`--all` overrides. No fixture could have surfaced this: every fixture had one write in an
+empty timeline, and the suite was green throughout.
+
+### Verification
+
+Replaying the incident's own window — floor at the previous `doctor.rs` commit, `800f1dec~1`
+— returns exactly one session:
+
+```
+$ ./scripts/file-provenance.py --since 2026-08-31T22:27:01+03:00 src/librarian/tools/doctor.rs
+PEER      src/librarian/tools/doctor.rs
+          window: writes at or after 2026-08-31T19:27:01+00:00
+          written by c2a08c22-21ba-4ee3-b0fe-f1cadef1632a
+```
+
+Identical to the `Session-Id` trailer on `800f1dec` — which during the incident did not yet
+exist, the work being uncommitted. **This is the answer the *Root cause* table records as
+unavailable**, and the row can now be filled.
+
+### What it still refuses to do
+
+- **Mentions are not authorship**, and the naive form is *wrong*, not merely vague: ranking
+  this project's transcripts by raw path-mention count puts `d4bd6ec9` (149) and `e3a0b567`
+  (46) **above** the known author `c2a08c22` (62). Only a tool call whose input names the
+  path as a write **target** counts.
+- **`UNKNOWN` is never rendered as "not mine"** — it is the load-bearing verdict, it prints
+  its own coverage caveat, and `tests/file-provenance.sh` asserts on the verdict *line* so
+  the caveat's own wording cannot satisfy the check.
+- It sees only what Claude did. A human editor, or any non-Claude process, is invisible by
+  construction.
+
 ## Hypotheses tried
 
 1. **Hypothesis:** the failures were caused by my own edits.
