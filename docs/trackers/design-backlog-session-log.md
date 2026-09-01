@@ -1,0 +1,470 @@
+---
+kind: tracker
+status: active
+title: Session Log — Design-Decision Backlog Triage
+owners:
+  - marius
+tags:
+  - backlog
+  - triage
+  - design-decisions
+  - capability-proposals
+topic: design backlog triage
+entry_prefix:
+  - F
+  - W
+entry_high_water_F: 3
+---
+
+# Session Log — Design-Decision Backlog Triage
+
+**Work stream.** Surveying the design decisions that have been waiting longest across four
+surfaces that each answer a different question — `docs/trackers/capability-proposals.md`
+(CAP-N, the pre-plan queue), `docs/plans/` (designs written and stalled), `docs/issues/`
+(defects whose fix needs a design call), and `docs/ROADMAP.md` § *Future Improvements*
+(unowned sketches) — and deciding which deserve a ruling. Opened 2026-09-01.
+
+> **Purpose:** Two-sided observation log for a multi-session work stream.
+> Captures frictions (F-N) and wins (W-N) that the session producing it
+> wants to preserve so future sessions inherit the lesson.
+>
+> **How to use:** Copy this file to `docs/trackers/<topic>-session-log.md`
+> in the active project on first reconnaissance pass. Append F-N / W-N
+> entries with:
+>
+> ```
+> artifact(action="append_entry", id="<artifact id>", id_prefix="F",
+>          anchor_heading="## Template for new entries",
+>          title="<one-line title>", body="**Observed:** ...")
+> ```
+>
+> One call, one write: the server allocates the next id, formats the
+> heading as `## F-N — <title>` (the only shape `link_scan` accepts as a
+> definition), records the ledger's high-water mark, and stamps
+> `**Valid:** dated <today>` unless your body declares a class. **Then**
+> add the Index / Wins Index row, using the id the call returned — the
+> indexes are the eval surface, the sections are the evidence.
+>
+> **Do not hand-allocate ids, and do not pre-write index rows.** A max-id
+> is a fact about an instant, and a peer session in the same checkout can
+> take the number between your scan and your write. Pre-written rows are
+> worse: the allocator counts an id claimed by an index row, so rows
+> written ahead of their sections consume the ids they name — which is why
+> codescout's `statement-validity-session-log` starts at `statement-validity-session-log:F-2`/`statement-validity-session-log:W-3`
+> rather than `statement-validity-session-log:F-1`/`statement-validity-session-log:W-1` (see `statement-validity-session-log:F-3` there).
+>
+> **`edit_markdown` is not the append path**, though it works at first.
+> This template ships without frontmatter, so a fresh copy is directly
+> editable — but once you declare `entry_prefix` to make the ledger
+> guarded (which `get_guide("tracker-conventions")` tells you to do), the
+> librarian guard refuses direct edits and only `append_entry` writes.
+> Reach for `edit_markdown` for the prose sections and the index tables,
+> never for allocating an entry.
+>
+> **Lifecycle:**
+> - Created at the start of a multi-session work stream.
+> - Appended-to across every session that touches the work.
+> - Entries with `Status: open` carry forward across sessions.
+> - Promotion to permanent surfaces (CLAUDE.md, ADRs, formal bug
+>   trackers) happens when the entry's `Promote-when` / `Fix idea`
+>   criteria fire.
+> - File archived (moved to `docs/trackers/archive/`) when the work
+>   stream wraps.
+
+---
+
+## Index
+
+| ID | Date | Severity | Category | Status | Title |
+|----|------|---------:|----------|--------|-------|
+| F-1 | 2026-09-01 | med | methodological | fixed-verified | a plan's `status: draft` means two opposite things, and triage read the wrong one |
+| F-2 | 2026-09-01 | low | measurement | fixed-verified | a grep-derived tool count was scoped to the regex's shape, not to the registry |
+| F-3 | 2026-09-01 | high | stale-substrate | fixed-verified | the pipeline tracker's Resume routes an implementer to the strategy its own review rejected |
+## Wins Index
+
+| ID | Date | Impact | Pattern | Counterfactual | Status |
+|----|------|-------:|---------|----------------|--------|
+| W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
+
+---
+
+## Promotion status
+
+**Audited:** <YYYY-MM-DD>, against the target surface itself — opened and read,
+not recalled.
+
+One line per `W-N` (and any `F-N` with a `Fix idea` bound for a permanent
+surface). Check the **target**, not the entry: a `Promote-when` that fired is
+invisible from inside the tracker, because `Status: validated` reads as healthy
+either way. Record one of:
+
+- **already promoted, no action** — quote the promoted text verbatim and name
+  where it landed, so the next reader verifies instead of re-deriving.
+- **UNFIRED, carried forward** — restate the criterion and the current datapoint
+  count.
+- **FIRED but not yet applied** — the one that leaks. Name the exact target
+  surface and the exact text to add. This is an action item, not a note; set the
+  entry's `Status:` to `promotion-due` so a query can find it.
+
+> ⚠️ **Name every instance of the target, not the target's type.** This machine
+> runs three Claude Code profiles (`~/.claude`, `~/.claude-sdd`,
+> `~/.claude-kat`), each with its own `CLAUDE.md`. An audit that concluded
+> *"not found in the user's global CLAUDE.md"* — singular — led to a promotion
+> that reached one file of three on 2026-08-18. The session that found the gap
+> was running on a profile **without** the rule, and applied it only because
+> another profile's copy happened to be injected as project instructions. Three
+> files that should be byte-identical have an md5; compare them.
+
+> ⚠️ **For an INSTALLED artifact the target is the SERVING copy — not the repo
+> source, and not the other copies.** Measured 2026-08-20: three rules promoted
+> into a plugin skill were byte-identical across all three profile caches *and*
+> stale against source, because the commit never bumped the version the cache is
+> keyed on. Comparing the copies to each other reads **green** there — only
+> comparing each copy to the claim catches it. And the session that made the edit
+> is the **least representative observer**: its own reload resolved the skill from
+> the repo source, so the confirming evidence sitting in front of it was evidence
+> about the wrong artifact.
+
+> ⚠️ **Anchor on a back-citation, not a verbatim quote.** A quote goes red when the
+> promoted rule is legitimately reworded — a false positive produced by the
+> promotion working as intended, observed 2026-08-20 when `codescout:R-89`'s bullet was
+> rewritten and the tracker's stored quote had to be edited to match. The durable
+> form is the promoted text citing its own entry id —
+> *"(codescout:R-1 + codescout:R-7 in codescout's `docs/trackers/reconnaissance-patterns.md`.)"* — so
+> verification is a `grep` for the id and survives every rewording. Keep the quote
+> as a reading aid; do not make it the predicate.
+
+Run this when the work stream wraps, **and** whenever a criterion fires
+mid-stream — an audit that only happens at archive time is one that happens
+after the lesson was needed. Prior art:
+`eduplanner-ui:docs/trackers/archive/calendar-insight-panel-session-log-2026-08-18.md`, whose
+audit correctly caught its own `calendar-insight-panel-session-log-2026-08-18:W-4` as fired-and-unapplied and named the exact
+text to promote.
+
+## Category conventions
+
+Use a short kebab-case category to group similar frictions. Prior
+sessions have used:
+
+| Category | When to use |
+|---|---|
+| `codescout-tool` | Friction in a codescout MCP tool (`grep`, `read_file`, `edit_markdown`, etc.) |
+| `subagent` | Subagent produced unexpected output or diverged from instructions |
+| `plan-prose` | Plan document had drift vs reality (wrong file paths, fictional code, mismatched counts) |
+| `architectural` | Discovered structural property of the system that the plan / docs didn't surface |
+| `self-friction` | Predicted a friction that turned out to be a false alarm — recorded for transparency |
+| `<language>-<library>` | Language- / library-specific footgun (`rust-serde`, `python-typing`) |
+| `release-pipeline` | Deployment-time gap (release binary missing, MCP reload needed, etc.) |
+
+Add a new category by writing it as a kebab-case string; no central registry needed.
+
+---
+
+## F-N entry template
+
+Pass this block as `append_entry`'s `body` (without the `## F-N — <title>`
+line — the server writes the heading from `title`). Add the matching Index
+row afterwards, using the id the call returned. Do not allocate the id
+yourself; see *How to use* above.
+
+```markdown
+## F-N — <one-line title>
+
+**Observed:** <date, session task>
+
+**When:** <what you were trying to do>
+
+**Expected:** <what plan / docs / prior session said>
+
+**Got:** <actual observed reality>
+
+**Probable cause:** <one sentence>
+
+**Workaround:** <what you did to proceed>
+
+**Severity:** low | med | high
+
+**Status:** open | wontfix-false-alarm | fixed-verified | mitigated | promoted-to-bug-tracker | pinned-as-eval-baseline
+
+**Valid:** invariant | dated YYYY-MM-DD | conditional — <the event that ends it>
+
+**Rests on:** <one durable sentence — an ADR, a decision, or the principle this
+instantiates>
+
+**Fix idea / Pointer:** <issue # in formal tracker, plan task ID, or "TBD">
+
+---
+```
+
+## W-N entry template
+
+Pass this block as `append_entry`'s `body`, with `id_prefix="W"` — F-N and
+W-N have separate counters. A win without a **Counterfactual** is marketing
+— name what would have happened without the pattern, with at least one
+piece of evidence.
+
+```markdown
+## W-N — <one-line title>
+
+**Observed:** <date, session task>
+
+**Pattern:** <the practice that worked>
+
+**Counterfactual:** <what would have happened without the pattern, with evidence>
+
+**Confirming data points:** <list of session moments validating the pattern; aim for ≥2>
+
+**Impact:** low | med | high
+
+**Promote-when:** <criterion for graduating into permanent docs (CLAUDE.md, ADR, etc.)>
+
+**Promoted-to:** <surface + section, one per line, line-start — omit until it lands>
+
+**Status:** validated | promotion-due | promoted-to-permanent-docs | archived
+
+**Valid:** invariant | dated YYYY-MM-DD | conditional — <the event that ends it>
+
+**Rests on:** <one durable sentence — an ADR, a decision, or the principle this
+instantiates>
+
+---
+```
+
+---
+
+## Status vocabulary
+
+Codified so the Index column means the same thing across sessions.
+
+### Friction statuses
+
+| Status | Meaning |
+|---|---|
+| `open` | Observed, not yet resolved. Default for new entries. |
+| `wontfix-false-alarm` | Initial observation was wrong; documented for transparency rather than deleted. |
+| `mitigated` | Workaround in place; root cause not fully resolved. |
+| `fixed-verified` | Code / process fix landed AND empirically confirmed. (`fixed` alone is too weak — verification is part of the status.) |
+| `promoted-to-bug-tracker` | Moved to a formal tracker (`docs/issues/*`, `docs/TODO-*`, GitHub issue). The session log keeps the pointer; the formal tracker owns the lifecycle. |
+| `pinned-as-eval-baseline` | Kept verbatim as a reference point for measuring later improvements. Do NOT close — its job is to remain comparable. |
+
+### Win statuses
+
+| Status | Meaning |
+|---|---|
+| `validated` | Pattern confirmed by ≥1 counterfactual data point. Default for entries with evidence. |
+| `promotion-due` | `Promote-when` has **fired** and the text is not yet on the target surface. An action item, not a resting state. Exists because `validated` cannot distinguish "criterion not yet met" from "criterion met, nobody harvested it" — and both read as healthy, which is how a lesson sits unpromoted while the failure it describes recurs. |
+| `promoted-to-permanent-docs` | Moved into CLAUDE.md, an ADR, a skill, or another permanent surface. Session log keeps the pointer — and, for a multi-instance target, names every instance it landed in. |
+| `archived` | Pattern no longer load-bearing — either the underlying system changed or the discipline became automatic. |
+
+---
+
+## F-1 — a plan's `status: draft` means two opposite things, and triage read the wrong one
+
+**Valid:** dated 2026-09-01
+
+**Category:** methodological · **Severity:** med · **Status:** fixed-verified (retracted before the user acted on it)
+
+**Observed.** Triaging "which design decisions have been waiting longest?", I ranked
+`docs/plans/` by `Status:` line plus git first→last commit date, and reported
+`docs/plans/2026-05-30-per-request-workspace-pinning.md` (`status: draft`, opened 94 days
+prior) as a stalled design whose bug had "re-surfaced today" as
+`docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`.
+I called that pairing "the notable one".
+
+**Got.** Both halves are false, and the scout that found it took two reads.
+
+`docs/trackers/resume-workspace-pinning-phase-4b-5.md` states the plan is *"still
+`status: draft` **on purpose**"*, quoting the plan's own § *Phase 4b — DEFERRED*: *"This
+plan stays active (do NOT archive) while 4b is open."* Phases 0–3 and 4a shipped and were
+**verified at the bytes 2026-08-28**; the lock-ordering proof is committed at `69c91896`;
+`inject_workspace_param` (`src/server.rs:626-638`) advertises the per-call `workspace`
+param on every pinnable tool. "Regime-3 correctness is closed and was live-verified."
+
+And the bug is not that plan's defect re-surfacing. It is `severity: low`, sits in cluster
+`IC-17` (*a shared resource carries no owner*), and its own Evidence section records that
+the per-call `workspace=` parameter — the very mechanism the pinning plan shipped —
+**resolved it first try**: *"the `workspace=` parameter worked first try, so no debugging
+was needed."* Its Fix section asks for better error text, and explicitly declines the
+architectural change: *"Deliberately **not** proposed: per-agent activation state."*
+
+**Root cause — the status vocabulary is overloaded across two surfaces, and only one of
+them is documented.** `get_guide("tracker-conventions")` defines `draft` for **trackers**
+as *"Scoped / watching, not yet active"*. Nothing defines it for **plans**, and this repo
+uses it there to mean the opposite: *shipped, deliberately unarchived because a named
+residual is still open*. Both surfaces are `.md` under `docs/`, both are catalogued with
+the same `status` column, and `artifact(find)` returns them side by side with no marker
+saying which vocabulary a given row is speaking. A triage pass that sorts on `status` is
+reading two languages as one.
+
+**Why "check more carefully" is the wrong remedy.** The failure returns a *plausible
+ranking*, not an error — a stalled plan and a deliberately-parked one are byte-identical
+at the `status:` line, and the disambiguator (a `resume-*` tracker that names the plan) is
+in a different file that no query joins to it. The reader who is best placed to catch this
+is the one who already knows the residual exists, which is exactly the reader who does not
+need the triage. This is `OB-N`-shaped: name the party who structurally cannot see it (a
+triage pass that has not read the plan's own § *Phase 4b*), not the party who was careless.
+
+**What the scout cost, and what it saved.** Two reads — the bug file, then the resume
+tracker. Without them the user would have been pointed at a 94-day-old "stalled" design
+that is in fact closed, and at a message-quality bug dressed as an architectural decision.
+Three other drafts I ranked the same way survived the check: `two-stack-retrieval-lite`
+(2026-06-16) carries no deliberate-draft note, and both 2026-04-02 plans have a single
+commit each and no implementation in `src/`.
+
+**Fix idea.** Two candidates, neither built:
+1. A `resume-*` tracker should carry a `supersedes`-style edge (or at minimum a
+   `**Plan:**` line the catalog indexes) so `artifact(find)` on a plan surfaces the
+   tracker that explains its status. Today the pointer runs one way only —
+   tracker → plan — so the plan is the row you find and the tracker is the row that
+   would have corrected you.
+2. Give plans their own status value for this state (`parked` / `residual-open`), or
+   have `doctor` flag a `status: draft` plan that a `resume-*` tracker names, so the
+   overload is visible at query time rather than at read time.
+
+**Rests on:** `get_guide("tracker-conventions")` § *Status vocabulary* (tracker surface);
+`docs/trackers/resume-workspace-pinning-phase-4b-5.md` § *Shipped, so nobody re-does it*;
+`docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
+§§ *Evidence*, *Fix*.
+
+## F-2 — a grep-derived tool count was scoped to the regex's shape, not to the registry
+
+**Valid:** dated 2026-09-01
+
+**Category:** measurement · **Severity:** low · **Status:** fixed-verified
+
+**Observed.** Checking whether the premise of `docs/plans/2026-04-02-onnx-intent-router-design.md`
+(*"codescout exposes 27 MCP tools"*) had decayed, I counted the live registry with
+`grep(pattern="Arc::new\\([A-Z]", glob="src/server.rs")` → **20 matches**, added the
+librarian adapters, and published *"20 non-librarian tools registered at `src/server.rs:324-349`
+plus 6 librarian adapters = 26 today"*.
+
+**Got.** The total is right and both terms are wrong. Reading the registry:
+
+- `src/server.rs:351` registers `Arc::new(crate::tools::guide::GetGuide::new())` — inside the
+  same `vec![]`, which closes at `:352`. The pattern `Arc::new\([A-Z]` cannot match it: the
+  constructor is written as a fully-qualified path, so the character after `(` is a lowercase
+  `c`. Base is **21**, not 20, and the line range I cited (`324-349`) stops two lines short of
+  the vector's end.
+- `src/librarian/tools/mod.rs:396-404` — `all_tools()` returns exactly **5**:
+  `Artifact`, `ArtifactEvent`, `ArtifactAugment`, `ArtifactRefreshTool`, `Librarian`.
+  `adapters_for` (`src/librarian/adapter.rs:171-182`) wraps each one-for-one, so 5 in, 5 out.
+
+21 + 5 = 26, which is what the session's own advertised tool list holds. The published
+*total* was never wrong — but only because I back-derived it from the tool list I could see
+and then attributed it to a split I had not read.
+
+**Root cause.** A regex-derived population is scoped to the regex's *shape*, not to the
+concept it stands for. `Arc::new\([A-Z]` encodes an assumption — "constructors are written
+bare" — that holds for 20 of 21 members, so it returns a plausible count rather than an
+error. Nothing downstream fires, because 20 and 21 are near enough that no reader queries
+either. This is `docs/adrs/2026-08-27-negative-results-name-their-scope.md` applied to a
+*positive* count: the number owed the scope it was measured over, and did not carry it.
+
+**What makes it worse than a miscount.** The number was doing argumentative work — it was
+the evidence for *"the premise has not decayed, so this design is still worth deciding."*
+That conclusion survives (26 ≈ 27), which is exactly why the bad derivation would not have
+been caught: a wrong method that reaches the right answer leaves no trace.
+
+**Fix idea.** For "how many X does the system register?", read the registry symbol
+(`symbols(name=..., include_body=true)`) rather than grepping for a construction pattern —
+the vector literal is the population, and reading it is the same number of calls. Where a
+grep is the only route, publish the pattern next to the count so a reader can see what it
+excluded.
+
+**Rests on:** `src/server.rs:322-352`; `src/librarian/tools/mod.rs:396-404`;
+`src/librarian/adapter.rs:171-182`;
+`docs/adrs/2026-08-27-negative-results-name-their-scope.md`.
+
+## F-3 — the pipeline tracker's Resume routes an implementer to the strategy its own review rejected
+
+**Valid:** dated 2026-09-01
+
+**Category:** stale-substrate · **Severity:** high · **Status:** open
+
+**Observed.** `docs/trackers/run-command-pipeline.md` (`5d022cd3b41009f4`, `status: draft`,
+opened 2026-05-18, last touched 2026-08-16) was the design I recommended as "decision-ready
+today — six questions, each with a stated lean." Scouting it before putting those questions
+to the user found four decayed claims and one that actively misroutes.
+
+**Got — the misrouter first.** The file's § *Resume* ends:
+
+> Open the next session with: read this tracker → resolve open items 1, 3, 6 → write
+> `run_pipeline_inner` **per strategy A** → tests → prompt update.
+
+Its own § *Architectural review* — later in the same file — **rejects Strategy A** (*"rejected:
+two pipeline-buffering mechanisms in tree"*) and Strategy B, and § *Tracker updates* records
+*"Lean C unless per-stage timeout requirement emerges."* An implementer following the Resume
+line, which is the section written to be read first, builds the design the review threw out.
+The review was appended *above* the Resume and the Resume was never updated — the two sections
+disagree, and the stale one is the entry point.
+
+**Got — three decayed substrate claims.** Verified at the bytes 2026-09-01:
+
+- **Concern 3's premise is false.** Its argument was *"the companion hook reads
+  `tool_input.command`, sees only stage 0 … IL3 enforcement becomes blind to pipelines"*,
+  and it carried **`Confidence: high`** — the highest in the file. But
+  `detect_il3_violation`'s own doc comment (`src/util/path_security.rs:1167-1212`) records:
+  *"That file still exists but is no longer wired: measured 2026-08-27, no `hooks.json`
+  PreToolUse matcher targets `run_command` … This function is the only live enforcement."*
+  There is no hook to be blind. **Open item #10** (*"companion hook must read
+  `tool_input.stages`"*) is void outright.
+- **…but Concern 3's conclusion survives, relocated and stronger.**
+  `detect_il3_violation(command)` is called on a **single string** at
+  `src/tools/run_command/mod.rs:211`, before `resolve_refs`. A `command` + `pipeline` schema
+  would blind *codescout's own* gate — which covers every MCP client, not just Claude Code.
+  So the `stages` XOR `command` ruling stands on better evidence than the one written for it.
+- **Concern 2's prerequisite is unmet.** It requires extracting `exec_one_stage` *before any
+  10th mode*. `symbols(name="exec_one_stage")` → **0 matches**. `run_command_inner` is now
+  `src/tools/run_command/inner.rs:279-605` (326 lines).
+- **Every line number in the review has drifted.** `inject_tee` cited at `inner.rs:145-186`
+  → actually **175-228**; its call site cited at `:288` → actually **:406**; the
+  foreground-exec block cited at `inner.rs:251-394` (~140 LOC) no longer names a block.
+
+**Root cause.** The review section is dated and the Resume section is not, so nothing marks
+which one is current — and the file offers no `**Valid:**` class on either. A design document
+that accumulates review passes by *appending* leaves its oldest navigational instruction at
+the bottom, where the reader is told to start. This is the same shape as `F-1`: the artifact
+returns a plausible instruction rather than an error, and the disambiguator (the review that
+overrides it) is 60 lines away in the section the reader reaches second.
+
+**Why the tracker's age is not itself the finding.** Three of the eight design surfaces
+(#2 mutual exclusivity, #4 pipefail, #5 output shape) reference nothing that moved and are
+decidable as written. The decay is concentrated in exactly the claims that cite code — which
+is what `**Rests on:**` exists to prevent.
+
+**Fix idea.** Before this design is implemented: (a) delete or rewrite the § *Resume* strategy
+line — it is the only actively harmful text in the file; (b) strike open item #10 and re-found
+Concern 3 on `mod.rs:211`; (c) re-anchor the four line references, or replace them with symbol
+names, which do not rot.
+
+**Resolved 2026-09-01 — all four applied to `docs/trackers/run-command-pipeline.md`** through
+the catalog (`artifact(action="update", patch={body_edits})`, id `5d022cd3b41009f4`), following
+the repo's dated-record convention: original analysis kept, correction appended above it.
+(a) § *Resume* now carries a six-step order that rules #7 before #3 and names Strategy **C**;
+(b) #10 struck as `VOID 2026-09-01`, Concern 3 re-founded on
+`src/tools/run_command/mod.rs:211` in a block above the retained text; (c) Concern 1
+re-anchored to `inner.rs:175-228` / `:406`, Concern 2's dead `251-394` replaced with
+`run_command_inner` at `:279-605` plus an explicit note that the sub-range is *derived from
+two anchors, not read* — and that the "nine dispatch modes" count was **not** re-derived.
+
+**The class is not closed.** The instance is fixed; the mechanism that produced it — an
+append-only design document whose oldest navigational section sits last, where the reader is
+told to start — has no guard. Candidate: `doctor` could flag a tracker whose § *Resume* (or
+last section) predates its newest dated section. Not built, not filed.
+
+**Rests on:** `src/tools/run_command/mod.rs:206-215`; `src/util/path_security.rs:1167-1212`
+(doc comment); `src/tools/run_command/inner.rs:175-228`, `:406`, `:279-605`;
+`symbols(name="exec_one_stage")` → 0 matches.
+
+## Template for new entries
+
+<!-- New F-N / W-N entries land above this line. This heading is the anchor:
+
+     artifact(action="append_entry", id="<artifact id>", id_prefix="F",
+              anchor_heading="## Template for new entries",
+              title="<one-line title>", body="**Observed:** ...")
+
+     The server allocates the id, writes `## F-N — <title>` at the ledger's
+     own level, records the high-water mark and stamps `**Valid:** dated
+     <today>` — one write. Then add the Index / Wins Index row with the id
+     it returned. Do not hand-allocate; do not pre-write the row. -->

@@ -80,7 +80,8 @@ The hook fix (shipped 2026-05-18) is the **read-side** half — pipes that start
 
 ### Concern 1 — `inject_tee` is a parallel stage-buffering mechanism
 
-`inject_tee` (`src/tools/run_command/inner.rs:145-186`, called at `:288`) already rewrites `... | grep FAILED` into `... | tee /tmp/unfiltered | grep FAILED`, capturing the pre-filter stream as a buffer. That is one-stage-deep pipeline buffering, in production today. Strategy A as drafted ignores this and builds a parallel mechanism — two systems for the same shape of input.
+`inject_tee` (`src/tools/run_command/inner.rs:175-228`, called at `:406` — re-anchored
+2026-09-01; cited as `:145-186`/`:288` when written) already rewrites `... | grep FAILED` into `... | tee /tmp/unfiltered | grep FAILED`, capturing the pre-filter stream as a buffer. That is one-stage-deep pipeline buffering, in production today. Strategy A as drafted ignores this and builds a parallel mechanism — two systems for the same shape of input.
 
 **Decision (proposed):** `pipeline=` rewrites stages into a single shell pipeline with per-stage tee taps; reuses the existing foreground-exec path. `inject_tee` generalizes from "tee the penultimate stage" to "tee every stage."
 
@@ -100,11 +101,37 @@ The hook fix (shipped 2026-05-18) is the **read-side** half — pipes that start
 
 ### Concern 2 — extract `exec_one_stage` before adding any 10th mode
 
-Nine dispatch modes in one function is past the "argues about where new features belong" heuristic. Before pipeline= goes anywhere, extract the foreground-exec block (current `inner.rs:251-394`, ~140 LOC: spawn + killpg + timeout + SIGPIPE reset + buffer-store) as `exec_one_stage`. Both current foreground path and pipeline= delegate to it.
+Nine dispatch modes in one function is past the "argues about where new features belong" heuristic. Before pipeline= goes anywhere, extract the foreground-exec block (spawn + killpg + timeout + SIGPIPE reset +
+buffer-store) as `exec_one_stage`.
+
+> **Re-anchored 2026-09-01.** The `inner.rs:251-394` cited here no longer names the block.
+> `run_command_inner` is now `src/tools/run_command/inner.rs:279-605` (326 lines); the
+> foreground-exec path is what follows the `inject_tee` call at `:406` and runs to the
+> function's end at `:605`. That bound is derived from two verified anchors, not from a read
+> of the block — confirm the exact span before cutting. **Still not done:**
+> `symbols(name="exec_one_stage")` returns 0 matches. The "nine dispatch modes" count above
+> is the 2026-05-18 claim and was not re-derived. Both current foreground path and pipeline= delegate to it.
 
 **Confidence:** medium. Have not read the full block; coupling to surrounding `inject_tee` flow may force a larger refactor than 140 LOC.
 
 ### Concern 3 — companion hook is `command`-blind to a `command + pipeline` schema
+
+> **Correction 2026-09-01 — the premise below is dead; the conclusion survives and is
+> stronger.** The text of this concern argues from the *companion hook*. That hook is no
+> longer wired: `detect_il3_violation`'s doc comment (`src/util/path_security.rs`) records
+> *"That file still exists but is no longer wired: measured 2026-08-27, no `hooks.json`
+> PreToolUse matcher targets `run_command` … This function is the only live enforcement."*
+> There is no hook left to be blind, so **open item #10 is void** (struck below).
+>
+> Re-found the concern on the live gate instead: `detect_il3_violation(command)` takes a
+> **single string** and runs in `RunCommand::call` (`src/tools/run_command/mod.rs:211`),
+> before `resolve_refs`. Under a `command` + `pipeline` schema it would see stage 0 only —
+> so the blindness is **codescout's own**, reaching every MCP client rather than just Claude
+> Code. The `stages` XOR `command` decision is therefore better supported than the argument
+> originally written for it, not weaker. Confidence stays **high**; the evidence changed.
+>
+> Analysis below kept as the dated record that argued for the decision. Do not read its
+> present tense as current.
 
 If schema lands as `command = stage 0, pipeline = [stages 1..N]`, the IL3 hook reads `tool_input.command`, sees only "cargo test," and allows. Actual behavior is a pipeline with a log-trimmer. **IL3 enforcement becomes blind to pipelines.**
 
@@ -140,7 +167,10 @@ together" signal pointed at this fix correctly. See
 - Open #1 (schema) — leans `stages` XOR `command`, not `command + pipeline`. (Concern 3.)
 - Open #7 (strategy) — add **Strategy C: shell-pipeline rewrite with per-stage tee taps**. Lean C unless per-stage timeout requirement emerges. (Concern 1.)
 - New open #9 — extract `exec_one_stage` from `run_command_inner` before adding any new mode. Prerequisite for any strategy. (Concern 2.)
-- New open #10 — companion hook must read `tool_input.stages` if schema lands as `stages`. (Concern 3.)
+- ~~New open #10 — companion hook must read `tool_input.stages` if schema lands as `stages`.~~
+  **VOID 2026-09-01** — no wired companion hook exists (no `hooks.json` PreToolUse matcher
+  targets `run_command`, measured 2026-08-27). Nothing to update. The enforcement this item
+  was protecting lives at `src/tools/run_command/mod.rs:211`; see the correction on Concern 3.
 
 ## Tests needed
 
@@ -158,6 +188,34 @@ together" signal pointed at this fix correctly. See
 
 ## Resume
 
-Hook smartening shipped 2026-05-18 (see commit on `experiments`). IL3 prompt rewrite shipped same day. Pipeline= design tracker opened, implementation pending its own dedicated session.
+Hook smartening shipped 2026-05-18 (see commit on `experiments`). IL3 prompt rewrite shipped
+same day. Pipeline= design tracker opened, implementation pending its own dedicated session.
 
-Open the next session with: read this tracker → resolve open items 1, 3, 6 → write `run_pipeline_inner` per strategy A → tests → prompt update.
+**Revised 2026-09-01 after a substrate scout** (`design-backlog-session-log:F-3`). The line
+that stood here read *"resolve open items 1, 3, 6 → write `run_pipeline_inner` per strategy
+A"*. **Strategy A is rejected** by § *Architectural review* Concern 1 — *"two
+pipeline-buffering mechanisms in tree"* — and § *Tracker updates* records *"Lean C."* The
+Resume was written before the review and never updated, so the file's entry point routed an
+implementer to the design its own review threw out. Corrected:
+
+Open the next session with:
+
+1. **Read § *Architectural review* before § *Design surfaces*.** The review supersedes the
+   leans stated in the surfaces list wherever the two differ (#1 and #7 both changed).
+2. **Rule #7 first — it forces #3.** Strategy **C** (shell-pipeline rewrite with per-stage
+   tee taps, generalizing `inject_tee`) makes per-stage timeout and per-stage cancellation
+   *impossible by construction*. That is the one irreversible choice in the set: rule it
+   knowing a long `cargo test` stage can then only be cancelled as a whole.
+3. **#1 is `stages` XOR `command`** — see the Concern 3 correction; the argument now rests on
+   `src/tools/run_command/mod.rs:211`, not on the retired companion hook.
+4. **#9 is a prerequisite under every strategy** — extract `exec_one_stage` from
+   `run_command_inner` first. Verified 2026-09-01: `symbols(name="exec_one_stage")` returns
+   **0 matches**, and `run_command_inner` is `src/tools/run_command/inner.rs:279-605`
+   (326 lines).
+5. Then #2, #4, #5, #6, #8 — all decidable as written. Note #6 (per-stage dangerous-command
+   gate) now has a sibling defect worth ruling once for both:
+   `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`.
+6. Tests (§ *Tests needed*), then prompt update (§ *Prompt rewrites*).
+
+**Line references in § *Architectural review* were re-anchored 2026-09-01** and are accurate
+as of that date; prefer the symbol names, which do not rot.
