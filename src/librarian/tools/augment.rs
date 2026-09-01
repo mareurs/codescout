@@ -328,6 +328,13 @@ impl Tool for ArtifactAugment {
         )
     })?;
 
+        // Best-effort: identity enrichment must never fail a tool call; a failed
+        // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
+        // No action param on this tool — the verb is the constant tool name.
+        if let Err(e) = ctx.catalog.lock().set_audit_verb("artifact_augment") {
+            tracing::warn!("audit verb stamp failed: {e}");
+        }
+
         // params_path: read the params JSON from a filesystem path server-side.
         // A large params array (≳9 KB) can't be round-tripped through the model
         // to rebuild the inline `params` argument — the MCP result buffer caps
@@ -588,6 +595,23 @@ mod tests {
         assert_eq!(row.prompt, "Keep me updated");
         let params: Value = serde_json::from_str(&row.params).unwrap();
         assert_eq!(params["format"], "table");
+    }
+
+    #[tokio::test]
+    async fn dispatch_stamps_the_audit_verb() {
+        let ctx = mk_ctx();
+        seed_artifact(&ctx, "art1");
+        // no action param on this tool — the stamp is the constant tool name
+        let _ = ArtifactAugment
+            .call(&ctx, json!({"id": "art1", "prompt": "Keep me updated"}))
+            .await;
+        let verb: Option<String> = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(verb.as_deref(), Some("artifact_augment"));
     }
 
     #[tokio::test]

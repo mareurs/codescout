@@ -56,6 +56,15 @@ impl Tool for ArtifactRefreshTool {
         let action = args["action"]
             .as_str()
             .ok_or_else(|| RecoverableError::new("action required — one of: gather, list_stale"))?;
+        // Best-effort: identity enrichment must never fail a tool call; a failed
+        // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
+        if let Err(e) = ctx
+            .catalog
+            .lock()
+            .set_audit_verb(&format!("artifact_refresh.{action}"))
+        {
+            tracing::warn!("audit verb stamp failed: {e}");
+        }
         match action {
             "gather" => super::refresh::call(ctx, args).await,
             "list_stale" => super::refresh_stale::call(ctx, args).await,
@@ -141,5 +150,24 @@ mod tests {
             .await
             .unwrap();
         assert!(v.is_array() || v["items"].is_array());
+    }
+
+    #[tokio::test]
+    async fn dispatch_stamps_the_audit_verb() {
+        let ctx = mk_ctx();
+        // list_stale is read-only; the stamp happens at dispatch regardless of verb kind
+        let _ = ArtifactRefreshTool
+            .call(
+                &ctx,
+                serde_json::json!({"action": "list_stale", "scope": "all"}),
+            )
+            .await;
+        let verb: Option<String> = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(verb.as_deref(), Some("artifact_refresh.list_stale"));
     }
 }

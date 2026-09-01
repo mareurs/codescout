@@ -76,6 +76,15 @@ impl Tool for ArtifactEvent {
         let action = args["action"]
             .as_str()
             .ok_or_else(|| RecoverableError::new("action required — one of: create, list"))?;
+        // Best-effort: identity enrichment must never fail a tool call; a failed
+        // stamp degrades the row to verb=NULL, which audit_log surfaces honestly.
+        if let Err(e) = ctx
+            .catalog
+            .lock()
+            .set_audit_verb(&format!("artifact_event.{action}"))
+        {
+            tracing::warn!("audit verb stamp failed: {e}");
+        }
         match action {
             "create" => super::event_create::call(ctx, args).await,
             "list" => super::timeline::call(ctx, args).await,
@@ -173,6 +182,25 @@ mod tests {
         // timeline returns {items:[...], count, truncated} even for unknown ids
         assert!(v["items"].is_array(), "expected items array, got {v}");
         assert_eq!(v["truncated"], serde_json::json!(false));
+    }
+
+    #[tokio::test]
+    async fn dispatch_stamps_the_audit_verb() {
+        let ctx = mk_ctx();
+        // list is read-only; the stamp happens at dispatch regardless of verb kind
+        let _ = ArtifactEvent
+            .call(
+                &ctx,
+                serde_json::json!({"action": "list", "artifact_id": "nonexistent"}),
+            )
+            .await;
+        let verb: Option<String> = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(verb.as_deref(), Some("artifact_event.list"));
     }
 
     #[test]

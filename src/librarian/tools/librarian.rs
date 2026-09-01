@@ -246,6 +246,22 @@ mod tests {
         assert!(v["archetypes"].is_array());
     }
 
+    #[tokio::test]
+    async fn dispatch_stamps_the_audit_verb() {
+        let ctx = mk_ctx();
+        // tracker_design is read-only; the stamp happens at dispatch regardless of verb kind
+        let _ = Librarian
+            .call(&ctx, serde_json::json!({"action": "tracker_design"}))
+            .await;
+        let verb: Option<String> = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT verb FROM audit_ctx", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(verb.as_deref(), Some("librarian.tracker_design"));
+    }
+
     /// `tracker_design`'s response tells the caller, twice (`archetype_detail`
     /// and `next_step`), to call back with `archetype="<name>"`. Until
     /// 2026-08-17 the input schema did not declare that parameter at all, so
