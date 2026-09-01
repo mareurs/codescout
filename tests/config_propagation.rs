@@ -78,7 +78,12 @@ const PRUNED: [&str; 3] = [".git", "target", "node_modules"];
 /// somebody predicted where it would be.
 ///
 /// **The marker is `.git` being a FILE.** That is exactly what a linked worktree has and an
-/// ordinary directory does not; a `.git` *directory* is an independent checkout and is skipped.
+/// ordinary directory does not. A `.git` *directory* is an independent checkout, so it is never
+/// **reported** — but the walk does continue **through** it, and will report that checkout's own
+/// linked worktrees as if they were ours. Pinned deliberately by
+/// [`a_nested_independent_checkout_is_walked_through_not_reported`]: over-reporting is benign
+/// here (a healthy nested worktree resolves and passes), while pruning at `.git`-the-directory
+/// would create a place this gate structurally cannot look.
 /// A git **submodule** carries the same file shape (`gitdir: <super>/.git/modules/<name>`) and
 /// breaks on a rename identically, so it is deliberately in scope. This repo has no
 /// `.gitmodules` today — stated rather than demonstrated, and the reason no test asserts it.
@@ -303,5 +308,108 @@ fn the_worktree_link_verdict_discriminates() {
         worktree_link("  gitdir:   /a/b  \n", always),
         WorktreeLink::Wired("/a/b".into()),
         "git does not write this spacing, but tolerating it must not change the verdict"
+    );
+}
+
+/// Build a tree exercising every rule in [`discover_linked_worktrees`], and return it.
+///
+/// A linked worktree on disk is exactly "a directory whose `.git` is a FILE" — the file's
+/// contents are irrelevant to discovery (they are [`worktree_link`]'s business), so these
+/// fixtures write a plausible `gitdir:` line and nothing else. No `git` invocation is needed
+/// or wanted: the point is to test the walk against shapes a real repo makes it hard to
+/// arrange, several of which cannot be created here at all without breaking the checkout.
+fn make_walk_fixture(root: &Path) {
+    let wt = |rel: &str| {
+        let dir = root.join(rel);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(dir.join(".git"), "gitdir: /somewhere/.git/worktrees/x\n").expect("write");
+    };
+
+    wt(".worktrees/wt-a"); // gitignored-shaped: the `ignore` crate would skip this
+    wt("deep/a/b/c/wt-b"); // depth 5: no depth cap, no root list
+    wt("target/wt-c"); // pruned
+    wt(".git/wt-d"); // pruned
+    wt("node_modules/wt-e"); // pruned
+    wt(".worktrees/wt-a/nested/wt-f"); // inside a FOUND worktree: not descended into
+
+    // A plain directory, and a nested INDEPENDENT checkout (`.git` is a directory).
+    std::fs::create_dir_all(root.join("plain/deeper")).expect("mkdir");
+    std::fs::create_dir_all(root.join("checkout/.git/objects")).expect("mkdir");
+    wt("checkout/inner-wt"); // a worktree belonging to that other checkout
+}
+
+/// The walk must find a worktree wherever it sits, and must skip exactly what it claims to.
+///
+/// **This is the test the live checks cannot be.** Both of those scan the real repo root, so
+/// on a checkout with no linked worktrees — CI always, and this machine since
+/// `.worktrees/audit-shards-t7` was removed — they pass having examined nothing, and
+/// [`the_walk_finds_every_worktree_git_itself_reports`] goes vacuous with them, because a
+/// positive control needs a positive to witness. Every rule below was therefore unexercised
+/// in CI from the moment the walk replaced the hardcoded `SCAN_ROOTS` list.
+///
+/// Mutations caught: removing any entry from [`PRUNED`]; adding a depth cap below 5; swapping
+/// `.git`-is-a-file for `.git`-exists (which would report `checkout/` itself); and deleting the
+/// don't-descend rule, which would report `wt-f` nested inside `wt-a`.
+#[test]
+fn the_walk_finds_worktrees_anywhere_and_skips_what_it_must() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let root = tmp.path();
+    make_walk_fixture(root);
+
+    let found: Vec<String> = discover_linked_worktrees(root)
+        .iter()
+        .map(|p| {
+            p.strip_prefix(root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+
+    assert_eq!(
+        found,
+        vec![
+            ".worktrees/wt-a".to_string(),
+            "checkout/inner-wt".to_string(),
+            "deep/a/b/c/wt-b".to_string(),
+        ],
+        "exact set, sorted. Present: a gitignored-shaped path (the `ignore` crate would skip \
+         it), a depth-5 path (no cap, no root list), and a worktree owned by a nested \
+         independent checkout. Absent: everything under `target/`, `.git/` and \
+         `node_modules/`, and `wt-f` nested inside the already-found `wt-a`."
+    );
+}
+
+/// A nested independent checkout is descended THROUGH, not skipped — pinned because the
+/// alternative is defensible and the difference is invisible until it fires.
+///
+/// `checkout/` has a `.git` DIRECTORY, so it is correctly not reported as a linked worktree.
+/// The walk then continues into it and reports `checkout/inner-wt`, a worktree that belongs to
+/// that other repository rather than to this one.
+///
+/// Kept rather than changed, because over-reporting here is benign and under-reporting is not:
+/// an orphaned worktree is broken wherever it lives, and [`worktree_link`] passes it as `Wired`
+/// whenever its own admin dir resolves — so a healthy nested checkout costs nothing, while
+/// pruning at `.git`-the-directory would create a place this gate structurally cannot look.
+/// If that trade is ever revisited, this test is the record of which way it was made.
+#[test]
+fn a_nested_independent_checkout_is_walked_through_not_reported() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let root = tmp.path();
+    make_walk_fixture(root);
+
+    let found = discover_linked_worktrees(root);
+    let rel: Vec<String> = found
+        .iter()
+        .map(|p| p.strip_prefix(root).unwrap_or(p).to_string_lossy().into())
+        .collect();
+
+    assert!(
+        !rel.iter().any(|p| p == "checkout"),
+        "a `.git` DIRECTORY is an independent checkout, never a linked worktree: {rel:?}"
+    );
+    assert!(
+        rel.iter().any(|p| p == "checkout/inner-wt"),
+        "the walk continues through it, so that checkout's own worktree IS reported: {rel:?}"
     );
 }
