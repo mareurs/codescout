@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 174
+entry_high_water_R: 175
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -7903,6 +7903,60 @@ Three instruments, two worlds, **no error from any of them**. The numbers I was 
 **Status:** open — single datapoint, caught pre-commit; the cost avoided was a permanently wrong citation in a spec whose whole argument is those two call sites.
 
 **Kin:** `R-89` (freshness is a property of the copy that SERVES you — this is the copy that ANSWERS you, a fourth axis alongside build, process and distribution), `R-113`, `R-170` (a number's scope must travel with it; here the scope is *which tree*), `OB-1` § *the third position* (a remedy published to the wrong audience — here, a remedy that cannot apply at all).
+
+## R-175 — A gate quantified over a population you never enumerated is a hypothesis in gate's clothing
+
+**Status:** validated — the gate it corrected never shipped
+**Valid:** invariant
+
+**Observed 2026-09-02.** A spec written ~1 hour earlier (same session, same
+author) specified Layer 1's Gate 2 as *"no registered `ledger_prefix` is a
+prefix of another"*. Scouting the write sites before implementing it showed the
+gate would have **failed on correct code the day it landed**.
+
+**The scout:** `grep` for every mutation of the shared `GuideLedger`, filtered
+to production. Two calls. It returned **six** writers where the spec assumed
+two, and one of them — the session opener — stamps `SESSION_OPENING_GUIDE`, a
+bare topic name that `guide-sections` also owns. The overlap is deliberate and
+argued at the site: keying the opener finer *"would desync this trigger from
+what `GuideLedger::re_arm` actually re-arms."*
+
+**What makes this an R-N rather than an ordinary catch.** The spec's error was
+not a wrong fact. Every sentence in it was true of the two engines it had
+examined. The error was a **gate generalised from a population of two**, and the
+tell is that the population was never counted — the spec said "engines 1 and 5
+share four mechanisms" and then wrote a rule quantified over *all* engines.
+
+> **A gate quantified over a population you did not enumerate is a hypothesis
+> wearing a gate's clothes.** It passes on the members you had in mind, which is
+> exactly the evidence that persuades you to ship it.
+
+**Cost avoided, concretely.** The gate would have red on first run against
+`session-opener`. The cheap repair at that point is to *delete the overlapping
+registration* or *widen the predicate* — both of which erase the finding, and
+one of which (a negative predicate, `!starts_with("op:")`) makes the gate
+permanently unfalsifiable. That branch is now closed by
+`no_engine_claims_a_key_from_outside_every_corpus`, which exists only because
+the scout ran first.
+
+**Second-order find.** The same enumeration produced a **seventh engine**. The
+2026-08-27 roster walked the prompt-surface inventory; the session opener is
+invisible there and visible in the write sites, because it retrieves on *session
+phase* and stamps a key shaped exactly like engine 1's. So the discriminator
+("the key you retrieve on") was sound — it was the **instrument** that was
+narrow, and "six" was a count of what one instrument could see rather than of a
+closed set.
+
+**Rests on:** `docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md`
+(`0021bead4e5a01e2`) § *Gates*, which carries the correction inline rather than
+silently shipping the fixed form; `64a0a64c`.
+
+**Promote-when:** a third instance of *"gate generalised from an
+un-enumerated population"* appears. Two so far — this, and the
+`serves:`-coverage gate that `get-guide-section-grain` deliberately built as a
+finite 88-row checklist *because* an open-ended coverage claim is
+unfalsifiable. That spec reached the right answer from the same pressure, which
+is why this is a pattern and not an incident.
 
 ## Template for new entries
 
