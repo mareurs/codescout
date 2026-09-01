@@ -69,11 +69,22 @@ cargo fmt && cargo clippy … && cargo test --workspace --no-default-features &&
 ```
 
 A session chained the four commands that way, the **lean** lane failed on an unrelated red (a
-peer's bug file, momentarily tracked without its `cluster/` tag), and the default lane was
+peer's bug file, momentarily tracked without its defect-class tag), and the default lane was
 skipped — leaving `target/debug/codescout` librarian-less. So the terminal state was the lean
 binary, which is the precise condition the reorder exists to prevent, reached *by following the
-documented order*. The failure that skips the rebuild is also the one that guarantees you are
-about to re-run and re-fail, so the window is not short.
+documented order*.
+
+**And it is worse than "the repair was skipped" — sharpened 2026-09-01 by `codescout-b7`.**
+`cargo test` has a build half and a test half, in that order. The build half is what overwrites
+`target/debug/codescout`, and it has **already completed** by the time any test can fail. So a
+lean-lane test failure does not prevent the trap from being set; it is reported *after* the trap
+is set, and then blocks the only step that would clear it. The two halves run in the order that
+**guarantees** the worst case rather than merely permitting it.
+
+That reframes the remedy's weight. `;` is not "run the last lane anyway, in case it matters" —
+it is the only thing that disarms a trap that is already armed by the time you read the red. The
+failure that skips the rebuild is also the one that guarantees you are about to re-run and
+re-fail, so the window is not short either.
 
 The asymmetry worth naming: `&&` expresses "stop if a step fails", which is right for a gate
 whose purpose is a **verdict**, and wrong for the one step whose purpose is a **side effect**.
@@ -93,6 +104,21 @@ only guarantees the rebuild happens. It is the same shape as the reorder itself 
 correct path end in a safe state, so compliance cannot leave anything armed (CLAUDE.md §
 *Observer Blindness*, remedy 3). The reorder closed the case where you *walk away* from the lean
 lane; this closes the case where the gate *stops you* at it.
+
+**What is measured here and what is deduced — because on this page the distinction is unusually
+sharp.** The *premise* is measured, on 2026-08-30, in the section above: after a lean lane
+`artifact --help` exits 2. The *2026-09-01 instance* is a deduction from it — the session that
+armed it re-ran the default lane immediately and did not probe the binary in the intervening
+moment, and by the time the gap was noticed the window had closed. Two sessions then declined to
+reproduce it, for the same reason: **verifying this trap and arming it are the same act.** A
+confirming run means leaving five other sessions on a shared checkout with a librarian-less
+binary in order to re-demonstrate a mechanism already measured. That is the wrong trade, so the
+prediction stands on the 2026-08-30 measurement plus cargo's build-then-test ordering, and not
+on a fresh observation.
+
+Recorded rather than glossed because a deduction in a page full of measurements will be read as
+one of them. Both sessions verified the *current* state instead, which is the cheap half and
+proves only that nothing is armed right now: `artifact --help` exits 0 against a 325 MB binary.
 ## Why the long clippy form, not `cargo clippy -- -D warnings`
 
 The long clippy form is the gate, not garnish: bare `cargo clippy -- -D warnings` lints only the
