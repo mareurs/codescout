@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 170
+entry_high_water_R: 172
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,8 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-172 | 2026-09-02 | hit, narrowly — caught by an isolating re-run before sending (1 instance) | **A result that falsifies a documented invariant is usually the invariant's already-recorded RESIDUAL.** The full four-command gate, run in the documented order, gave 10 of 11 `cli_artifact` failures — the librarian-less binary — against `CLAUDE.md`'s bold claim that *"following the gate cannot arm the trap … provided both lanes actually run"*. Both ran, both exited 0, and a draft saying the claim was false got written. Re-running the two lanes ALONE: lean leaves it lean, default restores it, exit 0, 11/11 — the ordering is sound and a peer's concurrent lean lane had landed inside the window. **What makes it an entry: the corpus had predicted it three days earlier, in a field built for exactly that, and reading the claim could never have found it.** The fix's own bug file (`…-shared-target-dir-feature-clobber-reds-the-cli-tests.md`, `status: fixed`, **archived**) carries in `unverified:`: *"the fix closes the TERMINAL state only, not the window … two sessions gating concurrently still collide and nothing detects that."* The residual is invisible to the canonical triage query by construction — archiving is the normal end state — so the check is `find(kind="bug", include_archived=true, …)` and then read `unverified:` before writing the word "false". **Not `R-163`:** there the attributed cause was the unchecked claim; here observation and cause were both right and the error under construction was the CONCLUSION'S SCOPE — a true local measurement generalised into a falsification, by an instrument that could not see the concurrency it was subject to. | residual confirmation recorded on `d2b0e9c1b9802432`'s `unverified:`; gate green at 01:32; kin `R-166` (the residual survived only because it was in a queryable field, not a commit message) |
+| R-171 | 2026-09-02 | miss ×3 in one session, third caught in draft (3 instances) | **A bounded read returns an absence indistinguishable from a real one — and `tail -c` on one long line cuts the OTHER end.** Three reflexive bounded reads of output whose value was in the part the bound removed: `cargo test … \| tail -8` lost the failure message of a test whose doc comment says the message names the offending file; `\| tail -3` lost which 2 of 18 failed; and `grep -o '…' \| tail -c 1300` cut the **head** of a single long line, producing a drafted accusation that a peer's edit "isn't where they say it is" — it was exactly where they said. **The law is not about `tail`:** the bound was chosen before the shape was known, so the negative it returns is acted on as a real absence. `tail -c N` on one line is sharpest, silently reversing which end is kept. **"Be careful with flags" is the wrong remedy** — all three were the progressive-disclosure habit correctly applied to the one output class where the payload IS the tail of a long thing. **Mechanical remedy:** redirect diagnosis-bearing output to a file and query it, never pipe to `tail`; this is already the Iron-Law-3 pattern, and the gap is that it reads as a VOLUME rule when this is a SHAPE rule, so it never fires for a 3-line pipe. Adjacent but explicitly **not** an instance: six commit outputs printing `Stashing unstaged files …` were fully present, read, and pre-classified as chrome — unread differs from uncaptured and this remedy does nothing for it. | `R-3` twin (disciplines the reader of a result; this disciplines the reader's INSTRUMENT); kin `R-167` (unanchored over-match) as its opposite — that one admits too much, this one shows too little |
 | R-170 | 2026-09-02 | near-miss, caught before any write (1 instance) | **A coverage ratio is a scope question before it is a drift finding — and the scope lived in the ENFORCEMENT layer.** Auditing `docs/issues/` for missing `cluster/<slug>` tags: live 34/34 tagged, archive 156/529, by month 0% → 33% → **42% (2026-08)** → 100%. That reads as drift, and I had a 236-file retro-tagging campaign half-composed. `tests/issue_clusters.rs`'s module header says the opposite in writing — the archive is out of scope by design, *"279 archived files in the backfilled window match none of them… forcing a fit would corrupt the counts that promotion reads"* — so the campaign was the specific thing already considered and ruled out, and would have inflated every `IC-N` with non-members. **The structural cause outlives the escape:** `issue-clusters.md` is where a count is READ, and it guards exactly one failure mode (*"trust the query; re-run it before trusting the count"*) — defending the count's freshness while saying nothing about its population, so re-running as instructed yields a fresh number still scoped to a 34%-tagged corpus, and the instruction to trust it is what stops you asking. **A number and the scope that validates it must co-locate at the point of READING, not of enforcement.** Mirror of the standing law: that one disciplines a prohibition you HAVE read; here the tree held one I had not, and my proposal was exactly what it forbade — so grep the enforcement layer (`tests/`, `scripts/pre-commit-*`, hooks) for the population's name, not only the docs. Cheap tell, no judgement needed: a ratio neither ~0% nor ~100% is a boundary someone drew, not drift. | `85915e8b`; two instruments of genuinely different scope (file frontmatter vs the catalog's `artifact.tags`) agreed on all 563 files; the scope was found by opening `tests/issue_clusters.rs` for an unrelated reason |
 | R-169 | 2026-09-02 | miss, self-inflicted (1 instance) | **Running the population check can make the attribution error MORE likely, not less — because it retires the feeling of not having checked.** I ran `/codescout-companion:reaching-peer-sessions`, got the correct socket-scoped table (16 sessions across 3 profiles; 6 in this checkout = 5 peers plus me), then attributed file authorship **by adjacency anyway**: everything in `git status` I had not written became "the peer's", meaning the one peer I happened to know about. Three of the six files were a different session's; `scripts/file-provenance.py` partitions them cleanly into two author ids. I shipped the wrong partition to my user *and* to the peer, in a message whose stated purpose was shared-checkout hygiene. **The enumeration ran, succeeded and was reported accurately — it answered *who is present*, and I used it for *who wrote this*, a different question with a different instrument.** The skill's own text says so verbatim (*"Enumerating a complete set still only bounds who was present — it does not attribute a write. To attribute one, ask."*) and was in my context when I wrote the message. | `88355d1d`; `scripts/file-provenance.py`; CLAUDE.md § *Reaching a Peer Session* ("Never route by adjacency") |
 | R-168 | 2026-09-02 | hit, scout refuted the sentence about to be written (1 instance) | **An instrument's report can EXPIRE — the loud state converts itself to silence on a timer.** Building `IC-4`'s worktree-gitdir surface, I was about to write *"the gate scans the filesystem because `git worktree list` cannot see this"* — clean, plausible, and reading as measured because the archived instance (`2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path`) does record an orphan the list omits. The probe refuted it: **immediately after a repo rename git DOES report it**, tagged `prunable gitdir file points to non-existent location`. Transcript and probe disagreed and both were right — about different *times*. The third party is a clock: `git gc` runs `git worktree prune --expire 3.months.ago` (`gc.worktreePruneExpire`) and **deletes the admin directory**, for a worktree whose files are still on disk, because git judges it by a path that moved. The archived bug is the post-expiry state; the rename was three months prior. **Why this is worse than a narrow instrument:** the window in which it works is the window in which nobody is looking yet, and a gate built on it **starts passing at the moment the defect becomes invisible** — its green is anti-correlated with the property. **Not `R-163`/`R-164`/`R-167`, nor `CLAUDE.md`'s recording law:** all four are instruments whose *scope* is narrower than it appears, wrong the same way on every run. This one is correct today and wrong later, with no event marking the transition, so re-running it is not a check on it — the instrument-shaped twin of `IC-11`. **Remedy:** ask whether the instrument has a garbage collector. Something that tidies "stale" records is, from the defect's point of view, something that destroys evidence, and it will be a well-behaved subsystem doing its documented job. | `7eead422` (`tests/config_propagation.rs`); `issue-clusters:IC-4` surface 2; four throwaway-repo probes, ~6 min; kin `IC-11`, contrast `R-163`/`R-164`/`R-167` |
@@ -7634,6 +7636,117 @@ Cheap tell, no judgement required: **a coverage ratio that is neither ~0% nor ~1
 **Status:** open — single datapoint, but the near-miss cost was a multi-hour campaign that would have corrupted the counts it was meant to complete.
 
 **Kin:** R-3, R-113 (a result is evidence about the instrument, not the world), R-117 (a fix naming a population asserts that population is non-empty — here the population existed and was deliberately excluded, the exclusion being the unread half), R-49 (re-entering your own artifact is a seam).
+
+## R-171 — A bounded read returns an absence indistinguishable from a real one — and `tail -c` on one long line cuts the other end
+
+**Valid:** invariant
+
+**Verdict:** miss, three times in one session, the third caught only by re-running unbounded
+before sending. No gate fired on any of them; two destroyed evidence I then had to re-create.
+
+**Observed:** 2026-09-01/02. Three bounded reads, each of output whose value was in the part
+the bound removed:
+
+| call | what it cut | cost |
+|---|---|---|
+| `cargo test … \| tail -8` | the failure message of `entry_sections_and_extract_agree_on_the_live_corpus`, a test whose doc comment says its message names the offending file | had to re-run the suite; the re-run was green, so the diagnosis rests on the test's documented corpus-sensitivity rather than on its own output |
+| `cargo test --test issue_clusters \| tail -3` | which 2 of 18 failed, and why | re-ran; green. Same loss, same session, ~40 min later |
+| `grep -o 'The 23rd.*' \| tail -c 1300` | the **head** of a long single line — `tail -c` on one line cuts from the front | drafted *"Edit 1's content isn't where they say it is"* about a peer, found it exactly where they said on the unbounded re-read |
+
+**The law is not about `tail`.** It is that a bounded read of an unknown-shaped payload returns
+a **negative that is indistinguishable from a real absence**, and the negative is what gets
+acted on. `tail -c N` on a single long line is the sharpest case — it silently reverses which
+end you keep, so the instrument does not merely truncate, it truncates the opposite end from
+the one the flag's name suggests.
+
+**Why "be careful with flags" is the wrong remedy.** All three were reflexes reaching for a
+bounded read to be a good context citizen — the habit the progressive-disclosure discipline
+correctly trains — applied to the one class of output where the payload IS the tail end of a
+long thing. The bound was chosen before the shape was known, which is the actual error.
+
+**Remedy, mechanical:** for any output whose *diagnosis* is the point — test failures, gate
+refusals, a long ledger field — redirect to a file and query it, never pipe to `tail`:
+
+```
+cargo test … > "$OUT" 2>&1; echo "exit=$?"
+grep -E '^test result' "$OUT"
+sed -n '/^failures:$/,$p' "$OUT" | head -20
+```
+
+That is already the Iron-Law-3 pattern for unbounded output (`run bare, query the buffer`) —
+the gap is that it was read as a *volume* rule and this is a *shape* rule, so it never fired
+for a 3-line pipe.
+
+**Adjacent but NOT an instance, and the distinction matters:** the same session read
+`Stashing unstaged files to … / Restored changes from …` in six consecutive commit outputs
+and classified it as chrome. That output was never truncated — it was fully present, read,
+and pre-classified as background, and it happened to be the refutation of a claim being
+written at the time. Unread differs from uncaptured, and the remedy above does nothing for
+it. Recorded here so the two are not merged into one over-general law.
+
+**Status:** open
+
+**Promote-when:** a fourth instance, or one where a truncated read reaches a commit message or
+a peer rather than being caught in draft.
+
+## R-172 — A result that falsifies a documented invariant is usually the invariant's already-recorded residual
+
+**Valid:** invariant
+
+**Verdict:** hit, narrowly. The isolating re-run happened before the draft was sent. Had it
+not, this session would have published a falsification of a `CLAUDE.md` claim that a test
+pins byte-for-byte, against a residual the corpus had already recorded three days earlier.
+
+**Observed:** 2026-09-02. Ran the full four-command gate in the documented order and got 10 of
+11 `cli_artifact` failures — `error: unrecognized subcommand 'artifact'`, the librarian-less
+binary. `CLAUDE.md` § *Development Commands* states the opposite in bold: *"Ending on the
+default lane rebuilds it, so following the gate cannot arm the trap for anyone else — provided
+both lanes actually run."* Both lanes ran, both exited 0. The obvious reading is that the
+claim is false, and a draft saying so was written.
+
+Re-running the two lanes alone, immediately: lean leaves the binary lean, default restores it,
+`exit 0`, 11/11. **The ordering claim is sound.** A peer's concurrent lean lane had landed
+inside the window between the default lane's build and `cli_artifact`'s exec.
+
+**What makes this an entry rather than a nuisance: the corpus predicted it, in a field built
+for exactly that, and reading the claim would never have found it.** The fix commit's own bug
+file — `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`,
+`status: fixed`, archived — carries in its **`unverified:`** frontmatter: *"the fix closes the
+TERMINAL state only, not the window … so two sessions gating concurrently still collide and
+nothing detects that."* That is this exact case, written down, queryable, three days old.
+
+**The law:** a result that appears to falsify a documented invariant is more often the
+invariant's **already-recorded residual** than a defect in the invariant. The prior belongs on
+"the doc has a caveat I have not read", not on "the doc is wrong" — because a claim load-bearing
+enough to be pinned by a test has usually been argued about already, and the argument's
+leftovers are in the bug file that closed it, not in the claim.
+
+**Where to look, and why it is not where anyone looks.** The residual sits in an
+**archived, `status: fixed`** record — invisible to the canonical triage query
+(`find(kind="bug", status={"in": ["open","investigating","zombie"]})`) by construction, since
+archiving is the normal end state. `unverified:` exists precisely so the caveat is queryable
+past closure. So the check is not "search open bugs" but:
+
+```
+artifact(action="find", kind="bug", include_archived=true,
+         filter={"rel_path": {"contains": "<the-thing>"}})
+```
+
+then read `unverified:` before writing the word "false".
+
+**Distinguish from `R-163`.** That one is about an observation whose attributed CAUSE is a
+second, unchecked claim. Here the observation and the cause were both right — a peer's build
+did clobber the binary — and the error under construction was in the **scope of the
+conclusion**: a true local measurement generalised into a falsification of a global claim,
+because the measurement could not see the concurrency it was subject to.
+
+**Also the reason `R-166` is load-bearing in the other direction:** the residual survived to be
+found only because someone put it in a queryable field instead of a commit message.
+
+**Status:** open
+
+**Promote-when:** a second case where an archived `unverified:` field would have pre-empted a
+falsification, or one where it did not exist and should have.
 
 ## Template for new entries
 
