@@ -49,12 +49,12 @@ then oldest `last_refreshed_at` ascending.
 ## Typical workflow
 
 ```
-artifact_refresh_stale(scope="repo")
+artifact_refresh(action="list_stale", scope="repo")
 → pick item from list
-artifact_refresh(id)
+artifact_refresh(action="gather", id=...)
 → synthesize new content
-artifact_update(id, { body: "..." })
-artifact_refresh_commit(id)
+artifact(action="update", id=..., patch={ body: "..." })
+artifact(action="update", id=..., commit_refresh=true)
 ```
 
 ## Known limitations

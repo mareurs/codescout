@@ -20,16 +20,16 @@ output feeds the next.
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `read_file(path)` | Get heading map — see all sections |
-| 2 | `read_file(path, headings=[...])` | Read target sections (one call, multiple sections) |
-| 3a | `edit_section(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |
-| 3b | `edit_file(path, heading=, old_string, new_string)` | Surgical: string replacement scoped to a section |
-| 3c | `edit_file(path, edits=[...])` | Batch: multiple edits across sections, atomic |
+| 1 | `read_markdown(path)` | Get heading map — see all sections |
+| 2 | `read_markdown(path, headings=[...])` | Read target sections (one call, multiple sections) |
+| 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace (body only — heading preserved), insert, remove |
+| 3b | `edit_markdown(path, action="edit", heading, old_string, new_string)` | Surgical: string replacement scoped to a section |
+| 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits across sections, atomic |
 
 **Tips:**
 - Start with the heading map (step 1) — don't jump straight to editing.
-- Use `headings=[]` (step 2) instead of `mode="complete"` unless you need the entire file.
-- Choose step 3a/3b/3c based on scope: whole section → `edit_section`, single fix → `edit_file(heading=)`, multiple fixes → `edit_file(edits=[])`.
+- Read the sections you need (step 2). There is no whole-file mode on `read_markdown`; the heading map plus `headings=[...]` is the path.
+- Choose step 3a/3b/3c based on scope: whole section → `action="replace"`, single fix → `action="edit"`, multiple fixes → `edits=[...]`.
 
 ---
 

@@ -121,8 +121,8 @@ exploring cap truncates it. This is more efficient than pagination for the commo
 agent wants a specific type of result.
 
 ```
-symbols(pattern="Grid", kind="class")  →  3 results  (no overflow)
-symbols(pattern="Grid")                →  401 results (overflow, most are variables)
+symbols(name="Grid", kind="class")  →  3 results  (no overflow)
+symbols(name="Grid")                →  401 results (overflow, most are variables)
 ```
 
 **The kind filter must:**

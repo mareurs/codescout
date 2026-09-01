@@ -11,11 +11,11 @@ Seven features built on a shared heading-parsing foundation:
 
 | Feature | Tool | Purpose |
 |---------|------|---------|
-| `edit_section` | New tool | Replace, insert, or remove entire sections by heading |
-| `headings=[]` | `read_file` param | Read multiple sections in one call |
-| `heading=` | `edit_file` param | Scope string matching to a section |
-| `edits=[]` | `edit_file` param | Atomic batch edits, optionally heading-scoped |
-| `mode="complete"` | `read_file` param | Full plan file inline with delivery receipt |
+| `edit_markdown` | New tool | Replace, insert, or remove entire sections by heading (shipped as `edit_section`; renamed in v0.11) |
+| `headings=[]` | `read_markdown` param | Read multiple sections in one call |
+| `heading=` | `edit_markdown` param | Scope string matching to a section |
+| `edits=[]` | `edit_markdown` param | Atomic batch edits, optionally heading-scoped |
+| ~~`mode="complete"`~~ | retired | Full-file inline delivery; no such parameter exists today |
 | Fuzzy heading matching | All heading params | Strips formatting, prefix/substring fallback |
 | Section coverage | Automatic | Tracks which sections you've read, hints on writes |
 
@@ -23,11 +23,11 @@ Seven features built on a shared heading-parsing foundation:
 
 | Step | Tool | Purpose |
 |------|------|---------|
-| 1 | `read_file(path)` | Get heading map — see all sections |
-| 2 | `read_file(path, headings=[...])` | Read target sections (one call) |
-| 3a | `edit_section(path, heading, action, content)` | Whole-section: replace, insert, remove |
-| 3b | `edit_file(path, heading=, old_string, new_string)` | Surgical: scoped string replacement |
-| 3c | `edit_file(path, edits=[...])` | Batch: multiple edits, atomic |
+| 1 | `read_markdown(path)` | Get heading map — see all sections |
+| 2 | `read_markdown(path, headings=[...])` | Read target sections (one call) |
+| 3a | `edit_markdown(path, heading, action, content)` | Whole-section: replace, insert, remove |
+| 3b | `edit_markdown(path, action="edit", heading, old_string, new_string)` | Surgical: scoped string replacement |
+| 3c | `edit_markdown(path, edits=[...])` | Batch: multiple edits, atomic |
 
 ---
 
@@ -178,7 +178,7 @@ have its own `heading` scope.
 
 ## Fuzzy Heading Matching
 
-All heading parameters (`heading=` on `read_file`, `edit_file`, `edit_section`)
+All heading parameters (`heading=` on `read_markdown` and `edit_markdown`)
 use a 4-tier matching strategy:
 
 1. **Exact match** — `## Auth` matches `## Auth`
@@ -208,11 +208,11 @@ Coverage resets when the file is modified on disk (mtime-based invalidation).
 
 | You want to… | Use |
 |--------------|-----|
-| Replace an entire section's content | `edit_section(action="replace")` |
-| Add a new section | `edit_section(action="insert_before/after")` |
-| Delete a section | `edit_section(action="remove")` |
-| Fix a typo in a section | `edit_file(heading=, old_string, new_string)` |
-| Toggle multiple checkboxes | `edit_file(edits=[...])` with per-edit `heading` |
-| Read specific sections | `read_file(headings=[...])` |
-| Read a full plan file | `read_file(mode="complete")` |
-| See what sections exist | `read_file(path)` — returns heading map |
+| Replace an entire section's content | `edit_markdown(action="replace")` |
+| Add a new section | `edit_markdown(action="insert_before"/"insert_after")` |
+| Delete a section | `edit_markdown(action="remove")` |
+| Fix a typo in a section | `edit_markdown(action="edit", heading=, old_string=, new_string=)` |
+| Toggle multiple checkboxes | `edit_markdown(edits=[...])` with per-edit `heading` |
+| Read specific sections | `read_markdown(headings=[...])` |
+| Read a whole markdown file | no single call — `read_markdown(path)` for the map, then `headings=[...]`. There is no whole-file mode. |
+| See what sections exist | `read_markdown(path)` — returns heading map |
