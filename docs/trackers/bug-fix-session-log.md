@@ -240,7 +240,7 @@ entry_high_water_W: 92
 | W-89 | 2026-09-01 | high | **Compare `updated_at` across every response a cross-section claim rests on, before publishing it** — and escalate to `artifact_event(action="list")`'s `field_patch` `prev_bytes`/`new_bytes` to learn exactly which state each read saw. A versioned store read through more than one call is not a snapshot | Five discrepancies sitting in context (IC-3 20-vs-18; IC-13/14/15/16 0-vs-16/7/15/2) were **all** artifacts of the torn read [[F-83]] — both commits either side are internally consistent, so the ledger contradicted itself in none of sixteen rows. Publishing would have called a peer's correct in-flight backfill a five-row self-contradiction, inside a report whose declared subject was count-vs-prose staleness, which is what would have made it credible rather than suspect. Detection cost: one `artifact(get)`. The same check then fired AGAIN four minutes later on the same artifact — IC-3's target moved to `OB-7` and `cluster/doc-contradicted-by-code` went 1 → 4, carrying IC-11 over n≥3 — so it is the correct default for the whole window `ListAgents` reports a busy peer, not a one-off | validated |
 | W-92 | 2026-09-01 | med | **Resolve authorship with the `Session-Id` commit trailer, never by elimination over `ListAgents`.** The trailer is a POSITIVE identifier (whose a commit IS), costs one `git log`, needs no socket enumeration, and reaches sessions that have already exited | A peer's heads-up asserted "your uncommitted doctor.rs work" reddened the shared gate. Not mine — all four of my commits contain 0 `.rs` files. Their diagnostics (`git status` + `git grep <symbol> HEAD`) soundly established "not mine"; the step to "yours" ran over an incomplete population — `peer-sessions.sh` 5, `ListAgents` 4, `peer-sessions.sh` 5, `ListAgents` 4 — **but that gap did NOT contain the answer: the real owner `c2a08c22` (codescout-68) was inside the visible four, for both of us.** Their error was conversational salience, not coverage; mine named an INVISIBLE session and cited its invisibility as corroboration. So "ListAgents under-reports" is true, documented (BL-58) and did no work in either failure — a false explanation built entirely from true parts. Cheaper than `F-80`'s transcript grep and `F-85`'s ask-the-session, and the only one that reaches exited sessions. `git log --author` is NOT a substitute: every session commits as the same author (IC-10). Cost was one turn spent disproving a negative, not zero. **Rule splits by state — committed: trailer; uncommitted: NO positive instrument exists, ask, and until answered say "not mine", never "yours" — see [[F-89]]** | validated |
 | W-90 | 2026-09-01 | med | **Re-verify `path:line` citations in artifacts THIS session authored, after any rebuild or peer commit.** Authorship is no exemption (`R-49`) — a bug file's citations are written at fix time, while peers are still moving the substrate under them | Filed bug cited `post-index-change-stage-log.sh:142` for the mv/rm fallback; the line is `:141` and `:142` is blank. No gate would have caught it: `audit_doc_refs` DOES scan `**/*.sh`, but `scan_code_comments` forces those findings to `Med` and CI runs `--fail-on high`, so it passes by design — the citation survives until a human follows it onto whitespace. The same pass also separated real drift from a false accusation: a `docs(issues):`-titled commit genuinely had changed the script, which looked like a capture, but the diff was a comment-only re-point of an archived path, coherent with its message. Without reading it, the plausible move was filing a third capture bug against a correct commit | validated |
-| W-91 | 2026-09-01 | high | **Re-read the substrate before a claim enters a DURABLE, queryable record** — the filesystem for a claim about the filesystem, the implementation for a claim that a capability is missing. Recorded as a **recurrence** of the reconnaissance skill's already-promoted current-state law, not as a new pattern, per that skill's § *Every promotion audits the promoted set* | Two catches. (1) A bug file's `## Residual — still open` said `.worktrees/bench` retains an orphaned gitdir; `ls .worktrees/` shows only `audit-trail-t1`. I was one call from writing a queryable `unverified:` field asserting an open residual that does not exist — into the single file tagged `cluster/record-asserts-an-unchecked-completion`. (2) I had begun drafting a bug asserting `unverified:` is unreachable by any query, on two true pieces of evidence (`find` → `unknown field`, and the librarian guide's "`extra` is NOT catalog-indexed"); `scan_terminal_status_with_caveat` is the deliberate reader and reports **65** records. Both false claims were backed by real evidence about something narrower than the sentence it was licensing. `outgrown` signal (n=1) on the promoted text: it names *fixes* and *prohibitions*, not **filed defect records** — the costliest surface, since a fix assuming a missing capability fails loudly at the call site while a filed bug is durable and nothing re-checks it | validated |
+| W-91 | 2026-09-01 | high | **Re-read the substrate before a claim enters a DURABLE, queryable record** — the filesystem for a claim about the filesystem, the implementation for a claim that a capability is missing. Recorded as a **recurrence** of the reconnaissance skill's already-promoted current-state law, not as a new pattern, per that skill's § *Every promotion audits the promoted set* | Two catches. (1) A bug file's `## Residual — still open` said `.worktrees/bench` retains an orphaned gitdir; `ls .worktrees/` shows only `audit-trail-t1`. I was one call from writing a queryable `unverified:` field asserting an open residual that does not exist — into the single file tagged `cluster/record-asserts-an-unchecked-completion`. (2) I had begun drafting a bug asserting `unverified:` is unreachable by any query, on two true pieces of evidence (`find` → `unknown field`, and the librarian guide's "`extra` is NOT catalog-indexed"); `scan_terminal_status_with_caveat` is the deliberate reader and reports **65** records. Both false claims were backed by real evidence about something narrower than the sentence it was licensing. `outgrown` signal (n=1) on the promoted text: it names *fixes* and *prohibitions*, not **filed defect records** — the costliest surface, since a fix assuming a missing capability fails loudly at the call site while a filed bug is durable and nothing re-checks it. **Promote-when FIRED same-day on a MISS** — a filed bug claimed two parsers lacked a fence guard they already had; shipped in `claude-plugins` `b74c730` / codescout-companion 1.19.11 | promoted-to-permanent-docs |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -8821,12 +8821,40 @@ capability fails loudly at the call site, while a filed bug asserting a missing 
 durable, cited, and nothing re-checks it. That is an `outgrown` signal (category 2) on the
 promoted text, of one datapoint.
 
-**Promote-when:** a second bug-filing-shaped instance of the absence form. At 2 datapoints,
-propose widening the skill's Phase 1 bullet from *"a proposed fix or prohibition"* to name
-filed defect records explicitly.
+**Promote-when: FIRED the same day — and the trigger is a MISS, which is what makes it
+worth more than either catch above.** The second bug-filing-shaped instance of the absence
+form is `docs/issues/archive/2026-09-01-an-unbalanced-fence-silently-disables-every-line-anchored-field.md`,
+whose first version claimed the hand-rolled fenced-line convention also governs `**Valid:**`
+and `**Rests on:**`, so every line-anchored field was exposed. Verified false:
+`parse_validity` / `parse_rests_on` (`src/librarian/statements.rs`) already use `FenceState`,
+**and** receive one section's text at a time with a fresh tracker per call, so neither axis
+was ever open. A guard asserted missing that was in fact present — the absence form, on the
+bug-filing surface, exactly the shape this entry predicted.
 
-**Status:** validated — both catches confirmed against the substrate the same session; the
-`outgrown` proposal awaits its second datapoint.
+**What separates it from datapoints 1 and 2: there, doubt occurred and the claim never
+shipped. Here the law did not fire.** The claim entered the filed record and was caught an
+hour later on re-entry (`R-49`), by me, while implementing the fix it was written for. A
+ledger holding only the catches has a population containing no misses by construction —
+CLAUDE.md § *Testing Discipline*'s recording-filter law — so datapoints 1 and 2 establish a
+habit and this one establishes a rate.
+
+**Correction to this entry's own claim about the skill text, found by reading it.** The
+paragraph above says the promoted wording *"enumerates fixes and prohibitions"* and does not
+name the surface I was on. Read at the bytes 2026-09-01 (`skills/reconnaissance/SKILL.md`
+in `claude-plugins`, Phase 1 — the current-state bullet): it **does** — *"stated as a
+principle, it can travel into a filed defect entry and into a question put to a human"* —
+but hangs that clause off the **prohibition** form alone. So what shipped is narrower and
+sharper than what this entry proposed: not *name filed defect records* (already there), but
+**detach the surface from the prohibition form**, since the absence form reaches the same
+durable record and now has two instances doing so. That correction is this entry's own law
+applied to this entry — a durable record making a claim about a substrate, narrowed by
+re-reading the substrate before acting on it.
+
+**Status:** promoted-to-permanent-docs — shipped in `claude-plugins` as `b74c730`
+(patch-id `1e175ea0182cb6a134111fe7bb6baa23fd6085dd`), released as codescout-companion
+`1.19.11` (`3e65211`), tracker refreshed at `11da775`, and the **served** copy probed
+present in all three profiles per `R-89` — not the repo copy. Both original catches remain
+confirmed against the substrate the same session.
 
 **Valid:** dated 2026-09-01
 
