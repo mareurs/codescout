@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 93
+entry_high_water_F: 95
 entry_high_water_W: 93
 ---
 
@@ -50,6 +50,8 @@ entry_high_water_W: 93
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-95 | 2026-09-01 | high | concurrent-sessions | mitigated | Mutation testing in the shared checkout put `if false && …` into a peer's **staged index**. Their review of the staged diff used a filtered grep that happened not to print the `if` line, so a disabled gate passed human review with a green suite behind it; the only thing that stopped the commit was the `unreviewed-content` pre-commit hook — which is about unstaged content, not about this defect, and would not have fired on a whole-tree `git add`. A mutation writes the SAME BYTES an intentional edit writes, so no observer can separate them: `file-provenance` correctly returned `SHARED` and named both sessions, and that is the most any instrument could say. Restored byte-exact, re-staged, peer notified, 7/7 green — but nothing prevents recurrence. Mutations belong in a worktree, not a shared tree |
+| F-94 | 2026-09-01 | med | test-rigor | fixed-verified | The new dispersion test pins the gate's **existence**, not its **threshold**. Four mutation runs: disabling the gate kills only that test (so it earns its place), but moving `DISPERSION` 0.8 → 0.9 is **7/7 green**. Its two fixtures sit at the extremes — 0.33 and 1.00 — so every cut in (0.33, 1.00] satisfies it, leaving the shipped 0.8 unguarded across **(0.667, 1.0]**. The sole guard between 0.667 and 0.8 is `…_reports_only_the_active_projects_citers`, a *project-scoping* regression whose 3-cites/2-files ratio is incidental to its purpose and unannotated — so a tidy-up making that fixture read more like a real ledger would keep it passing and delete the last guard. `IC-14` turned on a test |
 | F-93 | 2026-09-01 | med | measurement | fixed-verified | Two counts over a peer's **live append-only transcript** were true when published and false within the hour — `Write` 8 → **9**, `doctor.rs` mentions 80 → **187** — both inside a committed artifact. A retention-swept corpus makes every count a floor; an append-only one makes it a floor that **rises**, so the number decays toward looking like a conservative undercount rather than an error. The conclusion never moved and in fact strengthened (`Edit` still 0, now 9/9 native writes to `/tmp`), which removed the last thing that might have prompted a re-check. Remedy: state the PROPERTY ("every native write is scratch"), which cannot rot, not its cardinality, which rots at the ninth. **Found by running F-92's prescribed audit rather than filing it** — and that is the empirical proof F-92 was member-selection, not recording-filter: widening is a no-op for the latter and found two real defects here in one pass |
 | F-92 | 2026-09-01 | med | self-friction | fixed-verified | Corroborated a CORRECT verdict with evidence from outside its own window. `file-provenance` returned `SHARED` on `bug-fix-session-log.md`; I supported it with "F-83 appears 7× and is not mine" — but F-83 entered at `5d405b67`, which **predates** the window floor `9188d000`. The real in-window write was the peer's W-91 at `da44f73d`, learned from them volunteering it. Right answer, invalid support: the worse failure, since re-running the tool re-confirms the verdict and never touches the reasoning. Same shape as the evening's three misattributions — every part true, no step checked against the object — except the instrument was already open and prints the window on its own output line. The verdict came from the tool and was checked; the corroboration was mine, added to make it sound better-supported, and entered through the one channel with no gate. `git log <floor>..HEAD -- <path>` answers it in one command |
 | F-91 | 2026-09-01 | high | measurement | fixed-verified | A positive control certified the INCIDENT and was read as certifying the SUBSTRATE. The IC-10 calibration (`440dd773`) confirmed `cs_tool_log.jsonl` held the disputed writes, checked the other direction too (native writes: zero) and concluded "build it". It never asked whether that log retains records at all: `MAX_ENTRIES = 50` rolling (196 of 297 logs sit exactly at the cap), deleted on compact/resume/clear (`hook_helpers.py:244,420` — the calibrating session made **370** codescout calls and its own log held **1**), and `args` cut to 200 chars over unordered keys (11.5% of 1,920 write records carry no `path=`; 147 more carry a truncated one). The sample was the one session in the good state on all three axes. `wc -l .buddy/*/cs_tool_log.jsonl | sort -n | uniq -c` ends the design in one command. Nothing shipped — substrate rejected, channel built on transcripts, writer defect filed upstream |
@@ -7448,13 +7450,101 @@ direction:** mid-investigation I found four writes from me to that exact path, c
 were about the memory-write shrink guard. Path matched, content did not. Path-matching is
 elimination wearing a different hat.
 
-**Status:** open
+**Status:** open — **promote-when FIRED 2026-09-01**, third instance recorded below. Promotion
+to CLAUDE.md is now owed and is a user decision, not an agent one.
 
-**Promote-when:** a third session-attribution error lands whose root cause is a
-profile-scoped or otherwise partial population read as complete. Two exist now (this, and
-the buddy banner in BL-59). At three, the rule belongs in CLAUDE.md: never close an
-authorship question by elimination; identify positively from write history, across every
-profile.
+**Third instance — 2026-09-01, and it is the sharpest of the three because the instrument
+printed the warning and I read past it.** A peer attributed `src/util/librarian_guard.rs` to
+session `3e275c54` using `scripts/file-provenance.py`. I re-ran the same command on the same
+path, got `UNKNOWN`, and charged them with reporting out-of-window evidence as in-window. The
+refutation was wrong and the mechanism is nasty: the default window is **commit-relative**
+(`scripts/file-provenance.py:325`, *"since this path was last committed"*), and `c26943b5`
+landed at 14:59:59 — between their reading and mine — moving the floor past every write that
+supported the claim. **A verification re-run therefore silently answers a DIFFERENT question
+than the original**, and the commit is what erased its own provenance evidence.
+
+The elimination is the same shape as this entry's: `UNKNOWN` is a partial population (writes
+since the floor) and I read it as complete (*"the tool does not say what you reported"*). What
+makes it worse than the two prior instances — the tool's own output said, verbatim, *"That is a
+statement about coverage, NOT about ownership — Bash writes this tool's heuristics miss look
+identical. Do not read it as 'not mine'."* I quoted that line in my own message and still used
+the result as a refutation. Knowing the class, and being told it in the output, prevented
+nothing — which is `Observer Blindness`'s whole argument for a mechanism over an intention.
+
+**The positive identifier existed the entire time**, which is exactly what this entry's
+Promote-when prescribes: `c26943b5` carries `Session-Id: 3e275c54-d006-4cdc-a02f-c77837c1f1a0`
+in its commit trailer. One `git log -1 --format=%B <sha> | grep Session-Id` settles positively
+what no amount of window-scoped absence can settle by elimination.
+
+**Outcome differed from this entry's, and the difference is the lesson.** Here the peer
+*dropped a correct position*. This time they re-derived, produced the commit trailer and the
+window floors, and refuted me — so the cost was one round-trip rather than a lost correct
+claim. The variable was not care on either side; it was that the peer treated my contradiction
+as a claim to check rather than as authority. **SETTLED 2026-09-01 by asking the session, and the procedure is the finding.** `codescout-17`
+confirmed it is `3e275c54-d006-4cdc-a02f-c77837c1f1a0`; `c26943b5` is theirs and the original
+attribution was right. It holds this as a **fact rather than a derivation**, because the harness
+hands every session a scratchpad path carrying its own session id as a path component
+(`/tmp/claude-*/<project>/<session-id>/scratchpad`). Verified here against known ground truth:
+this session's scratchpad parent directory is its session id, and it matches
+`.buddy/.current_session_id` independently — two channels, one answer, neither inferred.
+
+**So this entry's Promote-when now has an available PROCEDURE, which it did not when written:**
+**ask the session, and have it quote its scratchpad path.** It is stronger than the commit's
+`Session-Id:` trailer, because the trailer exists only once a commit lands and this works on
+**uncommitted** state — which is where every misattribution today occurred. Record it for what it
+is: a **session→id** join the session can publish on request, **not** a pid→session join. There is
+no pid→session key on this machine, verified two ways.
+
+**Keep the failed derivation in the record, because it is this entry's actual subject.** A chain
+was offered — socket filename = PID, PID 3624594 = a live `claude` started 11:26:14, therefore
+`3e275c54` — and it reached the **right answer without closing**. Checked against a positive
+control on this session, `/proc/<pid>/environ` carries no session id at all and neither does the
+transcript JSONL, so the join it needs does not exist; and three `claude` processes started
+inside **145 seconds** (11:26:14 / 11:27:28 / 11:28:39), so "started 11:26" admits three
+candidates. Content-match-plus-testimony landing on the truth does not retroactively make it a
+key. **This is the case where a correct conclusion could have been drawn from insufficient
+evidence and nobody would ever have noticed** — which is precisely the risk this entry exists to
+name, arriving here as a near-miss rather than a failure.
+
+**Population note — RETRACTED 2026-09-01, an hour after it was written, and the retraction is
+the better entry.** It read: *"a second line of evidence WAS sound — `ListAgents` (3 live
+sessions) and the filesystem's live-transcript-write set (3 files in 10 minutes) are
+independent instruments returning the same closed population."* **False.** Both were
+**per-profile**. The transcript glob ran only in `~/.claude-sdd/projects/...`; re-measured
+across all three profiles, `~/.claude` held **3 more** freshly-written transcripts it never
+looked at. And a socket enumeration — `/run/user/1000/cc-socks/`, which is per-**user** — lists
+**6** live sessions whose cwd is this checkout, against the 2 peers `ListAgents` reported.
+
+**The two instruments were not independent; they shared a scope, and agreed BECAUSE of it.**
+One blind spot counted twice is indistinguishable from corroboration at the point of use — which
+is why "cross-check with a second instrument" is not sufficient advice on its own, and why the
+check has to be *does this instrument span the whole namespace*, not *do two of them agree*.
+
+Worth recording plainly: this entry's subject is **a partial population read as complete**, and
+the paragraph asserting my population was provably complete was itself a partial population read
+as complete — written in the entry that defines the class, while I was actively invoking the
+class. That is the fourth instance today of knowing-the-class preventing nothing, and it is the
+argument for the mechanism rather than the discipline, made against its own author.
+
+**Corrected procedure, from `codescout-17`, who found it via
+`codescout-companion:reaching-peer-sessions`:** enumerate over **sockets across all profiles**
+→ intersect with the write-derived set (`scripts/file-provenance.py`) → **ask the survivors**.
+`ListAgents` belongs nowhere in an authorship question: **discovery is per-profile
+(`$CLAUDE_CONFIG_DIR`), delivery is per-user (`/run/user/<uid>/cc-socks/`)**. The three sessions
+neither of us could route to were addressable by socket path the entire time — so `b2a50de8` and
+`bcc98c22` were never unreachable, and the fifth instance's conclusion that *"no routing decision
+was available"* was a claim about the world that was a fact about the instrument. CLAUDE.md §
+*Observer Blindness* carried the same false example and was corrected in the same pass.
+
+**Promote-when:** **FIRED** — a third session-attribution error lands whose root cause is a
+profile-scoped or otherwise partial population read as complete. Three now exist (this, the
+buddy banner in BL-59, and the `file-provenance` window above). The rule to promote, unchanged
+from when it was written: never close an authorship question by elimination; identify
+positively from write history, across every profile. The third instance adds one clause worth
+carrying with it — **a windowed instrument's zero is scoped to its window, and re-running it
+later silently moves that window.** And the settlement above adds the procedure the rule always
+lacked: **ask the session and have it quote its scratchpad path** — the one identifier that is
+given rather than inferred, and the only one that works before a commit exists.
 
 ## W-77 — A remedy that closes the COMPILE half of a class reads as the fix — the runtime half then stays open and green
 
@@ -9317,6 +9407,178 @@ picked it was right. Had F-92 been filed under the recording-filter law — as a
 the remedy would have been *"instrument the doubt"*, and these two numbers would still be wrong
 in a committed file. Widening the audit is a no-op for a Law 2 population and found two real
 defects here in one pass, which is the empirical form of the distinction.
+
+## F-94 — New dispersion test pins the gate's existence, not its threshold — 0.8 is unguarded across (0.667, 1.0]
+
+**Observed:** 2026-09-01, reconnaissance on the then-uncommitted dispersion gate in
+`scan_cited_prefix_with_no_definer` (`src/librarian/tools/doctor.rs`) — peer session
+`codescout-68`'s in-flight change, committed shortly after.
+
+**When:** After all 7 `cited_prefix` tests passed green, before the change was committed.
+
+**Expected:** The new test
+`cited_prefix_with_no_definer_suppresses_a_scattered_prefix_but_keeps_a_clustered_one`
+guards the dispersion gate it introduces. Its own doc comment argues both directions sit in
+one fixture "on purpose", the clustered prefix being "what makes this a discriminator rather
+than a control".
+
+**Got:** It guards the gate's **existence** and not its **threshold**. Four mutation runs,
+each restored byte-exact from a scratchpad backup (`diff -q`) before the next:
+
+| mutation | result |
+|---|---|
+| gate disabled (`if false && …`) | **only** the new test fails — it is the sole killer |
+| `DISPERSION` 0.8 → 0.5 | `…_fires_above_threshold` + `…_reports_only_the_active_projects_citers` fail; new test **passes** |
+| 0.8 → 0.6 | only `…_reports_only_the_active_projects_citers` fails |
+| 0.8 → 0.9 | **7/7 green** |
+
+Fixture ratios (files ÷ citations) across the module: `CL-N` 0.33 and `UT-N` 1.00 (the new
+test), `T-N` 0.50 (`…_fires_above_threshold`), `ZZ-N` 0.667
+(`…_reports_only_the_active_projects_citers`). The shipped 0.8 can therefore be moved
+anywhere in **(0.667, 1.0]** with a fully green suite. The only guard between 0.667 and 0.8
+is `cited_prefix_reports_only_the_active_projects_citers`, whose stated purpose is **project
+scoping** (it is the regression for the 52%-foreign-rows bug) and whose 3-citations/2-files
+ratio is incidental to that purpose and unannotated.
+
+**Probable cause:** The test was designed against the two *classes* the comment names —
+scattered vs clustered — rather than against the *constant* separating them. Its fixtures sit
+at the extremes, 0.33 and 1.00, so every threshold in (0.33, 1.00] satisfies it. The comment
+itself flags the cut as "FITTED to that n=14, on one corpus" and explicitly invites re-tuning
+against a second corpus; that is precisely the edit no test in the module constrains. The
+comment also names the boundary that matters — `GPT-N` (noise) and `CC-N`/`O-N` (real) "sit at
+exactly 0.50" — and that *lower* boundary is guarded, but again incidentally, by `T-N`'s 0.50.
+
+**Scope of the claim:** what was established is that no test constrains the constant in
+(0.667, 1.0]. I did **not** measure which real-corpus prefixes sit in that window, so this is
+not a claim that a specific number would flip — only that a re-tune there changes corpus
+behaviour with zero test signal, against a comment whose measured 6-of-8 suppression is the
+change's entire justification.
+
+**Workaround:** None needed — the shipped constant is correct and the suite is green. The
+exposure is to a future re-tune, or to a tidy-up of the `ZZ-N` fixture that made it read more
+like a real ledger (more citations per file), which would keep that test passing while
+deleting the last guard on the threshold.
+
+**Severity:** med — nothing defective ships today; the cost lands on the next person to touch
+the constant, which the comment invites. It is not `high` because the shipped value is right
+and two fixtures do pin the lower half.
+
+**Status:** fixed-verified — closed by `d44a4409`, patch-id
+`f37ae73ffe72846ca0cceae19b9649f8c24b6a08`, on `experiments`.
+
+**Verified independently rather than accepted on report.** The patch-id was recomputed here
+and matched exactly; the suite was run at that commit in a **detached worktree**, because the
+shared checkout did not compile at the time — an unrelated in-flight `librarian_guard`
+`Access`-parameter refactor by a third session had the signature changed ahead of its call
+sites. 8 passed / 0 failed, including the new
+`cited_prefix_dispersion_threshold_is_pinned_from_both_sides` and all seven prior tests. Note
+what that worktree also demonstrates: it is `F-95`'s remedy, used for the first time, on the
+very entry `F-95` was filed against.
+
+**Closed TIGHTER than filed, and by a mutation axis this entry missed.** The fix pins the
+constant with a boundary pair rather than annotating `ZZ-N`: `LO-N` at 4 citations / 3 files
+= 0.75 must stay **reported**, `HI-N` at 5 citations / 4 files = 0.80 must be **suppressed**.
+Together they admit only **(0.75, 0.80]** — narrower than the (0.667, 1.0] window measured
+above. Because `HI-N` sits *exactly* at the boundary it also pins the comparison as `>=`
+rather than `>`. My four runs mutated the threshold's **value** and never its **operator**, so
+that axis was unguarded here and I did not notice it was missing — a mutation population
+selected along one dimension of a two-dimensional gate. Arithmetic re-derived from the
+committed fixtures rather than taken from the report: LO `3×5=15 >= 4×4=16` false → reported;
+HI `4×5=20 >= 5×4=20` true → suppressed.
+
+**And this entry's own *Fix idea* offered the worse of the two remedies first.** It led with
+annotating `ZZ-N`. Once the boundary pair exists, `ZZ-N` is no longer load-bearing for the
+threshold — so the annotation would have documented a guard at the moment it stopped being
+one, which is the same defect class this entry reported. Putting the guard in the test that
+**owns** the constant is strictly better and is the shape to copy.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the four mutation runs above, each verified green/red by
+`cargo test --lib librarian::tools::doctor::tests::cited_prefix` and each preceded by a
+byte-exact restore; and the fixture ratios read from the test bodies themselves, not inferred
+— the gate-disabled run printed the real counts (`CL-N` 6 cites / 2 files, `UT-N` 4 / 4),
+confirming the new test's doc-comment arithmetic at runtime.
+
+**Fix idea / Pointer:** One annotation line on the `ZZ-N` fixture — CLAUDE.md § *Testing
+Discipline*, "annotate a fixture's load-bearing detail, on the fixture line" — saying its
+ratio is the last guard on `DISPERSION_NUM`/`DISPERSION_DEN`. Or a boundary case in the new
+test at ~0.75/0.85, which pins the constant directly and needs no cross-test annotation.
+This is an instance of `cluster/guard-narrower-than-its-name` (`IC-14`) turned on a test:
+the guard's name says "suppresses a scattered prefix", and it does — for every threshold in
+a range 2× wider than the one measured.
+
+## F-95 — Mutation testing in the shared checkout poisoned a peer's staged index with a disabled gate
+
+**Observed:** 2026-09-01, while running the mutation experiments recorded in `F-94` against
+an uncommitted change in the shared `experiments` checkout.
+
+**When:** Between mutation runs. Each run was: `cp` the file back from a scratchpad backup,
+`sed` the constants or the condition, `cargo test`. The tree therefore held a deliberately
+broken gate for seconds at a time, four times over.
+
+**Expected:** Mutations are local and transient — backup, mutate, test, restore — and nobody
+else observes the intermediate states.
+
+**Got:** A peer session (`codescout-68`) was mid-commit on that exact file and ran `git add`
+inside one of my windows. The index captured
+`if false && by_file.len() * DISPERSION_NUM >= total * DISPERSION_DEN` — my mutation A, a
+**disabled** gate. The peer had reviewed the staged diff, but with a filtered grep that
+happened not to print the `if` line, so the review passed over it. The only thing that
+stopped the commit was the `unreviewed-content` pre-commit hook refusing a pathspec commit
+carrying unstaged content. The peer reported observing the constants change under them in
+sequence — `5/4` → `if false &&` → `2/1` → `5/3` → `10/9` — which matches my mutation log
+exactly.
+
+**Probable cause:** A mutation writes the *same bytes* an intentional edit writes. There is
+no channel by which a concurrent reader can tell one from the other, so no amount of care on
+either side separates them — the peer's provenance probe (`scripts/file-provenance.py`)
+correctly reported `SHARED` and named both session ids, and that is the most any observer
+could have got: it can name the collision, never its semantics. This is
+`cluster/shared-resource-carries-no-owner` (`IC-17`) with `cluster/blast-radius-exceeds-visibility`
+(`IC-1`) on top — I could not see the peer, and the peer could not see that what they were
+staging was not authored.
+
+**Workaround:** Restored the file byte-exact from the scratchpad backup (`diff -q` → identical),
+then `git add` on the path to overwrite the poisoned index entry. Verified: `git diff` on the
+path empty; staged gate line is the enabled form with `NUM=5`/`DEN=4` and no `if false &&`;
+`cargo test --lib librarian::tools::doctor::tests::cited_prefix` → 7 passed / 0 failed. Peer
+notified with the full account and the tree handed back.
+
+**Severity:** high — a no-op gate was one `git commit` from landing, behind a green test run
+**and** a completed human review. It did not ship, but what stopped it was a hook about
+*unstaged content*, entirely unrelated to the defect; had the peer staged the whole tree
+rather than a pathspec, nothing in the path would have fired.
+
+**Status:** mitigated — the incident is cleaned up and verified, but nothing prevents
+recurrence. Any session may mutate any file in this checkout at any time.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the peer's own message, which independently reported the sequence of constant
+values it observed and named this session id from `scripts/file-provenance.py`; and the
+verification commands above, run after the restore rather than assumed.
+
+**Fix idea / Pointer:** Mutation testing must not run in a shared checkout — it belongs in a
+git worktree (`superpowers:using-git-worktrees`) or against a committed base, so the shared
+tree is never transiently wrong. That is the shape CLAUDE.md § *Observer Blindness* prescribes
+— make the correct path end in a safe state, rather than resolving to be careful, because
+neither party here was careless. The weaker alternative (announce before mutating) depends on
+remembering, and the `.buddy/$SID/recon-active` marker this skill already sets is not enough:
+it says a scout is running, not *which files are transiently untrustworthy*. The counterfactual
+win belongs to the peer's `unreviewed-content` hook and is theirs to file.
+
+**Refined 2026-09-01 by the change's author, and the refinement is sharper than the remedy
+above.** The operative property is not *isolation* but **atomicity**. What made my window
+collidable was that it spanned tool calls and therefore turns, leaving a mutant on disk for
+minutes at a time. Their own mutation run did backup → mutate → test → restore → `sha256`
+verify **inside one shell call**, so the window never crossed a turn boundary and no peer's
+`git add` could land inside it. That costs nothing, needs no worktree, and works in a shared
+checkout. A worktree still *eliminates* the class where one-call atomicity only collapses it,
+so the two are complements rather than rivals — but for an ordinary mutation run, atomicity is
+the cheaper correct answer and belongs first. `R-153`'s proposed SKILL.md bullet is updated to
+lead with it. Their summary is worth keeping verbatim: *"your `cp`+`sed` approach was right;
+what made it collide was that the window spanned turns."*
 
 ## Template for new entries
 
