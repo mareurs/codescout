@@ -1,11 +1,11 @@
 ---
-id: '6c779eb1c22b8aee'
+id: 6fce8a96f2e8d6e1
 kind: bug
-status: open
+status: fixed
 title: Audit trail records the statement, not the change — 98.5% of rows are empty diffs
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: ''
+closed: 2026-09-01
 opened: 2026-09-01
 owner: marius
 severity: medium
@@ -94,20 +94,38 @@ it passed through all 27,505. The new test must assert an unchanged-value `UPDAT
 **no** row, and be paired with one asserting a real change still does.
 
 ## Tests added
-N/A — not started.
 
+Fixed on `experiments` at **`40ab56f6`** (patch-id `d3021d83634be0f6b8d7c69200f241f80f9e5f96`).
+
+A `WHEN` clause on the UPDATE trigger, built by `changed_predicate()` from the same column
+list `update_diff_expr` already walks. `IS NOT`, never `<>`.
+
+Two tests, deliberately adjacent and deliberately a pair — the suite's existing update
+assertions are monotone under over-recording, which is exactly how 27,505 empty rows passed
+a green suite for a day:
+
+- `an_update_that_changes_nothing_writes_no_audit_row` — born RED against the old trigger
+  (2 rows where 1 was asserted). Also asserts the `UPDATE` really affected a row, so the
+  test cannot pass by failing to run its own mutation.
+- `an_update_that_changes_one_column_still_writes_a_row` — the other direction; fails if the
+  guard is too aggressive.
+- `a_null_to_value_transition_counts_as_a_change` — discriminates `IS NOT` from `<>`. Born
+  GREEN by design: it guards the regression the fix newly makes possible, since `<>` would
+  drop NULL transitions silently in both directions.
 ## Workarounds
 Filter every query: `librarian(action="audit_log", tbl="artifact")`, or prune periodically.
 
 ## Resume
-Implement the `WHEN` guard in `install_in_txn`; the reinstall-on-every-open convergence
-means existing catalogs are repaired by the next `Catalog::open` with no migration. Then
-re-measure the composition table above — the `commits/update` row should collapse to the
-count of genuine commit-metadata changes.
 
+Closed. The reinstall-on-every-open convergence means existing catalogs are repaired by the
+next `Catalog::open` — no migration, no backfill. Rows already written stay; prune them with
+`librarian(action="audit_log", prune_before_ms=…, confirm=true)` if the historic noise is in
+the way.
+
+Re-measure after a rebuild to confirm the composition collapsed: the `commits`/`update` line
+in the Evidence table should fall to the count of genuine commit-metadata changes.
 ## References
 - `src/librarian/catalog/audit.rs` — `install_in_txn`, `update_diff_expr`
 - `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md` § Phase 1 Capture
 - `docs/trackers/system-retrospective-improvements.md` T-7 (this blocks the shard export)
-- Sibling volume bug: `docs/issues/2026-09-01-audit-growth-concentrates-in-augmentation-params-health-blind-to-bytes.md`
-
+- Sibling volume bug: `docs/issues/archive/2026-09-01-audit-growth-concentrates-in-augmentation-params-health-blind-to-bytes.md`

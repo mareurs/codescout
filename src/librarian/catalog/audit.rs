@@ -19,7 +19,7 @@
 //! loudness law a guard nothing reaches is decoration. It is documented here
 //! instead: a schema change that makes a key column nullable owes this file a
 //! `COALESCE` and a test that can fail.
-//! See docs/issues/2026-09-01-audit-trigger-can-abort-writer-on-null-key-or-blob.md.
+//! See docs/issues/archive/2026-09-01-audit-trigger-can-abort-writer-on-null-key-or-blob.md.
 
 use anyhow::Result;
 use rusqlite::Connection;
@@ -928,7 +928,7 @@ mod tests {
     #[test]
     fn a_blob_value_does_not_abort_the_writer() {
         // Deliberate break for the blob half of
-        // docs/issues/2026-09-01-audit-trigger-can-abort-writer-on-null-key-or-blob.md.
+        // docs/issues/archive/2026-09-01-audit-trigger-can-abort-writer-on-null-key-or-blob.md.
         // Probed 2026-09-01: `json_object('c', X'DEADBEEF')` raises "JSON cannot
         // hold BLOB values", and a raising trigger aborts the WRITER's
         // transaction — the artifact write fails, not merely its audit row.

@@ -1,12 +1,13 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/capped-result-presented-as-complete
+closed: 2026-09-01
 opened: 2026-09-01
-closed:
-severity: medium
 owner: marius
 related: []
-tags: [cluster/capped-result-presented-as-complete]
-kind: bug
+severity: medium
 ---
 
 # BUG: audit trail growth is concentrated in augmentation params, and the health block cannot see bytes
@@ -72,8 +73,32 @@ clamping any single payload value over N KB to `{"len": …, "sha256": …}`. Re
 via `audit_log(prune_before_ms, confirm)` meanwhile.
 
 ## Tests added
-N/A — not started.
 
+Fixed on `experiments` at **`40ab56f6`** (patch-id `d3021d83634be0f6b8d7c69200f241f80f9e5f96`).
+
+Both halves of the review's proposal shipped:
+
+1. **`health()` reports bytes** — `payload_bytes` and `largest_payload_bytes`, via
+   `sum/max(length(CAST(payload AS BLOB)))`. The *largest* field is what makes the finding
+   visible: a total alone reads as uniform growth, and the whole point here is that 0.08% of
+   rows hold 88% of the bytes. Test `health_reports_payload_bytes`.
+2. **Oversized values are stood in for** — `value_expr(clamp=true)` emits
+   `{"elided":"oversize","len":N,"head":"<120 chars>"}` above 512 chars, in UPDATE diffs
+   **only**.
+
+The clamp is UPDATE-only because the measurement said so: this file's own Evidence shows the
+bytes are in updates (old AND new of a whole-blob rewrite), while 19 `artifact` deletes
+averaged 740 chars. Clamping DELETE images too would have broken the spec's "full OLD row on
+delete" rule — the forensically precious payload for the vanished-rows bug — and saved
+nothing. Guarded by `a_delete_image_keeps_oversize_values_verbatim`, whose only job is to
+fail if a later tidy-up extends the clamp to delete images.
+
+No `sha256` in the stand-in, deliberately: SQLite's bundled build has no hash function, and
+registering one via `create_scalar_function` would make the trigger raise for any **foreign**
+connection that never registered it — aborting that writer. A head is more useful anyway; a
+diff carries a column only when it changed, so "did it change" is already answered.
+
+Paired with `a_small_update_value_is_recorded_verbatim` so over-clamping is covered too.
 ## Workarounds
 Periodic `librarian(action="audit_log", prune_before_ms=…, confirm=true)`; the prune leaves
 a self-describing marker row.

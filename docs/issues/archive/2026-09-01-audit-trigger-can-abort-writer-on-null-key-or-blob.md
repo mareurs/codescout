@@ -1,12 +1,14 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/guard-narrower-than-its-name
+closed: 2026-09-01
 opened: 2026-09-01
-closed:
-severity: low
 owner: marius
 related: []
-tags: [cluster/guard-narrower-than-its-name]
-kind: bug
+severity: low
+unverified: 'NULL-row-id half is closed by documenting the limitation, not by a guard: no audited table permits a NULL key today, so nothing can reach or test one. A schema change making a key column nullable reopens this.'
 ---
 
 # BUG: an audit trigger can abort the writer's mutation on two measured paths, against the module doc's "never blocks" invariant
@@ -51,12 +53,29 @@ trigger SQL, recorded in the T-1 whole-branch review (Minor 5).
 N/A — mechanism measured at filing.
 
 ## Fix
-Either one expression each — `COALESCE(<row_id expr>, '<null>')` and a
-`typeof(...)='blob'` guard emitting a placeholder — or, per CLAUDE.md § Parsers Over a
-Namespace, narrow the module-doc invariant at the refusal site ("never blocks, for
-JSON-representable values and non-NULL keys"): a documented limitation and a silent one
-cost a reader very differently. Decide next time audit.rs is touched.
 
+Resolved on `experiments` at **`40ab56f6`** (patch-id `d3021d83634be0f6b8d7c69200f241f80f9e5f96`),
+taking **both** options this section offered — one per half, because the two halves differ in
+whether any caller can reach them.
+
+**BLOB half — fixed, with a test that was born red.** `value_expr()`'s first arm is
+`WHEN typeof(x)='blob' THEN json_object('elided','blob','len',length(x))`, applied to UPDATE
+diffs *and* DELETE images. It must be first: `length()` is blob-safe and `json_object()` is
+not. `a_blob_value_does_not_abort_the_writer` failed against the old code with the real
+production error — `SqliteFailure(..., "JSON cannot hold BLOB values")` raised on the
+**writer's** `UPDATE`, not on its audit row — and now asserts the write succeeds and the row
+reads `elided: blob`. Reachable by any writer: SQLite is dynamically typed, so nothing in the
+schema stops a BLOB landing in a TEXT column.
+
+**NULL row-id half — closed by narrowing the invariant, not by a guard.** The module doc now
+states the failure-direction claim narrowly and says what would reopen it. A `COALESCE` was
+the alternative and was rejected under CLAUDE.md's loudness law: every audited table's key is
+`NOT NULL` or a PRIMARY KEY, so no caller reaches it, no test can fail, and the guard would be
+decoration that reads as coverage. The doc now owes the next schema change an explicit debt:
+a key column made nullable brings back the `COALESCE` *and* a test that can fail.
+
+That asymmetry is the point the original finding was making — a documented limitation and a
+silent reinterpretation cost a reader very differently.
 ## Tests added
 N/A — not started.
 
