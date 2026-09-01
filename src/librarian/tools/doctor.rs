@@ -508,8 +508,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     )?);
     audit_health["unexported_rows"] = json!(pending);
     if pending > 0 {
+        // Reworded, not filtered (cheap fix, task-6 round-3 review):
+        // `pending` still includes commits/churn rows, which can never
+        // appear in a shard line (export always skips them) and are the
+        // large majority of a fresh trail's count — "not in a committed
+        // shard" read as a claim about every one of those rows, when most
+        // will never be shard material at all. "still to process" makes no
+        // claim about which rows would actually produce a line.
         audit_health["hint"] = json!(format!(
-            "{pending} audit rows are not in a committed shard — run librarian(action=\"audit_log\", export=true) and commit .codescout/audit/. A shard is a replica: it is only as fresh as its last export."
+            "{pending} audit rows are still to process for export (most rows are skip-only bookkeeping — commits already live in git, reindex churn is never audited — so this is not a count of rows a shard is missing) — run librarian(action=\"audit_log\", export=true) and commit .codescout/audit/. A shard is a replica: it is only as fresh as its last export."
         ));
     }
 

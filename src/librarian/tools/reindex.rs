@@ -431,8 +431,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // whole phase exists to avoid). Ruling 2: export runs once against the
     // CURRENT PROJECT's root, never once per reindex target — a shard is a
     // per-repo committed artifact, and `targets` may span several repos.
+    //
+    // Ruling 18 (task-6 round-3 review): gated on the DESTINATION repo's own
+    // `.gitattributes` opt-in — writing `.codescout/audit/*.jsonl` into a repo
+    // that has not declared `merge=union` for it turns the next branch merge
+    // into a plain-text conflict instead of a clean union. A manual
+    // `export=true` call (audit_log.rs) is a deliberate, individually-reviewed
+    // action and stays ungated; this automatic every-reindex path is exactly
+    // the one where nobody is watching each write, so it is the one that
+    // needs the check.
     let audit_export = match project_root(ctx) {
-        Some(root) => {
+        Some(root)
+            if crate::librarian::catalog::audit::shard::gitattributes_declares_shard_union(
+                &root,
+            ) =>
+        {
             match crate::librarian::catalog::audit::shard::export(&ctx.catalog.lock().conn, &root) {
                 Ok(r) => json!({"exported": r.exported, "through_seq": r.through_seq}),
                 Err(e) => {
@@ -441,6 +454,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
             }
         }
+        Some(_) => json!({
+            "skipped": "repo has not opted in — .gitattributes lacks `.codescout/audit/*.jsonl merge=union` (Ruling 18)"
+        }),
         None => json!({"skipped": "no current project"}),
     };
 
@@ -1179,6 +1195,15 @@ mod tests {
         let root = tmp.path();
         std::fs::create_dir_all(root.join("p1/docs")).unwrap();
         std::fs::write(root.join("p1/docs/a.md"), "# A\n").unwrap();
+        // Ruling 18 (task-6 round-3 review): the fold-in export is gated on the
+        // destination repo's own opt-in — without this file the call would be
+        // skipped entirely and `exported` would stay 0 regardless of whether
+        // `project_root` resolves correctly, defeating this test's own point.
+        std::fs::write(
+            root.join(".gitattributes"),
+            ".codescout/audit/*.jsonl merge=union\n",
+        )
+        .unwrap();
 
         let ctx = mk_ctx_with_project(root.to_path_buf(), "p1");
 
@@ -1193,6 +1218,35 @@ mod tests {
         assert!(
             !root.join("p1").join(".codescout").join("audit").exists(),
             "export must never use the sub-project's abs_path as its destination"
+        );
+    }
+
+    // Ruling 18 (task-6 round-3 review): the automatic fold-in export must NOT
+    // write into a repo that has not declared `merge=union` for the shard
+    // path — writing anyway would arm the very branch-merge conflict the
+    // attribute exists to prevent, in the one path (automatic, every-reindex)
+    // where nobody reviews the individual write. Mutation this catches:
+    // dropping the `gitattributes_declares_shard_union` guard from the
+    // `Some(root)` match arm — this test's directory would then gain a
+    // `.codescout/audit/` the same way the opted-in sibling test does.
+    #[tokio::test]
+    async fn audit_export_is_skipped_when_the_repo_has_not_opted_in_via_gitattributes() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("p1/docs")).unwrap();
+        std::fs::write(root.join("p1/docs/a.md"), "# A\n").unwrap();
+        // Deliberately no `.gitattributes` at all.
+
+        let ctx = mk_ctx_with_project(root.to_path_buf(), "p1");
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert!(
+            v["audit_export"]["skipped"].is_string(),
+            "must report a skip, not attempt the export: {v}"
+        );
+        assert!(
+            !root.join(".codescout").join("audit").exists(),
+            "no shard directory may be created for a repo that has not opted in"
         );
     }
 

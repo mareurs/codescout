@@ -19,11 +19,40 @@ use crate::librarian::catalog::gc;
 use anyhow::{Context, Result};
 use fs4::fs_std::FileExt;
 use rusqlite::Connection;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub(crate) const WATERMARK_KEY: &str = "audit_exported_through_seq";
+
+/// The write-dedup / doctor-count cursor — DISTINCT from `WATERMARK_KEY`.
+///
+/// Ruling 16 (task-6 round-3 review): the two are different quantities and
+/// conflating them into one clamped cursor was the round-3 Critical. The
+/// `WATERMARK_KEY` cursor is a RECOVERABILITY cursor — it must retry an
+/// unattributed row forever, so it is clamped below the earliest one seen
+/// and can sit still indefinitely. If the SAME cursor also gated writing,
+/// then the moment it sticks (a `d7bbeba8a9f23dd8`-shaped row: an artifact
+/// insert whose artifact was since deleted, so `by_artifact_id` cannot
+/// resolve it — this is not theoretical, it is `seq = 1` on the live
+/// catalog), every later row that resolves cleanly would be re-selected
+/// AND re-appended on every subsequent export, forever: the clamp holds
+/// the CURSOR back correctly, but does nothing to stop the WRITE, because
+/// the write happens during the same loop that computes the clamp, before
+/// the clamp is known.
+///
+/// This cursor answers a different question — "what is already durably on
+/// disk for this repo" — and is intentionally UNCLAMPED: it advances at
+/// every row this export call could dispose of one way or another (a
+/// commit/churn skip, a foreign attribution, or an export write), and only
+/// stalls at a genuinely unattributed row (mirrors the OLD, pre-Ruling-16
+/// running-max exactly, at the same three call sites — see `export`). A
+/// row is appended to a shard file only when its `seq` is strictly greater
+/// than this cursor's value as read at the START of the call, which is
+/// what makes a repeat export with the same stuck unattributed row a
+/// no-op on the file instead of doubling it (task-6 round-3 required
+/// test: `a_repeat_export_with_the_row_still_unattributed_does_not_regrow_the_file`).
+pub(crate) const WRITTEN_KEY: &str = "audit_written_through_seq";
 
 /// Changed-key sets that are pure reindex bookkeeping. An `update` whose keys
 /// are a SUBSET of this is dropped from the export; one that also carries any
@@ -32,12 +61,30 @@ const CHURN_KEYS: &[&str] = &["file_mtime", "file_sha256", "updated_at", "missin
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ShardLine {
+    // `#[serde(default)]` on every field below except `seq`: this file's
+    // entire purpose is being read by binaries of OTHER vintages (a shard is
+    // a git-merged file, committed by whichever version wrote it, read back
+    // by whatever version is running now). Without a default, adding any new
+    // required field on a future version makes every already-committed line
+    // from an older version fail to parse — `read_shards` would count each
+    // one as `malformed`, not "missing this field", the day that version
+    // ships (Important, task-6 round-3 review). `seq` is deliberately
+    // excluded: it is the dedup key in `read_shards`' `(host, seq)` `seen`
+    // set, and a defaulted `0` would silently collide two genuinely distinct
+    // rows into one `seen` entry rather than surfacing a real parse failure
+    // — worse than counting the line `malformed`, which at least says so.
+    #[serde(default)]
     pub host: String,
     pub seq: i64,
+    #[serde(default)]
     pub at_ms: i64,
+    #[serde(default)]
     pub tbl: String,
+    #[serde(default)]
     pub op: String,
+    #[serde(default)]
     pub row_id: String,
+    #[serde(default)]
     pub actor: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verb: Option<String>,
@@ -71,6 +118,16 @@ pub(crate) struct ExportReport {
     pub foreign: usize,
     pub files: Vec<String>,
     pub through_seq: i64,
+    /// Absolute path of the directory `export` wrote into (or would write
+    /// into, on a no-op call) — `repo_root.join(AUDIT_DIR)`. Ruling 19
+    /// (task-6 round-3 review): a session running from a linked worktree
+    /// resolves `repo_root` to the MAIN checkout (see `project_root()`), so
+    /// the write lands OUTSIDE the tree that session's own `git status`
+    /// looks at. The destination was always correct; it was invisible.
+    /// Naming it here is the fix — "correct code in the wrong tree defeats
+    /// every gate" (this repo's own SDD lesson) applies to a human checking
+    /// their worktree for new files exactly as much as it does to a CI gate.
+    pub dest: String,
 }
 
 fn is_pure_churn(op: &str, payload: Option<&str>) -> bool {
@@ -102,6 +159,63 @@ fn watermark(conn: &Connection, repo_root: &Path) -> Result<i64> {
     Ok(gc::get_meta(conn, &watermark_key(repo_root))?
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(0))
+}
+
+fn written_key(repo_root: &Path) -> String {
+    format!(
+        "{WRITTEN_KEY}:{}",
+        crate::util::fs::RepoPath::from_path(repo_root)
+    )
+}
+
+/// Per-repo write cursor — see `WRITTEN_KEY`'s doc comment for why this is a
+/// separate quantity from `watermark()`. Same "starts at 0, never reads a
+/// pre-existing unkeyed value" shape as `watermark()`, for the same reason.
+fn written_through(conn: &Connection, repo_root: &Path) -> Result<i64> {
+    Ok(gc::get_meta(conn, &written_key(repo_root))?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0))
+}
+
+/// Per-repo GC meta key holding the exact set of seqs currently sitting
+/// BELOW `written_through` that are still unattributed — i.e. the specific
+/// rows `written_through`'s unconditional advance "jumped over".
+///
+/// Why this exists, on top of the two scalar cursors: `written_through`
+/// must advance unconditionally (including past a still-open gap) to fix
+/// the Critical this round is about — a PERMANENTLY unattributable row
+/// must not gate every later row's write-dedup forever. But that same
+/// unconditional advance means a row's own `seq <= written_through` no
+/// longer implies "already written" once a gap sits below it: the gap
+/// itself has `seq <= written_through` too, the moment a LATER row's
+/// resolution drags the cursor past it, and it was never written. Without
+/// this set, the write-dedup guard cannot tell those two cases apart and
+/// picks one side wrong regardless of which way it defaults — silently
+/// dropping the gap row's eventual write forever (breaking Ruling 14's
+/// "stays recoverable" property this round is required to preserve), or
+/// re-duplicating every row above it on every single retry (reintroducing
+/// the unbounded-regrowth bug this round exists to fix).
+///
+/// Bounded in practice: entries are added only while a row stays
+/// unattributed, and removed the moment it resolves (permanently, for
+/// most real rows — see `WRITTEN_KEY`'s `d7bbeba8a9f23dd8` example — this
+/// set gains one entry and then never shrinks for that row, which is
+/// exactly correct: it costs one `HashSet` lookup per export, forever,
+/// not a re-scan of the file).
+const GAPS_KEY: &str = "audit_open_gaps";
+
+fn gaps_key(repo_root: &Path) -> String {
+    format!(
+        "{GAPS_KEY}:{}",
+        crate::util::fs::RepoPath::from_path(repo_root)
+    )
+}
+
+fn open_gaps(conn: &Connection, repo_root: &Path) -> Result<BTreeSet<i64>> {
+    Ok(gc::get_meta(conn, &gaps_key(repo_root))?
+        .and_then(|v| serde_json::from_str::<Vec<i64>>(&v).ok())
+        .map(|v| v.into_iter().collect())
+        .unwrap_or_default())
 }
 
 /// Resolve which repo an audited row belongs to, by walking from the row
@@ -209,13 +323,24 @@ fn attribute(
     }
 }
 
-/// Rows past the watermark that export would ACTUALLY consume for this
+/// Rows past the WRITE cursor that export would ACTUALLY consume for this
 /// repo — the same population `export` counts as `exported +
 /// skipped_commits + skipped_churn` (never `unattributed`, and never a row
 /// resolved to some other repo — see `export`'s loop for why both of those
 /// are excluded here). Doctor reports this, so it must not describe a
 /// different set than the verb does; a delta that counts rows export will
 /// never write for this repo reads as a permanent backlog.
+///
+/// Floors on `written_through`, NOT `watermark` (task-6 round-3 review,
+/// Ruling 16): `watermark` is the recoverability cursor and can sit
+/// permanently below an unattributed row — flooring THIS scan on it would
+/// re-count every already-written row past that point on every single
+/// `doctor` call, forever, which is exactly the "delta that can never reach
+/// zero" the round-3 review measured on the live catalog (`seq = 1` never
+/// resolves, so the old `watermark`-floored count never dropped below the
+/// full trail's length). `written_through` is unclamped and advances past
+/// everything but a genuinely unattributed row, so it tracks what is
+/// actually still outstanding.
 ///
 /// Not measured, flagged cheap (Minor, task-6 review): `attribute()` runs
 /// once per row here via `conn.query_row`, which re-prepares its SQL every
@@ -225,7 +350,7 @@ fn attribute(
 /// `doctor` invocation. Worth a prepared-statement pass if this ever shows
 /// up in a profile; not done here.
 pub(crate) fn unexported_count(conn: &Connection, repo_root: &Path) -> Result<i64> {
-    let w = watermark(conn, repo_root)?;
+    let w = written_through(conn, repo_root)?;
     let mut stmt = conn.prepare(
         "SELECT tbl, op, row_id, payload FROM catalog_audit WHERE seq > ?1 ORDER BY seq",
     )?;
@@ -253,9 +378,49 @@ pub(crate) fn unexported_count(conn: &Connection, repo_root: &Path) -> Result<i6
     Ok(n)
 }
 
+/// Ruling 18 (task-6 round-3 review): the automatic reindex fold-in export
+/// must never write into a repo that has not opted in to merging shard files
+/// — writing `.codescout/audit/*.jsonl` into a checkout whose `.gitattributes`
+/// lacks `merge=union` for that path means a future branch merge treats two
+/// hosts' independently-appended lines as a plain-text conflict instead of a
+/// clean union, the exact hazard the attribute exists to prevent. A manual
+/// `export=true` call (`audit_log.rs`) is a deliberate, individually-reviewed
+/// action and stays UNGATED — this check exists only for the automatic,
+/// every-reindex path where nobody is looking at each write.
+///
+/// Deliberately tolerant of exact spelling variance: matches a line whose
+/// whitespace-trimmed form is at least the two tokens `.codescout/audit/*.jsonl`
+/// and `merge=union`, in either order, ignoring any other attributes on the
+/// same line (e.g. `.codescout/audit/*.jsonl merge=union -diff` still counts).
+/// A missing or unreadable `.gitattributes` is treated as "not opted in", not
+/// as an error — most repos simply have not adopted `.codescout/audit/` yet.
+pub(crate) fn gitattributes_declares_shard_union(repo_root: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(repo_root.join(".gitattributes")) else {
+        return false;
+    };
+    text.lines().any(|line| {
+        let line = line.trim();
+        if line.starts_with('#') {
+            return false;
+        }
+        let mut tokens = line.split_whitespace();
+        let Some(pattern) = tokens.next() else {
+            return false;
+        };
+        pattern == ".codescout/audit/*.jsonl" && tokens.any(|t| t == "merge=union")
+    })
+}
+
 pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport> {
     let host_id = host::resolve_host_id(conn)?;
     let from = watermark(conn, repo_root)?;
+    let written_start = written_through(conn, repo_root)?;
+    // Snapshot of which seqs BELOW `written_start` are known gaps — loaded
+    // BEFORE the loop so the write-gate can tell "already written" (not in
+    // this set) from "jumped over by a later row's advance, never written"
+    // (in this set). See `GAPS_KEY`'s doc comment for why a scalar cursor
+    // alone cannot make this distinction.
+    let gaps_start = open_gaps(conn, repo_root)?;
     let dir = repo_root.join(AUDIT_DIR);
 
     let mut stmt = conn.prepare(
@@ -279,6 +444,7 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
 
     let mut report = ExportReport {
         through_seq: from,
+        dest: dir.display().to_string(),
         ..Default::default()
     };
     // Keyed by month string; value is (a representative at_ms for that month,
@@ -299,6 +465,16 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     // rows are visited in ascending `seq` order (`ORDER BY seq` above), so
     // the first unattributed hit is always the minimum.
     let mut min_unattributed: Option<i64> = None;
+    // The UNCLAMPED write cursor for THIS call — see `WRITTEN_KEY`'s doc
+    // comment. Advances at every row this loop can fully dispose of; only an
+    // unattributed row leaves it where it was (task-6 round-3, Ruling 16).
+    let mut written_max = written_start;
+    // Every seq this call still cannot attribute — becomes the NEXT persisted
+    // `GAPS_KEY` set wholesale (see `open_gaps`'s doc comment: a persisted
+    // gap that resolves this call simply does not get re-added here, which is
+    // exactly the removal rule, since every previously-open gap has a seq
+    // strictly greater than `from` and is therefore always rescanned above).
+    let mut gaps_this_call: BTreeSet<i64> = BTreeSet::new();
 
     for (seq, at_ms, tbl, op, row_id, actor, verb, payload) in rows {
         // commits/churn need no attribution at all — they are skip-only for
@@ -306,11 +482,13 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
         // regardless of which repo owns them (they don't have one).
         if tbl == "commits" {
             report.through_seq = report.through_seq.max(seq);
+            written_max = written_max.max(seq);
             report.skipped_commits += 1;
             continue;
         }
         if is_pure_churn(&op, payload.as_deref()) {
             report.through_seq = report.through_seq.max(seq);
+            written_max = written_max.max(seq);
             report.skipped_churn += 1;
             continue;
         }
@@ -325,6 +503,7 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
         let Some(owner) = attribute(conn, &tbl, &op, &row_id, payload.as_deref()) else {
             report.unattributed += 1;
             min_unattributed.get_or_insert(seq);
+            gaps_this_call.insert(seq);
             continue;
         };
 
@@ -333,8 +512,24 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
         // That other repo's own watermark governs whether it re-exports the
         // row, and it never consults ours.
         report.through_seq = report.through_seq.max(seq);
+        written_max = written_max.max(seq);
         if !owner.starts_with(repo_root) {
             report.foreign += 1;
+            continue;
+        }
+
+        // Write-dedup (Ruling 16, task-6 round-3): this row resolves to US,
+        // but it may already be sitting on disk from a PRIOR export call —
+        // selection always rescans from the (possibly stuck) recoverability
+        // watermark, which can sit well below `written_start` for as long as
+        // some earlier row stays unattributed. Only a row past our own last
+        // write (OR one this exact call still owes, per `gaps_start`)
+        // actually needs writing; re-appending one we already wrote would
+        // duplicate it on every single retry of the stuck row. A row in
+        // `gaps_start` is the one case where `seq <= written_start` does NOT
+        // mean "already on disk" — it means "jumped over while stuck, and
+        // resolving right now" — see `GAPS_KEY`'s doc comment.
+        if seq <= written_start && !gaps_start.contains(&seq) {
             continue;
         }
 
@@ -434,6 +629,21 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
         conn,
         &watermark_key(repo_root),
         &report.through_seq.to_string(),
+    )?;
+    // The write cursor is persisted unconditionally, even on a call that
+    // wrote nothing to disk — it still needs to remember that commits/churn/
+    // foreign rows up to `written_max` were fully dispositioned, or
+    // `unexported_count` (which now floors its scan on this cursor, not the
+    // recoverability one) would re-scan and re-count them on every call
+    // forever (Ruling 16, task-6 round-3 review).
+    gc::set_meta(conn, &written_key(repo_root), &written_max.to_string())?;
+    // Persist this call's own gap set wholesale — see `gaps_this_call`'s doc
+    // comment for why "wholesale replace" is the correct removal rule, not
+    // an incremental diff against `gaps_start`.
+    gc::set_meta(
+        conn,
+        &gaps_key(repo_root),
+        &serde_json::to_string(&gaps_this_call.into_iter().collect::<Vec<i64>>())?,
     )?;
     Ok(report)
 }
@@ -818,7 +1028,7 @@ mod tests {
     #[test]
     fn a_crash_between_append_and_watermark_duplicates_rather_than_loses() {
         // The ordering is load-bearing and this test is what pins it. Append
-        // first, advance the watermark second: a crash in between re-exports
+        // first, advance the cursors second: a crash in between re-exports
         // rows already on disk, and readers dedupe on (host, seq). The inverse
         // order would LOSE rows with no signal anywhere.
         //
@@ -834,8 +1044,17 @@ mod tests {
         export(&cat.conn, tmp.path()).unwrap();
         let n = lines(tmp.path()).len();
         assert!(n >= 2, "expected at least the two seeded rows, got {n}");
-        // Simulate the crash: the file is written, the watermark never advanced.
+        // Simulate the crash: the file is written, NEITHER cursor advanced.
+        // Task-6 round-3 (Ruling 16) split the single watermark into two —
+        // the recoverability cursor and the write-dedup cursor — but both are
+        // still persisted together at the tail of the same `export` call, so
+        // a crash between the file append and that persist leaves both stale.
+        // Resetting only the old watermark would leave the NEW write cursor
+        // correctly advanced from the first call, and the write-dedup guard
+        // would then (correctly, by its own design) suppress the resulting
+        // re-export — silently defeating what this test means to exercise.
         gc::set_meta(&cat.conn, &watermark_key(tmp.path()), "0").unwrap();
+        gc::set_meta(&cat.conn, &written_key(tmp.path()), "0").unwrap();
         export(&cat.conn, tmp.path()).unwrap();
         assert_eq!(
             lines(tmp.path()).len(),
@@ -937,6 +1156,51 @@ mod tests {
             "doctor's delta must describe the same population export consumes"
         );
         assert_eq!(unexported_count(&cat.conn, tmp.path()).unwrap(), 0);
+    }
+
+    // Ruling 18 (task-6 round-3 review): unit coverage for the parser itself,
+    // independent of the reindex-level gate tests in reindex.rs — covers the
+    // tolerance rules the doc comment promises (extra attributes on the same
+    // line, comment lines, a missing file) so a future edit to the matching
+    // logic cannot silently narrow or widen them without a test noticing.
+    #[test]
+    fn gitattributes_union_declaration_matches_are_tolerant_but_specific() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(
+            !gitattributes_declares_shard_union(tmp.path()),
+            "a missing .gitattributes must read as not-opted-in, not an error"
+        );
+
+        std::fs::write(
+            tmp.path().join(".gitattributes"),
+            "# comment mentioning .codescout/audit/*.jsonl merge=union should not count\n\
+             *.png binary\n",
+        )
+        .unwrap();
+        assert!(
+            !gitattributes_declares_shard_union(tmp.path()),
+            "a commented-out line must not count"
+        );
+
+        std::fs::write(
+            tmp.path().join(".gitattributes"),
+            ".codescout/audit/*.jsonl merge=union -diff\n",
+        )
+        .unwrap();
+        assert!(
+            gitattributes_declares_shard_union(tmp.path()),
+            "extra attributes on the same line must not defeat the match"
+        );
+
+        std::fs::write(
+            tmp.path().join(".gitattributes"),
+            ".codescout/audit/*.jsonl text\n",
+        )
+        .unwrap();
+        assert!(
+            !gitattributes_declares_shard_union(tmp.path()),
+            "the right path without merge=union must not count"
+        );
     }
 
     // Task 6, required test 1/6: export scoped to repo A must not leak repo
@@ -1234,7 +1498,7 @@ mod tests {
         cat.conn
             .execute(
                 "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor)
-             VALUES(1751328000000,'artifact','update','ghost','unknown')",
+                   VALUES(1751328000000,'artifact','update','ghost','unknown')",
                 [],
             )
             .unwrap();
@@ -1257,13 +1521,13 @@ mod tests {
             watermark(&cat.conn, tmp.path()).unwrap(),
             0,
             "the watermark must stay clamped below the unattributed row's seq \
-         (1) even though a LATER row in the same batch (seq 2, \"other\") \
-         resolved fine and would otherwise drag `through_seq` past it via \
-         the loop's running `.max()` — this is exactly what Critical 1 \
-         (task-6 review) named: an unattributed row survives its OWN \
-         iteration but is stranded by a later row's advance unless \
-         `through_seq` is clamped post-loop against the minimum \
-         unattributed seq. r1={r1:?}"
+               (1) even though a LATER row in the same batch (seq 2, \"other\") \
+               resolved fine and would otherwise drag `through_seq` past it via \
+               the loop's running `.max()` — this is exactly what Critical 1 \
+               (task-6 review) named: an unattributed row survives its OWN \
+               iteration but is stranded by a later row's advance unless \
+               `through_seq` is clamped post-loop against the minimum \
+               unattributed seq. r1={r1:?}"
         );
         assert!(
             lines(tmp.path()).iter().all(|l| l.row_id != "ghost"),
@@ -1277,14 +1541,23 @@ mod tests {
         seed(&cat, tmp.path(), "ghost");
         let r2 = export(&cat.conn, tmp.path()).unwrap();
         assert_eq!(r2.unattributed, 0, "{r2:?}");
-        // 3, not 1: the second export re-scans from watermark 0, so it
-        // re-processes "other"'s insert row (seq 2, now exported a second
-        // time) in addition to the originally-stuck "ghost" `update` row
-        // (seq 1, now attributable) and `seed`'s own fresh "ghost" `insert`
-        // row (seq 3) — all three are now attributable.
+        // 2, not 3 (task-6 round-3, Ruling 16): the second export still
+        // RE-SCANS from watermark 0 — that part is unchanged, and is what
+        // makes "ghost" (seq 1) recoverable at all — but "other"'s insert row
+        // (seq 2) was already written to disk by the FIRST export call, and
+        // the write-dedup cursor (`written_through`, separate from the
+        // recoverability watermark) remembers that. Only rows past it are
+        // actually written: the originally-stuck "ghost" `update` row (seq 1)
+        // and `seed`'s own fresh "ghost" `insert` row (seq 3). Re-exporting
+        // "other" a second time here is exactly the unbounded-regrowth defect
+        // Ruling 16 fixed — the live-catalog scenario that motivated the fix
+        // had 87 permanently-unattributable rows re-dragging ~790 already-
+        // written rows back onto disk on every single export/reindex.
         assert_eq!(
-            r2.exported, 3,
-            "the originally-unattributed row must still be recoverable: {r2:?}"
+            r2.exported, 2,
+            "the originally-unattributed row must still be recoverable, but a \
+               row already written to disk by the first call must not be \
+               re-appended: {r2:?}"
         );
         assert_eq!(
             lines(tmp.path())
@@ -1295,10 +1568,97 @@ mod tests {
             "both the original stuck update row and seed's own insert row must be exported"
         );
         assert_eq!(
+            lines(tmp.path())
+                .iter()
+                .filter(|l| l.row_id == "other")
+                .count(),
+            1,
+            "\"other\" must appear exactly once across both exports — the \
+               write-dedup cursor is what stops the second export from \
+               re-appending it just because the recoverability watermark had to \
+               stay behind for \"ghost\"'s sake"
+        );
+        assert_eq!(
             watermark(&cat.conn, tmp.path()).unwrap(),
             3,
             "with no unattributed rows left in this batch, the watermark must \
-         advance all the way to the highest seq scanned"
+               advance all the way to the highest seq scanned"
+        );
+        assert_eq!(
+            written_through(&cat.conn, tmp.path()).unwrap(),
+            3,
+            "the write cursor also reaches the highest seq actually written, \
+               and the two cursors converge once nothing is left stuck"
+        );
+    }
+
+    // Critical (task-6 round-3 review): a row that stays PERMANENTLY
+    // unattributable (the live catalog has 87 of these — e.g. seq 1 is an
+    // `artifact|update` row whose artifact no longer exists) must not force
+    // every already-written row above it to be re-appended on every single
+    // future export/reindex call. This is the regression the two-cursor split
+    // (Ruling 16) plus the `GAPS_KEY` gap-set fix this round exist to close.
+    //
+    // This test intentionally FAILS against the round-2 code (a single
+    // watermark, clamped and never separated from the write cursor): with
+    // only `watermark`, the recoverability cursor stays pinned at 0 forever
+    // because "ghost" never resolves, so a naive re-implementation using
+    // `watermark` as the write-dedup floor re-scans "other" from seq 0 on
+    // EVERY call and re-appends it every time — this test's second and third
+    // `export()` calls would each add another copy of "other" to the file
+    // instead of leaving it at exactly one.
+    #[test]
+    fn a_repeat_export_with_the_row_still_unattributed_does_not_regrow_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // Permanently unattributable: no artifact named "ghost" ever gets
+        // created in this test, modeling the live catalog's seq-1 row.
+        cat.conn
+            .execute(
+                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor)
+                   VALUES(1751328000000,'artifact','update','ghost','unknown')",
+                [],
+            )
+            .unwrap();
+        seed(&cat, tmp.path(), "other");
+
+        let r1 = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r1.exported, 1, "{r1:?}");
+        assert_eq!(r1.unattributed, 1, "{r1:?}");
+        assert_eq!(
+            watermark(&cat.conn, tmp.path()).unwrap(),
+            0,
+            "stuck below ghost's seq, same as the sibling test above"
+        );
+
+        // Call export again with NOTHING new — "ghost" is still unattributed,
+        // so the recoverability watermark cannot move. The write cursor must
+        // be what stops "other" from being re-appended.
+        let r2 = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(
+            r2.exported, 0,
+            "a row already on disk must not be re-exported just because the \
+             recoverability watermark is stuck behind a permanently-unattributable \
+             row: {r2:?}"
+        );
+        assert_eq!(r2.unattributed, 1, "{r2:?}");
+
+        // A third call, for good measure — the file must not grow AT ALL
+        // across repeated no-progress retries of the same stuck row.
+        let r3 = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r3.exported, 0, "{r3:?}");
+        assert_eq!(
+            lines(tmp.path())
+                .iter()
+                .filter(|l| l.row_id == "other")
+                .count(),
+            1,
+            "\"other\" must appear exactly once no matter how many times export \
+             is retried while \"ghost\" stays stuck"
+        );
+        assert!(
+            lines(tmp.path()).iter().all(|l| l.row_id != "ghost"),
+            "ghost itself must never appear — it never resolved in this test"
         );
     }
 
@@ -1410,6 +1770,36 @@ mod tests {
         // swaps rows[0]/rows[1] and fails these two assertions.
         assert_eq!(r.rows[0].row_id, "ok-2", "newer at_ms sorts first");
         assert_eq!(r.rows[1].row_id, "ok-1");
+    }
+
+    // Version-escape test (Important, task-6 round-3 review): a line written by
+    // an OLDER binary — before some field existed at all — must still parse.
+    // Every `ShardLine` field except `seq` carries `#[serde(default)]` for
+    // exactly this reason; this test pins that a line missing several of them
+    // (not just one) still counts as a good row, not `malformed`. Mutation
+    // this catches: removing `#[serde(default)]` from any covered field turns
+    // this from `rows.len() == 1, malformed == 0` into `rows.len() == 0,
+    // malformed == 1` — a real "new field ships, old lines start failing"
+    // regression, the exact failure mode the annotation exists to prevent.
+    #[test]
+    fn a_line_missing_defaulted_fields_still_parses_not_malformed() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Deliberately omit `actor`, `op`, `tbl`, `at_ms`, `verb`, and `payload`
+        // — everything except `host` and `seq`, the two fields that are either
+        // required (`seq`) or trivially always present (`host`, the file-name
+        // host, needed for the file to even be selected as foreign/self).
+        let line = serde_json::json!({ "host": "otherbox-99ffee", "seq": 1 }).to_string();
+        write_shard(tmp.path(), "otherbox-99ffee-202609.jsonl", &[&line]);
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(
+            r.malformed, 0,
+            "a line missing only #[serde(default)]-covered fields must not be \
+             counted malformed: {r:?}"
+        );
+        assert_eq!(r.rows.len(), 1, "the row must still arrive: {r:?}");
+        assert_eq!(r.rows[0].row_id, "", "defaulted to the empty string");
+        assert_eq!(r.rows[0].at_ms, 0, "defaulted to 0");
+        assert_eq!(r.rows[0].verb, None, "defaulted to None");
     }
 
     #[test]

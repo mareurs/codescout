@@ -86,6 +86,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "files": r.files,
             "through_seq": r.through_seq,
             "dir": format!("{}/", host::AUDIT_DIR),
+            // Ruling 19 (task-6 round-3 review): a session in a linked worktree
+            // writes into the MAIN checkout's working tree (attribution needs the
+            // real git root), which is correct but invisible to that session's own
+            // `git status` — "correct code in the wrong tree defeats every gate."
+            // Surface the absolute path so the write is visible without guessing.
+            "dest": r.dest,
             "note": "a committed shard is a REPLICA of the local trail, fresh only as of through_seq — the in-transaction guarantee exists on the local database alone. Commit the files to share them.",
         }));
     }
@@ -180,8 +186,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 json!({
                     "host": self_host, "seq": r.seq, "at_ms": r.at_ms, "tbl": r.tbl, "op": r.op,
                     "row_id": r.row_id, "actor": r.actor, "verb": r.verb,
-                    "payload": r.payload.as_deref()
-                        .and_then(|p| serde_json::from_str::<Value>(p).ok()),
+                    // Same fallback as the shard writer (shard.rs's `export`,
+                    // small fix 8, task-2 review): a payload that fails to
+                    // parse as JSON is still audit data, not `null`. Without
+                    // this a local row whose payload can't parse renders as
+                    // `payload: null` here while the SAME row, once shard-
+                    // exported and read back from another host, renders as
+                    // the raw string — a local/shard rendering split for
+                    // identical bytes (cheap fix, task-6 round-3 review).
+                    "payload": r.payload.as_deref().map(|p| {
+                        serde_json::from_str::<Value>(p).unwrap_or_else(|_| Value::String(p.to_string()))
+                    }),
                 }),
             )
         })
@@ -235,7 +250,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 "unit": "per host: [min seq, max seq] found, scoped to the shard files opened for THIS query's window — a host absent here had no shard file survive the window filter",
                 "by_host": shards.hosts,
             },
-            "note": "rows above whose host != self_host are a REPLICA of that host's local trail, fresh only as of that host's last export — see the export mode's own note.",
+            "note": "rows above whose host != self_host are a REPLICA of that host's local trail, fresh only as of that host's last export — see the export mode's own note. Scoping asymmetry (Ruling 17, task-6 round-3 review): filtered_total sums local_filtered_total (machine-wide across every repo sharing this catalog — filter_where carries no repo predicate) with these shard rows (repo-scoped, read from THIS repo's .codescout/audit/ only) — the two halves of one number are counted over different populations.",
         },
         "note": "verb means 'last dispatched verb on the writing connection', not per-statement; actor 'unknown' = a writer that did not identify itself (foreign process or raw sqlite3)."
     });

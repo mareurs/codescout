@@ -5,7 +5,8 @@
 
 # Audit shards are append-only line logs. Different hosts write different
 # files; the same host on two branches unions cleanly, because global order is
-# re-derived from (host, seq, at_ms) and never from line position.
+# re-derived from (at_ms DESC, seq DESC, host ASC) — never from line position —
+# on every read (see read_shards' sort_by in src/librarian/catalog/audit/shard.rs).
 .codescout/audit/*.jsonl merge=union
 
 # Lockfiles and binaries are kept verbatim.
