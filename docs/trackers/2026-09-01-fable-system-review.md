@@ -82,7 +82,7 @@ neither document re-derives the other:
 | SR-10 | Path-derived identity is the strongest wrong-architecture candidate (convergent with TMR-4) | validated |
 | SR-11 | Declare the catalog a rebuildable cache; every durable fix already moves that way | open |
 | SR-12 | Register co-evolution: shared taste selects for ornament the eval measured as worthless | open |
-| SR-13 | Live-session friction inventory (five items) | open |
+| SR-13 | Live-session friction inventory — all five probed; 2 overclaimed, 1 rediscovery, 3 filed | probed |
 | SR-14 | Ranked recommendations | open |
 | SR-15 | The product-identity question: tool or methodology | open |
 
@@ -303,27 +303,114 @@ and structure buy everything. Specific honest observations worth keeping:
 
 ## SR-13 — Live-session friction inventory
 
-**Status:** open
+**Status:** open — **all five probed 2026-09-01, same session. Two were overclaimed, one is a
+rediscovery, three are now filed bug files.**
 **Valid:** dated 2026-09-01
 
-Hit first-hand during this review session; each is small, none is filed as a bug yet (candidates
-for `docs/issues/` or U-N after triage):
+Hit first-hand during this review session, then **verified at the bytes rather than published
+from session memory.** The probing changed three of the five, which is the entry worth reading
+for method rather than content: a friction noticed in passing is a hypothesis, and the review
+that records it is not the pass that establishes it.
 
-1. **Guide injection grain** — first `artifact(get)` auto-injected the whole tracker-conventions
-   guide (~4.5k words) for a read-only query; the librarian guide already injects per-section
-   (`serves:` annotations); tracker-conventions arrives whole.
-2. **Read-path indirection** — one ledger section took three hops (`artifact(get)` → `@tool_*` →
-   `read_file(json_path)` → `@file_*` → line slice). Right for huge outputs; heavy as a default.
-3. **IL-3 granularity** — the gate evaluates the whole command string, so one offending clause
-   kills innocent compound clauses; fired twice on this session's measurement commands.
-4. **Read-refusal on managed ledgers** — blocking `edit_markdown` protects id allocation
-   (correct); blocking `read_markdown` protects only against the read→edit reflex and costs the
-   indirection in (2) on every read.
-5. **Freshness machinery live but unpopulated** — `freshness: "unknown"`,
-   `refreshed_at_commit: null` on every artifact touched; the flagship eval-green-lit provenance
-   keys shipped, but no refresh loop fills them (an IC-3-shaped observation about the showcase
-   feature; overlaps TMR-3).
+| # | as first written | after probing | disposition |
+|---|---|---|---|
+| 1 | guide injection grain | **rediscovery** — already filed, Phase 1 shipped | cite, don't re-file |
+| 2 | "3 calls to read a tracker section" | **overclaimed** — 1 call when the section fits; the real defect is the hint | filed |
+| 3 | "IL-3 granularity" | **misattributed, then twice corrected** — two gates, both defective | filed |
+| 4 | "read-refusal is paternalistic" | **understated** — a real bug with a documented contradiction | filed, high |
+| 5 | freshness unpopulated | **confirmed, not new** — it is TMR-3 | no new file |
 
+**1 — Guide injection grain: REDISCOVERY.** Filed as
+`docs/issues/2026-08-27-guide-topics-are-atomic-nodes-in-an-unmodelled-graph.md`
+(`7579b32b1cd2362f`, open), with Phase 1 — section-grain `get_guide` — **shipped 2026-08-27**
+and a distribution probe run 2026-08-31 (n=166 sessions). Per the activation bootstrap, a
+rediscovery is marked KNOWN and cites the ledger rather than opening a second file.
+
+What this session adds is one cheap measured increment the bug file does not carry:
+`serves:`-annotation coverage across the guide corpus, counted 2026-09-01 —
+`src/prompts/guides/librarian.md` has **13** annotations at 3,097 words;
+`src/prompts/guides/tracker-conventions.md` has **0** at **5,829 words**, the largest guide in
+the corpus and the one that auto-injects on the first `artifact` call of any session. Eight of
+the ten guides have zero. The mechanism is shipped and the biggest consumer is unwired — so
+this is annotation work against an existing mechanism, not a code change, and it is
+independent of both of Phase 2's blockers. Distinct from the bug file's own outstanding item
+(*"`tracker-conventions` is really six topics"*), which it explicitly labels an authoring
+judgement needing re-costing.
+
+```
+for f in src/prompts/guides/*.md; do printf "%s serves | %s words | %s\n" \
+  "$(grep -c '<!-- serves:' "$f")" "$(wc -w < "$f")" "$f"; done
+```
+
+**2 — Read-path indirection: OVERCLAIMED, and the correct form is narrower.** The original
+entry said a tracker section read costs three hops. It does not. A heading-scoped read returns
+inline **in one call**, body included — verified on
+`artifact(get, id=1b5a080fe2efcb6b, heading="## How a cluster becomes a rule")`, which came
+back with `body` and `body_meta.bytes: 1595`. The three-hop chain only appears when the
+*section itself* exceeds the inline budget (`## Index` is 25,531 bytes), where buffering is
+correct behaviour and not a defect.
+
+What survives is a real, small defect: on a buffered heading-scoped `get`, the envelope's
+`hint` names `json_path="$.preview.headings[*]"` — the heading map — when the caller passed
+`heading=` and wants `$.body`. Following the hint costs a wasted call. Filed:
+`docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md`.
+
+**3 — "IL-3 granularity": MISATTRIBUTED, and the correction was itself corrected.** Two
+distinct gates fired four times this session, and the original entry blamed one label for
+both. First correction: only the **source-file** gate has the scope defect, because a pipeline
+genuinely is one command. **That correction was wrong too**, overturned by a probe one call
+later — `echo pipe-scope-probe-ran; find . -name '*.toml' | head -2` refused with the `echo`
+never running, so the pipe gate evaluates its per-pipeline predicate over the whole submitted
+string as well. Both gates share one bug; they differ in that the pipe gate already **names
+the offending clause** and the source gate emits only `"shell access to source files is
+blocked"`. Filed:
+`docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`.
+
+The method note is the point: **two successive framings of this friction were wrong, and both
+were reasoned from the gates' own error text.** The probe cost one call each time. An error
+message is authoritative about its predicate and says nothing about its evaluation scope.
+
+**4 — Read-refusal on managed ledgers: UNDERSTATED. This is the session's most valuable
+finding, and the original wording would have buried it.** Filed high-severity as
+`docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`.
+
+`artifact(action="create")` writes `id: '<16-hex>'` into frontmatter; `librarian_guard`'s
+`stamped` predicate (`src/util/librarian_guard.rs:95`) reads that as "the librarian owns this
+file" — so **every artifact the tool creates is permanently refused by `edit_markdown` /
+`read_markdown`**, whatever its `kind`, augmented or not, ledger or not. Verified by contrast
+in one session: `docs/TEAM-ONBOARDING.md` (created via the tool, `kind: doc`, plain prose)
+refused; `CONTRIBUTING.md` and `README.md` (catalog rows, indexed not created, no frontmatter)
+edited fine. Membership is not the trigger — the stamp is.
+
+It contradicts a ruling that was tried, probed and reverted (`bb9a94d7`), and it converts files
+into the case the guard's pinned test
+(`a_catalogued_but_unaugmented_file_stays_directly_editable`) exists to forbid. The test cannot
+see it: its sample contains no *created* artifact — the recording-filter law, and here widening
+the sample is the fix. And it was **masked until a repair**: the guard learned to read quoted
+ids (archived 2026-08-16), and `create` emits the quoted form, so making the guard correct on
+its stated axis switched the defect on across the whole created population.
+
+The original SR-13 wording — *"blocking `read_markdown` protects only against the read→edit
+reflex"* — argued about whether a **policy** was too strict, having never asked why the file was
+guarded at all. It is the shape `CLAUDE.md` § *Observer Blindness* prescribes a probe for, and
+one `head -4` answered it.
+
+**5 — Freshness machinery live but unpopulated: CONFIRMED, and NOT new.** `freshness:
+"unknown"` and `refreshed_at_commit: null` on every artifact this session touched. Already
+owned by TMR-3 in `docs/trackers/tracker-management-redesign.md` (accepted 2026-07-17:
+push-based maintenance, evidenced by `refresh_count=0` on 21 of 23 augmented trackers
+ecosystem-wide). No new bug file; the observation is a datapoint on an accepted requirement.
+
+**A sixth thing, found by working the other five — the ledger's own counts had drifted, and the
+gate caught it rather than a reader.** Filing three bug files bumped three cluster counts.
+`tests/issue_clusters.rs::every_index_count_matches_the_corpus` failed on the stale Index table
+and printed the re-derivation to run. Reconciling it exposed a second, pre-existing drift: the
+Index rows read 20 / 15 / 10 while the `**Members:**` lines of the same three classes still
+read 19 / 14 / 9 — a count moved, the judgements quoting it did not, which is the defect that
+section's own preamble documents at length. Corpus truth was 21 / 16 / 11; all six were
+re-derived in one pass. **The mechanism, not the vigilance, is what caught this** — nobody was
+looking at the `**Members:**` lines, and the gate does not check them, so the CI failure over
+the table is what put a reader in front of them.
 ## SR-14 — Ranked recommendations
 
 **Status:** open
