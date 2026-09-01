@@ -180,13 +180,25 @@ mcp__codescout__edit_file                   path=src/librarian/tools/doctor.rs  
 ```
 
 **Checked the other direction too, because a positive alone would not settle it.** That session's
-CC transcript records `"name":"Edit"` **0** times and `"name":"Write"` **8** times — and all eight
+CC transcript records `"name":"Edit"` **0** times and `"name":"Write"` **9** times — and all nine
 Writes target `/tmp/…/scratchpad/` (commit messages, two probe scripts). Not one native write
 touched a repo file. So `doctor.rs` was authored **exclusively** through logged tools, and the
 channel would have named its owner correctly.
 
-Positive control on the search itself: the same transcript mentions `doctor.rs` 80 times, so the
-pattern reaches this file — the zero for native repo writes is a real absence, not a broken query.
+Positive control on the search itself: the same transcript mentions `doctor.rs` **187** times, so
+the pattern reaches this file — the zero for native repo writes is a real absence, not a broken
+query.
+
+> **Both counts are as of 2026-09-01 05:20, and the second has already moved once.** This section
+> first published **8** Writes and **80** mentions; both were correct when taken and false within
+> the hour, because the substrate is that session's **live, append-only transcript** and it kept
+> writing — including its replies to this one, which quote `doctor.rs`. Retention-swept corpora
+> make every count a *floor*; an append-only corpus makes every count a floor that **rises**, so a
+> bare number decays in the direction of looking like an undercount rather than an error. The
+> conclusion is unaffected and strengthened (`Edit` still 0, now 9 of 9 native writes to `/tmp`) —
+> which is exactly why nothing would have prompted a re-check. Stamp counts taken over a live file,
+> or state the property (`all native writes are scratch`) rather than its cardinality. Found by
+> auditing this session's other published corroborations after F-92; see F-93.
 
 ### 2. What it does not see — and it is bigger than "native Edit"
 
