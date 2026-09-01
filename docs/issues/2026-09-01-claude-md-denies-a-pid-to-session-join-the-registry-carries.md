@@ -143,13 +143,36 @@ fix must iterate profiles, not just read one.
 that `pid` appears only as the filename (`sessions/<pid>.json`), making the join
 filename→contents, *"which matters for anyone grepping for a `pid` field and concluding it is
 absent (I did, for one call)"*. Measured here across all three profiles: **16 of 16** live
-entries carry a `pid` **field**, including `3624594.json`, their own. The likely cause of the
-negative is whitespace — the file is minified, so the bytes are `"pid":3624594` and a grep for
-`"pid": ` (with a space, the pretty-printed form) matches nothing.
+entries carry a `pid` **field**, including `3624594.json`, their own.
 
-Worth keeping rather than quietly dropping, because the shape is this file's own subject: a
-search that finds nothing is evidence about the search. It also means the join is available
-**both ways** — pid→session from the filename, and session→pid by scanning contents — so a
+**The cause — measured by its author, and it is not the one proposed here.** This file first
+guessed whitespace: minified bytes `"pid":3624594` against a grep for the pretty-printed
+`"pid": `. **Falsified** — `grep -c '": '` over that file returns **0**, so no spacing
+assumption was in play. `codescout-17` supplied the real mechanism: their loop built one
+pattern for five keys,
+
+```
+grep -o "\"$k\":\"[^\"]*\"" "$f"      # requires a QUOTED value
+```
+
+and `sessionId`, `name`, `messagingSocketPath` and `cwd` are JSON **strings** while `pid` is a
+**number**. The type-uniform pattern excluded exactly the one key typed differently.
+Reproduced here: 4 of 5 keys match, `pid` alone returns nothing.
+
+**And the part worth carrying is why it persuaded.** The search was **4/5 correct**, so the
+instrument was visibly working and the one blank read as a property of the *data* rather than
+of the *pattern*. A uniform 0/5 sends you straight to the pattern; a partial hit does not.
+**Partial success is the camouflage** — which makes this a strictly worse case than `R-3`'s
+empty result, because the usual tell (nothing came back, so suspect the search) is exactly
+what a 4/5 removes. Their session logged it as `reconnaissance-patterns:R-160`, their fourth
+false-negative filter that day; one `cargo test` filter reported `ok` having matched 0 of 4820
+tests.
+
+Kept in full rather than silently corrected, because the sequence is the point: a refinement
+was offered and was wrong, the correction to it proposed a mechanism that was **also** wrong,
+and only the third account — from the party who still had the failing command — held. Two of
+the three wrong steps were confident and neither produced an error. It also means the join is
+available **both ways** — pid→session from the filename, and session→pid by scanning contents — so a
 repair does not have to derive one direction from the other.
 
 ## Root Cause
