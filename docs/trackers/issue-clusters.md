@@ -292,8 +292,28 @@ them. The second read *"118 tagged of 495"* and was **152 of 525** when re-deriv
 the same date it was written. The archive is outside the gate, so nothing holds its coverage and any
 figure here decays at the rate bugs are archived; run the two commands above instead. (Re-derived
 the same day under both instruments: `git grep -l` counts a file whose only mention is in prose,
-where the gate reads frontmatter alone — today **zero** files differ, so the two are
-interchangeable, and a bug file quoting a slug it does not declare is what would separate them.)
+where the gate reads frontmatter alone — at **this** unit, *is the file tagged at all*, zero files
+differ today. **At the per-slug unit the two already disagree, and that is the unit every `n` in the
+table uses.**)
+
+**So re-derive a single class with the ANCHORED form, never a bare `git grep -l 'cluster/<slug>'`:**
+
+```
+git grep -clE '^[[:space:]]*-[[:space:]]*cluster/<slug>[[:space:]]*$' -- 'docs/issues/*.md'
+```
+
+The unanchored form counts any file that *mentions* the slug, and the files that mention a slug they
+do not declare are **the files that were retagged** — a bug file recording its own move names the
+class it left. Measured 2026-09-01: `guard-narrower-than-its-name` reads **12 unanchored against 11
+anchored** and `assertion-that-cannot-fail` **4 against 3**, both inflated by
+`2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md` and its sibling, which say in
+prose which class they came from. The error therefore lands precisely on the classes under active
+adjudication, where the count is being read to make a decision. Found by a peer session
+(`codescout-3c`) while re-deriving the figure above, and it very nearly shipped the other way — as a
+refutation of a correct measurement. The sentence before this one used to call the two instruments
+*"interchangeable"* and name a file quoting an undeclared slug as the hypothetical that would part
+them; two such files already existed.
+
 **Every `n` in the table above therefore remains a floor.** Covering the archive would need an
 explicit `cluster/unclassified` slug meaning *looked, nothing fits* — a taxonomy decision, not a
 gate one.
