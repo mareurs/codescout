@@ -172,6 +172,34 @@ about the class.
 
 **Mechanism status:** partial.
 
+**Instances, 2026-09-01 — graded against the `Class` field rather than by resemblance.**
+Two sessions re-derived this class from scratch across four exchanges without either
+recognising it, which is independent confirmation of an entry that was argued rather than
+measured into existence. Three of that night's four qualify, and the grading is the point:
+
+- `bug-fix-session-log:F-93` — a **count** omitting *when* it was taken, over a peer's live
+  append-only transcript. `Write` 8 and `doctor.rs` mentions 80 were true when published and
+  read 9 and 187 within the hour. The author's context supplies the instant for free.
+- The withdrawn `same-session — 0` row in
+  `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — a **count**
+  omitting its denominator, which was 1 and not 11, inviting a 100% rate off n=1.
+- The blind `grep` on the same page — a **query result** omitting the key, which enumerated
+  only entries already known to exist and so could not match the one arriving. This is the
+  case the *"report a search count together with the key you searched for"* mechanism above
+  already predicts, arrived at independently.
+
+**`bug-fix-session-log:F-92` is deliberately NOT cited here.** It looks like a fourth and is
+not: its claim was not under-specified, it was **unverified** — support asserted and never
+checked. The remedies diverge, which is what makes the distinction worth keeping. OB-1 says
+*publish the parameter your reader lacks*; F-92 says *check the support you are about to
+publish*. A reader inheriting F-92 as an OB-1 instance would reach for the first and the
+claim would still be wrong.
+
+**The vigilance count above is deliberately NOT bumped.** Doing so needs each instance judged
+against *"committed by an author actively writing about the class"*, which has not been
+derived for these three — and bumping an underived count inside the entry documenting
+underived counts is a joke this corpus has made twice already.
+
 - **Publish the derivation, not the value.** *"8 verbs; the block prints 9 lines because
   clap appends its own `help`; and it is 8-or-nothing because the `#[cfg]` sits on the
   whole `Commands::Artifact` variant"* survives re-measurement. A bare `8` does not.
