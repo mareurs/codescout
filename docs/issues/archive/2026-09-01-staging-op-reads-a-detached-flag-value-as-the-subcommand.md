@@ -1,5 +1,5 @@
 ---
-id: '882fea0f3d66d72f'
+id: e06f747f579eca84
 kind: bug
 status: fixed
 title: 'BUG: staging_op reads a detached global-flag value as the subcommand, so `git -C <path> add` loses the stager'
@@ -154,12 +154,24 @@ Run staging commands with the cwd inside the repo (`cd "$P" && git add f`), or u
 
 ## Resume
 
-N/A — root cause measured, fixed at `7278508e`, pinned by five regression cases.
+N/A — root cause measured, fixed at `7278508e` (patch-id
+`b631c794728005941272b2191a709329644ecccd`), pinned by five regression cases, and archived here
+the same day.
 
-Archive is owed (`docs/issues/archive/`) once someone re-points the two citations of this file:
-`docs/issues/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md` § *References*
-and the `7c44a605` commit message. Deliberately not done in the same breath as the fix while
-four peer sessions are live in this checkout.
+Archived via `artifact(action="move")`, which re-keyed the artifact: `882fea0f3d66d72f` →
+**`e06f747f579eca84`**, 1 event grafted. Cite the new id; the old one no longer resolves.
+
+The one live citation of the old path — `docs/issues/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md`
+§ *References* — was re-pointed in the same commit as the move. The citation population was
+established with an **unfiltered** sweep rather than the `--include='*.md' --include='*.rs'`
+form the guide flags as silently lossy: measured on this repo, live citers of `docs/issues/`
+span `.md`, `.rs`, `.yaml`, `.sh`, `.json`, `.toml`, `.py` and `.yml`, so the narrow filter
+would have returned a clean zero for any of the latter six. It happened not to matter here —
+but that is a fact about this bug, not about the sweep.
+
+The three commit messages naming the old path (`7c44a605`, `7278508e`, `fc48f829`) are
+deliberately **not** repaired: history is not rewritten, and a commit message is a record of
+what was true when written.
 ## References
 - `scripts/post-index-change-stage-log.sh:99-116` (`staging_op`)
 - `docs/issues/archive/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md` — the fix (`a987df96`) this defect survives

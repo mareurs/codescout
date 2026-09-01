@@ -182,4 +182,4 @@ Open. Mechanism measured and reproduced; fix and regression cases owed.
 - `scripts/pre-commit-foreign-index.sh` (consumer)
 - `scripts/post-index-change-stage-log.sh:83,87,124,141` (the silent `exit 0` paths) — line numbers verified against `71499331`
 - `docs/issues/archive/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md` — same end state, different cause
-- `docs/issues/2026-09-01-staging-op-reads-a-detached-flag-value-as-the-subcommand.md` — found in the same pass
+- `docs/issues/archive/2026-09-01-staging-op-reads-a-detached-flag-value-as-the-subcommand.md` — found in the same pass; fixed at `7278508e` and archived
