@@ -1423,6 +1423,10 @@ them.
 
 **Verdict:** hit.
 
+**Valid:** dated 2026-09-02
+
+*(Re-measured 2026-09-02 — see § **Re-run** at the end. The declaration previously read `dated 2026-07-28` and sat **between items 1 and 2 of the numbered list below**, at column 0, which is where the parser wants it and nowhere a reader wants it: with no blank line before `2.`, rule 2 rendered as lazy continuation of the `**Valid:**` paragraph rather than as a list item, so the entry's "two separable rules" displayed as one. `scan_dated_stale` reported this entry for 35 days and could not have reported that — it parses the declaration and has nothing to say about the prose around it.)*
+
 An hour after filing `2026-07-28-edit-code-target-base-from-stale-lsp-range.md`, scouting
 before implementing its prescribed fix showed the `## Root cause` section was not
 supported. The file cited two real things — `target_base = leading_ws(lines[…])` at the
@@ -1441,7 +1445,6 @@ Two separable rules:
    end is responsible for them. Reading both ends feels like following the data; it is
    actually sampling the two points least likely to contain a guard.
 
-**Valid:** dated 2026-07-28
 2. **Re-scout your own artifact on re-entry.** A bug file written while the surprise is
    fresh is exactly right for *capture* and unreliable for *causation* — and the moment it
    is committed, its `## Root cause` becomes what the next reader trusts instead of
@@ -1496,6 +1499,69 @@ bullet opening verbatim: *"Re-entering your OWN bug file or plan to implement it
 seam — authorship is no exemption."* The read-the-layer-between-two-functions clause and the
 *temporal, not attentional* countermeasure both carried across. Also had no `Status:` line
 before the `F-7` sweep.
+
+### Re-run 2026-09-02 — the rate held; the countermeasure did not
+
+Produced by `librarian(action="doctor")`'s `entry_dated_stale`, which reported this entry at
+**35 days, exposure 17** — the highest-exposure decayed statement in the project. The instruction
+that check gives is *re-run the measurement and record the new figure*, so:
+
+**The original figure, 2026-07-28:** *"the third session-authored artifact to fail under later
+scrutiny in one sitting"* — `R-46`/`F-34`, `F-35`, `F-37`. **n=3, one sitting.**
+
+**The new figure, 2026-09-02, one sitting:** **two more**, both by this entry's re-reader, and one
+of them is the tight case rather than the loose one.
+
+- **`tracker-hygiene-log:HY-25` — a full instance, both halves.** Written while doing the work it
+  describes, published with `**Mechanism status:** none yet` and a three-option list, then re-entered
+  **to implement those options** — R-49's exact trigger. Option 3 had shipped two weeks earlier as
+  `scan_cited_but_undeclared`. Retracted 40 minutes after filing.
+- **`bug-fix-session-log:F-96` — the mechanism half only, recorded as such.** A claim (`core.hooksPath
+  points at scripts/`) published to three surfaces *as a reason*, false at two levels. It matches
+  *"written while doing the work they describe, when the writer's model is most confident and least
+  tested"*, but nobody re-entered it to implement anything, so it is not the re-entry trigger. Counted
+  under the mechanism, not under the trigger — the distinction this entry's own "n=3 in one sitting"
+  did not draw, and should have.
+
+**Running total: n=5 across two sittings 36 days apart**, unit = *session-authored artifacts that
+failed under later scrutiny in the sitting that produced them*. The rate claim holds.
+
+**What does NOT hold is this entry's countermeasure, and that is the finding.** *"The countermeasure
+is temporal, not attentional — re-read on re-entry, not harder on write"* is half right, and the half
+it misses is the one that did the work:
+
+| sitting | instances | what actually caught them |
+|---|---|---|
+| 2026-07-28 | 3 | **the author's own re-scout** — temporal, same observer |
+| 2026-09-02 | 2 | **neither was self-caught** |
+
+`F-96` was caught by a **peer session** (`codescout-3e`) contradicting a published claim. `HY-25` was
+caught by an **unconditional standing rule** — CLAUDE.md § *Observer Blindness*'s *grep `tests/`,
+`scripts/pre-commit-*` and hooks for a population's name before any campaign over it* — which fires
+on "about to start a campaign", a trigger that occurs anyway and is unrelated to suspicion. **In
+neither case did re-reading on re-entry fire.** In `HY-25`'s case re-entry *did* happen — that is
+what the session was doing — and re-reading the entry produced no doubt at all, because the entry was
+internally consistent. What broke it was reading a **different artifact** (the code).
+
+So the refinement: **re-reading is temporal but it is still the same observer, and this class's
+defining property is that the author holds the belief that makes the error invisible.** Ranked by
+what was measured rather than by what is comfortable:
+
+1. **A standing rule tied to an unrelated trigger** — fires without suspicion. Caught `HY-25`.
+2. **A peer with a different context** — not a more careful reader, a differently-situated one.
+   Caught `F-96`.
+3. **The author's own re-read on re-entry** — what this entry recommends. Caught 3 of 3 in 2026-07,
+   **0 of 2 in 2026-09.** Not refuted — 5 datapoints, and the 2026-07 three are real — but it is now
+   the *weakest* of three measured instruments rather than the recommendation.
+
+**Owed downstream, not done here:** the served `SKILL.md` § Phase 1 bullet carries the *temporal, not
+attentional* wording verbatim, so the skill currently recommends the instrument that scored 0 of 2.
+That is a cross-repo edit in `claude-plugins/codescout-companion/` and a change to a promoted law, so
+it is named rather than taken unilaterally — and it needs a third sitting before the ranking above is
+worth shipping into a skill. **Re-run trigger:** the next time `entry_dated_stale` reports this entry.
+
+**Status:** promoted-to-permanent-docs, and **the promoted wording is now known to be incomplete** —
+see § *Re-run 2026-09-02*.
 
 ## R-50 — The view is not the set: five errors, one shape
 
