@@ -178,10 +178,31 @@ together" signal pointed at this fix correctly. See
 ### R1 (2026-09-01, marius) — pipeline calls exec `bash -c`, not `sh -c`
 
 **Settles the shell half of #4 (pipefail) and unblocks #7.** Strategy C's headline advantage
-was *"pipefail = `set -o pipefail` in shell wrapper, no Rust state machine"* — and
-`set -o pipefail` is not POSIX `sh`. Measured 2026-09-01: `src/platform/unix.rs:71-86` execs
-`Command::new("sh")`, so the advantage rested on a shell codescout does not use. **Ruled: use
-`bash -c` for pipeline calls.**
+was *"pipefail = `set -o pipefail` in shell wrapper, no Rust state machine"*, and
+`src/platform/unix.rs:71-86` execs `Command::new("sh")` — so the advantage rested on a shell
+codescout does not use. **Ruled: use `bash -c` for pipeline calls.**
+
+**Measured 2026-09-01, and the reason is NOT "pipefail is not POSIX".** That was the
+rationale first recorded here and it is wrong twice over: POSIX Issue 8 (2024) adds
+`pipefail`, and upstream dash implements it. The real discriminator is **distro packaging of
+the same upstream version**:
+
+| system | `/bin/sh` → | version | `set -o pipefail; false \| true` |
+|---|---|---|---|
+| this dev host (Arch) | bash | — | works (tautological — it *is* bash) |
+| Debian 13 trixie | dash | 0.5.12-**12** | **works** — `pipeline_status=1` |
+| Alpine 3.23 | busybox | 1.37.0 | **works** — `pipeline_status=1` |
+| **Ubuntu 24.04 — `ubuntu-latest`, our CI runner** | dash | 0.5.12-**6ubuntu5** | **`sh: 1: set: Illegal option -o pipefail`, exit 2** |
+
+Same upstream dash `0.5.12`; Debian's `-12` carries the pipefail patch and Ubuntu's
+`-6ubuntu5` does not. `.github/workflows/ci.yml` runs `ubuntu-latest` on every non-matrix
+job, so the one system where it fails is the one that gates merges. **R1 stands — on a
+narrower and better-evidenced claim than the one it was ruled on.**
+
+> **Do not re-derive this from the first two rows.** Both were reached for because the images
+> happened to be local, and both *support* pipefail — a probe that stopped there would have
+> retracted a correct ruling. The sample has to be chosen by relevance to the proposition (CI),
+> not by availability. See `design-backlog-session-log:F-5`.
 
 **Why this is nearly free — half of it is already shipped.** `src/platform/windows.rs:182-193`
 already execs `git_bash_path()` with `-c`; Windows has been on bash the whole time, for the

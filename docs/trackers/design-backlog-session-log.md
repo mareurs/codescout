@@ -13,7 +13,7 @@ topic: design backlog triage
 entry_prefix:
   - F
   - W
-entry_high_water_F: 4
+entry_high_water_F: 5
 ---
 
 # Session Log — Design-Decision Backlog Triage
@@ -81,6 +81,7 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 | F-2 | 2026-09-01 | low | measurement | fixed-verified | a grep-derived tool count was scoped to the regex's shape, not to the registry |
 | F-3 | 2026-09-01 | high | stale-substrate | fixed-verified | the pipeline tracker's Resume routes an implementer to the strategy its own review rejected |
 | F-4 | 2026-09-01 | med | methodological | fixed-verified | a design cost was illustrated with a use case the source never claimed, and no caller can reach |
+| F-5 | 2026-09-01 | high | measurement | fixed-verified | two systems agreed and both were the wrong sample — a correct ruling was one message from retraction |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -529,6 +530,69 @@ then cite it.
 
 **Rests on:** `src/tools/run_command/inner.rs:436-439`; `src/platform/unix.rs:67-69`, `:71-86`,
 `:80`; `src/platform/windows.rs:182-193`; the `run_command` tool schema;
+`docs/trackers/run-command-pipeline.md` § *Rulings* R1.
+
+## F-5 — two systems agreed and both were the wrong sample — a correct ruling was one message from retraction
+
+**Valid:** dated 2026-09-01
+
+**Category:** measurement · **Severity:** high · **Status:** fixed-verified
+
+**Observed.** R1 was ruled on my claim that *"`set -o pipefail` is not POSIX sh; Debian and
+Ubuntu ship dash as `/bin/sh`, where it errors."* I had measured only that `src/platform/unix.rs:71`
+execs `sh`, and that **this** host's `/bin/sh` is bash — which is tautological evidence, since
+bash obviously supports pipefail. The failure half was asserted, never run: no dash, ash,
+busybox, ksh or mksh exists on this machine. Asked to verify, I found `docker` present and
+measured it.
+
+**Got — and the order the evidence arrived in is the finding.** First two probes, chosen
+because the images were already local:
+
+| system | `/bin/sh` → | version | result |
+|---|---|---|---|
+| Debian 13 trixie (`postgres:15`) | dash | 0.5.12-**12** | **works** — `pipeline_status=1` |
+| Alpine 3.23 (`postgres:16-alpine`) | busybox | 1.37.0 | **works** — `pipeline_status=1` |
+
+Both **falsified** the claim. At that point I had a complete, coherent, two-system refutation
+and was one message away from publishing *"my claim is wrong, R1's rationale is falsified"* —
+a retraction of a **correct** ruling. What stopped it was noticing the sample had been chosen
+by what was on the disk rather than by what the proposition was about. The proposition was
+about CI. `.github/workflows/ci.yml` runs `ubuntu-latest`. A third image was local:
+
+| system | `/bin/sh` → | version | result |
+|---|---|---|---|
+| **Ubuntu 24.04 (= `ubuntu-latest`)** | dash | 0.5.12-**6ubuntu5** | **`sh: 1: set: Illegal option -o pipefail`, exit 2** |
+
+**Root cause of the near-retraction — the sample was selected by availability, and
+availability is uncorrelated with the proposition.** Two systems agreeing is evidence only if
+their scopes differ *along the axis in question*. Debian and Alpine agree here because neither
+is Ubuntu, and Ubuntu is the entire claim. That is CLAUDE.md § *Reaching a Peer Session*'s
+"check independence, not agreement" — one blind spot counted twice — reappearing in a shell
+probe rather than a session enumeration, which is why it was not recognised on sight.
+
+**And the true discriminator is finer than any of the vocabulary in play.** Not "POSIX vs
+bash": POSIX Issue 8 (2024) **adds** `pipefail`, so "not POSIX" was stale knowledge, true
+before 2024 and false now. Not "dash vs bash" either: Debian and Ubuntu ship the **same
+upstream dash 0.5.12** and disagree, because Debian's `-12` packaging carries the pipefail
+patch and Ubuntu's `-6ubuntu5` does not. A claim pitched at the level of "shell family" cannot
+be right or wrong — it is not fine-grained enough to have a truth value. Both my original
+claim and my near-retraction were pitched there.
+
+**Net effect on the ruling: none, and that is the uncomfortable part.** R1 stands. Had I never
+verified, the ruling would still have been correct and the recorded rationale still wrong —
+the outcome is insensitive to whether the reasoning was checked, which is exactly the shape
+that lets bad rationale accumulate behind good decisions. The tracker now carries the measured
+table and an explicit warning not to re-derive the conclusion from the first two rows.
+
+**Fix idea.** When probing "does X fail on system class Y", enumerate the *deciding* system
+first — the one the decision is about — and treat convenient systems as context, never as the
+sample. Concretely here: read `.github/workflows/ci.yml` for `runs-on` **before** choosing an
+image, not after two probes disagreed with the hypothesis.
+
+**Rests on:** measured 2026-09-01 via `docker run --rm <img> sh -c 'set -o pipefail; false |
+true; echo pipeline_status=$?'` against `postgres:15`, `postgres:16-alpine`, and
+`rocm/llama.cpp:…ubuntu24.04_server`; `.github/workflows/ci.yml:37,70,88,241,273,306,500,519,542`
+(`runs-on: ubuntu-latest`); `src/platform/unix.rs:71-86`;
 `docs/trackers/run-command-pipeline.md` § *Rulings* R1.
 
 ## Template for new entries
