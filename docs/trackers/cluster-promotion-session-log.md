@@ -14,8 +14,8 @@ topic: cluster promotion and mechanism design
 entry_prefix:
 - F
 - W
-entry_high_water_F: 3
-entry_high_water_W: 2
+entry_high_water_F: 4
+entry_high_water_W: 3
 ---
 
 # Session Log — Cluster Promotion (IC-N → OB-N)
@@ -49,6 +49,7 @@ entry_high_water_W: 2
 | F-1 | 2026-09-01 | med | architectural | open | `OB-7`'s mechanism cites an LSP-verified result to justify a text-search check |
 | F-2 | 2026-09-01 | high | tooling | open | `ListAgents` enumerated 4 of 20 live sessions, so authorship inferred from it came from a 20%-complete population |
 | F-3 | 2026-09-01 | med | architectural | fixed-verified | The split's load-bearing sentence was refuted as a population claim 67 seconds before it was committed |
+| F-4 | 2026-09-01 | med | tooling | open | The ledger's count cells go stale by CONCURRENCY — 3 re-derivations invalidated in one session by peer filings; `tests/issue_clusters.rs` checks tag validity but never the Index numbers |
 
 ## Wins Index
 
@@ -56,6 +57,7 @@ entry_high_water_W: 2
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-09-01 | med | re-probe the served copy after a rebuild (`readlink /proc/<pid>/exe`) | 5 of 11 peers on deleted inodes, invisible to every existing instrument; an open bug's fix shown to fail open | validated |
 | W-2 | 2026-09-01 | med | compare pre-stage diff counts against `git commit`'s own `--stat` | capture of another session's hunks was invisible to four guards that all passed correctly; 23/16 measured vs 58/19 committed | validated |
+| W-3 | 2026-09-01 | high | blind a review by REDACTING the reviewer's copy, then name the second leak channel | slug-only redaction would have shown one reader `IC-14` twice in prose — that file's retag was the audit's only promotion-tripping finding | validated |
 
 ---
 
@@ -370,6 +372,109 @@ The instrument is wrong in **both directions at once**: it misses 3 of the 4 pee
 **Rests on:** the falsification condition being per-pair, as `IC-1` itself worded it. If it is ever restated in population terms, this entry's resolution stops holding and the split needs re-arguing.
 
 **Fix idea / Pointer:** `docs/trackers/issue-clusters.md` `IC-1`, falsification paragraph; `cluster-promotion-session-log:F-2` for the measurement; commit `0dea224` for the split.
+
+## F-4 — the ledger's count cells go stale by CONCURRENCY, so a manual sweep is invalidated by the next commit
+
+**Observed:** 2026-09-01, across one session that re-derived `docs/trackers/issue-clusters.md`'s
+Index counts three separate times.
+
+**When:** Post-rebuild reconnaissance, after committing a blind second-read audit whose commit
+message asserted *"All 17 table cells re-derived against `git ls-files` and matching."*
+
+**Expected:** A hand-maintained count table goes stale when someone forgets to update it — a
+neglect failure, fixed by a sweep.
+
+**Got (measured):** It goes stale because **peer sessions file bugs into the same checkout while
+you are deriving**. Three invalidations, none of them anyone's mistake:
+
+1. First derivation (session start) gave IC-3 = 20, IC-6 = 29 and the table said 19 / 27. Fixed
+   in `eee6eedf`.
+2. During the blind audit — the three classifier subagents ran ~6–9 minutes — a peer filed
+   `docs/issues/2026-09-01-git-apply-cached-stages-but-records-no-owner.md` (IC-3) and
+   `docs/issues/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md` (IC-6), taking
+   them to 22 and 30. Caught only because the retag pass re-derived all 17 cells before
+   committing `d928932e`.
+3. About two hours later, the peer's audit-trail work landed three more archived bug files —
+   `audit-records-the-statement-not-the-change-so-98-percent-is-empty` (IC-2),
+   `audit-growth-concentrates-in-augmentation-params-health-blind-to-bytes` (IC-13),
+   `audit-trigger-can-abort-writer-on-null-key-or-blob` (IC-14) — each +1, so `d928932e`'s
+   "all 17 match" claim was false within hours of being true.
+
+**Probable cause:** The count is a *query result* stored as *text*. Nothing binds the two. The
+ledger already knows this — its own preamble says `n` is a snapshot — but the remedy it
+prescribes is re-derivation, which is an act with a timestamp, and therefore has the same decay
+the cell does. The gate that exists (`tests/issue_clusters.rs`) enforces **tag validity** — one
+known slug per tracked file under `docs/issues/` — and does not read the Index table's numbers at
+all, so a drifted cell is mergeable.
+
+**Workaround:** None that holds. Re-deriving before any judgement that quotes a count is correct
+and is what caught instances 2 and 3, but it cannot make the committed cell true afterwards.
+
+**Severity:** med — no wrong judgement shipped, because every promotion call this session
+(`IC-10` clearing both bars, `IC-6`'s rule already landed) was made against a freshly derived
+number rather than a read cell. The cost is a commit message asserting a state that is no longer
+true, in a file whose entire purpose is that its counts drive promotion decisions.
+
+**Fix idea / Pointer:** Extend `tests/issue_clusters.rs`. It already has the two halves it needs:
+`valid_slugs()` parses this ledger's `**Slug:**` declarations, and the test walks the bug corpus.
+Add an assertion that each Index row's `n` equals the count of files carrying that slug. Note the
+population differs from the existing check — cells count **open + archive**, while the tag-validity
+check is deliberately open-only — so it is a second walk, not a reuse of the first. That makes a
+drifted cell a red test rather than a thing the next reader happens to notice.
+
+**Status:** open
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the ledger being a shared, concurrently-written artifact in a checkout with more
+than one active session — not on any property of the counting method, which was correct each time.
+
+## W-3 — blinding by redaction beat blinding by instruction — and the second leak channel was the one that mattered
+
+**Observed:** 2026-09-01, designing the independent blind second read of the 2026-09-01 archive
+classification pass (43 files, three Opus readers, `docs/trackers/issue-clusters.md`).
+
+**Pattern:** When a review must be blind to a prior verdict, **remove the information from the
+copy the reviewer reads** rather than instructing the reviewer not to look. Then ask what the
+*second* channel is: the obvious identifier is rarely the only one carrying the answer.
+
+Here the obvious channel was the `cluster/<slug>` frontmatter tag. The second was `IC-N` tokens
+in prose — these bug files cite each other's classes, and a ledger entry's id is as good as its
+slug. Both were redacted in working copies (`sed -E 's#cluster/[a-z0-9-]+#cluster/REDACTED#g;
+s#\bIC-[0-9]+\b#IC-REDACTED#g'`), verified zero-leak on both patterns across all 43 files before
+dispatch, with the ground truth held outside the readable directory.
+
+**Counterfactual:** `docs/issues/archive/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md`
+frames its own classification in its `## Resume` and `## References` sections — *"this file's tag
+is `cluster/…` and that is the trap"*, plus a reference line naming its `IC-N` disclaimer. Its
+reader met that framing as `cluster/REDACTED` / `IC-REDACTED`, reasoned from the file's measured
+root cause instead, and returned a **different class** — which the adjudication then confirmed
+against the file's own text and applied, taking `IC-10` to n=3 and tripping its promotion
+condition. Slug-only redaction would have shown that reader the string `IC-14` twice in prose,
+anchoring it on the verdict under audit. The single highest-value finding of the audit came from
+the channel the obvious redaction misses.
+
+**Confirming data points:**
+1. This session — `IC-N`-in-prose was a live leak channel in at least one of 43 files, and it was
+   the file whose retag had a promotion consequence.
+2. Pending: any future blind review in this repo where the second channel is checked for.
+
+**Impact:** high for audit validity — a blind review that leaks is worse than no review, because
+its agreement rate is then evidence about the leak rather than about the taxonomy. The 37/43
+figure is only meaningful if blindness held.
+
+**Promote-when:** a second blind-review design in this repo finds a non-obvious leak channel by
+asking the question. At 2 datapoints, promote to the reconnaissance skill as a Phase 1 bullet:
+*"blinding is structural, not instructed — redact the copy, then name the second channel."*
+
+**Status:** validated — single datapoint, leak channel identified and closed before dispatch,
+zero-leak verified by probe rather than assumed.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the general principle that a review's independence is a property of what the
+reviewer can *read*, not of what they were *told* — the same reasoning as `CLAUDE.md`
+§ *Observer Blindness*'s third requirement, a check that runs when nobody is worried.
 
 ## Template for new entries
 

@@ -148,7 +148,15 @@ names the class — but do not expect an IC number back.
 
 > Hand-maintained reading surface. The `## IC-N — <title>` headings are what define the tokens
 > and what `link_scan` resolves; this table is for scanning. `n` is a snapshot — re-run the
-> `**Members:**` query before trusting it.
+> `**Members:**` query before trusting it. **Measured 2026-09-01: three separate re-derivations
+> were invalidated inside one session** — IC-3 20→22 and IC-6 29→30 while a blind audit was
+> running, then IC-2, IC-13 and IC-14 each +1 about two hours later — every one of them a peer
+> session filing bugs in the same checkout, none of them a mistake by whoever last wrote the cell.
+> So these cells are stale **by concurrency**, not by neglect, and no manual sweep can hold them:
+> the sweep's own result is invalidated by the next commit. `tests/issue_clusters.rs` already
+> parses this file's `**Slug:**` set and walks the corpus for tag validity; asserting each table
+> cell against its derived count is the missing gate, and it is the only thing that would make a
+> drifted cell unmergeable rather than merely noticed later.
 >
 > **When a count moves, re-derive every judgement that quotes it, in the same pass.** The
 > 2026-08-31 backfill updated `**Members:**` and this table but not `**Promotes to:**` — the
@@ -183,7 +191,7 @@ names the class — but do not expect an IC number back.
 | id | class | slug | n | promotes to | mechanism |
 |---|---|---|---:|---|---|
 | IC-1 | the blast radius of a write is wider than the set of peers you can see | `blast-radius-exceeds-visibility` | 3 | `OB-3` — 2026-09-01 | partial; **split taken → IC-17** |
-| IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 19 | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
+| IC-2 | a gate keyed on an event it cannot observe substitutes a proxy | `gate-keyed-on-unobservable-event` | 20 | `OB-6` — promoted 2026-09-01 | designed (exemplar shipped) |
 | IC-3 | declaration is not execution | `declared-not-wired` | 22 | `OB-7` — promoted 2026-09-01 | **family 1 GATED** (`tests/tool_reachability.rs`); 2 of 3 families open |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | 8 | `OB` — passes admission test; hook owed | none yet |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | 11 | `H` — six subsystems; mechanism owed | none yet |
@@ -194,8 +202,8 @@ names the class — but do not expect an IC number back.
 | IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 3 | **clears both bars 2026-09-01** — n=3, spread 3, via second-read retag | none yet — candidate is `H` (a provenance channel for working-tree state) |
 | IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 4 | clears count; **spread adjudicated 2026-09-01 — 4 doc surfaces / 4 subsystems** | none yet — one of three sub-shapes is mechanizable |
 | IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | 0 | not yet — 1 instance, untagged; archive pass found none | none yet |
-| IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 14 | clears count; **spread adjudicated 2026-09-01 — clears, 6 or 11 depending on unit** | none yet — **10 share one layer** (denominator now 14; ratio not re-derived post-retag) |
-| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 9 | clears count; **spread adjudicated 2026-09-01 — 4 subsystems / 6 distinct guards** | none yet — one sub-shape of three is mechanizable |
+| IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 15 | clears count; **spread adjudicated 2026-09-01 — clears, 6 or 11 depending on unit** | none yet — **10 share one layer** (denominator now 14; ratio not re-derived post-retag) |
+| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 10 | clears count; **spread adjudicated 2026-09-01 — 4 subsystems / 6 distinct guards** | none yet — one sub-shape of three is mechanizable |
 | IC-15 | a parameter is accepted then silently dropped | `accepted-parameter-silently-dropped` | 15 | clears count; **spread adjudicated 2026-09-01 — 6 subsystems** | **partial** — behavioural probe on 2 of ~7 multi-action tools |
 | IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | 3 | **clears both bars 2026-09-01**; rule already in `CLAUDE.md` — the third instance buys measurability, not a rule | designed; positive-form guard owed |
 | IC-17 | a shared resource carries no owner, so enumerating the peer does not help | `shared-resource-carries-no-owner` | 15 | `OB-8` (+ OB-2) — 2026-09-01 | partial |
