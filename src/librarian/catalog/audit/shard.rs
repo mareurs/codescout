@@ -61,19 +61,22 @@ const CHURN_KEYS: &[&str] = &["file_mtime", "file_sha256", "updated_at", "missin
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ShardLine {
-    // `#[serde(default)]` on every field below except `seq`: this file's
-    // entire purpose is being read by binaries of OTHER vintages (a shard is
-    // a git-merged file, committed by whichever version wrote it, read back
-    // by whatever version is running now). Without a default, adding any new
-    // required field on a future version makes every already-committed line
-    // from an older version fail to parse — `read_shards` would count each
-    // one as `malformed`, not "missing this field", the day that version
-    // ships (Important, task-6 round-3 review). `seq` is deliberately
-    // excluded: it is the dedup key in `read_shards`' `(host, seq)` `seen`
-    // set, and a defaulted `0` would silently collide two genuinely distinct
-    // rows into one `seen` entry rather than surfacing a real parse failure
-    // — worse than counting the line `malformed`, which at least says so.
-    #[serde(default)]
+    // `#[serde(default)]` on every field below except `host` and `seq`: this
+    // file's entire purpose is being read by binaries of OTHER vintages (a
+    // shard is a git-merged file, committed by whichever version wrote it,
+    // read back by whatever version is running now). Without a default,
+    // adding any new required field on a future version makes every
+    // already-committed line from an older version fail to parse —
+    // `read_shards` would count each one as `malformed`, not "missing this
+    // field", the day that version ships (Important, task-6 round-3 review).
+    // `host` and `seq` are deliberately excluded, and for the SAME reason:
+    // together they are the dedup key in `read_shards`' `(host, seq)` `seen`
+    // set, and a defaulted `""`/`0` on either half would silently collide two
+    // genuinely distinct rows into one `seen` entry rather than surfacing a
+    // real parse failure (task-6 final review, Minor — `seq` alone was
+    // excluded pre-final-review, which applied the argument to only one half
+    // of a composite key) — worse than counting the line `malformed`, which
+    // at least says so.
     pub host: String,
     pub seq: i64,
     #[serde(default)]
@@ -212,10 +215,29 @@ fn gaps_key(repo_root: &Path) -> String {
 }
 
 fn open_gaps(conn: &Connection, repo_root: &Path) -> Result<BTreeSet<i64>> {
-    Ok(gc::get_meta(conn, &gaps_key(repo_root))?
-        .and_then(|v| serde_json::from_str::<Vec<i64>>(&v).ok())
-        .map(|v| v.into_iter().collect())
-        .unwrap_or_default())
+    // Same root cause, same fix family, as the atomicity note on `export`'s
+    // tail (task-6 final review, Important): a malformed persisted gap set is
+    // the ONE piece of state whose loss is unrecoverable, so a parse failure
+    // here must surface as an error, not silently collapse to an empty set.
+    // The old `.ok()` -> `unwrap_or_default()` chain reached the identical
+    // loss path from a different direction — corrupt JSON (truncated write,
+    // manual edit, a future format change) would read back as "no open
+    // gaps", `export` would then treat every genuinely-open gap below
+    // `written_start` as "already written", and each would be dropped for
+    // good with no counter or warning, exactly as an un-persisted gap would.
+    match gc::get_meta(conn, &gaps_key(repo_root))? {
+        None => Ok(BTreeSet::new()),
+        Some(v) => {
+            let parsed: Vec<i64> = serde_json::from_str(&v).with_context(|| {
+                format!(
+                    "corrupt {} value in catalog_meta for {}: {v:?}",
+                    gaps_key(repo_root),
+                    repo_root.display()
+                )
+            })?;
+            Ok(parsed.into_iter().collect())
+        }
+    }
 }
 
 /// Resolve which repo an audited row belongs to, by walking from the row
@@ -625,8 +647,33 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     // a_failed_append_never_advances_the_watermark/a_crash_between_append_and_
     // watermark_duplicates_rather_than_loses below, which pin it from both
     // directions.
+    //
+    // All three cursors below are persisted in ONE transaction, gaps FIRST
+    // (task-6 final review, Important). The three are not interchangeable on
+    // partial failure: a stale `watermark` just re-scans more rows next call,
+    // and a stale `written_through` just re-writes (dedup-safe, "duplicate,
+    // never lose") rows already on disk — both fail safe. A stale (absent)
+    // `gaps` set does not: if `written_through` had already committed while
+    // `gaps` had not, the next call hits `seq <= written_start &&
+    // !gaps_start.contains(&seq)`, skips the still-open gap as "already
+    // written", and — because a skipped row is never re-added to
+    // `gaps_this_call` — the gap is dropped from the set for good, with no
+    // counter or warning. `gc::set_meta` is a bare `conn.execute`, so without
+    // a transaction a crash or SQLITE_BUSY between calls (unremarkable on a
+    // machine-wide shared catalog) can commit one and lose another. Wrapping
+    // all three in one `unchecked_transaction()` closes that window; ordering
+    // gaps first inside it is belt-and-braces, not load-bearing once the
+    // transaction exists — do not "tidy" the order back to
+    // watermark/written/gaps, since that silently removes the
+    // fails-safe-if-still-partial property this comment documents.
+    let tx = conn.unchecked_transaction()?;
     gc::set_meta(
-        conn,
+        &tx,
+        &gaps_key(repo_root),
+        &serde_json::to_string(&gaps_this_call.into_iter().collect::<Vec<i64>>())?,
+    )?;
+    gc::set_meta(
+        &tx,
         &watermark_key(repo_root),
         &report.through_seq.to_string(),
     )?;
@@ -636,15 +683,8 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     // `unexported_count` (which now floors its scan on this cursor, not the
     // recoverability one) would re-scan and re-count them on every call
     // forever (Ruling 16, task-6 round-3 review).
-    gc::set_meta(conn, &written_key(repo_root), &written_max.to_string())?;
-    // Persist this call's own gap set wholesale — see `gaps_this_call`'s doc
-    // comment for why "wholesale replace" is the correct removal rule, not
-    // an incremental diff against `gaps_start`.
-    gc::set_meta(
-        conn,
-        &gaps_key(repo_root),
-        &serde_json::to_string(&gaps_this_call.into_iter().collect::<Vec<i64>>())?,
-    )?;
+    gc::set_meta(&tx, &written_key(repo_root), &written_max.to_string())?;
+    tx.commit()?;
     Ok(report)
 }
 
@@ -1143,6 +1183,17 @@ mod tests {
         );
     }
 
+    // Parity claim is conditional (task-6 final review, Minor): it holds only
+    // when this call resolves no PRE-EXISTING gap. `unexported_count` floors
+    // its scan on `written_through` (`WHERE seq > written_through`), so a
+    // resolving gap — seq <= written_through, present in `gaps_start` — is
+    // invisible to it; `export`'s loop writes that row anyway via the
+    // `!gaps_start.contains(&seq)` exception. `seed` below opens no gap, so
+    // the two counts agree here; with one present, `unexported_count` would
+    // under-report by the number of resolving gaps (doctor is reporting-only,
+    // so this does not lose data — `unexported_count` reaching 0 afterward
+    // still holds — but the parity this test asserts is not unconditional).
+
     #[test]
     fn unexported_count_matches_what_the_next_export_would_write() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1551,8 +1602,17 @@ mod tests {
         // and `seed`'s own fresh "ghost" `insert` row (seq 3). Re-exporting
         // "other" a second time here is exactly the unbounded-regrowth defect
         // Ruling 16 fixed — the live-catalog scenario that motivated the fix
-        // had 87 permanently-unattributable rows re-dragging ~790 already-
-        // written rows back onto disk on every single export/reindex.
+        // had a permanently-unattributable population (min unattributable seq
+        // = 1) re-dragging every already-written row above it back onto disk
+        // on every single export/reindex. A precise headcount is deliberately
+        // not cited here: an earlier draft of this comment cited 87, and an
+        // independent re-derivation (replicating `attribute`'s seven routes
+        // directly in SQL against the live catalog) got 72 with the churn
+        // filter applied and 102 without it, matching neither 87 nor each
+        // other (task-6 final review) — and the count grows over time
+        // regardless, so any fixed number here would rot the same way. If a
+        // fresh figure is wanted, re-run that SQL and state which counting
+        // rule (churn filtered or not) produced it.
         assert_eq!(
             r2.exported, 2,
             "the originally-unattributed row must still be recoverable, but a \
@@ -1593,8 +1653,14 @@ mod tests {
     }
 
     // Critical (task-6 round-3 review): a row that stays PERMANENTLY
-    // unattributable (the live catalog has 87 of these — e.g. seq 1 is an
-    // `artifact|update` row whose artifact no longer exists) must not force
+    // unattributable (the live catalog has at least one of these — e.g. seq 1
+    // is an `artifact|update` row whose artifact no longer exists — a total
+    // count is deliberately not cited: two independent re-derivations already
+    // disagreed, 87 vs. 72 vs. 102 depending on the churn-filter rule, and
+    // the population grows, so any fixed number here rots the same way; see
+    // the comment above `unattributed_row_is_counted_not_exported_and_stays_
+    // recoverable`'s `r2.exported` assertion for how to re-derive it) must
+    // not force
     // every already-written row above it to be re-appended on every single
     // future export/reindex call. This is the regression the two-cursor split
     // (Ruling 16) plus the `GAPS_KEY` gap-set fix this round exist to close.
@@ -1659,6 +1725,162 @@ mod tests {
         assert!(
             lines(tmp.path()).iter().all(|l| l.row_id != "ghost"),
             "ghost itself must never appear — it never resolved in this test"
+        );
+    }
+
+    // Closes the loss path named in the task-6 final review (Important): the
+    // three cursor writes at the end of `export` (gaps, watermark,
+    // written_through) used to be three independent bare `gc::set_meta`
+    // calls. If a crash or SQLITE_BUSY landed between them — unremarkable on
+    // a machine-wide shared catalog — `written_through` could commit while
+    // `gaps` did not, and the still-open gap would be silently dropped for
+    // good on the next call (see `open_gaps`'s doc comment). This test proves
+    // the fix by forcing a failure BETWEEN two of the three writes and
+    // asserting the three cursors are either ALL updated or NONE are; a
+    // partial update (the pre-fix defect) is the one outcome the transaction
+    // makes unreachable.
+    //
+    // Mutation this catches: reverting the three `gc::set_meta(&tx, ...)`
+    // calls to bare `gc::set_meta(conn, ...)` (dropping the transaction) lets
+    // the forced failure below land AFTER `gaps` has already durably
+    // committed on its own, so the post-call gap set would gain the new gap
+    // even though the whole call reported an error — this test's `gaps`
+    // equality assertion is what catches exactly that (verified by
+    // temporarily applying that mutation locally: this test fails with the
+    // mutation in place and passes without it).
+    #[test]
+    fn a_failure_during_cursor_persistence_strands_no_partial_state() {
+        // A trigger, not a competing connection: a lock held by a second
+        // connection would block export's FIRST write before anything runs,
+        // which cannot distinguish this fix from the pre-fix bug (three bare,
+        // individually-autocommitted `gc::set_meta` calls) — both fail
+        // identically before any of the three commits. What discriminates
+        // them is a failure that lands AFTER the first write and BEFORE the
+        // last, mirroring `apply_rehome_rolls_back_atomically_on_mid_batch_
+        // failure`'s "force a real failure mid-batch, assert full rollback"
+        // shape: a `BEFORE UPDATE` trigger rejects only the `written_through`
+        // key (persisted last, after gaps and watermark, in the fixed
+        // order), so `gaps` and `watermark` have already executed within the
+        // same transaction when the failure hits. Pre-fix, `gaps` (bare
+        // `conn.execute`, autocommit) would already be durably committed by
+        // that point; post-fix, it is only provisional inside `tx` and must
+        // roll back with everything else.
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("cat.sqlite");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+
+        let cat = Catalog::open(&db_path).unwrap();
+
+        // Seed one unattributable row (opens a gap) and one attributable row,
+        // then run one clean export to establish a known-good baseline for
+        // all three cursors — including a real value for `written_key`, so
+        // the second call below hits the trigger's `BEFORE UPDATE` (not
+        // `BEFORE INSERT`, which the trigger does not guard).
+        cat.conn
+            .execute(
+                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor)
+                     VALUES(1751328000000,'artifact','update','ghost','unknown')",
+                [],
+            )
+            .unwrap();
+        seed(&cat, &repo, "baseline");
+        let r0 = export(&cat.conn, &repo).unwrap();
+        assert_eq!(r0.exported, 1, "{r0:?}");
+        assert_eq!(r0.unattributed, 1, "{r0:?}");
+
+        let watermark_before = watermark(&cat.conn, &repo).unwrap();
+        let written_before = written_through(&cat.conn, &repo).unwrap();
+        let gaps_before = open_gaps(&cat.conn, &repo).unwrap();
+        assert!(
+            !gaps_before.is_empty(),
+            "baseline must leave an open gap (ghost) for this test to mean anything: \
+             {gaps_before:?}"
+        );
+
+        // A SECOND unattributable row, plus an attributable one, so the next
+        // export call's gap set actually DIFFERS from `gaps_before` (ghost
+        // alone never resolves, so re-scanning it every call would otherwise
+        // write back the same value regardless of atomicity — this second
+        // ghost is what makes the persisted gap set observably change, and
+        // is what the equality assertion below needs to have any teeth).
+        cat.conn
+            .execute(
+                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor)
+                     VALUES(1751328000001,'artifact','update','ghost2','unknown')",
+                [],
+            )
+            .unwrap();
+        seed(&cat, &repo, "second");
+
+        // Reject the LAST write in the fixed order (gaps, then watermark,
+        // then written_through) so the first two have already executed —
+        // committed pre-fix, merely provisional post-fix — when the failure
+        // hits.
+        let written_key_literal = written_key(&repo).replace('\'', "''");
+        cat.conn
+            .execute_batch(&format!(
+                "CREATE TRIGGER reject_written_write BEFORE UPDATE ON catalog_meta
+                 WHEN NEW.key = '{written_key_literal}'
+                 BEGIN SELECT RAISE(ABORT, 'forced failure for atomicity test'); END;"
+            ))
+            .unwrap();
+
+        let result = export(&cat.conn, &repo);
+        assert!(
+            result.is_err(),
+            "export must surface the trigger's forced failure, not silently swallow it: \
+             {result:?}"
+        );
+
+        cat.conn
+            .execute_batch("DROP TRIGGER reject_written_write;")
+            .unwrap();
+
+        // All three cursors must be EXACTLY as they were before the failed
+        // call — not one, not two, all three. Pre-fix, `gaps` (persisted
+        // first, autocommitted individually) would have already stuck at its
+        // NEW value (ghost + ghost2) even though `written_through` then
+        // failed — reproducing the exact loss path the final review named,
+        // just inverted: here the newly-opened `ghost2` gap would have been
+        // recorded despite the call failing, which is the wrong direction of
+        // the same bug (a partial, inconsistent write winning over "nothing
+        // happened").
+        assert_eq!(
+            watermark(&cat.conn, &repo).unwrap(),
+            watermark_before,
+            "watermark must not move on a call whose persistence step failed"
+        );
+        assert_eq!(
+            written_through(&cat.conn, &repo).unwrap(),
+            written_before,
+            "written_through must not move on a call whose persistence step failed"
+        );
+        assert_eq!(
+            open_gaps(&cat.conn, &repo).unwrap(),
+            gaps_before,
+            "the gap set is the unrecoverable one — a call that failed must leave it \
+             untouched, not partially advanced to include a gap opened during that \
+             same failed call"
+        );
+
+        // And once the trigger is gone, a clean retry must succeed and make
+        // real progress — the failure above was transient, not a permanent
+        // wedge.
+        let r1 = export(&cat.conn, &repo).unwrap();
+        assert_eq!(r1.exported, 1, "{r1:?}");
+        assert!(
+            lines(&repo).iter().any(|l| l.row_id == "second"),
+            "a clean retry after the trigger is removed must actually write the row \
+             that the failed call could not: {:?}",
+            lines(&repo)
+        );
+        assert_eq!(
+            open_gaps(&cat.conn, &repo).unwrap().len(),
+            2,
+            "the clean retry must now record BOTH ghosts as open gaps — proving the \
+             earlier failed call really did not persist ghost2 as a gap, rather than \
+             this test passing by coincidence"
         );
     }
 
@@ -1774,20 +1996,22 @@ mod tests {
 
     // Version-escape test (Important, task-6 round-3 review): a line written by
     // an OLDER binary — before some field existed at all — must still parse.
-    // Every `ShardLine` field except `seq` carries `#[serde(default)]` for
-    // exactly this reason; this test pins that a line missing several of them
-    // (not just one) still counts as a good row, not `malformed`. Mutation
-    // this catches: removing `#[serde(default)]` from any covered field turns
-    // this from `rows.len() == 1, malformed == 0` into `rows.len() == 0,
-    // malformed == 1` — a real "new field ships, old lines start failing"
-    // regression, the exact failure mode the annotation exists to prevent.
+    // Every `ShardLine` field except `host` and `seq` carries
+    // `#[serde(default)]` for exactly this reason (task-6 final review: `host`
+    // joined `seq` in the exclusion, both being halves of the `(host, seq)`
+    // dedup key — see the struct's doc comment); this test pins that a line
+    // missing several of them (not just one) still counts as a good row, not
+    // `malformed`. Mutation this catches: removing `#[serde(default)]` from
+    // any covered field turns this from `rows.len() == 1, malformed == 0`
+    // into `rows.len() == 0, malformed == 1` — a real "new field ships, old
+    // lines start failing" regression, the exact failure mode the annotation
+    // exists to prevent.
     #[test]
     fn a_line_missing_defaulted_fields_still_parses_not_malformed() {
         let tmp = tempfile::tempdir().unwrap();
         // Deliberately omit `actor`, `op`, `tbl`, `at_ms`, `verb`, and `payload`
-        // — everything except `host` and `seq`, the two fields that are either
-        // required (`seq`) or trivially always present (`host`, the file-name
-        // host, needed for the file to even be selected as foreign/self).
+        // — everything except `host` and `seq`, the two dedup-key fields that
+        // are always present on a real line and are never defaulted.
         let line = serde_json::json!({ "host": "otherbox-99ffee", "seq": 1 }).to_string();
         write_shard(tmp.path(), "otherbox-99ffee-202609.jsonl", &[&line]);
         let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
