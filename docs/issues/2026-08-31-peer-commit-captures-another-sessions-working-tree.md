@@ -453,6 +453,53 @@ two header lines. A one-line discrepancy in either direction reads exactly like 
 hunk, which makes the trap worse than a wrong number: it manufactures a false positive for the
 very mechanism the check exists to find.
 
+
+### The competing check that looks stronger and is structurally blind — 2026-09-01, `0c32bb85`
+
+Same layer, third occurrence, **not** filed as a new instance for the reason given above. It
+is recorded here because it falsifies a check a reader of this section would plausibly reach
+for *instead of* the stat comparison, believing it more precise.
+
+**What happened.** Session `c2a08c22` verified `git diff -- docs/trackers/bug-fix-session-log.md`
+in its own call: **23 insertions / 3 deletions**, its own W-91 correction and nothing else. Ran
+`git add <that one path> && git commit -- <that one path>` roughly 30 seconds later. Peer
+`codescout-e6` wrote `F-93` into the same file inside that gap. The commit landed **66
+insertions / 4 deletions**, carrying that entry and the `entry_high_water_F: 93` frontmatter
+bump under a message about a law citation.
+
+The stat comparison worked exactly as this section says: `66/4` against a remembered `23/3` is
+unmissable, and it is what caught it.
+
+**The new part is the check that ran alongside it and returned a false all-clear.** In the same
+verification call:
+
+```
+git diff docs/trackers/bug-fix-session-log.md | grep -c "F-92\|F-91\|W-93"   ->  0
+```
+
+Zero, correctly — and worthless. The pattern is an **enumeration of the peer entries already
+known to exist**, so it cannot match `F-93`, and a new entry is the only kind a peer writes.
+Confirmed at the bytes: `echo 'F-93 entry' | grep -c "F-92\|F-91\|W-93"` returns `0`. The
+check was incapable of firing at any time, on any content, in the direction that mattered.
+
+**Why this belongs on the page rather than in a session log.** A content grep *reads* as the
+stronger instrument — it names the thing you are afraid of, where a line count is merely a
+line count. It is strictly weaker, and it fails in the reassuring direction: it is a gate whose
+predicate is derived from what its author already believed was in the file, which is `R-5`'s
+self-validating shape (*"a check computed from the thing it judges cannot fail"*). The stat
+comparison is dumber and it is the one that holds, for the reason this section already gives
+— **a foreign hunk cannot leave the count unchanged**, and it needs to know nothing about who
+the peer is or what they wrote.
+
+So the rule stays exactly as stated: compare `--stat` to `--stat`. Do not substitute a content
+search for it, and do not treat a content search as corroboration — a grep whose pattern you
+wrote from memory is evidence about your memory.
+
+**Disposition of the captured content.** `F-93` is `codescout-e6`'s work, authored by them and
+committed under `c2a08c22`'s message at `0c32bb85`. Recorded here, and disclosed to that
+session directly, per *Instance 5*'s finding that disclosure is what prevents the downstream
+damage. Not rewritten: `git reset` on a shared index is the vector *Remedy (1)* documents, and
+trading a durable attribution error for a live one is a bad exchange.
 ## Candidate remedies
 
 > **Superseded by *Re-ranking, third time* above — kept for the reasoning, not the ranking.**
