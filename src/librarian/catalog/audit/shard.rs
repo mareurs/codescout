@@ -230,9 +230,18 @@ fn open_gaps(conn: &Connection, repo_root: &Path) -> Result<BTreeSet<i64>> {
         Some(v) => {
             let parsed: Vec<i64> = serde_json::from_str(&v).with_context(|| {
                 format!(
-                    "corrupt {} value in catalog_meta for {}: {v:?}",
+                    "corrupt {} value in catalog_meta for {}: {v:?}. Export for this \
+                     repo stays blocked until it is repaired. Fix the value to a JSON \
+                     array of integers, or delete it TOGETHER WITH {} — never this key \
+                     alone: `export` skips any `seq <= written_through` that is not in \
+                     this set, so clearing the set while the write cursor stands strands \
+                     every gap that has since become attributable, which is the loss \
+                     this key exists to prevent. Dropping both re-exports from the \
+                     recoverability watermark instead; duplicates dedupe on read by \
+                     (host, seq).",
                     gaps_key(repo_root),
-                    repo_root.display()
+                    repo_root.display(),
+                    written_key(repo_root),
                 )
             })?;
             Ok(parsed.into_iter().collect())
@@ -605,10 +614,11 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
             let path = dir.join(&name);
             // One exclusive lock per file: two sessions reindexing at once must
             // not interleave partial lines into a file that is about to be
-            // committed. Same primitive as src/retrieval/index_lock.rs. Armed
-            // for Task 4's production wiring — no test here exercises actual
-            // contention, since `export` has no non-test caller yet and
-            // cannot race itself within one test process.
+            // committed. Same primitive as src/retrieval/index_lock.rs. Live
+            // callers are audit_log.rs (manual `export=true`) and reindex.rs
+            // (the automatic fold-in), wired by Task 4 — real contention is
+            // reachable now. No test exercises it: two concurrent reindexes
+            // cannot be staged within one test process.
             let mut f = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -1193,7 +1203,6 @@ mod tests {
     // under-report by the number of resolving gaps (doctor is reporting-only,
     // so this does not lose data — `unexported_count` reaching 0 afterward
     // still holds — but the parity this test asserts is not unconditional).
-
     #[test]
     fn unexported_count_matches_what_the_next_export_would_write() {
         let tmp = tempfile::tempdir().unwrap();
