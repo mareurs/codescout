@@ -1,7 +1,7 @@
 ---
-id: d6a3b70e57498ec8
+id: 9b67295c125cfcb6
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the citation-volume gate selects FOR the prose it exists to exclude — 8 of 14 findings are acronyms, and the top four by volume are all noise'
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -211,6 +211,47 @@ re-proposed by the next reader, who will find them as attractive as this file's 
   numbers and prints them in its own message. Read its two limits in Evidence before
   implementing: the threshold is fitted to n=14, and 6/8 is a ceiling rather than a starting
   point.
+
+## Fix provenance
+
+Fixed on `experiments` by **option (e)**, dispersion instead of volume.
+
+- **SHA:** `d44a4409`
+- **patch-id:** `f37ae73ffe72846ca0cceae19b9649f8c24b6a08`
+
+Gate green: fmt clean; `clippy --workspace --all-targets --features local-embed -D warnings`
+0 errors; lean lane exit 0; default lane last, 4804 passed / 1 failed on
+`peer::server::tests::run_exits_after_idle_timeout_with_no_connections`, which is **not this
+change** — it passes in isolation in 1.14s, passes at HEAD with this diff stashed, was
+independently reproduced by two other sessions on unrelated work, and is separately filed as
+load-sensitive.
+
+**Real-corpus effect, measured with the built binary rather than only in tests: 13 → 7.** The
+six suppressed are exactly the six predicted — `CI`, `RFC`, `SHA`, `UTF`, `N`, `ZZ` — and
+**zero** real prefixes were lost. `GPT-N` sat at 0.50 in the pre-fix table and would have been
+*kept*; it left the corpus on its own between measurements, which is why the total reads 13
+rather than 14. Not a suppression, stated because the counts otherwise look like one.
+
+**Two tests, because "the gate exists" and "the constant is right" are different claims.** The
+second exists only because `codescout-09` mutation-tested the change while it was still
+uncommitted and found the first did not pin what it introduced: the shipped `0.8` could be
+moved anywhere in **(0.667, 1.0]** with a fully green suite, the lower end held only by an
+unrelated scoping test whose 3-cites/2-files ratio is incidental to its purpose and
+unannotated. Closed by pinning in the test that *owns* the constant — `LO-N` at 0.75 must stay
+reported, `HI-N` at exactly 0.80 must be suppressed — which admits only (0.75, 0.80] and puts
+the guard where a reader changing the number will be standing. Recorded as
+`bug-fix-session-log:F-94`.
+
+The deliberate break was **run**, not asserted: three mutations (threshold → 0.9, → 0.7,
+comparison `>=` → `>`) each killed the pinning test, each on the assertion whose message names
+that mutation, with the file restored sha256-identical inside a single shell call.
+
+**Known residual, by design rather than oversight.** `TC-N` (107 cites / 13 files, 0.12) is
+benchmark test-case ids and survives the gate; `GPT-N` would too if it returned. Both are
+named in Evidence § *the discriminator is already in the check's own output* as the structural
+ceiling — they sit at or below the same dispersion as real prefixes, so no threshold on this
+signal alone reaches them, and lowering it to catch them costs real ones. That is a limit of
+the signal, not an unfinished part of the fix.
 ## Tests added
 
 None — nothing is fixed. A fix under (a) wants the 14 real prefixes as a fixture, asserting

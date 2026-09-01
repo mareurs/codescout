@@ -3546,7 +3546,7 @@ fn scan_cited_prefix_with_no_definer(
     //     `CC-N`/`O-N` (real) sit at exactly 0.50, so no cut on this signal alone separates
     //     them — lowering it to catch `GPT-N` necessarily loses two real prefixes.
     //
-    // docs/issues/2026-09-01-citation-volume-gate-selects-for-the-prose-it-excludes.md
+    // docs/issues/archive/2026-09-01-citation-volume-gate-selects-for-the-prose-it-excludes.md
     const DISPERSION_NUM: usize = 5;
     const DISPERSION_DEN: usize = 4;
 
@@ -7742,7 +7742,7 @@ mod tests {
     /// incidental technical term (`UTF-8`, `SHA-256`, `RFC-7396`), and a real ledger namespace
     /// clusters instead. Measured 2026-09-01 across all 14 live findings on this repo: gating on
     /// `files / cites >= 0.8` suppressed 6 of 8 noise prefixes and lost **zero** real ones.
-    /// docs/issues/2026-09-01-citation-volume-gate-selects-for-the-prose-it-excludes.md
+    /// docs/issues/archive/2026-09-01-citation-volume-gate-selects-for-the-prose-it-excludes.md
     ///
     /// **Both directions are in ONE fixture on purpose.** The suppression half alone is monotone
     /// under "the check does nothing" and would pass against a stub that returns `vec![]`; the
