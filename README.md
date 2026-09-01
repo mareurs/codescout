@@ -59,6 +59,10 @@ Register as an MCP server in `~/.claude/settings.json`:
 
 → Full setup, agent configs, and project-toml options: **[mareurs.github.io/codescout](https://mareurs.github.io/codescout/)**
 
+👥 **Joining a team that already uses codescout?** Read [`docs/TEAM-ONBOARDING.md`](docs/TEAM-ONBOARDING.md)
+first — a plain-language guide to the tools *and* the knowledge system around them: what the
+gates are, how to query the catalog, and the capture habits that make the system work for you.
+
 ## Artifacts
 
 codescout now embeds **librarian** — a workspace-wide artifact registry that

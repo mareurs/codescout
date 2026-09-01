@@ -197,3 +197,7 @@ PRs generated with Claude Code are welcome. Just mention it in the PR descriptio
 ## Project Structure
 
 See [CLAUDE.md](CLAUDE.md) for the full developer guide, including project structure, design principles, and key patterns. That file is also what Claude Code reads when working on this project.
+
+New to how this repo works day to day — the librarian, the trackers, the gates, the capture
+habits? Start with [`docs/TEAM-ONBOARDING.md`](docs/TEAM-ONBOARDING.md): the teammate-facing
+guide, written in plain language.
