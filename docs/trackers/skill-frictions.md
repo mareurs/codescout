@@ -274,17 +274,17 @@ reasoned onward from the short list anyway.
 `ListAgents` returns fewer peers than expected."* It was in my available-skills list from the
 first turn of the session. It went uninvoked through:
 
-- three peer messages routed on the incomplete set (a broadcast that reached **two of five**
-  sessions in this checkout);
+- three peer messages routed on the incomplete set (a broadcast that reached **two of the five
+  peers** in this checkout);
 - a fifth instance filed in `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`
   concluding *"positive identification is unavailable"*;
 - a paragraph promoted into `CLAUDE.md` § *Observer Blindness* stating that as a rule.
 
 All three were wrong in the same way, and the operator caught it by asking whether a skill for
-this existed. Running Step 1 took one call and returned **16 live sessions across 3 profiles,
-five of them in this checkout** — against `ListAgents`' 2. Discovery is per-profile
-(`$CLAUDE_CONFIG_DIR/sessions/*.json`); delivery is per-user (`/run/user/<uid>/cc-socks/`). The
-three sessions I could not see were reachable the whole time.
+this existed. Running Step 1 took one call and returned **16 live sessions across 3 profiles**,
+with **six** whose `cwd` is this checkout — five peers plus this session — against `ListAgents`'
+2. Discovery is per-profile (`$CLAUDE_CONFIG_DIR/sessions/*.json`); delivery is per-user
+(`/run/user/<uid>/cc-socks/`). The three sessions I could not see were reachable the whole time.
 
 **Root cause — not a discoverability gap.** The skill is well-named, its description is precise,
 and its trigger is a condition I *observed and articulated*. Nothing was missing except the act

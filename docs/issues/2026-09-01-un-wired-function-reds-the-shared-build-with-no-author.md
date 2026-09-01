@@ -280,11 +280,31 @@ enumeration, at the operator's prompting:
    … 10 more across .claude / .claude-kat in other checkouts
 ```
 
-`ListAgents` reported **2** peers. The real population is **16 across 3 profiles, five of them in
-this checkout** — so the broadcast reached **two of five**, and the three sessions it could not
-see were reachable throughout by `uds:/run/user/1000/cc-socks/<PID>.sock`. The mechanism is
-simply that discovery is **per-profile** (`$CLAUDE_CONFIG_DIR/sessions/*.json`) while delivery is
-**per-user** (`/run/user/<uid>/cc-socks/`).
+`ListAgents` reported **2** peers. The real population is **16 sessions across 3 profiles**, and
+in this checkout — unit stated, because this paragraph got it wrong once — **six sessions, being
+five peers plus this one**. So the broadcast reached **two of the five peers**, and the three
+sessions it could not see were reachable throughout by
+`uds:/run/user/1000/cc-socks/<PID>.sock`. The mechanism is simply that discovery is
+**per-profile** (`$CLAUDE_CONFIG_DIR/sessions/*.json`) while delivery is **per-user**
+(`/run/user/<uid>/cc-socks/`).
+
+**A units slip inside this very correction, caught by a peer and worth one line.** This paragraph
+first read *"five of them in this checkout"* — presented as a subset of the 16 **sessions**, where
+the answer is six — immediately beside *"two of five"*, which counts **peers**. Two units in
+adjacent clauses, neither named, in the paragraph correcting a counting error. `codescout-09`
+re-derived it at 6 and that is what surfaced it. The remedy is the one
+`CLAUDE.md` § *Testing Discipline* already states: **a count must arrive with its unit or not at
+all.**
+
+**And the two instruments that "agreed" were never independent — `codescout-09`'s own retraction,
+recorded here because it is the sharper finding.** `CLAUDE.md`'s worked example of a *valid*
+elimination cited `ListAgents` and a filesystem transcript-write set *"both returning the same
+three"*. **Both were per-profile.** The transcript glob ran only under `~/.claude-sdd/projects/`;
+across all three profiles, `~/.claude` held three more freshly-written transcripts it never
+looked at. They agreed **because** they shared a blind spot — one blind spot counted twice, which
+at the point of use is indistinguishable from corroboration. **Check independence, not
+agreement**: matching numbers are evidence only if the scopes differ, and scope is precisely what
+a count does not carry.
 
 **Not claimed:** which of the omitted sessions wrote the file. `b2a50de8` / `bcc98c22` are
 plausibly among the three, and asserting that would repeat this file's own error. What *is*
