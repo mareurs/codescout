@@ -90,6 +90,22 @@ repos:
       # (`reconnaissance-patterns:R-155`). Measured at `461c037a`, which published counts of
       # 3/1/2 against zero members at HEAD with the gate green throughout.
       #
+      # THREE surfaces, not one: the Index cell, and the bare `n=` in each entry's
+      # `**Members:**` and `**Promotes to:**` fields. They drift independently — measured
+      # 2026-09-01, the cells were gated from 14:27 while four judgement fields went on
+      # reasoning from superseded counts for hours (`0c5bab41`), and `**Promotes to:**` is the
+      # one that REASONS from the count rather than merely stating it.
+      #
+      # A BACKTICKED `n=N` is a quotation of what a line used to say and is deliberately not
+      # checked; bare means live. That escape is the only thing separating the two, and it fails
+      # SAFE: an un-backticked quote produces a loud false report, never a silent miss. The
+      # refusal text says so, because the wrong repair — "correcting" a true historical figure —
+      # is the one nothing downstream would catch.
+      #
+      # Named for what it covers. Counts written as prose numerals ("the 18 members") are
+      # invisible by construction: of four hand-swept drifts it catches two, measured. A gate
+      # whose coverage is narrower than its name is `IC-14`, defined in the ledger it polices.
+      #
       # Python, not `cargo test --test issue_clusters`, per the stage rule at the top of this
       # file: that costs ~6.9s warm and takes the shared `target/` lock. This is <0.2s and
       # builds nothing. The duplicated parse logic is held in sync by a MECHANISM rather than

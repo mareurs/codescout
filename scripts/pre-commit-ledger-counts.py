@@ -121,38 +121,46 @@ def backticked_cluster_slug(rest: str) -> str | None:
     return inner[len("cluster/") :] if inner.startswith("cluster/") else None
 
 
-def first_n_claim(rest: str) -> int | None:
-    """Mirrors `first_n_claim` -- the FIRST `n=<N>`, never a later one.
+def bare_n_values(rest: str) -> list[int]:
+    """Mirrors `bare_n_values` -- every BARE n=<N>; a backticked `n=<N>` is a quotation.
 
-    Three entries quote a superseded count in the same sentence, so "any n=" would read a
-    historical figure as the live one.
+    The backtick is the escape and is now the ONLY signal separating a live claim from a
+    quotation: the ledger preserves superseded figures with their derivation, so
+    `**Promotes to:**` legitimately carries "took it from `n=2` to `n=27`". Position cannot
+    discriminate there -- two entries OPEN that field with a historical citation -- so a
+    first-n=-wins rule reddens two correct fields. `89697a15` backticked all ten quotes.
+
+    `n>=` is deliberately not matched: it is the promotion THRESHOLD in prose, never a count.
     """
-    hay = rest
+    out: list[int] = []
+    i = 0
     while True:
-        at = hay.find("n=")
+        at = rest.find("n=", i)
         if at < 0:
-            return None
+            return out
+        quoted = at > 0 and rest[at - 1] == "`"
         digits = ""
-        for ch in hay[at + 2 :]:
+        for ch in rest[at + 2 :]:
             if not ch.isdigit():
                 break
             digits += ch
-        if digits:
-            return int(digits)
-        hay = hay[at + 2 :]
+        if digits and not quoted:
+            out.append(int(digits))
+        i = at + 2
 
 
-def parse_member_counts(ledger: str, valid: set[str]) -> dict[str, int]:
-    """Mirrors `parse_member_counts` -- each `## IC-` section's `**Members:** ... n=N` claim.
+def parse_bare_n_claims(ledger: str, valid: set[str]) -> list[list]:
+    """Mirrors `parse_bare_n_claims` -- every bare n= in a class's judgement fields.
 
-    The Index cell and this claim are different assertions about the same quantity and drift
-    independently: measured 2026-09-01, the cells were gated while four prose judgement fields
-    kept reasoning from superseded counts until a peer swept them by hand (`0c5bab41`).
+    Both fields are read: `**Members:**` states the count, `**Promotes to:**` reasons from it and
+    is where the four measured drifts of 2026-09-01 actually did their damage (`0c5bab41`).
 
-    The slug RESETS at every `## IC-` heading, so a section declaring a slug but no `**Members:**`
-    line cannot leak its slug into the next section's count.
+    The slug RESETS at every `## IC-` heading and is NOT consumed on use, because it now spans
+    two fields -- so the reset is the only clearing mechanism, and a section stating a count
+    while declaring no slug is the shape it guards.
     """
-    out: dict[str, int] = {}
+    fields = (("**Members:**", "Members"), ("**Promotes to:**", "Promotes to"))
+    out: list[list] = []
     slug: str | None = None
     for line in ledger.splitlines():
         if line.startswith("## IC-"):
@@ -160,11 +168,11 @@ def parse_member_counts(ledger: str, valid: set[str]) -> dict[str, int]:
         elif line.startswith("**Slug:**"):
             cand = backticked_cluster_slug(line[len("**Slug:**") :])
             slug = cand if cand in valid else None
-        elif line.startswith("**Members:**"):
-            n = first_n_claim(line[len("**Members:**") :])
-            if slug is not None and n is not None:
-                out[slug] = n
-            slug = None
+        elif slug is not None:
+            for prefix, label in fields:
+                if line.startswith(prefix):
+                    out.extend([slug, label, n] for n in bare_n_values(line[len(prefix) :]))
+    out.sort()
     return out
 
 
@@ -230,7 +238,7 @@ def main() -> int:
             print(json.dumps(
                 {
                     "declared": parse_index_counts(fixture, fv),
-                    "claimed": parse_member_counts(fixture, fv),
+                    "claimed": parse_bare_n_claims(fixture, fv),
                 },
                 sort_keys=True,
             ))
@@ -253,7 +261,7 @@ def main() -> int:
 
     valid = valid_slugs(ledger)
     declared = parse_index_counts(ledger, valid)
-    claimed = parse_member_counts(ledger, valid)
+    claimed = parse_bare_n_claims(ledger, valid)
     actual = actual_counts(valid, source)
 
     if as_json:
@@ -268,8 +276,8 @@ def main() -> int:
         for slug, n in sorted(declared.items())
         if actual.get(slug, 0) != n
     ] + [
-        f"cluster/{slug} — **Members:** claims n={n}, staged corpus has {actual.get(slug, 0)}"
-        for slug, n in sorted(claimed.items())
+        f"cluster/{slug} — **{field}:** states a bare n={n}, staged corpus has {actual.get(slug, 0)}"
+        for slug, field, n in claimed
         if actual.get(slug, 0) != n
     ]
     if not drift:
@@ -282,13 +290,25 @@ def main() -> int:
         "This reads the INDEX, so it is about what you are SHIPPING, not what is on disk.\n"
         "`cargo test --test issue_clusters` can be green at the same moment — it reads the\n"
         "working tree, and a partial commit ships a state that never existed there.\n\n"
-        "Two surfaces are checked and they drift independently: the Index table's `n` cell,\n"
-        "and each entry's `**Members:** ... n=N` prose. A row can be right while the sentence\n"
-        "restating it is stale — four such drifts were repaired by hand on 2026-09-01.\n\n"
+        "Three surfaces are checked and they drift independently: the Index table's `n` cell,\n"
+        "and each entry's `**Members:**` and `**Promotes to:**` bare `n=`. A row can be right\n"
+        "while the sentences restating it are stale — four such drifts were repaired by hand on\n"
+        "2026-09-01, and the damage was in `**Promotes to:**`, which REASONS from the count.\n\n"
+        "If a bare n= is flagged, there are exactly two possibilities and they need opposite\n"
+        "fixes. EITHER the count moved and this judgement needs re-deriving, OR this is a\n"
+        "historical quote that lost its backticks. A backticked `n=N` quotes what a line used to\n"
+        "say and is deliberately NOT checked, because the ledger preserves superseded figures\n"
+        "with their derivation. Decide which before editing: `correcting` a true historical\n"
+        "figure makes it false, and nothing downstream will catch that.\n\n"
+        "NOT CHECKED AT ALL: counts written as prose numerals (`the 18 members`, `n is 8 rather\n"
+        "than 7`). Two such drifts were swept by hand at 0c5bab41 and this cannot see them.\n\n"
         "Most likely: you staged the ledger and not the bug files whose tags it counts.\n"
         "  git status --short docs/issues     # what is not staged\n"
         "  git add <the bug file(s)>          # then re-commit\n\n"
-        "If the count is genuinely wrong, re-derive rather than adjust by the delta:\n"
+        "If the count is genuinely wrong, re-derive rather than adjust by the delta -- and note\n"
+        "the pattern is ANCHORED. An unanchored `git grep -l 'cluster/<slug>'` also counts files\n"
+        "that merely NAME the class in prose, which inflates any class a bug file was retagged\n"
+        "out of, since that file's prose records the class it left:\n"
         "  git grep -clE '^[[:space:]]*-[[:space:]]*cluster/<slug>[[:space:]]*$' "
         "-- 'docs/issues/*.md' | wc -l\n"
         "and move the `**Members:**` and `**Promotes to:**` fields of BOTH classes in the\n"
