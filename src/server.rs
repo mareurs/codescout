@@ -3420,6 +3420,22 @@ mod tests {
     /// The inputs are derived from each tool's own `input_schema()` action enum — the
     /// same oracle Gate 6 uses — rather than hand-listed, so a new action is covered
     /// without editing this test.
+    ///
+    /// **Two caveats a reader of this gate needs, both from peer sessions on 2026-09-01.**
+    ///
+    /// Its live population is **one file**: `grep -l 'serves:' src/prompts/guides/*.md`
+    /// returns only `librarian.md`. So the configuration this gate refuses is currently
+    /// unreachable on eight of the nine topics — cheap to hold, and *thinly exercised*. A
+    /// bug in the declaring path has almost nothing testing it, and a second declaring
+    /// member is a deliberate act rather than something the corpus will supply. The
+    /// `verified >= 1` floor below is honest about that; it is not a claim of coverage.
+    ///
+    /// And the reason this gate is a separate one rather than a stronger Gate 6:
+    /// `reconnaissance-patterns:R-159` — *verifying a MECHANISM is not verifying its
+    /// REACHABILITY, and a clean mechanism check feels like the strong form.* Gate 6
+    /// establishes that a declared shape is well-formed against the registry, which reads
+    /// as the thorough answer precisely because it is exact. It says nothing about whether
+    /// any call arrives. That is this gate's whole subject.
     #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_declaring_topic_has_a_live_route_to_a_declared_section() {
@@ -3428,6 +3444,16 @@ mod tests {
 
         // Result shapes, not inputs: `relevant_guide_topic` reads the RESULT to pick a
         // topic. Mirrors Gate 2's probe set, including the doctor-shaped one.
+        //
+        // The `output_id` / `overflow` probe is deliberately INERT today, and says so here
+        // rather than reading as coverage. `symbols`, `references` and `call_graph` branch
+        // on those keys to route overflowing results to `progressive-disclosure` — but this
+        // gate only evaluates topics that DECLARE, which is `librarian` alone, and the
+        // librarian adapter's router reads `abs_path` / `violations` and never looks at
+        // either key. So removing this row changes no outcome now; it is here for the case
+        // where a topic reached via the overflow branch first declares a section, which is
+        // exactly when a missing probe would make this gate pass without having looked.
+        // Keep it, and do not cite it as evidence that overflow routing is covered.
         let result_probes = [
             serde_json::json!({}),
             serde_json::json!({"output_id": "@x", "overflow": true}),
