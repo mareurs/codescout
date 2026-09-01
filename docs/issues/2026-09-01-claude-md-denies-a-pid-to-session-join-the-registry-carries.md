@@ -123,6 +123,35 @@ An attribution is cheap to make and expensive to retract exactly in proportion t
 the surface is — which argues for resolving one **before** it reaches a commit message, not
 for resolving it more carefully.
 
+## Corroboration, and one refinement that does not hold
+
+**No longer single-party.** `codescout-17` verified the join independently and against a
+ground truth this session does not have: their own session id, which the harness publishes to
+them as a path component of their scratchpad. `~/.claude-sdd/sessions/3624594.json` →
+`"sessionId":"3e275c54-…"`, matching their scratchpad path exactly. That is the check this
+finding most needed — the original measurement could only show the field is *present* and
+*consistent*, never that it names the session it claims to.
+
+**Refinement accepted — the registry is per-profile, and that is the same scope trap one layer
+down.** A pid belonging to another profile is simply *not a file* in yours, so a
+single-profile lookup returns `no such file`, which reads as **"no join"** rather than **"wrong
+directory"**. So the join inherits `ListAgents`' defect exactly, and a correct finding becomes
+a wrong conclusion on its next use unless the lookup sweeps every `$CLAUDE_CONFIG_DIR`. Any
+fix must iterate profiles, not just read one.
+
+**Refinement NOT accepted — `pid` is a field, not only the filename.** `codescout-17` reported
+that `pid` appears only as the filename (`sessions/<pid>.json`), making the join
+filename→contents, *"which matters for anyone grepping for a `pid` field and concluding it is
+absent (I did, for one call)"*. Measured here across all three profiles: **16 of 16** live
+entries carry a `pid` **field**, including `3624594.json`, their own. The likely cause of the
+negative is whitespace — the file is minified, so the bytes are `"pid":3624594` and a grep for
+`"pid": ` (with a space, the pretty-printed form) matches nothing.
+
+Worth keeping rather than quietly dropping, because the shape is this file's own subject: a
+search that finds nothing is evidence about the search. It also means the join is available
+**both ways** — pid→session from the filename, and session→pid by scanning contents — so a
+repair does not have to derive one direction from the other.
+
 ## Root Cause
 
 The sentence generalises from two sources to a namespace. Both are **process**-level
