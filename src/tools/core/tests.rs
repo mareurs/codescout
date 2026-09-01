@@ -1786,6 +1786,113 @@ async fn op_4_routes_on_a_write_response_the_pipeline_produced() {
     );
 }
 
+/// `OP-4` delivered end-to-end by the REAL `EditFile`, in one call.
+///
+/// Closes the gap the OP-4 fix named in its own `unverified:` field and left open:
+/// *"no test performs an actual `edit_file` write to a `~/.claude` path and asserts OP-4
+/// arrives; what is asserted is that the pipeline produces a matching response and that the
+/// real `EditFile` supplies the selector, which is two tests meeting at a value both check
+/// rather than one call proving the whole."* The sibling test above is that pipeline half; this
+/// is the one call.
+///
+/// **Two changes made this writable, and neither was available when the sibling was written.**
+/// `a6b4fc35` gave write responses a path (`annotate_write_path`), and `30b6fc41` inverted
+/// `Tool::selector_key`'s default — so `EditFile` supplies its own selector and `call_content`
+/// runs the router itself. The sibling's explicit `route(Some("edit_file"), …)` is no longer
+/// the only way to reach the router, which is what lets this assert on the delivered block
+/// instead of on a value fed back in by hand.
+///
+/// **The negative control runs FIRST, and that order is load-bearing.** OP-4 is delivered once
+/// per session (ledger key `op:OP-4`), so a non-matching call made *after* the matching one
+/// would show no OP-4 block whatever the predicate did — a control that passes just as happily
+/// against a match-everything predicate. Running it first is what makes its silence mean "the
+/// predicate declined this path" rather than "the ledger was already spent".
+///
+/// **Both paths must be ABSOLUTE.** `annotate_write_path` keys by absoluteness, so a relative
+/// `.claude/settings.json` is filed under `rel_path` as `.claude/settings.json` — which does
+/// not contain the `/.claude` needle. Passing a relative path here would fail this test for a
+/// reason that has nothing to do with routing.
+///
+/// **Mutation, and what it does and does not establish.** Making `annotate_write_path` insert
+/// nothing kills this test — and also kills
+/// `a_write_response_names_the_path_it_wrote_so_op_4_can_match` and the sibling above, so it
+/// establishes that the annotation matters and NOT that this test is uniquely necessary
+/// (`reconnaissance-patterns:R-164`). What this test uniquely adds is coverage of the real
+/// `EditFile` body plus delivery in one call — a named gap closed, not a mutation nothing else
+/// catches.
+///
+/// **A mutation that does NOT kill it, recorded because I predicted it would.** Forcing the key
+/// to `rel_path` regardless of absoluteness leaves this test green: `names_path_containing`
+/// scans `abs_path` AND `rel_path`, so an absolute path misfiled under the relative key still
+/// matches the needle. Only `a_write_response_names_the_path_it_wrote_so_op_4_can_match` dies,
+/// which is correct — the key choice is load-bearing for honesty, not for matching, exactly as
+/// `annotate_write_path`'s own doc says ("a lie the matcher happens not to notice"). My first
+/// draft of this comment named that swap as a kill-mutation; it was measured and it is not one.
+#[tokio::test]
+async fn a_real_edit_file_write_under_dot_claude_delivers_op_4() {
+    let tmp = tempfile::tempdir().unwrap();
+    // `rooted_ctx`, deliberately not `worktree_repo_ctx`: that helper seeds a linked
+    // worktree, which is what its own callers are testing, and a write into an
+    // ambiguous checkout is refused before it can reach the router.
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    let ctx = rooted_ctx(&root).await;
+
+    // Negative control, FIRST — see the doc comment on why the order is load-bearing.
+    // Not a `.md` file: IL-5 routes markdown to `edit_markdown`, and the refusal would
+    // fail this control for a reason unrelated to the predicate under test.
+    let outside = root.join("notes.toml");
+    std::fs::write(&outside, "alpha = 1\n").unwrap();
+    let control = crate::tools::edit_file::EditFile
+        .call_content(
+            serde_json::json!({
+                "path": outside.display().to_string(),
+                "old_string": "alpha = 1",
+                "new_string": "alpha = 2",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("the control write must SUCCEED, or its silence about OP-4 proves nothing");
+    let control_text = joined_text(&control);
+    assert!(
+        !control_text.contains("operator-rule OP-4"),
+        "a write outside ~/.claude must not deliver OP-4 — without this the assertion below \
+         is equally satisfied by a predicate matching every path: {control_text}"
+    );
+
+    // The matching write.
+    let dot_claude = root.join(".claude");
+    std::fs::create_dir_all(&dot_claude).unwrap();
+    let target = dot_claude.join("settings.json");
+    std::fs::write(&target, "{\"model\": \"opus\"}\n").unwrap();
+    let hit = crate::tools::edit_file::EditFile
+        .call_content(
+            serde_json::json!({
+                "path": target.display().to_string(),
+                "old_string": "opus",
+                "new_string": "sonnet",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("the write must succeed — call_content's `?` would skip the router entirely");
+    let text = joined_text(&hit);
+    assert!(
+        text.contains("operator-rule OP-4"),
+        "a real edit_file write under .claude must deliver OP-4 through call_content in ONE \
+         call — this is the composition the two sibling tests could not establish. Got: {text}"
+    );
+    // The marker is not the rule: a mutation emitting the comment with an empty or wrong body
+    // would otherwise ship green. Same reasoning as
+    // `a_triggered_operator_rule_is_delivered_once_per_session`.
+    assert!(
+        text.contains("all three profiles"),
+        "the OP-4 block arrived without its imperative — marker present, rule text absent: \
+         {text}"
+    );
+}
+
 /// The no-echo write convention, guarded. Single-checkout repos — every test
 /// tempdir, and the overwhelmingly common real case — must be byte-identical to
 /// before this change. This is the test that makes the conditional shape change

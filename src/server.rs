@@ -3417,13 +3417,30 @@ mod tests {
     /// naming the tool that left.
     ///
     /// **A selector is necessary, NOT sufficient — do not read a green here as "routing
-    /// works".** `OP-4` names `edit_file` and `create_file`, both of which have supplied
-    /// selectors since `2447f709`, and it still cannot fire: its `path~` predicate is
-    /// matched against the RESPONSE, which carries no path. That defect is open at
-    /// `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`. This annotation is
-    /// the reason the two tools' own `selector_key` overrides could be deleted — it is
-    /// where their doc comments carried that caveat, and this is the site where someone
-    /// is most likely to mistake a supplied selector for a working route.
+    /// works".** A rule also needs its predicate to be able to match. `OP-4`
+    /// (`serves: edit_file(path~/.claude), create_file(path~/.claude)`) needed BOTH halves and
+    /// took two commits: `2447f709` gave those tools a selector, without which `route()` never
+    /// ran, and `a6b4fc35` added `annotate_write_path` so the response names the file actually
+    /// written, without which the `path~` predicate had nothing to match. Either alone changed
+    /// nothing observable. Both are archived at
+    /// `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`.
+    ///
+    /// *(Corrected 2026-09-01. This paragraph shipped in `30b6fc41` claiming OP-4 "still cannot
+    /// fire" against a response "which carries no path", and cited the bug as open at its
+    /// pre-archive path. Three errors in one sentence, from reading a superseded middle layer of
+    /// that file — its `## Fix` section opens with the authoritative "Fixed 2026-08-31 at
+    /// `a6b4fc35`" and preserves the earlier deferral text below it, which is what I quoted. The
+    /// status came from a sibling bug's `related:` field rather than from opening the file:
+    /// `reconnaissance-patterns:R-166`'s law, committed an hour after writing it.)*
+    ///
+    /// The caveat this annotation exists for still stands, and OP-2 is now the cleaner example:
+    /// it declares `Serves: Agent, Task`, which are Claude Code HARNESS tools and not
+    /// `crate::tools::Tool` implementors in this process, so no selector work in this codebase
+    /// can ever route it. A green here says every tool is reachable, never that every rule is
+    /// live. This annotation is also the reason the two write tools' own `selector_key`
+    /// overrides could be deleted — it is where their doc comments carried this caveat, and this
+    /// is the site where someone is most likely to mistake a supplied selector for a working
+    /// route.
     ///
     /// The positive end-to-end proof, for the one rule that does route, is
     /// `crate::tools::memory::tests::a_real_memory_write_call_delivers_op_3`.
