@@ -4,14 +4,15 @@
 //! at mutation time on a gitignored database — so what git carries is a
 //! REPLICA, and every surface must say so. See the spec's § Phase 2.
 //!
-//! `export`/`unexported_count` have no real (non-test) caller yet — the CLI
-//! or reindex integration point that calls them lands after this task — so
-//! every item in this file is only reachable via this file's own
-//! `#[cfg(test)] mod tests`. Same `#[cfg_attr(not(test), expect(dead_code,
-//! reason = "..."))]` pattern as `host.rs`: the expectation is asserted only
-//! in the non-test build, where these items are genuinely dead today, and
-//! fires the moment a later change adds a real caller without deleting the
-//! attribute.
+//! Task 4 gave this file its real (non-test) callers: `export` is called
+//! from `audit_log::call`'s `export=true` branch and from `reindex`'s
+//! best-effort fold-in; `read_shards` is called from `audit_log::call`'s
+//! query path to merge other hosts' committed rows into the local result.
+//! Same `#[cfg_attr(not(test), expect(dead_code, reason = "..."))]` pattern
+//! as `host.rs` — those attributes guarded every item here while only this
+//! file's own `#[cfg(test)] mod tests` reached them, and were DELETED, not
+//! widened, once `unfulfilled_lint_expectations` confirmed each had a live
+//! non-test caller; none remain in this file today.
 
 use super::host::{self, AUDIT_DIR};
 use crate::librarian::catalog::gc;
@@ -233,6 +234,13 @@ pub(crate) struct ShardRead {
     /// would be duplicated by `merge=union` on every same-host branch merge,
     /// and a declared window that disagrees with the rows is worse than none.
     pub hosts: BTreeMap<String, (i64, i64)>,
+    /// Files whose lines were parsed into `rows`/`hosts`. Task 4 deferred
+    /// decision 3: this does NOT sum with `files_skipped_by_window` +
+    /// `unreadable_files` to the on-disk file count in `AUDIT_DIR` —
+    /// `self_host`'s own shard file is excluded before any of these three
+    /// counters is touched, so the delta between the sum and the directory
+    /// listing is exactly one file (this host's own) on any host that has
+    /// ever exported, and zero on a host that never has.
     pub files_read: usize,
     pub files_skipped_by_window: usize,
     /// Shard files that parsed as a shard name, survived the window, but

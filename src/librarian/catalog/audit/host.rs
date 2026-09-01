@@ -6,23 +6,18 @@
 //! a re-derived id would move when the environment moves, silently forking one
 //! machine's shard history across two filenames with no error anywhere.
 //!
-//! Task 2 (writer, `shard.rs`) now calls into this module, but only from
-//! `shard::export`, which is itself only called by `shard.rs`'s own tests —
-//! so under `--cfg test` these items are reachable via that chain, and in the
-//! non-test build every item here remains genuinely unreached until a real
-//! (non-test) caller lands. Task 3 (reader) is still the sole consumer of
-//! `parse_shard_file_name`. Each item below carries its own
-//! `#[cfg_attr(not(test), expect(dead_code, reason = "..."))]` rather than a
-//! file-scoped `#![allow(dead_code)]`: `expect` fires
-//! `unfulfilled_lint_expectations` the moment a later task adds the first
-//! real (non-test) caller, so a stale suppression cannot ride along silently
-//! the way a blanket `allow` would (see `src/server.rs`'s `session_key` field
-//! for the same pattern). The `cfg_attr(not(test), ...)` wrapper is needed
-//! because this file's own unit tests call every one of these items directly
-//! — under `--cfg test` they are genuinely reachable and the plain
-//! `#[expect(dead_code)]` form would itself go unfulfilled and fail the
-//! `--all-targets` build; gating the expectation to the non-test
-//! configuration keeps it honest in both.
+//! Task 4 wired this module into the live tool surface: `resolve_host_id` is
+//! now called from `audit_log::call`'s query and export paths (labelling
+//! every merged row with its origin host), and `parse_shard_file_name` /
+//! `shard_file_name` are called from `shard::export` and `shard::read_shards`
+//! on real (non-test) call paths. Every item in this file is reachable from a
+//! non-test caller as of that commit. The `#[cfg_attr(not(test), expect(
+//! dead_code, reason = "..."))]` attributes that used to guard each item
+//! individually (rather than a file-scoped `#![allow(dead_code)]`, so a
+//! stale suppression could not ride along silently — see `src/server.rs`'s
+//! `session_key` field for the same pattern) were DELETED, not widened, once
+//! `unfulfilled_lint_expectations` confirmed each attribute's item had
+//! become live; none remain in this file today.
 
 use crate::librarian::catalog::gc;
 use anyhow::Result;

@@ -31,18 +31,22 @@ fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Export mode: append every unexported row to this host's committed shard
-    // and advance the watermark. Not combinable with filters — it exports
-    // everything past the watermark, so a filter alongside it would silently
-    // suggest a scoped export that never happened (IC-15).
+    // and advance the watermark. Not combinable with filters, nor with
+    // prune_before_ms — neither can silently absorb the other's args: a
+    // filter alongside export would suggest a scoped export that never
+    // happened (IC-15), and prune_before_ms alongside export would run
+    // export and hand the caller a different operation's result than the
+    // destructive one they asked for (Task review Finding 2, 2026-09-01).
     if args.get("export").and_then(Value::as_bool).unwrap_or(false) {
         let present: Vec<&str> = PRUNE_IGNORED_FILTER_KEYS
             .iter()
             .copied()
+            .chain(std::iter::once("prune_before_ms"))
             .filter(|k| args.get(*k).is_some_and(|v| !v.is_null()))
             .collect();
         if !present.is_empty() {
             return Err(RecoverableError::new(format!(
-                "export does not accept filters; it exports every unexported row — remove: {}",
+                "export does not accept filters or prune_before_ms; it exports every unexported row — remove: {}",
                 present.join(", ")
             )));
         }
@@ -175,9 +179,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Cross-host ordering uses at_ms (wall-clock), never seq (a per-host
     // autoincrement not comparable across hosts).
     merged.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    // Task review Finding (2026-09-01): merge THEN truncate, never cap each
+    // source independently first — capping local and shard rows separately
+    // before merging can starve a bursty exporter of any slot in the window
+    // even though its rows are the most recent overall.
     merged.truncate(limit);
     let entries: Vec<Value> = merged.into_iter().map(|(_, _, v)| v).collect();
     let count = entries.len();
+    // truncated = filtered_total > count: the two are computed over the same
+    // merged population (local + shard rows), so this holds regardless of
+    // which source produced the overflow — no separate "did shards truncate"
+    // conjunct is needed or correct.
     let truncated = filtered_total > count as i64;
     let mut out = json!({
         "entries": entries,
@@ -196,16 +208,36 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "self_host": self_host,
             "files_read": shards.files_read,
             "files_skipped_by_window": shards.files_skipped_by_window,
+            "unreadable_files": shards.unreadable_files,
             "malformed_lines": shards.malformed,
-            "coverage": shards.hosts,
+            "coverage": {
+                "unit": "per host: [min seq, max seq] found, scoped to the shard files opened for THIS query's window — a host absent here had no shard file survive the window filter",
+                "by_host": shards.hosts,
+            },
+            "note": "rows above whose host != self_host are a REPLICA of that host's local trail, fresh only as of that host's last export — see the export mode's own note.",
         },
         "note": "verb means 'last dispatched verb on the writing connection', not per-statement; actor 'unknown' = a writer that did not identify itself (foreign process or raw sqlite3)."
     });
+    let mut shard_warnings: Vec<String> = Vec::new();
     if shards.malformed > 0 {
-        out["shards_warning"] = json!(format!(
+        shard_warnings.push(format!(
             "{} malformed shard line(s) were skipped, not counted in filtered_total",
             shards.malformed
         ));
+    }
+    if shards.unreadable_files > 0 {
+        // Task review Finding 1 (2026-09-01): shard.rs documents and asserts
+        // that a dropped file "must not vanish silently" — but this was the
+        // only consumer, and it omitted the counter entirely, so a permission
+        // error or a directory-shaped shard name shortened filtered_total
+        // with nothing saying the number was short.
+        shard_warnings.push(format!(
+            "{} shard file(s) could not be read (permissions, a race, or a broken symlink) and are not counted in filtered_total",
+            shards.unreadable_files
+        ));
+    }
+    if !shard_warnings.is_empty() {
+        out["shards_warning"] = json!(shard_warnings.join("; "));
     }
     if truncated {
         out["hint"] = json!(format!(
@@ -457,11 +489,11 @@ mod tests {
         {
             let cat = ctx.catalog.lock();
             cat.conn
-                .execute(
-                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(2,'artifact','insert','local-1')",
-                    [],
-                )
-                .unwrap();
+                    .execute(
+                        "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(2,'artifact','insert','local-1')",
+                        [],
+                    )
+                    .unwrap();
         }
         let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();
         let entries = out["entries"].as_array().unwrap();
@@ -479,6 +511,113 @@ mod tests {
         assert_ne!(
             local["host"], "otherbox-99ffee",
             "the local row's host must be THIS host, not the foreign one: {local}"
+        );
+        // Task review Finding 8: `!= "otherbox-99ffee"` alone survives a
+        // mutation that labels local rows "local" instead of self_host —
+        // pin it to the value the response itself claims is self_host.
+        assert_eq!(
+            local["host"], out["shards"]["self_host"],
+            "the local row's host must equal shards.self_host exactly: {local}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_merged_query_with_local_and_shard_rows_sums_both_to_filtered_total() {
+        let (ctx, tmp) = mk_ctx();
+        write_foreign_shard(tmp.path(), 3);
+        {
+            let cat = ctx.catalog.lock();
+            for i in 0..2 {
+                cat.conn
+                        .execute(
+                            &format!(
+                                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES({},'artifact','insert','local-{i}')",
+                                100 + i
+                            ),
+                            [],
+                        )
+                        .unwrap();
+            }
+        }
+        let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();
+        // Task review Finding 6: no existing fixture held BOTH local and
+        // shard rows — this is the one property the whole merge rests on,
+        // and it is killed by neither the local-only nor the shard-only test.
+        assert_eq!(out["filtered_total"], 5, "{out}");
+        assert_eq!(out["count"], 5, "{out}");
+    }
+
+    #[tokio::test]
+    async fn truncated_reflects_the_merged_population_not_local_alone() {
+        let (ctx, tmp) = mk_ctx();
+        write_foreign_shard(tmp.path(), 3);
+        let out = call(&ctx, json!({"action": "audit_log", "limit": 2}))
+            .await
+            .unwrap();
+        // Task review Finding 7: with zero local rows, a `truncated`
+        // computed from the local count alone reads `false` (0 > 2) even
+        // though 3 shard rows overflow a limit of 2 — only the MERGED
+        // filtered_total catches this.
+        assert_eq!(out["filtered_total"], 3, "{out}");
+        assert_eq!(out["count"], 2, "{out}");
+        assert_eq!(out["truncated"], true, "{out}");
+    }
+
+    #[tokio::test]
+    async fn export_refuses_to_combine_with_prune_before_ms() {
+        let (ctx, _tmp) = mk_ctx();
+        let err = call(
+            &ctx,
+            json!({"action": "audit_log", "export": true, "prune_before_ms": 10}),
+        )
+        .await
+        .unwrap_err();
+        let re = err
+            .downcast_ref::<RecoverableError>()
+            .expect("must be a RecoverableError, not a silent discard of the destructive verb");
+        assert!(re.to_string().contains("prune_before_ms"), "{re}");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_shard_file_is_counted_not_silently_dropped() {
+        let (ctx, tmp) = mk_ctx();
+        let dir = tmp.path().join(host::AUDIT_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let at_ms = 1_788_220_800_000;
+        let name = host::shard_file_name("otherbox-99ffee", at_ms);
+        // A directory where a shard FILE should be: the name parses as a
+        // valid shard, but std::fs::read_to_string on a directory errors —
+        // this exercises the unreadable_files path without relying on real
+        // permission bits, which are not portable across CI runners.
+        std::fs::create_dir_all(dir.join(&name)).unwrap();
+        let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();
+        assert_eq!(out["shards"]["unreadable_files"], 1, "{out}");
+        let warning = out["shards_warning"]
+            .as_str()
+            .expect("an unreadable file must not vanish silently — Task review Finding 1");
+        assert!(warning.contains("could not be read"), "{warning}");
+    }
+
+    #[tokio::test]
+    async fn merged_query_names_shard_rows_as_a_replica_and_labels_coverage() {
+        let (ctx, tmp) = mk_ctx();
+        write_foreign_shard(tmp.path(), 2);
+        let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();
+        assert!(
+            out["shards"]["note"].as_str().unwrap().contains("REPLICA"),
+            "{out}"
+        );
+        assert!(
+            out["shards"]["coverage"]["unit"]
+                .as_str()
+                .unwrap()
+                .contains("seq"),
+            "{out}"
+        );
+        assert_eq!(
+            out["shards"]["coverage"]["by_host"]["otherbox-99ffee"],
+            json!([1, 2]),
+            "{out}"
         );
     }
 
