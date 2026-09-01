@@ -8644,7 +8644,7 @@ prefer comparing the artifact (`git show <sha> -- <path>`, checksum) over search
 diff answers the question the grep only approximates.
 
 **Severity:** med — no wrong artifact shipped, but the next action queued was a retraction of a
-correct root cause in `docs/issues/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md`.
+correct root cause in `docs/issues/archive/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md`.
 Cost had it landed: a bug file arguing against its own measured evidence, plus a peer acting on
 the retraction.
 
@@ -8676,7 +8676,7 @@ reconnect, over two bug files filed earlier in the same session.
 exemption (`R-49`), and a bug file's citations are written at fix time while the substrate is
 still moving under peer commits.
 
-**Counterfactual:** `docs/issues/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md`
+**Counterfactual:** `docs/issues/archive/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md`
 was filed citing `scripts/post-index-change-stage-log.sh:142` for the
 `mv -f "$tmp" "$log" … || rm -f "$tmp"` fallback. The line is `:141`; `:142` is **blank**. The
 off-by-one entered because the file was read once at `a987df96` and cited from that reading

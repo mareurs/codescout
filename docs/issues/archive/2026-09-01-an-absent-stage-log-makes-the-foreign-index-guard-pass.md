@@ -1,18 +1,18 @@
 ---
-id: d7bbeba8a9f23dd8
+id: 2eb51b4f12ed784e
 kind: bug
-status: open
+status: fixed
 title: 'BUG: an absent session-stage-log makes the foreign-index guard pass silently — every producer failure path exits 0'
 owners:
 - marius
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: ''
+closed: 2026-09-01
 opened: 2026-09-01
 owner: marius
 related: []
 severity: high
-unverified: 'The fail-open is MEASURED (EXIT=0 with a peer''s file staged). What is NOT established is a production trigger: the log was removed by hand in the repro, and no observed production run has been shown to lose the log. The one candidate — a 3-case suite failure on this session''s first run — is n=1 and did not reproduce in 12+ attempts.'
+unverified: 'Fix, mechanism and decision table are all measured and pinned (fa9b3aff, 6 regression cases, 5 confirmed RED first, verified live on the shared checkout). What is NOT established is production incidence: no real capture was ever observed via this path, only constructed. The 3a422b31 capture that started this work reached the same end state by the ATTRIBUTION-decay route a987df96 fixed, not by this cold-log route — so this closes a demonstrated hole, not a counted one. Also unmeasured: how often the new `-` over-refusal fires in practice, i.e. the cost side of P2. M4 bounds it at <=24.7% of staging calls (the blanket forms), but that is an upper bound on exposure, not a rate of refusals.'
 ---
 
 ## Summary
@@ -221,31 +221,80 @@ observation, **not** as a claim: candidate mechanism is one of the silent `exit 
 firing transiently, which is exactly what this bug describes, but n=1 and unconfirmed.
 
 ## Fix
-Not attempted. The shape follows `a987df96`'s own ruling — *unknown over-refuses recoverably;
-prefer the noisy wrong answer where the quiet one is unobservable* — which the producer now
-honours per-pair (`-`) but the consumer does not honour for the log as a whole:
 
-- guard: distinguish **"log absent"** from **"log lists nothing foreign"**, and refuse (or at
-  minimum warn loudly) on the former, since staged paths with no log is unattributable, not safe;
-- producer: make the failure paths emit something a reader can act on rather than `exit 0`.
+**Fixed at `fa9b3aff` on `experiments`** (patch-id `db92ba9acc47e85136624afbd736a335d6367a6b`).
 
-Note the guard cannot simply refuse whenever the log is missing without a bootstrap story —
-`e3c75306` seeds the log at install precisely because a cold log is legitimate at that moment.
-"Staged paths exist AND no log" is the discriminating condition.
+**P2, chosen from a measured decision table rather than from the mechanism alone.** `argv_paths()`
+emits the pathspec the staging command actually named; `names_path()` decides whether a rebuilt
+pair may be claimed. A pair argv did not name records `-`.
 
+Matching is **strict**, and the asymmetry is the design: a miss records `-`, which over-refuses
+and a reader recovers from; a false hit claims a peer's file, which under-refuses and emits
+nothing for anyone to recover from. That is `a987df96`'s own ruling, finally applied to the
+fallback it never reached. **Directory prefixes are deliberately not matched** — `git add src/`
+stages every file beneath `src/` *including a peer's*, so treating the subtree as named would be
+precisely the false hit this exists to avoid.
+
+Blanket forms therefore claim nothing, including their own files. **Intended, not a regression:**
+`git add -A` followed by a *bare* commit is exactly the capture this guard exists for, so making
+it loud is the point — and the documented pathspec-commit remedy never reads the shared index at
+all.
+
+Verified against the original cross-claim scenario:
+
+```
+before:  BBBB f.txt   BBBB g.txt   BBBB h.txt     guard EXIT=0  (silent capture)
+after:   -    f.txt   -    g.txt   BBBB h.txt     guard EXIT=1  (refused, names them)
+```
+
+Warm-log attribution unchanged (`AAAA x.txt` / `BBBB y.txt`), and confirmed **live** in the real
+shared checkout: this session's own `git add` of the fix attributed to `d91c1155-…` correctly
+through the new path.
+
+**Rejected: P1 (`-` whenever the log is cold).** It refuses your own routine commits, and a guard
+that does that gets switched off — after which there is no guard at all. The failure mode of the
+remedy mattered more than its correctness.
 ## Tests added
-None yet. Owed: a case that runs the guard with staged foreign content and **no** log present,
-asserting a refusal — and a re-entrancy case asserting the suite fails loudly rather than
-10-of-21 quietly when the hook is disabled.
 
+**`tests/hooks-discrimination.sh`** § *cold log claims only what argv named*, six cases at
+`fa9b3aff` — 26 → 32, all passing.
+
+**Five confirmed RED against the parent commit** (`want '-' got 'bbbb…'`, plus two missing
+refusals):
+
+| case | pre-fix |
+|---|---|
+| cold log: B claims the path B named | passed — the control, see below |
+| cold log: B does NOT claim A's staged path | **RED** |
+| an unowned peer path still refuses | **RED** |
+| refusal names the unowned path | **RED** |
+| `git add -A` names no path, so it claims nothing | **RED** |
+| and a bare commit after `-A` is refused | **RED** |
+
+**The control is the load-bearing one.** Without "B claims the path B named", the whole set is
+satisfied by a hook that records `-` for *everything* — the monotone-under-removal trap in
+CLAUDE.md § *Testing Discipline*, where an absence assertion is satisfied exactly as well by a
+dead mechanism. It passes pre-fix on purpose; it is there to fail against the wrong fix, not
+against the bug.
+
+**The trigger in the fixture is the measured one, not a convenience.** The cold state is produced
+by a *suppressed hook run* (`CODESCOUT_STAGE_LOG_RUNNING=1` on A's stage), not by `rm -f`,
+because M3 showed one missed invocation is what actually reaches this in production. A fixture
+that deleted the log would still pass while testing a mechanism nobody encounters.
 ## Workarounds
 The composition already documented in the hook header: `git add <paths>` then
 `git commit -- <same paths>`. The pathspec form ignores the shared index, so it does not depend
 on the log being correct or present.
 
 ## Resume
-Open. Mechanism measured and reproduced; fix and regression cases owed.
 
+N/A — root cause measured, fixed at `fa9b3aff`, pinned by six regression cases, and verified live
+on the shared checkout.
+
+The four measurements above are the durable part: **M2** in particular corrects the intuition
+this file opened with. "The log went cold" is *not* the dangerous state — log-empty implies
+index-empty, so nothing is staged to mis-attribute. "The log was cold **while content was
+staged**" is, and one missed hook invocation reaches it.
 ## References
 - `scripts/pre-commit-foreign-index.sh` (consumer)
 - `scripts/post-index-change-stage-log.sh:83,87,124,141` (the silent `exit 0` paths) — line numbers verified against `71499331`
