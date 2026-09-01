@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 91
+entry_high_water_F: 92
 entry_high_water_W: 93
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 93
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-92 | 2026-09-01 | med | self-friction | fixed-verified | Corroborated a CORRECT verdict with evidence from outside its own window. `file-provenance` returned `SHARED` on `bug-fix-session-log.md`; I supported it with "F-83 appears 7× and is not mine" — but F-83 entered at `5d405b67`, which **predates** the window floor `9188d000`. The real in-window write was the peer's W-91 at `da44f73d`, learned from them volunteering it. Right answer, invalid support: the worse failure, since re-running the tool re-confirms the verdict and never touches the reasoning. Same shape as the evening's three misattributions — every part true, no step checked against the object — except the instrument was already open and prints the window on its own output line. The verdict came from the tool and was checked; the corroboration was mine, added to make it sound better-supported, and entered through the one channel with no gate. `git log <floor>..HEAD -- <path>` answers it in one command |
 | F-91 | 2026-09-01 | high | measurement | fixed-verified | A positive control certified the INCIDENT and was read as certifying the SUBSTRATE. The IC-10 calibration (`440dd773`) confirmed `cs_tool_log.jsonl` held the disputed writes, checked the other direction too (native writes: zero) and concluded "build it". It never asked whether that log retains records at all: `MAX_ENTRIES = 50` rolling (196 of 297 logs sit exactly at the cap), deleted on compact/resume/clear (`hook_helpers.py:244,420` — the calibrating session made **370** codescout calls and its own log held **1**), and `args` cut to 200 chars over unordered keys (11.5% of 1,920 write records carry no `path=`; 147 more carry a truncated one). The sample was the one session in the good state on all three axes. `wc -l .buddy/*/cs_tool_log.jsonl | sort -n | uniq -c` ends the design in one command. Nothing shipped — substrate rejected, channel built on transcripts, writer defect filed upstream |
 | F-1 | 2026-05-17 | low | plan-prose | fixed-verified | Bug-file Resume paths cite non-existent layout |
 | F-2 | 2026-05-17 | med | self-friction | fixed-verified | 2 of 3 buffer bugs likely stale — code reads correct |
@@ -9196,6 +9197,45 @@ which `normalize()` discards as out-of-tree before any verb logic runs.
 All three are the fixture-detail law: the assertion states what must be true, and nothing states
 which part of the **setup** is what makes it able to tell. Each fixture is now annotated on its
 own line with what breaks if the detail goes.
+
+## F-92 — Corroborated a correct verdict with evidence from outside its own window
+
+**Valid:** dated 2026-09-01
+
+**Category:** self-friction · **Status:** fixed-verified · **Valid:** dated 2026-09-01
+
+**Observed:** Having shipped `scripts/file-provenance.py`, I reported its first live multi-author
+verdict to the user: `docs/trackers/bug-fix-session-log.md` reads `SHARED` (me + `c2a08c22`),
+*"corroborated independently by F-83 appearing 7× and not being mine."*
+
+**Got:** F-83 entered the file at `5d405b67`, which **predates** the window floor the verdict
+was computed under (`9188d000`, 04:10:32). A write outside the window is not evidence about the
+window. The real in-window write was `c2a08c22`'s W-91 at `da44f73d` (04:49:34) — which I
+learned from the peer volunteering it, not from any check of mine.
+
+**The verdict was right and the evidence was invalid**, which is the worse of the two ways to be
+wrong: a wrong verdict gets corrected the moment anyone re-runs the tool, while a right verdict
+with fabricated support survives every check that only re-checks the answer.
+
+**Root limit — this is the evening's own class, recurring inside the tool built to close it.**
+Every part true: F-83 is real, it is in the file seven times, it is not mine. No individual
+claim false, so nothing reads as wrong on review. And **no step was checked against the object
+in front of me** — the window, which I had designed forty minutes earlier and which the tool
+prints on its own output line. Same structure as the three misattributions in
+`docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`, and this
+time the instrument that would have answered was already open.
+
+**Why "corroboration" specifically is the exposed spot:** the verdict itself came from the tool
+and was therefore checked. The corroboration was mine, added to make the verdict *sound*
+better-supported, and it entered the report through the one channel with no gate on it. A
+sentence written to increase confidence is not itself subject to the check it is boosting.
+
+**Cheapest sufficient check, and it is one command:**
+`git log <floor>..HEAD -- <path>` — the window is printed by the tool, so the query needs no
+recall. It returns `da44f73d` immediately.
+
+**Consequence:** published to the user in a session summary; corrected in the same session
+after the peer's message prompted a re-read. No artifact carried it.
 
 ## Template for new entries
 
