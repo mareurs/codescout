@@ -172,3 +172,33 @@ The guard adds **no third list**. `Spec::required` already states each action's 
 Surface cost +393 chars (54,583 → 54,976; headroom 1,936 → 1,543): an **addition**, carried under P-3 by the measured deficit (1 attempt / 1 failure, plus `missing_required_param` ×41). Gate green: clippy clean, lean 3408/0, default 4984/0. Fix `6894b67d` on `experiments`, patch-id `3cb9bc68a685c46252388dc21a3dd8d7beff9098`. Bug archived as `2fbb59c9b84a0dcf`, tagged `cluster/declared-not-wired` through the catalog.
 
 T-10's investigation is **done and its finding is the opposite of what was expected**: chasing whether `graft` was the third instance that trips the `schemars` rule-of-three showed the spec's second instance does not qualify. `query`/`title_contains`/`preview` are neither advertised nor accepted — no `Args` under `src/librarian/tools/` has those fields — so they are IC-15 silent-drop (T-2's class), not this one. Net **2 confirmed, 1 live; the trigger has NOT fired.** Writing that correction into the spec is what remains of T-10.
+
+
+### 2026-09-01 — T-8..T-12 closed out, and two of the five were scoped on a stale premise
+
+Final: **T-8, T-9, T-10, T-11 done; T-12 dropped.** Commits `6894b67d` (fix + guard),
+`2e14e92a` (bug file + tasks), `1468c4b5` (probe + three stale counts), `0e48ef50` (T-11).
+
+**The result worth keeping is not any of the fixes — it is that 2 of 5 tasks rested on a
+number that had already been fixed.** Both were error aggregates over `usage.db`'s 29-day
+retention window, and both windows *straddled the fix commit*:
+
+| task | headline number | reality |
+|---|---|---|
+| T-11 | `missing field 'patch'` ×11, largest single cause in its family | all 11 predate `60df0d76` (2026-08-27 18:46); **zero after** |
+| T-12 | `artifact_event` 26.1% error rate, worst on the surface | spans **two** fixes (`6ba720bc` 2026-08-16, plus the `with_hint` messages on 08-27); since 08-27, **12 calls / 0 errors** |
+
+This defect class is nastier than a wrong query, because **the number is real and the query is
+correct.** Nothing in `SELECT err_family, count(*)` hints that half the population is
+historical. It survives review for the same reason the attribution errors that evening did —
+it is assembled entirely from true parts.
+
+**The check is one clause and it is now the probe's fourth documented trap:** group any error
+aggregate by `date(called_at)` before scoping work on it. *A count that stops on a date is a
+fixed bug.* T-11 survived as a real but **different** task once re-derived past the fix
+timestamp (9 of 15 live failures were bare serde messages from the remaining bare-`?` sites);
+T-12 did not survive at all.
+
+Note what did **not** save us: T-11 and T-12 were the two tasks with the *most* quantitative
+backing in the original plan. The measurement is what made them look strongest, and the
+measurement is what was wrong.
