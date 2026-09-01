@@ -577,6 +577,40 @@ the *substance*. It is checking a list of things already accounted for. Prefer t
 makes no claim about what the foreign content is, which is exactly why nothing about the foreign
 content can defeat it.
 
+**Cross-reference added 2026-09-01: the shipped guard PREDICTED this instance, and neither
+document pointed at the other.** `scripts/pre-commit-foreign-index.sh:30-50` splits the class in
+two — **CROSS-path** (*my index holds YOUR file*) which it covers, and **INTRA-path** (*my file
+holds YOUR lines*) which it does not — and says of the intra case, in its own comment: *"a bare
+commit sees only their own staged path and this guard exits 0. **It would have passed.** Path
+ownership was never in dispute — the contamination was inside a path both parties agree is
+yours, so no ownership check can see it."* `0c32bb85`, documented above, is that sentence borne
+out. The guard cites this file; this file did not cite the guard, so a reader arriving at either
+one got half the picture — the prediction without its instance, or the instance without the
+reason no gate caught it.
+
+Re-measured here independently rather than taken from the section above, and it agrees:
+`0c32bb85`'s subject is *"W-91 cited the wrong law"*, its diff adds `## F-93`, and its message
+contains **0 of 6** markers of `F-93`'s content (`F-93`, `append-only`, `Write 8`, `187`,
+`doctor.rs`, `false within the hour`). A first pass reported **1**, which was the pattern `80`
+matching the SHA `800f1dec` inside the message — a loose predicate matching something its own
+result did not contain, which is the negative-search law firing on the check written to confirm
+this very section.
+
+**Second INTRA-path instance the same day, and this one is not a capture.** `94d22b4d` committed
+`docs/trackers/reconnaissance-patterns.md` carrying `R-139` and `R-154`, authored by other
+sessions, alongside this session's `R-153`. Their index rows sat in the **same diff hunk**, so no
+hunk-level split existed and `git add -p` is unavailable in this harness; the entries were
+verified structurally complete and attributed explicitly in the commit message instead. Both
+pre-commit guards — *refuse a pathspec commit carrying unstaged content* and *refuse an index
+commit carrying another session's staged paths* — **passed**, correctly and uselessly, on exactly
+the axis the guard's comment says they cannot see. So the intra-path hole now has two measured
+instances rather than one prediction, and they differ usefully: `0c32bb85` was unnoticed until
+the captured session found it, `94d22b4d` was noticed before the commit and mitigated in prose
+rather than by any mechanism. **No new record and no new class** — the guard already assigns this
+to `IC-14` and already names the remedy (record each path's blob at `git add`, re-hash at
+pre-commit, refuse if it moved) as **not built**. This paragraph exists to close the citation, not
+to re-open the finding.
+
 ### The seam is created by the append convention, and it is 5.9% of this ledger
 
 `codescout-68`'s reading of the `F-93` split, measured rather than accepted. The capture was not
