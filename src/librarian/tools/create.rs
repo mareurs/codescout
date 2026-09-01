@@ -227,7 +227,14 @@ pub(crate) fn reject_reserved_extra_keys(
 /// that already has two — the `IC-6` shape this repo has 27 instances of. **The escape,
 /// since refusing a token owes one:** a body that genuinely opens with a `---` horizontal
 /// rule keeps it by leading with a blank line, and the hint says so.
-fn reject_body_leading_frontmatter(body: &str) -> Result<()> {
+/// **Called from two sites** — `create`'s `call()` and `update`'s full-body
+/// replacement — and shared rather than duplicated for the reason
+/// [`crate::tools::core::types::action_selector_key`] gives about its own callers: two
+/// copies of one predicate can drift into recognising different sets of bodies, and a
+/// guard that fires on one write surface but not its sibling is harder to notice than
+/// one that fires on neither. `update` was measured to have the identical defect on
+/// 2026-09-01 by probe, after `create` was already fixed.
+pub(crate) fn reject_body_leading_frontmatter(body: &str) -> Result<()> {
     if !(body.starts_with("---\n") || body.starts_with("---\r\n")) {
         return Ok(());
     }

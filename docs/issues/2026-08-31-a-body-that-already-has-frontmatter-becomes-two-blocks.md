@@ -1,7 +1,7 @@
 ---
 id: c202d8febd80ca8a
 kind: bug
-status: open
+status: fixed
 title: a body that already begins with a frontmatter block silently becomes a second, inert block
 tags:
 - cluster/addressing-without-an-escape-hatch
@@ -186,10 +186,36 @@ refusal already lives — at `artifact(create|update)`'s input boundary — not 
 
 ## Tests added
 
-None yet. The regression test should cover **both** seams: a `create` and an `update` each
-refusing a frontmatter-leading body, plus one asserting a *fenced* block in a body is still
-accepted, since documentation about frontmatter is a legitimate body.
+`create_refuses_a_body_that_opens_its_own_frontmatter_block` and
+`create_accepts_a_body_whose_dashes_are_not_a_leading_block` in `src/librarian/tools/create.rs`;
+`update_refuses_a_full_body_replacement_that_opens_a_frontmatter_block` and
+`body_edits_may_splice_content_that_begins_with_dashes` in `src/librarian/tools/update.rs`.
 
+**Three mutations, because there are two guarded SITES and two directions** — CLAUDE.md
+§ *Testing Discipline*: a mutation answers a question about one *line*, so a kill at `create`
+says nothing about `update`.
+
+| # | mutation | result |
+|---|---|---|
+| A | delete the guard call in `create::call()` | 25 passed / 1 failed — kills the `create` refusal test **only** |
+| B | widen the predicate to `body.contains("---")` | 25 passed / 1 failed — kills the `create` acceptance twin **only**; the refusal test stays **green** |
+| C | delete the guard call in `update::call()` | 983 passed / 1 failed — kills the `update` refusal test **only**; every `create` test stays **green** |
+
+**B is why the acceptance twin exists.** A refusal test is an *existence* assertion and is monotone
+under widening — a guard refusing every body whatsoever satisfies it completely — so it cannot see
+over-refusal at all. Its three fixtures fail for three different reasons: the leading blank line
+(the escape the hint promises, under test), a horizontal rule further down, and a fenced YAML
+example, which is how any document *about* frontmatter is written, including this repo's guides.
+
+**C is why the second site got its own test.** It is also the measurement that would have caught a
+premature close: the first fix covered `create` alone, and this file's own *Tests added* section had
+already named both seams. Sources restored byte-exactly after every run (`diff -q` → identical),
+verified rather than assumed.
+
+**Deliberately unguarded, and pinned as such:** `body_edits`. Those splice content at a heading
+inside an existing document, so a fragment opening with `---` is a horizontal rule mid-body, never a
+second block at position 0. `body_edits_may_splice_content_that_begins_with_dashes` exists so that
+exemption is distinguishable from having forgotten the site.
 ## Workarounds
 
 Pass metadata as parameters, never as body text:

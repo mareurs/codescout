@@ -447,6 +447,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
 
+    // The same defect `create` carries, at the other write surface: a full-body
+    // replacement whose first line is `---` lands a SECOND frontmatter block below the
+    // catalog's, which parses fine and is therefore silent. Measured by probe
+    // 2026-09-01 — `update` reproduced it identically after `create` was fixed, which is
+    // why the guard is shared rather than reimplemented here.
+    //
+    // `body_edits` deliberately NOT guarded: those splice content at a heading inside an
+    // existing document, so a fragment opening with `---` is a horizontal rule mid-body,
+    // not a second block at position 0. Guarding it would refuse legitimate content.
+    if let Some(new_body) = patch.body.as_deref() {
+        super::create::reject_body_leading_frontmatter(new_body)?;
+    }
+
     // Checked once here rather than inside `apply_frontmatter_patch`, which all three
     // frontmatter-touching branches below call and which is infallible by design.
     //
@@ -1621,6 +1634,94 @@ text
         )
         .await
         .expect_err("a reserved key is refused whatever its value");
+    }
+    /// The second guarded SITE, and it gets its own test for the reason CLAUDE.md
+    /// § *Testing Discipline* gives: a mutation answers a question about one line, so
+    /// `create`'s kill says nothing about this call. Measured before the guard existed
+    /// — `update` reproduced the doubled block identically, four `---` lines, with
+    /// `status: scratch` inert below a catalog block reading `draft`.
+    ///
+    /// Load-bearing fixture detail: the replacement body is deliberately LONGER than the
+    /// original. A shorter one would trip the 50% shrink guard first and the call would
+    /// fail for an unrelated reason, leaving this test green while proving nothing about
+    /// frontmatter — the assertion below would still see an `expect_err`.
+    #[tokio::test]
+    async fn update_refuses_a_full_body_replacement_that_opens_a_frontmatter_block() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "custom.md",
+                "kind": "spec", "title": "T", "body": "original body text, short"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        let abs = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+        let before = std::fs::read_to_string(&abs).unwrap();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body":
+                "---\nstatus: scratch\n---\n\n# Heading\n\nA replacement body that is \
+                 comfortably longer than the original, so the shrink guard cannot be \
+                 what refuses this call.\n"}}),
+        )
+        .await
+        .expect_err("a full-body replacement opening its own frontmatter must be refused");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("frontmatter block"),
+            "the error must name what it found, not merely refuse: {msg}"
+        );
+        assert!(
+            !msg.contains("shrink"),
+            "must be refused BY THIS GUARD, not incidentally by the shrink guard: {msg}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&abs).unwrap(),
+            before,
+            "the file must be untouched"
+        );
+    }
+
+    /// `body_edits` splices into an EXISTING document at a heading, so a fragment
+    /// opening with `---` is a horizontal rule mid-body, never a second block at
+    /// position 0. Guarding it would refuse legitimate content, so the guard
+    /// deliberately does not — and this pins that exemption, which is otherwise
+    /// indistinguishable from having forgotten the site.
+    ///
+    /// Mutation caught: extending the guard to `body_edits` content.
+    #[tokio::test]
+    async fn body_edits_may_splice_content_that_begins_with_dashes() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "custom.md",
+                "kind": "spec", "title": "T", "body": "# Section\n\nbody text here\n"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body_edits": [{
+                "heading": "# Section", "action": "insert_after",
+                "content": "---\n\nA horizontal rule, spliced mid-document.\n"
+            }]}}),
+        )
+        .await
+        .expect("a body_edits splice beginning with `---` is legitimate content");
     }
 
     #[tokio::test]

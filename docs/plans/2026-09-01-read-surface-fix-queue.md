@@ -28,7 +28,7 @@ output is mostly other sessions' work, so it is last and its deliverable is a re
 
 | # | item | kind | state |
 |---|---|---|---|
-| 1 | double-frontmatter corruption in `artifact(create)` | code fix | **done** — guard + 2 tests, 2 mutations measured |
+| 1 | double-frontmatter corruption in `artifact(create)` **and `update`** | code fix | **done** — 2 sites guarded, 4 tests, 3 mutations measured |
 | 2 | heading-miss discards the `Available headings` hint | code fix | queued |
 | 3 | hook refusal-text "what comes next" tail | design + shell | queued — blocked on a design call |
 | 4 | triage the 27 open bugs (verify-open cadence) | survey | queued |
@@ -96,6 +96,33 @@ Only the acceptance test mutates the other way. Probe file restored byte-exactly
 other sessions' archived artifacts, it needs its own decision about whether to merge or to leave
 history alone, and doing it silently inside a guard commit would be the same conflation the guard
 refuses. Recorded as item 5 below.
+
+### Follow-up the same session — the fix was premature, and the bug file said so
+
+`38ba4f49` guarded `create` alone. The bug file's own *Tests added* section had already named
+**two** seams — *"a `create` and an `update` each refusing a frontmatter-leading body"* — and a
+probe confirmed `update` reproduced it identically: 4 `---` lines, `status: scratch` inert below a
+catalog block reading `draft`.
+
+**Caught by re-reading the artifact rather than by any check.** Closing after one site would have
+left a passing suite, a green gate, a commit message full of measurements, and half the defect —
+with nothing anywhere to prompt a re-open. `R-49`'s law (*re-entering your own bug file counts as a
+seam; authorship is no exemption*) applied to a file written by a peer three days earlier.
+
+**The guard is now shared, not duplicated**, for the reason `action_selector_key`'s doc gives about
+its own callers: two copies of one predicate drift into recognising different sets of bodies, and a
+guard that fires on one write surface but not its sibling is *harder* to notice than one firing on
+neither.
+
+**Third mutation, at the second site:** deleting `update`'s call kills its refusal test only — 983
+passed / 1 failed — with every `create` test green. That is the per-site law measured rather than
+cited: `create`'s kill genuinely said nothing about `update`.
+
+**And one exemption pinned deliberately:** `body_edits` is *not* guarded, because it splices at a
+heading inside an existing document where a leading `---` is a horizontal rule, not a block at
+position 0. `body_edits_may_splice_content_that_begins_with_dashes` exists so that choice is
+distinguishable from a forgotten site — the *annotate-an-inert-fixture* direction of CLAUDE.md's
+fixture law.
 ## 2 — heading miss discards the hint (`9b6ba9568f3c28b3`)
 
 `heading_miss_meta`'s absent arm drops `err.hint()` while its ambiguous sibling forwards it, so a
