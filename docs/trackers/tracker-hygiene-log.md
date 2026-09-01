@@ -7,7 +7,7 @@ tags:
 - hygiene
 - skill-meta
 - lifecycle
-entry_high_water_HY: 23
+entry_high_water_HY: 24
 entry_prefix: HY
 expects_augmentation: docs/augmentations/docs-trackers-tracker-hygiene-log.yaml
 next-sweep-due: 2026-09-24
@@ -1797,6 +1797,79 @@ no surface reporting the other two. BL-44's cell already recorded the params hal
 (*"self-inflicted by the documented workflow"*); the section half is the same defect one
 representation over, and it went unrecorded because the check written in response to
 BL-44 was scoped to the pair that had just failed.
+
+## HY-24 — Miss: plans have no hygiene owner, and the detector that would catch the smaller half needs an archive convention the larger half never had
+
+**Type:** miss
+
+**Valid:** dated 2026-09-02
+
+**Rests on:** the skill's own Phase 2 inventory (`SKILL.md:167-173`), which is
+`git ls-files 'docs/trackers/*.md'` plus `artifact(find, kind="tracker",
+include_archived=true)`.
+
+**The miss.** `kind=plan` has no hygiene owner. The sweep inventories `docs/trackers/`
+and queries `kind="tracker"`; plans are never enumerated, in either directory, at any
+status. So plan-side drift is not something the detectors handle badly — it is not
+something they look at.
+
+**Measured today, and D2 already describes it.** Eleven rows under
+`docs/plans/archive/` carried `status: draft`. D2's second clause is *"file in archive
+dir with `status`"* — a verbatim match. They survived the 2026-07-17 and 2026-08-16
+sweeps untouched, because no sweep ever inventoried them. **The detector was not
+missing; the population was.** That is a different repair from writing a new detector,
+and confusing the two would produce a D12 that changes nothing.
+
+**Widening the inventory to `kind=plan` fixes the smaller half and misses the larger
+one.** A second population lives in `docs/superpowers/plans/` — 237 files, of which 46
+are live plan rows (42 `draft`, 3 `active`, 1 `done`). Five drafts were spot-checked
+against code and **all five had shipped**: `2026-05-01-call-graph` (the `call_graph`
+tool is callable), `2026-08-27-operator-rules-phase-1` (`src/operator_rules/`),
+`2026-08-31-cross-machine-catalog-recovery` (`docs/conventions/cross-machine-catalog-resume.md`),
+`2026-09-01-catalog-audit-trail` (`librarian(action="audit_log")`),
+`2026-08-27-get-guide-section-grain` (`src/prompts/guide_index.rs`). Against that
+population every current detector is structurally silent:
+
+| detector | why it cannot fire there |
+|---|---|
+| D2 terminal-not-archived | compares a live dir against an archive dir. **`docs/superpowers/plans/archive/` does not exist** — there is no archive convention for that directory at all |
+| D3 stale-active | keyed on `status: active`. These are `draft` |
+| D10 session-log-decay | matches `*session-log*.md` only |
+
+So the shipped-but-open plan is invisible three ways, and the third is the interesting
+one: D2 needs a *destination* to measure against, and a directory with no archive
+convention cannot generate a D2 finding no matter how stale it gets. **An absent
+convention reads to a detector exactly like a satisfied one.**
+
+**Proposal, and it is a decision before it is a detector.** The prior question is
+whether `docs/superpowers/plans/` is a *backlog* or a *log*. It is SDD run output;
+nothing reads those statuses (the seven code references to that path are path mentions,
+not status consumers); and no archive convention was ever authored for it. If it is a
+log, the fix is to **exclude it explicitly** — an omission and a decision look identical
+from inside the sweep, and only one of them survives someone widening the scope later.
+If it is a backlog, it needs an archive dir before D2 means anything there.
+
+Only `docs/plans/` clearly wants the tracker treatment: it is small, curated,
+human-facing, and already has `archive/` plus an index README with a "shipped as"
+column.
+
+**Both conditions this ledger requires of a proposal:**
+
+- **Scope the findings.** `artifact(find, kind="plan")` is project-wide and returned 50
+  live rows against the 6 in `docs/plans/` — a raw count here is a sample of two
+  populations with different conventions, not a census of one. Any D12 must report per
+  directory, and must say which directory it treated as authoritative, the way Phase 2
+  already does for `docs/trackers/`.
+- **A finding is not a fix.** A `draft` plan whose work shipped may be deliberately
+  parked: `docs/plans/2026-05-30-per-request-workspace-pinning.md` says in its own body
+  *"This plan stays active (do NOT archive) while 4b is open"*, and archiving it on a
+  shipped-phases signal would destroy the only record of a deferred scope. The evidence
+  a detector can read (phases marked DONE with SHAs) does not settle whether the plan is
+  finished.
+
+**Not proposed:** sweeping the 42. Absent a decision on what that directory is, flipping
+42 statuses is ceremony that also destroys the signal for whoever makes the decision
+later.
 
 ## Template for new entries
 

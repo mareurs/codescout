@@ -1,8 +1,42 @@
+---
+status: archived
+---
 # ONNX Intent Router — Unified Tool Surface Design
 
 **Date:** 2026-04-02
 **Status:** Draft — blocked on Phase 0 (tool fixes + clean data collection)
 **Branch:** experiments
+
+> **PHASE 0 SHIPPED BY OTHER MEANS; THE ROUTER WAS NEVER BUILT — archived 2026-09-02.**
+>
+> Verified at the bytes on 2026-09-02: no `ort` / `onnxruntime` dependency in any manifest,
+> and none of the proposed unified tools (`navigate`, `explore`, `edit`, `run`, `project`)
+> exists. The classifier, the pipeline templates and the misclassification handling are all
+> unbuilt.
+>
+> **But §*Phase 0* happened, by hand, over the following months — every tool this spec
+> called dead or broken is gone:**
+>
+> | this spec's Phase 0 target | what actually happened |
+> |---|---|
+> | `goto_definition`, `hover` (0 and 1 calls) | folded into `symbol_at(path, line, fields=["def","hover"])` |
+> | `rename_symbol`, `replace_symbol`, `remove_symbol`, `insert_code` | folded into `edit_code(action="rename"\|"replace"\|"remove"\|"insert")` |
+> | `find_references` (broken on non-Rust) | now `references` |
+> | `find_symbol` + `list_symbols` | now one `symbols` tool, overview or search by argument shape |
+>
+> **And the shape it argued for arrived without the ML.** This spec's premise was that an
+> `action=`-dispatched surface matches the model's mental model better than one tool per
+> operation. That is now how `workspace`, `index`, `library`, `artifact` and `librarian`
+> all work — reached by hand, with no classifier, no `ort`, and no training data.
+>
+> So the part that was never built is precisely the speculative part: **the learned router.**
+> Its §*Gate* was never met either — Phase 1 required a week of clean usage data and a
+> new analysis in `docs/research/`, and no such analysis exists.
+>
+> **Re-open trigger, if any:** evidence that tool *selection* (not tool quality) is a
+> measurable error source after the consolidation above. `docs/trackers/tool-usage-patterns.md`
+> is where that evidence would appear, and `docs/trackers/design-backlog-session-log.md`
+> already records one check of this spec's premise.
 
 ## Problem Statement
 

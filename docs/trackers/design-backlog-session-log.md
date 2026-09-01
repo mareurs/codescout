@@ -335,7 +335,7 @@ commit each and no implementation in `src/`.
 
 **Category:** measurement · **Severity:** low · **Status:** fixed-verified
 
-**Observed.** Checking whether the premise of `docs/plans/2026-04-02-onnx-intent-router-design.md`
+**Observed.** Checking whether the premise of `docs/plans/archive/2026-04-02-onnx-intent-router-design.md`
 (*"codescout exposes 27 MCP tools"*) had decayed, I counted the live registry with
 `grep(pattern="Arc::new\\([A-Z]", glob="src/server.rs")` → **20 matches**, added the
 librarian adapters, and published *"20 non-librarian tools registered at `src/server.rs:324-349`

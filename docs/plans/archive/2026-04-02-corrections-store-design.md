@@ -1,8 +1,39 @@
+---
+status: archived
+---
 # Corrections Store — Design Spec
 
 **Date:** 2026-04-02
 **Status:** Draft
 **Inspired by:** [rohitg00/pro-workflow](https://github.com/rohitg00/pro-workflow) — self-correcting memory system
+
+> **NOT BUILT — archived 2026-09-02 as overtaken, not as rejected.**
+>
+> Nothing in this spec shipped. Verified at the bytes on 2026-09-02: there is no
+> `src/corrections/`, no `learn` tool, and no `CorrectionsStore` — the only `corrections`
+> in the tree is the librarian's unrelated filter-repair response field.
+>
+> **What happened instead.** The need this spec identified — durable, searchable
+> corrections that survive a session — was met twice over by work that arrived on other
+> paths:
+>
+> - **Semantic memory.** `memory(action="remember" | "recall" | "forget")` with
+>   `bucket` classification and embedding search covers §*Search: FTS5 + Semantic Hybrid*
+>   and §*Session Start Loading* directly. Backed by `src/memory/`, including a
+>   sqlite-vec store for the daemon-free stack.
+> - **`src/operator_rules/`** covers the standing-instruction half — the "always run tests
+>   before committing" class this spec's §*Open Questions* asked whether to scope globally.
+>
+> **The design thinking is why this is archived rather than deleted.** §*Application
+> Tracking* (`times_applied`, decay on unused corrections) and §*Deduplication* have no
+> equivalent in what shipped — semantic memory records no usage counter, so nothing today
+> answers "is this memory earning its context budget?" If that question comes back, it
+> comes back to this file.
+>
+> **Its file pointers are stale** and were never updated: `src/agent.rs` is now
+> `src/agent/mod.rs`, `src/prompts/server_instructions.md` is now a slice of
+> `src/prompts/source.md`, and `src/tools/workflow.rs` was decomposed by the 2026-04-22
+> refactoring plan. Read the paths as historical.
 
 ## Problem
 
