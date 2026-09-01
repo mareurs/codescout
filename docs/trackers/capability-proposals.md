@@ -1157,9 +1157,17 @@ the unclassified-error head, and a 2.1-2.6x cost overcount in `cc.py`. Read them
 trusting any number in this entry that they touch.
 ## CAP-10 — Practice rules: a curated, agent-agnostic rule set injected at the moment it applies
 
-**Status:** open — proposed 2026-08-20, with measured evidence from the same day.
+**Status:** open — proposed 2026-08-20 with measured evidence from the same day. **Open decision
+1 settled 2026-09-02**: option 2 (inferred from the tool sequence), and the mechanism turned out
+to already exist — see § *Open decision 1 — SETTLED*. Decisions 2–4 remain open. Next action is
+**one** drafted rule plus its arm, not three.
 
-**Valid:** conditional — until a delivery mechanism is chosen (Open decision 1)
+**Valid:** conditional — until the plan-writing rule's arm reports whether an injected practice
+rule changes behaviour
+
+*(The previous condition — "until a delivery mechanism is chosen (Open decision 1)" — **fired**
+2026-09-02 and is replaced rather than deleted, so the entry's decay class tracks the next
+unanswered question instead of one already settled.)*
 
 **Rests on:** codescout is agent-agnostic by design — a rule that only reaches Claude Code is not a codescout capability. See memory `conventions` § Agent-Agnostic Design.
 
@@ -1212,6 +1220,77 @@ Most of the mechanism already exists.
 3. **What stops this becoming the thing it warns about?** An unread wall of prose injected at the wrong moment is strictly worse than nothing: it consumes context and trains the reader to skip.
 4. **Curation — who promotes a rule into the injected set?** The `Promote-when` machinery the validity spec describes, pointed at a new target. Do not build a second promotion path.
 
+
+### Open decision 1 — SETTLED 2026-09-02, and the question partly dissolved
+
+**It was posed as "which mechanism?" and the answer is "partition by trigger reachability" — a
+question that is now measurable rather than arguable.** The partition: *is the triggering act a
+call to a registered codescout tool?* If yes, it routes today with **no new mechanism at all**.
+If no, it is the same blocker as `OP-2` and `OP-3`, and that is one decision rather than three.
+
+**Option 2 (inferred from the tool sequence) is chosen, and it turned out to be free.** Between
+this proposal being written and today, the operator-rules engine shipped the whole mechanism it
+was going to need:
+
+- a rule corpus with `binding: always | triggered` and a `**Serves:**` selector grammar
+  (`shape := tool ["." action] ["(" pred ")"]`, `pred := "path~" substring`);
+- routing through the same section-grain matcher, with a once-per-session ledger keyed
+  `op:<ID>` — which is the delivery discipline *Open decision 3* worries about, already built;
+- `Tool::selector_key`'s default inverted at `30b6fc41`, so **all 21 registered tools** supply a
+  selector. Before that 17 of 21 returned `None`, so no inference from tool shape could have
+  routed anything — option 2 was **unimplementable** when this proposal ranked it second, and
+  nothing anywhere said so;
+- `annotate_write_path` at `a6b4fc35`, so a write response names the file it wrote and a `path~`
+  predicate has something to match.
+
+`OP-4` is the working proof: `create_file(path~/.claude)` routes end-to-end against a real write,
+pinned by `tools::core::tests::a_real_edit_file_write_under_dot_claude_delivers_op_4`. A practice
+rule declaring `Serves: create_file(path~docs/superpowers/plans/)` is the same shape and needs no
+code.
+
+**And the motivating rule is reachable at a BETTER moment than the one this proposal feared.**
+*"A plan that names a function must have opened it"* was measured on six subagent task briefs, so
+the assumed trigger was a dispatch — harness-only, unreachable. But dispatch is where the *harm*
+lands; the *cause* is plan-writing, which is a codescout write. Delivered at plan-write time the
+rule arrives **before** the six briefs are drafted rather than as they are handed over. The
+unreachable trigger was the wrong one to design for.
+
+**Option 3 (hook) stays rejected — on new grounds, which matters because the old grounds were
+weaker than they read.** It was rejected on agent-agnosticism. That argument has eroded: the
+companion plugin is always active in this repo, and `OP-2`/`OP-3` are a demonstrated class of
+rule only a hook can reach. It is now rejected for a better reason — **it is not needed for the
+motivating case**, so building it first solves the harder half of a problem whose easier half is
+already done. Re-open it when a rule that matters is provably harness-only, not before.
+
+**Option 1 (explicit) remains a fallback, never the primary**, exactly as argued above: an agent
+that knows to ask is not the agent the rule is for.
+
+### What settling this revealed about *Resume* step 2 — "draft three rules"
+
+Only **one of the three** named candidates is expressible in today's grammar. Checked against
+`Selector { tool, action, path_contains }`, which has exactly one predicate kind:
+
+| candidate | trigger | expressible today? |
+|---|---|---|
+| a plan that names a function must have opened it | a write under a plans path | **yes** — `create_file(path~docs/superpowers/plans/)` |
+| name what the predicate literally counts before reporting the number | the *measuring* act (`grep -c`, `wc -l`) | **no** — wants a command-string predicate |
+| apply the mutation, do not reason about it | an edit followed by a test run | **no** — wants sequence matching |
+
+So step 2 as written is over-optimistic: two of the three cannot be drafted at all without a
+grammar extension, and the extension they want is the expensive one. A command-string predicate
+would be evaluated on the hot path for **all 21** tools now that the selector default is
+universal — the same cost that killed a peer's parallel proposal for `run_command` guide routing
+on 2026-09-01.
+
+**Revised step 2: draft ONE rule — the plan-writing one — and measure it.** Strongest evidenced
+(6 of 6), the only one needing no new machinery, and one rule is the right unit for the question
+*Open decision 3* asks: whether an injected practice rule changes behaviour at all, or is
+decoration. Drafting two more before that answer exists is curation without a denominator.
+
+**Still open:** decisions 2, 3 and 4. Decision 2 is narrowed by the above — practice rules as a
+second *corpus* inside the operator-rules engine cost no tool slot, which was that decision's
+stated concern against
+`docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`.
 ### Resume
 
 1. Settle Open decision 1. It determines whether this is a small change or a subsystem, and it needs no code to decide.
