@@ -14,7 +14,7 @@ topic: cluster promotion and mechanism design
 entry_prefix:
 - F
 - W
-entry_high_water_F: 5
+entry_high_water_F: 6
 entry_high_water_W: 3
 ---
 
@@ -51,6 +51,7 @@ entry_high_water_W: 3
 | F-3 | 2026-09-01 | med | architectural | fixed-verified | The split's load-bearing sentence was refuted as a population claim 67 seconds before it was committed |
 | F-4 | 2026-09-01 | med | tooling | fixed-verified | The ledger's count cells go stale by CONCURRENCY — 3 re-derivations invalidated in one session by peer filings; gate shipped, caught a 4th drift on its first run |
 | F-5 | 2026-09-01 | med | architectural | open | `IC-13`'s claim is true of 4 of its 16 members — and the "≥4" floor carried from a prior audit bounded the opposite set; two rulings owed |
+| F-6 | 2026-09-01 | med | architectural | open | Ruling 2 — all 7 `IC-13` non-members fit **no existing class**, unanimously across two independent readers; the seven remedies agree pairwise, so the only open question is 3 classes or 4 |
 
 ## Wins Index
 
@@ -545,6 +546,82 @@ the Index caveats for the archive pass, so 4/16 is a measurement and not yet a c
 
 **Rests on:** the 16 per-file verdicts, each carrying a direct quote from the bug file, and on the
 two members whose own text disclaims the class — those two need no adjudication from anyone.
+
+## F-6 — ruling 2 — all 7 non-members fit NO existing class, unanimously; the readers split only on granularity
+
+**Observed:** 2026-09-01, ruling 2 of the `IC-13` pair — re-adjudicating the seven members the
+claim measurement (`F-5`) found outside the class.
+
+**When:** After ruling 1 widened the clause. Run with **two independent readers over the same
+seven files** rather than a split, deliberately: a membership ruling moves counts, and every
+classification pass this session until now had been one reader per file.
+
+**Expected:** Most of the seven would find homes among the other 16 classes, with maybe one
+no-fit.
+
+**Got:** **7 of 7 `NONE`, from both readers independently.** Not one of the seven belongs to any
+existing class. Both readers reached this against all 17 claims, with `NONE` explicitly offered as
+a first-class answer and forcing a fit explicitly forbidden.
+
+**The agreement is stronger than the headline.** Comparing per file, the two readers produced
+**the same remedy for all seven**, in some cases near-verbatim — file 3 as *"stop printing a
+denominator you cannot compute; mark the number a floor"* against *"drop the denominator when
+collection capped; publish count as floor"*; file 6 as *"window both ends; point the error at a
+surface holding the anchor"* against *"make the withheld tail reachable; point the error at a
+working surface"*. Since the remedy is this ledger's discriminator, seven agreed remedies is
+agreement on the substance.
+
+**They disagree only on GRANULARITY** — how to group those seven remedies into classes:
+
+| file | reader 1 (3 classes) | reader 2 (4 classes) |
+|---|---|---|
+| 1 `heading-scoped-get-overflow-hint` | `MC-A` route-cannot-reach-payload | `M-D` hint-composed-without-the-request |
+| 6 `append-entry-anchor` | `MC-A` | `M-A` wrong-key window (+`M-D`) |
+| 2 `audit-doc-refs-gate` | `MC-B` derivation-on-surviving-window | `M-A` truncated-window-ordered-by-wrong-key |
+| 4 `grep-narrowing-hint` | `MC-B` | `M-A` (+`M-B`) |
+| 3 `grep-showing-n-of-n` | `MC-B` | `M-B` floor-published-as-a-total |
+| 5 `unfiltered-output-ref` | `MC-C` magnitude-omitted | `M-C` instrument-omits-the-dimension |
+| 7 `audit-growth` | `MC-C` | `M-C` |
+
+**Files 5 and 7 are unanimous** — same pair, same claim, both readers: *a surface reports presence
+or a count where the decision turns on magnitude*. That one needs no adjudication.
+
+The dispute is whether *ordering-the-window* and *publishing-a-floor-as-a-total* are one class or
+two, and whether file 6 is primarily a bad window or a bad route. Each side has a real argument
+and they are not the same kind of argument:
+
+- **Reader 1 merges** (`MC-B` = files 2, 3, 4) on **corpus evidence**: file 4's fix *reproduced
+  file 3's defect one level down* and had to add the floor marker anyway — *"Without this the fix
+  would have replaced one piece of false precision with another one level down."* Entanglement
+  observed in the repair history, not argued from the claim.
+- **Reader 2 splits** on the **remedy test**: *"M-B removes a false name and M-C adds a missing
+  dimension. Two remedies, two classes."* Which is this ledger's own stated discriminator.
+
+**Probable cause of the split:** the two passes cut on different axes and both said so. `F-5`
+partitioned on *marker visibility* (C1/C2/C3 = 4/2/1); this pass partitions on *remedy*
+(2/3/2). Reader 1 named the crossing explicitly — `MC-B` spans the C1/C3 boundary because grep's
+two files share a remedy family while sitting either side of the visibility line. The partitions
+are not in conflict; they answer different questions.
+
+**Severity:** med — nothing is wrong in the tree. But the seven are still tagged `IC-13`, and
+`IC-13`'s count cannot become honest until they move, so the ledger currently publishes n=16 for
+a class whose claim reaches 9 of them.
+
+**Fix idea / Pointer:** Open the new classes and retag. Blocked on one decision only: **3 classes
+or 4.** Not blocked on membership, which is unanimous. Two consequences worth weighing before
+choosing — reader 2's `M-A` arrives at **3 instances across 3 subsystems**, clearing the promotion
+bar on creation, and reader 1's `MC-B` would arrive at 3 as well; the finer partition creates one
+more class that starts at n=1. Whichever is chosen, `IC-13` falls 16 → **9**, which is exactly
+what `F-5` projected.
+
+**Status:** open — adjudication complete and unanimous on membership; the granularity call is a
+human one and the retags wait on it.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** two independent readers over the same seven files, every row carrying a direct quote
+and an explicit remedy, and on the seven remedies agreeing pairwise — which is what makes this a
+granularity dispute rather than a classification one.
 
 ## Template for new entries
 
