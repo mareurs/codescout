@@ -393,9 +393,30 @@ list into the phases that own them. What remains is genuinely open:
 > deliberately not proposed. It needs `IC-17`'s owner field, the same substrate as Fix 2 of
 > the activation bug. **Do not tune the 5s window.**
 >
-> **Remaining Phase 5: (d)** the live `/mcp` end-to-end verify, which is a user step. Phase
-> 4b remains deferred and correctly so: `AgentInner.workspaces` is still
-> `HashMap<PathBuf, Workspace>` (`src/agent/mod.rs:112`).
+> **Phase 5(d) VERIFIED LIVE 2026-09-02 — regime 3 is closed end to end.** Against a
+> rebuilt server (`pid 903069`, `git_sha 3bf2f5f5`, `exe_deleted: false`), three checks:
+>
+> 1. **The pin resolves elsewhere without moving the default.** A `tree` call carrying
+>    `workspace=/home/marius/work/mirela` returned mirela's subprojects and the
+>    `paths are relative to /home/marius/work/mirela` banner, while `workspace(status)` in
+>    the *same batch* still reported `project_root: .../claude/codescout`.
+> 2. **The refusal names the pin first.** With mirela activated `read_only=true`, a write
+>    was refused with the 5(a) text — `workspace='<absolute path...>'` offered before
+>    re-activation, and re-activation labelled process-wide.
+> 3. **The remedy the refusal offers actually works, taken from the refused state.** This
+>    very paragraph was written by an `artifact(update)` carrying
+>    `workspace=/home/marius/work/claude/codescout` **while mirela was still the read-only
+>    active project.** The write landed in codescout; mirela's activation was not disturbed;
+>    no re-activation was needed. That is the bug's exact scenario, resolved by the
+>    parameter the refusal now names.
+>
+> Check 3 is the one worth keeping: 1 and 2 are properties of the mechanism and the message
+> separately, and only 3 shows the message routing a caller to a remedy that resolves the
+> situation it was refused in. A refusal that names a remedy nobody has driven from the
+> refused state is a claim, not a fix.
+>
+> **Phase 5 is complete.** Phase 4b remains deferred and correctly so:
+> `AgentInner.workspaces` is still `HashMap<PathBuf, Workspace>` (`src/agent/mod.rs:112`).
 
 **Status: Phases 0–3 COMPLETE — the entire READ surface honors per-request pinning;
 regime-3 is fixed for all reads.** Work lives on branch

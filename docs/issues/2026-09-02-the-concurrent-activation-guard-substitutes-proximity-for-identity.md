@@ -91,6 +91,25 @@ the documented harmful case. From the server's position the two are the same two
 against the same slot. Trading one real signal for another is not an improvement, so this
 is deliberately **not** proposed as the fix.
 
+
+### Not observed live, and the reason bounds the severity
+
+During the Phase 5(d) verify (2026-09-02) I ran exactly this shape against the live server
+— activate mirela, work, activate home — and **no warning fired.** Four tool round-trips sat
+between the two activations, putting them well outside the 5s window.
+
+That is not evidence against the bug: the derivation is from the pure function, and
+`concurrent_switch_warning_flags_rapid_foreign_switch` (`src/agent/mod.rs`) already asserts
+that a different root at 200ms warns. It is evidence about **exposure**. An LLM-driven
+session pays a model round-trip between calls, so its activate→work→return cycle usually
+exceeds 5s and never sees the false positive. The callers who *will* see it are the fast
+ones: a script, a hook, a subagent doing one pinned read, or any path where two activations
+land back to back.
+
+Recorded as a non-observation rather than dropped, because the alternative is a file that
+accumulates only the runs that fired. Severity stays **low** on this basis — and the
+asymmetry is worth naming: the population most likely to trip it is the least likely to
+read the warning.
 ## Hypotheses tried
 Suppress on `ReturnToHome` — rejected above on the false-negative it introduces, before
 being written.
@@ -131,4 +150,3 @@ which today encodes the proxy rather than the intent.
 - `docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`
   — same missing field, Fix 2
 - Cluster: `IC-17` — a shared resource carries no owner
-
