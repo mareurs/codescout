@@ -118,6 +118,21 @@ repos:
       # Scoped by `files:` rather than `always_run` — a commit touching neither the ledger nor
       # a bug file cannot break this invariant, and a hook that fires on every commit to say
       # nothing is how `--no-verify` gets learned.
+      #
+      # THE REPORTING SCOPE IS NARROWER THAN THE INVARIANT, and two sessions misread this the
+      # same way within an hour, so it is stated here rather than left to be inferred.
+      # `files:` matches the paths in YOUR COMMIT, not the shared index. So an already-broken
+      # ledger state — a bug file staged with its ledger edit unstaged, the coupling this hook
+      # exists for — does NOT block an arbitrary committer. It blocks only one whose own commit
+      # touches the ledger or a bug file. Everyone else commits straight past it and never
+      # learns it exists. Measured 2026-09-01: a peer flagged "whoever commits next will meet
+      # it", the next commit was markdown-only, the hook printed `(no files to check) Skipped`,
+      # and the broken index survived untouched.
+      #
+      # That is a LATENCY bound, not a correctness hole — the state cannot be committed by
+      # anyone it would falsify — and widening it would refuse commits that neither caused the
+      # break nor can repair it. But "the next commit will catch it" is the natural reading and
+      # it is wrong; the honest claim is "the next IN-SCOPE commit will".
       - id: ledger-counts
         name: refuse a commit whose ledger counts disagree with its staged corpus
         entry: scripts/pre-commit-ledger-counts.py
