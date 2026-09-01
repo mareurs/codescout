@@ -682,6 +682,154 @@ fn the_hook_script_agrees_on_both_yaml_tag_styles() {
         );
     }
 }
+// ---------------------------------------------------------------------------
+// `Mechanism status:` must carry a basis
+// ---------------------------------------------------------------------------
+
+/// The `**Mechanism status:**` bodies in the ledger, as `(entry id, body)`.
+///
+/// Pure over `text` so [`the_mechanism_basis_scan_discriminates`] can feed it entries whose
+/// right answers are known — the live ledger has only the shapes it happens to contain today.
+fn mechanism_statuses(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut id: Option<String> = None;
+    let mut fenced = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            // The `## Template for new entries` block carries a specimen field. A worked
+            // example teaching the syntax is not a declaration — the same rule
+            // `**Valid:**` detection uses.
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("## IC-") {
+            id = rest
+                .split_whitespace()
+                .next()
+                .map(|n| format!("IC-{}", n.trim_end_matches(|c: char| !c.is_ascii_digit())));
+        } else if let Some(body) = line.strip_prefix("**Mechanism status:**") {
+            if let Some(ic) = id.clone() {
+                out.push((ic, body.trim().to_owned()));
+            }
+        }
+    }
+    out
+}
+
+/// A field is *unbasised* when it asserts a state and gives no way to check it.
+///
+/// The test is deliberately crude — length after stripping the state word — because the
+/// precise version is not available. A first attempt classified by "does it contain a path or
+/// a SHA" and would have failed `IC-6` (which cites `edit_markdown` and `artifact(get)` by
+/// name) and `IC-18` (which cites "the ADR above"). Those are real citations in forms no regex
+/// enumerates, so the gate does not try: it asks only that the field say *something* beyond a
+/// bare verdict.
+fn is_unbasised(body: &str) -> bool {
+    let stripped = body
+        .trim()
+        .trim_end_matches('.')
+        .trim_matches('`')
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        stripped.as_str(),
+        "none yet" | "partial" | "designed" | "shipped" | "none"
+    )
+}
+
+/// No `**Mechanism status:**` may be a bare verdict with no basis.
+///
+/// **Why this shape and not "is the claim true".** Nothing can gate the truth of a sentence
+/// about the code. What a gate CAN require is that the sentence carry a route back to the
+/// thing it describes, so a reader re-checks it in a minute instead of re-deriving it — which
+/// is `CLAUDE.md` § *Observer Blindness*'s "ship the derivation rather than the value".
+///
+/// **Measured, and the reason this is not hypothetical.** Three fields were checked against
+/// their code on 2026-09-01/02 and **three were wrong**: `IC-5` read `none yet` while
+/// `scripts/build-windows.sh` had shipped a mechanism two hours after the field was written
+/// AND explicitly refused the one the field proposed; `IC-4` read `none yet` while
+/// `scripts/install-hooks.sh` had carried the check since its original fix, unrun by anything;
+/// `IC-3`'s partition described 18 members against a corpus of 22. A bare `none yet` reads as
+/// an established absence and was, in every case examined, an unexamined one.
+///
+/// The six that failed this gate when it was written were literally the nine characters
+/// `none yet.` — no date, no candidate, no reason. They now say they have not been checked,
+/// which is a weaker claim and a true one; the point is that "nobody has looked" and "there is
+/// nothing to find" stop being the same sentence.
+#[test]
+fn no_mechanism_status_is_a_bare_verdict() {
+    let text = std::fs::read_to_string(repo_root().join(LEDGER)).expect("read ledger");
+    let bare: Vec<String> = mechanism_statuses(&text)
+        .into_iter()
+        .filter(|(_, body)| is_unbasised(body))
+        .map(|(ic, body)| format!("{ic} — `{body}`"))
+        .collect();
+
+    assert!(
+        bare.is_empty(),
+        "a `**Mechanism status:**` states a verdict and gives no basis:\n  {}\n\n\
+         A bare verdict cannot be re-checked, so it is read as established. Measured on this \
+         ledger: of three such fields checked against their code, three were wrong — two \
+         claimed `none yet` over a mechanism that had already shipped, one of them over a \
+         mechanism that explicitly REFUSED the remedy the field proposed.\n\n\
+         Add whatever makes it checkable in one minute, not a paragraph:\n    \
+         `shipped`/`partial`/`designed` -> name where (a path, a symbol, a SHA, a tool, an ADR)\n    \
+         `none yet`                     -> say when it was last checked against the code, or \
+         that it has not been\n\n\
+         \"Not checked\" is a legitimate and useful answer. It is the difference between \
+         nobody having looked and there being nothing to find, and this gate exists because \
+         those two had the same nine characters.",
+        bare.join("\n  ")
+    );
+}
+
+/// The scan and the predicate must each return both answers, or the gate is decoration.
+#[test]
+fn the_mechanism_basis_scan_discriminates() {
+    // The predicate: bare verdicts in the forms the corpus actually uses.
+    assert!(is_unbasised("none yet."));
+    assert!(is_unbasised("none yet"));
+    assert!(is_unbasised("`partial`"));
+    assert!(is_unbasised("**designed**".trim_matches('*')));
+    // ...and anything carrying a basis, including citation forms no regex enumerates.
+    assert!(!is_unbasised(
+        "none yet — not checked against the code as of 2026-09-02"
+    ));
+    assert!(!is_unbasised(
+        "`shipped (partial)` — `edit_markdown` gained an `occurrence` selector"
+    ));
+    assert!(!is_unbasised(
+        "partial, covered in principle by the ADR above"
+    ));
+
+    // The scan: keyed to the right entry, and blind to the template's specimen field.
+    let doc = "\
+## IC-1 — a class
+**Mechanism status:** none yet.
+
+## IC-2 — another
+**Mechanism status:** `partial` — `src/thing.rs` does it.
+
+## Template for new entries
+
+```markdown
+## IC-N — <the class>
+**Mechanism status:** none yet | designed | shipped (<what>)
+```
+";
+    let found = mechanism_statuses(doc);
+    assert_eq!(
+        found.iter().map(|(i, _)| i.as_str()).collect::<Vec<_>>(),
+        vec!["IC-1", "IC-2"],
+        "the fenced template specimen must not be collected — it is a worked example, and \
+         collecting it would make this gate permanently red on a file that is correct"
+    );
+    assert!(is_unbasised(&found[0].1));
+    assert!(!is_unbasised(&found[1].1));
+}
 
 /// Every **bare** `n=` in a class's judgement fields equals that class's real membership.
 ///
