@@ -104,7 +104,17 @@ fn guard_with_oracle(
         " (a ledger — it declares an entry_prefix, and its PREFIX-N ids are \
          allocated by the server)"
     } else {
-        ""
+        // The `stamped` arm carried the empty string until 2026-09-01, so the one
+        // reason most likely to fire UNINTENDED — `artifact(action="create")` stamps
+        // every file it writes, whatever its kind — was also the only one that did not
+        // say why. A refusal is a negative result, and
+        // `docs/adrs/2026-08-27-negative-results-name-their-scope.md` requires it to
+        // name its scope. Naming the mechanism (BL-48: a direct frontmatter edit never
+        // reaches the catalog) is also what lets a reader judge whether the refusal is
+        // protecting anything on THIS file.
+        // docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+        " (stamped — it carries a librarian `id:`, so its frontmatter is catalog-indexed \
+         and a direct frontmatter edit would not reach the catalog)"
     };
     // A ledger that is NEITHER augmented nor stamped is the class this guard newly
     // covers, and it is the only one whose file is still where its state lives — so
@@ -435,6 +445,15 @@ mod tests {
     ///
     /// Green before the oracle was wired, deliberately: it pins the behaviour the
     /// fix must not break while widening the guard.
+    ///
+    /// **The load-bearing detail is that neither fixture carries an `id:`** — that
+    /// absence is the whole discriminator, so a tidy-up that "completes" either
+    /// frontmatter block by adding one leaves this test passing and testing nothing.
+    /// Verified on disk 2026-09-01: `docs/trackers/skill-frictions.md` still has no
+    /// `id:`, so the premise holds. What this test therefore does NOT cover is the
+    /// file that carries one because `artifact(action="create")` put it there — see
+    /// `a_stamped_refusal_names_the_stamp_as_its_reason` below and
+    /// `docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`.
     #[test]
     fn a_catalogued_but_unaugmented_file_stays_directly_editable() {
         struct NothingIsAugmented;
@@ -505,6 +524,74 @@ mod tests {
             Arc::ptr_eq(&read_from(&slot).expect("still installed"), &second),
             "a later install must REPLACE the earlier one — a discarded second install \
              makes the guard's behaviour depend on which server was built first"
+        );
+    }
+
+    /// A file whose ONLY reason for refusal is the stamped `id:` must say so.
+    ///
+    /// Born red 2026-09-01: the `stamped` arm's `why` was the empty string, so the
+    /// message read `'<path>' is a librarian-managed artifact — do not read or edit it
+    /// directly` with no reason at all. That is the arm most likely to fire unintended,
+    /// because `artifact(action="create")` stamps every file it writes whatever its
+    /// `kind` — measured that day: 57 of 120 tracked files under `docs/trackers/` and
+    /// 206 across `docs/issues/` carry a stamp, a population selected by creation
+    /// route rather than by any property of the file. A refusal is a negative result
+    /// and `docs/adrs/2026-08-27-negative-results-name-their-scope.md` requires it to
+    /// name its scope.
+    ///
+    /// The load-bearing fixture detail: the frontmatter carries an `id:` and **nothing
+    /// else that guards** — no `entry_prefix`, and the oracle reports not-augmented.
+    /// Add either and this test passes for the wrong reason, because a different arm
+    /// supplies the `why`. The two precondition asserts exist to make that failure
+    /// loud rather than silent.
+    ///
+    /// Mutation this kills: restoring `""` on the `stamped` arm, or moving the
+    /// `stamped` text onto a shared fallback the other arms also reach.
+    /// docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+    #[test]
+    fn a_stamped_refusal_names_the_stamp_as_its_reason() {
+        struct NothingIsAugmented;
+        impl AugmentedArtifactOracle for NothingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                false
+            }
+        }
+
+        // Exactly what `artifact(action="create", kind="doc", ...)` writes: a quoted
+        // id, no entry_prefix, no augmentation.
+        let text = "---\nid: '23421bbc5b226368'\nkind: doc\nstatus: draft\ntitle: A teammate guide\n---\n\n## Layer 2\n\nprose\n";
+        assert!(
+            declared_entry_prefixes(text).is_empty(),
+            "precondition: this fixture must NOT be a ledger, or the ledger arm \
+             supplies the `why` and this test stops testing the stamped arm"
+        );
+        assert!(
+            is_librarian_artifact(text),
+            "precondition: the stamped predicate must be what fires here"
+        );
+
+        let abs = std::path::Path::new("/repo/docs/TEAM-ONBOARDING.md");
+        let err = guard_with_oracle(
+            "docs/TEAM-ONBOARDING.md",
+            text,
+            Some(abs),
+            Some(&NothingIsAugmented),
+        )
+        .expect_err("a stamped file is still refused — this test is about the MESSAGE");
+        let re = err.downcast_ref::<RecoverableError>().unwrap();
+
+        assert!(
+            re.message.contains("stamped"),
+            "the refusal must name the stamp as its reason, not refuse anonymously \
+             — got: {}",
+            re.message
+        );
+        assert!(
+            re.message.contains("frontmatter"),
+            "and it must name the mechanism the stamp protects (a frontmatter edit \
+             does not reach the catalog), so a reader can judge whether it is \
+             protecting anything on this file — got: {}",
+            re.message
         );
     }
 

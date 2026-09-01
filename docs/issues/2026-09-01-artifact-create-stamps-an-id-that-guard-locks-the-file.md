@@ -1,5 +1,5 @@
 ---
-status: open
+status: investigating
 opened: 2026-09-01
 closed:
 severity: high
@@ -12,7 +12,7 @@ tags:
   - artifact-create
   - doc-vs-code
 kind: bug
-unverified: 'CLUSTER TAG IS ARGUABLE and deliberately flagged rather than hidden — this defect fails LOUDLY (a RecoverableError), and IC-2 carries an explicit falsification clause for exactly that ("Falsified by a member whose proxy failure surfaced as an error rather than a plausible result"). Tagged IC-2 anyway because the MECHANISM is an exact match — its claim names "a monotone stamp" as one of the three proxy shapes, and the id: stamp is one. IC-14 was considered and rejected as INVERTED (this guard is broader than its name, not narrower). A second read should rule: either IC-2 widens its claim to cover fail-closed proxies, or this is evidence for a new class. Filing honestly is blocked by the absence of a cluster/unclassified slug — tests/issue_clusters.rs requires exactly one known tag, so a novel defect must borrow the nearest class. No regression test yet.'
+unverified: "PARTIAL FIX ONLY — the refusal message now names the stamp and its mechanism (tested, born red), but the BEHAVIOUR is unchanged: a tool-created plain doc is still refused for reads and body writes. What remains is a decision between three scopes (see Fix § Still owed), not more investigation — deliberately left to the operator because it changes protection semantics for 263 existing files (57 of 120 trackers, 206 of the bug corpus). CLUSTER TAG IS ARGUABLE and flagged rather than hidden: this defect fails LOUDLY, and IC-2 carries an explicit falsification clause for exactly that. Tagged IC-2 on the exact match to the monotone-stamp proxy shape its claim names; IC-14 rejected as inverted (this guard is broader than its name, not narrower). A second read should rule: either IC-2 widens to fail-closed proxies, or this needs a new class — and filing honestly is blocked by the absence of a cluster/unclassified slug."
 ---
 
 # BUG: artifact(create) stamps `id:` into frontmatter, so every file the tool creates becomes permanently un-editable by `edit_markdown` — including plain prose docs the pinned test says must stay editable
@@ -175,38 +175,104 @@ being false, and the doc would keep prescribing it.
 
 ## Fix
 
-Two candidate directions; **the second is the one this file recommends**, and they are not
-exclusive.
+### Direction (a) — stop stamping on create: DEAD, ruled out 2026-09-01 by enumeration
 
-**(a) Stop stamping on create.** Let `reindex` associate path→id in the catalog, as it
-already does for `CONTRIBUTING.md`. Cheapest, and it aligns the tool with the documented
-prohibition. Risk to check before doing it: the frontmatter `id:` is what
-`doctor`'s `frontmatter_id_mismatch` / `repair_frontmatter_id` read, and
-`get_guide("tracker-conventions")` says a ledger's identity "must travel with the repo" —
-so removing the stamp wholesale may cost cross-machine identity recovery. Verify what
-actually consumes it before deleting it.
+The frontmatter `id:` has real consumers. `grep(pattern="frontmatter_id_mismatch|repair_frontmatter_id", glob="src/**/*.rs")` — **60 matches across 5 files**, concentrated in
+`src/librarian/tools/doctor.rs` (54), plus `mv.rs` (3), `adapter.rs`, `catalog/artifact.rs`,
+`tools/librarian.rs`. `doctor`'s `repair_frontmatter_id` fix mode exists to write this field,
+and `get_guide("tracker-conventions")` requires a ledger's identity to travel with the repo.
+Removing the stamp would break cross-machine identity recovery to fix a guard bug. **The stamp
+is correct; the guard's reading of it is the defect.**
 
-**(b) Narrow the `stamped` predicate — guard on the property, not the provenance.** The
-guard's real question is *"does this file's state live somewhere other than this file?"*
-`augmented` and `ledger` answer it directly. `stamped` answers a different question and is
-the arm with no explanatory `why` text, which is itself a tell. Replace it with a
-`kind`-aware check, or drop it and let the two precise predicates carry the guard.
+### Direction (b) — narrow the `stamped` predicate: correct, and contained
 
-Either way: **make the `stamped` arm say why it fired.** An empty `why`
-(`src/util/librarian_guard.rs:106-108`) on the least-intentional arm is a
-`docs/adrs/2026-08-27-negative-results-name-their-scope.md` violation in refusal form.
+`references(symbol="is_librarian_artifact", path="src/util/librarian_guard.rs")` — **exactly
+one production caller**, `src/util/librarian_guard.rs:95`; the other ten hits are its own
+tests. So the predicate can be narrowed without touching anything else.
 
-SHA: not yet fixed.
-patch-id: not yet fixed.
+**What `stamped` actually protects, established by reading the three arms against each other.**
+The guard collapses three different scopes into one blanket read-and-write refusal:
+
+| arm | what is elsewhere | reads wrong? | body writes wrong? | frontmatter writes wrong? |
+|---|---|---|---|---|
+| `augmented` | the params — file is a rendered snapshot | **yes** (stale, unsignalled) | yes | yes |
+| `ledger` | the `PREFIX-N` counter | no | no (`body_edits` is fine) | yes |
+| `stamped` | nothing — the catalog *indexes* frontmatter | no | no | **yes** (BL-48 drift) |
+
+Only `augmented` justifies refusing a read. `stamped`'s real concern is BL-48: a direct
+frontmatter edit does not reach the catalog, so `status`/`tags`/`title` drift between disk and
+index. That is a **frontmatter-write** concern, and the guard applies it to reads and body
+writes as well.
+
+### The argument that settles it: `stamped` guards an arbitrary subset
+
+**Measured 2026-09-01.** `docs/issues/_TEMPLATE.md` carries **no `id:`** — so every bug file
+created the *documented* way (copy the template) is unstamped and therefore unguarded. Only
+tool-created files are stamped:
+
+```
+git grep -lE "^id: '?.?[0-9a-f]{16}" -- 'docs/trackers/*.md' | wc -l   #  57 of 120
+git grep -lE "^id: '?.?[0-9a-f]{16}" -- 'docs/issues/*.md'   | wc -l   # 206 of 552
+```
+
+So the `stamped` arm protects **~47% of trackers and ~37% of the bug corpus, selected by
+creation route rather than by any property of the file.** A bug file's frontmatter tags are
+exactly as drift-prone whether a human or the tool created it, and the human-created majority
+is unprotected. Whatever `stamped` is for, it is not coherently achieving it.
+
+**This also raises the blast radius of the write-side change**, which is why it is not being
+made unilaterally: 263 existing files are currently refused, and narrowing `stamped` un-guards
+all of them at once.
+
+### Shipped 2026-09-01 — the message half
+
+The `stamped` arm's `why` was the empty string, so the arm most likely to fire unintended was
+the only one that refused **anonymously**. It now names the stamp and the mechanism it
+protects. No behaviour change; a refusal a reader can act on and judge.
+
+- `src/util/librarian_guard.rs` — the `why` arm in `guard_with_oracle`
+- Regression test `a_stamped_refusal_names_the_stamp_as_its_reason`, **verified born red**:
+  with the `""` restored it fails with `got: 'docs/TEAM-ONBOARDING.md' is a librarian-managed
+  artifact — do not read or edit it directly`, then passes with the fix. 21/21 in the module.
+- The pinned test `a_catalogued_but_unaugmented_file_stays_directly_editable` gained a
+  fixture annotation naming its load-bearing detail — neither row carries an `id:`, and that
+  absence is the whole discriminator, so a tidy-up "completing" either frontmatter block
+  would leave it passing and testing nothing.
+
+SHA: recorded at commit time below.
+patch-id: recorded at commit time below.
+
+### Still owed — the behavioural decision, for a human
+
+Three defensible scopes for `stamped`, in increasing blast radius:
+
+1. **Allow reads, keep refusing writes.** A read cannot drift. Needs a read/write intent
+   parameter on `guard_not_librarian_managed` — three call sites (`read_markdown`,
+   `edit_markdown`, `edit_file`). Strictly capability-increasing; nothing that works today
+   stops working.
+2. **Allow reads and body writes; refuse frontmatter writes.** Matches what BL-48 actually
+   describes. `edit_markdown` already takes a `frontmatter` param, so the caller's intent is
+   knowable at the call site.
+3. **Drop `stamped` entirely**, leaving `augmented || ledger`. Simplest, and the subset
+   argument above says it protects nothing coherent — but it un-guards 263 files, and bug-file
+   tag drift (BL-48) is a real cost CLAUDE.md warns about explicitly.
+
+Recommendation: **(2)**, because it is the only one that matches the mechanism. Not taken here
+because it changes protection semantics for 263 existing files, which is a call for the
+operator rather than a drive-by.
 
 ## Tests added
 
-None yet. The regression test is a new row in
-`a_catalogued_but_unaugmented_file_stays_directly_editable`'s table: a file produced by
-`artifact(action="create", kind="doc", ...)` must stay directly editable. **Demand a
-deliberate break** — the row must fail against today's tree before the fix, or it is
-pinning nothing (CLAUDE.md § SDD Rulings).
+`a_stamped_refusal_names_the_stamp_as_its_reason` — in `src/util/librarian_guard.rs`'s
+`mod tests`. **Born red and verified so**, not assumed: the fix was reverted, the test failed
+on the anonymous message, the fix was restored, 21/21 green. It asserts on two things (the
+word `stamped`, and `frontmatter` naming the mechanism) and carries two precondition asserts
+so it cannot silently start passing via the `ledger` or `augmented` arm.
 
+**Still owed for the behavioural fix:** a new row in
+`a_catalogued_but_unaugmented_file_stays_directly_editable`'s table built by
+`artifact(action="create", kind="doc", ...)`, which must red against today's tree before any
+of the three scopes above is implemented.
 ## Workarounds
 
 Route every read/write of a tool-created artifact through the catalog:
@@ -221,15 +287,18 @@ relying on it.
 
 ## Resume
 
-Decide (a) vs (b) — start by running
-`grep(pattern="frontmatter_id|repair_frontmatter_id", path="src/librarian/")` and
-`references(symbol="is_librarian_artifact", path="src/util/librarian_guard.rs")` to
-enumerate what actually consumes the stamp. Then add the failing test row described in
-*Tests added* against today's tree and confirm it reds before touching the guard.
+**Enumeration is done — do not redo it.** (a) is dead (60 consumers of the frontmatter id),
+(b) is contained (one production caller of `is_librarian_artifact`), and the population is
+263 files. The message half is shipped and tested.
 
-Also owed: a ruling on the cluster tag (see `unverified:`), and a decision on whether
+What remains is one decision, then a small implementation: pick scope 1, 2 or 3 from
+*Fix § Still owed*. Recommendation is (2). Then add the failing table row named in
+*Tests added* and thread a read/write (or frontmatter/body) intent through the three call
+sites — `read_markdown`, `edit_markdown`, `edit_file`, per
+`librarian_guard_fires_on_every_edit_file_write_path`.
+
+Also still owed: a ruling on the cluster tag (see `unverified:`), and a decision on whether
 `docs/TEAM-ONBOARDING.md` — a teammate-facing prose doc — should keep its stamp at all.
-
 ## References
 
 - `src/util/librarian_guard.rs:83-160` — the three predicates and `is_librarian_artifact`

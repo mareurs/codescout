@@ -201,6 +201,127 @@ writer-abort one — whose BLOB half got a test born red on the real production 
 whose NULL-key half is closed by narrowing the module-doc invariant rather than by a guard
 no caller can reach.
 
+
+## T-14 — artifact(create) stamps an `id:` that guard-locks the file
+
+**Status:** open — **HIGH**, and the first of this batch to work.
+**Valid:** dated 2026-09-01
+**Bug:** `docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md`
+
+**Why:** `artifact(action="create")` writes `id: '<16-hex>'` into frontmatter;
+`librarian_guard`'s `stamped` arm (`src/util/librarian_guard.rs:95`) reads that as "the
+librarian owns this file", so **every artifact the tool creates is permanently refused by
+`edit_markdown` / `read_markdown`** — whatever its `kind`, augmented or not, ledger or not.
+Verified by contrast in one session: `docs/TEAM-ONBOARDING.md` (tool-created, `kind: doc`,
+plain prose) refused; `CONTRIBUTING.md` and `README.md` (catalog rows, indexed not created)
+edited fine. Membership is not the trigger — the stamp is.
+
+Three things make it worth doing first. It contradicts a ruling that was tried, probed and
+reverted (`bb9a94d7`, documented in `get_guide("tracker-conventions")` § *Make the tracker
+guarded*). The guard's own pinned test
+`a_catalogued_but_unaugmented_file_stays_directly_editable` **cannot see it** — its sample
+holds no *created* artifact, which is the recording-filter law, and here widening the sample
+is the fix. And it was **masked until a repair**: the guard learned to read quoted ids
+(`docs/issues/archive/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`) and
+`create` emits the quoted form, so making the guard correct on its stated axis switched the
+defect on across the whole created population.
+
+**Shape:** decide between (a) stop stamping on create and let `reindex` associate path→id,
+and (b) narrow the `stamped` predicate to the property the guard actually cares about —
+*does this file's state live somewhere other than this file?*, which `augmented` and
+`ledger` already answer. **Enumerate what consumes the frontmatter id before choosing**:
+`doctor`'s `frontmatter_id_mismatch` / `repair_frontmatter_id` read it, and the conventions
+guide says a ledger's identity must travel with the repo.
+
+**Acceptance:** a `kind: doc` file produced by `artifact(create)` stays directly editable;
+the new row in `a_catalogued_but_unaugmented_file_stays_directly_editable` **reds against
+today's tree before the fix** (demand a deliberate break); and the `stamped` arm names why
+it fired — today its `why` is the empty string (`src/util/librarian_guard.rs:106-108`),
+which makes the arm most likely to fire unintentionally the one that explains itself least.
+
+## T-15 — Wire the eight unannotated guides into section-grain `get_guide`
+
+**Status:** open — start alongside T-14; no code change, so it cannot break the build.
+**Valid:** dated 2026-09-01
+
+**Why:** the section-grain mechanism **shipped 2026-08-27** (`7579b32b1cd2362f` Phase 1) and
+its biggest consumer is unwired. Measured 2026-09-01:
+
+```
+for f in src/prompts/guides/*.md; do printf "%s serves | %s words | %s\n" \
+  "$(grep -c '<!-- serves:' "$f")" "$(wc -w < "$f")" "$f"; done
+```
+
+`librarian.md` — **13** annotations at 3,097 words. `tracker-conventions.md` — **0** at
+**5,829 words**, the largest guide in the corpus and the one that auto-injects on the first
+`artifact` call of *any* session. Eight of ten guides have zero.
+
+**Scope discipline:** this is annotation of existing sections, and it is **independent of
+both** Phase 2 blockers on that bug (the 17,378 B decomposition and cross-topic shape
+disambiguation). It is **not** the same as that bug's *"`tracker-conventions` is really six
+topics"* item, which the bug explicitly labels an authoring judgement needing re-costing —
+do not let this task turn into that one.
+
+**Acceptance:** each annotated section names the tool call(s) it serves; a session that
+triggers one section receives that section rather than the topic; and the delivered-bytes
+figure is **re-measured** after the change rather than asserted — the mechanism can be
+wired correctly and still deliver everything if the `serves:` keys do not match real call
+names.
+
+## T-16 — Overflow hint on a heading-scoped `artifact(get)` points at metadata
+
+**Status:** open — small.
+**Valid:** dated 2026-09-01
+**Bug:** `docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md`
+
+**Why:** when a heading-scoped `get` overflows, the envelope's `hint` names
+`json_path="$.preview.headings[*]"` — the heading map — though the caller passed `heading=`
+and wants `$.body`. Following the hint costs a wasted call. `src/librarian/adapter.rs:471`
+states the right principle already ("the answer the action was asked for"); the mapping is
+fixed rather than argument-aware, which is BL-19's own failure mode in a narrower form.
+
+**Shape:** branch the hint on the arguments — `heading` / `headings` / `start_line` present
+→ lead with `$.body`, and where the body will itself overflow, name the line-slice form
+directly so the caller skips a hop.
+
+**Measure before extending it:** the envelope carries `preview.headings` even for a
+heading-scoped read (20 heading objects for `issue-clusters.md`), competing with the body
+for the ~9 KB inline budget. If sections routinely sit just over the budget because of that
+metadata, suppressing it **removes calls** rather than re-pointing them — which changes the
+value of this task. Not yet measured.
+
+**Acceptance:** a table test over `(args, expected_hint_json_path)` whose `heading` row
+fails against today's tree.
+
+## T-17 — Both shell gates evaluate a per-command predicate over the whole command string
+
+**Status:** open — small, but needs a design call on the splitter.
+**Valid:** dated 2026-09-01
+**Bug:** `docs/issues/2026-09-01-source-gate-refuses-the-whole-compound-command.md`
+
+**Why:** one offending clause in a `;`- or `&&`-separated command refuses every unrelated
+clause beside it. Verified by three probes: `echo x; wc -l Cargo.toml` runs;
+`echo x; wc -l Cargo.toml; grep -c fn src/main.rs` refuses wholesale; and
+`echo x; find . -name '*.toml' | head -2` refuses with the `echo` never running — so the
+**pipe** gate shares the defect, not just the source-file one. Fired four times in one
+session on measurement commands.
+
+The two gates differ in the half that matters for repair: the pipe gate **names the
+offending clause** verbatim in its message; the source gate emits only `"shell access to
+source files is blocked"`. So the offending clause is demonstrably in hand at refusal time,
+and the pipe gate is the model for the message fix.
+
+**Shape:** split on top-level separators and evaluate both predicates per resulting command;
+refuse the whole command still — partial execution of a refused command is a worse contract
+— but name the clause to remove. **One shared splitter, not two**: CLAUDE.md § *Parsers Over
+a Namespace* records four independent shell gates in this process each separately
+mis-parsing a heredoc, and a fifth parser is how that count reached four. Whatever splits
+the string owes the usual escape answer — a `;` inside quotes or a heredoc body is not a
+separator.
+
+**Acceptance:** the three probes as a table test, the two refusal rows asserting on the
+**named clause** rather than merely on refusal. Keep the `allowed` row — it is the
+discriminator that stops a refuse-everything gate from satisfying both refusal rows.
 ## History
 
 ### 2026-09-01 — Tracker created
