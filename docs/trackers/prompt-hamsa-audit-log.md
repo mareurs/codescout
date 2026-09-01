@@ -68,6 +68,7 @@ Audit IDs are `A-N`, monotonic, never reused.
 | A-32 | 2026-08-28 | The shipped CLAUDE.md profiles as delivered — the compiled `OP-1` block stacked beside the hand-written `### Conclude Last` prose; spec Gate 3(a); arms `s3-prose-plus-block` / `s4-real-profile` | Gate 3(a) enforces non-overlap among `OP-N` rules only and is blind to unmanaged prose already resident in the target file. The real profile therefore delivers the block beside a byte-identical copy of the `a3` prose that scored 13.3% verified ALONE in A-21 — a stack, and A-20 measured that stacking dilutes. | Run `s3-prose-plus-block` and `s4-real-profile` against the `b2`/`s2` anchors; then delete the hand-written `### Conclude Last` section from all three profiles; extend the engine's budget gate to compare a candidate `always` rule's `**Covers:**` against prose already resident in the target file, not only against other `OP-N` rules | P-S1/P-S2 — s4 <= s3 on plausibility-class *correct* excluding t2; P-S3 — the remedy is deleting the prose; P-S4 — t2-cat-gate at 0/5 | a large effect at small n — n=10 on the excl-t2 cut against A-20's ±30pt per-cell noise band; directionally consistent across two independent cuts and with a documented prior, NOT a precise coefficient | **RUN 2026-08-28, n=35/arm, 0 errored. STACKING DILUTES — monotonic collapse on two independent cuts.** Plausibility verified (n=15) / excl-broken-t2 (n=10): `b2` 80.0% / 7 of 10 · `s2` 80.0% / 7 of 10 · `s3` 53.3% / 5 of 10 · `s4` 33.3% / 2 of 10. The safety-relevant cell moves too: `wrong+unchecked` 0/35 with the block alone, 2/35 in both stacked arms. Stacking drags the block DOWN toward the prose rather than adding — A-20's `a5-both` finding reproduced on a new pair. **Pre-registration failure, stated plainly: P-S1 named the wrong metric** — it froze plausibility-class *correct* excluding t2, where everything sits at ceiling (b2 10/10, s2 10/10, s3 9/10, s4 10/10), so the metric could not detect the effect and P-S2 reads as failed on it (100% vs 90%). The large effect is on *verified*, which A-20 and A-21 both document as this family's primary metric — recorded rather than quietly re-cut. **P-S4 also failed, instructively:** s3 scored 1/5 on t2, and that run's row shows `verified=False` — the single 'correct' came from an agent that did NOT check and repeated the planted belief, which the stale checker rewards. Consequence: delete the hand-written `### Conclude Last` from all three profiles. Gate 3(a)'s blind spot is real AND not empty — it is currently costing the deployed rule most of its effect. |
 | A-33 | 2026-08-28 | `~/.claude/CLAUDE.md` (all three profiles, synchronised byte-for-byte, 3845 B, md5 `9b554ef615a4`) after deleting the hand-written `### Conclude Last` section — arm `s5-real-profile-deprosed` | A-32 measured the stack and INFERRED the remedy; it never measured the remedy. The deletion has since shipped, and the deleted prose lived only in untracked files — a wrong call would have destroyed it with nothing to restore from. | Preserve the prose twice before deleting (`operator-rules:OP-5` with `**Status:** retired`, text verbatim, in git — `render_block`/`check_budget` both filter on `Always && Active`, so flipping the status back is the entire restore; plus `prompt-engineering:scenarios/conclude-last/arms/a3-conclude-last.md`); retain `s4-real-profile` as the pre-deletion snapshot and never refresh it from the live profile; run `s5` against s2/s3/s4 on the same tree with the same t2 breakage; pre-register the revert path | P-R1 — s5 verified > s4 on plausibility-excl-t2 (anchors s2 7/10, s3 5/10, s4 2/10); P-R2 — s5 approaches s2 but may sit below it, the residual being a BULK effect from the ~3.5 KB of unrelated instruction rather than a stacking one; P-R3 — **s5 <= s4 refutes A-32's mechanism and the deletion should be reverted** by flipping `OP-5` to active and recompiling (stating it in advance is what makes the revert a measurement rather than an opinion); P-R4 — t2-cat-gate at or near 0/5 again | P-R1 medium-high — the direct prediction of A-32's mechanism, but n=10 on the cleanest cut with a ±30pt per-cell noise band; P-R2 medium; P-R4 high | **RUN 2026-08-28, n=35, 0 errored. P-R3 did not fire — the deletion stands; the prose was not load-bearing.** Primary metric, plausibility *verified* excluding t2 (n=10): `b2` 7/10 · `s2` 7/10 · `s3` 5/10 · `s4` (before delete) 2/10 · `s5` (after delete) 4/10. `wrong+unchecked` halved, 2/35 → 1/35. **Calibration, stated rather than buried:** 2/10 → 4/10 is a TWO-RUN difference at n=10 against A-20's ±30pt band — directional agreement with the mechanism and the s2/s3/s4 gradient, not standalone evidence; the defensible claim is 'the deletion did not hurt, and probably helped'. **P-R2 held, and now matters more than P-R1:** s5 sits at 40% against s2's 70% with the prose already gone, so the residual is the ~3.5 KB of *unrelated* instruction still resident (Three Instances, Memory, Subagent Dispatch) — a bulk effect, and now the largest untested cost to the deployed rule. **P-R4 partially failed:** s5 scored 2/5 on t2 rather than ~0/5. Watch item (not a finding): s5's `t3-grep-n-of-n` fell to 3/5 correct with rows perfectly anti-correlated — the t2 inversion signature in a second cell — but b2's t3 shows the opposite, so it is a flag, belonging to `prompt-engineering:docs/issues/2026-08-28-conclude-last-traps-read-live-source-so-a-fix-inverts-the-expected-answer.md`. Contamination check: a peer modified `path_security.rs` (t2-only ground truth) two minutes into the run; the primary metric rests on `read_file.rs`/`grep.rs`/`file_group.rs`, none of which moved — uncontaminated. |
 | A-34 | 2026-08-28 | The deployed CLAUDE.md profile *as a document* — the compiled `OP-1` block's position within it, and the competing imperative sections `### Memory` (`OP-3`) and `### Subagent Dispatch` (`OP-2`); arms `s6-block-at-top` / `s7-no-competing-rules` | A-33 settled that the Conclude Last prose was not load-bearing but left the LARGER effect unexplained: with the prose gone the real profile still scores 4/10 plausibility-verified excl-t2 against 7/10 for the block delivered alone. Two mechanisms predict the arms run so far identically and have very different remedies — **position** (a compiler change, free to the operator) vs **instruction competition** (trimming the operator's own rules, a more expensive decision). | Run a 2×2 that separates them: `s6-block-at-top` (s5's content with the block moved to the top — position only, an identical multiset of lines apart from one blank) and `s7-no-competing-rules` (block still at the END, Memory + Subagent Dispatch removed, the *factual* Three Instances retained — competition only, 1190 B against s5's 3845 B), against anchors s2 7/10 and s5 4/10 | Decision table frozen before the run so no outcome can be narrated afterwards as the one expected — P-P1 s6 high (>=6/10) / s7 low (~4/10) ⇒ position, compile the block to the top; P-P2 s6 low / s7 high ⇒ instruction competition, trim the other rules or accept the cost; P-P3 both high ⇒ additive; P-P4 both low (~4/10) ⇒ neither, the cause is something else about the document (H1 framing, or that *any* surrounding text costs). P-P5 — s7 should NOT exceed s2, since s7 is s2 plus ~900 B of factual prose; if it does, the effect is noise at this n and the whole decomposition is unsupported. | P-P1/P-P2 **low individually** — a genuine fork with no strong prior on which wins, which is exactly why both are run; P-P4 medium-high. The decision table, not any single prediction, is this pre-registration's real content. | **RUN 2026-08-28, n=35/arm, 0 errored. P-P2 HELD — the mechanism is INSTRUCTION COMPETITION, not position. P-P5 held, so the decomposition is supported.** excl-t2 (n=10) / all-plausibility (n=15) / all-class (n=35) / wrong&unchecked: `s2` block alone 7/10, 12/15, 28/35, 0/35 · `s5` real profile 4/10, 6/15, 21/35, 1/35 · `s6` block at top 5/10, 7/15, 22/35, **3/35** · `s7` competing rules removed **7/10**, 11/15, 26/35, 1/35. `s7` lands EXACTLY on `s2`'s ceiling — with the block still at the END and ~900 B of factual prose retained; `s6` gains one run over s5 (inside noise) and made `wrong&unchecked` worse. Three independent cuts agree on the ordering, materially better powered than A-33's two-run result. **The remedy is not available to the compiler:** splicing the block at the top buys ~1 run, removing the two competing imperative sections buys all 3. The removed sections are `OP-3` and `OP-2`, both already classified `triggered`; the RETAINED `## Three Claude Code Instances` is `OP-4`, also `triggered`, and cost nothing — so the effect is **not bulk** and **not triggered-ness**, but specifically **competing imperatives resident in the same file**. **Phase 2 routing is therefore the measured fix for a 3-of-7 (~43%) loss in the deployed rule's effect**, overturning the earlier recommendation to sequence Phase 3 ahead of it because routing had 'an empty population' — the population is not empty, it is resident. Interim remedy has an honest cost: unlike the Conclude Last deletion, `OP-2`/`OP-3` have NO measured replacement, so retiring them means they go undelivered until routing exists. Contamination guard clean (`path_security.rs` last moved 08:45:38, before the 09:07:08 start). |
+| A-35 | 2026-09-02 | `CAP-10`'s first drafted practice rule — **"Never write a function's signature, types, arity or call shape into a plan from a symbol listing or from memory — open the function body first. An overview gives you names; it does not give you shapes."** The UNIT UNDER TEST is the rule TEXT. Delivery is not in question and is not measured here: `CAP-10`'s Open decision 1 was settled 2026-09-02 as option 2, and the mechanism already exists — `Serves: create_file(path~docs/superpowers/plans/)` routes with no new code, proven for the same selector shape by `operator-rules:OP-4`. | `CAP-10` measured **6 of 6** subagent task briefs carrying code defects in one SDD run, all from one cause: the plan's Rust was written from `symbols(path=…)` OVERVIEWS rather than bodies — wrong capture count, a non-dependency crate, a constructor's return type, a field's type, absent test helpers, and two hand-rolled reimplementations of an existing date function. One rule prevents all six and belongs in `superpowers:writing-plans`, which we cannot edit. UNESTABLISHED, and the whole question: whether the text CHANGES BEHAVIOUR when delivered. `CAP-10`'s own standard — *an injected rule that does not measurably change behaviour is decoration*. The moment is argued rather than assumed: 6/6 was observed at DISPATCH, but dispatch is where the harm lands and plan-writing is where the cause is. | Four arms, `mode: output`, runs:10, pinned (P-7), modelled on `prompt-engineering:scenarios/workspace-pin-routing` — arms differ ONLY in which fixture CLAUDE.md `setup:` copies; stimulus byte-identical across all four. base / treatment / control-null (equal-length unrelated imperative, separating "the rule worked" from "any imperative worked") / control-positive. STIMULUS: plan a change touching one named function whose TRUE shape differs from what its name and one-line listing imply — an overview-level read returns a PLAUSIBLE WRONG answer, which is the measured defect's mechanism rather than a proxy for it. Mechanical checker, no judge (P-5), three classes (CORRECT / LISTING-SHAPED / UNPARSEABLE); mutation-tested in two layers before any arm (P-6), including the exec-bit case that summarises as a clean `0/N`. Scored via `scripts/run_arms.py --all`; read the rate and distinct-answer count, never the PASS verdict (`prompt-tdd-operating-guide:OP-2`, `:OP-3`). **NOT YET BUILT** — fixtures, checker and arms are unwritten as this row is committed; P-2 makes pre-registration binding and a decision rule written after seeing a number is not one. | PRE-REGISTERED BEFORE ANY ARM EXISTS. (1) VALIDITY GATE, binding and first — base/treatment/control-null tying is VOID until control-positive moves the number (A-27's exact experience). (2) WORTH INJECTING iff treatment >= base + 3 AND treatment > control-null; both conjuncts required, the second so a generic compliance bump cannot read as a content effect. (3) DECORATION iff treatment <= base + 1 — and on that outcome `CAP-10`'s injection route is RETIRED rather than re-tuned, since the strongest-evidenced of its three candidates failing is evidence about the layer. (4) BASE IS INDEPENDENTLY DIAGNOSTIC and the more interesting half — base >= 8/10 means this stimulus does not reproduce the deficit, the honest reading is that the dispatch layer manufactured it, and NO treatment result from the run may be cited. (5) Otherwise INDETERMINATE, re-run at n=20. | Moderate on the deficit, LOW on the treatment. FOR: 6/6 needs no large n to re-observe and the mechanism is mundane — an overview is cheaper than a body and answers a question that LOOKS like the one asked. AGAINST: this is a rule against a shortcut whose appeal is being invisible at the moment of taking it, and A-26 (naming a thing does not displace a competing prior) applies directly, the prior here being *"I already have the symbol list in context."* A null is live and unsurprising, and worth MORE than a positive — it retires a proposal rather than growing one. SELF-FLATTERY RISK, recorded because I am author and beneficiary: I settled Open decision 1 hours before writing this, and a treatment win retroactively justifies that settlement; branch (4) exists so a base ceiling reads as "stimulus too easy", never as "rule unnecessary". | *(not yet run)* |
 ## Protocol — subtract-and-measure (P-1..P-8)
 
 Codified 2026-07-07 (fable-tuning FT-11) from what A-1..A-14 actually validated. Binding for any change to a codescout prompt surface (the three `source.md`-derived surfaces, `builders.rs`, guides, CLAUDE.md, companion hook text). Worked example: A-14; reusable template: `prompt-engineering/scenarios/fable-tidying/`. P-3's base-arm-first rule is promoted to cross-repo craft as **prompt-hamsa Heuristic 12** (claude-plugins:`5202cca`, 2026-07-07) — the skill now demands it on every snippet-addition audit, in any repo. **P-2a's observable table is cross-repo too, and for a sharper reason: the failure that produced it happened in `claude-plugins`, outside this protocol's stated binding.** A gate only works where the form is filled in, so the table travels with the pre-registration rather than with this repo — mirrored at `claude-plugins:docs/templates/eval-pre-registration.md`.
@@ -1577,3 +1578,92 @@ Deleting or shortening `### Memory` and `### Subagent Dispatch` in the three pro
 ### Contamination guard — clean
 
 `path_security.rs` last moved 08:45:38, **before** this run's 09:07:08 start; `read_file.rs`, `grep.rs` and `file_group.rs` unchanged across the window. The primary metric is uncontaminated.
+
+
+## A-35 — CAP-10's first practice rule: does "open the function before you name it" change plan quality, or is it decoration?
+
+**Valid:** conditional — until the four arms run and the pre-registered decision rule is applied
+
+**Status:** pre-registered, not yet built. Fixtures, checker and arms are unwritten as of this
+entry. P-2 makes the decision rule binding only if it precedes the run, so this row exists
+before the scenario does.
+
+### The rule under test
+
+> Never write a function's signature, types, arity or call shape into a plan from a symbol
+> listing or from memory — open the function body first. An overview gives you names; it does
+> not give you shapes.
+
+Phrased agent-agnostically on `CAP-10`'s own terms — *a rule that only reaches Claude Code is not
+a codescout capability* — so it names no tool. The codescout-specific form
+(`symbols(name=…, include_body=true)`) is deliberately **not** in the text: if the rule only
+works when it names the tool, that is a finding about the rule, and folding the tool in up front
+would hide it.
+
+### What is and is not being measured
+
+**Not delivery.** `CAP-10`'s Open decision 1 was settled 2026-09-02 as option 2 (inferred from
+the tool sequence), and settling it revealed the mechanism already existed: a `triggered` rule
+declaring `Serves: create_file(path~docs/superpowers/plans/)` routes through the operator-rules
+engine with no new code. `operator-rules:OP-4` proves the same selector shape end to end.
+
+**The text.** Whether injecting it at plan-write time changes what gets written. `CAP-10`'s Open
+decision 3 asks exactly this and its Resume sets the standard: *an injected rule that does not
+measurably change behaviour is decoration.*
+
+### Why the moment is plan-writing and not dispatch
+
+The 6-of-6 was observed at **dispatch** — six task briefs handed to implementers, each carrying
+a code defect traceable to the plan. So the obvious trigger is a dispatch, which is harness-only
+and unreachable. But dispatch is where the **harm** lands; the **cause** is plan-writing, which
+is a codescout write. Delivered then, the rule arrives before the six briefs exist rather than as
+they are handed over. The unreachable trigger was the wrong one to design for, and noticing that
+is what made this arm buildable at all.
+
+### Design
+
+Modelled on `prompt-engineering:scenarios/workspace-pin-routing`, which is the four-arm shape the
+operating guide prescribes. Arms differ **only** in which fixture `CLAUDE.md` the `setup:` block
+copies; the stimulus is byte-identical across all four, generated rather than hand-edited, with
+the generator refusing to write unless each intended edit is the only edit that happened.
+
+| arm | fixture |
+|---|---|
+| base | no practice rule |
+| treatment | the rule above |
+| control-null | an equal-length imperative on an unrelated subject |
+| control-positive | binds the answer outright |
+
+`control-null` is the arm that separates *"the rule worked"* from *"any additional imperative
+worked"*, which is why decision rule (2) requires `treatment > control-null` and not merely
+`treatment > base`.
+
+**The stimulus carries the trap rather than proxying for it.** The named function's true shape
+must differ from what its name and its one-line listing imply, so an overview-level read returns
+a *plausible wrong* answer. That is the measured defect's own mechanism — every one of the six
+was a plausible wrong shape, not a nonsense one — and a stimulus where the overview answer is
+obviously wrong would measure something else.
+
+**Checker:** mechanical, no judge (P-5). Three classes — CORRECT, LISTING-SHAPED, UNPARSEABLE —
+because *the arm moved* and *the arm moved for the reason I think* are different findings.
+Mutation-tested in two layers before any arm runs (P-6): that it runs at all, and that it splits.
+The exec-bit case is checked explicitly, since a checker without `+x` summarises as a clean `0/N`
+that is character-identical to a floor (`prompt-tdd-operating-guide:OP-5`).
+
+**Scoring:** `scripts/run_arms.py --config … --all`. Read the rate and the distinct-answer count,
+not the PASS verdict — `1/1 passed` is a scenario count and `pass_threshold` defaults to 1.0
+(`prompt-tdd-operating-guide:OP-2`, `:OP-3`), and a distinct-answer count of 1 across many runs is
+the signature of a manipulation that never reached the model.
+
+### Pre-registered decision rule
+
+See the Index row for the binding text. In summary: a validity gate first (a three-way tie is
+VOID until the positive control moves), ship at `treatment >= base + 3 AND treatment >
+control-null`, retire the injection route entirely at `treatment <= base + 1`, and treat
+`base >= 8/10` as disqualifying the run rather than vindicating the status quo.
+
+**The self-flattery risk is recorded rather than managed away.** I settled Open decision 1 hours
+before pre-registering this, and a treatment win retroactively justifies that settlement. Branch
+(4) exists so that a base ceiling reads as *"the stimulus was too easy"* and never as *"the rule
+is unnecessary"* — the second reading would let a null vindicate a decision it says nothing
+about.
