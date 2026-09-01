@@ -91,6 +91,53 @@ Birds-eye retrospective (2026-09-01) synthesized from three sweeps: the session-
 **Acceptance:** a row mutated on host A is queryable on host B after pull; same-host two-branch shard merge needs no manual resolution; doctor names the unexported delta; a merged read labels each host's coverage window.
 
 **Depends on:** T-1 (row format designed export-ready there: `seq` monotone/never-reused, watermark key reserved). Full design: `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md` § Phase 2.
+## T-8 — Advertise `graft`'s required params
+
+**Why:** `artifact(action="graft")` is advertised in the action enum (`src/librarian/tools/artifact.rs:35`) but its two required params are not in the schema. `src/librarian/tools/graft.rs:10-11` declares `Args { from_id: String, into_id: String }`; neither appears among `artifact`'s 53 advertised properties, verified against the live wire. Measured in `usage.db`: **1 attempt, 1 failure** (`missing_required_param`). The action is unusable as advertised.
+
+**Shape:** add `from_id` / `into_id` to `input_schema` in `src/librarian/tools/artifact.rs`, action-labelled like their siblings (`src_id`/`dst_id` for `link`, `new_rel_path` for `move`).
+
+**Acceptance:** T-9's guard goes green on `graft` without its `required()` helper supplying the params out-of-band; a live `artifact(action="graft")` with no params errors naming both fields, and both appear in `tools/list`.
+
+## T-9 — Action→schema guard: required params must be advertised
+
+**Why:** `every_action_labelled_schema_key_is_honored_by_that_action` (`src/librarian/tools/artifact.rs:350`) iterates `schema["properties"]` — it checks **schema→action** only. Nothing checks the reverse, which is why T-8's defect survived. Sharper: that test's own `required()` helper **hardcodes** `from_id`/`into_id` for `graft` (`artifact.rs:386-389`), so the knowledge that would have caught the bug was written down, out-of-band, inside the test that missed it — § *Two-representations-one-truth* (T-6) occurring inside the guard.
+
+**Shape:** assert the reverse direction — every required (non-`Option`, no `serde(default)`) field of each action's `Args` appears in `schema["properties"]`. Derive one list from the other rather than maintaining a second hand-written table.
+
+**This is worth MORE because the structural fix is deferred.** `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md` gates `schemars`-derived schemas on a third instance of *advertised ≠ accepted*. Until that fires, this guard is what **detects** instance 3 rather than waiting for someone to trip over it — CLAUDE.md § *Observer Blindness*'s "check that runs when nobody is worried".
+
+**Acceptance:** written **before** T-8 so it goes red on `graft` naturally — that is the deliberate break, earned rather than staged. Then green after T-8, with a param deletion re-reddening it.
+
+## T-10 — Correct the tool-surface-budget spec's instance count
+
+**Why:** `0e0316e9036d7f16` § *Rejected* defers `schemars` derivation under a `tool-registration-rule-of-three` resting on *"one confirmed instance (F-1) plus one unverified (`query` / `title_contains` / `preview` passed by agents, unadvertised — origin not yet checked)"*. Both halves are now checkable, and the count moves in **both directions**:
+
+- `graft` is a **new confirmed** instance (T-8) — the count rises to 2 confirmed.
+- The unverified one is **the wrong class** and should be retired. Verified 2026-09-01: no `Args` struct under `src/librarian/tools/` accepts `query`, `title_contains` or `preview` (sole grep hit is an unrelated fn parameter, `get.rs:35`), and `find::Args` cannot carry `deny_unknown_fields` because the dispatcher passes sibling actions' keys through. So those three are neither advertised **nor** accepted — agents guessed the names and serde dropped them silently. That is IC-15 accepted-parameter-silently-dropped, i.e. **T-2's** class, not this one.
+
+**Net: 2 confirmed, 1 live. The trigger has NOT fired.** Recording this is what keeps the gate honest — an inflated count fires the rewrite early exactly as a stale one never fires it at all.
+
+**Shape:** update § *Rejected* and § *Revisit-when* through the catalog. Re-point the retired instance at T-2.
+
+**Acceptance:** the spec names its instances with their verification status, and a reader can tell how far the trigger is from firing without re-deriving it.
+
+## T-11 — Fix the bare missing-param error, then cut the prose compensating for it
+
+**Why:** `missing_required_param` is the **#2 error family** across the librarian tools (41, behind `edit_stale_match` at 44). **12 of the 41 are `missing field 'patch'`** — the raw serde message from `artifact(action="update")`. Its siblings (`get`, `graph`, `link`, `append_entry`, `update_entry`) already name the action and carry a hint; `update` does not. The `artifact` tool description *already documents this exact failure in prose* — so the per-request surface pays, on every request of every session, to describe a defect a one-line fix removes.
+
+**Shape:** bring `update` (and any other bare-message action) up to the sibling pattern via `RecoverableError::with_hint`. **Then** cut the compensating paragraph from the description.
+
+**Acceptance:** gate green; the cut is the **only** change in this cohort that removes prose the model reads, so it ships behind pre-registered `A-35` with an observational window on `err_family` (P-4, precedent A-2).
+
+## T-12 — `artifact_event` legibility
+
+**Why:** worst error rate of any tool on the surface — **26.1% (6 of 23)** — and **100% of its failures are `missing_required_param`**, at 2,258 chars of per-request cost. The `kind`→required-payload-keys mapping (`note`→`text`, `status_change`→`to`, `verdict`→`outcome`, …) exists only as description prose, so it is not reachable by the machine at the moment of failure.
+
+**Shape:** surface the mapping from prose into the schema, or make the error name the required keys **for the `kind` actually passed**.
+
+**Acceptance:** a `create` call with a valid `kind` and a missing payload key errors naming that key. Re-judge its 7 never-passed params **after** the fix, never before — both time-travel actions (`artifact:state_at`, `librarian:workspace_state_at`) were attempted exactly once each and **both failed on the same missing param**, so a 0/2 discovery rate is what "never passed" can mean.
+
 ## History
 
 ### 2026-09-01 — Tracker created
@@ -98,3 +145,23 @@ Seeded from the birds-eye retrospective (3-agent sweep: trackers, bug corpus, ar
 
 ### 2026-09-01 — T-1 design approved; T-7 split out
 Brainstorming settled T-1's three axes (any-writer triggers / full-on-delete+diff-on-update / keep-forever) and produced `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md`. The git-sharing question raised during review became T-7 (committed audit shards), phased after T-1 with the row format made export-ready up front.
+
+
+### 2026-09-01 — T-8..T-12 added from the tool-surface measurement
+
+Measured the `tools/list` surface off the live wire (26 tools, 54,583 chars = 47,156 schema + 7,427 desc; budget 56,519, headroom 1,936), reconciled against `server::tests::tool_surface_report_lengths`. Found it **under budget but mis-allocated**: `graft` advertised without its two required params (T-8), no guard in that direction (T-9), and `missing_required_param` the #2 error family at 41 (T-11/T-12).
+
+Three candidate tasks were **dropped as already adjudicated**, which is why this cohort is five and not eight: `library`'s zero calls is open experiment `prompt-surface-compaction-session-log:F-3`, re-running on/after 2026-09-02; narrowing `pinnable()` / trimming the injected `workspace` param was **rejected** in `0e0316e9036d7f16` ("a bursty capability, not a dead one"); and per-tool schema caps were rejected there too ("per-item caps do not bound a sum").
+
+T-10 exists because the measurement **corrected the premise of a deferred decision in both directions at once** — see its section.
+
+
+### 2026-09-01 — T-8 and T-9 shipped; T-10's premise established
+
+T-9 written **first**, deliberately: it went red on `["graft:from_id", "graft:into_id"]` against the unfixed schema, so the deliberate break was earned from a real defect rather than staged by mutating a passing test. T-8 then made it green. Guard wired at all four `param_probe` sites (`artifact`, `librarian`, `artifact_event`, `artifact_refresh`) — one kill proves one site.
+
+The guard adds **no third list**. `Spec::required` already states each action's required params, and `sweep` depends on that table being complete (its base call must survive deserialisation), so the two representations already existed and the assertion just makes them agree. Its own blind spot — an action absent from `required` contributes nothing and is passed over silently — is recorded at the function's doc comment, not only in the bug file.
+
+Surface cost +393 chars (54,583 → 54,976; headroom 1,936 → 1,543): an **addition**, carried under P-3 by the measured deficit (1 attempt / 1 failure, plus `missing_required_param` ×41). Gate green: clippy clean, lean 3408/0, default 4984/0. Fix `6894b67d` on `experiments`, patch-id `3cb9bc68a685c46252388dc21a3dd8d7beff9098`. Bug archived as `2fbb59c9b84a0dcf`, tagged `cluster/declared-not-wired` through the catalog.
+
+T-10's investigation is **done and its finding is the opposite of what was expected**: chasing whether `graft` was the third instance that trips the `schemars` rule-of-three showed the spec's second instance does not qualify. `query`/`title_contains`/`preview` are neither advertised nor accepted — no `Args` under `src/librarian/tools/` has those fields — so they are IC-15 silent-drop (T-2's class), not this one. Net **2 confirmed, 1 live; the trigger has NOT fired.** Writing that correction into the spec is what remains of T-10.
