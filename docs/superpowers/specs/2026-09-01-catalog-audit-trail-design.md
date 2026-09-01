@@ -130,23 +130,64 @@ time on a gitignored database. A git-native trail is structurally a **replica**,
 surfaced as one (else it is an IC-13: a committed log that reads as complete but is only as
 fresh as its last export). Precedent: the augmentation sidecar (`f565504a`).
 
-- `audit_log export` appends rows since the watermark to
+### Revised 2026-09-01 — what the measurement changed
+
+This section was written from estimates. Histogramming the live trail before planning
+falsified its central volume claim, and three decisions were settled against the numbers.
+
+**The volume analysis below was aimed at the wrong term.** It proposed filtering "pure
+reindex churn"; measured over a 1.74-hour window (27,914 rows), reindex churn is **0.4%** of
+rows. **98.5%** were `commits` updates whose payload was literally `{}` — an UPDATE trigger
+with no `WHEN` clause firing on statements that changed nothing — and **88% of payload bytes**
+sat in 23 `artifact_augmentation` update rows averaging 34KB. Unfiltered, that is ~380k
+rows/day into a committed file; phase 2 was not shippable on that population.
+
+Both are fixed (T-13, `40ab56f6`), and **the fix belongs upstream rather than in the export
+filter**: filtering at export would have left the local query surface unusable and the
+database growing, while the trail's own `seq`-gap tamper signal stayed diluted by noise.
+Post-fix, a reindex writes 20 rows instead of ~2,750, and a tracker append writes 441 chars
+instead of 7,364.
+
+**Steady state, grounded on the catalog's own 98-day history** (3,545 events ≈ 36/day, 4,446
+artifacts, 3,408 links): roughly **1–2 MB/month/host**. The window this was scoped in was a
+burst — an SDD run with nine commits, several reindexes and a merge — and is not a rate.
+
+### Settled design
+
+- **`audit_log export`** appends rows since the watermark to
   `.codescout/audit/<host>-<YYYYMM>.jsonl` — one file per (host, month), append-only,
-  committed.
+  committed. `.codescout/` has no blanket ignore rule (it already tracks
+  `/.codescout/projects/`), so the directory is tracked by default; an explicit
+  `.gitignore` comment records that this is deliberate rather than an oversight.
+- **Host identity is persisted, never re-derived.** `catalog_meta['audit_host_id']`, resolved
+  **once** from `CODESCOUT_AUDIT_HOST` → `COMPUTERNAME` → `/etc/hostname` → `HOSTNAME`,
+  sanitized to `[a-z0-9-]{1,24}`, and suffixed with 6 hex chars. The catalog is machine-local,
+  so a value stored in it *is* a host identity by construction; the suffix is what keeps two
+  machines that both call themselves `arch` from writing the same file. No new dependency —
+  `gethostname` was considered and rejected as not worth a crate for a value we must persist
+  anyway. A readable prefix is a courtesy; the suffix is the correctness.
+- **Read path: merge-on-query, stateless.** `audit_log` reads the local `catalog_audit` and
+  streams the shard files, merging on `(at_ms, host, seq)` — never on line position. There is
+  no import and no second table. An imported replica is exactly the two-representations-one-
+  truth shape T-6 exists to remove, and it would add a sync step that can silently not have
+  run. Shard filenames encode host and `YYYYMM`, so `since`/`until` prunes whole files before
+  opening them.
+- **Shard scope: every audited table except `commits`.** `commits` is a cache of git, so
+  exporting an audit of it *into* git is circular — and at ~192 rows/day it is the largest
+  remaining term. It stays audited locally.
 - **Merge conflicts solved structurally:** different machines write different files; same
-  host on two branches gets `.gitattributes` `merge=union` (correct for append-only line
-  logs; global order is re-derived from `(host, seq, at_ms)`, never from line position).
-- **Volume:** exports filter pure reindex churn by default (update rows whose changed-set ⊆
-  `{file_mtime, file_sha256, updated_at, missing_since}`); everything stays queryable
-  locally.
-- **Honesty markers:** each export stamps `audit_exported_through_seq` (catalog_meta + shard);
-  doctor reports the unexported delta; merged reads label each host's coverage window.
+  host on two branches gets `.gitattributes` `merge=union`, correct for append-only line logs.
+- **Honesty markers.** Each export stamps `audit_exported_through_seq` (catalog_meta + shard
+  header); doctor reports the unexported delta; a merged read labels each host's coverage
+  window. **`filtered_total` and `truncated` must count shard rows too, or say they do not** —
+  a merged query whose total silently reflects only the local table is this document's own
+  IC-13, committed inside the feature that exists to avoid it.
 - **Not forgettable:** incremental export folds into surfaces that already run (`reindex`,
-  `merge_worktree`) plus the manual verb; a pre-commit hook is possible later (H-N
-  territory, out of scope here).
+  `merge_worktree`) plus the manual verb. Concurrent appends take the `fs4` file lock already
+  used by `src/retrieval/index_lock.rs`; two sessions reindexing at once must not interleave
+  partial lines into a committed file.
 - Payoff: after a pull, `audit_log` answers "which session on the other machine deleted
   these rows" — the vanished-rows question across the machine boundary.
-
 ## Rejected alternatives
 
 - **Rust-layer audit wrapper** — rich identity, but out-of-band writers invisible; standing
