@@ -75,6 +75,35 @@ Universality, rather than one lucky record:
 Both `/proc/<pid>/environ` and the transcript JSONL were re-checked and do lack it, so the
 doc's premise is not the error — only the inference from it.
 
+### Second route — from a COMMIT to the session that wrote it
+
+The route above starts from a pid and is about a **live writer**. Starting from a commit closes
+the other half — **committed state** — and it is the half that comes up in practice, because the
+question is usually *"who wrote this line?"* rather than *"who is running right now?"*.
+
+Measured 2026-09-01 by `codescout-3e`, resolving the author of `75ec6310` with no prior knowledge
+of which session it was:
+
+```bash
+git log -1 --format='%b' 75ec6310 | tail -1
+# Session-Id: b2a50de8-a666-4933-b030-f7bf8e18fd6a
+
+grep -l "b2a50de8-a666-4933-b030-f7bf8e18fd6a" ~/.claude*/sessions/*.json
+# /home/marius/.claude/sessions/2201565.json      -> pid 2201565, name codescout-3c, profile .claude
+```
+
+Three hops, all of them lookups rather than inferences: **commit → `Session-Id` trailer →
+registry entry → pid, name, profile, socket.** The peer was then addressed directly at
+`uds:/run/user/1000/cc-socks/2201565.sock` — cross-profile, so the bare name would have been
+refused.
+
+Note what this does *not* weaken. `CLAUDE.md` § *Observer Blindness* is right that the trailer
+"exists only once a commit lands, and uncommitted state is where every misattribution that day
+occurred" — that stays true, and the scratchpad-path ask remains the route for uncommitted work.
+What the section gets wrong is narrower and is this file's subject: it states there is **no
+pid→session join** at all, and the registry is a join in both directions. For committed state the
+chain above is complete and positive, needing no elimination step and no candidate set.
+
 ## Worked demonstration — the same session, 20 minutes later
 
 The routing question that surfaced this produced three unknown writer ids across two files.
