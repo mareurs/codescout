@@ -29,7 +29,7 @@ output is mostly other sessions' work, so it is last and its deliverable is a re
 | # | item | kind | state |
 |---|---|---|---|
 | 1 | double-frontmatter corruption in `artifact(create)` **and `update`** | code fix | **done** — 2 sites guarded, 4 tests, 3 mutations measured |
-| 2 | heading-miss discards the `Available headings` hint | code fix | queued |
+| 2 | heading-miss discards the `Available headings` hint | code fix | **done** — 2 sites guarded, 3 tests, 3 mutations measured |
 | 3 | hook refusal-text "what comes next" tail | design + shell | queued — blocked on a design call |
 | 4 | triage the 27 open bugs (verify-open cadence) | survey | queued |
 
@@ -130,6 +130,36 @@ heading typo returns a bare `not found` when the resolver has *already built* th
 headings" list. `cluster/declared-not-wired` (IC-3). Continues this session's read-surface work
 stream directly.
 
+
+### Outcome (2026-09-01)
+
+**A second site again, and again the bug file did not name it.** `heading_miss_meta`'s absent arm
+was the filed defect; the plural `headings=[…]` branch builds its own `missing` list, never calls
+that helper, and was dropping the hint too. Fixing the helper alone would have shipped half the
+defect — the identical shape as item 1's `create`/`update` pair, hours apart, and the second time
+today that *mutate once per guarded SITE* was the difference between a fix and a partial one.
+
+The plural branch emits `headings_hint` **once**, not per member: the hint is derived from the
+document rather than the query, so every missing member would carry a byte-identical string — and N
+copies of one fact is precisely the envelope bloat this work stream exists to remove.
+
+**The bug file's own `## Tests added` pre-wrote the trap, and it was right:** *"asserting only
+`heading_hint` exists is monotone under widening — `unwrap_or_default()` returns `""`, which is
+present and useless."* Both miss-tests therefore assert the hint **names the fixture's real
+headings**, not that the key is present.
+
+| mutation | result |
+|---|---|
+| singular arm drops the hint | 56 / 1 — kills the singular test **only** |
+| plural branch drops the hint | 56 / 1 — kills the plural test **only** |
+| emit the hint on SUCCESS too | 56 / 1 — kills `a_resolved_heading_carries_no_hint` **only** |
+
+The third row is the twin. The first two are presence assertions and are monotone under widening, so
+emitting the key unconditionally satisfies both completely; only the third mutates that way.
+
+**Gate:** fmt clean, clippy 0 warnings, lean lane exit 0, default lane 4836 passed / 1 failed — the
+known load-sensitive `run_exits_after_idle_timeout_with_no_connections`, filed at `f5957aaa` and
+verified isolated twice today against a 10s budget.
 ## 3 — hook refusal-text tail
 
 Implement `docs/plans/2026-09-01-shared-checkout-commit-sequence-guide.md`. Each pre-commit hook

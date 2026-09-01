@@ -44,18 +44,37 @@ fn find_heading_section<'q>(
 /// rather than re-deriving the state from message text — the message is prose and its
 /// wording is not a contract.
 ///
+/// **Both arms forward `err.hint()`, and the absent arm used not to.** The two errors
+/// carry *different* hints and both are already built by the time we get here: the
+/// ambiguous one names `occurrence=` as the remedy, and the absent one carries
+/// `"Available headings: …"` from `resolve_section_range`
+/// (`src/tools/file_summary/file_summary.rs:447`). Dropping the second meant a caller who
+/// mistyped a heading was told only that it was missing, while the list that would have
+/// corrected the typo had been computed, formatted, and then discarded one frame away —
+/// costing a round-trip to fetch a map the failing call already held. `IC-3`
+/// (`declared-not-wired`): the capability existed and nothing reached it.
+///
 /// Staying `isError: false` is deliberate and unchanged; see the comment at
 /// `src/usage/db.rs` on why `artifact(get)` reports a heading miss in `body_meta`
-/// instead of raising. Only the *label* was wrong.
+/// instead of raising. Only the *label* was wrong, and then only the *hint*.
 fn heading_miss_meta(name: &str, err: &crate::tools::RecoverableError) -> serde_json::Value {
+    // One expression, so the two arms cannot drift on this field the way they already did
+    // once. A hint is always present in practice — both `resolve_section_range` failure
+    // paths use `with_hint` — but `unwrap_or_default` keeps this total rather than
+    // asserting that from another module.
+    let hint = err.hint().unwrap_or_default();
     match err.extra.get("occurrences") {
         Some(occurrences) => json!({
             "heading": name,
             "heading_ambiguous": true,
             "occurrences": occurrences,
-            "heading_hint": err.hint().unwrap_or_default(),
+            "heading_hint": hint,
         }),
-        None => json!({ "heading": name, "heading_missing": true }),
+        None => json!({
+            "heading": name,
+            "heading_missing": true,
+            "heading_hint": hint,
+        }),
     }
 }
 
@@ -641,6 +660,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 let mut parts = Vec::new();
                 let mut missing = Vec::new();
                 let mut ambiguous = Vec::new();
+                // The absent-member hint is `"Available headings: …"`, derived from the
+                // document rather than from the query, so every missing member in one call
+                // carries a byte-identical string. Captured once and emitted once as
+                // `headings_hint` — repeating it per member would be N copies of one fact.
+                let mut missing_hint: Option<String> = None;
                 for name in list {
                     match find_heading_section(body, name.as_str()) {
                         Ok(s) => parts.push(s),
@@ -650,7 +674,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                                 "occurrences": e.extra.get("occurrences"),
                             }));
                         }
-                        Err(_) => missing.push(name.clone()),
+                        Err(e) => {
+                            if missing_hint.is_none() {
+                                missing_hint = e.hint().map(str::to_string);
+                            }
+                            missing.push(name.clone());
+                        }
                     }
                 }
                 if !missing.is_empty() || !ambiguous.is_empty() {
@@ -667,6 +696,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 let mut extra = json!({ "headings": list });
                 if !missing.is_empty() {
                     extra["headings_missing"] = json!(missing);
+                    // Same fix as the singular branch, at its own site: the resolver built
+                    // this list and it was being discarded one frame away, costing the
+                    // caller a round-trip to fetch a map the failing call already held.
+                    if let Some(h) = missing_hint {
+                        extra["headings_hint"] = json!(h);
+                    }
                 }
                 if !ambiguous.is_empty() {
                     extra["headings_ambiguous"] = json!(ambiguous);
@@ -1077,6 +1112,123 @@ mod tests {
         assert_eq!(v["body"], "");
         assert_eq!(v["body_meta"]["heading_missing"], true);
     }
+    /// The absent arm must forward the hint the resolver already built, not just say
+    /// "missing". `resolve_section_range` formats `"Available headings: …"` from the
+    /// document (`src/tools/file_summary/file_summary.rs:447`) and `heading_miss_meta`
+    /// used to discard it while its ambiguous sibling forwarded one — the capability was
+    /// built and unreached (`IC-3`).
+    ///
+    /// **Asserts the CONTENT, not merely the key.** A presence-only assertion
+    /// (`is_string()`, `!= null`) is satisfied by an empty string, which is exactly what a
+    /// regression here would produce: `unwrap_or_default()` on a hintless error yields
+    /// `""` and the key still exists. So the fixture's two headings are named in the
+    /// assertion — that is what makes this test able to fail.
+    #[tokio::test]
+    async fn a_missing_heading_forwards_the_available_headings_hint() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## Alpha\n\nx\n\n## Beta\n\ny\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "Nonexistent"}))
+            .await
+            .unwrap();
+
+        assert_eq!(v["body_meta"]["heading_missing"], true);
+        let hint = v["body_meta"]["heading_hint"]
+            .as_str()
+            .expect("the absent arm must carry a hint, as its ambiguous sibling does");
+        assert!(
+            hint.contains("Alpha") && hint.contains("Beta"),
+            "the hint must name the headings that DO exist — an empty string satisfies a \
+             presence check and repairs nothing: {hint:?}"
+        );
+    }
+
+    /// Second guarded SITE, and it gets its own test for the same reason `create` and
+    /// `update` each needed one: a kill at the singular branch says nothing about this
+    /// one. The plural branch builds its own `missing` list and never calls
+    /// `heading_miss_meta`, so fixing that helper alone left this path still discarding
+    /// the hint.
+    ///
+    /// Load-bearing fixture detail: **two** missing members, not one. The hint is derived
+    /// from the document rather than the query, so every missing member yields a
+    /// byte-identical string; two members is what makes `headings_hint` being emitted
+    /// ONCE, rather than per member, an observable property instead of an untested claim.
+    #[tokio::test]
+    async fn missing_plural_headings_forward_one_shared_hint() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## Alpha\n\nx\n\n## Beta\n\ny\n",
+        )
+        .unwrap();
+
+        let v = call(
+            &ctx,
+            json!({"id": "a", "headings": ["Alpha", "Nope", "AlsoNope"]}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            v["body_meta"]["headings_missing"],
+            json!(["Nope", "AlsoNope"])
+        );
+        let hint = v["body_meta"]["headings_hint"]
+            .as_str()
+            .expect("a plural miss must carry the available-headings hint too");
+        assert!(
+            hint.contains("Alpha") && hint.contains("Beta"),
+            "the hint must name the headings that DO exist: {hint:?}"
+        );
+        assert!(
+            v["body_meta"]["headings_hint"].is_string(),
+            "emitted once at the top level, never one copy per missing member"
+        );
+    }
+
+    /// The twin the two above cannot provide. Both assert a key is PRESENT, which is
+    /// monotone under widening — emitting `headings_hint` unconditionally, on every call
+    /// including fully successful ones, satisfies them completely. This mutates the other
+    /// way: a call that resolves everything must carry no hint at all, because a hint on a
+    /// success is noise in the envelope this whole work stream exists to shrink.
+    #[tokio::test]
+    async fn a_resolved_heading_carries_no_hint() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## Alpha\n\nx\n\n## Beta\n\ny\n",
+        )
+        .unwrap();
+
+        let one = call(&ctx, json!({"id": "a", "heading": "Alpha"}))
+            .await
+            .unwrap();
+        assert!(
+            one["body_meta"]["heading_hint"].is_null(),
+            "a resolved singular heading must not carry a repair hint: {:?}",
+            one["body_meta"]
+        );
+
+        let many = call(&ctx, json!({"id": "a", "headings": ["Alpha", "Beta"]}))
+            .await
+            .unwrap();
+        assert!(
+            many["body_meta"]["headings_hint"].is_null(),
+            "a fully resolved plural read must not carry one either: {:?}",
+            many["body_meta"]
+        );
+    }
+
     /// I2 fix-round: a `heading=` that fails to resolve must NOT get the stubbed preview.
     /// Stubbing on a miss inverted the whole point of the change — the caller got nothing
     /// back in `body` and had *also* lost the heading map that would tell them the real

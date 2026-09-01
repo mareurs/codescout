@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 opened: 2026-09-01
 closed:
 severity: medium
@@ -112,24 +112,52 @@ bug file is durable and re-checked by nothing.
 
 ## Fix
 
-Add `"heading_hint": err.hint().unwrap_or_default()` to the `None` arm of
-`heading_miss_meta` (`src/librarian/tools/get.rs:50-60`), matching its sibling.
+**Fixed 2026-09-01 on `experiments`.** SHA and patch-id below.
 
-**Deliberately NOT bundled into the change that found it.** That change
-(`a-scoped-read-is-billed-the-full-heading-map`) restores the full heading map on a miss,
-which *re-masks* this defect — the caller gets the map instead of the hint. That makes this
-lower-priority, not fixed: the hint is the targeted answer and the map is the brute-force
-one, and a caller who wants only the hint still cannot have it.
+`heading_miss_meta` (`src/librarian/tools/get.rs`) now hoists `err.hint()` above the match, so both
+arms forward it from one expression — the two arms cannot drift on this field the way they already
+did once.
 
-SHA and patch-id to be recorded here at fix time.
+**A SECOND SITE existed and this file did not name it.** The plural `headings=[…]` branch builds its
+own `missing` list and never calls `heading_miss_meta`, so fixing the helper alone would have left
+half the defect — the same shape as the `create`/`update` pair fixed earlier the same day, and the
+same law: *mutate once per guarded SITE, not once per feature*. It now captures the hint once and
+emits it as `headings_hint`. **Once, deliberately:** the hint is derived from the *document*, not
+the query, so every missing member in one call would yield a byte-identical string, and N copies of
+one fact is exactly the envelope bloat this work stream exists to remove.
 
+**The prediction in this section held, with one correction.** *"That change re-masks this defect —
+the caller gets the map instead of the hint"* was right, and is why this stayed low-priority rather
+than being bundled in. What it under-stated: on a **plural** miss the map is not merely brute-force,
+it is the *only* signal, because that branch reported bare member names with no hint at all.
 ## Tests added
 
-None yet — not fixed. When fixed, the guard must assert the hint's **presence and content**
-on the absent path, paired with the existing ambiguous-path behaviour. Asserting only
-"`heading_hint` exists" is monotone under widening — `unwrap_or_default()` returns `""`,
-which is present and useless.
+`a_missing_heading_forwards_the_available_headings_hint`,
+`missing_plural_headings_forward_one_shared_hint`, and `a_resolved_heading_carries_no_hint`, all in
+`src/librarian/tools/get.rs`.
 
+**The warning this section wrote in advance is implemented, not just heeded.** Both miss-tests
+assert the hint **names `Alpha` and `Beta`** — the fixture's real headings — rather than that the key
+exists. `unwrap_or_default()` on a hintless error yields `""`, which is present and useless, so a
+presence check would pass in exactly the broken world.
+
+**Three mutations, three sites/directions, each killing exactly one test:**
+
+| # | mutation | result |
+|---|---|---|
+| D | singular arm drops `heading_hint` again | 56 passed / 1 failed — `a_missing_heading_forwards_…` **only** |
+| E | plural branch drops `headings_hint` | 56 passed / 1 failed — `missing_plural_headings_…` **only** |
+| F | emit the hint key on SUCCESS too | 56 passed / 1 failed — `a_resolved_heading_carries_no_hint` **only** |
+
+**F is why the third test exists.** D and E are presence assertions and are monotone under
+widening: emitting `heading_hint` unconditionally, on every call including fully successful ones,
+satisfies both completely. Only the third mutates that way — and a hint on a success is noise in the
+very envelope this work stream shrank.
+
+**E's load-bearing fixture detail** is that it names **two** missing members rather than one. That
+is what makes "emitted once, not per member" an observable property instead of an untested claim.
+
+Source restored byte-exactly after each run (`diff -q` → identical), verified rather than assumed.
 ## Workarounds
 
 Call `read_markdown(path)` for the heading map, or `artifact(action="get", id=…)` with no
