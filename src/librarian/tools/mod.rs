@@ -550,6 +550,62 @@ pub(crate) mod param_probe {
              this test silently stop checking"
         );
     }
+
+    /// The **reverse** direction of `sweep`, and the one nothing checked.
+    ///
+    /// `sweep` walks `schema["properties"]` and asks whether each advertised key is
+    /// honored — schema→action. It cannot see a key the schema never advertises, so an
+    /// action whose *required* params are absent from the schema passes it silently. That
+    /// is how `artifact(action="graft")` shipped advertised-but-unusable: `graft::Args`
+    /// requires `from_id` and `into_id`, neither appeared among the 53 advertised
+    /// properties, and the single real attempt in `usage.db` failed with
+    /// `missing_required_param`.
+    ///
+    /// The check needs no new table. `Spec::required` is **already** a per-action
+    /// statement of what an action requires, and `sweep` depends on it being complete —
+    /// its base call must survive deserialisation to be a valid baseline. So the two
+    /// representations already exist; this asserts they agree, which is the seam itself
+    /// rather than a third copy of it.
+    ///
+    /// **What it cannot see, stated because the gap is monotone under omission:** an
+    /// action missing from `Spec::required` altogether contributes no keys and is passed
+    /// over in silence. `sweep` catches part of that case indirectly — an action needing
+    /// fields that `required` omits produces a base call that dies at deserialisation, so
+    /// base and probe outcomes match and its labelled keys report as unhonored — but only
+    /// for keys carrying an `<action>:` label. Adding an action means adding it to
+    /// `required`; neither this assertion nor `sweep` will remind you.
+    pub(crate) fn assert_required_are_advertised(tool: &str, schema: &Value, spec: &Spec<'_>) {
+        let props = schema["properties"]
+            .as_object()
+            .expect("schema has properties");
+
+        let mut missing = Vec::new();
+        let mut checked = 0usize;
+        for action in spec.actions {
+            for key in (spec.required)(action).keys() {
+                if key == "action" {
+                    continue;
+                }
+                checked += 1;
+                if !props.contains_key(key) {
+                    missing.push(format!("{action}:{key}"));
+                }
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "{tool}: these params are REQUIRED by an action's Args but are not advertised \
+             in the schema, so a caller cannot discover them and the action is unusable as \
+             advertised — the inverse of IC-15, and invisible to the forward sweep. Add \
+             them to input_schema: {missing:?}"
+        );
+        assert!(
+            checked > 0,
+            "{tool}: the required-param table supplied no keys for any action, so this \
+             assertion checked nothing — `Spec::required` or `Spec::actions` has drifted"
+        );
+    }
 }
 
 #[cfg(test)]

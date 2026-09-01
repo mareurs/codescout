@@ -85,7 +85,9 @@ mod tests {
     /// still diverges, because the ill-typed value fails the type check on the way in.
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        use crate::librarian::tools::param_probe::{assert_all_honored, Spec};
+        use crate::librarian::tools::param_probe::{
+            assert_all_honored, assert_required_are_advertised, Spec,
+        };
 
         fn required(action: &str) -> serde_json::Map<String, Value> {
             let mut m = serde_json::Map::new();
@@ -109,6 +111,15 @@ mod tests {
             |args| async move { ArtifactRefreshTool.call(&mk_ctx(), args).await },
         )
         .await;
+
+        // Reverse direction, site 4 of 4 — see `param_probe::assert_required_are_advertised`.
+        // Reuses the same `required` table rather than restating it: the point of the check is
+        // that the two representations agree, so a second copy would defeat it.
+        assert_required_are_advertised(
+            "artifact_refresh",
+            &ArtifactRefreshTool.input_schema(),
+            &spec,
+        );
     }
 
     #[tokio::test]

@@ -147,6 +147,8 @@ impl Tool for Artifact {
                 },
                 "src_id": { "type": "string", "description": "link: source artifact id" },
                 "dst_id": { "type": "string", "description": "link: destination artifact id" },
+                "from_id": { "type": "string", "description": "graft: id of the row whose history is folded in. This row is DELETED by the call — its events, links, observations and augmentation move to `into_id` first." },
+                "into_id": { "type": "string", "description": "graft: id of the surviving row that absorbs `from_id`'s history. Both ids are REQUIRED; graft is refused if either is unknown or the two are equal." },
                 "rel": { "type": "string", "description": "link: relation type (supersedes, implements, ...)" },
                 "depth": {
                     "type": "integer",
@@ -332,76 +334,7 @@ mod tests {
     /// differ for the wrong reason.
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        use crate::librarian::tools::param_probe::{assert_all_honored, Spec};
-
-        const NO_SUCH_ID: &str = "0000000000000000";
-
-        fn required(action: &str) -> serde_json::Map<String, Value> {
-            let mut m = serde_json::Map::new();
-            match action {
-                "get" | "graph" | "delete" => {
-                    m.insert("id".into(), json!(NO_SUCH_ID));
-                }
-                "update" => {
-                    m.insert("id".into(), json!(NO_SUCH_ID));
-                    m.insert("patch".into(), json!({}));
-                }
-                "move" => {
-                    m.insert("id".into(), json!(NO_SUCH_ID));
-                    m.insert("new_rel_path".into(), json!("docs/nope.md"));
-                }
-                "graft" => {
-                    m.insert("from_id".into(), json!(NO_SUCH_ID));
-                    m.insert("into_id".into(), json!("1111111111111111"));
-                }
-                "append_entry" => {
-                    m.insert("id".into(), json!(NO_SUCH_ID));
-                    m.insert("id_prefix".into(), json!("ZZ"));
-                }
-                "update_entry" => {
-                    m.insert("id".into(), json!(NO_SUCH_ID));
-                    m.insert("entry_collection".into(), json!("nope"));
-                    m.insert("entry_id".into(), json!("ZZ-1"));
-                    m.insert("fields".into(), json!({}));
-                }
-                "link" => {
-                    m.insert("src_id".into(), json!(NO_SUCH_ID));
-                    m.insert("dst_id".into(), json!("1111111111111111"));
-                    m.insert("rel".into(), json!("cites"));
-                }
-                "state_at" => {
-                    m.insert("artifact_id".into(), json!(NO_SUCH_ID));
-                }
-                "create" => {
-                    m.insert("kind".into(), json!("bug"));
-                    m.insert("title".into(), json!("probe"));
-                    // Escaping path: refused before anything is written, so the baseline is
-                    // stable and no file is created.
-                    m.insert("rel_path".into(), json!("../probe-must-not-exist.md"));
-                }
-                _ => {}
-            }
-            m
-        }
-
-        let spec = Spec {
-            actions: &[
-                "find",
-                "get",
-                "create",
-                "update",
-                "move",
-                "delete",
-                "graft",
-                "link",
-                "graph",
-                "state_at",
-                "append_entry",
-                "update_entry",
-            ],
-            accepts_any_json: &[],
-            required,
-        };
+        use crate::librarian::tools::param_probe::assert_all_honored;
 
         // 37 labelled keys across the 12 actions as of 2026-08-17. The floor leaves room for
         // the schema to shrink without a false alarm while still catching a break in the
@@ -409,11 +342,113 @@ mod tests {
         assert_all_honored(
             "artifact",
             &Artifact.input_schema(),
-            &spec,
+            &probe_spec(),
             30,
             |args| async move { Artifact.call(&mk_ctx(), args).await },
         )
         .await;
+    }
+
+    const PROBE_NO_SUCH_ID: &str = "0000000000000000";
+
+    const PROBE_ACTIONS: [&str; 12] = [
+        "find",
+        "get",
+        "create",
+        "update",
+        "move",
+        "delete",
+        "graft",
+        "link",
+        "graph",
+        "state_at",
+        "append_entry",
+        "update_entry",
+    ];
+
+    /// The minimum type-valid args each action needs to get *past* deserialisation.
+    ///
+    /// **Every value here is chosen to fail resolution, and that is the load-bearing
+    /// detail**: a nonexistent id, an escaping `rel_path`. The failure must be reached
+    /// *after* deserialisation so `sweep` can tell it apart from a deser error. `create`
+    /// in particular must not succeed, or its second call would hit "already exists" and
+    /// differ for the wrong reason. Swap any of these for a value that resolves and the
+    /// probe keeps passing while comparing the wrong two outcomes.
+    ///
+    /// This table is read by two tests pulling in opposite directions —
+    /// `every_action_labelled_schema_key_is_honored_by_that_action` (schema→action) and
+    /// `every_required_param_is_advertised` (action→schema). It is deliberately the
+    /// single copy: it was previously inlined in the forward test, where it recorded
+    /// `graft`'s `from_id`/`into_id` while the schema advertised neither, and supplying
+    /// them out-of-band is exactly what let that defect pass.
+    fn probe_required(action: &str) -> serde_json::Map<String, Value> {
+        let mut m = serde_json::Map::new();
+        match action {
+            "get" | "graph" | "delete" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+            }
+            "update" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("patch".into(), json!({}));
+            }
+            "move" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("new_rel_path".into(), json!("docs/nope.md"));
+            }
+            "graft" => {
+                m.insert("from_id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("into_id".into(), json!("1111111111111111"));
+            }
+            "append_entry" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("id_prefix".into(), json!("ZZ"));
+            }
+            "update_entry" => {
+                m.insert("id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("entry_collection".into(), json!("nope"));
+                m.insert("entry_id".into(), json!("ZZ-1"));
+                m.insert("fields".into(), json!({}));
+            }
+            "link" => {
+                m.insert("src_id".into(), json!(PROBE_NO_SUCH_ID));
+                m.insert("dst_id".into(), json!("1111111111111111"));
+                m.insert("rel".into(), json!("cites"));
+            }
+            "state_at" => {
+                m.insert("artifact_id".into(), json!(PROBE_NO_SUCH_ID));
+            }
+            "create" => {
+                m.insert("kind".into(), json!("bug"));
+                m.insert("title".into(), json!("probe"));
+                // Escaping path: refused before anything is written, so the baseline is
+                // stable and no file is created.
+                m.insert("rel_path".into(), json!("../probe-must-not-exist.md"));
+            }
+            _ => {}
+        }
+        m
+    }
+
+    fn probe_spec() -> crate::librarian::tools::param_probe::Spec<'static> {
+        crate::librarian::tools::param_probe::Spec {
+            actions: &PROBE_ACTIONS,
+            accepts_any_json: &[],
+            required: probe_required,
+        }
+    }
+
+    /// Site 1 of 4, reverse direction. See
+    /// `crate::librarian::tools::param_probe::assert_required_are_advertised`.
+    ///
+    /// Written before the fix it demanded, and red on first run: `graft` required
+    /// `from_id` and `into_id`, and `artifact`'s schema advertised neither, so the action
+    /// could not be called as advertised. That red is the deliberate break — earned from
+    /// a real defect rather than staged by mutating a passing test.
+    #[tokio::test]
+    async fn every_required_param_is_advertised() {
+        use crate::librarian::tools::param_probe::assert_required_are_advertised;
+
+        assert_required_are_advertised("artifact", &Artifact.input_schema(), &probe_spec());
     }
 
     /// The doc half of

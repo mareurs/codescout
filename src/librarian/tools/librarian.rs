@@ -168,7 +168,9 @@ mod tests {
     /// (`docs/issues/archive/2026-09-01-tracker-design-discards-every-argument-on-one-type-error.md`).
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        use crate::librarian::tools::param_probe::{assert_all_honored, Spec};
+        use crate::librarian::tools::param_probe::{
+            assert_all_honored, assert_required_are_advertised, Spec,
+        };
 
         fn required(action: &str) -> serde_json::Map<String, Value> {
             let mut m = serde_json::Map::new();
@@ -219,6 +221,11 @@ mod tests {
             |args| async move { Librarian.call(&mk_ctx(), args).await },
         )
         .await;
+
+        // Reverse direction, site 2 of 4 — see `param_probe::assert_required_are_advertised`.
+        // Reuses the same `required` table rather than restating it: the point of the check is
+        // that the two representations agree, so a second copy would defeat it.
+        assert_required_are_advertised("librarian", &Librarian.input_schema(), &spec);
     }
 
     #[tokio::test]

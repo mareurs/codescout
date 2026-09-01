@@ -106,7 +106,9 @@ mod tests {
     /// shape and keeps the baseline failing on the id rather than on validation.
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        use crate::librarian::tools::param_probe::{assert_all_honored, Spec};
+        use crate::librarian::tools::param_probe::{
+            assert_all_honored, assert_required_are_advertised, Spec,
+        };
 
         const NO_SUCH_ID: &str = "0000000000000000";
 
@@ -140,6 +142,11 @@ mod tests {
             |args| async move { ArtifactEvent.call(&mk_ctx(), args).await },
         )
         .await;
+
+        // Reverse direction, site 3 of 4 — see `param_probe::assert_required_are_advertised`.
+        // Reuses the same `required` table rather than restating it: the point of the check is
+        // that the two representations agree, so a second copy would defeat it.
+        assert_required_are_advertised("artifact_event", &ArtifactEvent.input_schema(), &spec);
     }
 
     #[tokio::test]
