@@ -92,6 +92,74 @@ created" from "pair whose row was lost". Distinguishing them needs a signal the 
 not carry — the pathspec from argv, or a durable marker that the log was once non-empty. That
 is a design decision with a real failure mode either way, so it is left for a ruling rather
 than guessed at.
+
+## Measurements 2026-09-01 — two of which correct this file
+
+Run before choosing a fix, because the fix is a claim about a population. All in throwaway repos
+under `$TMPDIR` against the real hook; the shared checkout was never written to.
+
+**M1 — the cold state is ROUTINE, not exotic. This file said "lost"; that understates it.**
+The log is rebuilt from `git diff --cached --raw` on every index write, so an empty index writes
+a **0-byte** log and `[ -s "$log" ]` is then false. Reached with no deletion at all: commit, then
+any index write. `git commit` *does* fire the hook (instrumented, 1 firing), but the log empties
+on the **next** write, not during the commit.
+
+**M2 — and the routine cold state is HARMLESS. This is the correction that matters.**
+Log-empty ⇔ index-empty, so when the log is cold there is by construction nothing staged to
+mis-attribute. Each staging op warms the log with its own rows before any peer's write lands:
+
+```
+AAAA   a.txt
+BBBB   b.txt      <- cold log, two sessions, still correct
+```
+
+So the danger is **not** "the log went cold". It is "the log was cold *while content was staged*",
+which the routine path cannot produce.
+
+**M3 — the real trigger is ONE missed hook run, and no deletion is needed.**
+A staged `peer.txt` with its hook suppressed (one inherited `CODESCOUT_STAGE_LOG_RUNNING`), then
+B staged `mine.txt` normally:
+
+```
+BBBB   mine.txt
+BBBB   peer.txt   <- A's file, now recorded as B's
+B's bare commit would carry: mine.txt, peer.txt
+```
+
+Any of the four `exit 0` paths reaches this. The original repro's `rm -f` was a stand-in for a
+mechanism that is ordinary.
+
+**M4 — pathspec coverage is 73.8%, so a pathspec discriminator is not an empty population.**
+Across 573 session transcripts and 107,488 Bash invocations in this project, 1,585 real
+`git add` calls (extracted from the `"command"` field only — a first pass over transcript prose
+inflated this to 3,406 by counting markdown backticks as invocations):
+
+| bucket | n | share |
+|---|---|---|
+| explicit pathspec | 1,170 | **73.8%** |
+| blanket (`-A` 383, `-u` 8) | 391 | 24.7% |
+| other flag-led | 24 | 1.5% |
+
+Buckets are mutually exclusive and sum to 1,585. A looser first pass reported "64 bare
+`git add .`"; there are **zero** — those were `git add .codescout/…` and `.claude/…`, explicit
+paths beginning with a dot.
+
+### The ruling this sets up
+
+| policy | peer's staged file | your own file | cost |
+|---|---|---|---|
+| **P0** current — `owner = claimant` | **claimed as yours**, silently | correct | under-refuses; violates `a987df96`'s own rule |
+| **P1** `-` whenever the log is cold | safe `-` | **`-` too** | refuses your own routine commits — the version that gets the guard switched off |
+| **P2** claimant only for argv-named paths, `-` otherwise | safe `-` | correct for 73.8% | over-refuses on the 24.7%, in the recoverable direction |
+
+P2's uncovered remainder is `git add -A` / `-u`, which `scripts/pre-commit-foreign-index.sh`'s
+own header **already declares uncoverable**: *"it cannot cover a `git add -A` under your own id,
+where every path reads as yours by construction."* So P2 shrinks an existing blind spot rather
+than creating a new one.
+
+**Not yet ruled on** — P2 is a policy change to a guard every session in this checkout shares,
+so it is left for a deliberate decision rather than taken as the obvious reading of a
+measurement.
 ## Reproduction
 Verified 2026-09-01 in a throwaway repo under `$TMPDIR`; the real checkout was never touched.
 

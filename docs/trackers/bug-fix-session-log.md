@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 88
-entry_high_water_W: 91
+entry_high_water_W: 92
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -236,6 +236,7 @@ entry_high_water_W: 91
 | W-88 | 2026-08-31 | high | **A fix option that names a file KIND is a hypothesis about which instances are live — count the population before preferring it for being narrow.** Running the reproduction before the plan (CLAUDE.md § Bug Tracking) on the gitignored-anchor bug: the filed mechanism was churn — a lock file and a db "rewritten on every index build" — and both are **inert here**, last changed 2026-04-17 and 2026-05-13, the retrieval backend having moved to remote Qdrant. What fires is the file's own second-order effect, and it is a different KIND of defect: all five sidecars recorded one identical `.codescout/project.toml` hash matching no file present, mtime three days before the re-anchor that supposedly refreshed it. A tracked sidecar hashing a gitignored file is a cross-machine oscillation with **no fixed point** — A refreshes, commits A's hash, B is permanently stale, B refreshing flips A — so unlike churn, the repair action creates the next defect, for someone not present to see it. Paired second win: three write sites, `refresh_hashes` never re-seeding, confirmed by per-site mutation rather than argued | The plan's option (2), "exclude by kind — lock files, `*.db`, `*.sqlite`, cache dirs", is a churn detector, and reads as the prudent narrow choice **until** you count what it catches. The worst instance is a small, stable, hand-edited TOML: no matching extension, no cache directory, never rewritten. It would have excluded the two already-inert anchors and left `project.toml` — the one firing in all five memories — anchored: 12 bad anchors down to 7, and **zero** of the eight false staleness reports resolved, behind its own green tests. Separately, a fix at `seed_anchors` alone (the site "anchor-selection time" most naturally names) would have compiled, passed the gate, and changed nothing observable, since every affected memory already had a sidecar and so reaches only the two other sites | validated |
 
 | W-89 | 2026-09-01 | high | **Compare `updated_at` across every response a cross-section claim rests on, before publishing it** — and escalate to `artifact_event(action="list")`'s `field_patch` `prev_bytes`/`new_bytes` to learn exactly which state each read saw. A versioned store read through more than one call is not a snapshot | Five discrepancies sitting in context (IC-3 20-vs-18; IC-13/14/15/16 0-vs-16/7/15/2) were **all** artifacts of the torn read [[F-83]] — both commits either side are internally consistent, so the ledger contradicted itself in none of sixteen rows. Publishing would have called a peer's correct in-flight backfill a five-row self-contradiction, inside a report whose declared subject was count-vs-prose staleness, which is what would have made it credible rather than suspect. Detection cost: one `artifact(get)`. The same check then fired AGAIN four minutes later on the same artifact — IC-3's target moved to `OB-7` and `cluster/doc-contradicted-by-code` went 1 → 4, carrying IC-11 over n≥3 — so it is the correct default for the whole window `ListAgents` reports a busy peer, not a one-off | validated |
+| W-92 | 2026-09-01 | med | **Resolve authorship with the `Session-Id` commit trailer, never by elimination over `ListAgents`.** The trailer is a POSITIVE identifier (whose a commit IS), costs one `git log`, needs no socket enumeration, and reaches sessions that have already exited | A peer's heads-up asserted "your uncommitted doctor.rs work" reddened the shared gate. Not mine — all four of my commits contain 0 `.rs` files. Their diagnostics (`git status` + `git grep <symbol> HEAD`) soundly established "not mine"; the step to "yours" ran over an incomplete population — `peer-sessions.sh` 5, `ListAgents` 4, real owner `bcc98c22-…` in the gap, holding `d98a664b`/`75c33bdc`/`bcf6075c`, all in `src/librarian/tools/`. Cheaper than `F-80`'s transcript grep and `F-85`'s ask-the-session, and the only one that reaches exited sessions. Note `git log --author` is NOT a substitute: every session commits as the same author (IC-10). Cost was one turn spent disproving a negative, not zero — corrected by the sender | validated |
 | W-90 | 2026-09-01 | med | **Re-verify `path:line` citations in artifacts THIS session authored, after any rebuild or peer commit.** Authorship is no exemption (`R-49`) — a bug file's citations are written at fix time, while peers are still moving the substrate under them | Filed bug cited `post-index-change-stage-log.sh:142` for the mv/rm fallback; the line is `:141` and `:142` is blank. No gate would have caught it: `audit_doc_refs` DOES scan `**/*.sh`, but `scan_code_comments` forces those findings to `Med` and CI runs `--fail-on high`, so it passes by design — the citation survives until a human follows it onto whitespace. The same pass also separated real drift from a false accusation: a `docs(issues):`-titled commit genuinely had changed the script, which looked like a capture, but the diff was a comment-only re-point of an archived path, coherent with its message. Without reading it, the plausible move was filing a third capture bug against a correct commit | validated |
 | W-91 | 2026-09-01 | high | **Re-read the substrate before a claim enters a DURABLE, queryable record** — the filesystem for a claim about the filesystem, the implementation for a claim that a capability is missing. Recorded as a **recurrence** of the reconnaissance skill's already-promoted current-state law, not as a new pattern, per that skill's § *Every promotion audits the promoted set* | Two catches. (1) A bug file's `## Residual — still open` said `.worktrees/bench` retains an orphaned gitdir; `ls .worktrees/` shows only `audit-trail-t1`. I was one call from writing a queryable `unverified:` field asserting an open residual that does not exist — into the single file tagged `cluster/record-asserts-an-unchecked-completion`. (2) I had begun drafting a bug asserting `unverified:` is unreachable by any query, on two true pieces of evidence (`find` → `unknown field`, and the librarian guide's "`extra` is NOT catalog-indexed"); `scan_terminal_status_with_caveat` is the deliberate reader and reports **65** records. Both false claims were backed by real evidence about something narrower than the sentence it was licensing. `outgrown` signal (n=1) on the promoted text: it names *fixes* and *prohibitions*, not **filed defect records** — the costliest surface, since a fix assuming a missing capability fails loudly at the call site while a filed bug is durable and nothing re-checks it | validated |
 ## Category conventions
@@ -8830,6 +8831,78 @@ filed defect records explicitly.
 **Rests on:** the skill's existing current-state law, of which this is an instance rather
 than independent evidence — and on `scan_terminal_status_with_caveat` remaining the reader
 for `unverified:`.
+
+## W-92 — The Session-Id commit trailer is a positive authorship instrument; elimination over ListAgents is not
+
+**Observed:** 2026-09-01. A peer session sent a courteous heads-up that "your uncommitted
+doctor.rs work" (`scan_unterminated_fence`, written but not wired) had reddened the shared gate
+for ~10 minutes — clippy `-D dead-code` aborting compilation plus two failing tests. The work
+was not mine. I had not opened a `.rs` file all session.
+
+**Pattern:** On a shared checkout, resolve authorship with the **`Session-Id` commit trailer**,
+which this repo already writes on every commit. It is a *positive* identifier: it says whose a
+commit **is**, rather than whose it is not.
+
+```
+git log -8 --format='%h %s%n  %(trailers:key=Session-Id,valueonly)'
+```
+
+Three sessions separated cleanly on one command:
+
+```
+d91c1155-…  me            7c44a605, 7278508e, fc48f829, d4c5ec46   — 0 .rs files in any
+c2a08c22-…  codescout-68  (had volunteered its own id earlier)
+bcc98c22-…  a fourth      d98a664b, 75c33bdc, bcf6075c — ALL src/librarian/tools/
+```
+
+`bcc98c22` is the neighbourhood `doctor.rs` lives in, and matches bug `52542a0ec81771a3`
+(unbalanced fence), whose body names `src/librarian/tools/doctor.rs`. That is the likely owner —
+**and it does not appear in my `ListAgents`.**
+
+**Counterfactual:** The peer's own diagnostics were sound and they ran them — `git status`
+showing `doctor.rs` modified, `git grep <symbol> HEAD` returning absent. Those establish the work
+is *not theirs*. The step that failed was assigning it to me by **elimination over a population
+no instrument reports completely**: `peer-sessions.sh` showed 5 sessions in this checkout while
+`ListAgents` showed 4, and the actual owner sits in that gap.
+
+**The cost was not zero, and this entry said it was for about ten minutes.** Corrected by the
+peer themselves, who named the mechanism better than I had: *"my message asserted your authorship
+in its first line and you had to spend a reply disproving a negative — that's the cost even when
+the ask is 'nothing needed from you'."* A misattribution addressed TO someone is not free
+because it is actionless; the recipient still has to spend a turn establishing a negative about
+their own work, and the burden lands on the party with the least reason to suspect a problem.
+Measured here: one full turn, four verification commands. Filing it in a bug file would have
+been worse (`F-80`), but "worse" is not "the only cost".
+
+That correction is itself the `R-49` shape — re-entering your own just-written artifact is a
+seam, and authorship is no exemption. This entry was **twelve minutes old** when the claim in it
+was refuted, by the one party structurally placed to know: the sender, who knew what writing the
+message had cost them to send and what it cost me to answer. I could not see it because I was
+the one who paid it and read the ask, not the turn, as the cost.
+
+**Confirming data points:**
+1. `F-80` (this log) — authorship closed by elimination, sent as a positive ID, and wrong;
+   remedy proposed there was grepping session transcripts for `tool_use` write calls.
+2. `F-85` (this log) — five wrong attributions across three sessions in 15 minutes, **all five**
+   resolved by asking the session and only by asking.
+3. This entry — the first time the `Session-Id` trailer was used as the instrument, and it is
+   **cheaper than both** prior remedies: one `git log`, no socket enumeration, no transcript
+   scan, and it reaches sessions that have already exited.
+
+**Impact:** med — one misattribution corrected before it was recorded anywhere, and a positive
+instrument identified that costs one command.
+
+**Promote-when:** a second session resolves an authorship question with the `Session-Id` trailer.
+At 2 datapoints, promote to CLAUDE.md § *Git Workflow* as *"resolve authorship with the
+`Session-Id` trailer, never by elimination over `ListAgents` — it under-reports by construction
+(BL-58), and the trailer reaches exited sessions."*
+
+**Status:** validated — single datapoint, misattribution corrected at source.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** this repo's commit convention of writing a `Session-Id` trailer. If that convention
+lapses the instrument disappears, which is itself an argument for keeping it.
 
 ## Template for new entries
 
