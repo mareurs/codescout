@@ -142,7 +142,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 | OB-8 | 2026-09-01 | a shared resource carries no owner, so seeing the peer does not help — four captures in 34 min with enumeration complete | the writing session | wrong instrument | **partial** — outbound gate shipped; inbound not closeable per-session |
 | OB-7 | 2026-09-01 | a declaration is well-formed, and nothing in production reaches it — including for the compiler, which cannot lint `pub` in a lib crate | the author of the declaration | wrong instrument | **partial** — decidable for 1 of 3 families |
 | OB-6 | 2026-09-01 | a gate collapses "cannot observe" into the confident answer — three states exist, two are offered | the gate, and every reader of its output | wrong instrument | **designed** — exemplar shipped at `b9cc75b4` |
-| OB-5 | 2026-08-31 | a summary keyed only by findings cannot say which checks RAN — absence reads as a clean bill of health | the reader of the report | wrong instrument | **none yet** — designed, 3 lines |
+| OB-5 | 2026-08-31 | a summary keyed only by findings cannot say which checks RAN — and which direction the silence is misread in belongs to the **reader**, not the instrument (2 instances, opposite wrong conclusions) | the reader of the report | wrong instrument | **none yet** — the enumeration *is* the work; the original "3 lines" estimate is retracted in-entry |
 | OB-4 | 2026-08-31 | a liveness marker with a good hit rate (2/3) spends the trust it earned — and three git-based instruments agreeing is **one** instrument | the session doing cleanup | wrong instrument | **none yet** — worklist |
 | OB-3 | 2026-08-31 | a peer/agent listing is arbitrary w.r.t. the real population | the session reading the listing | wrong instrument | shipped (OS enumeration) |
 | OB-2 | 2026-08-31 | shared `target/` left in a feature-clobbered state | the session that arms it | wrong instrument | **shipped** (gate ends safe) |
@@ -838,6 +838,42 @@ outside the enum. Not this session's work; recorded so the entry and the fix do 
 **Status:** validated — two instances, one closed by the right mechanism, both verified in
 source; instance 1 under active repair
 
+### Sub-pattern — which direction the silence is misread in belongs to the READER, not the instrument
+
+The entry above calls *absence reads as a clean bill of health* **the worst available direction**
+for a conflation to fail in. Measured 2026-09-01 across two sessions: that is true of a `doctor`
+summary and **false as a general property**. The same silence is read as **red** by a reader who
+expected a failure, and the wrong action is then the opposite one — so the direction is a fact
+about the reader's expectation, not about the instrument.
+
+Both instances were `cargo test` runs filtered by a **remembered** test name, where a filter
+matching nothing prints `0 passed; 0 failed` per binary — indistinguishable from a binary that
+simply holds no matching test.
+
+| reader expected | silence read as | wrong action |
+|---|---|---|
+| a gate to pass | **green** — `0 failed` across 25 binaries | publish a gate result for a check that never ran |
+| a mutation to kill a named test | **red** — "the mutation was not killed" | discard a **good** test as weak |
+
+**Instance 1 (this session).** `cargo test --workspace -- doc_tool_refs valid_slugs claude_md_…`
+reported green having executed **one** of three intended checks: `doc_tool_refs` is a *file* name,
+and no test is called `valid_slugs` (the real ones are `every_declared_class_has_an_index_row`,
+`the_slug_set_excludes_the_template_placeholder`, …). Caught only because the per-binary
+`N filtered out / 0 running` lines did not match what was expected — not by reading the verdict,
+which said `ok` throughout.
+
+**Instance 2 (peer, same evening) is a confirming null, and a denominator rather than a catch.**
+Five filtered runs checked via `-- --list`, all five non-empty; **two were mutation runs**, where a
+silent zero would have condemned a working deliberate-break test. Nothing needed correcting, which
+is exactly why it is recorded — a confirming check produces no finding, so this population is empty
+by construction unless someone publishes into it (§ *Testing Discipline*'s recording law). It bears
+on the base rate, not the hit rate, and must not be absorbed as a near-catch.
+
+**Why this is the parent class one level up.** The discriminator — *did this filter match anything?*
+— is held by the harness and absent from the output, exactly as `by_check`'s check inventory is held
+by `doctor.rs` and absent from its summary. And the same remedy shape is available and unbuilt:
+`-- --list` names the matched set **before** the run. Until something emits it, the reader-side rule
+is that **a filtered run owes its matched count**, precisely as a peer count owes its unit.
 ## OB-6 — a gate collapses "cannot observe" into the confident answer
 
 **Valid:** invariant
