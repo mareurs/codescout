@@ -224,6 +224,37 @@ a renderable array, and the stub's string is what suppresses the section map. St
 killing exactly the test for the condition it dropped; the stub gate, the `M5` backfill and
 the `I4` drop-list arm were each killed individually. A kill at one site says nothing about
 another.
+
+### Verified LIVE after a rebuild, by a session that did not make the fix (2026-09-01)
+
+Every other line in this file rests on `cargo test` green plus the author's own reading — both
+of which are evidence about the **source tree**, never about the copy a running MCP server
+serves. `reconnaissance-patterns:R-89`: freshness breaks on three independent axes (build,
+process, distribution), an `include_str!`'d or long-lived server holds whatever it started with,
+and **the session that made the edit is the least representative observer of whether it
+shipped**, being the only one reading the copy its own reload handed it.
+
+`codescout-3c` supplied the missing observer. After the operator ran `cargo rb` and reconnected
+`/mcp` — a genuinely fresh process, started by neither of us — they called a heading-scoped
+`artifact(get)` and reported:
+
+> `preview.headings` returns `"omitted (body selector present) — call artifact(get, id=…) with
+> no body selector for the map"`, and the response comes back **inline rather than buffered**.
+
+Both halves matter and they are different claims. The stub proves the gate fires; **inline
+rather than buffered** proves the envelope actually shrank below the buffering threshold, which
+is the outcome the ~81% figure predicts and which no unit test in this fix asserts.
+
+**Recorded here rather than left in the message, and the timing is the argument.** It arrived as
+a peer message; `codescout-3c`'s session had **ended** within the hour, so the message was the
+only copy and is now unreachable. That is `reconnaissance-patterns:R-166` — *a finding parked in
+a commit message or a chat has no citable home* — firing on the very evidence that closes this
+file, roughly sixty minutes after the law was written.
+
+**Logged as a confirmation, not a catch.** CLAUDE.md § *Testing Discipline* asks for the
+**denominator**: when a re-derivation confirms, publish the confirmation, because a population
+that records only its catches looks self-correcting. This one confirmed. The denominator is
+`codescout-3c`'s.
 ## Workarounds
 
 None needed for correctness — the requested payload is right. To limit the cost, prefer
