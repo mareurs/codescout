@@ -21,7 +21,7 @@ use fs4::fs_std::FileExt;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(crate) const WATERMARK_KEY: &str = "audit_exported_through_seq";
 
@@ -50,6 +50,12 @@ pub(crate) struct ExportReport {
     pub exported: usize,
     pub skipped_commits: usize,
     pub skipped_churn: usize,
+    /// Rows whose owning repo could not be determined (the artifact/event
+    /// they hang off is already gone and the payload does not carry enough
+    /// to say). Counted so the number is visible, never exported, and —
+    /// unlike `skipped_commits`/`skipped_churn` — never advances the
+    /// watermark: see the comment in `export`'s loop for why.
+    pub unattributed: usize,
     pub files: Vec<String>,
     pub through_seq: i64,
 }
@@ -64,28 +70,153 @@ fn is_pure_churn(op: &str, payload: Option<&str>) -> bool {
     };
     !map.is_empty() && map.keys().all(|k| CHURN_KEYS.contains(&k.as_str()))
 }
-fn watermark(conn: &Connection) -> Result<i64> {
-    Ok(gc::get_meta(conn, WATERMARK_KEY)?
+fn watermark_key(repo_root: &Path) -> String {
+    // `RepoPath` gives a stable, forward-slash-normalized string so the same
+    // repo keys the same way on every platform; two repos never collide
+    // because a full path (not just its final component) is the key body.
+    format!(
+        "{WATERMARK_KEY}:{}",
+        crate::util::fs::RepoPath::from_path(repo_root)
+    )
+}
+
+/// Per-repo watermark. A pre-existing UNKEYED `audit_exported_through_seq`
+/// value (written before this task, when the export was machine-wide) is
+/// deliberately never read here — every repo starts at 0 and re-derives its
+/// own true position from scratch. See the module-level note on why the old
+/// key is left inert rather than deleted.
+fn watermark(conn: &Connection, repo_root: &Path) -> Result<i64> {
+    Ok(gc::get_meta(conn, &watermark_key(repo_root))?
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(0))
 }
 
-/// Rows past the watermark that export would consider — the SAME population
-/// `export` consumes, including the ones it will drop. Doctor reports this, so
-/// it must not describe a different set than the verb does; a delta that
-/// counts rows export will never write reads as a permanent backlog.
-pub(crate) fn unexported_count(conn: &Connection) -> Result<i64> {
-    let w = watermark(conn)?;
-    Ok(conn.query_row(
-        "SELECT count(*) FROM catalog_audit WHERE seq > ?1",
-        [w],
-        |r| r.get(0),
-    )?)
+/// Resolve which repo an audited row belongs to, by walking from the row
+/// back to an `artifact.abs_path` (or, for `worktree_registration`, straight
+/// from the row id, which IS the worktree root). Returns `None` when the
+/// row cannot be traced to any repo — the underlying artifact/event is
+/// already gone and the payload does not carry enough to say.
+///
+/// `delete` rows route from the payload's captured OLD-row image (Task 2),
+/// never from a live join — the row they would join against no longer
+/// exists by definition.
+///
+/// Routing table (payload keys/columns confirmed against schema.sql,
+/// catalog/mod.rs and audit/mod.rs's `AUDITED_TABLES` row-id formats):
+/// - `artifact`: row_id IS the artifact id. `delete` reads `abs_path` out of
+///   the payload; insert/update join `artifact.id`.
+/// - `artifact_augmentation`: row_id IS the artifact id for every op.
+/// - `events`: `delete` reads `artifact_id` out of the payload; insert/update
+///   join `events.id` to get `artifact_id`, then resolve that.
+/// - `artifact_link`: row_id is `"{src_id}→{dst_id}:{rel}"` (no surrounding
+///   whitespace) — attribute via `src_id`.
+/// - `entry_cite`: row_id is `"{src_slug}:{src_local}→{dst_ref}"` — attribute
+///   via `src_slug`, joined against `artifact.slug`.
+/// - `worktree_registration`: row_id IS the worktree root itself (the PK),
+///   identical across insert/update/delete — no join needed at all.
+fn attribute(
+    conn: &Connection,
+    tbl: &str,
+    op: &str,
+    row_id: &str,
+    payload: Option<&str>,
+) -> Option<PathBuf> {
+    fn by_artifact_id(conn: &Connection, id: &str) -> Option<PathBuf> {
+        conn.query_row("SELECT abs_path FROM artifact WHERE id = ?1", [id], |r| {
+            r.get::<_, String>(0)
+        })
+        .ok()
+        .map(PathBuf::from)
+    }
+    fn payload_str(payload: Option<&str>, key: &str) -> Option<String> {
+        let v: serde_json::Value = serde_json::from_str(payload?).ok()?;
+        v.get(key)?.as_str().map(str::to_string)
+    }
+
+    match tbl {
+        "artifact" => {
+            if op == "delete" {
+                payload_str(payload, "abs_path").map(PathBuf::from)
+            } else {
+                by_artifact_id(conn, row_id)
+            }
+        }
+        "artifact_augmentation" => by_artifact_id(conn, row_id),
+        "events" => {
+            let artifact_id = if op == "delete" {
+                payload_str(payload, "artifact_id")?
+            } else {
+                conn.query_row(
+                    "SELECT artifact_id FROM events WHERE id = ?1",
+                    [row_id],
+                    |r| r.get::<_, String>(0),
+                )
+                .ok()?
+            };
+            by_artifact_id(conn, &artifact_id)
+        }
+        "artifact_link" => {
+            // No delimiter present would just return the whole string via
+            // `.next()`, never `None` — a malformed row_id fails the
+            // downstream artifact lookup instead of panicking here.
+            let src_id = row_id.split('→').next()?;
+            by_artifact_id(conn, src_id)
+        }
+        "entry_cite" => {
+            let before_dst = row_id.split('→').next()?;
+            let src_slug = before_dst.split(':').next()?;
+            conn.query_row(
+                "SELECT abs_path FROM artifact WHERE slug = ?1",
+                [src_slug],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .map(PathBuf::from)
+        }
+        "worktree_registration" => Some(PathBuf::from(row_id)),
+        _ => None,
+    }
+}
+
+/// Rows past the watermark that export would ACTUALLY consume for this
+/// repo — the same population `export` counts as `exported +
+/// skipped_commits + skipped_churn` (never `unattributed`, and never a row
+/// resolved to some other repo — see `export`'s loop for why both of those
+/// are excluded here). Doctor reports this, so it must not describe a
+/// different set than the verb does; a delta that counts rows export will
+/// never write for this repo reads as a permanent backlog.
+pub(crate) fn unexported_count(conn: &Connection, repo_root: &Path) -> Result<i64> {
+    let w = watermark(conn, repo_root)?;
+    let mut stmt = conn.prepare(
+        "SELECT tbl, op, row_id, payload FROM catalog_audit WHERE seq > ?1 ORDER BY seq",
+    )?;
+    let rows = stmt
+        .query_map([w], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut n = 0i64;
+    for (tbl, op, row_id, payload) in rows {
+        if tbl == "commits" || is_pure_churn(&op, payload.as_deref()) {
+            n += 1;
+            continue;
+        }
+        if matches!(attribute(conn, &tbl, &op, &row_id, payload.as_deref()), Some(owner) if owner.starts_with(repo_root))
+        {
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport> {
     let host_id = host::resolve_host_id(conn)?;
-    let from = watermark(conn)?;
+    let from = watermark(conn, repo_root)?;
     let dir = repo_root.join(AUDIT_DIR);
 
     let mut stmt = conn.prepare(
@@ -116,23 +247,41 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     let mut by_month: BTreeMap<String, (i64, Vec<String>)> = BTreeMap::new();
 
     for (seq, at_ms, tbl, op, row_id, actor, verb, payload) in rows {
-        // Must advance past a skip-only row too (commits, pure churn) — the
-        // watermark tracks position in the SOURCE table, not export outcome.
-        // Moving this below the two `continue`s below leaves it stuck behind
-        // skip-only rows forever, a permanent phantom backlog in doctor's
-        // `unexported_count`; see commits_rows_are_never_exported and
-        // reindex_churn_updates_are_never_exported, both of which now assert
-        // `unexported_count == 0` after a skip-only export (Important 2,
-        // task-2 review).
-        report.through_seq = report.through_seq.max(seq);
+        // commits/churn need no attribution at all — they are skip-only for
+        // EVERY repo's export, so advancing past them here is always safe
+        // regardless of which repo owns them (they don't have one).
         if tbl == "commits" {
+            report.through_seq = report.through_seq.max(seq);
             report.skipped_commits += 1;
             continue;
         }
         if is_pure_churn(&op, payload.as_deref()) {
+            report.through_seq = report.through_seq.max(seq);
             report.skipped_churn += 1;
             continue;
         }
+
+        // Attribute BEFORE touching the watermark. A row that cannot be
+        // traced to any repo must not be treated as "past" THIS repo's
+        // cursor: it might in fact belong to a repo that has not exported
+        // yet, and advancing here would make it permanently unrecoverable —
+        // no other repo's independently-keyed watermark would ever revisit
+        // a seq value below its own cursor. Counted so the number is
+        // visible; never exported; never advances through_seq.
+        let Some(owner) = attribute(conn, &tbl, &op, &row_id, payload.as_deref()) else {
+            report.unattributed += 1;
+            continue;
+        };
+
+        // A row confidently attributed to a DIFFERENT repo is a stable,
+        // resolved fact, not an open question — safe to advance past it.
+        // That other repo's own watermark governs whether it re-exports the
+        // row, and it never consults ours.
+        report.through_seq = report.through_seq.max(seq);
+        if !owner.starts_with(repo_root) {
+            continue;
+        }
+
         let line = ShardLine {
             host: host_id.clone(),
             seq,
@@ -217,7 +366,11 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     // a_failed_append_never_advances_the_watermark/a_crash_between_append_and_
     // watermark_duplicates_rather_than_loses below, which pin it from both
     // directions.
-    gc::set_meta(conn, WATERMARK_KEY, &report.through_seq.to_string())?;
+    gc::set_meta(
+        conn,
+        &watermark_key(repo_root),
+        &report.through_seq.to_string(),
+    )?;
     Ok(report)
 }
 
@@ -374,8 +527,16 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::{artifact, Catalog};
 
-    fn seed(cat: &Catalog, id: &str) {
+    // Places the seeded artifact UNDER `root` — load-bearing for every test
+    // that exports against `tmp.path()` as the repo root: Task 6's `export`
+    // only writes a row into its own shard when the row's artifact resolves
+    // under that same root (component-boundary `starts_with`, not a global
+    // free-for-all). A `seed` that planted rows outside `root` would make
+    // every existing single-repo test fail closed (0 exported) under the
+    // new attribution step rather than testing what it says it tests.
+    fn seed(cat: &Catalog, root: &std::path::Path, id: &str) {
         let row = artifact::TestArtifactRowBuilder::new(id)
+            .with_abs_path(root.join(format!("{id}.md")))
             .with_status("draft")
             .build();
         artifact::upsert(cat, &row).unwrap();
@@ -406,7 +567,7 @@ mod tests {
     fn export_writes_rows_past_the_watermark_and_advances_it() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
-        seed(&cat, "a1");
+        seed(&cat, tmp.path(), "a1");
         let host_id = host::resolve_host_id(&cat.conn).unwrap();
         // Pin the full line shape against the actual source row, not just its
         // presence — a mutation probe found `at_ms`/`actor`/`verb`/`payload`
@@ -482,7 +643,7 @@ mod tests {
     fn a_second_export_with_no_new_rows_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
-        seed(&cat, "a1");
+        seed(&cat, tmp.path(), "a1");
         export(&cat.conn, tmp.path()).unwrap();
         let before = lines(tmp.path()).len();
         let r = export(&cat.conn, tmp.path()).unwrap();
@@ -514,14 +675,14 @@ mod tests {
         // backlog (Important 2, task-2 review) — moving the `through_seq`
         // update below the `continue`s left every other assertion in this
         // suite green.
-        assert_eq!(unexported_count(&cat.conn).unwrap(), 0);
+        assert_eq!(unexported_count(&cat.conn, tmp.path()).unwrap(), 0);
     }
 
     #[test]
     fn reindex_churn_updates_are_never_exported() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
-        seed(&cat, "a1");
+        seed(&cat, tmp.path(), "a1");
         export(&cat.conn, tmp.path()).unwrap();
         cat.conn
             .execute(
@@ -534,7 +695,7 @@ mod tests {
         assert_eq!(r.exported, 0);
         // Same phantom-backlog guard as commits_rows_are_never_exported: a
         // churn-only row must not sit past the watermark forever.
-        assert_eq!(unexported_count(&cat.conn).unwrap(), 0);
+        assert_eq!(unexported_count(&cat.conn, tmp.path()).unwrap(), 0);
     }
 
     #[test]
@@ -545,7 +706,7 @@ mod tests {
         // trail exists for.
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
-        seed(&cat, "a1");
+        seed(&cat, tmp.path(), "a1");
         export(&cat.conn, tmp.path()).unwrap();
         cat.conn
             .execute(
@@ -562,11 +723,19 @@ mod tests {
     fn rows_from_different_months_land_in_different_files() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
+        // Delete rows route from the payload's captured OLD-row image, not a
+        // live join (Task 2/6) — supply one that resolves under `tmp.path()`
+        // or these rows land as `unattributed` instead of exported, and the
+        // test would stop expressing what it says it tests.
+        let old_path = tmp.path().join("old.md").to_string_lossy().to_string();
+        let new_path = tmp.path().join("new.md").to_string_lossy().to_string();
         cat.conn
             .execute(
-                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor)
-                 VALUES(1751328000000,'artifact','delete','old','unknown'),
-                       (1788220800000,'artifact','delete','new','unknown')",
+                &format!(
+                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor,payload)
+                     VALUES(1751328000000,'artifact','delete','old','unknown','{{\"abs_path\":\"{old_path}\"}}'),
+                           (1788220800000,'artifact','delete','new','unknown','{{\"abs_path\":\"{new_path}\"}}')"
+                ),
                 [],
             )
             .unwrap();
@@ -596,13 +765,13 @@ mod tests {
         // has cardinality `n` if both are preserved and distinct.
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
-        seed(&cat, "a1");
-        seed(&cat, "a2");
+        seed(&cat, tmp.path(), "a1");
+        seed(&cat, tmp.path(), "a2");
         export(&cat.conn, tmp.path()).unwrap();
         let n = lines(tmp.path()).len();
         assert!(n >= 2, "expected at least the two seeded rows, got {n}");
         // Simulate the crash: the file is written, the watermark never advanced.
-        gc::set_meta(&cat.conn, WATERMARK_KEY, "0").unwrap();
+        gc::set_meta(&cat.conn, &watermark_key(tmp.path()), "0").unwrap();
         export(&cat.conn, tmp.path()).unwrap();
         assert_eq!(
             lines(tmp.path()).len(),
@@ -641,7 +810,7 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
-        seed(&cat, "a1");
+        seed(&cat, tmp.path(), "a1");
         let audit_dir = tmp.path().join(AUDIT_DIR);
         std::fs::create_dir_all(&audit_dir).unwrap();
         std::fs::set_permissions(&audit_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
@@ -666,7 +835,7 @@ mod tests {
             return;
         }
 
-        let before = gc::get_meta(&cat.conn, WATERMARK_KEY).unwrap();
+        let before = gc::get_meta(&cat.conn, &watermark_key(tmp.path())).unwrap();
         let result = export(&cat.conn, tmp.path());
         let _ = std::fs::set_permissions(&audit_dir, std::fs::Permissions::from_mode(0o700));
 
@@ -683,7 +852,7 @@ mod tests {
             "expected the failure to originate at export's file-open step \
              (context \"opening <path>\"), got: {chain}"
         );
-        let after = gc::get_meta(&cat.conn, WATERMARK_KEY).unwrap();
+        let after = gc::get_meta(&cat.conn, &watermark_key(tmp.path())).unwrap();
         assert_eq!(
             before, after,
             "a failed append must never advance the watermark — advancing it \
@@ -695,15 +864,194 @@ mod tests {
     fn unexported_count_matches_what_the_next_export_would_write() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
-        seed(&cat, "a1");
-        let pending = unexported_count(&cat.conn).unwrap();
+        seed(&cat, tmp.path(), "a1");
+        let pending = unexported_count(&cat.conn, tmp.path()).unwrap();
         let r = export(&cat.conn, tmp.path()).unwrap();
         assert_eq!(
             pending as usize,
             r.exported + r.skipped_commits + r.skipped_churn,
             "doctor's delta must describe the same population export consumes"
         );
-        assert_eq!(unexported_count(&cat.conn).unwrap(), 0);
+        assert_eq!(unexported_count(&cat.conn, tmp.path()).unwrap(), 0);
+    }
+
+    // Task 6, required test 1/6: export scoped to repo A must not leak repo
+    // B's rows into A's shard. Mutation this catches: dropping the
+    // `owner.starts_with(repo_root)` gate in `export` (or replacing it with
+    // an always-true check) would make B's row attribute successfully and
+    // then export into A's shard anyway — this test would see `b1` show up
+    // in `lines(tmp_a.path())` and fail.
+    #[test]
+    fn export_scoped_to_one_repo_excludes_another_repos_rows() {
+        let tmp_a = tempfile::tempdir().unwrap();
+        let tmp_b = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, tmp_a.path(), "a1");
+        seed(&cat, tmp_b.path(), "b1");
+
+        let r = export(&cat.conn, tmp_a.path()).unwrap();
+        assert_eq!(r.exported, 1, "{r:?}");
+
+        let got_a = lines(tmp_a.path());
+        assert!(
+            got_a.iter().any(|l| l.row_id == "a1"),
+            "repo A's own row must be exported into its shard"
+        );
+        assert!(
+            !got_a.iter().any(|l| l.row_id == "b1"),
+            "repo B's row must never land in repo A's shard"
+        );
+        // B's shard was never touched by A's export at all.
+        assert!(lines(tmp_b.path()).is_empty());
+    }
+
+    // Task 6, required test 2/6: this is the headline defect the whole task
+    // exists to fix. Mutation this catches: reverting `watermark`/`export`'s
+    // per-repo key back to the single global `WATERMARK_KEY` — exporting A
+    // first would then advance the ONE shared cursor past B's row's `seq`,
+    // and B's own export would see nothing past its (shared) watermark and
+    // export zero rows instead of one.
+    #[test]
+    fn watermarks_are_independent_per_repo() {
+        let tmp_a = tempfile::tempdir().unwrap();
+        let tmp_b = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, tmp_a.path(), "a1");
+        seed(&cat, tmp_b.path(), "b1");
+
+        let r_a = export(&cat.conn, tmp_a.path()).unwrap();
+        assert_eq!(r_a.exported, 1, "{r_a:?}");
+
+        let r_b = export(&cat.conn, tmp_b.path()).unwrap();
+        assert_eq!(
+            r_b.exported, 1,
+            "B's export must not be starved by A's watermark having already \
+             advanced past B's row: {r_b:?}"
+        );
+        assert!(
+            lines(tmp_b.path()).iter().any(|l| l.row_id == "b1"),
+            "b1 must actually be written to B's own shard"
+        );
+    }
+
+    // Task 6, required test 3/6: a `delete` row's owning repo must be read
+    // from the payload's captured OLD-row image, never from a live join —
+    // the artifact row is already gone by the time export runs. Mutation
+    // this catches: routing `artifact`/`delete` through `by_artifact_id`
+    // (a live join) instead of `payload_str(payload, "abs_path")` — the join
+    // would find nothing (no such artifact exists), `attribute` would return
+    // `None`, and the row would come out `unattributed` instead of exported.
+    #[test]
+    fn delete_row_is_attributed_from_its_payload_not_a_live_join() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let gone_path = tmp.path().join("gone.md").to_string_lossy().to_string();
+        cat.conn
+            .execute(
+                &format!(
+                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor,payload)
+                     VALUES(1751328000000,'artifact','delete','gone','unknown',
+                            '{{\"abs_path\":\"{gone_path}\"}}')"
+                ),
+                [],
+            )
+            .unwrap();
+
+        let r = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(
+            r.unattributed, 0,
+            "a delete row with a usable payload must not fall through to unattributed: {r:?}"
+        );
+        assert_eq!(r.exported, 1, "{r:?}");
+        assert!(lines(tmp.path()).iter().any(|l| l.row_id == "gone"));
+    }
+
+    // Task 6, required test 4/6: a row that cannot be traced to any repo is
+    // counted but neither exported nor allowed to advance the watermark past
+    // its own `seq` — advancing would make it permanently unrecoverable once
+    // the row later becomes attributable (e.g. a delayed insert resolves the
+    // artifact it references). Mutation this catches: advancing
+    // `report.through_seq` in the `None` branch of `export`'s attribution
+    // check (matching the commits/churn branches above it) — the second
+    // `export` call below would then never re-scan the row's `seq`, and
+    // `ghost` would stay unexported forever even after the artifact exists.
+    #[test]
+    fn unattributed_row_is_counted_not_exported_and_stays_recoverable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // No artifact named "ghost" exists yet, and this is not a delete (no
+        // payload to fall back on) — `attribute` must return `None`.
+        cat.conn
+            .execute(
+                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor)
+                 VALUES(1751328000000,'artifact','update','ghost','unknown')",
+                [],
+            )
+            .unwrap();
+
+        let r1 = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r1.unattributed, 1, "{r1:?}");
+        assert_eq!(r1.exported, 0, "{r1:?}");
+        assert_eq!(
+            watermark(&cat.conn, tmp.path()).unwrap(),
+            0,
+            "an unattributed-only export must not advance the watermark past \
+             the row it could not place"
+        );
+        assert!(lines(tmp.path()).is_empty());
+
+        // The artifact now exists under this same repo root — the row becomes
+        // attributable. Because the watermark never advanced past it, a second
+        // export must still see and export it.
+        seed(&cat, tmp.path(), "ghost");
+        let r2 = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r2.unattributed, 0, "{r2:?}");
+        // 2, not 1: `seed` itself triggers a fresh `artifact`/`insert` audit
+        // row for "ghost" (seq 2) in addition to the original stuck
+        // `update` row (seq 1) — both are now attributable and exported.
+        assert_eq!(
+            r2.exported, 2,
+            "the originally-unattributed row must still be recoverable: {r2:?}"
+        );
+        assert_eq!(
+            lines(tmp.path())
+                .iter()
+                .filter(|l| l.row_id == "ghost")
+                .count(),
+            2,
+            "both the original stuck update row and seed's own insert row must be exported"
+        );
+    }
+
+    // Task 6, required test 6/6: the repo-ownership check must be
+    // component-boundary correct, not a naive string prefix. Mutation this
+    // catches: replacing `owner.starts_with(repo_root)` (`std::path::Path`'s
+    // component-aware `starts_with`) with a raw string comparison such as
+    // `owner.to_string_lossy().starts_with(&repo_root.to_string_lossy())` —
+    // `"/tmp/x/repo-backup"` textually starts with `"/tmp/x/repo"`, so the
+    // naive form would wrongly treat `repo-backup`'s row as belonging to
+    // `repo` and export it there.
+    #[test]
+    fn sibling_directory_sharing_a_string_prefix_is_not_treated_as_the_same_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        let repo_backup = tmp.path().join("repo-backup");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&repo_backup).unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, &repo_backup, "b1");
+
+        let r = export(&cat.conn, &repo).unwrap();
+        assert_eq!(
+            r.exported, 0,
+            "repo-backup's row must not export into repo's shard: {r:?}"
+        );
+        assert_eq!(
+            r.unattributed, 0,
+            "the row IS attributable — just to a different repo, not to no repo"
+        );
+        assert!(lines(&repo).is_empty());
     }
 
     fn write_shard(root: &std::path::Path, name: &str, lines: &[&str]) {

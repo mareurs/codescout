@@ -168,11 +168,18 @@ fn backfill_commits(
 // lives on the *agent* and is async. Duplicated from gather.rs:294 rather than made
 // `pub` mid-run. A shard is a per-REPO committed artifact, so export runs once
 // against the current project's root, never once per reindex target.
+//
+// Task 6: `abs_path` is a sub-project inside a repo (e.g. a monorepo member),
+// never the export destination — `.codescout/audit/` belongs at the repo
+// root so every sub-project's shard lands in the one place `read_shards`
+// looks. Use `main_root` (linked worktree → its main checkout) or else
+// `git_root`, and drop the `ctx.workspace.roots.first()` fallback entirely:
+// guessing an unrelated configured root is worse than skipping export this
+// call, which is what `None` now means to every caller.
 fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
     ctx.current_project
         .as_ref()
-        .map(|cp| cp.abs_path.clone())
-        .or_else(|| ctx.workspace.roots.first().map(|r| r.path.clone()))
+        .map(|cp| cp.main_root.clone().unwrap_or_else(|| cp.git_root.clone()))
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -1146,6 +1153,37 @@ mod tests {
         assert!(
             target.ends_with("p1"),
             "target should end with p1, got: {target}"
+        );
+    }
+
+    // Task 6, required test 5/6: the reindex fold-in export must target the
+    // current project's git_root (via `project_root`), never its `abs_path`
+    // when the current project is a sub-project inside a larger repo.
+    // Mutation this catches: reverting `project_root` to read `cp.abs_path`
+    // (or to fall back to `ctx.workspace.roots.first()`) instead of
+    // `cp.main_root.unwrap_or(cp.git_root)` — the shard directory would then
+    // land at `root/p1/.codescout/audit` instead of `root/.codescout/audit`,
+    // and a later reindex of a sibling sub-project would never find it.
+    #[tokio::test]
+    async fn audit_export_targets_the_repo_root_not_the_sub_projects_abs_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("p1/docs")).unwrap();
+        std::fs::write(root.join("p1/docs/a.md"), "# A\n").unwrap();
+
+        let ctx = mk_ctx_with_project(root.to_path_buf(), "p1");
+
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        let exported = v["audit_export"]["exported"].as_u64().unwrap_or(0);
+        assert!(exported >= 1, "{v}");
+        assert!(
+            root.join(".codescout").join("audit").is_dir(),
+            "the shard must land at the git root"
+        );
+        assert!(
+            !root.join("p1").join(".codescout").join("audit").exists(),
+            "export must never use the sub-project's abs_path as its destination"
         );
     }
 

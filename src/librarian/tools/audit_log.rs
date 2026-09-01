@@ -22,11 +22,14 @@ const PRUNE_IGNORED_FILTER_KEYS: &[&str] = &["tbl", "row_id", "actor", "op", "si
 // Ruling 1 (Task 4 brief): `ctx.project_root()` does not exist — `project_root()`
 // lives on the *agent* and is async. Duplicated from gather.rs:294 rather than
 // made `pub` mid-run.
+//
+// Task 6: see reindex.rs's copy of this helper for why `abs_path` and the
+// `ctx.workspace.roots.first()` fallback are both gone — same reasoning
+// applies verbatim to the export destination this feeds.
 fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
     ctx.current_project
         .as_ref()
-        .map(|cp| cp.abs_path.clone())
-        .or_else(|| ctx.workspace.roots.first().map(|r| r.path.clone()))
+        .map(|cp| cp.main_root.clone().unwrap_or_else(|| cp.git_root.clone()))
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -52,7 +55,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
         let root = project_root(ctx).ok_or_else(|| {
             RecoverableError::new(
-                "export requires a resolved current project — no current project or workspace root is set"
+                "export requires a resolved current project with a git root — no current project is set"
                     .to_string(),
             )
         })?;
@@ -62,6 +65,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "exported": r.exported,
             "skipped_commits": r.skipped_commits,
             "skipped_churn": r.skipped_churn,
+            "unattributed": r.unattributed,
             "files": r.files,
             "through_seq": r.through_seq,
             "dir": format!("{}/", host::AUDIT_DIR),
@@ -450,17 +454,35 @@ mod tests {
         let (ctx, tmp) = mk_ctx();
         {
             let cat = ctx.catalog.lock();
+            // Task 6: an `artifact`/`insert` row is attributed by joining
+            // `row_id` against a live `artifact.abs_path` — an artifact must
+            // actually exist under this fixture's repo root (`tmp.path()`,
+            // its `git_root`) or the row comes out unattributed instead of
+            // exported, same as every other pre-existing single-repo test in
+            // this suite.
             cat.conn
                 .execute(
-                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(1,'artifact','insert','x')",
-                    [],
+                    "INSERT INTO artifact \
+                     (id, abs_path, kind, status, created_at, updated_at, file_mtime, file_sha256) \
+                     VALUES ('x', ?1, 'spec', 'active', 0, 0, 0, '')",
+                    [tmp.path().join("x.md").to_string_lossy().to_string()],
                 )
                 .unwrap();
+            cat.conn
+                    .execute(
+                        "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(1,'artifact','insert','x')",
+                        [],
+                    )
+                    .unwrap();
         }
         let out = call(&ctx, json!({"action": "audit_log", "export": true}))
             .await
             .unwrap();
-        assert_eq!(out["exported"], 1);
+        // 2, not 1: seeding the artifact via a raw `INSERT INTO artifact`
+        // fires the table's own audit trigger, producing a second
+        // `artifact`/`insert` row for "x" in addition to the manually
+        // inserted one above — both are now attributable and exported.
+        assert_eq!(out["exported"], 2);
         assert!(out["note"].as_str().unwrap().contains("REPLICA"), "{out}");
         let dir = tmp.path().join(host::AUDIT_DIR);
         let mut wrote_a_file = false;

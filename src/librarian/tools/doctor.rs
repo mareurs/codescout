@@ -492,7 +492,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // lock is dropped immediately after (next line) to keep lock scope
     // minimal, and audit::health needs &cat.conn.
     let mut audit_health = crate::librarian::catalog::audit::health(&cat.conn)?;
-    let pending = crate::librarian::catalog::audit::shard::unexported_count(&cat.conn)?;
+    // Task 6: scoped to the active project's repo root (main checkout for a
+    // linked worktree) — same destination `export` itself now uses. No
+    // active project means no scope to report against, same degradation as
+    // the move-candidate detection just above.
+    let pending = match ctx.current_project.as_deref() {
+        Some(cp) => {
+            let audit_repo_root = cp.main_root.as_deref().unwrap_or(&cp.git_root);
+            crate::librarian::catalog::audit::shard::unexported_count(&cat.conn, audit_repo_root)?
+        }
+        None => 0,
+    };
     audit_health["host"] = json!(crate::librarian::catalog::audit::host::resolve_host_id(
         &cat.conn
     )?);
@@ -5148,7 +5158,14 @@ mod tests {
     async fn the_audit_block_names_the_host_and_the_unexported_delta() {
         let cat = Catalog::open_in_memory().unwrap();
         seed_artifact(&cat, "1111111111111111", "/tmp/whatever/a.md");
-        let ctx = TestToolContextBuilder::new(cat).build();
+        // Task 6: `unexported_count` is now scoped to the current project's
+        // repo root — without one, the seeded row's own insert audit row has
+        // nothing to be counted against (no scope means no pending count,
+        // same degradation as `move_candidates` just above it). Root the
+        // fixture at the seeded artifact's own parent directory so it
+        // resolves as this repo's row, same as `ctx_rooted_at` elsewhere in
+        // this module.
+        let ctx = ctx_rooted_at(cat, std::path::Path::new("/tmp/whatever"));
         let v = call(&ctx, json!({})).await.unwrap();
         let audit = &v["catalog_health"]["audit"];
         assert!(audit["host"].is_string(), "{audit}");
