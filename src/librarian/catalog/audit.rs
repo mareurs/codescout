@@ -604,8 +604,11 @@ mod tests {
         // the marker row explains the seq gap: tbl catalog_audit, op delete
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].tbl, "catalog_audit");
+        assert_eq!(rows[0].op, "delete");
+        assert_eq!(rows[0].row_id, "prune");
         let p: serde_json::Value =
             serde_json::from_str(rows[0].payload.as_deref().unwrap()).unwrap();
         assert_eq!(p["pruned"], 1);
+        assert_eq!(p["before_ms"], i64::MAX);
     }
 }
