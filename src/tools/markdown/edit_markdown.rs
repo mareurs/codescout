@@ -1341,10 +1341,23 @@ impl Tool for EditMarkdown {
         // Reject librarian-managed artifacts — use artifact(action="update") instead.
         // Passing the resolved path also catches augmented artifacts with no
         // frontmatter id, where a direct write desynchronises file from params.
+        //
+        // `access` is what the caller's own arguments already say: `frontmatter` present
+        // means this call mutates catalog-indexed keys, absent means it is body-only.
+        // That distinction is the whole reason a merely-STAMPED file no longer refuses
+        // an ordinary prose edit — the drift BL-48 describes is a frontmatter drift, and
+        // this is the one call site that can prove it is not doing one.
+        // docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+        let access = if input["frontmatter"].is_object() {
+            crate::util::librarian_guard::Access::FrontmatterWrite
+        } else {
+            crate::util::librarian_guard::Access::BodyWrite
+        };
         crate::util::librarian_guard::guard_not_librarian_managed(
             path,
             &file_content,
             Some(&resolved),
+            access,
         )?;
 
         // Working buffer — frontmatter mutation (if requested) lands here first,

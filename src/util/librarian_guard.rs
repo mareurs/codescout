@@ -6,17 +6,56 @@
 /// augmentation state, event history).
 use crate::tools::RecoverableError;
 
-/// Returns a `RecoverableError` if `text` looks like a librarian-managed artifact.
-/// Call this after the file has been read, before any read or mutation logic.
+/// What the caller is about to do, so the guard can refuse the narrowest thing that is
+/// actually unsafe rather than everything.
+///
+/// The guard has three refusal reasons and they do **not** share a scope, which is what
+/// this type exists to express:
+///
+/// | reason | what lives elsewhere | read | body write | frontmatter write |
+/// |---|---|---|---|---|
+/// | augmented | the `params` — the file is a rendered snapshot | unsafe | unsafe | unsafe |
+/// | ledger | the `PREFIX-N` counter | refused | refused | refused |
+/// | stamped | nothing — the catalog *indexes* the frontmatter | safe | safe | **unsafe** |
+///
+/// Only `augmented` makes a *read* wrong, because only there does the file hold something
+/// other than the truth. `stamped`'s real concern is BL-48 — a direct frontmatter edit
+/// never reaches the catalog, so `status` / `tags` / `title` drift between disk and index —
+/// and that is a frontmatter-write concern which the guard used to apply to reads and body
+/// writes as well.
+///
+/// `ledger` is deliberately left refusing everything in this change: narrowing it is a
+/// separate question about `PREFIX-N` allocation, and mixing the two would make neither
+/// reviewable.
+/// docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    /// A read. Cannot desynchronise anything, so only a stale-snapshot file refuses it.
+    Read,
+    /// A write the caller knows is confined to the body — no frontmatter key is touched.
+    BodyWrite,
+    /// A write that touches frontmatter, **or one whose extent the caller cannot bound**.
+    /// The conservative value: `edit_file` replaces raw text anywhere in the file, so it
+    /// passes this rather than proving a negative about where its `old_string` matched.
+    FrontmatterWrite,
+}
+
+/// Returns a `RecoverableError` if `text` is a librarian-managed artifact that this
+/// `access` would be unsafe on. Call it after the file has been read, before any read or
+/// mutation logic.
+///
+/// `access` is what narrows the refusal — see [`Access`] for which reason refuses which
+/// operation, and why only `augmented` makes a read wrong.
 pub fn guard_not_librarian_managed(
     path: &str,
     text: &str,
     abs_path: Option<&std::path::Path>,
+    access: Access,
 ) -> Result<(), anyhow::Error> {
     // Clone the Arc out first — see `read_from` on why the lock must not be held
     // across `is_augmented`.
     let oracle = oracle();
-    guard_with_oracle(path, text, abs_path, oracle.as_deref())
+    guard_with_oracle(path, text, abs_path, oracle.as_deref(), access)
 }
 
 /// Answers whether a path is an **augmented** librarian artifact — one whose
@@ -84,6 +123,7 @@ fn guard_with_oracle(
     text: &str,
     abs_path: Option<&std::path::Path>,
     oracle: Option<&dyn AugmentedArtifactOracle>,
+    access: Access,
 ) -> Result<(), anyhow::Error> {
     // Three independent reasons a file is off-limits, and none implies another: a
     // stamped frontmatter id says the librarian wrote this file; augmentation says
@@ -97,6 +137,34 @@ fn guard_with_oracle(
     if !augmented && !ledger && !stamped {
         return Ok(());
     }
+
+    // The three reasons do not share a scope, so neither should the refusal.
+    //
+    // `stamped` ALONE — not augmented, not a ledger — means only that the catalog
+    // indexes this file's frontmatter. Nothing about the body or about reading is
+    // unsafe: the file is where its state lives. What is unsafe is a direct
+    // frontmatter edit, which never reaches the catalog and drifts `status` / `tags` /
+    // `title` between disk and index (BL-48).
+    //
+    // Refusing reads here cost more than it bought, twice over. `read_file` carries no
+    // guard at all, so a read of a stamped markdown file was always one tool away —
+    // the refusal did not prevent the read, it pushed the caller off the
+    // heading-addressed tool Iron Law 4 sends them to. And the population is selected
+    // by creation route rather than by any property of the file:
+    // `docs/issues/_TEMPLATE.md` carries no `id:`, so every bug file created the
+    // documented way is unstamped, while `artifact(action="create")` stamps everything
+    // it writes. Measured 2026-09-01: 57 of 120 tracked files under `docs/trackers/`
+    // and 206 across `docs/issues/`.
+    //
+    // `ledger` keeps refusing every access on purpose. Narrowing it is a separate
+    // question about who may advance a `PREFIX-N` counter, and answering both in one
+    // change would make neither reviewable.
+    // docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+    let stamped_only = stamped && !augmented && !ledger;
+    if stamped_only && access != Access::FrontmatterWrite {
+        return Ok(());
+    }
+
     let why = if augmented {
         " (augmented — its params live in the catalog, and this file is only a \
          rendered snapshot of them)"
@@ -105,14 +173,11 @@ fn guard_with_oracle(
          allocated by the server)"
     } else {
         // The `stamped` arm carried the empty string until 2026-09-01, so the one
-        // reason most likely to fire UNINTENDED — `artifact(action="create")` stamps
-        // every file it writes, whatever its kind — was also the only one that did not
-        // say why. A refusal is a negative result, and
+        // reason most likely to fire UNINTENDED was also the only one that did not say
+        // why. A refusal is a negative result, and
         // `docs/adrs/2026-08-27-negative-results-name-their-scope.md` requires it to
-        // name its scope. Naming the mechanism (BL-48: a direct frontmatter edit never
-        // reaches the catalog) is also what lets a reader judge whether the refusal is
-        // protecting anything on THIS file.
-        // docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+        // name its scope. Naming the mechanism is also what lets a reader judge whether
+        // the refusal is protecting anything on THIS file.
         " (stamped — it carries a librarian `id:`, so its frontmatter is catalog-indexed \
          and a direct frontmatter edit would not reach the catalog)"
     };
@@ -130,6 +195,16 @@ fn guard_with_oracle(
          • Edit anything else (prose, a heading, a typo):\n\
          \x20 artifact(action=\"update\", id=\"<id>\", patch={body_edits: [{heading: \"## X\", \
          action: \"edit\", old_string: \"...\", new_string: \"...\"}]})"
+            .to_string()
+    } else if stamped_only {
+        // Reached only by a FrontmatterWrite, since every other access returned Ok
+        // above. So the hint can name the one route that does reach the catalog,
+        // instead of the generic three-line menu — and say what is now allowed, or the
+        // caller has no way to learn that the body was never the problem.
+        "Frontmatter on this file is catalog-indexed, so edit it through the catalog:\n\
+         • artifact(action=\"update\", id=\"<id>\", patch={status: \"...\", tags: [...]})\n\
+         Reads and BODY edits are allowed directly — read_markdown, and edit_markdown \
+         without its `frontmatter` param, both work on this file."
             .to_string()
     } else {
         "Use artifact tools instead:\n\
@@ -319,7 +394,13 @@ mod tests {
     #[test]
     fn guard_returns_recoverable_error_for_artifact() {
         let text = "---\nid: abc513d3ee0f0b50\nkind: tracker\n---\n";
-        let err = guard_not_librarian_managed("docs/trackers/foo.md", text, None).unwrap_err();
+        let err = guard_not_librarian_managed(
+            "docs/trackers/foo.md",
+            text,
+            None,
+            Access::FrontmatterWrite,
+        )
+        .unwrap_err();
         let re = err.downcast_ref::<RecoverableError>().unwrap();
         assert!(re.message.contains("librarian-managed artifact"));
         assert!(re.hint().unwrap().contains("artifact(action="));
@@ -328,7 +409,12 @@ mod tests {
     #[test]
     fn guard_passes_for_plain_markdown() {
         let text = "# A plain markdown file\nNo frontmatter.\n";
-        assert!(guard_not_librarian_managed("docs/notes.md", text, None).is_ok());
+        // Strictest access on purpose: a file with no frontmatter at all must pass even
+        // the narrowest gate, so the pass cannot be coming from the access narrowing.
+        assert!(
+            guard_not_librarian_managed("docs/notes.md", text, None, Access::FrontmatterWrite)
+                .is_ok()
+        );
     }
 
     /// BL-33 / `docs/issues/archive/2026-08-16-librarian-guard-misses-quoted-frontmatter-ids.md`.
@@ -392,9 +478,13 @@ mod tests {
     #[test]
     fn guard_fires_on_a_quoted_id_the_way_it_does_on_a_bare_one() {
         let quoted = "---\nid: '9a892c2a5976e296'\nkind: tracker\n---\n";
-        let err =
-            guard_not_librarian_managed("docs/trackers/open-issue-work-queue.md", quoted, None)
-                .expect_err("a quoted id is still a librarian id — the guard must refuse");
+        let err = guard_not_librarian_managed(
+            "docs/trackers/open-issue-work-queue.md",
+            quoted,
+            None,
+            Access::FrontmatterWrite,
+        )
+        .expect_err("a quoted id is still a librarian id — the guard must refuse");
         let re = err.downcast_ref::<RecoverableError>().unwrap();
         assert!(re.message.contains("librarian-managed artifact"));
         assert!(re.hint().unwrap().contains("artifact(action="));
@@ -430,6 +520,11 @@ mod tests {
             text,
             Some(abs),
             Some(&oracle),
+            // `Read` is the strongest form of this assertion: augmentation is the ONE
+            // reason that makes even a read wrong, because the file is a snapshot of
+            // params held elsewhere. If this ever passes, the augmented arm has been
+            // narrowed along with the stamped one.
+            Access::Read,
         )
         .expect_err("an augmented artifact must be refused whatever its frontmatter looks like");
         let re = err.downcast_ref::<RecoverableError>().unwrap();
@@ -477,7 +572,18 @@ mod tests {
         ] {
             let abs = std::path::PathBuf::from("/repo").join(display);
             assert!(
-                guard_with_oracle(display, text, Some(&abs), Some(&NothingIsAugmented)).is_ok(),
+                guard_with_oracle(
+                    display,
+                    text,
+                    Some(&abs),
+                    Some(&NothingIsAugmented),
+                    // Strictest access: these files must stay editable even for a
+                    // frontmatter write, since neither is stamped, augmented or a
+                    // ledger. A weaker value here would let the access narrowing
+                    // supply the pass.
+                    Access::FrontmatterWrite,
+                )
+                .is_ok(),
                 "{label}: a catalogued but unaugmented file must stay directly editable"
             );
         }
@@ -576,6 +682,9 @@ mod tests {
             text,
             Some(abs),
             Some(&NothingIsAugmented),
+            // A stamped-only file refuses ONLY a frontmatter write now, so this is the
+            // access that still reaches the message under test.
+            Access::FrontmatterWrite,
         )
         .expect_err("a stamped file is still refused — this test is about the MESSAGE");
         let re = err.downcast_ref::<RecoverableError>().unwrap();
@@ -592,6 +701,134 @@ mod tests {
              does not reach the catalog), so a reader can judge whether it is \
              protecting anything on this file — got: {}",
             re.message
+        );
+    }
+
+    /// The behavioural half of T-14: a file whose ONLY guard reason is the stamped
+    /// `id:` must stay readable and body-editable, and must still refuse a frontmatter
+    /// write.
+    ///
+    /// Born red 2026-09-01 on the `Read` and `BodyWrite` rows: before the change the
+    /// `stamped` arm refused every access, so a plain `kind: doc` file created by
+    /// `artifact(action="create")` was locked to the `artifact` API for life —
+    /// `docs/TEAM-ONBOARDING.md`, a teammate-facing prose guide, was the instance that
+    /// surfaced it.
+    ///
+    /// **The table is the test.** A single-access version cannot express this property:
+    /// the claim is that the three accesses are treated *differently*, so a row that
+    /// only refuses (or only permits) is satisfied by a guard that ignores `access`
+    /// entirely. Both directions are needed, which is why `expect_refused` is a column
+    /// rather than three separate tests.
+    ///
+    /// Mutations this kills:
+    /// - dropping the `access != FrontmatterWrite` early return → the two permit rows fail
+    /// - widening it to permit `FrontmatterWrite` too → the refuse row fails, and BL-48
+    ///   drift becomes reachable through `edit_markdown(frontmatter=…)`
+    /// - narrowing the early return to `stamped` without the `&& !augmented && !ledger`
+    ///   guard → caught by `an_augmented_artifact_is_guarded_even_with_no_frontmatter_id`
+    ///   and `a_declared_ledger_is_guarded_with_no_id_and_no_augmentation`, both of which
+    ///   now pass `Access::Read` for exactly that reason.
+    ///
+    /// docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
+    #[test]
+    fn a_stamped_only_file_refuses_frontmatter_writes_and_permits_reads_and_body_edits() {
+        struct NothingIsAugmented;
+        impl AugmentedArtifactOracle for NothingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                false
+            }
+        }
+
+        // Byte-for-byte what `artifact(action="create", kind="doc", ...)` writes.
+        let text = "---\nid: '23421bbc5b226368'\nkind: doc\nstatus: draft\ntitle: A teammate guide\n---\n\n## Layer 2\n\nprose\n";
+        assert!(
+            is_librarian_artifact(text) && declared_entry_prefixes(text).is_empty(),
+            "precondition: stamped and NOT a ledger — otherwise this tests the ledger arm"
+        );
+
+        let abs = std::path::Path::new("/repo/docs/TEAM-ONBOARDING.md");
+        for (access, expect_refused, why) in [
+            (
+                Access::Read,
+                false,
+                "a read cannot desynchronise anything, and `read_file` carries no guard \
+                 at all — so refusing here never prevented the read, it only pushed the \
+                 caller off the heading-addressed tool Iron Law 4 sends them to",
+            ),
+            (
+                Access::BodyWrite,
+                false,
+                "the catalog indexes this file's FRONTMATTER; its body is where its own \
+                 state lives, so a body edit drifts nothing",
+            ),
+            (
+                Access::FrontmatterWrite,
+                true,
+                "a direct frontmatter edit never reaches the catalog, so status/tags/title \
+                 drift between disk and index (BL-48) — this is the one access the stamp \
+                 legitimately protects",
+            ),
+        ] {
+            let got = guard_with_oracle(
+                "docs/TEAM-ONBOARDING.md",
+                text,
+                Some(abs),
+                Some(&NothingIsAugmented),
+                access,
+            );
+            assert_eq!(
+                got.is_err(),
+                expect_refused,
+                "{access:?}: expected refused={expect_refused} — {why}"
+            );
+        }
+    }
+
+    /// The stamped arm's refusal has to say what is now ALLOWED, not only what is not.
+    ///
+    /// Without this, the narrowing is invisible to the caller it was made for: they hit
+    /// a refusal on a frontmatter write and have no way to learn that the read and the
+    /// body edit they gave up on would both have worked. That is the shape
+    /// `docs/adrs/2026-08-27-negative-results-name-their-scope.md` is about — a negative
+    /// result that under-claims its own scope.
+    #[test]
+    fn the_stamped_hint_names_the_catalog_route_and_says_body_edits_are_allowed() {
+        struct NothingIsAugmented;
+        impl AugmentedArtifactOracle for NothingIsAugmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                false
+            }
+        }
+
+        let text = "---\nid: '23421bbc5b226368'\nkind: doc\n---\n\n## A\n\nprose\n";
+        let abs = std::path::Path::new("/repo/docs/TEAM-ONBOARDING.md");
+        let err = guard_with_oracle(
+            "docs/TEAM-ONBOARDING.md",
+            text,
+            Some(abs),
+            Some(&NothingIsAugmented),
+            Access::FrontmatterWrite,
+        )
+        .expect_err("a frontmatter write on a stamped file must still be refused");
+        let hint = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap()
+            .hint()
+            .unwrap_or_default()
+            .to_string();
+
+        assert!(
+            hint.contains("artifact(action=\"update\""),
+            "the hint must name the route that DOES reach the catalog: {hint}"
+        );
+        assert!(
+            hint.contains("edit_markdown"),
+            "and it must name the tool the caller may still use for the body, or the \
+             narrowing is invisible to them: {hint}"
+        );
+        assert!(
+            !hint.contains("append_entry"),
+            "a stamped non-ledger owns no id namespace: {hint}"
         );
     }
 
@@ -628,6 +865,9 @@ mod tests {
             text,
             Some(abs),
             Some(&NothingIsAugmented),
+            // `Read` deliberately: the ledger arm still refuses every access, and this
+            // row is what would fail first if a later change narrowed it by accident.
+            Access::Read,
         )
         .expect_err("a declared ledger must be guarded");
         let re = err.downcast_ref::<RecoverableError>().unwrap();
@@ -748,6 +988,7 @@ mod tests {
             text,
             Some(abs),
             Some(&NothingIsAugmented),
+            Access::Read,
         )
         .expect_err("a ledger must be guarded");
         let re = err.downcast_ref::<RecoverableError>().unwrap();
@@ -765,8 +1006,15 @@ mod tests {
     /// The widened hint belongs to the ledger arm alone. An augmented artifact's file
     /// is a rendered snapshot of catalog params, so `body_edits` is the ONLY correct
     /// route there and offering `append_entry` beside it would be wrong; a stamped id
-    /// says the librarian wrote the file, which the ledger routing does not describe
-    /// either. Both keep the original generic hint.
+    /// says the frontmatter is catalog-indexed, which the ledger routing does not
+    /// describe either.
+    ///
+    /// What each arm keeps is no longer the same, corrected 2026-09-01: the augmented
+    /// arm keeps the generic hint, and the stamped arm now gets its own, naming the
+    /// `artifact(update)` route for frontmatter **and** saying that reads and body edits
+    /// are allowed. This test is about neither of those texts — it pins only that
+    /// `append_entry` does not leak out of the ledger arm, which is the property that
+    /// survives both.
     #[test]
     fn the_ledger_hint_does_not_leak_into_the_augmented_or_stamped_arms() {
         struct EverythingIsAugmented;
@@ -791,6 +1039,7 @@ mod tests {
             augmented_ledger,
             Some(abs),
             Some(&EverythingIsAugmented),
+            Access::Read,
         )
         .expect_err("an augmented artifact must be guarded");
         let hint = err
@@ -812,6 +1061,7 @@ mod tests {
             stamped,
             Some(abs),
             Some(&NothingIsAugmented),
+            Access::FrontmatterWrite,
         )
         .expect_err("a stamped artifact must be guarded");
         let hint = err

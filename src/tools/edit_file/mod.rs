@@ -708,10 +708,16 @@ fn read_edit_target(resolved: &std::path::Path, display_path: &str) -> anyhow::R
             anyhow::Error::new(e).context(format!("reading {} to edit it", resolved.display()))
         }
     })?;
+    // `FrontmatterWrite` is the conservative value, not a claim. `edit_file` replaces
+    // raw text anywhere in the file, so it cannot bound its own extent — an
+    // `old_string` may well sit inside the frontmatter block. Passing `BodyWrite` here
+    // would be asserting a negative the caller has not established.
+    // docs/issues/2026-09-01-artifact-create-stamps-an-id-that-guard-locks-the-file.md
     crate::util::librarian_guard::guard_not_librarian_managed(
         display_path,
         &content,
         Some(resolved),
+        crate::util::librarian_guard::Access::FrontmatterWrite,
     )?;
     Ok(content)
 }
