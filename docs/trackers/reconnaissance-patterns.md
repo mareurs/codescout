@@ -6242,7 +6242,7 @@ subject: it verified all three `R-89` axes positively — binary built `21:26:20
 started `21:45:06` (after the build), `/proc/<pid>/exe` resolving to that exact file, and
 `~/.cargo/bin/codescout` a symlink to it with equal hashes — then found **9 of 13 live
 `codescout start` processes serving pre-rebuild bytes**, two ~85h behind. Filed as
-`docs/issues/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md`.
+`docs/issues/archive/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md`.
 
 **The miss.** `git status` then showed an untracked `docs/issues/.buddy/`. I read it as my
 own statusline-marker debris and ran `rm -rf` on it. Two things were wrong with that, and

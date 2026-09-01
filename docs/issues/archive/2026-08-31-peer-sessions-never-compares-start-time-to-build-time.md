@@ -1,9 +1,10 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: peer-sessions.sh collects process start time but never compares it to the binary's build time, so a peer serving stale bytes reads as healthy
 tags:
 - cluster/blast-radius-exceeds-visibility
+closed: 2026-09-01
 opened: 2026-08-31
 owner: marius
 severity: med
@@ -83,6 +84,29 @@ nine others.
 
 ## Fix
 
+**Fixed 2026-09-01 on `experiments`, by the corrected form below — not the one first proposed here.**
+
+| | SHA | patch-id |
+|---|---|---|
+| the fix | `4816d64f` | `efe2bd3aa69a50734a0e12a25bddea388d709cf4` |
+| the regression test + its runner | `ce39b8f4` | `825cf81d56845f82d259fb4e64c0d65cfc176399` |
+
+`binary_state()` in `scripts/peer-sessions.sh` reads the ` (deleted)` suffix directly, exactly as
+§ *The proposed fix above FAILS OPEN* prescribes. The report prints `cs REPLACED` per row and
+counts them in the closing summary, carrying the "a peer's numbers are evidence about the build it
+LOADED" note this file asked for, beside the existing authorship warning.
+
+**Verified by two independent instruments rather than by reading the code.** Unfiltered,
+`peer-sessions.sh` names sessions `3624594`, `3632455`, `3639628` as `REPLACED`. Those are exactly
+the parent sessions of the three stale codescout servers a separate `ps`-start-time-vs-binary-mtime
+scan found among nine. Nine processes, both outcomes present, zero disagreements — the population
+containing *both* answers is what makes that a control rather than a confirmation.
+
+**This sat `open` for a day after being fixed.** The fix shipped under `fix(scripts): report which
+binaries a peer actually loaded…`, a message naming no tracker entry, so nothing flipped the status
+and no gate noticed — the zombie-open shape `CLAUDE.md`'s verify-open cadence exists for. It was
+found by going to *implement* a fix that already existed.
+
 Two lines in `peer-sessions.sh`, per pid:
 
 ```sh
@@ -158,6 +182,32 @@ were serving replaced bytes at the moment of measurement, and every existing ins
 at the right path) — reported them healthy.
 
 ## Tests added
+
+`tests/peer-sessions.sh` — 10 cases, `ce39b8f4`. Wired into a new `shell-tests` CI job in the
+same commit, which is the load-bearing half: the four shell suites under `tests/` had **no
+runner at all** until then. `hooks-discrimination.sh` (41 cases) and `file-provenance.sh` (58)
+were cited from twelve places, every one a bug file, plan or tracker, and invoked by nothing.
+A regression test with no runner would not have satisfied the archive trigger in substance.
+
+**Cases 1 and 2 share one pid.** The same process is asserted `current`, then `REPLACED`, with
+nothing changed but the file underneath it. That is what makes the pair non-vacuous by
+construction — no stub satisfies both halves — and it matters here specifically because a suite
+asserting only `REPLACED` passes against a function that returns `REPLACED` unconditionally.
+
+**Mutation-verified against a real deleted binary, including the superseded fix:**
+
+| implementation | verdict | |
+|---|---|---|
+| the shipped ` (deleted)` suffix check | `REPLACED` | detects |
+| the fix first proposed in § *Fix* | `current` | **misses** — fail-open, reproduced |
+| always `current` | `current` | **misses** |
+| always `REPLACED` | `REPLACED` | caught by the intact-case assertion instead |
+
+Two further cases: a dead pid must read `?` rather than guess in either direction, and the caller
+must actually *print* the verdict — guarding the function alone would pass against a script that
+computes the state and drops it, which is this corpus's `declared-not-wired` shape.
+
+Mutations were run on temp copies, never by editing the shared checkout.
 
 None yet — the script has no harness. If one lands, the case worth pinning is a fixture
 where start time and binary mtime straddle: the shape that reads healthy today.

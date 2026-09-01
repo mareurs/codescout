@@ -12,7 +12,7 @@
 # the comparison three times because the script would not do it.
 #
 # THE FIX THIS PINS IS THE *SECOND* ONE, AND THAT IS THE WHOLE POINT.
-# docs/issues/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md first
+# docs/issues/archive/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md first
 # proposed comparing process start time against the binary's mtime:
 #
 #     exe=$(readlink "/proc/$pid/exe"); [ "$(stat -c %Y /proc/$pid)" -lt "$(stat -c %Y "$exe")" ]

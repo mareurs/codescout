@@ -102,7 +102,7 @@ profile_of() {
 # the case it targets: `stat` on the "(deleted)" string errors, the comparison
 # gets an empty operand, `[ N -lt "" ]` errors to stderr and evaluates false,
 # and the stale row prints nothing at all. Measured 2026-09-01 against pid
-# 997544. See docs/issues/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md.
+# 997544. See docs/issues/archive/2026-08-31-peer-sessions-never-compares-start-time-to-build-time.md.
 binary_state() {
     _bs=$(readlink "/proc/$1/exe" 2>/dev/null) || { echo "?"; return; }
     [ -z "$_bs" ] && { echo "?"; return; }
