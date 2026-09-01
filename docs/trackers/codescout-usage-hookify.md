@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 7
+entry_high_water_H: 8
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -312,3 +312,40 @@ That makes the companion compression-reminder load-bearing as the **post-compact
 **Status:** **deferred — rejected by design (tool self-governs).** Contrast H-2: the `.md` deny is correct because `read_markdown` *fully supersedes* `read_file` for markdown. No analogous superseding tool exists for source — `symbols` is a lossy projection, not a replacement.
 
 **Adjacent (sibling F-22):** `pika_observations` keys on errors, not silent-`success`, so silent-success misuse is invisible to a Pika scan (F-22 filed a follow-up). Relevant here: a future warn-hook would be the *only* way to observe the full-no-range pattern, since the DB scan structurally cannot.
+
+
+### H-8 — Native `Bash` is invisible to `usage.db`, so no Pika scan can measure shell-mediated tool misuse — and an eval is live on exactly that axis
+
+**Pattern:** Every H-N above proposes a hook whose value is judged against `usage.db`. That instrument records **codescout MCP calls only**. When shell work goes through native `Bash` rather than `run_command`, it leaves no row — so any misuse committed through the shell is not merely under-counted, it is **structurally unobservable**, and a Pika scan returns a clean, plausible number rather than an error.
+
+**Confirming data (measured 2026-09-01, this repo):**
+
+```
+sqlite3 .codescout/usage.db \
+  "SELECT COUNT(*), SUM(tool_name LIKE '%ash%'), COUNT(DISTINCT tool_name) FROM tool_calls;"
+→ 52769 | 0 | 26
+```
+
+**52,769** recorded calls, **zero** matching `%ash%`, 26 distinct tool names — all codescout tools (`run_command` 19,398; `grep` 5,694; `read_file` 5,213; `symbols` 4,394). Re-derived here rather than carried from memory `gotchas`, which asserts the same thing dated 2026-08-27.
+
+Session evidence, **corrected downward by `H-7` and stated with its unit**: this session committed **3** Iron-Law-1 violations through `Bash` where a codescout tool fully supersedes — one `awk` range-extraction of a function body (`symbols(name="seed_ledger", include_body=true)` returns the same body *plus* the doc comment the awk range silently dropped, verified by running it), and two `grep -n '<symbol>'` on a `.rs` file (`references(symbol, path)` / `grep(pattern, path)`). The count was first written as **5**; `H-7` adjudicates the other two out — they were `read_file` line-range reads, which is precisely the 82–94% sliced-read class `H-7` measured and defended. The inflated figure is recorded because it is the failure this entry is about: the number was assembled by someone who had not yet read the ledger's own prior ruling.
+
+**This does NOT contradict `H-7`; it is the half `H-7` could not see.** `H-7` rejected denying `read_file` on source extensions on measured grounds — `symbols` is a lossy projection, not a replacement, and the tool already self-governs via `read_full_file`'s redirect. All three of those properties are properties of **a codescout tool**. Native `Bash` has none of them: no redirect, no hint, no row. `H-7`'s own closing note already names the shape — *"`pika_observations` keys on errors, not silent-`success`, so silent-success misuse is invisible to a Pika scan"* — and this is that argument one layer out, where the blindness is total rather than partial.
+
+**Why it is urgent rather than tidy:** `CLAUDE.md` records `security.shell_command_mode` as a **live eval arm** — the project is actively measuring native `Bash` against `run_command` and has not ruled. The instrument that would settle it can see **one arm**. Any verdict drawn from `usage.db` during this evaluation is a comparison between a measured arm and an unmeasured one, and it will read as a clean result. That is a measurement-integrity defect under an in-flight decision, not a hook wish.
+
+**Proposed hookify rule — a RECORDER, not a gate:**
+
+- **Predicate:** `PostToolUse` on native `Bash`.
+- **Decision:** neither `deny` nor `warn` — **record**. Write a `tool_calls` row with `tool_name='bash'`, the command's first token, and a classification of the argument's extension, so the existing schema can see the arm.
+- **Reason text:** none surfaced to the agent. A recorder that nags is a warn hook wearing a disguise, and `H-7` is the standing evidence that warns on this surface are low-value.
+
+**Explicitly NOT proposing a deny on `Bash`-reads-of-source.** Two reasons, and the second is the one that would have bitten: `H-7`'s reasoning partly transfers even though its evidence does not; and a deny keyed on "Bash touches `*.rs`" would have blocked this session's `sed -i` mutation runs, which were the work rather than the mistake (`bug-fix-session-log:F-94` is their product). **Gate nothing until the recorder has produced a base rate** — proposing a threshold before the measurement is what `H-7` had to spend a `usage.db` sweep to undo.
+
+**Promote-when:** the recorder ships and 2+ weeks of rows exist. *Then* ask whether a warn is justified, against a real denominator. If the `shell_command_mode` eval concludes before that, the recorder is still the thing that makes the conclusion checkable afterwards.
+
+**Status:** proposed — recorder only; no gate, no threshold, no carve-out yet.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the `sqlite3` count above, run in this repo this session; `H-7`'s U-27 sweep for the adjudication that cut 5 → 3; and `CLAUDE.md` § *Companion Plugin* for `shell_command_mode` being an open arm rather than a setting.
