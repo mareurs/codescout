@@ -31,6 +31,7 @@ codescout splits its state across two stores with **opposite** durability:
 | `cites` edges (the link graph) | `catalog.db` | **no** |
 | Artifact **augmentations** — `prompt`, `params`, `params_schema`, `render_template`, `entry_collection` | `catalog.db` | **no** |
 | Event log, observations | `catalog.db` | **no** |
+| Audit trail (`catalog_audit`) | `catalog.db` | **partial** — see below |
 
 `~/.local/share/librarian/catalog.db` is machine-local and gitignored, and it is
 **machine-global** — one DB spanning every repo on the host, not one per project.
@@ -47,6 +48,23 @@ reason this page exists:
   an error.
 
 Nothing fails. You just quietly get less.
+
+**The audit trail is "partial," not "no," and the partiality runs in the direction
+you don't expect.** `catalog_audit` itself — the live, per-row insert/update/delete
+log — is machine-local like everything else in `catalog.db` and does not travel.
+What *does* travel is a curated export: `librarian(action="audit_log",
+export=true)` writes this host's own new rows, scoped to the repo being queried,
+into a per-host-per-month file under `.codescout/audit/*.jsonl`; committing that
+file is what lets `audit_log`'s query mode merge it back in on any host that has
+the repo checked out (`get_guide("librarian")`'s `audit_log` row). So after a bare
+`git pull`, a fresh clone's `audit_log` can answer "who deleted this, on the other
+machine" — the other host's shard arrived as a file — but knows **nothing about
+this host's own past** until this host runs its own `export=true` at least once;
+there is no bootstrap read of the local `catalog_audit` table backward in time.
+And the reverse gap is silent in the usual way: a host that never calls
+`export=true` (or exports but never commits the file) is indistinguishable from a
+host that made no catalog changes at all — freshness is bounded by each host's
+*last export*, not by its actual activity.
 
 **A fifth mode has the OPPOSITE shape, and it is not on the table above.** The four
 above are state that fails to arrive. This one is state that arrives *without* its

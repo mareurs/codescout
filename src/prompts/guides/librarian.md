@@ -292,7 +292,7 @@ Accepted keys: `status, title, owners, tags, topic, time_scope, extra, body, bod
 | `legibility_scan` | Rank code-legibility refactor candidates from usage.db friction + the symbol index. Writes the `legibility-backlog` tracker (open targets by observed cost; auto-closes refactored ones). `write=false` for dry-run. |
 | `doctor` | Read-only catalog drift scan (forward-slash form, NTFS ADS colons, `..` segments, missing-on-disk files, `abs_path_must_be_absolute`). Manual — run after large refactors or when downstream LIKE queries return empty. Returns a per-check JSON report; does NOT mutate catalog state. |
 | `merge_worktree` | Fold a worktree session's shadow rows onto their main twins (delta-only) and close the registration. See § Worktree overlay below. |
-| `audit_log` | Query the catalog audit trail — who mutated what, when; actor 'unknown' = a writer that did not identify itself (foreign process). `prune_before_ms` + `confirm` prunes (dry-run by default). |
+| `audit_log` | Query the catalog audit trail — who mutated what, when; actor 'unknown' = an unidentified writer. Also merges other hosts' committed shard files (`.codescout/audit/*.jsonl`) for the repo, so a clone can answer for another host's history. `export=true` writes this host's new rows to its shard — commit it to share. `prune_before_ms`+`confirm` prunes (dry-run by default; excludes `export`). |
 
 **context params:**
 ```

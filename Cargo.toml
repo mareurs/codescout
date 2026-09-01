@@ -243,7 +243,7 @@ panic = "abort"
 
 [dev-dependencies]
 tempfile = "3"
-temp-env = "0.3"
+temp-env = { version = "0.3", features = ["async_closure"] }
 tower = "0.5"
 filetime = "0.2"
 mockito = "1"
