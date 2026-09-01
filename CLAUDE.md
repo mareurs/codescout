@@ -175,6 +175,17 @@ entries with `Status: open` older than 14 days against current code and the bug-
 shipping under a `fix(ci):` or `feat(...):` message rather than one naming the tracker entry trips
 no gate, so entries go zombie-open by default — a 2026-05-25 pass flipped 3 of 4 nominally-open
 entries in one tracker.
+
+**Two corrections to that population, both measured 2026-09-02 (`tracker-hygiene-log:HY-25`).**
+It covers **friction-style ledgers only** — `F-N` / `W-N` / `ET-N` / `T-N` / … — and **not `R-N`**,
+where `Status: open` means *"not yet promoted into the served skill"*: a promotion state no
+reconciliation can close. Run the query literally and **75 of 155** open entries are a different
+question wearing the same word. And **run `librarian(action="doctor")` before hand-rolling a scan**
+— `entry_dated_stale`, `entry_conditional_past_due` and `entry_cited_from_outside_but_undeclared`
+already ship the machine-checkable half, priced by **cross-file citation count** (`exposure ≥ 5`)
+rather than by age, on the principle that a decayed fact nothing cites costs nothing. An age-only
+scan re-derives a worse version of a wired check **and reports its own shortfall as a clean
+backlog** — it returns a small number, never an error.
 ## Git Workflow
 
 **`master` is protected** — all experimental work on `experiments`; promote to `master` only after tests + clippy + MCP verify; `experiments` is never deleted; never commit in-progress work directly to `master`.

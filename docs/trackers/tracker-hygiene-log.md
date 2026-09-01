@@ -1951,6 +1951,40 @@ options 1 and 2, because a convention nobody can query is exactly what a gate is
 has been re-checked since, and my first pass mis-flagged it only because I keyed on
 `opened:`.
 
+### CORRECTION, same day, before anything was built: option 3 already ships, and defect 2 is narrower than stated above
+
+Everything above this heading is left as written. It was wrong in a way worth keeping, because the error is `R-104`'s prohibition form — *a proposed fix asserts that X is not already done* — and I published it as a **worklist item**, which is the shape that gets acted on.
+
+**`scan_cited_but_undeclared` exists at `src/librarian/tools/doctor.rs:3018` and is wired into `call` at `:369`,** alongside `scan_conditional_past_due` (`:354`), `scan_dated_stale` (`:363`) and `scan_validity_unparseable` (`:375`). It is the plan's Task 7
+(`docs/superpowers/plans/2026-08-20-statement-validity-layers-1-2.md:1075`), shipped. `src/librarian/statements.rs` carries the fence-aware, first-wins, nested-truncating `**Valid:**` parser behind it. **I proposed rebuilding a subsystem that had been running for two weeks.**
+
+**What led me there was a stale doc comment, not an absence.** `scan_dated_stale`'s own docs read *"an entry with no declaration is a different, **not-yet-shipped** check's business (Task 7…)"* — true when written, false since, and it is the sentence I reasoned forward from. Corrected in the same commit as this entry. Doc-vs-code drift inside the very subsystem that exists to detect claim decay.
+
+**And the mechanism is not idle — it fires.** `librarian(action="doctor")`, 2026-09-02, this project:
+
+| check | count |
+|---|---|
+| `entry_dated_stale` | 8 |
+| `entry_conditional_past_due` | 3 |
+| `entry_cited_from_outside_but_undeclared` | 2 |
+| `validity_unparseable` | 0 |
+
+Plus **102 more entry-validity rows scoped out** to 7 other project roots — 115 corpus-wide. Highest-exposure row is `R-49` (dated 2026-07-28, 35 days, **exposure 17**), a law promoted into the served reconnaissance skill.
+
+**Defect 2, corrected.** I framed "only 45 of 69 friction entries carry a date" as coverage lost. `doctor` gates on `EXPOSURE_THRESHOLD = 5` — citations *from other files* — on the stated principle that **a decayed fact nothing cites costs nothing.** That is a better instrument than mine: it prices by consequence where I priced by age, and an undated entry nothing cites is correctly not a finding. The residue defect 2 actually names is undated entries **above** the exposure gate, which is what `entry_cited_from_outside_but_undeclared` reports, and today that is **2** — not 24. Defect 1 is untouched by this: `doctor` never reads `**Status:**`, so the `R-N` overload is purely a hazard for the *human* cadence in CLAUDE.md.
+
+**So the real gap is neither of the two I named.** It is that **`doctor` is manual and nobody runs it.** Thirteen findings sat unread here while I hand-rolled two Python scripts to rediscover a worse version of the same question. That is CLAUDE.md § *Testing Discipline*: **loudness is a property of a PATH, not of a failure** — an alarm nothing reaches is exactly as informative as no alarm. The instrument is correct, priced, deterministic, tested to ~20 cases, and unobserved.
+
+**Mechanism status:** one built and unwatched; one unbuilt.
+
+1. **Reach the check's output** — the real gap. `doctor` runs only when someone types it. Candidate shapes: the `tracker-hygiene` skill's sweep calling it (cheapest — the sweep already exists and already has a reader), or the SessionStart banner surfacing a non-zero entry-validity count. **Not** a pre-commit gate: these are worklists, not verdicts, and every one of them needs a human to re-run a measurement and judge.
+2. **Disambiguate `Status: open`** — defect 1, still unbuilt and still valid. One CLAUDE.md sentence scoping the cadence to friction-style ledgers and excluding `R-N`, whose `open` is a promotion state.
+3. ~~Gate on undeclared validity~~ — **shipped as Task 7.** Struck rather than deleted, so the next reader finds out it was proposed and already existed.
+
+**Superseded from the section above:** the three-option list ending *"option 1 is a one-sentence CLAUDE.md change and is the one to take first"* — option 3 of that list was already built, and the option that matters most (reaching the output) was not on it at all.
+
+### The original three options, as written before the correction — kept because option 3 is the error
+
 **Mechanism status:** none yet. Three candidate shapes, cheapest first, none taken
 unilaterally because each touches a convention rather than a defect:
 

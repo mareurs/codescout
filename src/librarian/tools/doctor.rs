@@ -2871,8 +2871,10 @@ fn iso_to_epoch_days(iso: &str) -> Option<i64> {
 /// **Declared `dated` only — parsed with `parse_validity`, never `resolve_validity`.**
 /// `resolve_validity`'s default-is-decay behavior treats an UNDECLARED entry as `dated
 /// <fallback>`, which is exactly the guessed age this check must not produce. An entry
-/// with no declaration is a different, not-yet-shipped check's business (Task 7, which
-/// reports it as undeclared rather than guessing its age).
+/// with no declaration is [`scan_cited_but_undeclared`]'s business — it reports the entry
+/// as undeclared rather than guessing its age. (That check shipped as the plan's Task 7;
+/// this sentence said "not-yet-shipped" until 2026-09-02, by which point it had been wired
+/// into [`call`] for weeks and a reader had proposed rebuilding it.)
 ///
 /// **Gated on `EXPOSURE_THRESHOLD`, not run over every dated entry.** Same `indegree`
 /// map computed once per `doctor` run by [`entry_indegree`] and shared with
