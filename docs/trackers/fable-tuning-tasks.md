@@ -88,7 +88,7 @@ Ran as hamsa A-13. **CLEAN on both axes across ALL delivered surfaces** — 3 sl
 
 **Priority:** high · **Surface:** infra · **Eval gate:** no · **Status:** done
 
-Root cause was `lf.py`'s `load_env()` stopping at the first existing `.env` — codescout's own `.env` shadowed `~/agents/llm-proxy/.env`. Fixed to merge all candidates via `setdefault`; verified `lf.py recent` works from the codescout cwd. See `skill-frictions:F-001` (claude-traces).
+Root cause was `lf.py`'s `load_env()` stopping at the first existing `.env` — codescout's own `.env` shadowed `~/agents/llm-proxy/.env`. Fixed to merge all candidates via `setdefault`; verified `lf.py recent` works from the codescout cwd. See `skill-frictions:SKF-1` (claude-traces).
 
 ### FT-9 — Run served-by analysis on recent Fable debugging sessions to confirm or refute silent Opus fallback
 

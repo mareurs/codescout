@@ -6,6 +6,8 @@ owners: []
 tags:
   - skills
   - frictions
+entry_prefix: SKF
+entry_high_water_SKF: 23
 ---
 
 # Skill Frictions Tracker
@@ -16,7 +18,7 @@ Running log of rough edges found while using project skills. Feed into refactor 
 
 ## `/claude-traces`
 
-### F-001 — lf.py env auto-discovery silently fails
+### SKF-1 — lf.py env auto-discovery silently fails
 **When:** `lf.py session <id>` on first run  
 **Expected:** Auto-load keys from `~/agents/llm-proxy/.env` (documented behavior)  
 **Got:** `ERROR: LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY not set`  
@@ -26,19 +28,19 @@ Running log of rough edges found while using project skills. Feed into refactor 
 
 **Root cause found + FIXED 2026-07-07** — the 05-03 fix only improved the error message; the real bug was `load_env()` returning after the *first existing* `.env`. Any project with its own `.env` (e.g. codescout's, holding only `CARGO_REGISTRY_TOKEN`/`CODESCOUT_*`) shadowed `~/agents/llm-proxy/.env` so the `LANGFUSE_*` keys never loaded. Fix (in `~/agents/llm-proxy/.claude/skills/claude-traces/scripts/lf.py`, symlinked into codescout): load **all** candidate `.env` files with `os.environ.setdefault` merge semantics — earlier candidates still win per-key, real env vars win over files. Verified: `lf.py recent` now works from codescout cwd. Surfaced during Fable-tuning FT-8.
 
-### F-002 — cc.py stats fails silently on cross-project sessions
+### SKF-2 — cc.py stats fails silently on cross-project sessions
 **When:** `cc.py stats 64618681-de62-4bf7-abad-0e0d93de005a`  
 **Expected:** Find session JSONL and return token/cost summary  
 **Got:** `ERROR: session not found`  
 **Probable cause:** `cc.py` only scans the current project dir by default; session may live in a different project  
 **Fix idea:** Skill should instruct: run `cc.py sessions --all` first to locate which project owns the session before running `stats`/`trace`; or add auto-fallback to `--all` on not-found
 
-### F-003 — No guidance on env setup prerequisite
+### SKF-3 — No guidance on env setup prerequisite
 **When:** Starting any Langfuse workflow  
-**Observation:** Skill docs describe key locations but don't surface a "setup check" step. New users will hit F-001 first and not know why.  
+**Observation:** Skill docs describe key locations but don't surface a "setup check" step. New users will hit SKF-1 first and not know why.  
 **Fix idea:** Add a `## Prerequisites` section at the top: "Run `lf.py check-env` (or equivalent) to verify keys resolve before starting analysis."
 
-### F-004 — `cc.py sessions --all` permission friction
+### SKF-4 — `cc.py sessions --all` permission friction
 **When:** Trying to locate session across all projects  
 **Observation:** `--all` scans broadly (`~/.claude/projects/`); triggers user confirmation in some permission modes  
 **Fix idea:** Skill should note this as a known prompt; suggest narrowing with `--project` when the project is known
@@ -46,7 +48,7 @@ Running log of rough edges found while using project skills. Feed into refactor 
 ---
 
 
-### F-005 — `lf.py find` prints 12-char truncated IDs; `lf.py trace` needs full UUID
+### SKF-5 — `lf.py find` prints 12-char truncated IDs; `lf.py trace` needs full UUID
 **When:** Running `lf.py trace <id>` with the ID copied from `lf.py find` output  
 **Got:** `404 Client Error: Not Found for url: .../api/public/traces/12c504ad-d66`  
 **Root cause:** `cmd_find` prints `t['id'][:12]` (line ~201 in lf.py), but `cmd_trace` passes the value directly to `GET /api/public/traces/{id}` which requires full UUID  
@@ -55,7 +57,7 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Fix options:** (a) print full UUIDs in `find` (widen column), (b) make `trace` do a prefix lookup via `GET /traces?sessionId=...` and filter client-side  
 **Status: FIXED 2026-05-03** — `cmd_find` now prints full 36-char UUIDs; column widened to 36; footer updated to "copy as-is"
 
-### F-006 — `lf.py trace` "Tools (N)" shows available schema, not actual calls
+### SKF-6 — `lf.py trace` "Tools (N)" shows available schema, not actual calls
 **When:** Reading `lf.py trace` output to understand what tools were used  
 **Got:** `Tools (34): Agent, AskUserQuestion, ...` — lists all 34 tools in the schema  
 **Expected:** Which tools were actually called in that API turn  
@@ -63,7 +65,7 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Workaround:** Use `cc.py tool-calls <session_id> --project <path>` for actual sequence  
 **Fix idea:** Proxy should log tool_use block names (not inputs) into observation metadata, e.g. `tools_called: ["mcp__codescout__symbols", "TaskCreate"]`
 
-### F-007 — Session belongs to different project; cc.py stats/trace fails silently
+### SKF-7 — Session belongs to different project; cc.py stats/trace fails silently
 **When:** `cc.py stats 64618681-...` from codescout project  
 **Got:** `ERROR: session not found`  
 **Root cause:** cc.py scans only the current project's JSONL by default; session was in `/home/marius/work/mirela/backend/kotlin`  
@@ -71,7 +73,7 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Fix idea:** On not-found, auto-suggest `cc.py sessions --all | grep <session_prefix>` as next step; or add `cc.py locate <session_id>` that scans all projects and returns the owning path
 
 
-### F-008 — cc.py path decoding ambiguous: `-` in dir names decoded as `/`
+### SKF-8 — cc.py path decoding ambiguous: `-` in dir names decoded as `/`
 **When:** `cc.py sessions --all` shows `project: /home/marius/work/mirela/backend/kotlin`  
 **Reality:** Actual path is `/home/marius/work/mirela/backend-kotlin`  
 **Root cause:** JSONL encodes project paths as `~/.claude/projects/<path-with-slashes-as-dashes>/`. cc.py reverses this by replacing `-` with `/`, but directory names that contain `-` (e.g. `backend-kotlin`) are indistinguishable from path separators.  
@@ -79,13 +81,13 @@ Running log of rough edges found while using project skills. Feed into refactor 
 **Fix idea:** cc.py should verify the reconstructed path exists; if not, try heuristics (longest existing prefix). Also document the ambiguity in skill docs so users know to verify before using a `--project` path from `--all` output.  
 **Status: FIXED 2026-05-03** — `project_key_to_path` now uses filesystem-guided bitmask decode: tries all `-`-vs-`/` splits ordered by most separators first, picks first path that exists on disk
 
-### F-010 — artifact(update, rel_path) updates metadata but doesn't rename file on disk (FIXED 2026-05-23, codescout:1cb123d1)
+### SKF-9 — artifact(update, rel_path) updates metadata but doesn't rename file on disk (FIXED 2026-05-23, codescout:1cb123d1)
 **When:** `artifact(action="update", patch={rel_path: "new/path.md"})` after manually moving a file  
 **Got:** Artifact metadata updated (confirmed `"updated": true`), but file stays at old path  
 **Impact:** Subsequent `edit_markdown(path="new/path.md")` fails with "No such file or directory"  
 **Fix:** `update` now rejects `patch.rel_path` with a RecoverableError hinting at `artifact(action="move", id=..., new_rel_path=...)`. Two-call APIs must reject the wrong input shape explicitly, not accept silently — silent divergence is the worst failure mode here because `updated: true` reads as proof of action. Test: `update_rejects_rel_path_with_move_hint` in `src/librarian/tools/update.rs`. The `move` action (`src/librarian/tools/mv.rs`) covers the file-rename use case atomically.
 
-### F-011 — cc.py hardcodes `~/.claude`; sessions from other profiles invisible
+### SKF-10 — cc.py hardcodes `~/.claude`; sessions from other profiles invisible
 **When:** 2026-07-10, inspecting session fc0e9019 (a `~/.claude-kat` session) with `cc.py stats/tool-calls`.
 **Got:** `ERROR: session not found` — `CLAUDE_DIR = Path.home() / ".claude"` is hardcoded (cc.py:23), so `~/.claude-sdd` / `~/.claude-kat` sessions can't be inspected. This machine runs three profiles by design.
 **Workaround:** sed-copied cc.py to scratchpad with the profile dir patched.
@@ -100,23 +102,23 @@ sys.argv = ["cc.py"] + sys.argv[1:]; cc.main()
 **Second gap found on this pass:** `cc.py trace` truncates message bodies to ~200 chars, so the intent thread of a long session is not recoverable from it — the compaction-summary and multi-paragraph user prompts are exactly the high-value turns, and they are exactly the ones cut. Restoring a session needs an untruncated per-role message dump; there is no cc.py subcommand for it. **Fix idea:** add `cc.py messages <session_id> [--role user] [--since TS] [--full]`.
 ## `/analyze-usage`
 
-### F-005 — `find ~/work` assumption not portable
+### SKF-11 — `find ~/work` assumption not portable
 **When:** Step 1 (Discover DBs)  
 **Observation:** Skill hardcodes `~/work` as standard project root with a note to adjust — but doesn't tell the model HOW to detect the right root. If the user's projects live elsewhere, step 1 produces zero results with no actionable error.  
 **Fix idea:** Add discovery fallback: check `git rev-parse --show-toplevel`, then `~/work`, then `~` — or ask user for root on zero results
 
-### F-006 — No per-session filter mode
+### SKF-12 — No per-session filter mode
 **When:** User wants to analyze a specific session (as in this conversation)  
 **Observation:** Skill is report-only (all-time). There's no way to scope queries to a session_id even though `tool_calls.session_id` exists.  
 **Fix idea:** Add `/analyze-usage session <id>` mode that runs the same queries with `WHERE session_id=?`
 
-### F-007 — Skill doesn't coordinate with claude-traces
+### SKF-13 — Skill doesn't coordinate with claude-traces
 **When:** User asks for session-level efficiency analysis  
 **Observation:** `/analyze-usage` covers usage.db (codescout-side), `/claude-traces` covers JSONL+Langfuse (Claude-side). Neither skill mentions the other or describes how to combine them for a full picture.  
 **Fix idea:** Add a "See also" cross-reference in both skills; document the complementary data model (usage.db = tool call metrics, Langfuse = token/cost/tool sequence)
 
 
-### F-009 — analyze-usage operates in isolation from claude-traces
+### SKF-14 — analyze-usage operates in isolation from claude-traces
 **Observation:** `/analyze-usage` scans usage.db (codescout-side: tool call counts, latency, errors) but has no awareness of `/claude-traces` (Claude-side: token cost, stop reasons, actual tool sequences from JSONL/Langfuse). A full session audit requires both — usage.db tells you *what codescout saw*, JSONL/Langfuse tells you *what the model decided*.  
 **Current state:** Neither skill references the other. A user wanting session-level efficiency analysis has to manually combine them.  
 **Direction:** `/analyze-usage` should be the driver — it owns the audit workflow. It should:
@@ -125,13 +127,13 @@ sys.argv = ["cc.py"] + sys.argv[1:]; cc.main()
 3. Synthesize both into a unified verdict (efficiency + correctness)  
 **Fix idea:** Add a `## Cross-referencing with session traces` section to the analyze-usage skill that explains when and how to invoke `cc.py tool-calls` + `lf.py session` for drill-down, and what signals from usage.db should trigger the drill-down (e.g. sessions with >50 calls, error rate >10%, or overflows).
 
-### F-008 — Skill doesn't mention librarian for tracker creation
+### SKF-15 — Skill doesn't mention librarian for tracker creation
 **When:** User asked to create a tracker for grep usage patterns  
 **Got:** File created manually with `create_file` instead of `artifact(action="create", kind="tracker")`  
 **Prompt gap:** Neither `/claude-traces` nor `/analyze-usage` skill mentions that trackers should go through the librarian. A one-liner "create any tracker via `artifact(action=create, kind=tracker)` — call `librarian(tracker_design)` first" would prevent this.
 
 
-### F-010 — Step-2 query-battery output overflows; natural `grep | sed` post-processing trips the companion IL3 gate
+### SKF-16 — Step-2 query-battery output overflows; natural `grep | sed` post-processing trips the companion IL3 gate
 **When:** Step 2 (per-DB SQL queries), running under the `codescout-companion` PreToolUse hook (the normal dev environment for this repo).
 **Observation:** The documented invoke pattern loops `sqlite3 -line "$db" "..."` across every DB. With ~10 active DBs the combined output exceeds the inline budget and lands in a `@cmd_*` buffer (440+ lines buffered). The obvious next step — `grep -E "..." @cmd_xxx | sed 's/^ *//'` to extract the per-DB error rows — trips the IL3 advisory ("piped `grep` to a log-trimmer"), re-buffers the result, and truncates it again, forcing a fallback to `cat @cmd` + multiple `sed -n 'A,Bp' @cmd` paging calls. Net: ~3 extra round-trips per analysis to read data the skill already produced.
 **Got:** Skill Step 2 says nothing about (a) expecting overflow on multi-DB loops, or (b) that buffered output must be paged with a single bounded-LHS command (`sed -n`, `cat`, bare `grep @ref`) — never a chained pipe to `sed`/`head`/`tail`, which the companion gate blocks.
@@ -140,7 +142,7 @@ sys.argv = ["cc.py"] + sys.argv[1:]; cc.main()
 
 ## `superpowers:subagent-driven-development`
 
-### F-012 — the finish step deletes every per-task report
+### SKF-17 — the finish step deletes every per-task report
 
 **When:** Completing a ten-task SDD run (`get-guide-section-grain`, 2026-08-27).
 
@@ -170,7 +172,7 @@ this run; the upstream skill still says delete.
 **Status:** open — local mitigation in place (`sdd-ruling-log.md` + a CLAUDE.md append
 trigger); upstream skill unchanged.
 
-### F-013 — `review-package` BASE is easy to get silently wrong when anything commits out-of-band
+### SKF-18 — `review-package` BASE is easy to get silently wrong when anything commits out-of-band
 
 **When:** Same run. A bug file was committed between one task's head and the next task's
 commit.
@@ -190,12 +192,12 @@ contains commits by an author/subject outside the task.
 ruling).
 ## `/onboarding`
 
-### F-001 — workspace onboarding silently over-reported per-project memory writes
+### SKF-19 — workspace onboarding silently over-reported per-project memory writes
 **When:** Multi-project workspace with `force=true`. HARD-GATE only verified `project-overview` per project, allowing subagents to pass with 2 of 6 memories.
 **Got:** Final summary claimed 6/6 coverage; in reality some projects had 2–3 memories.
 **Fix idea (FIXED 2026-05-07):** Phase 4 Coverage Verification reads back all 6 topics per project; subagent MANIFEST line is advisory only.
 
-### F-002 — onboarding root-layer content not captured
+### SKF-20 — onboarding root-layer content not captured
 **When:** Monorepo with real root-layer code (dev scripts, docker-compose, top-level scripts).
 **Got:** Workspace prompt explicitly forbade a root subagent and had no fallback to capture root content.
 **Fix idea (FIXED 2026-05-07):** workspace `architecture` template grew Top-Level Code Map + Generic Navigation subsections; the no-root-subagent rule now states the reason.
@@ -203,7 +205,7 @@ ruling).
 
 ## `/superpowers:writing-plans` + `/codescout-companion:reconnaissance`
 
-### F-001 — writing-plans writes test assertions naming types without scouting them; recon's triggers don't catch this
+### SKF-21 — writing-plans writes test assertions naming types without scouting them; recon's triggers don't catch this
 
 **When:** Plan `docs/superpowers/plans/2026-05-18-jsonpath-negative-slice.md`
 written via the writing-plans skill, then re-scouted via `/codescout-companion:reconnaissance`
@@ -261,7 +263,7 @@ not just a recon-saves-the-day story is the substantive complaint.
 
 ## `/codescout-companion:reaching-peer-sessions`
 
-### F-001 — the trigger condition was observed, said out loud, and the skill still went uninvoked
+### SKF-22 — the trigger condition was observed, said out loud, and the skill still went uninvoked
 
 **When:** 2026-09-01, a full session of cross-session coordination on a shared checkout
 (codescout-17). `ListAgents` was called three times and reported 2–3 peers. A peer's
@@ -315,7 +317,7 @@ never invokes the skill currently never learns that `ListAgents` is a subset.
 
 ## `/buddy:summon`
 
-### F-001 — Summon protocol assumes native Bash/Read; codescout-companion hard-denies both
+### SKF-23 — Summon protocol assumes native Bash/Read; codescout-companion hard-denies both
 **When:** 2026-06-11, `/buddy:summon hamsa` in the codescout project. The SKILL protocol steps say to use the Bash tool (discover-specialists.sh, track_specialist.py, summons.log append) and the Read tool (SKILL.md, lens addenda, memories, memory-protocol.md, gates.md).
 **Got:** codescout-companion hard-denies native `Bash` and native `Read` on this project (and `read_file` on `.md` via IL4). Every step had to be translated: `run_command` for the scripts, `cat` for the foreign-repo markdown (SKILL.md / memory-protocol.md / gates.md), `printf >> summons.log`. It worked, but a less-adapted agent would stall on the first blocked Bash/Read call.
 **Fix idea:** Have the buddy:summon protocol name codescout-aware fallbacks (if native Bash/Read are gated, use run_command / cat / read_markdown), or detect a codescout-companion project and emit the adapted tool list up front. Low urgency — the adaptation is mechanical once known.

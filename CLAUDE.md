@@ -195,7 +195,11 @@ believed.
 ### Skill Frictions — `docs/trackers/skill-frictions.md`
 
 Rough edges found while using project skills (`/claude-traces`, `/analyze-usage`, etc.).
-Entries are numbered F-NNN with root cause, impact, and fix idea.
+Entries are numbered SKF-N with root cause, impact, and fix idea. **The ledger declares
+`entry_prefix: SKF`, so the server allocates ids — never hand-number one.** It used to use
+`F-NNN` restarted per skill section, which produced 23 entries under 13 ids (`F-001` had five
+definers) and made every one of them uncitable, since several definers of a token resolve to
+nothing.
 
 **Claude — append when:**
 - A skill command fails unexpectedly or requires a workaround
@@ -204,9 +208,13 @@ Entries are numbered F-NNN with root cause, impact, and fix idea.
 
 **How to append (Claude):**
 ```
-edit_markdown("docs/trackers/skill-frictions.md",
-  action="insert_after", heading="## `/<skill-name>`",
-  content="### F-NNN — <title>\n**When:** ...\n**Got:** ...\n**Fix idea:** ...")
+artifact(action="append_entry", id="<skill-frictions artifact id>", id_prefix="SKF",
+  anchor_heading="## `/<skill-name>`",
+  title="<one-line title>",
+  body="**When:** ...\n**Got:** ...\n**Fix idea:** ...")
+# One call: the server assigns the next SKF-N and writes the `### SKF-N — <title>` heading,
+# which is the only shape link_scan accepts as a definition. Do NOT hand-write the heading —
+# hand-allocation is what produced the five-way `F-001` collision.
 ```
 
 **User — browse:** open `docs/trackers/skill-frictions.md` directly; entries are grouped by
@@ -423,7 +431,7 @@ Why this exists, and the measured history:
 authorship record in
 `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`. The skill went
 uninvoked for a whole session while its trigger condition was observed and stated out loud —
-`skill-frictions:F-001`, whose lesson is that **a trigger the model must notice is a policy, not
+`skill-frictions:SKF-22`, whose lesson is that **a trigger the model must notice is a policy, not
 a mechanism.** Treat this section as the standing instruction that replaces the noticing.
 ## Observer Blindness — when care is the wrong instrument
 
