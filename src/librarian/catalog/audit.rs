@@ -234,13 +234,13 @@ pub(crate) struct AuditRow {
     pub payload: Option<String>,
 }
 
-/// Dynamic filter SQL: same pattern as `events::timeline_for_artifact`.
-/// Newest-first (`ORDER BY seq DESC`) so a capped `limit` always returns the
-/// most recent activity rather than the oldest.
-pub(crate) fn query(conn: &Connection, f: &AuditFilter, limit: usize) -> Result<Vec<AuditRow>> {
-    let mut sql = String::from(
-        "SELECT seq, at_ms, tbl, op, row_id, actor, verb, payload FROM catalog_audit WHERE 1=1",
-    );
+/// Builds the shared `WHERE 1=1 AND ...` clause + bound params for
+/// `AuditFilter`, factored out so `query()` (which appends `ORDER BY ... LIMIT`)
+/// and `count_matching()` (which wraps in `SELECT count(*)`) can never drift
+/// apart on which rows a filter matches — Task review Finding B (2026-09-01)
+/// depends on `filtered_total` reflecting exactly the same WHERE as `query()`.
+fn filter_where(f: &AuditFilter) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
+    let mut sql = String::from(" WHERE 1=1");
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(v) = &f.tbl {
         sql.push_str(" AND tbl = ?");
@@ -266,6 +266,17 @@ pub(crate) fn query(conn: &Connection, f: &AuditFilter, limit: usize) -> Result<
         sql.push_str(" AND at_ms <= ?");
         params.push(Box::new(v));
     }
+    (sql, params)
+}
+
+/// Dynamic filter SQL: same pattern as `events::timeline_for_artifact`.
+/// Newest-first (`ORDER BY seq DESC`) so a capped `limit` always returns the
+/// most recent activity rather than the oldest.
+pub(crate) fn query(conn: &Connection, f: &AuditFilter, limit: usize) -> Result<Vec<AuditRow>> {
+    let (where_sql, mut params) = filter_where(f);
+    let mut sql =
+        String::from("SELECT seq, at_ms, tbl, op, row_id, actor, verb, payload FROM catalog_audit");
+    sql.push_str(&where_sql);
     sql.push_str(" ORDER BY seq DESC LIMIT ?");
     params.push(Box::new(limit as i64));
     let mut stmt = conn.prepare(&sql)?;
@@ -284,6 +295,19 @@ pub(crate) fn query(conn: &Connection, f: &AuditFilter, limit: usize) -> Result<
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+/// Count of rows matching `f`, with no `LIMIT` — the denominator behind
+/// `audit_log`'s `filtered_total`/`truncated` (Task review Finding B,
+/// 2026-09-01), built from the exact same WHERE as `query()` via
+/// `filter_where` so the two can never disagree on which rows match.
+pub(crate) fn count_matching(conn: &Connection, f: &AuditFilter) -> Result<i64> {
+    let (where_sql, params) = filter_where(f);
+    let sql = format!("SELECT count(*) FROM catalog_audit{where_sql}");
+    conn.query_row(&sql, rusqlite::params_from_iter(params.iter()), |r| {
+        r.get(0)
+    })
+    .map_err(Into::into)
 }
 
 /// Deletes audit rows older than the cutoff, then writes ONE marker row

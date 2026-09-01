@@ -744,9 +744,16 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(
-            trigger_count > 0,
-            "audit triggers must exist after open_with_workspace's v6 table-copy path"
+        // Task review Finding C (2026-09-01): `> 0` is widening-monotone — it
+        // cannot tell "all triggers installed" from "one survived". Each
+        // audited table gets exactly 3 triggers (insert/update/delete), so
+        // the true count is derived from the live constant rather than a
+        // hardcoded literal that could go stale as AUDITED_TABLES grows.
+        let expected = crate::librarian::catalog::audit::AUDITED_TABLES.len() as i64 * 3;
+        assert_eq!(
+            trigger_count, expected,
+            "audit triggers must exist after open_with_workspace's v6 table-copy path \
+             (expected AUDITED_TABLES.len() * 3 = {expected})"
         );
 
         cat.conn
