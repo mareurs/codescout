@@ -177,6 +177,78 @@ and a fix-shaped hole.
 The repo-level version of the same gap: `cargo check --no-default-features` is not in the
 documented pre-commit gate (`fmt` + `clippy -D warnings` + `test`, all default-features), so every
 session walks into the same trap and nothing catches it until someone builds lean.
+### committed-audit-shards (T-7) — 2026-09-01/02
+
+Six tasks (one created mid-run), 13 commits, 5 Opus task reviews + 5 scoped re-reviews. Every
+review found something; two tasks needed a second fix round. **Six vacuous assertions** were
+caught across the run, and the sixth was inside a test written specifically to satisfy the
+vacuity lens.
+
+| ruling | class | cost if wrong | verdict |
+|---|---|---|---|
+| 1 — `ctx.project_root()` does not exist; add a local helper shaped like `gather.rs:294` rather than making that one `pub` | plan defect | one 6-line duplication a later refactor folds | held |
+| 2 — reindex exports against the current project's root, not per-target; `None` skips rather than errors | plan defect | a `scope="all"` reindex exports into one repo, others export on their own next run | **WRONG** — the `.or_else(roots.first())` fallback made the skip branch unreachable, so it guessed `roots[0]`. Corrected in Task 6 |
+| 3 — no environment mutation in tests; split a pure `mint_host_id` out of `resolve_host_id` | test-safety | the env-precedence chain ships untested | held — and the split was judged a better design than the brief's |
+| 4 — export must call `host::shard_file_name` rather than re-deriving the name | de-duplication | none identified | held |
+| 5 — suffix takes a process-local atomic counter, not `RandomState` | correctness | two machines colliding on hostname+pid+nanosecond | **PARTLY WRONG** — the review showed it gave overwhelming probability, not the guarantee the ruling claimed; `nanos` was re-read per call and could XOR-cancel. Fixed with a `LazyLock` |
+| 6 — Task 5's implementer writes the missing helpers; `BLOCKED` if the harness cannot host them | plan placeholder | one extra dispatch round | held |
+| 7 — per-item `#[expect(dead_code)]`, not file-scoped `#![allow]` | observer-blindness | a suppression covering every later item, silently | held on mechanism, **incomplete on form** — a bare `#[expect]` goes unfulfilled under `--cfg test`; the shipped `#[cfg_attr(not(test), expect(…))]` was the implementer's correction |
+| 8 — host-segment allowlist deferred from Task 1 to Task 3 | scope | one commit's delay on a defect with no reachable caller | held |
+| 9 — four Minors promoted into fix round 1 because one falsified Ruling 5's own guarantee | calibration | a larger fix diff | held |
+| 10 — the Ruling-3 coverage gap stays deferred and stays *stated* | honesty | a reader mistakes an accepted cost for an oversight | held |
+| 11 — `ShardRead.matched` dropped rather than added; the brief declared it and its own reference code omitted it | plan self-contradiction | an unused field satisfying a stale declaration | held |
+| 12 — the Critical becomes Task 6, not a Task 4 fix round | process | one extra task boundary | held |
+| 13 — Task 5 moves *after* Task 6, because its fixture must be multi-repo | process | the acceptance test bakes in the blind spot that let the defect ship | held — and this is the ruling I would most defend |
+| 14 — scoping design: per-repo watermark, `git_root` destination, attribution through the artifact, `unattributed` reported not guessed | design | an unattributed row exports late rather than wrongly | held on design, **wrong on one premise** — I wrote that a linked worktree lives under the main root; true of this repo's convention, not of git |
+| 15 — Task 4's nine smaller findings ship separately from the Critical | process | a fix round touching code Task 6 rewrites | held |
+| 16 — split the conflated cursors: a clamped *recoverability* cursor plus an `audit_written_through_seq` high-water mark | design | re-append into a committed git file, unbounded | **INCOMPLETE** — as written it would have silently dropped the rows it claims to keep recoverable; see below |
+| 17 — disclose that `filtered_total` sums a machine-wide local count with a repo-scoped shard count | honesty | a total over a population the response never describes | held |
+| 18 — gate the automatic reindex fold-in on the destination repo carrying the `.gitattributes merge=union` line | privacy/scope | a repo that never opted in is written to on every reindex | held — and the gate was proven to *open*, not only to close |
+| 19 — name the destination absolute path in the export response | visibility | a worktree session cannot see which tree it wrote into | held |
+
+**Wrong or incomplete: 5 of 19 (26%).** Every one caught by a review or an implementer, none by
+me. The rate did not improve as the run went on, which is the honest reading: it tracked how far
+each ruling reached past what I had verified, not fatigue.
+
+**Ruling 16 is the sharpest of the five, because it was correct and insufficient.** Two cursors
+stop the re-append. But a row unattributed at seq 5 that *later becomes attributable* is skipped
+forever once `written_through` passes 5 — so the ruling, implemented literally, would have
+silently discarded exactly the rows its own clamp exists to keep retryable. The implementer saw
+it, added a persisted `audit_open_gaps` set unasked, and **flagged it as their own extension with
+rationale** rather than slipping it in. The re-review confirmed it necessary rather than
+gold-plating. A ruling that fixes the failure it names and opens a quieter one is the shape to
+watch for.
+
+**Wrong or incomplete: 4 of 15 (27%).** Higher than the T-1 run's ~12%, and the reason is
+legible: this plan reached further past what I had verified. Every one of the four was caught by
+a review or an implementer, none by me.
+
+### Lessons this run earned
+
+**A single-repo fixture made a Critical unrepresentable, and three Opus reviews read the code
+correctly and found nothing.** Export selected rows with no repo predicate behind a global
+watermark; the catalog is machine-wide (54,304 rows across 8 repos, three of them client work).
+Reviewers cannot find what the tests cannot express. **The fixture's dimensionality is a review
+input** — say what a fixture *cannot* distinguish when you hand one over.
+
+**Finding one vacuity in a test does not clear the test.** One test carried three, each found
+only after the previous was closed: order-invariance, `1 == 1` at n=1, and `None == None`.
+
+**"The mutation killed" is only evidence if the mutation matches the regression class.** Twice a
+genuine kill was demonstrated against a line adjacent to the defect — once mutating a field to a
+sentinel (proving `Some(x) != None`) when the class was a value collapsing *to* `None`, and once
+mutating the `None` branch when the live defect was a running `max` two statements later.
+
+**Three dispositions that look identical at the call site can have opposite requirements.**
+`skipped_commits`, `skipped_churn` and `unattributed` are all a `continue` in one loop; two must
+advance the watermark and one must not. The implementation honoured that at the row and lost it
+to a running `max` — and `ON DELETE CASCADE` made it the *normal* case, so one artifact deletion
+silently dropped its whole event/link/citation history.
+
+**A controller instruction is a hypothesis.** Four of mine were wrong or incomplete and every one
+was caught by an agent verifying rather than complying: the `EnvGuard` path, `dead_code`
+transitivity, an allowlist assertion that could not kill the mutation it named, and the
+worktree-under-main-root premise. Brief them to check, and mean it.
 ## Rulings
 
 Append below. Newest run first.
