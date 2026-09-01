@@ -112,6 +112,12 @@ done < <(GIT_INDEX_FILE="$idx" git diff-index --cached --name-only HEAD)
     echo
     echo "If you have read the diff and the content is genuinely yours, staging it"
     echo "satisfies this check. \`--no-verify\` also works and is the wrong habit."
+    # Forward reach: this hook teaches ITS rule, and every hook here teaches only its
+    # own, so the sequence was being learned one collision at a time — nine cross-session
+    # messages and ~2h across two sessions for one two-author commit, measured 2026-09-01.
+    # Single emitted copy, shared by all three refusing hooks, so the three cannot drift.
+    _tail="$(dirname "$0")/commit-sequence-tail.txt"
+    [ -r "$_tail" ] && { echo; cat "$_tail"; }
 } >&2
 
 exit 1

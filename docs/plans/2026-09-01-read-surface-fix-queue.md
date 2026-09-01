@@ -30,7 +30,7 @@ output is mostly other sessions' work, so it is last and its deliverable is a re
 |---|---|---|---|
 | 1 | double-frontmatter corruption in `artifact(create)` **and `update`** | code fix | **done** — 2 sites guarded, 4 tests, 3 mutations measured |
 | 2 | heading-miss discards the `Available headings` hint | code fix | **done** — 2 sites guarded, 3 tests, 3 mutations measured |
-| 3 | hook refusal-text "what comes next" tail | design + shell | queued — blocked on a design call |
+| 3 | hook refusal-text "what comes next" tail | design + shell | **done** — one emitted copy, 3 hooks, end-to-end probed |
 | 4 | triage the 27 open bugs (verify-open cadence) | survey | queued |
 
 ## 1 — double-frontmatter corruption (`a1dd1e9b0ef2f999`, archived)
@@ -162,7 +162,8 @@ known load-sensitive `run_exits_after_idle_timeout_with_no_connections`, filed a
 verified isolated twice today against a 10s budget.
 ## 3 — hook refusal-text tail
 
-Implement `docs/plans/2026-09-01-shared-checkout-commit-sequence-guide.md`. Each pre-commit hook
+Implement `docs/plans/archive/2026-09-01-shared-checkout-commit-sequence-guide.md` (archived on
+completion; superseded by the convention page). Each pre-commit hook
 teaches its own rule at its own collision and stops, so the sequence is learned one collision at a
 time — measured cost on 2026-09-01: nine cross-session messages and roughly two hours across two
 sessions.
@@ -172,6 +173,37 @@ shared text. Four copies drift and `link_scan` cannot see shell strings, so the 
 helper emitting a common tail with each hook prepending its own rule — but that is a decision, not
 a transcription.
 
+
+### Outcome (2026-09-02) — the design call, made
+
+**One emitted copy, `scripts/commit-sequence-tail.txt`, read by all three refusing hooks**
+(`pre-commit-foreign-index.sh`, `pre-commit-unreviewed-content.sh`, `pre-commit-ledger-counts.py`)
+immediately before each refuses. The prose — six steps, each with the measurement it was paid for,
+plus the refuted guide-injection route — lives once at
+[`docs/conventions/shared-checkout-commit-sequence.md`](../conventions/shared-checkout-commit-sequence.md).
+
+**That split is a summary and its source, not two copies** — the same shape as `CLAUDE.md`'s gate
+sentence against `gate-ordering.md`. It answers the open question this queue recorded (*four copies
+drift*) by having one, and the second concern (*`link_scan` cannot see shell strings*) by putting
+the citable prose in markdown where the scanner does reach it.
+
+**Probed end to end, not just unit-poked.** A throwaway repo, a seeded `session-stage-log`, and the
+real `pre-commit-foreign-index.sh`: **exit 1**, and the refusal carries **both** its own rule and
+the shared sequence — 57 lines against ~32 before. Python's emit path and bash's `dirname`
+resolution were checked separately, including from a different cwd, since those are the parts that
+can vary; the `cat` of a verified-readable file cannot.
+
+**The probe's first run was a false pass, and it is the useful part.** I seeded the stage log with
+`git rev-parse :peer.txt` — a *full* blob sha — while the hook derives its key from `git diff
+--cached --raw`, which is **abbreviated**. The lookup missed, the hook exited **0**, and nothing
+said why. A fixture that does not match the parser under test produces a green that means nothing,
+and this one would have been reported as *"the hook does not fire"* rather than *"my fixture is
+wrong"*. Re-derived the key the hook's own way and it refused immediately.
+
+**Honest bound, carried in the doc rather than only here:** a refusal still fires *after* the work
+it invalidates. This shortens recovery from N collisions to one; it does not move the teaching
+before the work. Only a per-session worktree does that, which
+`scripts/pre-commit-unreviewed-content.sh`'s own header already says.
 ## 4 — verify-open triage
 
 CLAUDE.md's verify-open cadence: reconcile every `Status: open` entry older than 14 days against

@@ -23,6 +23,101 @@ use std::process::Command;
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
+/// The shared commit-sequence tail exists and says something.
+///
+/// **Why this needs a gate at all.** All three refusing hooks read
+/// `scripts/commit-sequence-tail.txt` **best-effort** — bash guards with `[ -r … ]`, Python
+/// swallows `OSError` — because a missing tail must never turn a hook's own verdict into a
+/// crash. That is the right failure mode and it is also a silent one: delete the file and
+/// every refusal quietly reverts to its pre-2026-09-02 text, all three at once, with no
+/// error anywhere and every test still green.
+///
+/// This is CLAUDE.md § *Testing Discipline*'s loudness law read from the other side: an
+/// alarm nothing reaches is as informative as no alarm, and a best-effort read whose
+/// absence nobody observes is a mechanism that can leave without being noticed. The
+/// observer who would otherwise notice is a session mid-collision, which is the worst
+/// possible moment to discover the guidance is gone.
+///
+/// **Asserts content, not existence.** An empty file is readable, so `exists()` alone
+/// passes in the broken world — the same empty-string trap `heading_hint` carried at
+/// `a35a9c35`. The two anchors below are the load-bearing halves: the opening phrase is
+/// what makes the text recognisable as the shared tail rather than any other file, and the
+/// pointer is the only route from a terse refusal to the reasoning. Either going is a
+/// silent downgrade.
+#[test]
+fn the_shared_commit_sequence_tail_is_present_and_non_trivial() {
+    let path = repo_root().join("scripts/commit-sequence-tail.txt");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "cannot read {}: {e}\n\nAll three refusing pre-commit hooks read this file \
+             best-effort, so its absence is SILENT: every refusal reverts to its own rule \
+             alone and nothing reports it. If the tail moved, move this gate with it — do \
+             not delete it.",
+            path.display()
+        )
+    });
+
+    assert!(
+        text.contains("This is one rule in a sequence"),
+        "the tail must open with the phrase that makes it recognisable as the shared \
+         sequence; found: {:?}",
+        text.chars().take(80).collect::<String>()
+    );
+    assert!(
+        text.contains("docs/conventions/shared-checkout-commit-sequence.md"),
+        "the tail is the summary and that page is its source — without the pointer a \
+         reader who just tripped a hook has no route to the reasoning"
+    );
+}
+
+/// Every hook that refuses actually REACHES the tail — call site, not mention.
+///
+/// The test above proves the file has content; this proves something runs it. Together they
+/// are the two halves the loudness law asks for — the emitter and the path to it — and
+/// neither implies the other: a present file nothing reads is decoration, and a reader
+/// pointed at an absent file is silence.
+///
+/// **This assertion is anchored on the CALL, and the first version was not.** It grepped
+/// each script for `commit-sequence-tail.txt`, which survives in
+/// `_emit_sequence_tail`'s own body after its call site is deleted — so the mutation
+/// "stop calling it" left the test green. That is `IC-3`, declared-not-wired, occurring
+/// inside the test written to prevent it: the helper was declared, nothing reached it, and
+/// the check could not tell the difference. Measured 2026-09-02, and the reason the
+/// anchors below are per-language rather than one shared substring.
+///
+/// Greps rather than executes because the refusal path is environment-shaped (a seeded
+/// `session-stage-log`, a `next-index-*` `GIT_INDEX_FILE`, a `CLAUDE_CODE_SESSION_ID`), and
+/// a test that cannot construct those would assert nothing. The end-to-end run was done
+/// once by hand against `pre-commit-foreign-index.sh` — exit 1, refusal carrying both its
+/// own rule and the tail — and is recorded in
+/// `docs/plans/2026-09-01-read-surface-fix-queue.md` § 3 rather than re-derived here.
+#[test]
+fn every_refusing_hook_emits_the_shared_tail() {
+    // Each anchor is the line that RUNS the emission in that script's language, chosen so
+    // that deleting the call — while leaving any helper, comment or path string in place —
+    // fails this test.
+    for (script, call_anchor) in [
+        ("scripts/pre-commit-foreign-index.sh", "cat \"$_tail\""),
+        ("scripts/pre-commit-unreviewed-content.sh", "cat \"$_tail\""),
+        (
+            "scripts/pre-commit-ledger-counts.py",
+            "\n    _emit_sequence_tail()",
+        ),
+    ] {
+        let text = std::fs::read_to_string(repo_root().join(script))
+            .unwrap_or_else(|e| panic!("cannot read {script}: {e}"));
+        assert!(
+            text.contains(call_anchor),
+            "{script} refuses commits but never REACHES the shared sequence tail: no \
+             {call_anchor:?} on any path. A hook that teaches only its own rule is how the \
+             sequence came to be learned one collision at a time — nine cross-session \
+             messages for one two-author commit, measured 2026-09-01. Note this asserts the \
+             CALL, not a mention of the filename: the filename survives in a helper's body \
+             after its call site is gone, which is how the first version of this gate \
+             passed with the emission dead."
+        );
+    }
+}
 
 /// Every `edition = "…"` in the workspace manifest.
 ///

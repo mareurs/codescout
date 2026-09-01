@@ -1,0 +1,25 @@
+This is one rule in a sequence, and the rest of it is why this refusal is cheap
+to hit twice. Each step below exists because skipping it cost something measured
+on this checkout — the sequence, not the rules, is what nobody had written down.
+
+  1. Enumerate before assuming you are alone.
+       scripts/peer-sessions.sh — not ListAgents, which is per-profile and once
+       reported 2 peers where 16 sessions existed across 3 profiles.
+  2. Identify your own work POSITIVELY, by the Session-Id trailer or
+       scripts/file-provenance.py — never by a commit range. A range is a proxy
+       for authorship and stops being one the moment anyone else commits.
+  3. Decide the COUPLING before you stage. A count and its member, a citation
+       and its target, commit together or not at all: every partial state is a
+       red tree for every other session.
+  4. Stage, then read the diff, then commit by pathspec.
+       git add <paths> && git diff --cached && git commit -m "..." -- <paths>
+       Staging is what satisfies the unreviewed-content check; the pathspec is
+       not. And -m goes BEFORE --, or git reads it as a pathspec.
+  5. Verify the INDEX, not the exit code. `git add` can fail on a contended
+       lock, and a retry loop that exhausts looks identical to one that worked.
+  6. If a commit captures another session's file: stop. Do not reset or amend.
+       On a shared tree the repair destroys work the defect only mislabels.
+       Report it instead.
+
+Full sequence, with the measurements each step was paid for:
+  docs/conventions/shared-checkout-commit-sequence.md

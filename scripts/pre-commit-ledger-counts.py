@@ -25,6 +25,7 @@ the test reddens until you change the other.
 from __future__ import annotations
 
 import json
+import pathlib
 import subprocess
 import sys
 
@@ -287,6 +288,29 @@ def actual_counts(valid: set[str], source: str) -> dict[str, int]:
     return out
 
 
+def _emit_sequence_tail() -> None:
+    """Print the shared commit-sequence tail, if it is readable.
+
+    Forward reach. Each hook here teaches only its own rule at its own collision, so the
+    sequence was being learned one collision at a time -- nine cross-session messages and
+    roughly two hours across two sessions for one two-author commit, measured 2026-09-01.
+
+    Single emitted copy (``scripts/commit-sequence-tail.txt``), shared by all three
+    refusing hooks, so the three texts cannot drift apart. The full prose with the
+    measurement behind each step lives in
+    ``docs/conventions/shared-checkout-commit-sequence.md``; that split is a summary and
+    its source, the same shape as CLAUDE.md's gate sentence against
+    ``docs/conventions/gate-ordering.md``, not two copies of one text.
+
+    Best-effort by design: a missing or unreadable tail must never turn this hook's own
+    verdict into a crash, and that verdict is already on stderr by the time this runs.
+    """
+    tail = pathlib.Path(__file__).with_name("commit-sequence-tail.txt")
+    try:
+        print("\n" + tail.read_text(encoding="utf-8"), file=sys.stderr, end="")
+    except OSError:
+        pass
+
 def main() -> int:
     source = "index"
     as_json = False
@@ -383,6 +407,7 @@ def main() -> int:
         "same pass — a count and the judgement reading it move independently.",
         file=sys.stderr,
     )
+    _emit_sequence_tail()
     return 1
 
 

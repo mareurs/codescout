@@ -161,6 +161,45 @@ Not designed. Three directions, none costed:
 - **Per-session worktrees**, which dissolve this and most of `IC-17` — and which
   `pre-commit-unreviewed-content.sh`'s own header already names as the only complete answer.
 
+
+### Direction 3 is FALSIFIED — per-session worktrees do not dissolve this (2026-09-02)
+
+Reported by `codescout-8a`, who hit the same empty intersection **inside a private linked
+worktree** (`.worktrees/audit-shards-t7`) during a `git rebase` — the one configuration this file
+named as the escape.
+
+1. The rebase stopped mid-replay on a transient `index.lock`. The staged content was commit
+   `79a03aab`'s own diff, replayed by their own rebase. **A linked worktree's index is
+   per-worktree**, so no peer could have staged into it.
+2. `git commit -C 79a03aab` was refused by `pre-commit-foreign-index.sh` as *"paths staged by
+   another session"*, attributed to `(unrecorded)`.
+3. The hook's own prescribed remedy is **structurally unavailable** there:
+   `fatal: cannot do a partial commit during a cherry-pick.`
+
+**The discriminator is the defect, and it sits one layer above where this bug was filed.** The
+guard keys on *"is this staging CLAIMED?"* rather than *"is this index SHARED?"* — and `rebase`
+stages through plumbing that writes no `session-stage-log` entry, so a session's **own** paths read
+as foreign. That is `IC-2` (a gate keyed on an event it cannot observe substitutes a proxy) rather
+than `IC-17`, and it means isolating the resource does not help while the proxy stays wrong.
+
+Two one-line guards they propose, neither weakening the shared-checkout case — **not yet verified
+by me, recorded as their claim:**
+
+- exit 0 when `git rev-parse --git-dir` differs from `--git-common-dir` (linked worktree ⇒ private
+  index);
+- exit 0 while a rebase or cherry-pick is in progress (`$GIT_DIR/rebase-merge`, `CHERRY_PICK_HEAD`).
+
+**They used `--no-verify` for that one commit and disclosed it**, having identified the content
+*positively* first rather than by elimination: `git patch-id --stable` of the staged diff was
+`09a31bb672d83b6c03c1694c23bc5802f73baa31`, byte-identical to `79a03aab`'s own. That is the right
+shape for the one case where the guard is provably wrong, and it is worth separating from the habit
+the guard's own text warns about — the disclosure and the positive identification are what make it
+different.
+
+**What this changes here:** § *Fix* direction 3 (*"per-session worktrees, which dissolve this"*) is
+wrong as written and must not be costed as an escape. Directions 1 and 2 stand. A fourth is now
+available and is cheaper than either: **fix the discriminator** — ask whether the index is shared,
+which git can answer directly, instead of whether the staging was claimed, which it cannot.
 ## Tests added
 
 None. This is a report, not a fix. The simulation harness that produced the six-row table
@@ -182,7 +221,7 @@ owner-field direction is the only one left and this becomes a design task, not a
 
 ## References
 
-- `docs/plans/2026-09-01-shared-checkout-commit-sequence-guide.md` — the friction this bug
+- `docs/plans/archive/2026-09-01-shared-checkout-commit-sequence-guide.md` — the friction this bug
   is the guard-side half of; § *Where a two-author commit is genuinely unrepresentable*
   carries the simulation.
 - `docs/trackers/issue-clusters.md` § `IC-17` — the class; its *Mechanism status* line

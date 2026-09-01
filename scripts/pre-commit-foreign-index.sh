@@ -208,6 +208,11 @@ done < <(git diff --cached --raw 2>/dev/null |
     echo "including the ones ListAgents hides from you."
     echo
     echo "\`--no-verify\` also works and is the wrong habit."
+    # Forward reach — see scripts/commit-sequence-tail.txt. This hook's rule is step 4's
+    # consequence; the rest of the sequence is what stops the next collision rather than
+    # this one. Single emitted copy shared by all three refusing hooks.
+    _tail="$(dirname "$0")/commit-sequence-tail.txt"
+    [ -r "$_tail" ] && { echo; cat "$_tail"; }
 } >&2
 
 exit 1
