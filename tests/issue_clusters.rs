@@ -572,6 +572,7 @@ fn the_ledger_parsers_agree_on_a_fixture() {
 **Slug:** `cluster/gamma`
 | IC-4 | fourth | `cluster/gamma` | 2 | not yet | none yet |
 **Members:** `filter={...}` — n=2, by query.
+**Promotes to:** A stray ` backtick opens here, and a stale n=42 follows it.
 ";
 
     let mut child = Command::new("python3")
@@ -780,6 +781,12 @@ fn every_declared_class_states_a_bare_n() {
 ///    `IC-3` states a count and declares no slug. Only the `## IC-` reset stops `IC-3`'s 99
 ///    being filed under `beta` — a silent wrong answer, the worst shape available here.
 /// 4. **A bare `n=` on a non-field line is not a claim.** `**Claim:**` prose is not gated.
+/// 5. **A DANGLING backtick opens nothing — the tail stays CHECKED.** `IC-4`'s 42 follows a
+///    lone backtick and must come back as a claim. This is the property the span rewrite could
+///    have broken in the SILENT direction, which adjacency structurally could not: an unbalanced
+///    span swallowing the rest of the line would skip real claims with nothing to show for it.
+///    It was a comment on `bare_n_values` until `codescout-3e` measured it from outside; a
+///    property worth an external measurement is worth a test.
 ///
 /// **The ORDER of `IC-2` and `IC-3` is what makes discrimination 3 able to fail.** A slug now
 /// spans two fields, so it is no longer consumed on use and the `## IC-` reset is the only
@@ -814,6 +821,7 @@ fn the_bare_n_claim_parser_discriminates() {
 ## IC-4 — fourth
 **Slug:** `cluster/gamma`
 **Members:** `filter={...}` — n=2, by query.
+**Promotes to:** A stray ` backtick opens here, and a stale n=42 follows it.
 ";
     let got = parse_bare_n_claims(ledger, &valid);
 
@@ -824,6 +832,7 @@ fn the_bare_n_claim_parser_discriminates() {
             ("alpha".to_string(), "Promotes to".to_string(), 7),
             ("alpha".to_string(), "Promotes to".to_string(), 7),
             ("gamma".to_string(), "Members".to_string(), 2),
+            ("gamma".to_string(), "Promotes to".to_string(), 42),
         ],
         "expected exactly alpha's two bare claims and gamma's one.\n\
          - `n=2`/`n=27`/`n=4` are BACKTICKED TOKENS and must be skipped\n\
