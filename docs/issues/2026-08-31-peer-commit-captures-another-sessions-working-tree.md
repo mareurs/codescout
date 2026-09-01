@@ -563,6 +563,46 @@ The content grep is the one a careful author reaches for, because it looks like 
 the *substance*. It is checking a list of things already accounted for. Prefer the number: it
 makes no claim about what the foreign content is, which is exactly why nothing about the foreign
 content can defeat it.
+
+### The seam is created by the append convention, and it is 5.9% of this ledger
+
+`codescout-68`'s reading of the `F-93` split, measured rather than accepted. The capture was not
+an accident of timing: **this repo's documented append discipline puts a commit boundary exactly
+where a peer's `git add` can fall.** `artifact(append_entry)` writes the `## <ID> — <title>`
+section, and CLAUDE.md then says *"THEN add the Index / Wins Index row, using the id the call
+returned — never before"*. Two writes, necessarily ordered, with a gap between them. Every entry
+written correctly has that window.
+
+So it should be visible in history, and it is. Over all **186** `F-N`/`W-N` entries in
+`docs/trackers/bug-fix-session-log.md`, comparing the first commit to introduce `## <ID> — `
+against the first to introduce `| <ID> | 20`:
+
+| | count |
+|---|---:|
+| body and index row in one commit | 173 |
+| **split across two commits** | **11** (5.9%) |
+| one shape not findable by `-S` (format drift) | 2 |
+
+**Then the part that matters, and it is not the 11.** Classifying those splits by the
+`Session-Id` trailer:
+
+| | count |
+|---|---:|
+| cross-session — a genuine capture | **1** (`F-93`: `c2a08c22` → `d91c1155`) |
+| same-session — one author, two commits | **0** |
+| **no trailer — unknowable, permanently** | **10** |
+
+The trailer is younger than the corpus, so ten of eleven splits can never be classified. And
+`%an` reads the identical name on every one of them — `IC-10` in a line — so their default
+reading is the **benign** one, *"same person split their own work"*, which is both the likelier
+prior and completely unfalsifiable. A capture in that set is indistinguishable from tidiness.
+
+**Two consequences for anyone reconstructing authorship here.** First, `git log -S` on one shape
+of an entry returns one commit and **looks complete** — the answer is well-formed, singular, and
+wrong for 5.9% of entries. Probe the heading *and* the index row; disagreement is the signal.
+Second, this is the honest scope of the trailer: it is an excellent positive instrument going
+forward and it does nothing for the past. The ten are not a backlog to resolve, they are the
+measured cost of having added the instrument late.
 ## Candidate remedies
 
 > **Superseded by *Re-ranking, third time* above — kept for the reasoning, not the ranking.**
