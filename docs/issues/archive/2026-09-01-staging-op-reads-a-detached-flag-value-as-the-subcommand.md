@@ -98,10 +98,34 @@ cannot name an owner because the owner was never recorded. Per `a987df96`'s own 
 direction — but it is still wrong, and it is aimed squarely at automated callers, which are
 the ones that use `git -C`.
 
-**Two guards in this repo disagree.** `codescout-companion`'s worktree-ambiguity hook
-*blocks* a bare `git commit` and instructs `git -C /full/worktree/path commit ...`; this hook
-then cannot attribute anything staged that way. Following one guard defeats the other. That
-collision is the finding, not the parse bug alone.
+**~~Two guards in this repo disagree.~~ RETRACTED 2026-09-01, same day, by probe.** This
+section originally argued that `codescout-companion`'s worktree-ambiguity hook *mandates*
+`git -C /full/path`, which this hook then cannot attribute — "following one guard defeats the
+other" — and called that collision the real finding, larger than the parse bug.
+
+It is **wrong**. Raised by peer `codescout-68`, who hit both guards in sequence and noticed the
+ordering, then confirmed with one command:
+
+```
+git add --dry-run docs/RELEASE.md      -> exit 0, NOT blocked
+```
+
+The worktree guard refuses the **commit-family** verbs (`commit/push/reset/rebase/merge/
+checkout -b`) and never refuses `git add`. Both of the commands it blocked merely *contained*
+`git commit`. Since attribution is recorded at **staging** time, the compliant path leaves
+staging bare and attributable, and the mandated `-C` lands on the commit — which claims
+nothing. No tension exists on the path where attribution happens.
+
+**The population was smaller than the framing implied, too**, and was only measured after the
+challenge: `-C` accounts for **32 of 1586** real `git add` invocations (**2.0%**), with **0**
+using the separated `--git-dir <path>` form. Not empty — those 32 were genuinely mis-attributed
+and `-` is the recoverable direction — so the fix stands on its own merits. What does not stand
+is the claim that it resolved a guard collision.
+
+Recorded as `F-90` in `docs/trackers/bug-fix-session-log.md`: being blocked by a guard twice
+felt like having tested it, and the claim reached five surfaces — three commit messages, this
+file, and a source comment — before anyone probed it. A refusal establishes what a guard
+*refuses*, never what it *permits*.
 
 ## Fix
 

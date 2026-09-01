@@ -113,9 +113,22 @@ staging_op() {
         case "$_so_tok" in
             # Global flags that consume the NEXT argv token, so the value lands in its
             # own slot. Without this arm the value is classified as the subcommand: a
-            # path matches no verb, falls to `*) return 1`, and `git -C <path> add` --
-            # the form codescout-companion's worktree guard MANDATES -- silently records
-            # `-` instead of the stager.
+            # path matches no verb, falls to `*) return 1`, and `git -C <path> add`
+            # silently records `-` instead of the stager.
+            #
+            # SCOPE, measured 2026-09-01 rather than argued: 32 of 1586 real `git add`
+            # invocations across this project's session transcripts use `-C` (2.0%), and
+            # 0 use the separated `--git-dir <path>` form. Small, not empty -- those 32
+            # were mis-attributed, and `-` is recoverable, so the fix is cheap and right.
+            #
+            # An earlier version of this comment claimed the companion's worktree guard
+            # MANDATES `git -C`, making the two guards directly conflict. That was WRONG,
+            # and a peer caught it. Probed 2026-09-01: a bare `git add` is NOT blocked by
+            # that guard -- it refuses the commit-family verbs (commit/push/reset/rebase/
+            # merge/checkout -b). Attribution is recorded at STAGING time, so the
+            # compliant path leaves staging bare and attributable, and the mandated `-C`
+            # lands on the commit, which claims nothing. The conflict was overstated; the
+            # parse bug was not.
             #
             # HAND-MAINTAINED SUBSET, and deliberately so: git exposes no way to ask it
             # which global flags take a value, so this list can only ever be a snapshot.
