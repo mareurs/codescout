@@ -5415,7 +5415,7 @@ survives regardless.
 
 **Rests on:** the search is over *propositions* (places that state X), but every cheap query is over *forms* (places matching a pattern). The gap between those two sets is invisible to the query by construction, so no refinement of the query closes it.
 
-**Status:** validated — 2 independent sessions, same defect, same run
+**Status:** validated — 3 instances, 3 sessions. The founding pair was 4-vs-5 in one run; the third (2026-09-01) is 4-vs-60, an order of magnitude worse.
 
 **Observed (2026-08-30).** Two sessions independently enumerated every place the four-command gate is transcribed, in order to deduplicate them. Both returned **four**. The real count was **five**. The agreement between two independent sweeps was not corroboration — it was the same defect run twice, and it raised confidence in a wrong number rather than exposing it.
 
@@ -5447,6 +5447,32 @@ So the class is not *prose vs fenced block*. It is **any query keyed on a token 
 
 ## R-139 — the parameter your own context supplies for free is the one you will omit
 
+
+**Third instance, 2026-09-01 — and the ratio is 15×, not 1.25×.** Mining the bug corpus for a
+candidate defect class, the proposition was *"bug files whose root cause is a selector narrower
+than the population it names"*. The query was over **titles** matching
+`only (scans|counts|reads|matches)|narrower|subset|blind to|misses`, and returned **4**. The same
+proposition queried over **bodies** returned **60**. Both are clean positive integers, and nothing
+in either output marks the gap between them.
+
+Two things this instance adds beyond the 2026-08-30 pair:
+
+- **Magnitude.** The founding evidence was 4-vs-5 — one missed site, recoverable by a careful
+  reader. 4-vs-60 is a different regime: at that ratio the shape query is not *under-counting* the
+  proposition, it is **sampling** it. The figure was safe to publish only because it was labelled
+  `n=4 is a floor, not a census` in the entry it fed; bare, it would have read as the class's size.
+- **The proposition was itself this law.** The class being mined — `issue-clusters:IC-18`, *a
+  selector narrower than the population it names* — is what the query was an instance of. Knowing
+  the law, holding it in working memory, and actively writing its definition prevented none of it.
+  That is `CLAUDE.md` § *Observer Blindness* reproduced in a further setting, and it is the
+  strongest available argument that the remedy is **structural** — report the count *and the form
+  you searched* — rather than attentional.
+
+The tell was not suspicion of the number. It was running the body query for a *different* reason
+— hunting a third member — and noticing that two answers to the same question disagreed by an
+order of magnitude.
+
+**Valid:** invariant
 **Valid:** invariant
 
 **Rests on:** a published claim is evaluated in the reader's context, not the author's. Any parameter the author's context supplies silently is one the author cannot perceive as missing — so the omission is invisible to the person best placed to fix it, and *only* to them.
