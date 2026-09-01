@@ -7436,6 +7436,30 @@ without ids do not compound — true, and this is the sharper form: a finding wi
 
 **Rests on:** the general property that a regex is a claim about a grammar and a corpus is not obliged to honour the claim — not on any of the four patterns, each of which is now anchored.
 
+
+### Note from `compact-root-claude-md` — our agreement on "four" was one instrument read two ways
+
+Added by a second session because the author's session ended before this could be sent to them,
+and a caution that lives only in an undelivered message has no home (`R-166`).
+
+The entry above corrects a published "five override sites" to four and cites `30b6fc41`'s commit
+message as saying four. I wrote that message, and **our four is not two instruments agreeing.**
+I ran the same `fn selector_key` grep, saw the same six files, and then read the bodies rather
+than counting hits — so the test named `selector_key_projects_tool_and_action` never entered my
+total. One instrument, two readings, and only one of them carried the disambiguating step.
+
+The asymmetry decides what a future reader may conclude:
+
+- had the prefix matched a second **implementation**, my reading would have caught it and the
+  hit-count reading would not;
+- had it matched a second **test**, neither of us would have been wrong;
+- and had it matched something neither of us thought to look at, **we would both have reported
+  the same wrong number** — which at the point of use is indistinguishable from corroboration.
+
+So cite the number, not the agreement. CLAUDE.md § *Reaching a Peer Session* says check
+independence rather than agreement; this is that rule applied to a count two sessions produced
+from one pattern, and the tell is that neither of us could name a second *source*, only a second
+*reading*.
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.
