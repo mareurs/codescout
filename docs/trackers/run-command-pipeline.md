@@ -1,7 +1,7 @@
 ---
 id: '5d022cd3b41009f4'
 kind: tracker
-status: draft
+status: draft — first ruling recorded (R1)
 title: run_command(pipeline=[...]) design
 tags:
 - run_command
@@ -172,6 +172,57 @@ together" signal pointed at this fix correctly. See
   targets `run_command`, measured 2026-08-27). Nothing to update. The enforcement this item
   was protecting lives at `src/tools/run_command/mod.rs:211`; see the correction on Concern 3.
 
+
+## Rulings
+
+### R1 (2026-09-01, marius) — pipeline calls exec `bash -c`, not `sh -c`
+
+**Settles the shell half of #4 (pipefail) and unblocks #7.** Strategy C's headline advantage
+was *"pipefail = `set -o pipefail` in shell wrapper, no Rust state machine"* — and
+`set -o pipefail` is not POSIX `sh`. Measured 2026-09-01: `src/platform/unix.rs:71-86` execs
+`Command::new("sh")`, so the advantage rested on a shell codescout does not use. **Ruled: use
+`bash -c` for pipeline calls.**
+
+**Why this is nearly free — half of it is already shipped.** `src/platform/windows.rs:182-193`
+already execs `git_bash_path()` with `-c`; Windows has been on bash the whole time, for the
+reason its own doc comment gives — *"the shell is the same POSIX shell on every platform …
+under `cmd.exe` none of those binaries exist, so the guidance codescout ships was unrunnable
+on Windows."* This ruling extends that existing principle to Unix for one call shape rather
+than introducing a new dependency direction.
+
+**The one new obligation.** `shell_unavailable_hint()` returns `None` unconditionally on Unix
+(`src/platform/unix.rs:67-69`) because *"POSIX guarantees `/bin/sh`"* — a guarantee that does
+**not** extend to bash. A pipeline call therefore needs a bash-availability probe and a
+`RecoverableError` naming the requirement when it is absent. The Windows twin is the exact
+precedent: it already answers `Some(hint)` when no Git Bash is installed, and `run_command`
+already turns that into a recoverable error rather than a bare `program not found`. Build the
+Unix pipeline path the same way; do not let it fail as a spawn error.
+
+**Consequence deliberately accepted, not waved away.** Single-command `run_command` stays
+`sh -c` on Unix, so the tool will exec two different shells depending on which field is set.
+A bashism then works in pipeline mode and fails bare — a real, small inconsistency. It is
+accepted rather than resolved by moving *all* Unix shell use to bash, because that would make
+bash a hard dependency for every `run_command` call rather than for the one shape that needs
+it. **Revisit-when:** a user reports a command behaving differently bare vs. as stage 0, or
+any second feature needs a bashism — at that point the divergence is paying no rent and
+unifying on bash is the cheaper answer.
+
+**Still open after this ruling:** the pipefail *semantics* half of #4 (stop-on-first-non-zero,
+keep prior buffers, surface the failing stage) is unchanged and still decidable as written.
+#7's choice between Strategy C and A/B is now unblocked but **not made** — C's remaining cost
+is that per-stage timeout is impossible, which § *Resume* step 2 says to rule knowingly.
+
+> **Note on why per-stage cancellation is NOT among C's costs.** An earlier framing of this
+> tracker's open questions treated "kill one stage, keep the pipeline" as C's deciding
+> drawback. It is not a requirement: `run_command` exposes no per-stage control surface, the
+> MCP call is request/response with no mid-flight channel, #2 makes pipeline mutually
+> exclusive with `run_in_background` (closing the one handle-based path), and the existing
+> cancellation intent is explicitly the opposite — `src/tools/run_command/inner.rs:436-439`
+> kills *"the entire pipeline … not just the shell"* on future-drop, by design. The
+> SIGPIPE-driven behaviours callers actually rely on (`head` closing stdin kills the producer;
+> killing a producer EOFs its consumers) are free in any shell pipeline and survive under C —
+> `unix.rs:80` resets SIGPIPE to `SIG_DFL` in `pre_exec` precisely so they work. See
+> `design-backlog-session-log:F-4`.
 ## Tests needed
 
 - Happy: 3-stage `seq 1 100 | grep ^5 | wc -l` produces 11 (one "5", "50"-"59", "5"; 11 matches).

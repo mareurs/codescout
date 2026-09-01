@@ -13,7 +13,7 @@ topic: design backlog triage
 entry_prefix:
   - F
   - W
-entry_high_water_F: 3
+entry_high_water_F: 4
 ---
 
 # Session Log — Design-Decision Backlog Triage
@@ -80,6 +80,7 @@ surfaces that each answer a different question — `docs/trackers/capability-pro
 | F-1 | 2026-09-01 | med | methodological | fixed-verified | a plan's `status: draft` means two opposite things, and triage read the wrong one |
 | F-2 | 2026-09-01 | low | measurement | fixed-verified | a grep-derived tool count was scoped to the regex's shape, not to the registry |
 | F-3 | 2026-09-01 | high | stale-substrate | fixed-verified | the pipeline tracker's Resume routes an implementer to the strategy its own review rejected |
+| F-4 | 2026-09-01 | med | methodological | fixed-verified | a design cost was illustrated with a use case the source never claimed, and no caller can reach |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -455,6 +456,80 @@ last section) predates its newest dated section. Not built, not filed.
 **Rests on:** `src/tools/run_command/mod.rs:206-215`; `src/util/path_security.rs:1167-1212`
 (doc comment); `src/tools/run_command/inner.rs:175-228`, `:406`, `:279-605`;
 `symbols(name="exec_one_stage")` → 0 matches.
+
+## F-4 — a design cost was illustrated with a use case the source never claimed, and no caller can reach
+
+**Valid:** dated 2026-09-01
+
+**Category:** methodological · **Severity:** med · **Status:** fixed-verified
+
+**Observed.** Presenting the pipeline design's open questions, I named per-stage cancellation
+as Strategy C's deciding cost — *"the one irreversible choice in the set … if you'd ever want
+to kill a stuck `cargo test` stage without tearing down the pipeline, C is wrong."* The user
+asked, in four words, why anyone would want that. **There is no answer.** I had taken the
+review's line *"per-stage cancellation impossible"* and manufactured a use case to make it
+concrete, without checking whether the capability was reachable.
+
+**Got.** Four facts, none of which needed more than one read:
+
+- `run_command` exposes **no per-stage control surface** — its parameters are `command`, `cwd`,
+  `timeout_secs`, `run_in_background`, `interactive`, `acknowledge_risk`, `workspace`.
+- The MCP call is **request/response**. There is no mid-flight channel through which a
+  per-stage cancel could be issued even if one existed.
+- Design surface #2 makes pipeline **mutually exclusive with `run_in_background`**, closing
+  the one handle-based path that might have offered mid-flight control.
+- The existing cancellation intent is **explicitly the opposite**:
+  `src/tools/run_command/inner.rs:436-439` kills *"the entire pipeline … not just the shell"*
+  on future-drop. Per-stage cancellation is not an unimplemented feature; killing everything
+  is the deliberate design.
+
+Per-stage *timeout* is hollow for the same reason: the only stage that realistically needs one
+is the producer, which a total timeout already covers. And the behaviours callers actually want
+are free in any shell pipeline and survive under C — `head` closing stdin SIGPIPEs the
+producer, killing a producer EOFs its consumers — with `src/platform/unix.rs:80` resetting
+SIGPIPE to `SIG_DFL` in `pre_exec` precisely so the first one works.
+
+**What the check found instead.** The review's *real* risk was one line above, flagged at
+`Confidence: medium` and never checked: *"`set -o pipefail` is not POSIX sh."* Measured —
+`src/platform/unix.rs:71-86` execs `Command::new("sh")`. On this host `/bin/sh` → bash, so it
+passes locally and on every local run; Debian/Ubuntu CI ships dash as `/bin/sh`, where
+`set -o pipefail` errors. Strategy C's headline advantage was conditional on a shell codescout
+does not exec. That became the ruling (§ *Rulings* R1: pipeline calls exec `bash -c`).
+
+**Root cause — the failure mode is a plausible concern, not a wrong fact.** Everything I said
+about C was *quoted accurately from the review*. What I added was the use case, and a use case
+is a claim about the world that the source did not make. `R-19` covers asserting a checkable
+fact; this is the softer sibling — dressing a source's abstract limitation in a concrete
+scenario the source never claimed, which makes it *more* persuasive and *less* checked. The
+tell: I could not have named a caller who would exercise it, and did not try.
+
+**Why this entry is worth more than its severity.** It is the **first correction this session
+that came from a reader's doubt rather than my own scout** — F-1, F-2 and F-3 were all found
+by scouting. CLAUDE.md § *Testing Discipline* names this population as structurally
+unrecorded: *"a reader who doubts a figure and re-counts it produces nothing"*, so the corpus
+contains only cases where doubt failed to occur. This one **found something**, so it is a
+catch rather than a denominator, and belongs in the record for exactly that reason. Note also
+what made it cheap: the question cost four words and did not propose an alternative — it asked
+for the *justification*, which is the shape that finds an unjustified claim fastest.
+
+**Second defect, same turn, recorded because it is the more embarrassing one.** The message
+announcing this finding ended *"**Logged as `design-backlog-session-log:F-4`**"*. It was not.
+No `append_entry` call was made in that turn — the sentence was written as though the act had
+followed. Claiming a completed write is worse than the analysis error it was reporting: the
+analysis was checkable and got checked, whereas a false completion claim is believed by
+default and, had the session ended there, would have left a citation in the transcript
+pointing at an entry that does not exist. There is no guard for this beyond re-reading one's
+own tool calls before asserting a write landed.
+
+**Fix idea.** For "X is impossible under this design": before publishing it as a cost, name the
+caller who would exercise X and the surface they would reach it through. If neither exists, the
+limitation is real and the *cost* is zero — say so, rather than illustrating it. And never
+write "logged as N" in the same message as the analysis; write the entry, read the returned id,
+then cite it.
+
+**Rests on:** `src/tools/run_command/inner.rs:436-439`; `src/platform/unix.rs:67-69`, `:71-86`,
+`:80`; `src/platform/windows.rs:182-193`; the `run_command` tool schema;
+`docs/trackers/run-command-pipeline.md` § *Rulings* R1.
 
 ## Template for new entries
 
