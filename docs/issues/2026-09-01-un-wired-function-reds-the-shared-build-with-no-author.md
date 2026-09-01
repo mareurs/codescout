@@ -195,13 +195,34 @@ available remedy that went unused; for this one it was used and was insufficient
 difference between a discipline gap and an information gap, and only the second requires a
 provenance channel to exist.
 
-**Datapoint on the mechanism.** `scripts/file-provenance.py` (shipped `0e657dc5`, same evening)
-is the channel this instance needed, and it existed — unknown to me — while I was inferring.
-`codescout-68` reports two correct positives from it within the hour, one of them identifying a
-peer's uncommitted `src/util/librarian_guard.rs` in their own `git diff`. **Not verified here**:
-I did not run it against `doctor.rs` after the fact, so this is their measurement and not mine.
-Two stated limits worth carrying: the default window is *since this path was last committed*,
-and `UNKNOWN` means no record matched — never "not yours".
+**Datapoint on the mechanism — corrected 2026-09-01, hours after it was written, by its own
+source.** `scripts/file-provenance.py` (shipped `0e657dc5`, same evening) is the channel this
+instance needed, and it existed — unknown to me — while I was inferring.
+
+This paragraph first recorded *"two correct positives within the hour"* as `codescout-68`'s
+measurement. They withdrew that framing themselves: at claim time **one of the two was
+confirmed** (`doctor.rs` → `SHARED`, corroborated when `codescout-09` independently owned the
+mutation run) and the second — `src/util/librarian_guard.rs` → `PEER` — was asserted as
+*correct* on the tool's answer alone, with nothing else behind it. Reported as two-of-two.
+
+The second has **since** been confirmed, and by a different instrument: that refactor landed as
+`c26943b5`, carrying `Session-Id: 3e275c54-d006-4cdc-a02f-c77837c1f1a0` — the session
+`file-provenance.py` had named. So the trailer corroborates what the tool said about
+*uncommitted* state, which is stronger support than the original claim offered, because the
+trailer is not the tool under test; it is the instrument the tool exists to substitute for when
+no commit exists yet.
+
+**Carry the sequence, not just the result.** Two-of-two is where this landed, but at claim time it
+was one-of-two-plus-an-assertion, and the missing confirmation arrived later from an instrument
+that did not yet exist for that file. Recording only the endpoint would make the tool's evidence
+base look stronger, and faster, than it was. Their own read: this is the `F-92` shape — right
+verdict, absent support — committed while writing to the party who filed `F-92`, which is another
+datapoint for the section heading two above rather than an aside.
+
+**Not verified by me either way**: I did not run `file-provenance.py` against `doctor.rs` after
+the fact, so none of these positives is my own measurement. Two stated limits worth carrying: the
+default window is *since this path was last committed*, and `UNKNOWN` means no record matched —
+never "not yours". That second one is the shape that produces instance five.
 
 **Cost:** one misrouted message, one correcting message, one re-routed message. The lint was
 already fixed by its owner before the reroute arrived (`d44a4409`), so the routing error cost

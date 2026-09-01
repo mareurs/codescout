@@ -241,7 +241,8 @@ which makes the arm most likely to fire unintentionally the one that explains it
 
 ## T-15 — Wire the eight unannotated guides into section-grain `get_guide`
 
-**Status:** open — start alongside T-14; no code change, so it cannot break the build.
+**Status:** open — **RE-SCOPED 2026-09-01 by measurement, and the measurement refutes this
+entry's own framing.** Split into T-15a (cheap, ready) and T-15b (authoring, needs a decision).
 **Valid:** dated 2026-09-01
 
 **Why:** the section-grain mechanism **shipped 2026-08-27** (`7579b32b1cd2362f` Phase 1) and
@@ -256,17 +257,61 @@ for f in src/prompts/guides/*.md; do printf "%s serves | %s words | %s\n" \
 **5,829 words**, the largest guide in the corpus and the one that auto-injects on the first
 `artifact` call of *any* session. Eight of ten guides have zero.
 
-**Scope discipline:** this is annotation of existing sections, and it is **independent of
-both** Phase 2 blockers on that bug (the 17,378 B decomposition and cross-topic shape
-disambiguation). It is **not** the same as that bug's *"`tracker-conventions` is really six
-topics"* item, which the bug explicitly labels an authoring judgement needing re-costing —
-do not let this task turn into that one.
+### The constraint this entry originally missed — a hard 2,500 B cap
 
-**Acceptance:** each annotated section names the tool call(s) it serves; a session that
-triggers one section receives that section rather than the topic; and the delivered-bytes
-figure is **re-measured** after the change rather than asserted — the mechanism can be
-wired correctly and still deliver everything if the `serves:` keys do not match real call
-names.
+A section that carries a `serves:` declaration must be **≤ 2,500 bytes**
+(`MAX_DECLARED_SECTION_BYTES`, `src/prompts/guide_index.rs`), enforced by a test that fails the
+build and whose message says *"Decompose it at `###` and move the declaration onto the child
+sections. A slice this large is the failure this feature exists to fix."*
+
+So *"annotation only, no code change"* — this entry's original claim, and the reason it was
+ranked as the cheapest lever — **is true of most of the corpus and false of the guide that
+matters most.** Measured per guide with a fence-aware splitter mirroring
+`guide_index.rs::split_sections` (a naive `^## ` split is wrong here: three earlier
+measurements were wrong because a fence line inside `tracker-conventions` matched it):
+
+| guide | sections | over 2,500 B | total | annotatable today |
+|---|---:|---:|---:|---|
+| `librarian.md` | 18 | **0** | 23,137 B | already done (13) |
+| `error-handling.md` | 3 | 0 | 1,857 B | all |
+| `progressive-disclosure.md` | 5 | 0 | 5,669 B | all |
+| `project-activation-bootstrap.md` | 5 | 0 | 2,594 B | all |
+| `symbol-navigation.md` | 3 | 0 | 3,145 B | all |
+| `untrusted-content.md` | 5 | 0 | 5,317 B | all |
+| `iron-laws-detail.md` | 7 | 1 | 12,007 B | 6 of 7 |
+| `librarian-runtime.md` | 11 | 1 | 10,944 B | 10 of 11 |
+| `workspace-state.md` | 9 | 1 | 10,355 B | 8 of 9 |
+| **`tracker-conventions.md`** | 15 | **5** | **39,106 B** | 10 of 15 |
+
+**Note the tension the table exposes and this entry asserted away:** `librarian.md` is
+annotated *because* all 18 of its sections already fit the cap. `tracker-conventions.md` is the
+biggest lever *and* the only guide where a third of the sections cannot carry a declaration
+without being decomposed first. Those are not independent facts — the guide is unannotated
+partly because it is the hard one.
+
+### T-15a — ready now, no judgement required
+
+Annotate the sections that already fit: **all** of `error-handling`, `progressive-disclosure`,
+`project-activation-bootstrap`, `symbol-navigation`, `untrusted-content`; and the
+under-cap sections of `iron-laws-detail` (6/7), `librarian-runtime` (10/11), `workspace-state`
+(8/9), `tracker-conventions` (10/15). Pure annotation, build-safe, independent of both Phase 2
+blockers on `7579b32b1cd2362f`.
+
+### T-15b — the five over-cap `tracker-conventions` sections
+
+These need decomposition at `###` before they can be declared, which is **exactly** the
+*"`tracker-conventions` is really six topics"* item that bug explicitly labels an authoring
+judgement needing re-costing. Do not let T-15a drift into this. It wants a deliberate decision
+about how that guide is organised, not a mechanical split to satisfy a byte cap — and a bad
+split here is worse than no annotation, because a section boundary is what a future reader
+inherits.
+
+**Acceptance (both parts):** each annotated section names the tool call(s) it serves; the
+`serves:` shapes must be real `tool.action` identifiers, because `parse_shape` accepts a
+syntactically valid shape that can never match a live call and the section then silently stops
+being delivered — the exact failure this feature exists to prevent. And the delivered-bytes
+figure must be **re-measured** afterwards rather than asserted: the mechanism can be wired
+correctly and still deliver everything if the keys do not match real call names.
 
 ## T-16 — Overflow hint on a heading-scoped `artifact(get)` points at metadata
 
