@@ -3397,6 +3397,107 @@ mod tests {
         );
     }
 
+    /// A declaring topic must have at least one LIVE route from a real call to at least
+    /// one of its declared sections. Gate 7.
+    ///
+    /// Gate 6 checks that a declared shape names a real tool and a real action. This
+    /// checks the step after it: that some call which actually ROUTES to this topic can
+    /// produce a selector key one of its shapes matches. Different failures, and this is
+    /// the dangerous direction — `Shape::matches` returns `false` when `selector_key` is
+    /// `None`, deliberately ("do not turn it into a wildcard"). So declaring sections on
+    /// a topic whose triggering tools all opt out of `selector_key` does not merely fail
+    /// to improve delivery: it REPLACES whole-topic delivery with the preamble alone,
+    /// while Gates 1–6 all stay green.
+    ///
+    /// Measured 2026-09-01 while scoping the T-15a annotation pass, which this gate then
+    /// refuted. Of the nine topics, only `librarian` and `tracker-conventions` are
+    /// reachable this way. Every tool routing to `progressive-disclosure` (nine of them),
+    /// `symbol-navigation` (three) and `workspace-state` (one) returns `None`, and
+    /// `project-activation-bootstrap` has no `relevant_guide_topic` at all — it is the
+    /// session-opening special case. Annotating any of them would have been a silent
+    /// content regression, and that pass was already scoped, queued and approved.
+    ///
+    /// The inputs are derived from each tool's own `input_schema()` action enum — the
+    /// same oracle Gate 6 uses — rather than hand-listed, so a new action is covered
+    /// without editing this test.
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn every_declaring_topic_has_a_live_route_to_a_declared_section() {
+        use crate::prompts::guide_index::GUIDE_INDEX;
+        let (_dir, server) = make_server().await;
+
+        // Result shapes, not inputs: `relevant_guide_topic` reads the RESULT to pick a
+        // topic. Mirrors Gate 2's probe set, including the doctor-shaped one.
+        let result_probes = [
+            serde_json::json!({}),
+            serde_json::json!({"output_id": "@x", "overflow": true}),
+            serde_json::json!({"abs_path": "docs/issues/x.md"}),
+            serde_json::json!({"abs_path": "docs/trackers/x.md"}),
+            serde_json::json!({"violations": [{"path": "docs/trackers/x.md"}]}),
+        ];
+
+        let mut verified = 0usize;
+        for topic in crate::prompts::GUIDE_TOPICS {
+            if !GUIDE_INDEX.declares(topic) {
+                continue;
+            }
+            let mut route: Option<String> = None;
+            'search: for tool in &server.tools {
+                let mut inputs = vec![serde_json::json!({})];
+                if let Some(actions) = tool
+                    .input_schema()
+                    .get("properties")
+                    .and_then(|p| p.get("action"))
+                    .and_then(|a| a.get("enum"))
+                    .and_then(|e| e.as_array())
+                {
+                    for a in actions.iter().filter_map(|v| v.as_str()) {
+                        inputs.push(serde_json::json!({"action": a}));
+                    }
+                }
+                for result in &result_probes {
+                    if tool.relevant_guide_topic(result) != Some(*topic) {
+                        continue;
+                    }
+                    for input in &inputs {
+                        let Some(sel) = tool.selector_key(input) else {
+                            continue;
+                        };
+                        if !GUIDE_INDEX
+                            .match_sections(topic, Some(&sel), result)
+                            .is_empty()
+                        {
+                            route = Some(format!("{} -> {sel}", tool.name()));
+                            break 'search;
+                        }
+                    }
+                }
+            }
+            assert!(
+                route.is_some(),
+                "`{topic}` declares `serves:` sections, but no registered tool both routes \
+                 to it AND returns a selector_key matching any of them. `Shape::matches` \
+                 treats `selector_key == None` as no-match by design, so these declarations \
+                 do not add delivery — they REPLACE whole-topic delivery with the preamble \
+                 alone. Either implement `selector_key` on a tool that routes here (see \
+                 `crate::tools::core::types::action_selector_key`), or remove the \
+                 declarations. Do not waive this one: a waiver would record the regression \
+                 as intentional."
+            );
+            verified += 1;
+        }
+
+        // Anti-vacuity: the loop is silent if nothing declares, which is the state this
+        // gate is least useful in and most likely to be mistaken for green. `librarian`
+        // declares today, so a floor of one is the honest assertion — deliberately not a
+        // count of declaring topics, which grows.
+        assert!(
+            verified >= 1,
+            "no topic declares any section, so this gate verified nothing — it is reading \
+             an empty corpus rather than passing"
+        );
+    }
+
     /// Every registered guide topic must either fire from some tool, or be declared
     /// pull-only with a reason — and not both. This is the triggered-xor-pull-only half
     /// of the deleted `every_guide_topic_is_triggered_or_declared_pull_only` (see Gate 2
