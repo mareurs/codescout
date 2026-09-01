@@ -84,6 +84,39 @@ fn apply_soft_cap(body: &str) -> (String, Option<(usize, usize, Vec<String>)>) {
     (shown, Some((SOFT_CAP_LINES, total, top_headings)))
 }
 
+/// What a stubbed preview puts where the heading array was.
+const HEADINGS_OMITTED_NOTE: &str =
+    "omitted (body selector present) — call artifact(get, id=…) with no body selector for the map";
+
+/// Strip the heavy fields from a preview when the caller already named what they wanted.
+///
+/// Key-driven rather than shape-driven, so a preview shape this function does not know
+/// about (`plan`, `spec`, `memory`) keeps its current behaviour rather than silently
+/// losing a field: the worst case is no improvement, never a regression.
+///
+/// `line_count`, `total_headings` and `headings_truncated` are RETAINED deliberately —
+/// they report the magnitude withheld, so a caller who needs the map learns it exists and
+/// how big it is. Reporting only its absence would be the `IC-21` shape.
+/// docs/issues/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
+fn stub_preview(full: &Value) -> Value {
+    let Some(obj) = full.as_object() else {
+        return full.clone();
+    };
+    let mut stub = serde_json::Map::with_capacity(obj.len());
+    for (k, v) in obj {
+        match k.as_str() {
+            "headings" => {
+                stub.insert(k.clone(), json!(HEADINGS_OMITTED_NOTE));
+            }
+            "summary" | "last_heading" => {}
+            _ => {
+                stub.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    Value::Object(stub)
+}
+
 #[derive(Deserialize)]
 struct Args {
     id: String,
@@ -533,7 +566,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     if let Some(body) = parsed_body.as_deref() {
-        out["preview"] = crate::librarian::preview::extract(&row.kind, &row, body, ctx);
+        let preview = crate::librarian::preview::extract(&row.kind, &row, body, ctx);
+        // `body_selected` is computed at :483 and already in scope — do not recompute.
+        out["preview"] = if body_selected {
+            stub_preview(&preview)
+        } else {
+            preview
+        };
 
         if body_selected {
             let (final_body, overflow_meta, body_meta_extra) = if let Some(ref name) = a.heading {
@@ -1036,6 +1075,75 @@ mod tests {
         let v = call(&ctx, json!({"id": "a"})).await.unwrap();
         assert_eq!(v["preview"]["shape"], "spec");
         assert!(v.get("body").is_none(), "body absent when not selected");
+    }
+
+    /// A scoped read already named what it wanted. Shipping the whole heading map with it
+    /// answers a question the caller did not ask — measured 2026-09-01 at ~2,611 bytes of
+    /// preview against a 3,210-byte requested section.
+    /// docs/issues/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
+    ///
+    /// Heading count is deliberately pushed past `default::MAX_HEADINGS` (20): `total_headings`
+    /// is only stamped by `headings::stamp_truncation` when the cap actually bites
+    /// (`preview/headings.rs:86`), so a fixture at or under the cap would leave that field
+    /// absent and the "magnitude is retained" assertion below untestable — verified by first
+    /// running this test against a 4-heading fixture, which failed `total_headings == 4` with
+    /// `left: Null, right: 4`, confirming the field truly is cap-conditional rather than always
+    /// present.
+    #[tokio::test]
+    async fn preview_is_stubbed_when_a_body_selector_is_present() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = mk_row("a");
+        row.kind = "doc".into();
+        artifact::upsert(&cat, &row).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        let mut md =
+            String::from("# T\n\n## One\n\nalpha\n\n## Two\n\nbravo\n\n## Three\n\ncharlie\n");
+        for i in 0..21 {
+            md.push_str(&format!("\n## Filler{i}\n\nfiller content\n"));
+        }
+        std::fs::write(dir.path().join("a.md"), &md).unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "## Two"}))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            v["preview"]["headings"].as_str(),
+            Some(HEADINGS_OMITTED_NOTE),
+            "a body-selected read must not ship the heading array"
+        );
+        // Magnitude is RETAINED, not just absence — reporting only absence would be the
+        // IC-21 shape (an instrument omitting the dimension that grows). 25 = "# T" + "## One"
+        // + "## Two" + "## Three" + 21 fillers, chosen to exceed the 20-heading preview cap so
+        // `total_headings` is actually stamped onto the full preview for the stub to retain.
+        assert_eq!(v["preview"]["total_headings"], 25);
+        assert!(
+            v["body"].as_str().unwrap().contains("bravo"),
+            "the requested section must still be returned"
+        );
+    }
+
+    /// The positive twin. Without this, a mutation that deletes the preview builder
+    /// entirely passes the test above — absence assertions are monotone under removal.
+    #[tokio::test]
+    async fn preview_headings_are_still_shipped_when_no_body_selector() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = mk_row("a");
+        row.kind = "doc".into();
+        artifact::upsert(&cat, &row).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        std::fs::write(
+            dir.path().join("a.md"),
+            "# T\n\n## One\n\nalpha\n\n## Two\n\nbravo\n\n## Three\n\ncharlie\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a"})).await.unwrap();
+
+        let headings = v["preview"]["headings"]
+            .as_array()
+            .expect("an unscoped read must keep the heading map");
+        assert_eq!(headings.len(), 4);
     }
 
     #[tokio::test]

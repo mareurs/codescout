@@ -997,6 +997,64 @@ mod tests {
         );
     }
 
+    /// `section_headings_summary` requires `preview.headings` to be an ARRAY
+    /// (src/librarian/adapter.rs:747). Once a body-selected read stubs that key to a
+    /// string, the summary can no longer lead with the heading map — so the fix in
+    /// `get.rs` delivers this for free and no second gate is needed here.
+    /// Controller Ruling 2, .superpowers/sdd/.../progress.md
+    ///
+    /// `body` is padded past `dominant_text_preview`'s 200-byte `MIN_LEN` so
+    /// `librarian_compact_summary` has a non-heading signal to report — without it every
+    /// contributor (finding-truncation, elided-rows, body-cap, overflow-hint, matched-items,
+    /// section-headings, dominant-text) returns `None` for this fixture, `lines` stays empty,
+    /// and the function returns `None` regardless of the headings-array-vs-string fix,
+    /// panicking `.expect("a summary")` below for a reason unrelated to what this test names.
+    /// Verified by first running this test with the short body from the plan, which panicked
+    /// at `.expect("a summary")` with no headings-related message at all.
+    #[test]
+    fn a_body_selected_read_summary_cannot_lead_with_the_heading_map() {
+        // Shaped as a POST-Task-1 scoped result: `headings` is the stub string.
+        let result = json!({
+            "body": "## Index\n\nthe section the caller asked for, padded past the two-hundred-byte \
+                      dominant-text-preview threshold so the compact summary has a non-heading \
+                      signal to report instead of returning None for an unrelated reason.",
+            "body_meta": { "heading": "## Index", "line_count": 2, "bytes": 40 },
+            "preview": {
+                "shape": "default",
+                "headings": "omitted (body selector present) — call artifact(get, id=…) with no body selector for the map",
+                "total_headings": 12
+            }
+        });
+
+        let summary = librarian_compact_summary("artifact", &result).expect("a summary");
+
+        assert!(
+            !summary.contains("sections:"),
+            "a body-selected read must not lead with the heading map, got: {summary}"
+        );
+    }
+
+    /// The positive twin: an UNSCOPED result still carries an array, and the summary must
+    /// still lead with the map. Without this, deleting `section_headings_summary`'s call
+    /// site passes the test above while destroying the map for everyone.
+    #[test]
+    fn an_unscoped_read_summary_still_leads_with_the_heading_map() {
+        let result = json!({
+            "body": "# T\n\n## Alpha\n\n## Index\n",
+            "preview": { "headings": [
+                { "level": 2, "text": "Alpha", "line": 3 },
+                { "level": 2, "text": "Index", "line": 5 }
+            ]}
+        });
+
+        let summary = librarian_compact_summary("artifact", &result).expect("a summary");
+
+        assert!(
+            summary.contains("sections:"),
+            "an unscoped read must keep the heading map, got: {summary}"
+        );
+    }
+
     /// The sequencing constraint the bug file recorded: keep the truncation warning as
     /// an ADDITIONAL line, never a precondition. It guards a silent-truncation defect
     /// that once cost duplicate sections, and `truncate_compact` cuts from the tail —
