@@ -9,7 +9,7 @@ tags:
 - iron-law-6
 - prompts
 closed: 2026-09-01
-unverified: 'The codescout half is committed and gated on experiments. The COMPANION half is not: codescout-companion/hooks/subagent-guidance.mjs and tests/test-subagent-guidance.sh are green but uncommitted in the claude-plugins repo. Do not archive until that lands and its SHA is recorded below.'
+unverified: 'Both halves are committed and gated: codescout 019b1c5b on experiments, claude-plugins ac1b1fa on branch fix/subagent-guide-fetch-directive. That branch is NOT merged to main -- the only outstanding item. Do not archive until it merges.'
 ---
 
 ## Symptom
@@ -110,8 +110,17 @@ two plain reproductions, not a discriminating condition.
 **Not yet archived, and the reason is queryable in `unverified:` above.** The companion half
 of the fix — `codescout-companion/hooks/subagent-guidance.mjs`, which is the only channel
 that reaches a subagent directly, plus its three new cases in `tests/test-subagent-guidance.sh`
-(39 passed, 0 failed) — is green but uncommitted in the `claude-plugins` repo. Archive this
-file once that lands, recording its SHA and patch-id here too.
+(39 passed, 0 failed) — is committed in the `claude-plugins` repo at **`ac1b1fa`**, patch-id
+**`f7cbe7f484dce20a708f97e84f772550ebdbff79`**, on branch `fix/subagent-guide-fetch-directive`.
+That branch is **not merged to `main`**, which is the only thing still outstanding. Archive
+this file once it merges.
+
+(The companion half is nonetheless already *live*: `claude-plugins` hooks resolve via
+`CLAUDE_PLUGIN_ROOT` to the repo working tree, so the edit took effect on save rather than on
+merge. The codescout half is live too, by a different and less comfortable route — a release
+build by another session at 22:52 on 2026-09-01 compiled the then-uncommitted working tree into
+the shared binary, so servers started after that timestamp ran this fix before it was
+committed, while six older servers kept the pre-fix image.)
 
 The residual that no wording change reaches — the ledger cannot key on an identity the MCP
 protocol never carries — is filed as `OB-11` on `docs/trackers/observer-blindness.md`, which
