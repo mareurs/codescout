@@ -291,6 +291,118 @@ has "working tree moved after staging -> refuse" "$out" "EXIT=1"
 has "names the file" "$out" "f.txt"
 rm -rf "$T"
 
+# ------------------------------------------ 6. `git apply --cached` names paths in the PATCH
+# docs/issues/2026-09-01-git-apply-cached-stages-but-records-no-owner.md
+#
+# `apply` sits in staging_op()'s verb list, so the write is eligible to claim -- but
+# argv_paths() emits the POSITIONAL, which for `apply` is the PATCH FILE and never a staged
+# path. names_path() cannot match it, so every `apply --cached` records `-`, and
+# pre-commit-foreign-index then refuses the stager's own commit while naming an owner who
+# does not exist. That disables the one tool able to split a file holding two sessions'
+# edits -- the documented remedy for the capture bug this whole suite exists after.
+#
+# The fix must not spend names_path()'s strictness to buy this. A patch's own `+++ b/<p>`
+# and `--- a/<p>` headers are the same KIND of thing argv is for `add`: the set of paths
+# this invocation intends to stage. Deriving from the index instead would drop the
+# restriction altogether and re-open the false-claim failure it exists to prevent.
+echo
+echo "== apply --cached claims what the PATCH names"
+
+new_repo
+printf 'a\nb\n' > f.txt
+git add f.txt > /dev/null 2>&1
+git commit -qm base > /dev/null 2>&1
+printf 'a\nX\nb\n' > f.txt
+git diff f.txt > p1.patch
+git checkout -- f.txt
+CLAUDE_CODE_SESSION_ID="$A" git apply --cached p1.patch
+eq "apply --cached claims the patch's path" "$(owner_of f.txt)" "$A"
+
+# A path the patch does NOT name must stay unclaimed, though it sits in the very same
+# `git diff --cached --raw` output the hook iterates. This is precisely what names_path()
+# buys and the fix must leave it intact -- mutate the fix to claim every diffed path and
+# this is the assertion that dies.
+new_repo
+printf 'a\n' > mine.txt
+printf 'a\n' > theirs.txt
+git add mine.txt theirs.txt > /dev/null 2>&1
+git commit -qm base > /dev/null 2>&1
+printf 'peer edit\n' > theirs.txt
+CLAUDE_CODE_SESSION_ID="$B" git add theirs.txt
+printf 'b\n' > mine.txt
+git diff mine.txt > only-mine.patch
+git checkout -- mine.txt
+CLAUDE_CODE_SESSION_ID="$A" git apply --cached only-mine.patch
+eq "the patch's own path goes to the applier" "$(owner_of mine.txt)" "$A"
+eq "a co-staged path the patch never named stays with its stager" "$(owner_of theirs.txt)" "$B"
+
+# New-file patch: the pre-image is /dev/null, so the path appears only on the +++ side.
+new_repo
+printf 'a\n' > base.txt
+git add base.txt > /dev/null 2>&1
+git commit -qm base > /dev/null 2>&1
+printf 'brand new\n' > added.txt
+git add -N added.txt > /dev/null 2>&1
+git diff added.txt > new.patch
+git rm -q --cached added.txt > /dev/null 2>&1
+rm -f added.txt
+CLAUDE_CODE_SESSION_ID="$A" git apply --cached new.patch
+eq "a new-file patch (--- /dev/null) is claimed" "$(owner_of added.txt)" "$A"
+
+# Deletion patch: the post-image is /dev/null, so the path appears only on the --- side.
+new_repo
+printf 'a\n' > doomed.txt
+git add doomed.txt > /dev/null 2>&1
+git commit -qm base > /dev/null 2>&1
+git rm -q doomed.txt > /dev/null 2>&1
+# The `--` is load-bearing: after `git rm` the path is gone from the working tree, so
+# `git diff --cached doomed.txt` is ambiguous, errors, and writes an EMPTY patch. `apply`
+# then fails with "No valid patches in input", nothing is staged, and the assertion below
+# fails against a case that never ran -- which reads exactly like a defect in patch_paths.
+git diff --cached -- doomed.txt > del.patch
+git reset -q --hard > /dev/null 2>&1
+CLAUDE_CODE_SESSION_ID="$A" git apply --cached del.patch
+eq "a deletion patch (+++ /dev/null) is claimed" "$(owner_of doomed.txt)" "$A"
+
+# Multi-file patch: every path it names, not merely the first.
+new_repo
+printf 'a\n' > m1.txt
+printf 'a\n' > m2.txt
+git add m1.txt m2.txt > /dev/null 2>&1
+git commit -qm base > /dev/null 2>&1
+printf 'b\n' > m1.txt
+printf 'b\n' > m2.txt
+git diff > multi.patch
+git checkout -- m1.txt m2.txt
+CLAUDE_CODE_SESSION_ID="$A" git apply --cached multi.patch
+eq "multi-file patch claims the first path" "$(owner_of m1.txt)" "$A"
+eq "multi-file patch claims the second path" "$(owner_of m2.txt)" "$A"
+
+# -p0 changes what a +++ header means, so the header no longer names a repo-relative path.
+# OVER-REFUSE rather than guess: names_path()'s asymmetry is the whole design, and a miss
+# is recoverable where a false hit is not.
+new_repo
+printf 'a\n' > z.txt
+git add z.txt > /dev/null 2>&1
+git commit -qm base > /dev/null 2>&1
+printf 'b\n' > z.txt
+git diff --no-prefix z.txt > p0.patch
+git checkout -- z.txt
+CLAUDE_CODE_SESSION_ID="$A" git apply --cached -p0 p0.patch
+eq "an unusual -p level over-refuses rather than guessing" "$(owner_of z.txt)" "-"
+
+# A patch read from STDIN puts no filename in argv at all. Nothing to open, so nothing to
+# claim -- and that must stay a `-` rather than becoming a claim on everything diffed.
+new_repo
+printf 'a\n' > s.txt
+git add s.txt > /dev/null 2>&1
+git commit -qm base > /dev/null 2>&1
+printf 'b\n' > s.txt
+git diff s.txt > s.patch
+git checkout -- s.txt
+CLAUDE_CODE_SESSION_ID="$A" git apply --cached < s.patch
+eq "a patch on stdin over-refuses (no filename in argv)" "$(owner_of s.txt)" "-"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]

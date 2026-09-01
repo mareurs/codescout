@@ -74,23 +74,18 @@
 # terminal-staged content reads as foreign to a session, which is the conservative
 # answer. When NOBODY has an id the whole log is `-` and the guard is silent, which is
 # honest — without ids there is nothing to discriminate.
-
 set -uo pipefail
-
 # Our own `git diff` can write the index (an opportunistic stat-refresh), which would
 # re-enter this hook. Two independent brakes: refuse re-entry, and forbid git from
 # taking the optional index lock at all.
 [ -n "${CODESCOUT_STAGE_LOG_RUNNING:-}" ] && exit 0
 export CODESCOUT_STAGE_LOG_RUNNING=1
 export GIT_OPTIONAL_LOCKS=0
-
 git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
 [ -n "$git_dir" ] || exit 0
-
 log="$git_dir/session-stage-log"
 tmp="$log.$$"
 me="${CLAUDE_CODE_SESSION_ID:--}"
-
 # Did a STAGING operation cause this index write? Only then may we claim a new pair.
 # Tokens are NUL-separated; skip argv[0] up to `git`, then skip global flags (`-c`) and
 # their `key=value` arguments, and take the first real subcommand. An unreadable or
@@ -152,7 +147,6 @@ staging_op() {
     done < <(tr '\0' '\n' < "/proc/$PPID/cmdline" 2>/dev/null)
     return 1
 }
-
 # The pathspec the staging command actually NAMED, one per line.
 #
 # This is what lets a cold log stay honest. Rebuilding from `git diff --cached --raw` sees
@@ -163,10 +157,51 @@ staging_op() {
 #
 # Emits nothing for a blanket form (`-A`, `-u`, `.`, a directory), which is deliberate --
 # see names_path.
+# The paths a patch FILE names, for `git apply`. `apply`'s positional is the patch, never a
+# staged path, so without this the verb sits in staging_op()'s list while argv_paths() feeds
+# names_path() a filename that can never match -- every `apply --cached` records `-` and the
+# foreign-index guard then refuses the stager's own commit
+# (docs/issues/2026-09-01-git-apply-cached-stages-but-records-no-owner.md).
+#
+# STRICT for the same reason names_path is: only DEFAULT-PREFIX headers are read. A patch
+# written with --no-prefix, or applied with -p0, emits nothing and the write degrades to `-`.
+# Matching loosely here would let a stray `--- ` line inside a patch's own CONTENT -- a diff
+# of a diff, which this repo produces -- name a path the invocation never touched, and that
+# is the false hit the whole design is built to avoid.
+#
+# There is deliberately NO separate bail on -p<n>/--directory, and the absence is the
+# considered answer rather than an omission. A first version carried one; mutation testing
+# killed zero tests with it removed, and no reachable caller could be named for it. Two
+# things already cover the ground it claimed: a --no-prefix patch fails the `a/` match above
+# and emits nothing, and where a prefixed patch under an odd -p COULD reach names_path, the
+# existing-owner lookup (see the `[ -s "$log" ]` branch in the main loop) resolves the row
+# before names_path is consulted at all. A guard nothing reaches is decoration however
+# loudly it is written, so it was deleted rather than given a test to justify it.
+patch_paths() {
+    [ -f "$1" ] || return 0
+    awk '
+        /^--- a\// || /^\+\+\+ b\// {
+            p = substr($0, 5)
+            sub(/\t.*$/, "", p)
+            # NOT INDEPENDENTLY GUARDED, and that is recorded rather than papered over.
+            # Mutation-tested 2026-09-01: deleting this line kills zero tests, because
+            # names_path() suffix-matches (`*/$tok`), so an unstripped `a/f.txt` still
+            # matches target `f.txt`. No killing case was constructible. It stays because
+            # it is a CONTRACT line, not a guard: names_path documents its input as a
+            # repo-relative path, and emitting `a/f.txt` would rely on that suffix match to
+            # paper over a value that is not one. If names_path ever tightens to exact
+            # matching -- the direction its own comment leans -- this line becomes
+            # load-bearing with no test to notice it had been removed.
+            sub(/^[ab]\//, "", p)
+            if (p != "") print p
+        }
+    ' "$1" 2>/dev/null
+}
 argv_paths() {
     [ -r "/proc/$PPID/cmdline" ] || return 0
     _ap_seen_git=0
     _ap_seen_verb=0
+    _ap_verb=""
     _ap_skip=0
     while IFS= read -r _ap_tok; do
         [ -n "$_ap_tok" ] || continue
@@ -188,6 +223,7 @@ argv_paths() {
                 *=*) continue ;;
                 add | rm | mv | restore | apply | update-index | stash)
                     _ap_seen_verb=1
+                    _ap_verb="$_ap_tok"
                     continue
                     ;;
                 *) return 0 ;;
@@ -196,11 +232,16 @@ argv_paths() {
         case "$_ap_tok" in
             --) continue ;;
             -*) continue ;;
-            *) printf '%s\n' "$_ap_tok" ;;
+            *)
+                if [ "$_ap_verb" = "apply" ]; then
+                    patch_paths "$_ap_tok"
+                else
+                    printf '%s\n' "$_ap_tok"
+                fi
+                ;;
         esac
     done < <(tr '\0' '\n' < "/proc/$PPID/cmdline" 2>/dev/null)
 }
-
 # Did argv name this repo-relative path? STRICT on purpose, and the asymmetry is the whole
 # design: a miss records `-`, which over-refuses and a reader recovers from; a false hit
 # claims a peer's file, which under-refuses and nothing is emitted for anyone to recover
@@ -225,7 +266,6 @@ $_NAMED
 EOF
     return 1
 }
-
 if staging_op; then
     claimant="$me"
     _NAMED="$(argv_paths)"
@@ -233,9 +273,7 @@ else
     claimant="-"
     _NAMED=""
 fi
-
 : > "$tmp" || exit 0
-
 # `--raw` gives ":<srcmode> <dstmode> <srcsha> <dstsha> <status>\t<path>"; field 4 of
 # the first tab-separated column is the staged (post-image) blob.
 while IFS=$'\t' read -r blob path; do
@@ -255,8 +293,6 @@ while IFS=$'\t' read -r blob path; do
     printf '%s\t%s\t%s\n' "$owner" "$blob" "$path" >> "$tmp"
 done < <(git diff --cached --raw 2>/dev/null |
     awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }')
-
 # Atomic replace: peers run this hook concurrently against the same file.
 mv -f "$tmp" "$log" 2>/dev/null || rm -f "$tmp"
-
 exit 0
