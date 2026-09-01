@@ -152,6 +152,62 @@ instead of 7,364.
 artifacts, 3,408 links): roughly **1–2 MB/month/host**. The window this was scoped in was a
 burst — an SDD run with nine commits, several reindexes and a merge — and is not a rate.
 
+### Revised 2026-09-02 — the catalog is MACHINE-WIDE, and this section assumed otherwise
+
+Everything above was written treating the catalog as per-repo. It is not. There is one SQLite
+file at `dirs::data_local_dir()/librarian/catalog.db` spanning every workspace root on the
+machine, so `catalog_audit` holds rows for artifacts in **every** repo. Measured 2026-09-02 on
+the author's machine: **54,304 audit rows across 8 repositories**, of which 4,685 commit rows
+are codescout's — the rest belong to unrelated projects, three of them client work.
+
+Composed with the design above, that produced a Critical defect, found by Task 4's review:
+
+- `export`'s row selection is `WHERE seq > ?1` with **no repo predicate**, and
+  `audit_exported_through_seq` is a **single global key**.
+- The destination is the **active project's** root.
+
+So the first `reindex` in any repo drains the machine's entire audit backlog into that repo and
+advances the global watermark — leaving every other repo's committed shard permanently and
+silently short. That is this document's own IC-13, on the write side, inside the feature built
+to prevent it.
+
+Two consequences worth stating separately, because each has a different remedy:
+
+1. **Sub-projects.** The destination is `current_project.abs_path`, not `git_root`. Activating
+   a registered sub-project (`crates/codescout-embed` is one, in this very repo) writes shards
+   to a path the repo-root `.gitattributes`/`.gitignore` entries do not cover and
+   `read_shards(repo_root)` never reads back.
+2. **Data exposure.** `delete` payloads are full OLD-row images, and `artifact`'s columns
+   include `abs_path`. A committed shard could therefore publish absolute filesystem paths and
+   artifact metadata for unrelated — including private — repositories into this repo's git
+   history. Outward-facing and effectively irreversible once pushed.
+
+**Adjudicated 2026-09-02: repo scoping is the whole remedy.** A separate redaction pass over
+committed payloads was considered and rejected — `abs_path` is frequently *how* a reader
+identifies what was deleted, so redacting it costs the forensic value the trail exists for,
+and it would be a second mechanism guarding a hole the first one closes. Correctness and
+privacy have the same fix here.
+
+### Scoping design (supersedes the row-selection and watermark rules above)
+
+- **The watermark is per-repo**, keyed by the repo root:
+  `audit_exported_through_seq:<git_root>`. The global key is superseded; a catalog holding the
+  old unkeyed value must not have it read as any repo's watermark.
+- **The destination is `git_root`, never `abs_path`.** `CurrentProject` carries both precisely
+  because they differ for sub-projects.
+- **Rows are attributed to a repo through the artifact they hang off**, since every audited
+  table except `commits` (already excluded) and `worktree_registration` ultimately references
+  one: resolve the audit row to an artifact id, then to `artifact.abs_path`, then prefix-match
+  the repo root on a component boundary (`/repo-backup` must not match `/repo`).
+- **A `delete` row's artifact is gone by definition**, so its attribution comes from the
+  `abs_path` inside its own payload image.
+- **Attribution can genuinely fail** — an `events` row whose artifact was deleted earlier, for
+  instance. Those rows are **reported as `unattributed`, never guessed and never silently
+  dropped.** An unattributed row stays unexported and stays past its repo's watermark, so it is
+  recoverable once attribution improves; a guessed one is a wrong row in a committed file.
+- **The cross-machine end-to-end test must use a multi-repo fixture.** A single-repo fixture
+  makes this entire class unrepresentable, which is how the original design passed its own
+  review.
 ### Settled design
 
 - **`audit_log export`** appends rows since the watermark to
