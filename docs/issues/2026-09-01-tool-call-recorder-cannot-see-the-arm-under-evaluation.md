@@ -2,14 +2,14 @@
 id: dd576a520be29aba
 kind: bug
 status: open
-title: 'BUG: the tool-call recorder selects MCP calls only, so a live eval comparing it to native Bash is measured on one arm'
+title: 'BUG: the tool-call recorder selects MCP calls only, so every usage question answers over a subset with no marker'
 tags:
 - cluster/selector-narrower-than-its-population
 closed: ''
 opened: 2026-09-01
 owner: marius
 severity: medium
-unverified: 'Not established that the shell_command_mode eval actually derives its verdict from usage.db — CLAUDE.md says the eval is in flight and separately says Bash work is invisible to /analyze-usage, but no measurement here connects the two. If the eval scores by another instrument, the consequence section overstates the stake and only the general blindness stands. Also: no fix is implemented, and the write-path fork in ## Fix is undecided.'
+unverified: 'RESOLVED 2026-09-01 and the answer was NO — the shell_command_mode eval does not derive its verdict from usage.db, because no such eval arm exists: all ten prompt-engineering scenarios pin shell_command_mode="warn", and usage.db appears once in that harness (claude_code.py:191) as fixture SEED, never as a scoring input. The file''s original urgency framing is withdrawn in ## Summary. STILL UNVERIFIED: (a) the separate claim in memory gotchas:493 that ''Eval data showed Opus performing better with native Bash than with run_command'' has no discoverable eval artifact in either repo — not searched: Langfuse, the headroom repo, or session transcripts, so this is absence-in-my-search rather than absence; (b) no fix is implemented and the write-path fork in ## Fix is undecided; (c) Tier 2''s recorder now lacks a demand argument.'
 ---
 
 ## Summary
@@ -17,9 +17,14 @@ unverified: 'Not established that the shell_command_mode eval actually derives i
 `.codescout/usage.db` records **codescout MCP calls only**. Native `Bash` tool calls leave no
 row, so every question asked of that database — `/analyze-usage`, a Pika scan, any
 `tool_calls` query — silently answers over a subset. The zero it returns for shell-mediated
-misuse reads as *"no such misuse"* rather than *"never looked"*. This matters now rather than
-in general, because `security.shell_command_mode` is a **live evaluation arm** comparing
-native `Bash` against `run_command`, and the instrument can see one of the two arms.
+misuse reads as *"no such misuse"* rather than *"never looked"*. **The urgency framing this file shipped with was WRONG, and is withdrawn here before anyone acted on it.** It read: *"This matters now rather than in general, because `security.shell_command_mode` is a live evaluation arm comparing native `Bash` against `run_command`, and the instrument can see one of the two arms."* Measured 2026-09-01, resolving this file's own `unverified:` field:
+
+- **No arm varies `shell_command_mode`.** All **ten** scenarios in `prompt-engineering` that mention it pin it to `"warn"` — base, treatment, control and positive-control alike. It is fixed setup, not the variable under test, so that harness does not evaluate the shell path at all.
+- **The harness does not score from `usage.db`.** `usage.db` appears exactly once across its `scripts/` and `src/`, at `src/prompt_tdd/adapters/claude_code.py:191`, in a comment about *seeding* it as fixture setup before launch. Scoring runs through per-scenario `check_*.py` checkers over run logs. Nothing reads `tool_calls` for a verdict.
+
+So there is no live eval whose verdict this blindness distorts, and the file's slug — `...cannot-see-the-arm-under-evaluation` — is now inaccurate. It is deliberately **not renamed**: a move re-keys the artifact id and would strand `IC-18`'s member citation and `d061c1ee`'s commit message, which is a worse cost than a stale slug that this paragraph corrects on sight.
+
+**What survives, unchanged and still worth fixing.** The blindness itself is measured and real: `/analyze-usage`, any Pika scan, and `docs/trackers/tool-usage-patterns.md` cannot see shell work routed through native `Bash`, and a zero from any of them reads as *"none"* rather than *"never looked"*. What changes is the deadline, not the defect — this is ordinary technical debt on a measurement surface, not something gating an in-flight decision. Tier 1 below (name the scope at every reader) is accordingly the whole of what is clearly owed; Tier 2's recorder now needs a demand argument it does not currently have.
 
 ## Symptom (Effect)
 
@@ -154,7 +159,7 @@ is off the critical path, and schema ownership is the thing most expensive to ge
 
 **Open question 2 — what of the command to store.** Raw command lines carry paths, hostnames
 and occasionally secrets, and `usage.db` is a long-lived local corpus read by scans. Storing
-the first token plus an argument classification answers the eval's question without
+the first token plus an argument classification answers the coverage question without
 accumulating shell history. Decide before shipping, not after.
 
 **Do not tune anything on this data until it exists.** `H-8`'s `Promote-when` is deliberate:
@@ -193,4 +198,3 @@ sentence to each response.
 - `docs/trackers/issue-clusters.md` § `IC-18` — the defect class this instantiates
 - `src/usage/db.rs:15` (create), `:59` (migrations), `:191` (insert)
 - `claude-plugins/codescout-companion/hooks/hooks.json` — the `PostToolUse` surface
-
