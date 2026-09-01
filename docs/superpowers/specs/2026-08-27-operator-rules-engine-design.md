@@ -63,8 +63,17 @@ Two consequences, both live:
   > ledger is git-tracked and travels between hosts, the compiled block lives in untracked
   > `~/.claude*/CLAUDE.md` and does not, and nothing runs `--check` on either host. Recorded
   > as `CM-10` in `docs/trackers/resume-cross-machine-catalog-restore.md`.
-- **The other five engines** (§ *Where this sits*). Each is a key type plus a corpus and
-  ships separately.
+- **The other five engines** (§ *Where this sits*). Each is a key type plus a corpus.
+
+  > ⚠ **Superseded 2026-09-02.** This bullet used to end *"and ships separately."* That was
+  > true when written and is now false in the tree: engines 1 and 5 share the retrieval key
+  > (`Tool::selector_key`), the shape grammar (`operator_rules::render` imports
+  > `prompts::guide_index::parse_shape`), the session ledger (`ctx.guide_hints_emitted`, with
+  > `op:` vs `<topic>#<heading>` namespaces), and the emission site (`Tool::call_content`).
+  > What remains out of scope *here* is designing those engines — the coupling itself is
+  > owned by
+  > [`2026-09-02-retrieval-engine-coordination-design.md`](2026-09-02-retrieval-engine-coordination-design.md)
+  > (`0021bead4e5a01e2`).
 - **The 44.4% `contradicted` rate** measured in `docs/evals/2026-08-27-guide-injection-use.md`.
   Guidance arriving and being violated is an enforcement problem; it is out of scope here
   for the same reason `get-guide-section-grain` excluded it.
@@ -96,24 +105,25 @@ Two consequences, both live:
 
 ## Where this sits
 
-Six engines were enumerated 2026-08-27 by walking the surface inventory in
-`src/prompts/README.md` § *Surfaces* plus the tracker corpus. The discriminator is **the key
-you retrieve on**, because that determines the corpus, the retrieval mechanism, and what the
-ledger must remember.
+The six-engine table **moved 2026-09-02** to
+[`2026-09-02-retrieval-engine-coordination-design.md`](2026-09-02-retrieval-engine-coordination-design.md)
+(`0021bead4e5a01e2`) § *The family*, which is now its only home — asserted by that spec's
+gate 5.
 
-| Engine | Retrieval key | Corpus | Status |
-|---|---|---|---|
-| 1. codescout guiding | call shape | compiled-in guides | `sdd/get-guide-section-grain`, 9 of 10 tasks |
-| 2. model helper | served model | empty by measurement | needs a base arm before a design |
-| 3. project corpus | task topic / graph | librarian artifacts | unbuilt |
-| 4. outcome coaching | *result* shape | `err_family`, already ranked | unbuilt |
-| **5. operator** | **the human** | **`~/.claude*/CLAUDE.md`** | **this spec** |
-| 6. craft / domain | task intent | `SKILL.md`, buddy specialists | exists, own retrieval |
+It moved because a per-engine spec is the wrong owner for cross-engine state, and the decay
+was already measurable: this table's engine-1 row read *"9 of 10 tasks"* while engine 1's
+Phase 1 had shipped complete and accumulated an eight-item resume queue
+(`docs/trackers/resume-get-guide-section-grain-phases-2-3.md`).
 
-`domain`, `model` and `task-shape` are **facets that cut across engines**, not engines. The
-evidence is in the corpus this spec covers: *"Sonnet is the floor for subagent dispatch"* is a
-**model** rule living in the **operator** corpus. Treating each facet as an engine yields an
-engine per facet-combination.
+What this spec still owns, unchanged: **the operator engine is number 5, its retrieval key is
+the human, and its corpus is `~/.claude*/CLAUDE.md` compiled from
+`docs/trackers/operator-rules.md`.**
+
+One finding from the enumeration stays here because it is about *this* corpus: `domain`,
+`model` and `task-shape` are **facets that cut across engines**, not engines. The evidence is
+local — *"Sonnet is the floor for subagent dispatch"* is a **model** rule living in the
+**operator** corpus. Treating each facet as an engine yields an engine per
+facet-combination.
 
 ---
 

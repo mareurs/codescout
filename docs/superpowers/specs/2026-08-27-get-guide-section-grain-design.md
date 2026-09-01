@@ -23,6 +23,30 @@ Evidence base: [`../../evals/2026-08-27-guide-injection-use.md`](../../evals/202
 
 ---
 
+## Coordination — this engine is not alone in the pipeline
+
+Added 2026-09-02, after this spec's Phase 1 shipped.
+
+The machinery below is now **shared**. `operator_rules::render` imports `parse_shape` from
+`prompts::guide_index`; `operator_rules::route` matches on the same `Tool::selector_key` this
+spec introduces; and both engines stamp the same `GuideLedger` under disjoint key namespaces
+(`<topic>#<heading>` here, `op:OP-N` there). All four hand-offs happen inside
+`Tool::call_content`.
+
+Two consequences for anyone reading this spec as a build guide:
+
+- **`selector_key` is no longer this engine's private projection.** Its default was inverted
+  to universal in `30b6fc41`, and `every_registered_tool_supplies_a_selector_key`
+  (`src/server.rs:3448`) now holds every tool to it. A tool returning `None` is invisible to
+  *both* engines, not just this one.
+- **The p50 byte ceiling in Task 10 is not the whole budget.** `operator_rules::budget`
+  enforces a second, independent ceiling over the same context window, and engine 6
+  (craft/domain skills) is counted by neither.
+
+The coordinator, its registry, the preview surface and the dashboard routes are designed in
+[`2026-09-02-retrieval-engine-coordination-design.md`](2026-09-02-retrieval-engine-coordination-design.md)
+(`0021bead4e5a01e2`). Its Rollout step 0 is `GG-3` from this engine's own resume queue — the
+two streams meet there.
 ## Problem
 
 `Tool::relevant_guide_topic(&self, result) -> Option<&str>` returns a **topic name**;

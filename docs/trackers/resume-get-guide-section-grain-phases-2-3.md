@@ -11,7 +11,7 @@ tags:
 - prompt-surfaces
 - progressive-disclosure
 topic: get_guide section grain
-entry_high_water_GG: 8
+entry_high_water_GG: 9
 entry_prefix: GG
 ---
 
@@ -269,6 +269,52 @@ on disk, less 236 B of `##` heading lines), not the "~28 KB" GG-1 states;
 § *Entry-level standard* is **17,323 B** (GG-1: 17,378) and § *Bug files* is **11,319 B**
 (GG-1: 10,170). The queue's own header says to verify these first; this is that check,
 done.
+
+## GG-9 — This engine now has a coordinator, and GG-3 is its step 0
+
+**Valid:** dated 2026-09-01
+
+**Status:** open — a dependency added to this queue from outside it
+
+Recorded 2026-09-02, after the operator asked for the engine family to be
+operable: a coordinator, a management system and a preview system over a
+surface the engines share, with the graphs and rules visible and modifiable.
+
+That surface is designed in
+`docs/superpowers/specs/2026-09-02-retrieval-engine-coordination-design.md`
+(`0021bead4e5a01e2`). **Its Rollout step 0 is `GG-3`** — extracting
+`guide_blocks_for` / `inject_hint` / `GuideDeliveryShape` / `guide_block` out of
+the ~408-line trait method. You cannot register an engine that is inlined.
+
+**What changed about GG-3's justification.** GG-3 was promoted by the Phase 1
+whole-branch reviewer as *follow-up, not a merge blocker* — testability only,
+correct code. It now also blocks a second work stream. Its own "do it before
+Phase 2 adds more delivery paths through the same method" is already overtaken:
+Phase 2 of the **operator** engine added one on 2026-08-31 (`1bdf94bd`), so the
+method today carries two engines' delivery paths, not one.
+
+**Verified 2026-09-02, the four shared mechanisms:**
+
+- `Tool::selector_key` — default inverted to universal in `30b6fc41`; held by
+  `every_registered_tool_supplies_a_selector_key` (`src/server.rs:3448`).
+- `prompts::guide_index::parse_shape` — imported by `operator_rules::render:46`.
+- `ctx.guide_hints_emitted` : `GuideLedger` — `<topic>#<heading>` vs `op:OP-N`,
+  held apart by the single pairwise test `op_keys_collide_with_no_guide_key`.
+- `Tool::call_content` — one selector computed once, fanned out to both.
+
+**Two items in this queue gain a second consumer:**
+
+- `GG-4` (54 B of slack on the 12,000 B p50 ceiling) — the coordination spec's
+  gate 3 replaces that ceiling with one budget over *all* engines. Do not spend
+  the 54 B assuming it is engine 1's alone; `operator_rules::budget` is a
+  second, independent ceiling over the same context window, and engine 6
+  (craft/domain skills) is counted by neither.
+- `GG-7` (topics are atomic nodes in an unmodelled graph) — that graph is what
+  the spec's `GET /api/engines/graph` route renders. GG-7 stops being purely a
+  correctness bug and becomes the data model for the operator surface.
+
+**Next:** do `GG-3` as a pure refactor, no behaviour change. It serves both
+streams and blocks neither.
 
 ## Template for new entries
 
