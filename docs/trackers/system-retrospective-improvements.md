@@ -202,3 +202,6 @@ T-12 did not survive at all.
 Note what did **not** save us: T-11 and T-12 were the two tasks with the *most* quantitative
 backing in the original plan. The measurement is what made them look strongest, and the
 measurement is what was wrong.
+
+### 2026-09-01 — T-1 landed on experiments
+Catalog audit trail merged: 9 commits, fast-forward to `10972335` (patch-id `e2076003a9cd7cb3bedee3ff1e2ee7c944bed0bf` for the head commit; the branch was rebased twice mid-run, so cite by patch-id). Final gate on the merged tree: clippy clean, lean 0 failures, default 0 failures across 27 binaries (exit codes 0/0/0, `FAILED|panicked` grep = 0). SDD run: 5 tasks, 3 fix rounds + 1 final fix wave, 15 rulings (0 wrong so far) appended to `docs/trackers/sdd-ruling-log.md`. Two Opus reviews produced the load-bearing findings (non-atomic trigger install; prune-ignores-filters). Follow-ups owed and filed as bugs: audit-growth-via-augmentation-params, audit-trigger-can-abort-writer. Phase 2 (committed shards) = T-7.
