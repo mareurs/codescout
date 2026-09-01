@@ -438,6 +438,16 @@ fn every_index_count_matches_the_corpus() {
 /// names all 17 classes. Its sibling is monotone under parser failure by construction: an empty
 /// map means an empty loop means no assertion. This test is the whole of what stands between
 /// that and a gate that is green forever for the wrong reason.
+///
+/// **The count gate sees TRACKED files only, so a local green defers rather than clears.**
+/// [`tracked_all_bug_files`] shells out to `git ls-files`, so a bug file that exists but has not
+/// been `git add`ed is invisible to the count while its ledger row may already have been updated
+/// — the pair agrees, the test passes, and the disagreement surfaces at CI once the file is
+/// staged. That is deliberate and matches the module header's reason for gating on tracked files
+/// only (an untracked file is a peer's in-flight work, and gating on it lets one session red
+/// another's build). Reported from the receiving end by a peer session on 2026-09-01, who hit
+/// exactly this: green locally while their new bug file was untracked, red once staged. The
+/// failure text cannot say this, so it is said here.
 #[test]
 fn every_declared_class_has_an_index_row() {
     let valid = valid_slugs();
