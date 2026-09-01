@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 156
+entry_high_water_R: 160
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,10 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-160 | 2026-09-01 | miss, peer-caught (1 instance) | **Partial success is the camouflage: one pattern over a heterogeneous population misses its odd member.** Probing five keys of a session-registry file with one grep built as `"$k":"[^"]*"`, I reported four present and `pid` absent — then offered "pid is only the filename" to a peer as a refinement. Wrong: the bytes are `"pid":3624594`. Four keys are JSON **strings** and `pid` is a **number**, so the type-uniform pattern excluded exactly the one key typed differently. What made it persuasive is that the instrument was **visibly working** — a uniform 0/5 would have sent me to the pattern, where 4/5 made the blank read as a property of the data. The peer's own diagnosis (minified, no space after colon) was also wrong; `grep -c '": '` returns 0. Fourth false-negative filter of mine in one session, three in `cargo test`: a bare name with `--exact` matched 0 of 4820 and reported `ok`; `-- guide` matched 132 tests but not the gate under test; `-- valid_slugs` named no test at all. Each returned a well-formed plausible result, never an error. **Proposal:** `R-3` bullet — check the pattern against the population's ODD member, and treat a partial hit as a stronger warning than a total miss. | this session, verified in the bytes both ways; sibling of `R-158` — there the *control* was drawn from the most prominent member, here the *pattern* was fitted to the most typical one |
+| R-159 | 2026-09-01 | hit (1 instance) | **Verifying a MECHANISM is not verifying its REACHABILITY, and a clean mechanism check feels like the strong form of confirmation.** Refused to relay a peer's claim unverified (`R-154`) and checked all three load-bearing facts in the bytes: `Shape::matches` opening `let Some(sel) = sel else { return false }` (`guide_index.rs:179`), the trait default returning `None` (`types.rs:1439`), and exactly five `selector_key` override sites of six files. All three held; I relayed it as time-critical. **Correct, and moot** — the recipient found a fourth fact neither of us sought: `progressive-disclosure.md` carries **zero** `serves:` markers (`librarian.md` is the only declaring guide), so `guide_blocks_for` takes the `!GUIDE_INDEX.declares(topic)` branch at `types.rs:1019` and `Shape::matches` is **never consulted** for that topic. Every check asked how the code behaves *when entered*; none asked *is it entered*. This is § *Testing Discipline*'s "loudness is a property of a PATH" aimed at a claim rather than a guard — `BL-66` is an `abort!` nothing reaches, this is a verified blocker nothing reaches — and the remedy transposes: name the live configuration in which the mechanism fires. One `grep -l 'serves:' src/prompts/guides/*.md` answers it. **Not an argument against verifying before relaying:** reachability is a FOURTH question, and verifying the mechanism harder never reaches it. | mirror of `R-3` — that says prove your instrument can *find*, this says prove your finding can *fire*; sibling `R-154` (relay discipline, which worked) |
+| R-158 | 2026-09-01 | miss twice, self-caught on the retry (2 instances) | **The canonical case is the worst positive control — prominence is why it is already covered.** `R-3` says run a positive control and is silent on *which* case. The case that comes to mind first is the highest-traffic, best-documented one, which is exactly the one most likely already protected: prominence causes both memorability and coverage, so the correlation is systematic rather than luck. Mutating `artifact.create` to verify a new declared-shape gate reddened **two pre-existing tests**, because it is one of six shapes a hard-coded high-volume test pins — "proving" the gate fires while proving nothing about its necessity. Re-mutating on `artifact.link` (one of 18 of 24 unpinned shapes) gave the real figure: 132 guide tests pass, the new gate alone fails. Same session, same mistake: annotating `symbol-navigation` first to verify Gate 7, the one topic an existing byte-identity test happens to pin via its `symbols` fixture. **The two failed in OPPOSITE directions** — one made the gate look more necessary than it is, the other made the tree look less defended, retracting a published "passes all six gates". So the bias is toward whatever the canonical case happens to be, and cannot be corrected by leaning either way. **Proposal:** choose controls from the population's UNREMARKABLE members; pairs with CLAUDE.md's "mutate once per guarded SITE", which says how many and is silent on which. | this session; gates `1b02f36b` and `b769277b`; the retraction is recorded in `system-retrospective-improvements:T-15a` |
+| R-157 | 2026-09-01 | hit (1 instance) | **A work-split is TWO claims, and the "easy half" label is the one that tells you not to check.** `R-95` established that a **deferral** rationale is inflated in the direction that justifies stopping. This is the mirror, with the opposite sign: when work is split so the hard half can be deferred, the easy half's cost is **deflated** to justify the split. And the easy half is the more dangerous one — a deferral says *"do not do this"*, so nobody acts on it, whereas *"ready now, build-safe, no judgement required"* says *"do this without thinking"*, which actively suppresses the scout that would refute it. `T-15a` carried a three-clause label and all three were false. *"Pure annotation"* — Gate 5 makes the **topic** the unit, so no topic holding an over-cap section can be partially annotated, and the recorded per-topic counts describe a partition the gate forbids. *"Build-safe"* — inverted: `Shape::matches` treats `selector_key: None` as no-match by design, and every tool routing to the three target topics returns `None`, so annotating REMOVES whole-guide delivery in favour of the preamble. *"Ready now"* — four of nine topics are pull-only, where `GetGuide` serves `topic_body()` and never consults the index. The easy half was **empty**: the only annotatable topic left is the five-over-cap one deferred as the hard half. **Proposal:** widen the `R-95`/`R-92` Phase 1 bullet to cover the split, naming `no judgement required`, `build-safe` and `mechanical` as triggers. | `system-retrospective-improvements:T-15a` (superseded text kept inline); Gate 7 at `b769277b`; kin `R-95` — same law, opposite sign |
 | R-156 | 2026-09-01 | hit (1 instance) | **A guard's suggested REMEDY is a claim about your situation, and it was written without it.** The `foreign-index` pre-commit hook correctly refused a bare commit whose index held a peer's staged path, then prescribed *"commit your own paths by pathspec"* — which would have committed the ledger carrying that peer's `IC-22` `n=2` **without** the bug file satisfying it, producing a `HEAD` where `every_index_count_matches_the_corpus` fails against a corpus of 1. The guard is sound on the axis it owns and has no way to see that a count cell and a bug file are **one change**; correct against capture, red `HEAD` under coupling. This is `R-49`'s *proposed fix is a claim about current state* arriving from a **mechanism** rather than a person, and harder to doubt for that reason — a hook's text reads as policy, not as a proposal, and the refusal's authority carries over to the advice attached to it. **Remedy:** check refusal and prescription separately — name what the commit must contain for every gate to hold at `HEAD`, *then* pick a commit form. Here the pathspec form was right and needed all three paths, which the guard's example neither had nor could have. | `455184eb` (the commit; verified worktree/`HEAD`/declared agree at 9, 6, 2); inverse of `R-155` — that is a gate reading the wrong tree, this is advice moving you to a tree the gate never read |
 | R-155 | 2026-09-01 | hit (1 instance) | **A gate that reads the WORKING TREE certifies a state you may not be shipping.** Law *B*'s axis, applied to git state rather than to build features: `every_index_count_matches_the_corpus` runs `git grep` over the working tree, was green, and said nothing about what got committed — six of seven retagged files went unstaged, so three newly-opened classes published counts of 3/1/2 against **zero members at `HEAD`**. No amount of re-running helps, because the shipped state is not one the check can address: a partial commit ships a state that never existed on disk. Silent in the author's direction (local green, CI red, surfacing to whoever pushes next) and actively reassuring, since running the gate before committing answers a different question than the commit poses. **Runnable, one call:** `git grep -cl <pat> -- <paths> \| wc -l` against `git grep -cl <pat> HEAD -- <paths> \| wc -l`; any divergence after a commit you believed complete is a partial commit. Only run because a peer's report had made HEAD-vs-worktree the habit an hour earlier. **Proposal:** Law *B* sub-shape — name the tree your instrument read, and check it is the tree you are shipping. | `cluster-promotion-session-log:F-7` (the working, repaired at `4f598b5b`); sibling of `R-89` — that one is *which build*, this is *which tree*, the same question of a different substrate |
 | R-154 | 2026-09-01 | hit (1 instance) | **A NUMBER inherited from a subagent report is a claim, and a floor carries no denominator to check it against.** Law *A* already names *"a subagent's report"* as a claim; what let this one through is that the claim was a **quantity**, and quantities read as measurements someone else already took. Two subagents auditing a different question each noted `IC-13`'s *"without a marker"* clause looked false for “at least four” members; that floor crossed three of my messages, a commit message and a tracker entry, and was about to ground a taxonomy ruling. Measuring it (16 files, one reader each, quote per verdict, expected answer withheld) gave **A=4 / B=5 / C=7** — the claim holds for 4, and the floor had been carried in the **opposite direction** to its meaning: read as bounding the members the claim *fails* for, it bounded the ones it *holds* for (true failure figure 12 of 16). Two properties made it durable: a floor has **no denominator**, so ≥4 is compatible with 4/16 and 4/4 — opposite rulings — and re-reading a bound tells you nothing new; and the **framing selected its meaning**, since “the claim is too narrow” predicts B, so the digits read as “4 B’s” when B is the *smallest* bucket. **Proposal:** Law *A* sub-shape — a number from another task is a claim; re-derive it, and demand its denominator before it bounds anything. | `cluster-promotion-session-log:F-5` (the 16 per-file verdicts, each quoting the file that settles it); kin `cluster-promotion-session-log:F-4` — a count cell stale by *concurrency* rather than provenance, so numbers here rot two ways with different remedies (re-derive vs gate) |
@@ -6669,6 +6673,191 @@ Following it would have committed the ledger **carrying the peer's `n=2`** witho
 **Valid:** invariant
 
 **Rests on:** the general principle that a mechanism's prescription is authored without the caller's context, not on the specific hook — which may gain coupling-awareness and would not falsify this.
+
+## R-157 — A work-split is two claims — and the "easy half" label is the one that says don't check
+
+**Valid:** dated 2026-09-01
+
+**Verdict:** hit — the scout ran before the annotation pass and refuted its whole premise.
+
+**Observed:** 2026-09-01, entering the `T-15a` task recorded in
+`system-retrospective-improvements` as *"ready now, no judgement required … Pure annotation,
+build-safe."* Scouted the guide-index gate structure and delivery mechanics before writing a
+single declaration.
+
+**The law.** `R-95` established that a **deferral** rationale is a claim, and that its bias has
+a direction: nobody drafts an estimate that makes deferred work sound *easier*, because that
+estimate would not justify stopping. This is the mirror case, and it has the opposite sign.
+**When work is SPLIT into an easy half and a hard half so the hard half can be deferred, the
+easy half's cost is written to justify the split — so it is DEFLATED.** Both halves of the
+split are claims; `R-95` audits one of them.
+
+**Why the easy half is the more dangerous one.** A deferral rationale says *"do not do this"*,
+so nobody acts on it — it is durable and wrong, but inert. A label reading *"ready now,
+build-safe, no judgement required"* says *"do this without thinking"*, which is an instruction
+to **skip the scout**. It does not merely fail to prompt verification; it actively suppresses
+the check that would refute it. The phrase *"no judgement required"* is the tell.
+
+**Evidence — three independent refutations of one three-clause label:**
+
+1. *"Pure annotation"* — false. Gate 5 (`every_section_of_a_declaring_topic_is_reachable`)
+   makes the **topic** the unit, not the section: the first declaration in a topic obliges
+   every other section in it. So the four topics with an over-cap section cannot be partially
+   annotated at all, and the recorded per-topic counts (`6/7`, `10/11`, `8/9`, `10/15`) describe
+   a partition the gate does not permit.
+2. *"Build-safe"* — false, and inverted. `Shape::matches` opens `let Some(sel) = sel else {
+   return false }` — deliberate, "do not turn it into a wildcard". Only five of the registry's
+   tools override `selector_key`; **every** tool routing to `progressive-disclosure` (nine),
+   `symbol-navigation` (three) and `workspace-state` (one) returns `None`. Annotating them does
+   not add delivery, it REPLACES whole-guide delivery with the preamble alone. Reproduced in
+   the delivered bytes.
+3. *"Ready now"* — false. Four of the nine topics are in `PULL_ONLY_GUIDE_TOPICS`, and
+   `GetGuide` serves `topic_body()` without ever consulting the index, so declarations there
+   are inert regardless. `tracker-conventions` is the only annotatable topic left, and it is
+   the five-over-cap one — i.e. `T-15b`, the half that was deferred.
+
+**Counterfactual.** Without the scout: ~13–40 sections annotated across three to nine files,
+gates 1–6 green, and a silent downgrade of three topics' guide delivery to preamble-only. Three
+of the four topics turned out to have a pre-existing guard, so the likeliest outcome is a
+confusing red on a fixture assertion (`a_topic_without_declarations_reports_false`) that an
+author would legitimately re-point before proceeding — the one topic whose only signal is
+re-pointable is `progressive-disclosure`, the largest of the three.
+
+**Proposal.** The Phase 1 bullet promoted from `R-95`/`R-92` reads *"a deferral rationale is a
+claim, and the least-audited kind."* Widen it to **"a work-split is two claims, and the
+easy-half label is the one that tells you not to check"** — naming the deflation direction and
+the `no judgement required` / `build-safe` / `mechanical` phrasings as triggers. Same law, one
+mechanism it does not currently cover.
+
+**Rests on:** `Shape::matches`'s `None`-is-no-match contract, and Gate 5's topic-level scope.
+Both pinned by tests as of `b769277b`; re-verify if either changes.
+
+## R-158 — The canonical case is the worst positive control — prominence is why it's already covered
+
+**Valid:** dated 2026-09-01
+
+**Verdict:** miss, twice, in one session — and caught only because the law was applied a second
+time rather than because it was known.
+
+**Observed:** 2026-09-01, twice while mutation-verifying two new gates (`1b02f36b`, `b769277b`).
+
+**The law.** `R-3`'s promoted form says *"run a positive control … one per state you believe the
+instrument can report."* True, and it does not say which case to use. **The case that comes to
+mind first is the canonical, highest-traffic, most-documented one — which is exactly the case
+most likely to be already covered, so a control built on it confirms and teaches nothing.**
+Prominence is what makes a case memorable *and* what got it protected. The two properties share
+a cause, so the correlation is systematic, not luck.
+
+**Both instances, same shape:**
+
+1. Verifying Gate 6 (declared `serves:` shapes must name a live tool/action). Mutated
+   `artifact.create` → `artifact.creat`. It reddened — and reddened **two pre-existing tests**,
+   because `artifact.create` is one of six shapes a hard-coded high-volume test
+   (`librarian_declares_the_six_highest_volume_artifact_shapes`) already pins. Stopping there
+   would have "proved" the gate fires while proving nothing about whether it was **needed**.
+   Re-mutated on `artifact.link` — one of the 18 of 24 declared shapes nothing pins — and the
+   real figure appeared: **132 guide tests pass, Gate 6 alone fails.**
+2. Verifying Gate 7 (a declaring topic needs a live route). Annotated `symbol-navigation`
+   first — the topic `a_non_declaring_topic_is_byte_identical_to_today` happens to pin, because
+   that test uses `symbols(path=".")` as its fixture. Re-ran on `progressive-disclosure` and
+   `project-activation-bootstrap`, which is what produced the honest result: **three of four
+   candidate topics already had a guard**, and only one (`progressive-disclosure`) had nothing
+   but a re-pointable fixture assertion.
+
+**The asymmetry that makes this worth an entry.** The two instances failed in **opposite
+directions** from the same mistake. In (1) the over-covered control made the new gate look more
+necessary than it was. In (2) it made the tree look less defended than it is — and I had already
+published *"passes all six gates"*, which the second mutation retracted. So this does not bias
+toward optimism or pessimism; it biases toward **whatever the canonical case happens to be**,
+which is unpredictable and therefore not correctable by leaning one way.
+
+**Proposal.** Extend the positive-control sentence in the Phase 1 bullet: *"choose the control
+from the population's UNREMARKABLE members — the canonical case is the one most likely to be
+already covered, so it is the worst available control."* Pairs with CLAUDE.md § Testing
+Discipline's *"mutate once per guarded SITE"*, which says how many controls to run and is silent
+on which. Two datapoints, both this session, both mine, in two different subsystems.
+
+**Cost if it had gone unnoticed:** one over-claimed gate justification and one published claim
+("passes all six gates") left standing. The second was already in a commit message before the
+re-mutation retracted it.
+
+**Rests on:** the two pre-existing tests named above continuing to pin those specific
+fixtures — `librarian_declares_the_six_highest_volume_artifact_shapes`' hard-coded six, and
+`a_non_declaring_topic_is_byte_identical_to_today`'s `symbols` call. If either generalises, the
+instances stay valid as history but the ledger should not be read as still describing the tree.
+
+## R-159 — verifying a MECHANISM is not verifying its REACHABILITY, and a clean mechanism check feels like the strong form
+
+**Observed:** 2026-09-01. A peer reported that a spec's planned change would not unblock what its author might assume, because `selector_key` returns `None` for every tool routing to `progressive-disclosure` and `Shape::matches` rejects `None` by construction. I refused to relay it unverified — `R-154` — and checked all three load-bearing facts myself: `Shape::matches` at `src/prompts/guide_index.rs:179` opening `let Some(sel) = sel else { return false }`; the trait default at `src/tools/core/types.rs:1439` returning `None`; and exactly five override sites out of six files containing `fn selector_key`. All three held. I relayed it as time-critical to a session mid-implementation.
+
+**Got:** correct, and **moot**. The recipient found a fourth fact neither of us had looked for: `src/prompts/guides/progressive-disclosure.md` contains **zero** `serves:` markers — `librarian.md` is the only declaring guide in the tree — so `guide_blocks_for` takes the `!GUIDE_INDEX.declares(topic)` branch at `types.rs:1019` and **`Shape::matches` is never consulted for that topic at all.** The blocker is real, verified, and sits on no live path. It fires only if someone later adds `serves:` to that guide.
+
+**The gap:** I verified the mechanism and never asked whether anything reaches it. Every one of my three checks was a question about how the code *behaves when entered*; none was the question *is it entered*. That distinction is invisible from inside the verification, because a mechanism check that comes back clean feels like the strong form of confirmation — I had read the actual bytes, not a doc.
+
+**This is `CLAUDE.md` § *Testing Discipline*'s "loudness is a property of a PATH, not of a failure" pointed at a claim rather than a guard.** `BL-66` is an `abort!` nothing arrives at; this is a *verified blocker* nothing arrives at. Same structure, and the same remedy transposes: **name the concrete caller that reaches it.** For a guard that means naming who trips it; for a relayed claim it means naming the live configuration in which the mechanism fires. Had I asked *"which guide declares a shape today?"* — one `grep -l`, the check the recipient actually ran — the answer is one file and not this one.
+
+**Cost and non-cost.** Cheap here: one read for a session mid-SDD-run, and they recorded the trap in their spec as a checked non-assumption, so the warning bought something despite being inapplicable. The failure mode worth respecting is the other branch — a *stop-work* warning routed on a verified-but-unreachable mechanism, which is expensive precisely because every fact in it survives scrutiny.
+
+**Not an argument against verifying before relaying.** `R-154` still holds and the verification was right; the three facts are true and now pinned by a peer's Gate 7. **Reachability is a fourth question, additional to the three, and it is the one that decides whether the claim is actionable.** Verifying the mechanism harder never reaches it.
+
+**Status:** validated — one datapoint, mechanism inspectable rather than inferred (`grep -l 'serves:' src/prompts/guides/*.md` returns one file; the branch is at `types.rs:1019`).
+
+**Promote-when:** a second instance where a verified mechanism turns out to sit on no live path. Then it belongs beside `R-3`'s positive-control rule as its mirror — that one says prove your instrument can *find*; this says prove your finding can *fire*.
+
+**Valid:** invariant
+
+**Rests on:** the general distinction between a mechanism's behaviour and its reachability, not on this guide corpus — adding `serves:` to a second guide would change the example and not the law.
+
+## R-160 — Partial success is the camouflage — one pattern over a heterogeneous population misses its odd member
+
+**Valid:** dated 2026-09-01
+
+**Verdict:** miss — I asserted a fact about the world from a search that found nothing, and a
+peer session caught it. Downstream catch, not a self-catch.
+
+**Observed:** 2026-09-01, verifying a peer's claim that
+`$CLAUDE_CONFIG_DIR/sessions/<pid>.json` carries a pid→sessionId join. I probed five keys in one
+loop and reported that four were present and that **`pid` was not a field, only the filename** —
+offering that back to the peer as a refinement to their bug file. It was wrong. The bytes are
+`"pid":3624594`.
+
+**Mechanism, and it is not the obvious one.** The loop built one pattern for all five keys:
+
+```
+grep -o "\"$k\":\"[^\"]*\"" "$f"      # requires a QUOTED value
+```
+
+`sessionId`, `name`, `messagingSocketPath` and `cwd` are JSON **strings**; `pid` is a JSON
+**number**. The type-uniform pattern silently excluded the one key typed differently. The peer's
+own diagnosis — that the file is minified and I had grepped for `": "` with a space — is also
+wrong: `grep -c '": '` over the file returns **0**, so no spacing assumption was involved either
+way. Verified before conceding, which is how the sharper cause surfaced.
+
+**The new mechanism this adds to `R-3`. Partial success is the camouflage.** `R-3`'s promoted
+form warns that a zero is evidence about the search. What made this one persuasive is that the
+search was **4/5 correct**: four keys came back with real values, so the instrument was visibly
+working, and the fifth's blank read as a property of the data rather than of the pattern. A
+uniform 0/5 would have prompted an immediate look at the pattern. **A heterogeneous population
+queried with one pattern fails exactly on its odd member, and the successes are what make that
+failure legible as absence.**
+
+**Fourth false-negative filter of my own in this one session**, three of them in `cargo test`:
+`-- <bare name> --exact` (matched 0 of 4820, reported `ok`), `-- guide` (matched 132 tests but
+not the gate under test, whose name contains no "guide"), `-- valid_slugs` (no such test exists;
+the real names are `every_declared_class_has_an_index_row` and siblings), and this grep. Each
+returned a **well-formed, plausible result** rather than an error, and two of the four were
+about to be published.
+
+**Proposal.** Add to the `R-3` bullet: **"a query over a heterogeneous population encodes a type
+or shape assumption — check the pattern against the ODD member, not the typical one, and treat a
+partial hit as a stronger warning than a total miss."** Note this is `R-158`'s sibling with the
+same root: there, the *control* was drawn from the population's most prominent member; here the
+*pattern* was fitted to the population's most typical member. Same bias, two different
+instruments.
+
+**Rests on:** the registry being minified JSON with `pid` as a bare number. If a future Claude
+Code version pretty-prints it or quotes `pid`, the instances stay valid as history but the byte
+detail does not.
 
 ## Template for new entries
 

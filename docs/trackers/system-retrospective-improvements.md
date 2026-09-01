@@ -289,13 +289,62 @@ biggest lever *and* the only guide where a third of the sections cannot carry a 
 without being decomposed first. Those are not independent facts — the guide is unannotated
 partly because it is the hard one.
 
-### T-15a — ready now, no judgement required
+### T-15a — BLOCKED on `selector_key`; the "easy half" label was wrong in three ways
 
-Annotate the sections that already fit: **all** of `error-handling`, `progressive-disclosure`,
-`project-activation-bootstrap`, `symbol-navigation`, `untrusted-content`; and the
-under-cap sections of `iron-laws-detail` (6/7), `librarian-runtime` (10/11), `workspace-state`
-(8/9), `tracker-conventions` (10/15). Pure annotation, build-safe, independent of both Phase 2
-blockers on `7579b32b1cd2362f`.
+**Status: blocked. Do not attempt as written.** Scouted 2026-09-01 before annotating anything;
+every clause of the original scoping was refuted. Superseded text kept below for the record.
+
+> ~~Annotate the sections that already fit: **all** of `error-handling`, `progressive-disclosure`,
+> `project-activation-bootstrap`, `symbol-navigation`, `untrusted-content`; and the
+> under-cap sections of `iron-laws-detail` (6/7), `librarian-runtime` (10/11), `workspace-state`
+> (8/9), `tracker-conventions` (10/15). Pure annotation, build-safe, independent of both Phase 2
+> blockers on `7579b32b1cd2362f`.~~
+
+**1. "Pure annotation" — the unit is the TOPIC, not the section.** Gate 5
+(`every_section_of_a_declaring_topic_is_reachable`) obliges every section of a topic once any
+one of them declares. So the four topics holding an over-cap section cannot be partially
+annotated at all, and the per-topic counts above describe a partition the gate forbids.
+
+**2. "Build-safe" — inverted. It would REMOVE delivery.** `Shape::matches`
+(`src/prompts/guide_index.rs:179`) opens `let Some(sel) = sel else { return false }`,
+deliberately — *"do not turn it into a wildcard"*. Only five tools in the registry override
+`selector_key` (the librarian family via `adapter.rs`, plus `create_file`, `edit_file`,
+`memory`). **Every** tool routing to `progressive-disclosure` (nine), `symbol-navigation`
+(three) and `workspace-state` (one) returns `None`; `project-activation-bootstrap` has no
+`relevant_guide_topic` at all — it is the session-opening special case. Annotating any of them
+replaces whole-guide delivery with the preamble alone. Reproduced in the delivered bytes.
+
+**3. "Ready now" — four of the nine topics are inert targets.** `error-handling`,
+`untrusted-content`, `iron-laws-detail` and `librarian-runtime` are in
+`PULL_ONLY_GUIDE_TOPICS`, and `GetGuide` serves `topic_body()` without consulting the index, so
+declarations there change nothing either way.
+
+**What is left of T-15a: nothing annotatable.** `tracker-conventions` is the only topic that is
+both triggered and selector-bearing, and it is the five-over-cap one — i.e. **T-15b**, the half
+that was deferred. The easy half was empty.
+
+**The real prerequisite** is implementing `selector_key` on the tools that trigger these topics
+(~13 tools, via `crate::tools::core::types::action_selector_key`). That is a behavioural change,
+not an annotation pass, and it is unscoped — treat it as a new T-N rather than as part of this
+one.
+
+**Gate now refuses the bad configuration.** `b769277b` adds Gate 7
+(`every_declaring_topic_has_a_live_route_to_a_declared_section`), which fails with the mechanism
+and remedy named. Note its live population is **one file** — `grep -l 'serves:'
+src/prompts/guides/*.md` returns only `librarian.md` (verified 2026-09-01, independently by
+`codescout-b7`) — so the gate is cheap to hold but thinly exercised: a bug in the declaring path
+has almost nothing testing it, and a second declaring member would be a deliberate act rather
+than something the corpus supplies.
+
+**Also corrected here:** the claim that this would be "a silent regression passing all six
+gates" was wrong. Mutating three topics separately showed three of four already have a guard —
+`symbol-navigation` via `a_non_declaring_topic_is_byte_identical_to_today`,
+`project-activation-bootstrap` via `session_opening_guide_never_declares_sections`,
+`workspace-state` incidentally via Gate 3. Only `progressive-disclosure` had nothing but a
+re-pointable fixture assertion. See `reconnaissance-patterns:R-158`.
+
+**Cross-cutting lesson:** `reconnaissance-patterns:R-157` — a work-split is two claims, and the
+"easy half" label is the one that tells you not to check.
 
 ### T-15b — the five over-cap `tracker-conventions` sections
 
