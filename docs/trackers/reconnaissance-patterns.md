@@ -7564,11 +7564,38 @@ bytes*, not *whose work this is* — co-edited files exist and are resolved by a
 **And keep the two halves of an identification separate when reporting.** I verified from
 my own run that the eight files partition into two author ids and that none is mine. That
 `6524892b` is `codescout-b7` came from `codescout-b7` quoting its own id, which is the
-prescribed positive method. That `3e275c54` is `compact-root-claude-md` is that session's
-inference about a third party, which I have not confirmed — `/proc/<pid>/environ` carries
-no `CLAUDE_CODE_SESSION_ID`, so the id→name mapping is not independently checkable from
-here. Report the id when only the id is established. Attaching a name costs nothing and
-is precisely how the original error propagated.
+prescribed positive method. That `3e275c54` is `compact-root-claude-md` was that session's
+inference about a third party, which I did not confirm at the time — `/proc/<pid>/environ`
+carries no `CLAUDE_CODE_SESSION_ID`, so the lookup I reached for does not exist. Report the
+bare id when only the id is established: **stating an unverified name costs nothing to do,
+which is exactly why the original error propagated so easily.**
+
+**Closing the mapping (2026-09-02, method supplied by `codescout-b7`).** The lookup runs
+the opposite way from the one I tried. The registry file is *named for the pid*, and its
+JSON carries `sessionId` and `name` together — so scan for the id and read the basename:
+
+```bash
+sid=<session-id>
+for f in "$HOME"/.claude*/sessions/*.json; do
+  grep -q "\"sessionId\":\"$sid\"" "$f" || continue
+  p=$(basename "$f" .json)
+  [ "$(tr -d '\0' </proc/$p/comm)" = claude ] && printf '%s -> pid %s  name %s  profile %s\n' \
+    "$sid" "$p" "$(sed -n 's/.*"name":"\([^"]*\)".*/\1/p' "$f")" \
+    "$(basename "$(dirname "$(dirname "$f")")")"
+done
+```
+
+Validated by running it on **my own** id as a control, not merely on the id in question: it
+returned the pid, name and profile matching my `<-- you` row from the enumeration. On that
+basis `3e275c54` resolves to pid 3624594 / `compact-root-claude-md` / `.claude-sdd`.
+
+**It still does not license "X did this", and that caveat is the sharper half of the
+entry.** The `comm` check guards pid reuse but not a *recycled* registry file — and **a
+session that compacts or resumes mints a new id for the same agent doing the same work.**
+So the relation this closes is id→name, never agent→name: the bytes were written by an id,
+and an agent is a longer-lived thing than whichever id was current when it typed. Write
+*"the session registered as X"*, and expect one agent's work to span several ids across a
+long task. A tool that resolves the name is not a tool that resolves the author.
 
 ## Template for new entries
 
