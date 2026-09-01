@@ -6,10 +6,12 @@
 //! a re-derived id would move when the environment moves, silently forking one
 //! machine's shard history across two filenames with no error anywhere.
 //!
-//! Nothing outside this file's own tests calls into this module yet — Tasks 2
-//! (writer) and 3 (reader) are what consume `resolve_host_id`,
-//! `shard_file_name`, `parse_shard_file_name`, `AUDIT_DIR`, and
-//! `HOST_META_KEY`. Each item below carries its own
+//! Task 2 (writer, `shard.rs`) now calls into this module, but only from
+//! `shard::export`, which is itself only called by `shard.rs`'s own tests —
+//! so under `--cfg test` these items are reachable via that chain, and in the
+//! non-test build every item here remains genuinely unreached until a real
+//! (non-test) caller lands. Task 3 (reader) is still the sole consumer of
+//! `parse_shard_file_name`. Each item below carries its own
 //! `#[cfg_attr(not(test), expect(dead_code, reason = "..."))]` rather than a
 //! file-scoped `#![allow(dead_code)]`: `expect` fires
 //! `unfulfilled_lint_expectations` the moment a later task adds the first
@@ -26,13 +28,9 @@ use crate::librarian::catalog::gc;
 use anyhow::Result;
 use rusqlite::Connection;
 
-// Not `cfg_attr(not(test), expect(...))` like the items below: unlike them,
-// nothing — not even this file's own tests — references AUDIT_DIR yet, so
-// dead_code fires in both the test and non-test compilation units and a
-// plain unconditional expect is the correct (and honest) suppression here.
-#[expect(
-    dead_code,
-    reason = "consumed by Task 2 (writer) and Task 3 (reader): the audit directory root"
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "consumed by Task 2 (writer) via shard::export")
 )]
 pub(crate) const AUDIT_DIR: &str = ".codescout/audit";
 #[cfg_attr(
@@ -49,10 +47,7 @@ pub(crate) const HOST_META_KEY: &str = "audit_host_id";
 /// prefix — and the prefix is a courtesy, not the correctness.
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "consumed transitively via resolve_host_id, Task 2 (writer)"
-    )
+    expect(dead_code, reason = "consumed by Task 2 (writer) via resolve_host_id")
 )]
 fn candidate_name() -> String {
     for key in ["CODESCOUT_AUDIT_HOST", "COMPUTERNAME", "HOSTNAME"] {
@@ -74,10 +69,7 @@ fn candidate_name() -> String {
 /// Namespace).
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "consumed transitively via mint_host_id, Task 2 (writer)"
-    )
+    expect(dead_code, reason = "consumed by Task 2 (writer) via mint_host_id")
 )]
 fn sanitize(raw: &str) -> String {
     let mut out = String::new();
@@ -105,10 +97,7 @@ fn sanitize(raw: &str) -> String {
 /// increasing counter is mixed in as a third, always-distinct source.
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "consumed transitively via suffix, Task 2 (writer)"
-    )
+    expect(dead_code, reason = "consumed by Task 2 (writer) via suffix")
 )]
 static MINT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -120,10 +109,7 @@ static MINT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 /// principle vary in exactly the bits the counter also touches.
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "consumed transitively via suffix, Task 2 (writer)"
-    )
+    expect(dead_code, reason = "consumed by Task 2 (writer) via suffix")
 )]
 static SUFFIX_NANOS: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -142,10 +128,7 @@ static SUFFIX_NANOS: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
 /// foundation for a collision guard.
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "consumed transitively via mint_host_id, Task 2 (writer)"
-    )
+    expect(dead_code, reason = "consumed by Task 2 (writer) via mint_host_id")
 )]
 fn suffix() -> String {
     use std::sync::atomic::Ordering;
@@ -163,7 +146,7 @@ fn suffix() -> String {
 /// environment or a catalog connection.
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "consumed by resolve_host_id, Task 2 (writer)")
+    expect(dead_code, reason = "consumed by Task 2 (writer) via resolve_host_id")
 )]
 pub(crate) fn mint_host_id(candidate: &str) -> String {
     format!("{}-{}", sanitize(candidate), suffix())
@@ -174,10 +157,7 @@ pub(crate) fn mint_host_id(candidate: &str) -> String {
 /// design — all the logic that needs testing lives in `mint_host_id`.
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 2 (writer), which resolves the host id once per catalog before writing"
-    )
+    expect(dead_code, reason = "consumed by Task 2 (writer) via shard::export")
 )]
 pub(crate) fn resolve_host_id(conn: &Connection) -> Result<String> {
     if let Some(existing) = gc::get_meta(conn, HOST_META_KEY)? {
@@ -192,7 +172,10 @@ pub(crate) fn resolve_host_id(conn: &Connection) -> Result<String> {
 
 /// `<host>-<YYYYMM>.jsonl`. One file per host per month: month bounds the file
 /// size, and host keeps two machines off each other's lines entirely.
-#[cfg_attr(not(test), expect(dead_code, reason = "consumed by Task 2 (writer)"))]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "consumed by Task 2 (writer) via shard::export")
+)]
 pub(crate) fn shard_file_name(host: &str, at_ms: i64) -> String {
     format!("{host}-{}.jsonl", month_key(at_ms))
 }
@@ -201,10 +184,7 @@ pub(crate) fn shard_file_name(host: &str, at_ms: i64) -> String {
 /// calendar so it agrees with `at_ms` on every platform.
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "consumed transitively via shard_file_name, Task 2 (writer)"
-    )
+    expect(dead_code, reason = "consumed by Task 2 (writer) via shard_file_name")
 )]
 pub(crate) fn month_key(at_ms: i64) -> String {
     let days = at_ms.div_euclid(86_400_000);
@@ -216,10 +196,7 @@ pub(crate) fn month_key(at_ms: i64) -> String {
 /// this crate free of a chrono dependency for one date field.
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "consumed transitively via month_key, Task 2 (writer)"
-    )
+    expect(dead_code, reason = "consumed by Task 2 (writer) via month_key")
 )]
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
