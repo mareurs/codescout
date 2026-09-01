@@ -90,7 +90,15 @@ it. A stale server therefore never recycles: it is not use-coupled, it does not 
 nobody cares, and only `/mcp` or that session exiting clears it — neither of which anything
 prompts. **Discriminate by parent, not by the `(deleted)` marker, which is identical for both:**
 `ps -o cmd= -p $(ps -o ppid= -p <pid>)` — a server's parent is `…/claude`, a mux's is another
-`codescout`, and the mux command line also carries `mux --socket …`.
+`codescout`, and the mux command line also carries `mux --socket …`. **Prefer that last one — the
+child's OWN cmdline — which is what the block below now uses.** The parent test carries a latent
+false positive: it asks whether the *parent's* command line contains `claude`, and this repo lives
+at `/home/marius/work/claude/codescout`, so a mux whose parent server was launched from
+`target/release/codescout` classifies as a **server**. It happens not to fire only because live
+servers run via the `~/.cargo/bin/codescout` symlink — an accident of launch path, not a property
+of the test. Found by a peer 2026-09-01 by checking the snippet against every live mux instead of
+assuming it; the `mux --socket` form needs no parent lookup and was verified to give the identical
+partition (9 servers + 3 muxes) on the same population.
 
 Measured 2026-09-01: a release build at 13:04:36 left **three** servers from 11:26–11:28 running
 the deleted image, still alive at 13:40 — one in this repo, two in another project. The in-repo
@@ -122,8 +130,7 @@ per-user and therefore profile-independent, where `ListAgents` is per-profile an
 ```
 for p in $(pgrep -x codescout); do
   case "$(readlink /proc/$p/exe 2>/dev/null)" in *" (deleted)")
-    pp=$(ps -o ppid= -p $p | xargs)
-    case "$(ps -o cmd= -p $pp)" in *claude*) echo "server $p";; *) echo "mux $p";; esac;;
+    case "$(tr '\0' ' ' < /proc/$p/cmdline)" in *"mux --socket"*) echo "mux $p";; *) echo "server $p";; esac;;
   esac
 done
 ```
