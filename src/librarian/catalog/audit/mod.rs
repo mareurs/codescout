@@ -327,6 +327,12 @@ pub(crate) struct AuditRow {
 /// and `count_matching()` (which wraps in `SELECT count(*)`) can never drift
 /// apart on which rows a filter matches — Task review Finding B (2026-09-01)
 /// depends on `filtered_total` reflecting exactly the same WHERE as `query()`.
+///
+/// `shard::matches()` mirrors this predicate field-for-field for committed
+/// shard rows (which never reach this SQL table). A field added here and
+/// forgotten there is a filter-drift bug that returns a plausible but wrong
+/// count rather than an error — `matches()` guards against it with an
+/// exhaustive `AuditFilter` destructure so the two cannot silently diverge.
 fn filter_where(f: &AuditFilter) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
     let mut sql = String::from(" WHERE 1=1");
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();

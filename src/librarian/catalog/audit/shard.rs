@@ -287,15 +287,31 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
 pub(crate) struct ShardRead {
     pub rows: Vec<ShardLine>,
     pub malformed: usize,
-    /// host → (min seq, max seq) present. This is the coverage window, DERIVED
-    /// from the rows rather than declared in a header: a header line would be
-    /// duplicated by `merge=union` on every same-host branch merge, and a
-    /// declared window that disagrees with the rows is worse than none.
+    /// host → (min seq, max seq) present, **scoped to the files that survived
+    /// window pruning** — not the full committed shard set for that host. A
+    /// file skipped by `month_in_window` never has its lines parsed, so a host
+    /// whose only shard falls outside the query window is simply absent from
+    /// this map rather than reporting a window that was never opened. This is
+    /// DERIVED from the rows rather than declared in a header: a header line
+    /// would be duplicated by `merge=union` on every same-host branch merge,
+    /// and a declared window that disagrees with the rows is worse than none.
     pub hosts: BTreeMap<String, (i64, i64)>,
     pub files_read: usize,
     pub files_skipped_by_window: usize,
+    /// Shard files that parsed as a shard name, survived the window, but
+    /// could not be read (permissions, race with a concurrent writer, a
+    /// symlink to nowhere). Counted separately from `malformed` — malformed
+    /// is a bad *line* inside a file we did read; this is a whole file we
+    /// never got to look at, and conflating them would hide which one it is.
+    pub unreadable_files: usize,
 }
 
+/// Mirrors `filter_where` (`mod.rs`) field-for-field — the SQL predicate for
+/// local rows and this predicate for shard rows must never drift, since
+/// Task 4 sums a SQL-filtered count and a `matches()`-filtered count into one
+/// `filtered_total`. The exhaustive destructure below is the parity guard: a
+/// new `AuditFilter` field added to `filter_where` and forgotten here fails
+/// the build instead of silently producing a wrong total.
 #[cfg_attr(
     not(test),
     expect(
@@ -304,16 +320,22 @@ pub(crate) struct ShardRead {
     )
 )]
 fn matches(l: &ShardLine, f: &super::AuditFilter) -> bool {
-    f.tbl.as_ref().is_none_or(|v| *v == l.tbl)
-        && f.row_id.as_ref().is_none_or(|v| *v == l.row_id)
-        && f.actor.as_ref().is_none_or(|v| *v == l.actor)
-        && f.op.as_ref().is_none_or(|v| *v == l.op)
-        && f.since.is_none_or(|v| l.at_ms >= v)
-        && f.until.is_none_or(|v| l.at_ms <= v)
+    let super::AuditFilter {
+        tbl,
+        row_id,
+        actor,
+        op,
+        since,
+        until,
+    } = f;
+    tbl.as_ref().is_none_or(|v| *v == l.tbl)
+        && row_id.as_ref().is_none_or(|v| *v == l.row_id)
+        && actor.as_ref().is_none_or(|v| *v == l.actor)
+        && op.as_ref().is_none_or(|v| *v == l.op)
+        && since.is_none_or(|v| l.at_ms >= v)
+        && until.is_none_or(|v| l.at_ms <= v)
 }
 
-/// Read every OTHER host's shards, filtered and deduped.
-///
 /// `self_host`'s own shard is skipped: those rows are already in the local
 /// table, and counting them twice would produce a wrong `filtered_total` —
 /// a plausible number rather than an error, which nothing downstream catches.
@@ -348,6 +370,12 @@ pub(crate) fn read_shards(
             continue;
         }
         let Ok(body) = std::fs::read_to_string(e.path()) else {
+            // A file whose NAME parsed as a valid shard but whose CONTENTS we
+            // could not read (permissions, a race with a concurrent writer, a
+            // dangling symlink) must not vanish silently — that would under-count
+            // `files_read` against what the directory listing promised with no
+            // signal anywhere that a file was dropped.
+            out.unreadable_files += 1;
             continue;
         };
         out.files_read += 1;
@@ -359,6 +387,15 @@ pub(crate) fn read_shards(
                 out.malformed += 1;
                 continue;
             };
+            // Defense in depth: the file name already excludes self_host, but a
+            // line's own `host` field is attacker/bug-reachable independently of
+            // the file it lives in (a manual edit, a future writer bug that puts
+            // the wrong host in the payload). Checking the field too costs one
+            // string comparison and closes that gap rather than trusting the
+            // filename alone to carry the invariant.
+            if line.host == self_host {
+                continue;
+            }
             let key = (line.host.clone(), line.seq);
             let span = out
                 .hosts
@@ -372,6 +409,10 @@ pub(crate) fn read_shards(
             out.rows.push(line);
         }
     }
+    // Sort key is `at_ms`, never `seq`: `seq` is a per-host autoincrement, so
+    // two different hosts' rows can carry the identical seq from 1 upward —
+    // it has no meaning as a CROSS-host ordering key. `at_ms` is a real wall-clock
+    // timestamp and is the only field here that is comparable across hosts.
     out.rows.sort_by(|a, b| {
         b.at_ms
             .cmp(&a.at_ms)
@@ -756,6 +797,15 @@ mod tests {
         .to_string()
     }
 
+    fn foreign_line_for(host: &str, seq: i64, at_ms: i64, row_id: &str) -> String {
+        serde_json::json!({
+            "host": host, "seq": seq, "at_ms": at_ms,
+            "tbl": "artifact", "op": "delete", "row_id": row_id,
+            "actor": "codescout:sess-b", "payload": {"id": row_id}
+        })
+        .to_string()
+    }
+
     #[test]
     fn a_foreign_hosts_rows_are_read_back() {
         let tmp = tempfile::tempdir().unwrap();
@@ -803,6 +853,12 @@ mod tests {
         let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
         assert_eq!(r.rows.len(), 2, "the good lines still arrive");
         assert_eq!(r.malformed, 1, "and the bad one is REPORTED");
+        // Pin the sort order too: `at_ms DESC` means the later row (ok-2, at_ms
+        // ...001) sorts FIRST. This is the mutation-proof site for an inverted
+        // comparator — flipping `b.at_ms.cmp(&a.at_ms)` to `a.at_ms.cmp(&b.at_ms)`
+        // swaps rows[0]/rows[1] and fails these two assertions.
+        assert_eq!(r.rows[0].row_id, "ok-2", "newer at_ms sorts first");
+        assert_eq!(r.rows[1].row_id, "ok-1");
     }
 
     #[test]
@@ -818,6 +874,47 @@ mod tests {
         let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
         assert_eq!(r.rows.len(), 1, "deduped on (host, seq)");
         assert_eq!(r.rows[0].row_id, "dup");
+    }
+
+    #[test]
+    fn two_different_hosts_sharing_the_same_seq_are_both_kept() {
+        // Row identity is (host, seq), not seq alone: seq is a per-host
+        // autoincrement, so two DIFFERENT hosts legitimately reuse seq=1.
+        // A dedup key of `seq` alone would collapse these two distinct rows
+        // into one, silently dropping a foreign host's row. This test is
+        // the mutation-proof site for that: mutating the dedup key in
+        // read_shards from `(line.host.clone(), line.seq)` to `line.seq`
+        // makes this fail (2 rows -> 1, hosts.len() 2 -> ... still 2 since
+        // `hosts` is updated before the dedup check, so `rows.len()` is the
+        // assertion that actually catches it).
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[&foreign_line_for(
+                "otherbox-99ffee",
+                1,
+                1_788_220_800_000,
+                "a",
+            )],
+        );
+        write_shard(
+            tmp.path(),
+            "thirdbox-aa11bb-202609.jsonl",
+            &[&foreign_line_for(
+                "thirdbox-aa11bb",
+                1,
+                1_788_220_800_001,
+                "b",
+            )],
+        );
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(
+            r.rows.len(),
+            2,
+            "seq=1 from two different hosts are both kept"
+        );
+        assert_eq!(r.hosts.len(), 2);
     }
 
     #[test]
@@ -868,6 +965,12 @@ mod tests {
         assert_eq!(r.files_skipped_by_window, 1);
         assert_eq!(r.rows.len(), 1);
         assert_eq!(r.rows[0].row_id, "new");
+        // `hosts` is scoped to files that survived window pruning: the skipped
+        // 202507 file's seq=1 line was never parsed, so the coverage window for
+        // this host reflects ONLY the seq=2 row that came from the opened file —
+        // not (1, 2), which is what it would be if `hosts` covered every
+        // committed shard for the host regardless of the query window.
+        assert_eq!(r.hosts.get("otherbox-99ffee"), Some(&(2, 2)));
     }
 
     #[test]
@@ -945,5 +1048,144 @@ mod tests {
         );
         let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
         assert_eq!(r.hosts.get("otherbox-99ffee"), Some(&(1, 9)));
+    }
+
+    #[test]
+    fn an_unreadable_shard_file_is_counted_not_silently_skipped() {
+        // A name that parses as a shard but whose contents cannot be read
+        // (permissions, a race, a dangling symlink) must not vanish with no
+        // signal — that is the same silent-partial-answer failure mode as an
+        // unreported malformed line, just one level up (whole file vs. one
+        // line). A directory sharing the shard's filename triggers the same
+        // `read_to_string` failure as a permissions problem, without depending
+        // on this test running as non-root.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(super::super::host::AUDIT_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir(dir.join("otherbox-99ffee-202609.jsonl")).unwrap();
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.unreadable_files, 1, "the unreadable file is REPORTED");
+        assert_eq!(r.files_read, 0, "never counted as successfully read");
+        assert_eq!(
+            r.malformed, 0,
+            "not conflated with a bad LINE inside a file we did read"
+        );
+        assert_eq!(r.rows.len(), 0);
+    }
+
+    #[test]
+    fn an_until_bound_before_every_file_skips_them_all() {
+        // `month_in_window`'s `since` branch is covered by
+        // `a_since_window_skips_whole_files_by_name`; this covers `until`
+        // symmetrically. An `until` set to a month before every committed
+        // shard must prune all of them — if the `until` comparison were
+        // inverted (`>=` instead of `<=`), every file would wrongly survive.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[&foreign_line(1, 1_788_220_800_000, "too-new")],
+        );
+        let f = crate::librarian::catalog::audit::AuditFilter {
+            until: Some(1_751_328_000_000), // 2025-07, well before the 2026-09 shard
+            ..Default::default()
+        };
+        let r = read_shards(tmp.path(), &f, "me-000000").unwrap();
+        assert_eq!(r.files_skipped_by_window, 1);
+        assert_eq!(r.files_read, 0);
+        assert_eq!(r.rows.len(), 0);
+    }
+
+    #[test]
+    fn matches_filters_by_tbl_actor_op_and_until_not_just_row_id_and_since() {
+        // filters_apply_to_shard_rows_the_same_way_they_apply_locally exercises
+        // row_id; a_since_window_skips_whole_files_by_name exercises since (at
+        // the whole-file level). Neither reaches tbl/actor/op/until inside
+        // `matches()` itself — a field dropped from that predicate's `&&` chain
+        // would pass both of those tests silently.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[
+                &foreign_line(1, 1_788_220_800_000, "keep"),
+                &foreign_line(2, 1_788_220_800_001, "wrong-tbl"),
+            ],
+        );
+        let f = crate::librarian::catalog::audit::AuditFilter {
+            tbl: Some("artifact".to_string()),
+            actor: Some("codescout:sess-b".to_string()),
+            op: Some("delete".to_string()),
+            until: Some(1_788_220_800_000),
+            ..Default::default()
+        };
+        let r = read_shards(tmp.path(), &f, "me-000000").unwrap();
+        assert_eq!(r.rows.len(), 1, "until excludes the later row");
+        assert_eq!(r.rows[0].row_id, "keep");
+
+        let f_wrong_tbl = crate::librarian::catalog::audit::AuditFilter {
+            tbl: Some("nonexistent-table".to_string()),
+            ..Default::default()
+        };
+        let r2 = read_shards(tmp.path(), &f_wrong_tbl, "me-000000").unwrap();
+        assert_eq!(r2.rows.len(), 0, "tbl mismatch excludes everything");
+
+        let f_wrong_actor = crate::librarian::catalog::audit::AuditFilter {
+            actor: Some("codescout:nobody".to_string()),
+            ..Default::default()
+        };
+        let r3 = read_shards(tmp.path(), &f_wrong_actor, "me-000000").unwrap();
+        assert_eq!(r3.rows.len(), 0, "actor mismatch excludes everything");
+
+        let f_wrong_op = crate::librarian::catalog::audit::AuditFilter {
+            op: Some("insert".to_string()),
+            ..Default::default()
+        };
+        let r4 = read_shards(tmp.path(), &f_wrong_op, "me-000000").unwrap();
+        assert_eq!(r4.rows.len(), 0, "op mismatch excludes everything");
+    }
+
+    #[test]
+    fn a_directory_with_both_a_self_and_a_foreign_shard_opens_only_the_foreign_one() {
+        // our_own_hosts_shard_is_not_read_back only ever writes ONE file (the
+        // self-host one), so it cannot distinguish "correctly skipped" from
+        // "there was nothing else to read anyway". Put a foreign shard
+        // alongside it and assert `files_read == 1`.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "me-000000-202609.jsonl",
+            &[&foreign_line_for("me-000000", 1, 1_788_220_800_000, "mine")],
+        );
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[&foreign_line(1, 1_788_220_800_001, "theirs")],
+        );
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.files_read, 1, "only the foreign shard is opened");
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0].row_id, "theirs");
+    }
+
+    #[test]
+    fn a_line_claiming_self_host_inside_a_foreign_named_file_is_still_excluded() {
+        // Defense in depth: the filename already excludes self_host, but this
+        // proves the per-line `line.host == self_host` check also does its
+        // job independently — a line's own host field can disagree with the
+        // file it lives in (manual edit, a future writer bug), and only the
+        // per-line check catches that case.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[
+                &foreign_line_for("me-000000", 1, 1_788_220_800_000, "impersonating-self"),
+                &foreign_line(2, 1_788_220_800_001, "genuinely-foreign"),
+            ],
+        );
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.rows.len(), 1, "the self-claiming line is excluded");
+        assert_eq!(r.rows[0].row_id, "genuinely-foreign");
     }
 }
