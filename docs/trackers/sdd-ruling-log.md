@@ -179,7 +179,7 @@ documented pre-commit gate (`fmt` + `clippy -D warnings` + `test`, all default-f
 session walks into the same trap and nothing catches it until someone builds lean.
 ### committed-audit-shards (T-7) — 2026-09-01/02
 
-Six tasks (one created mid-run), 13 commits, 5 Opus task reviews + 5 scoped re-reviews. Every
+Six tasks (one created mid-run), 16 commits, 5 Opus task reviews + 6 scoped re-reviews. Every
 review found something; two tasks needed a second fix round. **Six vacuous assertions** were
 caught across the run, and the sixth was inside a test written specifically to satisfy the
 vacuity lens.
@@ -205,8 +205,9 @@ vacuity lens.
 | 17 — disclose that `filtered_total` sums a machine-wide local count with a repo-scoped shard count | honesty | a total over a population the response never describes | held |
 | 18 — gate the automatic reindex fold-in on the destination repo carrying the `.gitattributes merge=union` line | privacy/scope | a repo that never opted in is written to on every reindex | held — and the gate was proven to *open*, not only to close |
 | 19 — name the destination absolute path in the export response | visibility | a worktree session cannot see which tree it wrote into | held |
+| 20 — the final re-review's three residuals are fixed by the controller rather than a fourth dispatch, and the reviewer's own proposed repair is rejected as lossy | calibration + correctness | a longer error string | held — and it caught a defect the *review* introduced (see below) |
 
-**Wrong or incomplete: 5 of 19 (26%).** Every one caught by a review or an implementer, none by
+**Wrong or incomplete: 5 of 20 (25%).** Every one caught by a review or an implementer, none by
 me. The rate did not improve as the run went on, which is the honest reading: it tracked how far
 each ruling reached past what I had verified, not fatigue.
 
@@ -219,9 +220,16 @@ rationale** rather than slipping it in. The re-review confirmed it necessary rat
 gold-plating. A ruling that fixes the failure it names and opens a quieter one is the shape to
 watch for.
 
-**Wrong or incomplete: 4 of 15 (27%).** Higher than the T-1 run's ~12%, and the reason is
-legible: this plan reached further past what I had verified. Every one of the four was caught by
-a review or an implementer, none by me.
+**Ruling 20 is the one that ran the other way — the review was wrong and the ruling caught it.**
+The scoped re-review correctly flagged that the corrupt-gap-set error named no recovery path,
+then wrote that the error "carries the key and the raw value, which is enough for an operator to
+clear the `catalog_meta` row." Clearing that key **alone is the loss path this entire run
+closed**: `export` skips at `seq <= written_start && !gaps_start.contains(&seq)`, so deleting the
+set while the write cursor stands strands every gap that has since become attributable. Not all
+of them — the attribution check runs first, so a *still*-unattributable row re-opens its own gap —
+which means the lost population is exactly the one the gap set exists to protect. The shipped
+error names the safe repair instead: fix the value to a JSON array, or delete it **together with**
+`audit_written_through_seq`, never alone.
 
 ### Lessons this run earned
 
@@ -249,6 +257,23 @@ silently dropped its whole event/link/citation history.
 was caught by an agent verifying rather than complying: the `EnvGuard` path, `dead_code`
 transitivity, an allowlist assertion that could not kill the mutation it named, and the
 worktree-under-main-root premise. Brief them to check, and mean it.
+
+**A reviewer that identifies a missing repair path can propose the lossy repair — and the
+suggestion arrives wearing the authority of the finding.** The finding was correct and the remedy
+inverted it, which is the same shape as Ruling 16 one layer up: a correction that fixes the
+failure it names and opens a quieter one. It survived only because the controller re-read the skip
+condition before transcribing the reviewer's sentence into an operator-facing string. Treat a
+review's *remedy* as a claim needing the same verification as the code — the finding earns no
+credit for the fix.
+
+**A subagent's closing courtesy can flip process-wide state under its controller.** Task 6's
+implementer ended with "Home project workspace restored", which re-activated the main checkout;
+activation is process-wide and `run_command` sandboxes cwd to the active project, so the
+controller's verification of the final commit ran in the wrong repository. Worktrees share one
+object database, so `git show` and `git patch-id` still resolved **correctly from the wrong tree**
+while `git log` reported a branch that looked gone — half-right output is harder to catch than
+wholly wrong output. Later subagent briefs in this run carried an explicit "do not activate, do
+not restore" instruction.
 ## Rulings
 
 Append below. Newest run first.
