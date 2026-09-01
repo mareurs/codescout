@@ -153,10 +153,85 @@ staging_op() {
     return 1
 }
 
+# The pathspec the staging command actually NAMED, one per line.
+#
+# This is what lets a cold log stay honest. Rebuilding from `git diff --cached --raw` sees
+# every staged pair, not just the ones this command touched, so claiming all of them for the
+# current writer hands a session its peers' work (measured 2026-09-01: A staged f+g, one hook
+# run was missed, B staged h, and B owned all three). Naming is the only signal in the write
+# itself that separates "pair I just created" from "pair whose row was lost".
+#
+# Emits nothing for a blanket form (`-A`, `-u`, `.`, a directory), which is deliberate --
+# see names_path.
+argv_paths() {
+    [ -r "/proc/$PPID/cmdline" ] || return 0
+    _ap_seen_git=0
+    _ap_seen_verb=0
+    _ap_skip=0
+    while IFS= read -r _ap_tok; do
+        [ -n "$_ap_tok" ] || continue
+        if [ "$_ap_seen_git" = "0" ]; then
+            [ "$(basename -- "$_ap_tok")" = "git" ] && _ap_seen_git=1
+            continue
+        fi
+        if [ "$_ap_skip" = "1" ]; then
+            _ap_skip=0
+            continue
+        fi
+        if [ "$_ap_seen_verb" = "0" ]; then
+            case "$_ap_tok" in
+                -C | -c | --git-dir | --work-tree | --namespace | --exec-path | --super-prefix)
+                    _ap_skip=1
+                    continue
+                    ;;
+                -*) continue ;;
+                *=*) continue ;;
+                add | rm | mv | restore | apply | update-index | stash)
+                    _ap_seen_verb=1
+                    continue
+                    ;;
+                *) return 0 ;;
+            esac
+        fi
+        case "$_ap_tok" in
+            --) continue ;;
+            -*) continue ;;
+            *) printf '%s\n' "$_ap_tok" ;;
+        esac
+    done < <(tr '\0' '\n' < "/proc/$PPID/cmdline" 2>/dev/null)
+}
+
+# Did argv name this repo-relative path? STRICT on purpose, and the asymmetry is the whole
+# design: a miss records `-`, which over-refuses and a reader recovers from; a false hit
+# claims a peer's file, which under-refuses and nothing is emitted for anyone to recover
+# from. `a987df96`'s ruling, applied to the fallback it never reached.
+#
+# Deliberately NOT matched: a directory prefix. `git add src/` stages every file beneath
+# src/ INCLUDING a peer's, so treating the subtree as named would be exactly the false hit
+# this function exists to avoid. Blanket forms degrade to `-` and that is correct -- a
+# blanket add followed by a BARE commit is the capture this guard exists for, so making it
+# loud is the point. The pathspec-commit remedy never reads the shared index and is
+# unaffected.
+names_path() {
+    _np_target="$1"
+    [ -n "${_NAMED:-}" ] || return 1
+    while IFS= read -r _np_tok; do
+        [ -n "$_np_tok" ] || continue
+        [ "$_np_tok" = "$_np_target" ] && return 0
+        case "$_np_target" in */"$_np_tok") return 0 ;; esac
+        case "$_np_tok" in */"$_np_target") return 0 ;; esac
+    done <<EOF
+$_NAMED
+EOF
+    return 1
+}
+
 if staging_op; then
     claimant="$me"
+    _NAMED="$(argv_paths)"
 else
     claimant="-"
+    _NAMED=""
 fi
 
 : > "$tmp" || exit 0
@@ -170,7 +245,13 @@ while IFS=$'\t' read -r blob path; do
         owner="$(awk -F'\t' -v b="$blob" -v p="$path" \
             '$2 == b && $3 == p { print $1; exit }' "$log")"
     fi
-    [ -n "$owner" ] || owner="$claimant"
+    if [ -z "$owner" ]; then
+        if [ "$claimant" != "-" ] && names_path "$path"; then
+            owner="$claimant"
+        else
+            owner="-"
+        fi
+    fi
     printf '%s\t%s\t%s\n' "$owner" "$blob" "$path" >> "$tmp"
 done < <(git diff --cached --raw 2>/dev/null |
     awk -F'\t' '{ split($1, a, " "); print a[4] "\t" $2 }')

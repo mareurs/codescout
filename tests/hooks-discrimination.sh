@@ -200,6 +200,45 @@ eq "-C <path> status is NOT a staging op" "$(owner_of formC.txt)" "-"
 
 rm -rf "$T"
 
+# ------------------------------------- 2b. a cold log claims only what argv NAMED
+# The cross-claim. `:135` used to be `[ -n "$owner" ] || owner="$claimant"`, so a pair with
+# no surviving row went to whoever caused the CURRENT write -- one session staging one file
+# became the recorded owner of every staged path, its peers' included, and the guard then
+# saw nothing foreign and passed silently.
+#
+# The trigger needs no `rm -f`: ONE hook invocation that does not complete is enough, and an
+# inherited CODESCOUT_STAGE_LOG_RUNNING is the cheapest way to reach it -- which is what the
+# suppressed `git add` below simulates. Measured 2026-09-01.
+echo "== cold log claims only what argv named"
+new_repo
+echo seed > seed.txt
+git add -A > /dev/null 2>&1
+git commit -qm base
+
+# A stages with its hook suppressed, so the log never learns about peer.txt.
+echo peer > peer.txt
+CODESCOUT_STAGE_LOG_RUNNING=1 CLAUDE_CODE_SESSION_ID="$A" git add peer.txt
+# B then stages ITS OWN file, normally. B named mine.txt and nothing else.
+echo mine > mine.txt
+CLAUDE_CODE_SESSION_ID="$B" git add mine.txt
+
+eq "cold log: B claims the path B named" "$(owner_of mine.txt)" "$B"
+eq "cold log: B does NOT claim A's staged path" "$(owner_of peer.txt)" "-"
+out="$(guard "$B")"
+has "an unowned peer path still refuses" "$out" "EXIT=1"
+has "refusal names the unowned path" "$out" "peer.txt"
+
+# A blanket form names no path, so it claims nothing -- including its own. This is the
+# intended degradation, not a regression: `git add -A` followed by a BARE commit is exactly
+# the capture this guard exists for, so making it loud is the point. The pathspec commit
+# remedy is unaffected, because it never reads the shared index at all.
+rm -f .git/session-stage-log
+echo extra > extra.txt
+CLAUDE_CODE_SESSION_ID="$B" git add -A
+eq "git add -A names no path, so it claims nothing" "$(owner_of extra.txt)" "-"
+has "and a bare commit after -A is refused" "$(guard "$B")" "EXIT=1"
+rm -rf "$T"
+
 # -------------------------------------------------------------- 3. owner resolution
 echo "== owner resolution"
 new_repo
