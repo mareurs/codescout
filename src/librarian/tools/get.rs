@@ -98,20 +98,52 @@ const HEADINGS_OMITTED_NOTE: &str =
 /// they report the magnitude withheld, so a caller who needs the map learns it exists and
 /// how big it is. Reporting only its absence would be the `IC-21` shape.
 /// docs/issues/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
+///
+/// This is one side of a cross-file contract with `LibrarianAdapter::section_headings_summary`
+/// (`src/librarian/adapter.rs`, doc comment above its definition): that function's whole job is
+/// to read `preview.headings` as an array and render it into the compact summary, and it
+/// early-returns `None` the moment `.as_array()` fails — which is exactly what replacing the
+/// array with `HEADINGS_OMITTED_NOTE` (a string) here causes. A body-selected `artifact(get)`
+/// therefore gets no "sections: …" line in `format_compact`, silently, for free — this is the
+/// intended effect (the caller already picked a section; a redundant list adds nothing), not a
+/// bug in the adapter. `total_headings`, below, is what still lets a caller learn the map
+/// exists and how large it is even though the array itself is gone.
+///
+/// `total_headings` is only stamped onto the full preview by `headings::stamp_truncation`
+/// when the heading count exceeds the cap (`preview/headings.rs:86`) — an artifact at or under
+/// the cap never carries it. Left alone, a body-selected read of a short artifact would get the
+/// stub note AND no count at all, strictly worse than the unstubbed response (which at least has
+/// the array to count). So when the field is absent, it is backfilled here from
+/// `headings.len()` — the very array being discarded — before that array is replaced.
+///
+/// `last_heading` is kept, not dropped: it exists because `append_entry` inserts before its
+/// anchor, so a ledger's append point is conventionally its LAST heading, and it is a ~60-byte
+/// field against a preview whose `headings` array can run ~2,400 bytes — dropping it saved
+/// essentially nothing while costing a body-selected read of a long ledger its one cheap way to
+/// name the append point.
 fn stub_preview(full: &Value) -> Value {
     let Some(obj) = full.as_object() else {
         return full.clone();
     };
+    let heading_count = obj
+        .get("headings")
+        .and_then(|h| h.as_array())
+        .map(|arr| arr.len());
     let mut stub = serde_json::Map::with_capacity(obj.len());
     for (k, v) in obj {
         match k.as_str() {
             "headings" => {
                 stub.insert(k.clone(), json!(HEADINGS_OMITTED_NOTE));
             }
-            "summary" | "last_heading" => {}
+            "summary" => {}
             _ => {
                 stub.insert(k.clone(), v.clone());
             }
+        }
+    }
+    if !stub.contains_key("total_headings") {
+        if let Some(n) = heading_count {
+            stub.insert("total_headings".to_string(), json!(n));
         }
     }
     Value::Object(stub)
@@ -567,12 +599,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     if let Some(body) = parsed_body.as_deref() {
         let preview = crate::librarian::preview::extract(&row.kind, &row, body, ctx);
-        // `body_selected` is computed at :483 and already in scope — do not recompute.
-        out["preview"] = if body_selected {
-            stub_preview(&preview)
-        } else {
-            preview
-        };
+        // `body_selected` (already in scope, computed above from `a.full` / `a.heading` /
+        // `a.headings` / `a.start_line` / `a.end_line` — do not recompute it here) is the
+        // DEFAULT for whether the preview gets stubbed. It is corrected to `false` below,
+        // specifically when the `heading` selector fails to resolve: the stub's premise —
+        // "the caller already named what they wanted" — is false on a miss, and shipping an
+        // empty `body` alongside a withheld section map would cost that caller a second
+        // round-trip just to find the map, defeating the whole point of stubbing.
+        let mut stub_this_preview = body_selected;
 
         if body_selected {
             let (final_body, overflow_meta, body_meta_extra) = if let Some(ref name) = a.heading {
@@ -580,7 +614,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     crate::tools::file_summary::HeadingQuery::new(name.as_str(), a.occurrence);
                 match find_heading_section(body, query) {
                     Ok(section) => (section, None, json!({ "heading": name })),
-                    Err(e) => (String::new(), None, heading_miss_meta(name, &e)),
+                    Err(e) => {
+                        // Missing AND ambiguous both land here (see `heading_miss_meta`) —
+                        // neither is "the caller got what they asked for", so both restore the
+                        // full preview rather than only the strictly-absent case.
+                        stub_this_preview = false;
+                        (String::new(), None, heading_miss_meta(name, &e))
+                    }
                 }
             } else if let Some(ref list) = a.headings {
                 // A per-member `occurrence` has no shape here (members are bare strings),
@@ -653,6 +693,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 });
             }
         }
+
+        out["preview"] = if stub_this_preview {
+            stub_preview(&preview)
+        } else {
+            preview
+        };
     }
 
     Ok(out)
@@ -913,6 +959,37 @@ mod tests {
         assert_eq!(v["body"], "");
         assert_eq!(v["body_meta"]["heading_missing"], true);
     }
+    /// I2 fix-round: a `heading=` that fails to resolve must NOT get the stubbed preview.
+    /// Stubbing on a miss inverted the whole point of the change — the caller got nothing
+    /// back in `body` and had *also* lost the heading map that would tell them the real
+    /// heading, costing a second round-trip instead of saving one.
+    /// docs/issues/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
+    #[tokio::test]
+    async fn heading_miss_keeps_the_full_preview_not_the_stub() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## B\n\nb\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "Nonexistent"}))
+            .await
+            .unwrap();
+
+        assert_eq!(v["body"], "");
+        assert_eq!(v["body_meta"]["heading_missing"], true);
+
+        // The regression: a successful body-selected read stubs `preview.headings` to a
+        // string note (see `preview_is_stubbed_when_a_body_selector_is_present`). On a miss
+        // that must NOT happen — the caller needs the map more, not less.
+        let headings = v["preview"]["headings"]
+            .as_array()
+            .expect("a heading miss must keep the full heading array, not the omitted note");
+        assert_eq!(headings.len(), 3, "# T, ## A, ## B: {headings:?}");
+    }
 
     /// A heading present TWICE is not "missing". Reporting it so sends the caller hunting
     /// for a heading that is right there — in a response whose own `preview.headings`
@@ -949,6 +1026,16 @@ mod tests {
             occ[0].as_u64().unwrap() < occ[1].as_u64().unwrap(),
             "document order: {occ:?}"
         );
+
+        // I3 (fix-round): the ambiguous case also fails to resolve a body, so it takes the
+        // same "restore the full preview" path as a strict miss (both are the `Err` arm of
+        // `find_heading_section`, see `heading_miss_meta`) — confirmed here rather than
+        // assumed, per the fix-round ruling that this doc comment's claim needed re-checking,
+        // not re-writing, once I2 landed.
+        let headings = v["preview"]["headings"]
+            .as_array()
+            .expect("an ambiguous heading must also keep the full heading array");
+        assert_eq!(headings.len(), 4, "# T, ## A, ## B, ## A: {headings:?}");
     }
 
     /// The over-correction guard: a heading that genuinely is not there must still say
@@ -1117,10 +1204,50 @@ mod tests {
         // + "## Two" + "## Three" + 21 fillers, chosen to exceed the 20-heading preview cap so
         // `total_headings` is actually stamped onto the full preview for the stub to retain.
         assert_eq!(v["preview"]["total_headings"], 25);
+        // I4 (fix-round): `last_heading` must survive the stub too — it is the ONLY cheap way
+        // to name a long ledger's append point (`append_entry` inserts before its anchor, so
+        // the append point is conventionally the LAST heading), and the pre-fix drop list threw
+        // it away for ~2% of the bytes it saved. Nothing in this suite caught that before;
+        // this is the guard.
+        assert_eq!(v["preview"]["last_heading"]["text"], "Filler20");
         assert!(
             v["body"].as_str().unwrap().contains("bravo"),
             "the requested section must still be returned"
         );
+    }
+    /// M5 fix-round: the under-cap twin of `preview_is_stubbed_when_a_body_selector_is_present`.
+    /// `total_headings` is only stamped onto the FULL preview by `headings::stamp_truncation`
+    /// when the cap (20) is exceeded — a 4-heading artifact never gets it. Left alone, stubbing
+    /// such a preview would drop the heading array AND report no count at all, strictly worse
+    /// than the unstubbed response (which at least has the array to count). `stub_preview` must
+    /// backfill `total_headings` from the array it is about to discard.
+    #[tokio::test]
+    async fn stub_preview_backfills_total_headings_under_the_cap() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mut row = mk_row("a");
+        row.kind = "doc".into();
+        artifact::upsert(&cat, &row).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        std::fs::write(
+            dir.path().join("a.md"),
+            "# T\n\n## One\n\nalpha\n\n## Two\n\nbravo\n\n## Three\n\ncharlie\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "heading": "## Two"}))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            v["preview"]["headings"].as_str(),
+            Some(HEADINGS_OMITTED_NOTE),
+            "still stubbed — this is a successful selection, not a miss"
+        );
+        // 4 = "# T" + "## One" + "## Two" + "## Three", well under MAX_HEADINGS (20), so the
+        // full preview never had `total_headings` stamped onto it — this field is only present
+        // in the response because `stub_preview` backfilled it from the array it just replaced.
+        assert_eq!(v["preview"]["total_headings"], 4);
+        assert!(v["body"].as_str().unwrap().contains("bravo"));
     }
 
     /// The positive twin. Without this, a mutation that deletes the preview builder

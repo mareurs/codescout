@@ -744,6 +744,14 @@ fn matched_items_summary(result: &Value) -> Option<String> {
 /// `artifact(get, heading="…")` call to make instead of pulling the whole body out of
 /// the buffer. Rendered with their level markers so a heading can be passed straight
 /// back as that argument.
+///
+/// This is one side of a cross-file contract with `stub_preview` (`src/librarian/tools/get.rs`):
+/// this function reads `preview.headings` as an array via `.as_array()?` and early-returns
+/// `None` the instant that fails. `stub_preview` replaces that array with a string note
+/// (`HEADINGS_OMITTED_NOTE`) whenever `artifact(get)`'s caller already selected a body — so a
+/// body-selected `get` produces no "sections: …" line here, silently, for free. That is the
+/// intended effect, not a bug in this function: the caller already picked a section, and a
+/// redundant list of every section would answer a question they did not ask.
 fn section_headings_summary(result: &Value) -> Option<String> {
     const MAX_HEADINGS: usize = 14;
 
