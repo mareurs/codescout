@@ -176,6 +176,15 @@ fn backfill_commits(
 // `git_root`, and drop the `ctx.workspace.roots.first()` fallback entirely:
 // guessing an unrelated configured root is worse than skipping export this
 // call, which is what `None` now means to every caller.
+//
+// KNOWN GAP (Important 4, task-6 review) — same helper, same limitation as
+// audit_log.rs's copy: `main_root` assumes a linked worktree lives UNDER its
+// main checkout, which is this repo's convention, not a git guarantee.
+// `git worktree add ../elsewhere` breaks it — `/elsewhere`'s own rows then
+// attribute outside whatever `repo_root` this function returns, land in
+// `ExportReport::foreign` on every export, and are never claimed by any
+// export call this codebase issues. Documented, not handled — see the fuller
+// note on audit_log.rs's `project_root()`.
 fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
     ctx.current_project
         .as_ref()

@@ -26,6 +26,22 @@ const PRUNE_IGNORED_FILTER_KEYS: &[&str] = &["tbl", "row_id", "actor", "op", "si
 // Task 6: see reindex.rs's copy of this helper for why `abs_path` and the
 // `ctx.workspace.roots.first()` fallback are both gone — same reasoning
 // applies verbatim to the export destination this feeds.
+//
+// KNOWN GAP (Important 4, task-6 review), documented here rather than
+// handled: `main_root` is derived correctly for the common case (a linked
+// worktree living somewhere UNDER its main checkout), but git does not
+// require that nesting — `git worktree add ../elsewhere` places a linked
+// worktree entirely OUTSIDE the main checkout, and `main_root` still
+// resolves to the real main-checkout path in that case. A session running
+// from `/elsewhere` therefore always exports against the MAIN checkout's
+// root, never against `/elsewhere` itself — so `/elsewhere`'s own audit rows
+// (whose `abs_path` lives under `/elsewhere`) attribute to a path that does
+// not `starts_with` any `repo_root` this function will ever return for that
+// session. They land in `ExportReport::foreign` on every export, forever,
+// and no session ever exports with `repo_root = /elsewhere` to claim them.
+// Not fixed here — fixing it needs `attribute()` to resolve ownership by
+// walking up from `abs_path` to the nearest `.git`, not by trusting
+// `main_root`/`git_root`, which is a larger change than this task's scope.
 fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
     ctx.current_project
         .as_ref()
@@ -66,6 +82,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "skipped_commits": r.skipped_commits,
             "skipped_churn": r.skipped_churn,
             "unattributed": r.unattributed,
+            "foreign": r.foreign,
             "files": r.files,
             "through_seq": r.through_seq,
             "dir": format!("{}/", host::AUDIT_DIR),
@@ -469,11 +486,11 @@ mod tests {
                 )
                 .unwrap();
             cat.conn
-                    .execute(
-                        "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(1,'artifact','insert','x')",
-                        [],
-                    )
-                    .unwrap();
+                .execute(
+                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(1,'artifact','insert','x')",
+                    [],
+                )
+                .unwrap();
         }
         let out = call(&ctx, json!({"action": "audit_log", "export": true}))
             .await
@@ -511,11 +528,11 @@ mod tests {
         {
             let cat = ctx.catalog.lock();
             cat.conn
-                    .execute(
-                        "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(2,'artifact','insert','local-1')",
-                        [],
-                    )
-                    .unwrap();
+                .execute(
+                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(2,'artifact','insert','local-1')",
+                    [],
+                )
+                .unwrap();
         }
         let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();
         let entries = out["entries"].as_array().unwrap();
@@ -551,14 +568,14 @@ mod tests {
             let cat = ctx.catalog.lock();
             for i in 0..2 {
                 cat.conn
-                        .execute(
-                            &format!(
-                                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES({},'artifact','insert','local-{i}')",
-                                100 + i
-                            ),
-                            [],
-                        )
-                        .unwrap();
+                    .execute(
+                        &format!(
+                            "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES({},'artifact','insert','local-{i}')",
+                            100 + i
+                        ),
+                        [],
+                    )
+                    .unwrap();
             }
         }
         let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();

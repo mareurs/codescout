@@ -54,8 +54,21 @@ pub(crate) struct ExportReport {
     /// they hang off is already gone and the payload does not carry enough
     /// to say). Counted so the number is visible, never exported, and —
     /// unlike `skipped_commits`/`skipped_churn` — never advances the
-    /// watermark: see the comment in `export`'s loop for why.
+    /// watermark past itself: see the comment in `export`'s loop for the
+    /// mechanism (a tracked minimum, not the single skipped iteration).
     pub unattributed: usize,
+    /// Rows confidently attributed to a repo OTHER than `repo_root`. Correct
+    /// and silent when that other repo eventually runs its own export (its
+    /// own watermark governs it, and never consults ours) — but silent
+    /// forever for a repo that never will, e.g. a linked worktree created
+    /// with `git worktree add <path-outside-the-main-checkout>`: such a
+    /// worktree's own rows attribute to a path under ITS root, while every
+    /// export call for that session resolves `repo_root` to the MAIN
+    /// checkout (see `project_root()` in audit_log.rs/reindex.rs) — so those
+    /// rows are always "foreign" here and are never claimed by any export
+    /// this codebase issues. Counting them at least makes the drop visible;
+    /// it does not fix it. See the doc comment on `project_root()`.
+    pub foreign: usize,
     pub files: Vec<String>,
     pub through_seq: i64,
 }
@@ -97,21 +110,39 @@ fn watermark(conn: &Connection, repo_root: &Path) -> Result<i64> {
 /// row cannot be traced to any repo — the underlying artifact/event is
 /// already gone and the payload does not carry enough to say.
 ///
-/// `delete` rows route from the payload's captured OLD-row image (Task 2),
-/// never from a live join — the row they would join against no longer
-/// exists by definition.
+/// Only the `artifact` table's `delete` arm avoids a live join entirely: its
+/// payload carries `abs_path` directly, so there is nothing left to look up.
+/// Every OTHER table's `delete` arm still ends in a live `SELECT` against
+/// `artifact` (`by_artifact_id`, or a slug lookup for `entry_cite`) — even
+/// when the id going into that join was itself read from the payload (as in
+/// `events`). `artifact_augmentation`, `events`, `artifact_link` and
+/// `entry_cite` are all `ON DELETE CASCADE` off `artifact`, so a single
+/// artifact delete fires cascade-delete audit rows for all of these in the
+/// SAME BATCH, and by the time each one's live join runs, the artifact row
+/// it needs is already gone — which is exactly the shape that makes those
+/// deletes land as `unattributed`, not the payload-routing this comment used
+/// to claim for all of them.
 ///
 /// Routing table (payload keys/columns confirmed against schema.sql,
 /// catalog/mod.rs and audit/mod.rs's `AUDITED_TABLES` row-id formats):
 /// - `artifact`: row_id IS the artifact id. `delete` reads `abs_path` out of
 ///   the payload; insert/update join `artifact.id`.
-/// - `artifact_augmentation`: row_id IS the artifact id for every op.
-/// - `events`: `delete` reads `artifact_id` out of the payload; insert/update
-///   join `events.id` to get `artifact_id`, then resolve that.
+/// - `artifact_augmentation`: row_id IS the artifact id for every op —
+///   always a live join, even on delete.
+/// - `events`: `delete` reads `artifact_id` out of the payload, then still
+///   joins `artifact` on it live; insert/update join `events.id` to get
+///   `artifact_id` first, then resolve that the same way.
 /// - `artifact_link`: row_id is `"{src_id}→{dst_id}:{rel}"` (no surrounding
-///   whitespace) — attribute via `src_id`.
+///   whitespace) — attribute via `src_id`, always a live join.
 /// - `entry_cite`: row_id is `"{src_slug}:{src_local}→{dst_ref}"` — attribute
-///   via `src_slug`, joined against `artifact.slug`.
+///   via `src_slug`, joined against `artifact.slug` (always a live join).
+///   `artifact.slug` is NULLable (schema.sql) and backfilled lazily by
+///   `librarian doctor fix=mint_slugs`; an `entry_cite` row whose artifact
+///   has a NULL slug is unattributable by construction, delete or not.
+///   Also note: this split assumes `src_slug` itself contains no `:` — no
+///   escape and no disambiguator if it ever did (CLAUDE.md § Parsers Over a
+///   Namespace). Slugs are server-minted today, so the corpus does not
+///   contain one, but nothing here would refuse it if it did.
 /// - `worktree_registration`: row_id IS the worktree root itself (the PK),
 ///   identical across insert/update/delete — no join needed at all.
 fn attribute(
@@ -185,6 +216,14 @@ fn attribute(
 /// are excluded here). Doctor reports this, so it must not describe a
 /// different set than the verb does; a delta that counts rows export will
 /// never write for this repo reads as a permanent backlog.
+///
+/// Not measured, flagged cheap (Minor, task-6 review): `attribute()` runs
+/// once per row here via `conn.query_row`, which re-prepares its SQL every
+/// call rather than reusing a prepared statement — and `doctor` calls this
+/// unconditionally, so a repo that has never exported gets its whole trail
+/// rescanned, re-preparing the same handful of queries per row, on every
+/// `doctor` invocation. Worth a prepared-statement pass if this ever shows
+/// up in a profile; not done here.
 pub(crate) fn unexported_count(conn: &Connection, repo_root: &Path) -> Result<i64> {
     let w = watermark(conn, repo_root)?;
     let mut stmt = conn.prepare(
@@ -245,6 +284,21 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     // Keyed by month string; value is (a representative at_ms for that month,
     // used only to derive the shard filename, and the serialized lines).
     let mut by_month: BTreeMap<String, (i64, Vec<String>)> = BTreeMap::new();
+    // Tracks the smallest seq of any row this batch could not attribute.
+    // `through_seq` is clamped against it ONCE, after the whole batch is
+    // scanned (see the clamp below) — not skipped only at its own iteration.
+    // Without this, a later, higher-seq ROW THAT DOES resolve (e.g. an
+    // artifact's own delete row, attributable via its payload) still runs
+    // the loop's running `.max()` and drags `through_seq` past the earlier
+    // unattributed row, permanently stranding it: `ON DELETE CASCADE` on
+    // `events`, `artifact_link`, `entry_cite`, `artifact_augmentation` means
+    // a single artifact delete produces exactly this shape in ONE batch —
+    // the cascade-deleted children (unattributable, their live join fails)
+    // alongside the parent's own delete row (attributable via payload).
+    // (task-6 review, Critical 1.) `.get_or_insert` is correct only because
+    // rows are visited in ascending `seq` order (`ORDER BY seq` above), so
+    // the first unattributed hit is always the minimum.
+    let mut min_unattributed: Option<i64> = None;
 
     for (seq, at_ms, tbl, op, row_id, actor, verb, payload) in rows {
         // commits/churn need no attribution at all — they are skip-only for
@@ -267,9 +321,10 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
         // yet, and advancing here would make it permanently unrecoverable —
         // no other repo's independently-keyed watermark would ever revisit
         // a seq value below its own cursor. Counted so the number is
-        // visible; never exported; never advances through_seq.
+        // visible; never exported.
         let Some(owner) = attribute(conn, &tbl, &op, &row_id, payload.as_deref()) else {
             report.unattributed += 1;
+            min_unattributed.get_or_insert(seq);
             continue;
         };
 
@@ -279,6 +334,7 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
         // row, and it never consults ours.
         report.through_seq = report.through_seq.max(seq);
         if !owner.starts_with(repo_root) {
+            report.foreign += 1;
             continue;
         }
 
@@ -306,6 +362,14 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
             .1
             .push(serde_json::to_string(&line)?);
         report.exported += 1;
+    }
+
+    // Clamp once, after the whole batch is scanned: no row at or after the
+    // earliest unattributed seq is allowed to count as "exported past" for
+    // this repo's watermark, no matter how many later rows in the same
+    // batch resolved cleanly (task-6 review, Critical 1).
+    if let Some(min_seq) = min_unattributed {
+        report.through_seq = report.through_seq.min(min_seq - 1);
     }
 
     if !by_month.is_empty() {
@@ -966,6 +1030,179 @@ mod tests {
         assert!(lines(tmp.path()).iter().any(|l| l.row_id == "gone"));
     }
 
+    // Important 3 (task-6 review): only `artifact` insert/delete had coverage
+    // (2 of 7 attribution routes in `attribute`'s match). The five below cover
+    // the rest, using the REAL audited tables + their install()-installed
+    // triggers (not hand-built `catalog_audit` rows) so each test exercises
+    // the actual trigger-produced `row_id` shape, not a guess at it.
+
+    #[test]
+    fn artifact_augmentation_insert_is_attributed_via_its_artifact_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, tmp.path(), "a1");
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_augmentation(artifact_id,prompt) VALUES('a1','p')",
+                [],
+            )
+            .unwrap();
+
+        let r = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r.unattributed, 0, "{r:?}");
+        assert!(
+            lines(tmp.path())
+                .iter()
+                .any(|l| l.tbl == "artifact_augmentation" && l.row_id == "a1"),
+            "{:?}",
+            lines(tmp.path())
+        );
+    }
+
+    #[test]
+    fn events_insert_is_attributed_via_its_artifact_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, tmp.path(), "a1");
+        crate::librarian::catalog::events::insert(
+            &cat,
+            &crate::librarian::catalog::events::TestEventRowBuilder::new("a1", "note")
+                .with_id("e1")
+                .build(),
+        )
+        .unwrap();
+
+        let r = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r.unattributed, 0, "{r:?}");
+        assert!(
+            lines(tmp.path())
+                .iter()
+                .any(|l| l.tbl == "events" && l.row_id == "e1"),
+            "{:?}",
+            lines(tmp.path())
+        );
+    }
+
+    #[test]
+    fn artifact_link_insert_is_attributed_via_its_src_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, tmp.path(), "src");
+        seed(&cat, tmp.path(), "dst");
+        cat.conn
+            .execute(
+                "INSERT INTO artifact_link(src_id,dst_id,rel,created_at) VALUES('src','dst','cites',1)",
+                [],
+            )
+            .unwrap();
+
+        let r = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r.unattributed, 0, "{r:?}");
+        assert!(
+            lines(tmp.path())
+                .iter()
+                .any(|l| l.tbl == "artifact_link" && l.row_id == "src→dst:cites"),
+            "{:?}",
+            lines(tmp.path())
+        );
+    }
+
+    #[test]
+    fn entry_cite_insert_is_attributed_via_its_src_slug() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, tmp.path(), "a1");
+        cat.conn
+            .execute("UPDATE artifact SET slug='a-one' WHERE id='a1'", [])
+            .unwrap();
+        cat.conn
+            .execute(
+                "INSERT INTO entry_cite(src_slug,src_local,dst_ref,rel,created_at)
+                 VALUES('a-one','F-1','x','cites',1)",
+                [],
+            )
+            .unwrap();
+
+        let r = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r.unattributed, 0, "{r:?}");
+        assert!(
+            lines(tmp.path())
+                .iter()
+                .any(|l| l.tbl == "entry_cite" && l.row_id == "a-one:F-1→x"),
+            "{:?}",
+            lines(tmp.path())
+        );
+    }
+
+    // Important 3 (task-6 review), NULL-slug case: `artifact.slug` is NULLable
+    // (schema.sql) and only backfilled lazily by `librarian doctor
+    // fix=mint_slugs`. `entry_cite.src_slug` is itself NOT NULL and
+    // FK-enforced against `artifact.slug` (schema.sql / catalog/mod.rs), so a
+    // real `entry_cite` row can only ever be written once its citing
+    // artifact already has a non-NULL slug — there is no way to construct an
+    // FK-valid row that reproduces the gap. What actually happens instead:
+    // the target artifact's slug is NULL *at export time*, and the audited
+    // row (however it got there — e.g. hand-repaired data, or a catalog
+    // opened with `foreign_keys=OFF` at some point in its history) captures a
+    // `src_slug` that currently matches no row. `attribute`'s live join
+    // (`SELECT abs_path FROM artifact WHERE slug = ?1`) then finds nothing —
+    // same observable outcome as the FK-blocked case, reached via a raw
+    // `catalog_audit` row rather than a real `entry_cite` insert, mirroring
+    // `delete_row_is_attributed_from_its_payload_not_a_live_join`'s approach
+    // for the `artifact`/delete arm above.
+    #[test]
+    fn entry_cite_row_referencing_a_still_null_slug_is_unattributed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        // "a1" exists but has never had mint_slugs run — slug stays NULL.
+        seed(&cat, tmp.path(), "a1");
+        cat.conn
+            .execute(
+                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor)
+                 VALUES(1751328000000,'entry_cite','insert','a-one:F-1→x','unknown')",
+                [],
+            )
+            .unwrap();
+
+        let r = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(
+            r.unattributed, 1,
+            "no artifact has slug='a-one' (it is still NULL), so the live join \
+             must fail and the row must be counted unattributed, not silently \
+             dropped or wrongly attributed to some other artifact: {r:?}"
+        );
+        // 1, not 0: `seed`'s own artifact-insert audit row (attributable via
+        // a live join on `artifact.id`) is exported normally — only the
+        // entry_cite row referencing the still-NULL slug is unattributed.
+        assert_eq!(r.exported, 1, "{r:?}");
+    }
+
+    #[test]
+    fn worktree_registration_insert_is_attributed_via_its_own_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        cat.conn
+            .execute(
+                &format!(
+                    "INSERT INTO worktree_registration(worktree_root,main_root,created_at)
+                     VALUES('{root}','{root}',1)"
+                ),
+                [],
+            )
+            .unwrap();
+
+        let r = export(&cat.conn, tmp.path()).unwrap();
+        assert_eq!(r.unattributed, 0, "{r:?}");
+        assert!(
+            lines(tmp.path())
+                .iter()
+                .any(|l| l.tbl == "worktree_registration" && l.row_id == root),
+            "{:?}",
+            lines(tmp.path())
+        );
+    }
+
     // Task 6, required test 4/6: a row that cannot be traced to any repo is
     // counted but neither exported nor allowed to advance the watermark past
     // its own `seq` — advancing would make it permanently unrecoverable once
@@ -975,30 +1212,64 @@ mod tests {
     // check (matching the commits/churn branches above it) — the second
     // `export` call below would then never re-scan the row's `seq`, and
     // `ghost` would stay unexported forever even after the artifact exists.
+    //
+    // Critical 2 (task-6 review): the ORIGINAL version of this test used a
+    // single raw audit row, so `through_seq` trivially stayed at 0 regardless
+    // of whether the watermark-advance logic tracked a minimum unattributed
+    // `seq` or just skipped the `.max()` call at the unattributed row's own
+    // iteration — the running-max defect (Critical 1: a LATER, resolvable row
+    // in the SAME batch re-advances `through_seq` past an earlier unattributed
+    // one via `.max()`) was never exercised. This version adds `other` — a
+    // second, HIGHER-seq, attributable row in the SAME first `export` call —
+    // so the running-max path is actually entered, and asserts the watermark
+    // still stays clamped below `ghost`'s seq even though `other` resolved.
     #[test]
     fn unattributed_row_is_counted_not_exported_and_stays_recoverable() {
         let tmp = tempfile::tempdir().unwrap();
         let cat = Catalog::open_in_memory().unwrap();
         // No artifact named "ghost" exists yet, and this is not a delete (no
-        // payload to fall back on) — `attribute` must return `None`.
+        // payload to fall back on) — `attribute` must return `None`. This is
+        // the FIRST row ever inserted into `catalog_audit` in this test, so it
+        // is seq 1.
         cat.conn
             .execute(
                 "INSERT INTO catalog_audit(at_ms,tbl,op,row_id,actor)
-                 VALUES(1751328000000,'artifact','update','ghost','unknown')",
+             VALUES(1751328000000,'artifact','update','ghost','unknown')",
                 [],
             )
             .unwrap();
+        // A second, ATTRIBUTABLE row at a HIGHER seq (2, via `seed`'s own
+        // artifact-insert audit trigger) in the SAME batch the first export
+        // below will scan. This is the fixture Critical 1 needs: without it,
+        // `through_seq` never leaves 0 regardless of whether the running-max
+        // defect is present, and the test cannot tell the fixed code from the
+        // broken code.
+        seed(&cat, tmp.path(), "other");
 
         let r1 = export(&cat.conn, tmp.path()).unwrap();
         assert_eq!(r1.unattributed, 1, "{r1:?}");
-        assert_eq!(r1.exported, 0, "{r1:?}");
+        // "other" (seq 2) is attributable and under this repo root — it must
+        // still be exported. The bug this test guards against is the
+        // WATERMARK wrongly advancing past "ghost" because "other" resolved,
+        // not "other" being wrongly withheld.
+        assert_eq!(r1.exported, 1, "{r1:?}");
         assert_eq!(
             watermark(&cat.conn, tmp.path()).unwrap(),
             0,
-            "an unattributed-only export must not advance the watermark past \
-             the row it could not place"
+            "the watermark must stay clamped below the unattributed row's seq \
+         (1) even though a LATER row in the same batch (seq 2, \"other\") \
+         resolved fine and would otherwise drag `through_seq` past it via \
+         the loop's running `.max()` — this is exactly what Critical 1 \
+         (task-6 review) named: an unattributed row survives its OWN \
+         iteration but is stranded by a later row's advance unless \
+         `through_seq` is clamped post-loop against the minimum \
+         unattributed seq. r1={r1:?}"
         );
-        assert!(lines(tmp.path()).is_empty());
+        assert!(
+            lines(tmp.path()).iter().all(|l| l.row_id != "ghost"),
+            "ghost must not appear in the shard yet: {:?}",
+            lines(tmp.path())
+        );
 
         // The artifact now exists under this same repo root — the row becomes
         // attributable. Because the watermark never advanced past it, a second
@@ -1006,11 +1277,13 @@ mod tests {
         seed(&cat, tmp.path(), "ghost");
         let r2 = export(&cat.conn, tmp.path()).unwrap();
         assert_eq!(r2.unattributed, 0, "{r2:?}");
-        // 2, not 1: `seed` itself triggers a fresh `artifact`/`insert` audit
-        // row for "ghost" (seq 2) in addition to the original stuck
-        // `update` row (seq 1) — both are now attributable and exported.
+        // 3, not 1: the second export re-scans from watermark 0, so it
+        // re-processes "other"'s insert row (seq 2, now exported a second
+        // time) in addition to the originally-stuck "ghost" `update` row
+        // (seq 1, now attributable) and `seed`'s own fresh "ghost" `insert`
+        // row (seq 3) — all three are now attributable.
         assert_eq!(
-            r2.exported, 2,
+            r2.exported, 3,
             "the originally-unattributed row must still be recoverable: {r2:?}"
         );
         assert_eq!(
@@ -1020,6 +1293,12 @@ mod tests {
                 .count(),
             2,
             "both the original stuck update row and seed's own insert row must be exported"
+        );
+        assert_eq!(
+            watermark(&cat.conn, tmp.path()).unwrap(),
+            3,
+            "with no unattributed rows left in this batch, the watermark must \
+         advance all the way to the highest seq scanned"
         );
     }
 
