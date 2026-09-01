@@ -122,23 +122,40 @@ def backticked_cluster_slug(rest: str) -> str | None:
 
 
 def bare_n_values(rest: str) -> list[int]:
-    """Mirrors `bare_n_values` -- every BARE n=<N>; a backticked `n=<N>` is a quotation.
+    """Mirrors `bare_n_values` -- every n= NOT inside a backtick span.
 
-    The backtick is the escape and is now the ONLY signal separating a live claim from a
-    quotation: the ledger preserves superseded figures with their derivation, so
-    `**Promotes to:**` legitimately carries "took it from `n=2` to `n=27`". Position cannot
-    discriminate there -- two entries OPEN that field with a historical citation -- so a
-    first-n=-wins rule reddens two correct fields. `89697a15` backticked all ten quotes.
+    The backtick is the escape and is the ONLY signal separating a live claim from a quotation:
+    the ledger preserves superseded figures with their derivation, so `**Promotes to:**`
+    legitimately carries "took it from `n=2` to `n=27`". Position cannot discriminate there --
+    two entries OPEN that field with a historical citation -- so a first-n=-wins rule reddens two
+    correct fields. Eleven backticked n= occurrences under the span reading, ten of which would
+    be flagged if bare; a tight-token count gives ten, the difference being `n=1 taggable` -- a
+    backticked PHRASE, and corpus evidence that the house style already wraps prose.
+
+    SPAN, not adjacency. The first shipped version tested only the byte before `n=`, so an n=
+    inside a backticked PHRASE read as a live claim. Complete pairs only: a dangling backtick
+    opens nothing, leaving the tail CHECKED, because a false report is loud where a skipped
+    claim would be silent.
 
     `n>=` is deliberately not matched: it is the promotion THRESHOLD in prose, never a count.
     """
+    spans: list[tuple[int, int]] = []
+    open_at: int | None = None
+    for i, ch in enumerate(rest):
+        if ch == "`":
+            if open_at is None:
+                open_at = i
+            else:
+                spans.append((open_at, i))
+                open_at = None
+
     out: list[int] = []
     i = 0
     while True:
         at = rest.find("n=", i)
         if at < 0:
             return out
-        quoted = at > 0 and rest[at - 1] == "`"
+        quoted = any(a < at < b for a, b in spans)
         digits = ""
         for ch in rest[at + 2 :]:
             if not ch.isdigit():

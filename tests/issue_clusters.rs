@@ -372,32 +372,62 @@ fn parse_index_counts(text: &str, valid: &BTreeSet<String>) -> BTreeMap<String, 
     out
 }
 
-/// Every **bare** `n=<N>` in a field's tail; a backticked `` `n=<N>` `` is skipped.
+/// Every **bare** `n=<N>` in a field's tail; an `n=` inside any backtick span is skipped.
 ///
 /// **The backtick is the escape, and it is now the ONLY signal separating a live claim from a
 /// quotation.** The ledger's house style preserves superseded figures with their derivation
 /// rather than overwriting them, so `**Promotes to:**` legitimately carries sentences like
 /// *"the archive backfill took it from `n=2` to `n=27`"*. Position cannot discriminate there —
 /// two entries OPEN the field with a historical citation — so a first-`n=`-wins rule reddens
-/// two correct fields. `89697a15` backticked all ten quotes across the corpus, which is the
+/// two correct fields. `89697a15` backticked the corpus's historical quotes, which is the
 /// disambiguator `IC-6` says a parser over a namespace owes.
+///
+/// **Counted with its unit, because two readings differ by one.** Eleven backticked `n=`
+/// occurrences under the SPAN reading, of which ten disagree with their class's count and would
+/// be flagged if bare; the eleventh quotes a figure that happens to equal today's. A tight-token
+/// count (`` `n=N` `` only) gives **ten**, because one occurrence is `` `n=1 taggable` `` — a
+/// backticked PHRASE. That phrase is corpus evidence for the span rule below: the house style
+/// already wraps prose, and it worked under adjacency only because its `n=` happened to sit
+/// first inside the span.
 ///
 /// This replaced a positional rule rather than joining it. Measured over all 22 `**Members:**`
 /// lines, independently by two sessions: exactly one bare `n=` per line, equal to the positional
 /// answer, and no line opens with a backticked quote — so the delimiter is strictly safer than
 /// position, not merely simpler.
 ///
+/// **The escape is SPAN-based, not adjacency-based, and that distinction was a shipped bug.**
+/// The first version tested only the byte before `n=`, so a tight `` `n=16` `` was skipped while
+/// an `n=` inside a backticked *phrase* — `` `took it from n=99 to n=98` `` — came back as two
+/// live claims. Found by `codescout-3e` testing the shipped parser, not by review. It failed
+/// loud (a false drift report, never a missed defect) and the corpus was clean because
+/// `89697a15` made every quote tight, so nothing would have surfaced it. The reason to fix
+/// rather than document: the rule a reader carries is *"backticked means quoted"*, and the
+/// natural way to quote a superseded line is to wrap the LINE — so the remembered rule was
+/// broader than the code, which is `IC-14` inside the gate that polices `IC-14`.
+///
 /// `n≥` is deliberately not matched: it appears in the ledger's prose as the *promotion
 /// threshold*, never as a class count, so checking it against the corpus would report drift on
 /// a sentence stating a rule.
 fn bare_n_values(rest: &str) -> Vec<usize> {
-    let bytes = rest.as_bytes();
+    // Complete backtick PAIRS only. A dangling backtick opens nothing, so everything after it
+    // stays CHECKED — the failure direction matters more than the edge case, and a false drift
+    // report is loud where a skipped live claim would be silent.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut open: Option<usize> = None;
+    for (i, &byte) in rest.as_bytes().iter().enumerate() {
+        if byte == b'`' {
+            match open.take() {
+                Some(start) => spans.push((start, i)),
+                None => open = Some(i),
+            }
+        }
+    }
+
     let mut out = Vec::new();
     let mut i = 0;
     while let Some(at) = rest[i..].find("n=") {
         let start = i + at;
-        // `start - 1` may land mid-codepoint; a UTF-8 continuation byte never equals b'`'.
-        let quoted = start > 0 && bytes[start - 1] == b'`';
+        let quoted = spans.iter().any(|&(a, b)| a < start && start < b);
         let digits: String = rest[start + 2..]
             .chars()
             .take_while(char::is_ascii_digit)
@@ -528,7 +558,8 @@ fn the_ledger_parsers_agree_on_a_fixture() {
 **Slug:** `cluster/alpha`
 | IC-1 | first | `cluster/alpha` | 7 | not yet — **10 share one layer** | none yet |
 **Members:** `filter={...}` — n=7, 2026-09-01. The backfill took it from `n=2` to `n=27`.
-**Promotes to:** `not yet` — n=7, below the bar. This field read `n=4` until today.
+**Promotes to:** `not yet` — n=7, below the bar. This field read `n=4` until today.\n\
+**Promotes to:** `not yet` — n=7 again. `The backfill took it from n=98 to n=99` overnight.
 
 ## IC-2 — declares a slug but states no count
 **Slug:** `cluster/beta`
@@ -595,12 +626,14 @@ fn the_ledger_parsers_agree_on_a_fixture() {
         "fixture no longer reaches the section-boundary leak; the IC-2/IC-3 ORDER is load-bearing"
     );
     assert!(
-        !claims.iter().any(|(_, _, n)| matches!(n, 27 | 4)),
+        !claims.iter().any(|(_, _, n)| matches!(n, 27 | 4 | 98 | 99)),
         "fixture no longer reaches the backtick escape — a quoted n= is being read as a claim.\n\
          27 and 4 are checked because they appear ONLY inside backticks in this fixture. `n=2` \
          is deliberately NOT checked: it appears both as a quotation on IC-1 and as gamma's real \
          bare claim, so its presence proves nothing either way — a guard naming it fires on a \
-         correct parser, which is what the first version of this assertion did."
+         correct parser, which is what the first version of this assertion did.\n\
+         98 and 99 sit inside a backticked PHRASE and cover the span-vs-adjacency distinction \
+         specifically: they are the two an adjacency check lets through."
     );
 }
 
@@ -737,8 +770,11 @@ fn every_declared_class_states_a_bare_n() {
 /// read the right thing — it can only be shown not to have complained. Four discriminations,
 /// each a real shape in the corpus:
 ///
-/// 1. **Backticked is skipped.** `IC-6` legitimately writes *"took it from `n=2` to `n=27`"*.
-///    This is the whole escape; without it the parser reports drift on correct prose.
+/// 1. **Backticked is skipped, by SPAN not adjacency.** `IC-6` legitimately writes *"took it
+///    from `n=2` to `n=27`"* with tight tokens; the fixture also carries a backticked PHRASE
+///    wrapping two `n=`s, because the natural way to quote a superseded LINE is to wrap the
+///    line. An adjacency check passes every other assertion in this test and lets those two
+///    through — that version shipped, at `cd17a58c`.
 /// 2. **Both fields are read.** `**Promotes to:**` is where the four measured drifts lived.
 /// 3. **A slug spans its own section and no further.** `IC-2` declares one and states no count;
 ///    `IC-3` states a count and declares no slug. Only the `## IC-` reset stops `IC-3`'s 99
@@ -764,7 +800,8 @@ fn the_bare_n_claim_parser_discriminates() {
 ## IC-1 — first
 **Slug:** `cluster/alpha`
 **Members:** `filter={...}` — n=7, 2026-09-01. The backfill took it from `n=2` to `n=27`.
-**Promotes to:** `not yet` — n=7, below the bar. This field read `n=4` until today.
+**Promotes to:** `not yet` — n=7, below the bar. This field read `n=4` until today.\n\
+**Promotes to:** `not yet` — n=7 again. `The backfill took it from n=98 to n=99` overnight.
 **Claim:** a sentence mentioning n=1234 that is not a judgement field.
 
 ## IC-2 — declares a slug but states no count
@@ -785,11 +822,15 @@ fn the_bare_n_claim_parser_discriminates() {
         vec![
             ("alpha".to_string(), "Members".to_string(), 7),
             ("alpha".to_string(), "Promotes to".to_string(), 7),
+            ("alpha".to_string(), "Promotes to".to_string(), 7),
             ("gamma".to_string(), "Members".to_string(), 2),
         ],
         "expected exactly alpha's two bare claims and gamma's one.\n\
-         - `n=2`/`n=27`/`n=4` are BACKTICKED quotations and must be skipped; catching them \
-           reports drift on correct prose\n\
+         - `n=2`/`n=27`/`n=4` are BACKTICKED TOKENS and must be skipped\n\
+         - n=98/n=99 sit inside a backticked PHRASE and must ALSO be skipped: the escape is \
+           span-based, not adjacency-based. An adjacency check passes every other assertion \
+           here and lets these two through as live claims — that shipped, and was found by \
+           testing rather than by review\n\
          - n=1234 sits on a `**Claim:**` line, which is not a gated field\n\
          - n=99 belongs to a section that declares no slug; it must be DROPPED, never filed \
            under `beta` — that is IC-3's count leaking across a section boundary into the last \
