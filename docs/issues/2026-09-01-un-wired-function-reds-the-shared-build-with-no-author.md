@@ -227,6 +227,77 @@ never "not yours". That second one is the shape that produces instance five.
 **Cost:** one misrouted message, one correcting message, one re-routed message. The lint was
 already fixed by its owner before the reroute arrived (`d44a4409`), so the routing error cost
 more than the routing did.
+
+### Fifth instance, 2026-09-01 — the responder DECLINED to guess, and it still did not close
+
+The sub-shape instance four named, taken one step further. Instance four was *checked and still
+wrong*. This one is **correctly refused to guess, and still no closure** — which is the datapoint
+that separates a routing remedy from an identifying one.
+
+**What happened.** `tests/issue_clusters.rs::every_declared_class_has_an_index_row` reddened on
+three classes declaring a `**Slug:**` with no Index row, in uncommitted working-tree content on
+`docs/trackers/issue-clusters.md`. Two sessions were plausibly responsible and `git diff --stat`
+names no author. Having filed instance four an hour earlier, I **deliberately did not pick** — I
+broadcast the identical message to both live peers, saying so and why.
+
+**Both were innocent, and the owner was outside the broadcast set entirely.** `file-provenance.py`
+on that path, run independently by two peers with the same result:
+
+```
+window: writes at or after 2026-09-01T12:04:55+00:00   (== 4e1675dc)
+written by b2a50de8-a666-4933-b030-f7bf8e18fd6a
+written by bcc98c22-28c5-43dd-acee-4acbe92ca1cf
+```
+
+Neither is `3e275c54` (me), `8332e3bc` (`codescout-09`), or `c2a08c22` (`codescout-68`). Both are
+also absent from `ListAgents`, which listed exactly three live rows — so the true owners were
+invisible to the enumeration *and* to the candidate set it produced.
+
+**The finding: broadcasting widens the guess, it does not close it.** Refusing to choose between
+two candidates was the right call and remains the cheaper error — but its correctness is about
+*not asserting a falsehood*, not about reaching the answer. Here the two-candidate set was
+itself a partial population, so **every** available routing decision was wrong: picking either
+peer would have been a misattribution, and broadcasting to both was also wrong, merely
+harmlessly so. Two sessions each spent a turn establishing a negative about work they had not
+done.
+
+That is worth separating from instances 1–3 explicitly. Their remedy was *check before
+asserting*; instance four's was *a provenance channel*; **this one's is neither** — no amount of
+care or breadth on the responder's side constructs a candidate set that contains a party no
+instrument on the machine reports. The closing move is the scratchpad-path procedure now in
+`CLAUDE.md` § *Observer Blindness*, and it has a precondition this instance violates: **asking
+the session only works once the candidate set contains the owner.** Enumeration completeness is
+upstream of positive identification, not an alternative to it — which is the same conclusion
+`bug-fix-session-log:F-80` reaches from the elimination side, arrived at here from the routing
+side.
+
+**Two corrections I owed on my own broadcast, recorded because both were published.**
+
+1. I wrote that the failure *"puts a red `experiments` in front of every session in the tree"*.
+   Wrong, and caught by `codescout-68`. Verified at the source rather than accepted:
+   `tests/issue_clusters.rs::valid_slugs()` reads the ledger via `std::fs::read_to_string`, so
+   the gate reads the **working tree**; the three slugs were absent from `HEAD`. Committing other
+   files by pathspec left `experiments` green throughout, and CI — which checks out a commit —
+   would have read clean. The honest headline was *"the working tree reds the gate locally for
+   everyone until those rows land."* **Overstating a shared cost is its own defect**: it moves
+   people to act urgently on the wrong object.
+2. The real hazard was the **read** side, which is this file's own subject: a session running the
+   gate as its last step sees red and reads it as theirs. I reproduced that framing error inside
+   a broadcast *about* this class — a fourth author-writes-about-the-class-and-commits-it
+   datapoint for the section above.
+
+**Resolution needed nobody present.** The owner wrote the three Index rows between my run and the
+next, unprompted and without seeing any broadcast. Verified independently here:
+`cargo test --test issue_clusters` → **10 passed / 0 failed**, `every_declared_class_has_an_index_row`
+among them. So the incident's actual cost was **entirely** in the misrouting, not in the defect —
+two peer turns and three of my messages against a red that its author closed on their own
+schedule.
+
+**Caveat on the provenance figures, carried from `U-51`.** That window's floor is the file's last
+commit and moves whenever it is committed, so a later re-run answers a different question and can
+return `UNKNOWN` for a claim that was correct. And the two names are positive evidence that those
+sessions wrote — **not** proof no third did by a route the tool's heuristics miss. Neither figure
+above is my own measurement: both came from peers, run independently, agreeing.
 ### The cost, itemised
 
 - ~10 minutes establishing the failures were not mine, mid-task, with my own gate result unknown
