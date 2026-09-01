@@ -3301,6 +3301,102 @@ mod tests {
         }
     }
 
+    /// Every DECLARED shape must name a real tool, and a real action on that tool.
+    /// Gate 6.
+    ///
+    /// Gate 2 above runs the opposite direction — observed shape → some section serves
+    /// it — so until now nothing checked that a declaration is reachable *at all*. A
+    /// shape naming a nonexistent action passes Gate 1 (`parse_shape` validates only
+    /// that both halves are identifiers), passes Gate 2 (which iterates the census and
+    /// never the declarations), and passes Gate 5 (which asserts `serves` is non-empty,
+    /// not that it is live). The section then silently stops being delivered — the exact
+    /// failure section-grain delivery exists to prevent, one level up. This is
+    /// `observer-blindness:OB-7`'s shape: a declaration that is well-formed and that
+    /// nothing in production reaches.
+    ///
+    /// The oracle is the tool REGISTRY plus each tool's `input_schema()` action enum,
+    /// and deliberately **not** `shape_census.txt`. The census records what has been
+    /// *called*, so it rejects every genuinely new action: measured 2026-09-01,
+    /// `librarian.audit_log` is declared, real, and absent from the census. A
+    /// census-based gate would have demanded a waiver for a correct declaration, which
+    /// trains authors to waive rather than to fix.
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn every_declared_shape_names_a_live_tool_and_action() {
+        use crate::prompts::guide_index::GUIDE_INDEX;
+        let (_dir, server) = make_server().await;
+
+        let mut checked = 0usize;
+        for topic in crate::prompts::GUIDE_TOPICS {
+            let Some(entry) = GUIDE_INDEX.topic(topic) else {
+                continue;
+            };
+            for sec in &entry.sections {
+                for shape in &sec.serves {
+                    let tool = server
+                        .tools
+                        .iter()
+                        .find(|t| t.name() == shape.tool)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{topic} § {} declares `serves: {}`, but no registered tool \
+                                 is named `{}`. A shape naming an unregistered tool can \
+                                 never match, so that section is undeliverable.",
+                                sec.heading, shape.tool, shape.tool
+                            )
+                        });
+
+                    if let Some(action) = &shape.action {
+                        let schema = tool.input_schema();
+                        let allowed: Vec<String> = schema
+                            .get("properties")
+                            .and_then(|p| p.get("action"))
+                            .and_then(|a| a.get("enum"))
+                            .and_then(|e| e.as_array())
+                            .map(|v| {
+                                v.iter()
+                                    .filter_map(|x| x.as_str().map(str::to_string))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        assert!(
+                            !allowed.is_empty(),
+                            "{topic} § {} declares `serves: {}.{action}`, but tool `{}` \
+                             exposes no `action` enum in its input_schema. Either the shape \
+                             should be tool-only (`serves: {}`), or the schema moved.",
+                            sec.heading,
+                            shape.tool,
+                            shape.tool,
+                            shape.tool
+                        );
+                        assert!(
+                            allowed.iter().any(|a| a == action),
+                            "{topic} § {} declares `serves: {}.{action}`, which is not one \
+                             of `{}`'s real actions ({}). It parses, clears every other \
+                             gate, and is delivered to nothing.",
+                            sec.heading,
+                            shape.tool,
+                            shape.tool,
+                            allowed.join(", ")
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
+
+        // Anti-vacuity floor, not a total: the loop above is silent on an empty corpus,
+        // and a gate that passes by scanning nothing is the defect it is here to catch.
+        // 24 distinct shapes were declared when this landed and declarations only ever
+        // grow, so this is a floor that never needs revising upward — deliberately not
+        // an equality, which would turn every new declaration into a failing gate.
+        assert!(
+            checked >= 24,
+            "the gate scanned only {checked} declared shapes — it is reading an empty or \
+             truncated corpus and would otherwise pass vacuously"
+        );
+    }
+
     /// Every registered guide topic must either fire from some tool, or be declared
     /// pull-only with a reason — and not both. This is the triggered-xor-pull-only half
     /// of the deleted `every_guide_topic_is_triggered_or_declared_pull_only` (see Gate 2
