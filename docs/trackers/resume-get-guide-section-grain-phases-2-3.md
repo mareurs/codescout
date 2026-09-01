@@ -330,10 +330,15 @@ method today carries two engines' delivery paths, not one.
 **Two items in this queue gain a second consumer:**
 
 - `GG-4` (54 B of slack on the 12,000 B p50 ceiling) — the coordination spec's
-  gate 3 replaces that ceiling with one budget over *all* engines. Do not spend
-  the 54 B assuming it is engine 1's alone; `operator_rules::budget` is a
-  second, independent ceiling over the same context window, and engine 6
-  (craft/domain skills) is counted by neither.
+  gate 3 extends that ceiling into one budget over *all* emitters. Do not spend
+  the 54 B assuming the margin is defended more broadly than it is: `shape_total`
+  sums only blocks containing `<!-- auto-injected get_guide(`, so triggered
+  operator rules and craft/domain skill bodies land in the same window counted by
+  **nothing**. (Corrected 2026-09-02 — this bullet previously called
+  `operator_rules::budget` "a second, independent ceiling over the same context
+  window". It is not: `SIZE_CEILING = 10` counts *rules*, at compile time, over the
+  `always` set `route()` never delivers. See
+  `prompt-surface-measurement-session-log:F-46`.)
 - `GG-7` (topics are atomic nodes in an unmodelled graph) — that graph is what
   the spec's `GET /api/engines/graph` route renders. GG-7 stops being purely a
   correctness bug and becomes the data model for the operator surface.

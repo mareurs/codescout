@@ -130,17 +130,42 @@ six.
 An operator's only instrument today is to make a call and inspect what came back — which
 also stamps the ledger, so the instrument spends the thing it measures.
 
-### 4. Two budgets over one context window
+### 4. One byte budget, covering part of the window, and two emitters bounded by nothing
 
-Engine 1 enforces a p50 session ceiling (`CEILING = 12_000` B) and a per-section cap
-(`MAX_DECLARED_SECTION_BYTES = 2500`, verified in `guide_index.rs` today). Engine 5 enforces
-its own `SIZE_CEILING` in `operator_rules::budget`. Both spend the same context window and
-neither knows about the other. Two budgets over one resource is not a budget.
+> ⚠ **Rewritten 2026-09-02 at the start of Layer 2. The first version of this section was
+> wrong in every clause, and the error is recorded as
+> `prompt-surface-measurement-session-log:F-46`.** It read: *"Engine 5 enforces its own
+> `SIZE_CEILING` in `operator_rules::budget`. Both spend the same context window and neither
+> knows about the other. Two budgets over one resource is not a budget."* I had not opened
+> `budget.rs`. `SIZE_CEILING = 10` is a count of **rules**, checked at **compile time**
+> (`operator_rules::mod:47`, `corpus.rs:40` — never on the delivery path), over the
+> `always` set — which `route()` excludes **unconditionally**. It governs exactly the set
+> that is never delivered per call. The corrected picture below is worse for the system and
+> supports the same gate for a different reason.
 
-Sharpening the point: GG-4 records engine 1 sitting at **11,946 B against its 12,000 B
-ceiling — 54 B of slack** (measured 2026-08-27; re-derive before relying on it). A single
-operator rule promoted to `always` lands in the same window and is invisible to that gate.
+There is **one** byte budget, it covers **part** of the window, and two emitters are bounded
+by nothing at all.
 
+| emitter | bound | unit |
+|---|---|---|
+| guide sections (push) | `CEILING = 12_000` in `a_p50_session_stays_under_…` | bytes, p50 session |
+| session opener (engine 7) | the same ceiling — it emits a `get_guide(` block | bytes |
+| operator `always` (resident) | `SIZE_CEILING = 10`, compile time | **rule count**, and on a *disjoint* set |
+| operator `triggered` (per call) | **nothing** | — |
+| craft skills (engine 6) | **nothing** | — |
+
+Engine 1 also caps each declared section at `MAX_DECLARED_SECTION_BYTES = 2500`.
+
+**The exclusion is deliberate, not incidental.** The ceiling test's `shape_total` sums only
+blocks containing `<!-- auto-injected get_guide(`; operator rules emit
+`<!-- operator-rule OP-N …`. So the one real budget is *written* not to see the other
+engine's bytes — which is defensible for a test named after guide injection, and indefensible
+as the system's only accounting of what an agent receives.
+
+Sharpening it: `GG-4` records engine 1 at **11,946 B against 12,000 — 54 B of slack**
+(measured 2026-08-27; re-derive before relying on it). That margin is defended against guide
+prose and against nothing else. Any triggered operator rule, and every skill body, lands in
+the same window carrying no accounting whatsoever.
 ---
 
 ## Design
@@ -313,7 +338,16 @@ design consequence, and it is available now.
    > second is a defect, so only the second is gated. `RetrievalKey::SessionPhase` and
    > the `Corpus` field both exist because of this find.
 3. **One budget.** A p50 session's **total** emission across all engines is under one
-   committed ceiling. Absorbs Task 10's `CEILING`; does not sit beside it.
+   committed ceiling, counted by **emitter** rather than by comment marker. Absorbs Task
+   10's `CEILING`; does not sit beside it.
+
+   > **Corrected 2026-09-02** (`prompt-surface-measurement-session-log:F-46`). This gate
+   > used to read *"absorbs Task 10's ceiling rather than sitting beside it"* on the premise
+   > that a second byte ceiling existed to reconcile. It does not. There is one ceiling and
+   > two unbudgeted emitters, so the work is **extending** an accounting to emitters that
+   > have none — not merging two numbers. A gate that summed the guide ceiling's bytes and
+   > `SIZE_CEILING`'s rule count would have passed, and been cited afterwards as proof the
+   > budgets were unified.
 4. **Preview fidelity — and note which assertion discriminates.** The obvious gate is
    *"preview leaves the ledger unchanged"*, and it is **monotone under removal**: a preview
    that returns nothing at all passes it. The discriminating assertion is that preview's

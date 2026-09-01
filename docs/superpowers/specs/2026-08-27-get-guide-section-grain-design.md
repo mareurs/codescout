@@ -39,9 +39,14 @@ Two consequences for anyone reading this spec as a build guide:
   to universal in `30b6fc41`, and `every_registered_tool_supplies_a_selector_key`
   (`src/server.rs:3448`) now holds every tool to it. A tool returning `None` is invisible to
   *both* engines, not just this one.
-- **The p50 byte ceiling in Task 10 is not the whole budget.** `operator_rules::budget`
-  enforces a second, independent ceiling over the same context window, and engine 6
-  (craft/domain skills) is counted by neither.
+- **The p50 byte ceiling in Task 10 is the system's ONLY byte accounting, and it is scoped
+  to this engine.** `shape_total` sums blocks containing `<!-- auto-injected get_guide(`,
+  so triggered operator rules (`<!-- operator-rule OP-N …`) and craft/domain skill bodies
+  land in the same context window counted by nothing. `operator_rules::budget` is **not** a
+  second byte ceiling — `SIZE_CEILING = 10` counts *rules*, at compile time, over the
+  `always` set that `route()` never delivers. Corrected 2026-09-02;
+  `prompt-surface-measurement-session-log:F-46` records the version of this bullet that
+  claimed otherwise.
 
 The coordinator, its registry, the preview surface and the dashboard routes are designed in
 [`2026-09-02-retrieval-engine-coordination-design.md`](2026-09-02-retrieval-engine-coordination-design.md)

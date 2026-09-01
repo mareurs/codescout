@@ -9,7 +9,7 @@ tags:
 - measurement
 - librarian
 topic: prompt surface budget measurement eval harness compaction
-entry_high_water_F: 45
+entry_high_water_F: 46
 entry_high_water_W: 28
 entry_prefix:
 - F
@@ -4105,6 +4105,81 @@ Worth being precise about where the knowledge already lived: `ci.yml:51-60` carr
 The generalisation is the part to keep: **a documented gate narrower than the enforced gate is worse than no documentation.** Everyone runs the documented form and believes they are covered, so the gap cannot surface during review — only at push, after every reviewer has already signed off. The cost is not the lint; it is that a clean review is not evidence of a clean tree.
 
 **Rests on:** `.github/workflows/ci.yml:50` (narrow job) and `:61` (wide job, with its explanatory comment at `:51-60`). Failure and fix: `c30c07a7`, patch-id `c586b0766eacf6c4765c3bb0359ff50839a2e9f1`. CLAUDE.md § Development Commands corrected in the same commit as this entry.
+
+## F-46 — I described a budget from its module name — SIZE_CEILING counts rules, at compile time, on the set that is never delivered
+
+**Status:** open — the false premise is committed in five places; fix listed below
+**Severity:** high — it is already published, and it was about to be the design input for Layer 2's central gate
+**Valid:** dated 2026-09-02
+
+**Observed.** Writing the retrieval-engine coordination spec I asserted, as a
+core problem statement, that engine 1 and engine 5 each enforce a budget over
+the same context window and neither knows about the other:
+
+> *"Engine 1 enforces a p50 session ceiling (`CEILING = 12_000` B) … Engine 5
+> enforces its own `SIZE_CEILING` in `operator_rules::budget`. Both spend the
+> same context window and neither knows about the other. Two budgets over one
+> resource is not a budget."*
+
+**I never opened `budget.rs`.** Reading it at the start of Layer 2 — the layer
+whose central gate was to be *"collapse the two ceilings into one"* — showed
+every clause of that sentence is wrong in a different way:
+
+| I claimed | Verified 2026-09-02 |
+|---|---|
+| a byte ceiling | `SIZE_CEILING = 10` is a **count of rules** |
+| per-call / per-session | called only from `operator_rules::mod:47` and `corpus.rs:40` — **compile time**, never on the delivery path |
+| over delivered content | filters `binding == Always`, and `route()` excludes `always` **unconditionally** — it governs exactly the set that is **never delivered per call** |
+
+**The real shape is worse, and argues the same conclusion for a different
+reason.** There is **one** byte budget covering **part** of the window, plus two
+wholly unbounded emitters:
+
+| emitter | bound | unit |
+|---|---|---|
+| guide sections (push) | `CEILING = 12_000` | bytes, p50 session |
+| session opener | same ceiling (emits a `get_guide(` block) | bytes |
+| operator `always` (resident) | `SIZE_CEILING = 10`, compile time | **rule count**, on a disjoint set |
+| operator `triggered` (per call) | **nothing** — grep for `len\|bytes\|CEILING\|cap` in `route.rs` returns zero | — |
+| craft skills | **nothing** | — |
+
+And the exclusion is explicit rather than incidental: the ceiling test's
+`shape_total` filters to blocks containing `<!-- auto-injected get_guide(`, while
+operator rules emit `<!-- operator-rule OP-N …`. So the one real budget
+**deliberately** does not see the other engine's bytes.
+
+**Why the error survived my own review.** Two things, and the second is the
+transferable one.
+
+1. `operator_rules::budget` is a plausible name for a delivery budget, and its
+   doc comment opens *"Gate 3 — the two budget constraints"*, which reads as
+   confirmation if you are looking for a second budget.
+2. **The claim was load-bearing for a document rather than for a call.** Nothing
+   executed it, so nothing could red. Every gate stayed green through five
+   commits while a false premise about a measurement instrument propagated —
+   which is `Loudness is a property of a PATH` applied to prose: a claim on no
+   execution path has no observer, however confidently written.
+
+> **A budget you have not read is a budget you are describing from its name.**
+> The tell is available without reading anything: I could name the *other*
+> ceiling's constant, unit, and call site, and for this one I could name only the
+> module.
+
+**Counterfactual.** Layer 2's gate 3 would have been built to reconcile two
+ceilings, one of which does not measure what the gate assumes. The likely
+outcome is not a red test — it is a gate that sums a byte count and a rule count,
+passes, and is cited later as proof the budgets are unified.
+
+**Fix — five committed surfaces carry the false premise:**
+
+- `2026-09-02-retrieval-engine-coordination-design.md` § *Problem 4*, § *Gates* gate 3
+- `2026-08-27-get-guide-section-grain-design.md` § *Coordination* (second bullet)
+- `resume-get-guide-section-grain-phases-2-3.md` `GG-9` (the `GG-4` bullet)
+- commit `238755ff` message (immutable; corrected by the follow-up commit)
+- `src/engines/mod.rs` module docs are **clean** — they describe the ledger, not budgets
+
+**Rests on:** `src/operator_rules/budget.rs`, `src/operator_rules/route.rs`,
+`a_p50_session_stays_under_the_committed_guide_byte_ceiling`'s `shape_total`.
 
 ## Template for new entries
 
