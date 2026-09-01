@@ -10,6 +10,7 @@ tags:
 - ci-gate
 - coverage-gap
 - docs
+- cluster/selector-narrower-than-its-population
 ---
 
 ## Summary

@@ -8,6 +8,7 @@ tags:
 - progressive-disclosure
 - tooling
 - docs-vs-code
+- cluster/selector-narrower-than-its-population
 closed: 2026-07-28
 opened: 2026-07-28
 owner: marius

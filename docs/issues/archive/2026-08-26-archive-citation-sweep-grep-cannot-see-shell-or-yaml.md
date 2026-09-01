@@ -1,13 +1,18 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-26
+tags:
+- tracker-conventions
+- guide
+- doc-refs
+- archive-flow
+- cluster/selector-narrower-than-its-population
 closed: 2026-08-26
-severity: low
+opened: 2026-08-26
 owner: marius
 related: []
-tags: [tracker-conventions, guide, doc-refs, archive-flow]
-unverified: "The guide fix, step 1 (55 archive-move citations, 7884fc7b) and step 2 (7 comment-borne placeholders — 1 fixed in d7d4a5c7, 6 wontfix as deliberate illustrations) are all done and verified. The severity-promotion policy question is MEASURED and answered `not yet`: ~429 broken code-comment refs remain, still far too many to gate on. What is NOT characterised: what those ~429 actually are. A 50-of-430 sample suggests roughly 76% carry severity_reason=code_comment_capped and the rest are basename_ambiguous or gitignored_path — which would already be med or low on their own merits and so are NOT part of a promotion blast radius — but the audit caps its findings array at 50 with no flag to raise it, so that split is sampled, not counted. Step 3 (re-measure) is deliberately NOT done: the composition would have to change by an order of magnitude to move the answer off `not yet`."
-kind: bug
+severity: low
+unverified: 'The guide fix, step 1 (55 archive-move citations, 7884fc7b) and step 2 (7 comment-borne placeholders — 1 fixed in d7d4a5c7, 6 wontfix as deliberate illustrations) are all done and verified. The severity-promotion policy question is MEASURED and answered `not yet`: ~429 broken code-comment refs remain, still far too many to gate on. What is NOT characterised: what those ~429 actually are. A 50-of-430 sample suggests roughly 76% carry severity_reason=code_comment_capped and the rest are basename_ambiguous or gitignored_path — which would already be med or low on their own merits and so are NOT part of a promotion blast radius — but the audit caps its findings array at 50 with no flag to raise it, so that split is sampled, not counted. Step 3 (re-measure) is deliberately NOT done: the composition would have to change by an order of magnitude to move the answer off `not yet`.'
 ---
 
 # BUG: the prescribed archive-citation sweep cannot see `.sh`, `.yml`, `.py` or `.toml`

@@ -1,5 +1,5 @@
 ---
-id: 31c2ed41477b348d
+id: '31c2ed41477b348d'
 kind: bug
 status: fixed
 title: 'BUG: activate by PATH bypasses workspace memory resolution, so a sub-project reports an empty memory set it does not have'
@@ -9,6 +9,7 @@ tags:
 - multi-project
 - activate
 - false-negative
+- cluster/selector-narrower-than-its-population
 closed: 2026-08-27
 opened: 2026-08-27
 owner: marius
