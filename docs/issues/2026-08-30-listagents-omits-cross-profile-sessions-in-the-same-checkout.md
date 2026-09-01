@@ -676,6 +676,14 @@ Ranked, and (b) is the one that matters even if (a) never happens.
   real population; a session is addressable by `uds:<socket path>` whether or not it
   is listed.
 
+## Fix provenance
+
+- **SHA:** `188ab791` (`experiments`)
+- **patch-id:** `2315deed4088429834896ff32f5a5e6571141dd0`
+
+The **mitigation only** — `scripts/peer-sessions.sh` plus its `docs/PROBES.md` row. The
+profile-scoped registry is a harness defect and is not fixed here, so options (a) and (b)
+above stay open; this anchor records what shipped, not what closes the bug.
 ## Tests added
 
 None — the code is not in this repo. The testable claim if it were: enumeration must

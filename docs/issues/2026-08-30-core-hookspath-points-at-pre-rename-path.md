@@ -8,6 +8,7 @@ tags:
 - repo-rename
 - environment
 closed: 2026-08-31
+no_fix_commit: 'The fix is `git config --unset core.hooksPath` — a change to untracked local git config — so no commit exists and none can, and no regression test is possible. Re-measure with `git config --get core.hooksPath` (expect exit 1) rather than trusting this record: the 2026-08-30 closure already recorded once a fix that had not been applied, which is why `unverified:` is also set.'
 opened: 2026-08-30
 owner: marius
 related:

@@ -9,6 +9,7 @@ tags:
 - env-config
 - multi-machine-config
 closed: 2026-08-29
+no_fix_commit: The fix edits the project-root `.env`, which is gitignored (`.gitignore:38`), so no commit exists and none can — re-confirmed 2026-09-01. Nothing here is owed. The code-adjacent risk the bug points at (docker-compose.yml trusting an unvalidated, un-templated local `.env` for a bind-mount path with no existence check) is unchanged by the fix and remains latent for the next machine.
 opened: 2026-08-29
 owner: marius
 related: []

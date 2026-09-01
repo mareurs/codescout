@@ -149,6 +149,14 @@ corpus to have "nothing worth keeping", but three live surfaces resolve against 
 block, and its frontmatter carries `unverified:` naming the contradiction, so the
 canonical bug triage query can reach it.
 
+## Fix provenance
+
+- **SHA:** `4b6ce839` (`experiments`)
+- **patch-id:** `4da36a7932d8ccb56bd41205393bf7026a192798`
+
+The disk cleanup (184 MB) and the record correction. Deliberately the only anchor here:
+the residual closed later by an **unattributed removal**, not by a commit, so there is no
+second pointer to declare — see § *Residual*.
 ## Residual — RESOLVED 2026-09-01 by an unattributed removal
 
 `.worktrees/bench` no longer exists. Measured 2026-09-01: `.worktrees/` contains only

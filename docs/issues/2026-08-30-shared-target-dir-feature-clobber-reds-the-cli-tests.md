@@ -51,7 +51,6 @@ Usage: codescout <COMMAND>
 
 For more information, try '--help'.
 ```
-```
 
 The failing set is the whole `artifact_*` family: `artifact_find_on_empty_catalog_returns_empty_items_json`,
 `artifact_find_semantic_without_embedder_reports_hint`, `artifact_graph_missing_id_runs`,
@@ -219,8 +218,8 @@ authority, and a later reader finding a one-line CLAUDE.md edit made by a peer s
 21:18 could reasonably read it as the drive-by this file spent two commits declining to make.
 It was not: proposed by one session, applied by a second, and ratified by the operator.
 
-- SHA: `73066479` (`experiments` — orphans on the next rebase)
-- patch-id: `8c42c7e35d91c50518796f94a8170f2a49e29d42` — **verified independently here**
+- **SHA:** `73066479` (`experiments` — orphans on the next rebase)
+- **patch-id:** `8c42c7e35d91c50518796f94a8170f2a49e29d42` — **verified independently here**
   (`git show 73066479 | git patch-id --stable`) rather than accepted from the relaying
   session, and it matches to the character.
 

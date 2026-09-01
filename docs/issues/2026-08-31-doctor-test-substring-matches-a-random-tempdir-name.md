@@ -69,6 +69,15 @@ cannot occur in a path, so the assertion depends only on what the check reports.
 comment at the assertion states this and names the CI run, because the next person to
 tidy `` `QQ-N` `` back to `QQ` would reintroduce it with no test able to object.
 
+## Fix provenance
+
+- **SHA:** `5816c8eb` (`experiments`)
+- **patch-id:** `b1a93d45ecae0c03ed2a068949966f41435d1807`
+
+Carried inside a three-failure CI fix rather than shipped alone, so the commit subject does
+not name this bug — the relevant hunk is the backticked `` `QQ-N` `` comparison in
+`src/librarian/tools/doctor.rs`. Fixed by construction, never reproduced locally; see
+`unverified:` before reading a green CI as discriminating.
 ## The general form
 
 This is not "a flaky test"; it is an **assertion whose input contains environment-controlled
@@ -87,4 +96,3 @@ narrow it and does not repeat the measurement.
 Sweep for sibling instances: negative `contains` assertions whose receiver is a message
 built with `{}` over a `Path`. Do it as its own pass — the 466-hit grep above is the
 starting population, not the finding set.
-

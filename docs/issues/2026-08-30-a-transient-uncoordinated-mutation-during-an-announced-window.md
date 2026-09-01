@@ -11,6 +11,7 @@ tags:
 - protocol
 - mutation-testing
 closed: 2026-08-30
+no_fix_commit: 'The mitigation is a practice change only — announce WHAT you are about to do, never HOW — so nothing was committed and no anchor is owed. Note the proposed promotion into R-129 as a second clause was NOT taken: verified 2026-09-01, R-129 in docs/trackers/reconnaissance-patterns.md contains no such clause. So the mitigation is unwritten as well as uncommitted, and nothing enforces it.'
 opened: 2026-08-30
 owner: marius
 severity: medium

@@ -210,9 +210,22 @@ Neither remedy is implemented by this task. No change was made to
 `names_path_containing`, to any write tool's response shape, or to `OP-4`'s selector
 in the ledger.
 
-- **SHA** — N/A, no fix commit exists yet.
-- **patch-id** — N/A.
+*(Superseded — this pair read `N/A, no fix commit exists yet` while the file was still
+`open`, and the fix landed afterwards. The declared anchors are in § *Fix provenance*
+below. Kept rather than deleted because the paragraph above it is the scope decision that
+made the N/A true at the time.)*
 
+## Fix provenance
+
+- **SHA:** `a6b4fc35` (`experiments`)
+- **patch-id:** `2d962f961ed764458b74ed5d0b67ed197945b957`
+- **SHA:** `2447f709` (`experiments`)
+- **patch-id:** `f83c6439691efb24ca790d00752e7cc7a43a74fe`
+
+Two commits, neither sufficient alone — which is why both are declared rather than one
+named as *the* fix. `2447f709` supplies the `selector_key` without which `route()` never
+runs; `a6b4fc35` supplies the written path the predicate matches. Read `unverified:` before
+treating this as end-to-end covered.
 ## Tests added
 - `src/operator_rules/route.rs::tests::op_4s_path_predicate_cannot_fire_against_a_write_response_today`
   — characterization test: pins that `OP-4` does not fire against a real (no-echo)

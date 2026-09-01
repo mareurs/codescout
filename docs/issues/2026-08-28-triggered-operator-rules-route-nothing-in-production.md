@@ -205,9 +205,21 @@ halfway compliant (right tool, wrong action/target) — not the ones the imperat
 actually worried about. No equivalent smallest fix exists for OP-2 (structurally
 unreachable) or OP-4 (two independent blockers — see the companion bug file).
 
-- **SHA** — N/A, no fix commit exists yet.
-- **patch-id** — N/A.
+*(Superseded — this pair read `N/A, no fix commit exists yet` while the file was still
+`open`, and the fix landed afterwards. The declared anchors are in § *Fix provenance*
+below. Kept rather than deleted because the paragraph above it is the scope decision that
+made the N/A true at the time.)*
 
+## Fix provenance
+
+- **SHA:** `2447f709` (`experiments`)
+- **patch-id:** `f83c6439691efb24ca790d00752e7cc7a43a74fe`
+- **SHA:** `a4968a13` (`experiments`)
+- **patch-id:** `01ee708b8db35c1918f463dc0cf642c2fe5b99a9`
+
+`2447f709` is the fix; `a4968a13` corrects two comments it falsified. Scope is unchanged
+from `unverified:` — OP-3 routes, OP-4 gains only its precondition, OP-2 is structurally
+unreachable from here.
 ## Tests added
 None — this is a filing-only bug report; no code changes accompany it. The existing
 `op_4s_*` tests in `src/operator_rules/route.rs` already pin the predicate-level

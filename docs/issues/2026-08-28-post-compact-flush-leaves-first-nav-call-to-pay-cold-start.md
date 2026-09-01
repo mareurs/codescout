@@ -14,6 +14,7 @@ tags:
 - doc-vs-behavior
 - timeout
 closed: 2026-08-31
+no_fix_commit: The messaging fix landed in a DIFFERENT repo — ../claude-plugins/codescout-companion/hooks/session-start.mjs — so no codescout commit exists for it and this repo cannot anchor one; cite it as claude-plugins:<sha> if you need the pointer. Verified 2026-09-01. The MECHANISM (no prewarm after the flush) is untouched in codescout and has no commit either, per `unverified:` — so the absence of an anchor here is two different absences, not one.
 unverified: 'The MESSAGING is fixed and verified live in all three profiles; the MECHANISM is untouched. (a) the prewarm is deliberately unshipped — its prescribed form is a no-op for this bug''s own Rust reproduction (PREWARM_LANGUAGES is JVM-only) and the workspace-keyed mux makes the cold window far narrower than this record assumed, so the flush still does not prewarm and a genuinely cold single-session workspace still pays. Also NO REGRESSION GUARD: nothing asserts the hook text, so the sentence can regress silently — which is why this is not archived. The original 60s timeout has still never been reproduced with the mux confirmed down; that measurement remains owed.'
 ---
 

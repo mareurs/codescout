@@ -226,6 +226,14 @@ and correct the hint to name it.
 edits the plan while believing they edited the shipped record — strictly worse than
 today's loud refusal.
 
+## Fix provenance
+
+- **SHA:** `164c8bd6` (`experiments`)
+- **patch-id:** `a3681488286644bf7c0a182740d26065a1230d44`
+
+Steps 1–3 only. Step 4 — the file-relative vs body-relative line-number frame — did not
+land; it is stated in `unverified:` and tracked separately as
+`docs/issues/2026-08-31-artifact-get-line-numbers-are-body-relative-not-file-relative.md`.
 ## Tests added
 
 Eight regression tests, each with its mutation control named before the run.
