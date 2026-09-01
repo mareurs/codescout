@@ -181,6 +181,36 @@ session walks into the same trap and nothing catches it until someone builds lea
 
 Append below. Newest run first.
 
+### catalog-audit-trail — 2026-09-01
+
+Plan: `docs/superpowers/plans/2026-09-01-catalog-audit-trail.md` ·
+Spec: `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md` (plan's Design
+Correction supersedes spec § Capture, probe-validated) · 9 commits (rebased onto
+experiments mid-run) · final review 0 Critical / 4 Important — 2 fixed in the wave,
+2 adjudicated · **15 rulings, 0 wrong so far** (several await post-merge verification).
+
+Run shape worth noting: executed in a worktree off a shared checkout carrying three live
+peer sessions and a peer's 13 staged paths; a mid-run operator note added standing
+obligations (lean lane per boundary, rebase before final gate, rulings-to-this-log) that
+several rows below implement.
+
+| ruling | class | cost if wrong | verdict |
+|---|---|---|---|
+| `AuditFilter` includes `op` — the plan's Step-3 code governs over its own Interfaces block, which under-counts | correctness | none (superset) | held |
+| `resolve_actor` ships only the `key.id()` form; the plan's dead match block is a warning artifact to delete (the plan says so itself) | correctness | compile error, caught instantly | held |
+| Task 5's tracker/catalog writes run from the MAIN checkout post-merge — librarian writes from a linked worktree create shadow rows | safety | a manual merge_worktree pass | held — pending post-merge doctor check |
+| Models: Sonnet implementers (user iron rule, no Haiku); Opus reviews for T1/T2 (trigger/identity core) + final; Sonnet for T3-T5 reviews and re-reviews | process | review-quality gap on T3-T5, backstopped by Opus final | held — Opus T1/T2 reviews each produced the run's load-bearing findings |
+| Implementers use native file tools inside the worktree — codescout MCP tools resolve against the MAIN checkout ("correct code in the wrong tree") | safety | leaked writes to main, caught by git-status step | held — validated when a Task-5 REVIEWER's default-configured grep produced a false "0 matches in src" claim exactly this way |
+| Wrap `install()` in BEGIN IMMEDIATE — the plan's own reference code was wrong (bare execute_batch = up to 21 unaudited-write windows per open on a shared WAL catalog, invisible because no row means no seq gap); caught by the Opus review's plan-mandated label | correctness | none — strictly safer | held — fresh datapoint for "a plan's reference code is a sketch" |
+| "Exactly two dispatchers" in the plan was wrong: stamp ALL five mutating librarian dispatchers — a stale verb is a positively wrong value in a forensic column, strictly worse than NULL (the never-mis-attribute direction governs) | correctness | 3 one-line stamps | held |
+| Prune-marker test gains op/row_id/before_ms asserts — the plan's own reference test was vacuous on the fields the spec names | correctness | none | held |
+| Audit-growth via augmentation params (one tracker append ≈ 50KB audit row; health block blind to bytes) is FILED post-merge, not a merge blocker | scope | growth invisible until noticed; bounded by manual prune existing | held — bug file owed |
+| Final-review Important 4 ("tracker close-out absent from branch") adjudicated as scheduled work under the main-checkout ruling, not an omission — the reviewer lacked ledger context | process | a fix-then-forget leak if the post-merge step is skipped | held — verify-open cadence is the backstop |
+| Accept lean-lane/long-clippy deferral at Task 1 only, then adopt the operator note: lean lane at EVERY task boundary (a Task-5-only gate makes a lean failure un-attributable across four tasks) | process | ~20s per boundary | held — implementers ran it green at every boundary from T2 on |
+| Rebase onto experiments BEFORE the final gate, and re-read the gate paragraph AFTER (it had moved upstream) | process | gate run on a tree neither branch has compiled | held — clean rebase, 7 commits, gate re-read unchanged in substance |
+| Fix wave scope = final-review Importants 1+2 plus two same-file smalls (unit label, trigger_count==21); everything else deferred with per-item triage | scope | a second wave if triage misjudged | held — re-review: all addressed, no new breakage |
+| Gate-count wobble across reports (3408→3253 lean) treated as a named re-review check, not accepted or dismissed | measurement | an unexplained shrink of executed tests trusted | held — explained: lib-only vs aggregated-across-binaries summary lines, 0 failed every lane |
+| Controller instrument error, recorded rather than hidden: four ledger appends replaced their anchor line instead of appending (same edit shape each time); each restored on notice, appends switched to end-of-file anchors | process | ledger rows silently lost at compaction-recovery time | held — the ledger is the recovery map, so the error class matters more than its four cheap instances |
 ### cross-machine-catalog-recovery — 2026-08-31
 
 Plan: `docs/superpowers/plans/2026-08-31-cross-machine-catalog-recovery.md` ·
