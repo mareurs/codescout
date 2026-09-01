@@ -152,6 +152,31 @@ verified to carry `id: <16-hex>` and no `entry_prefix` — pre-fix it refuses wi
 *"do not read or edit it directly"*, post-fix it reads. Confirming the fixture is load-bearing is
 the whole probe; without it you have measured nothing and feel informed.
 
+**The refusal that makes that probe work is the same thing that HIDES the staleness in normal
+use.** The anonymous *"do not read or edit it directly"* is a detector only once you are already
+suspicious. Measured 2026-09-01 from the *receiving* side: a session hit several stamped-file
+refusals (`issue-clusters.md`, an archived bug file), routed around each via `artifact(get)`, and
+questioned none — because **a refusal reads as the guard working correctly**. Its workarounds
+happened to be right, so nothing downstream broke and nothing prompted a re-check, while some of
+those refusals had been fixed hours earlier. That is `R-89`'s process axis with a wrinkle worth
+naming on its own: not merely that the served copy is stale, but that **the stale copy's error
+text is what makes it invisible** — a plausible refusal rather than an error, which is precisely
+the shape nothing downstream fires on.
+
+**Freshness is per-TRANSPORT, not per-session — one session can be fresh on the CLI path and
+stale on MCP in the same minute.** Measured 2026-09-01: a session's `doctor` runs all went
+through `./target/debug/codescout doctor`, rebuilt before each run and therefore current, while
+every `artifact()` / `edit_markdown()` call it made in the same window went through an MCP server
+started six hours earlier. Its **measurements stand; its writes were stale.** The split falls the
+dangerous way by default, because measurements tend to go through the CLI and mutations through
+MCP — so the readings look fine and the *writes* are the stale half. Ask which transport a call
+took before ruling a session clean or dirty; *"my session is fresh"* is not a well-formed claim.
+
+*(Mirror of this section's opening case, observed 2026-09-01: mux `3934969` fresh at 19:37 under
+server `62803` stale from 13:38. The opening paragraph has a fresh server attaching to a stale
+mux; this is the inverse. The two layers are therefore demonstrably independent in both
+directions, rather than merely described as separate.)*
+
 **Mechanism candidate (not built).** The server can answer this about itself in one syscall —
 `readlink("/proc/self/exe")` ending in `" (deleted)"` — and surface a one-line advisory in the
 envelope. That is a check that runs when nobody is worried; the `/proc` sweep above runs only once
