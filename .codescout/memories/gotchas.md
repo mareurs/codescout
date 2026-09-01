@@ -100,6 +100,26 @@ writes were recording audit rows the superseded way with nothing to signal it.
 session — `readlink /proc/<ppid>/cwd` is the discriminator that does work, and it is enough to
 tell a peer which window to reconnect.
 
+**They ACCUMULATE, which is the consequence of not self-healing and is easy to under-rate from a
+single reading.** Re-measured at 15:2x the same day, after a few more rebuilds: **10 stale
+servers and 2 stale muxes**, up from 3 servers ninety minutes earlier. The split is the whole
+point — the 2 muxes recycle themselves once idle past their timeout; the 10 servers will not,
+and each is a session silently running pre-rebuild code. Treat any single count as a floor
+rather than a magnitude: it grows once per rebuild per live session and falls only when
+sessions exit.
+
+Count it directly, and note this is a `/proc` sweep rather than a session enumeration — it is
+per-user and therefore profile-independent, where `ListAgents` is per-profile and under-reports:
+
+```
+for p in $(pgrep -x codescout); do
+  case "$(readlink /proc/$p/exe 2>/dev/null)" in *" (deleted)")
+    pp=$(ps -o ppid= -p $p | xargs)
+    case "$(ps -o cmd= -p $pp)" in *claude*) echo "server $p";; *) echo "mux $p";; esac;;
+  esac
+done
+```
+
 ## RemoteEmbedder Dimensions
 
 `RemoteEmbedder.dimensions()` returns `0` until after the first successful `embed()` call
