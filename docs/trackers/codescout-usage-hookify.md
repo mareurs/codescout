@@ -162,7 +162,22 @@ a row in `tool_calls`. Hookify catches it pre-call.
   in-server rejection within the turn — memory route too slow;
   substrate route required.
 
-**Valid:** dated 2026-05-24
+**Valid:** dated 2026-09-02
+
+**Re-verified 2026-09-02 — still shipped and wired; the § *Hook details* above are stale in their
+specifics.** The hook is `hooks/il4-deny-hook.mjs`, a **Node** script, not the
+`il4-deny-hook.sh` ("50 lines, mirrors `il3-deny-hook.sh` shape") this entry describes; it was
+ported at some point and nothing updated the prose. `hooks.json:103` points at the `.mjs` correctly.
+The test file is still `il4-deny-hook.test.sh`, which is what makes the drift look like a missing
+script rather than a rename.
+
+**I nearly filed a broken-hook bug off that.** A targeted `ls` of the path this entry names returned
+*No such file or directory* while its test file sat beside it and `hooks.json` still matched
+`il4-deny-hook` — a shape that reads exactly like a live PreToolUse matcher pointing at nothing. What
+corrected it was iterating **every** script `hooks.json` references and checking each for existence:
+zero missing. A lookup scoped to one name cannot distinguish *gone* from *renamed*; a check over the
+whole namespace can. Second occurrence of that exact save within ten minutes — see `I-4`'s
+label-vs-content table — which is `R-3` twice in one sweep.
 
 
 
@@ -252,7 +267,44 @@ That makes the companion compression-reminder load-bearing as the **post-compact
 - The audit tool already classifies findings as `verdict ∈ {missing, ambiguous_basename, resolved_basename}`. CI should only fail on `verdict=missing severity≥med`; `ambiguous_basename` is informational (could be a basename collision; not necessarily wrong); `resolved_basename` is OK.
 - Once active, this hook closes the loop on U-7 by making the failure mode loud at PR time instead of session time. The companion to H-3 (which catches tool-name drift in companion surfaces): H-5 catches path/link/symbol drift in doc surfaces.
 
-**Valid:** dated 2026-05-24
+**Valid:** dated 2026-09-02
+
+**Re-measured 2026-09-02, and the load-bearing figure is now false.** The wiring verifies:
+`Commands::AuditDocRefs` at `src/main.rs:204`, CLI at `src/cli/audit_doc_refs.rs`, CI job
+`audit-doc-refs` at `.github/workflows/ci.yml:601` running
+`./target/release/codescout audit-doc-refs --no-emit-tracker --fail-on high --json --project .` at
+`:626`. **What does not hold is *"Full-tree audit at master HEAD: 0 high-severity findings"*.**
+
+`librarian(action="audit_doc_refs")` today: 1796 files, 59901 refs, **4 high-severity**, all in this
+project. They split two and two, and the split is the finding:
+
+| finding | verdict |
+|---|---|
+| `docs/manual/src/tools/ast.md:4` → `src/tools/ast.rs` | **genuine** — path does not exist |
+| `docs/socraticode-borrow-tracker.md:34` → `src/tools/usage.rs` | **genuine** — path does not exist |
+| `docs/PROBES.md:146` → `src/serve` | **false positive** |
+| `docs/PROBES.md:146` → `src/lsp/m` | **false positive** |
+
+**The two false positives are a parser defect, not doc drift, and they are self-referential.**
+`PROBES.md:146` mentions `src/serve` and `src/lsp/m` **as quoted examples of truncated paths** —
+illustrating a `claude-plugins` bug where a 200-char `args` cut destroys the path it was preserving.
+`audit_doc_refs` has no escape for *mentioning* a path, so it read the examples as citations and
+graded them high. That is CLAUDE.md § *Parsers Over a Namespace*, no-escape half, verbatim: *"a
+documentation example of citation syntax counted as a real citation"* — and it lands on the check
+this intervention gates CI with.
+
+**Consequence, and it is not recorded anywhere else:** CI gates on `--fail-on high`. If its
+`--project .` scoping sees what this run saw, the gate is either failing on two unfixable findings
+(unfixable because the doc cannot cite the example any other way) or its scope differs from the
+default paths in a way nobody has written down. **Not resolved here** — my run used default paths
+rather than CI's exact invocation, so the honest claim is *the figure moved from 0 to 4 and two of
+the four cannot be fixed by editing the doc*. Establishing whether CI is currently red is the next
+step and needs the CI invocation run verbatim, not this one.
+
+**Also observed:** `scan_meta.degraded: true`, `lsp_languages_degraded: ["rust"]`, cause
+`lsp_behind_index` — which `HY-6` already records as a flag that reports a live LSP as offline. The
+four findings above are `file_path` refs and do not depend on the LSP, so the degradation does not
+undercut them; it would matter for symbol refs.
 
 
 ### H-6 — Audit classifier: reader-side / placeholder path FP class
