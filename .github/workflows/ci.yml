@@ -39,6 +39,50 @@ jobs:
       - uses: actions/checkout@v4
       - run: cargo fmt --check
 
+  # The shell suites under tests/ had NO runner until 2026-09-01. Measured that day:
+  # `tests/hooks-discrimination.sh` (41 cases) and `tests/file-provenance.sh` (58) —
+  # 99 assertions guarding the shared-checkout git hooks and the write-provenance
+  # probe — were referenced from twelve places, every one of them a bug file, a plan
+  # or a tracker. Nothing in CI, .pre-commit-config.yaml, or any Makefile invoked
+  # either. Both were green, and had been hand-run once and cited in a commit message.
+  #
+  # That is the exact anti-pattern hooks-discrimination.sh was written to replace. Its
+  # own header says so: "Its precedent was a hand-run matrix pasted into a commit
+  # message, which is evidence about one instant and cannot fail a later build." The
+  # replacement inherited the defect it named — a suite nothing runs is evidence about
+  # one instant too. CLAUDE.md § Testing Discipline states the general form: loudness
+  # is a property of a PATH, and an alarm nothing reaches is exactly as informative as
+  # no alarm.
+  #
+  # tests/peer-sessions.sh (10 cases) was written against this job rather than beside
+  # it — the archive trigger for the bug it closes demands a regression test, and a
+  # test with no runner does not satisfy that in substance.
+  #
+  # Both suites are self-contained — they build fixtures under `mktemp -d` and never
+  # read the real ~/.claude or this checkout, which matters because several sessions
+  # share it. They need git, python3 and sqlite3; ubuntu-latest has all three.
+  #
+  # tests/mcp-smoke-{rust,kotlin}.sh are deliberately NOT here. They drive a live MCP
+  # server and fail outside that setup; the `test-server-stack` job below is the lane
+  # that owns the running-stack case.
+  shell-tests:
+    name: Shell suites (hooks, provenance, peer-sessions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # file-provenance.sh derives a default window from "when was this path last
+          # committed", so a depth-1 checkout gives it no history to read.
+          fetch-depth: 0
+      - name: Identify a committer (the hook suites build throwaway git repos)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch master
+      - run: bash tests/hooks-discrimination.sh
+      - run: bash tests/file-provenance.sh
+      - run: bash tests/peer-sessions.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
