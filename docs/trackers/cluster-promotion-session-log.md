@@ -52,7 +52,7 @@ entry_high_water_W: 3
 | F-4 | 2026-09-01 | med | tooling | fixed-verified | The ledger's count cells go stale by CONCURRENCY — 3 re-derivations invalidated in one session by peer filings; gate shipped, caught a 4th drift on its first run |
 | F-5 | 2026-09-01 | med | architectural | open | `IC-13`'s claim is true of 4 of its 16 members — and the "≥4" floor carried from a prior audit bounded the opposite set; two rulings owed |
 | F-6 | 2026-09-01 | med | architectural | fixed-verified | Ruling 2 — all 7 `IC-13` non-members fit **no existing class**, unanimously across two independent readers; four-class partition taken → IC-19/20/21/22, IC-13 16→9 |
-| F-7 | 2026-09-01 | med | tooling | open | The ledger shipped without its corpus — 3 new classes published counts of 3/1/2 against **0 members at HEAD**; the gate reads the working tree, so a partial commit is invisible to it. Repaired; mechanism owed |
+| F-7 | 2026-09-01 | med | tooling | **fixed-verified** | The ledger shipped without its corpus — 3 new classes published counts of 3/1/2 against **0 members at HEAD**; the gate reads the working tree, so a partial commit is invisible to it. Repaired; mechanism owed |
 
 ## Wins Index
 
@@ -679,7 +679,11 @@ derivation against the **staged** state (`git grep --cached`, or a temp-index ch
 exactly. Deliberately **not** done by changing the test to read the index: that would red on every
 ordinary unstaged edit, which is the state the test is useful in.
 
-**Status:** open — the split is repaired; the mechanism that would have prevented it is not built.
+**Status:** **fixed-verified 2026-09-01** — `3be0088e`, patch-id `e27ec0a41eca7afa71bd591caf03c2ae5fa46292`. Built as `scripts/pre-commit-ledger-counts.py`, hook `ledger-counts`, reading the **index** only (`git ls-files` for the population, `git show :<path>` for content). Both partial-commit directions were reproduced against the real shape in a throwaway repo and both are refused: the ledger staged with retags unstaged (this entry's own shape) and a new tagged bug file staged without the ledger; the correct commit with both staged passes.
+
+**Three things the build changed about the plan above, and each is worth more than the fix.** The `git grep --cached` sketch was not used — `--cached` searches the index for a *pattern* and yields no population, and the count needs `git ls-files` for *which* files the commit contains. The temp-index-checkout alternative proved unnecessary once measured: `git show :<path>` reads staged content directly. And the **language** was decided by a prohibition already written into `.pre-commit-config.yaml`'s own header — *"only checks that do not build may run at commit stage"*, because a cargo build takes the shared `target/` lock and serialises every concurrent session's commits. Measuring `cargo test --test issue_clusters` at **6.9s warm** rediscovered that independently, but the rule was there to be read first. A proposed fix is a claim about current state (`reconnaissance-patterns:R-49`), and so is a proposed *implementation*.
+
+**The duplicated parse logic is held by a mechanism rather than by care** — `the_hook_script_agrees_with_this_gate` runs the script over the same substrate and compares both maps, so divergence reds. That test has a gap it structurally cannot see: mutating the Python to drop the inline `tags: [a, b]` arm left it **green**, because **zero** bug files in the corpus carry a `cluster/` tag in YAML flow style, so the live corpus cannot reach that branch. Closed by `the_hook_script_agrees_on_both_yaml_tag_styles`, pure over stdin. Four mutations run: two killed, one killed only by the new test, one survived as an **equivalent mutant** (the two block-form arms overlap on the same input) — established as equivalence rather than filed as a coverage gap.
 
 **Valid:** dated 2026-09-01
 
