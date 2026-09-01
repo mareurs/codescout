@@ -92,25 +92,59 @@ false line had already been copied into a second file and a commit message befor
 checked it — an `## Environment` block reads as background, so nothing treats it as the
 claim it is.
 
+**Second correction, same day, same source — when a hook edit actually reaches anyone.**
+pre-commit clears unstaged changes before running hooks (`staged_files_only.py`; it is the
+root cause of `8cc95806a7b5f37a`, filed here the day before), so a `language: system` entry
+executes the **committed** copy of its own script rather than the one in your editor.
+Reproduced independently in a throwaway repo before acceptance, three cases:
+
+```
+hook-script edit UNSTAGED             -> ran the committed copy; the edit is inert
+hook-script edit STAGED               -> ran the edit
+further UNSTAGED edit over committed  -> ran the committed copy again
+```
+
+So **the moment a hook edit goes live is `git add`, not the editor save** — and that has two
+consequences for this file. *For testing:* a proposed fix to either guard cannot be validated by
+editing it and committing something, because the edit does not execute until it is staged; §
+*Resume*'s probe has to be run with the change staged. *For the class this bug is filed under:*
+that same `git add` makes the new rules live **for every other session on the checkout at
+once**, with no signal to any of them — a session midway through the commit sequence can have
+the guards change under it, authored by a peer it cannot see. That is
+`cluster/shared-resource-carries-no-owner` holding about the **guards themselves**, not only
+about the index they read.
+
+*Reported by `codescout-8a` and reproduced here rather than accepted. The mechanism is also
+visible in this session's own commit output without any probe: every commit made against a
+dirty tree printed `Stashing unstaged files to …` and `Restored changes from …`, and the one
+made against a clean tree printed neither.*
+
 ## Root cause
 
 Two guards read the **same** discriminator in **opposite** directions, and nothing composes
 them.
 
-- `scripts/pre-commit-foreign-index.sh:94-97` exits 0 when
+- `scripts/pre-commit-foreign-index.sh:95-98` exits 0 when
   `${GIT_INDEX_FILE##*/}` matches `next-index-*` — the temporary index git builds for a
   pathspec commit. So with a foreign path staged, the pathspec form is the **only** accepted
-  one. Its own header (`:90-93`) states this is *"the same discriminator
+  one. Its own header (`:91-94`) states this is *"the same discriminator
   scripts/pre-commit-unreviewed-content.sh uses, read in the opposite direction."*
 - `scripts/pre-commit-ledger-counts.py:12` reads *"the INDEX and nothing else — `git
   ls-files` for the population, `git show :<path>`"* for content, and `main()`
-  (`:290-340`) has **no pathspec exemption at all**. Under a pathspec commit the active
+  (`:314-413`) has **no pathspec exemption at all**. Under a pathspec commit the active
   index is HEAD plus the named paths, so any count whose member falls outside the pathspec
   is compared against HEAD's corpus and mismatches.
 
 *Read in the source 2026-09-01 — the two exemption paths and their absence — not inferred
 from the simulation above, which was run by another session and whose staged state no
 longer exists to re-run.*
+
+*Every line number in this section was re-checked against `HEAD` on 2026-09-02 and four of
+five had drifted — `foreign-index` by one, `main()` from `:290-340` to `:314-413` — shifted by
+`3bf2f5f5`, a commit by this file's own author, made after this section was written. The
+conclusions did not move; only the coordinates did. Re-derive them before quoting rather than
+trusting the pair, and note that `git status` reported worktree == index for all three scripts
+at that check, so the copy read is the copy that executes (see § Environment).*
 
 The deeper cause is `IC-17`'s missing field: **the git index records what changed and never
 who changed it.** Both guards are workarounds for that absence, and they work around it with
@@ -120,7 +154,7 @@ staged subset, which is exactly the form `ledger-counts` wants.
 
 ## Evidence
 
-`foreign-index`'s pathspec exemption, `scripts/pre-commit-foreign-index.sh:94-97`:
+`foreign-index`'s pathspec exemption, `scripts/pre-commit-foreign-index.sh:95-98`:
 
 ```sh
 idx="${GIT_INDEX_FILE:-}"
