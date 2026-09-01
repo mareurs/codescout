@@ -22,34 +22,13 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by shard::export/unexported_count, not yet wired to a live (non-test) caller until Task 4's integration point lands"
-    )
-)]
 pub(crate) const WATERMARK_KEY: &str = "audit_exported_through_seq";
 
 /// Changed-key sets that are pure reindex bookkeeping. An `update` whose keys
 /// are a SUBSET of this is dropped from the export; one that also carries any
 /// other key is real history and is kept.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by shard::is_pure_churn, live only via export, not yet wired to a live (non-test) caller"
-    )
-)]
 const CHURN_KEYS: &[&str] = &["file_mtime", "file_sha256", "updated_at", "missing_since"];
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by shard::export, not yet wired to a live (non-test) caller"
-    )
-)]
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ShardLine {
     pub host: String,
@@ -65,13 +44,6 @@ pub(crate) struct ShardLine {
     pub payload: Option<serde_json::Value>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by shard::export, not yet wired to a live (non-test) caller"
-    )
-)]
 #[derive(Debug, Default, serde::Serialize)]
 pub(crate) struct ExportReport {
     pub exported: usize,
@@ -81,13 +53,6 @@ pub(crate) struct ExportReport {
     pub through_seq: i64,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by shard::export, not yet wired to a live (non-test) caller"
-    )
-)]
 fn is_pure_churn(op: &str, payload: Option<&str>) -> bool {
     if op != "update" {
         return false;
@@ -98,13 +63,6 @@ fn is_pure_churn(op: &str, payload: Option<&str>) -> bool {
     };
     !map.is_empty() && map.keys().all(|k| CHURN_KEYS.contains(&k.as_str()))
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by shard::export/unexported_count, not yet wired to a live (non-test) caller"
-    )
-)]
 fn watermark(conn: &Connection) -> Result<i64> {
     Ok(gc::get_meta(conn, WATERMARK_KEY)?
         .and_then(|v| v.parse::<i64>().ok())
@@ -115,13 +73,6 @@ fn watermark(conn: &Connection) -> Result<i64> {
 /// `export` consumes, including the ones it will drop. Doctor reports this, so
 /// it must not describe a different set than the verb does; a delta that
 /// counts rows export will never write reads as a permanent backlog.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by doctor.rs's audit_health reporting once Task 4 wires it in; not yet wired to a live (non-test) caller"
-    )
-)]
 pub(crate) fn unexported_count(conn: &Connection) -> Result<i64> {
     let w = watermark(conn)?;
     Ok(conn.query_row(
@@ -131,13 +82,6 @@ pub(crate) fn unexported_count(conn: &Connection) -> Result<i64> {
     )?)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4's CLI/reindex integration point; not yet wired to a live (non-test) caller"
-    )
-)]
 pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport> {
     let host_id = host::resolve_host_id(conn)?;
     let from = watermark(conn)?;
@@ -277,13 +221,6 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
 }
 
 #[derive(Debug, Default)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via read_shards"
-    )
-)]
 pub(crate) struct ShardRead {
     pub rows: Vec<ShardLine>,
     pub malformed: usize,
@@ -312,13 +249,6 @@ pub(crate) struct ShardRead {
 /// `filtered_total`. The exhaustive destructure below is the parity guard: a
 /// new `AuditFilter` field added to `filter_where` and forgotten here fails
 /// the build instead of silently producing a wrong total.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via read_shards"
-    )
-)]
 fn matches(l: &ShardLine, f: &super::AuditFilter) -> bool {
     let super::AuditFilter {
         tbl,
@@ -339,13 +269,6 @@ fn matches(l: &ShardLine, f: &super::AuditFilter) -> bool {
 /// `self_host`'s own shard is skipped: those rows are already in the local
 /// table, and counting them twice would produce a wrong `filtered_total` —
 /// a plausible number rather than an error, which nothing downstream catches.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring), the merge-on-query tool surface"
-    )
-)]
 pub(crate) fn read_shards(
     repo_root: &Path,
     f: &super::AuditFilter,
@@ -426,13 +349,6 @@ pub(crate) fn read_shards(
 /// deliberately coarse — a month that straddles the boundary is opened and its
 /// rows filtered per-line. Being generous here is the safe direction: a file
 /// wrongly skipped is a silently missing row.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via read_shards"
-    )
-)]
 fn month_in_window(month: &str, f: &super::AuditFilter) -> bool {
     let in_bound = |ms: i64, keep_if_ge: bool| -> bool {
         let bound = host::month_key(ms);

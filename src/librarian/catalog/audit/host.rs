@@ -28,33 +28,12 @@ use crate::librarian::catalog::gc;
 use anyhow::Result;
 use rusqlite::Connection;
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via shard::export"
-    )
-)]
 pub(crate) const AUDIT_DIR: &str = ".codescout/audit";
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via resolve_host_id, the only writer of this key"
-    )
-)]
 pub(crate) const HOST_META_KEY: &str = "audit_host_id";
 
 /// Sources tried in order, first non-empty wins. No `gethostname` crate: the
 /// value must be persisted anyway, so a dependency would buy only the readable
 /// prefix — and the prefix is a courtesy, not the correctness.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via resolve_host_id"
-    )
-)]
 fn candidate_name() -> String {
     for key in ["CODESCOUT_AUDIT_HOST", "COMPUTERNAME", "HOSTNAME"] {
         if let Ok(v) = std::env::var(key) {
@@ -73,13 +52,6 @@ fn candidate_name() -> String {
 /// audit directory. Allowlist, never a denylist — a denylist over a filename is
 /// the addressing-without-an-escape-hatch class (CLAUDE.md § Parsers Over a
 /// Namespace).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via mint_host_id"
-    )
-)]
 fn sanitize(raw: &str) -> String {
     let mut out = String::new();
     for ch in raw.to_ascii_lowercase().chars() {
@@ -104,13 +76,6 @@ fn sanitize(raw: &str) -> String {
 /// process share the pid and can share the nanosecond on a coarse clock —
 /// that is both a flaky test and a real collision — so a monotonically
 /// increasing counter is mixed in as a third, always-distinct source.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via suffix"
-    )
-)]
 static MINT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Captured once per process, not once per call: `suffix()`'s uniqueness
@@ -119,13 +84,6 @@ static MINT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 /// is held constant across calls being compared. Re-reading the clock per
 /// call would make it merely probabilistic — a nanosecond term could in
 /// principle vary in exactly the bits the counter also touches.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via suffix"
-    )
-)]
 static SUFFIX_NANOS: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -141,13 +99,6 @@ static SUFFIX_NANOS: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
 /// Deliberately not `RandomState`: its per-call variation is documented as
 /// unspecified rather than guaranteed, and an unverified claim is not a
 /// foundation for a collision guard.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via mint_host_id"
-    )
-)]
 fn suffix() -> String {
     use std::sync::atomic::Ordering;
     const K1: u64 = 0x9E37_79B9_7F4A_7C15;
@@ -162,13 +113,6 @@ fn suffix() -> String {
 /// suffix. Split out from `resolve_host_id` so sanitization, path-traversal
 /// escape, and the fallback behavior are all testable without touching the
 /// environment or a catalog connection.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via resolve_host_id"
-    )
-)]
 pub(crate) fn mint_host_id(candidate: &str) -> String {
     format!("{}-{}", sanitize(candidate), suffix())
 }
@@ -176,13 +120,6 @@ pub(crate) fn mint_host_id(candidate: &str) -> String {
 /// The stable id for this catalog's machine: read from `catalog_meta` if
 /// already minted, else minted from `candidate_name()` and persisted. Thin by
 /// design — all the logic that needs testing lives in `mint_host_id`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via shard::export"
-    )
-)]
 pub(crate) fn resolve_host_id(conn: &Connection) -> Result<String> {
     if let Some(existing) = gc::get_meta(conn, HOST_META_KEY)? {
         if !existing.trim().is_empty() {
@@ -196,26 +133,12 @@ pub(crate) fn resolve_host_id(conn: &Connection) -> Result<String> {
 
 /// `<host>-<YYYYMM>.jsonl`. One file per host per month: month bounds the file
 /// size, and host keeps two machines off each other's lines entirely.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via shard::export"
-    )
-)]
 pub(crate) fn shard_file_name(host: &str, at_ms: i64) -> String {
     format!("{host}-{}.jsonl", month_key(at_ms))
 }
 
 /// `YYYYMM` for an epoch-ms UTC instant, computed from the SQLite-free civil
 /// calendar so it agrees with `at_ms` on every platform.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via shard_file_name"
-    )
-)]
 pub(crate) fn month_key(at_ms: i64) -> String {
     let days = at_ms.div_euclid(86_400_000);
     let (y, m, _d) = civil_from_days(days);
@@ -224,13 +147,6 @@ pub(crate) fn month_key(at_ms: i64) -> String {
 
 /// Howard Hinnant's days-from-civil, inverted. Public-domain algorithm; keeps
 /// this crate free of a chrono dependency for one date field.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "consumed by Task 4 (production wiring) via month_key"
-    )
-)]
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
@@ -257,7 +173,6 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 /// the allowlist is `None` (not-a-shard), never an error: it may simply be
 /// a stray committed file, and this parser owes that escape the same way
 /// it owes one for READMEs.
-#[cfg_attr(not(test), expect(dead_code, reason = "consumed by Task 3 (reader)"))]
 pub(crate) fn parse_shard_file_name(name: &str) -> Option<(String, String)> {
     let stem = name.strip_suffix(".jsonl")?;
     let (host, month) = stem.rsplit_once('-')?;

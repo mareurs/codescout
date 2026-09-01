@@ -8,6 +8,9 @@
 /target
 /.mcp.json
 # codescout data dir: ignore generated/personal files, track shareable ones
+# NOT ignored, deliberately: /.codescout/audit/*.jsonl are the committed audit
+# shards (T-7). Adding a blanket `.codescout/` rule would silently stop sharing
+# them, with no error anywhere — the same shape as the projects/ note above.
 /.codescout/project.toml
 /.codescout/index-state.json
 /.codescout/embeddings.db

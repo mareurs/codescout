@@ -114,7 +114,8 @@ impl Tool for Librarian {
                 "until": { "type": "integer", "format": "int64", "description": "audit_log: only rows at_ms <= this epoch-ms UTC timestamp." },
                 "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written. link_scan: cap ARTIFACTS scanned (default 10000) — findings use findings_limit. doctor: abs_path_outside_managed_roots window size (default 10); raise it to reach rows the report counts but elides, pair with offset to page. audit_log: max rows returned, newest first (default 50, max 500)." },
                 "prune_before_ms": { "type": "integer", "format": "int64", "description": "audit_log: delete audit rows with at_ms strictly less than this epoch-ms UTC cutoff. Dry-run by default (returns would_delete); pass confirm=true to apply — the apply always leaves one self-describing marker row explaining the resulting seq gap." },
-                "confirm": { "type": "boolean", "description": "doctor fix=prune_missing batch mode / fix=rehome / audit_log prune_before_ms: pass true to apply; omitted/false = dry-run." }
+                "confirm": { "type": "boolean", "description": "doctor fix=prune_missing batch mode / fix=rehome / audit_log prune_before_ms: pass true to apply; omitted/false = dry-run." },
+                "export": { "type": "boolean", "description": "audit_log: export unexported rows to this host's shard." }
             }
         })
     }

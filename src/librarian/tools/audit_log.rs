@@ -3,6 +3,7 @@
 
 use super::{RecoverableError, ToolContext};
 use crate::librarian::catalog::audit;
+use crate::librarian::catalog::audit::{host, shard};
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -18,7 +19,52 @@ const MAX_LIMIT: usize = 500;
 /// instead of silently discarding them.
 const PRUNE_IGNORED_FILTER_KEYS: &[&str] = &["tbl", "row_id", "actor", "op", "since", "until"];
 
+// Ruling 1 (Task 4 brief): `ctx.project_root()` does not exist — `project_root()`
+// lives on the *agent* and is async. Duplicated from gather.rs:294 rather than
+// made `pub` mid-run.
+fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
+    ctx.current_project
+        .as_ref()
+        .map(|cp| cp.abs_path.clone())
+        .or_else(|| ctx.workspace.roots.first().map(|r| r.path.clone()))
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    // Export mode: append every unexported row to this host's committed shard
+    // and advance the watermark. Not combinable with filters — it exports
+    // everything past the watermark, so a filter alongside it would silently
+    // suggest a scoped export that never happened (IC-15).
+    if args.get("export").and_then(Value::as_bool).unwrap_or(false) {
+        let present: Vec<&str> = PRUNE_IGNORED_FILTER_KEYS
+            .iter()
+            .copied()
+            .filter(|k| args.get(*k).is_some_and(|v| !v.is_null()))
+            .collect();
+        if !present.is_empty() {
+            return Err(RecoverableError::new(format!(
+                "export does not accept filters; it exports every unexported row — remove: {}",
+                present.join(", ")
+            )));
+        }
+        let root = project_root(ctx).ok_or_else(|| {
+            RecoverableError::new(
+                "export requires a resolved current project — no current project or workspace root is set"
+                    .to_string(),
+            )
+        })?;
+        let cat = ctx.catalog.lock();
+        let r = shard::export(&cat.conn, &root)?;
+        return Ok(json!({
+            "exported": r.exported,
+            "skipped_commits": r.skipped_commits,
+            "skipped_churn": r.skipped_churn,
+            "files": r.files,
+            "through_seq": r.through_seq,
+            "dir": format!("{}/", host::AUDIT_DIR),
+            "note": "a committed shard is a REPLICA of the local trail, fresh only as of through_seq — the in-transaction guarantee exists on the local database alone. Commit the files to share them.",
+        }));
+    }
+
     // Prune mode: dry-run by default, confirm=true applies (doctor's fix convention).
     if let Some(before) = args.get("prune_before_ms").and_then(Value::as_i64) {
         let present: Vec<&str> = PRUNE_IGNORED_FILTER_KEYS
@@ -86,20 +132,53 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // names whether the response is a window rather than the whole match —
     // docs/PROGRESSIVE_DISCOVERABILITY.md Pattern 1 (sibling precedent:
     // `events::timeline_for_artifact` returns `truncated`).
-    let filtered_total: i64 = audit::count_matching(&cat.conn, &f)?;
-    let count = rows.len();
-    let truncated = count as i64 == limit as i64 && filtered_total > count as i64;
-    let entries: Vec<Value> = rows
+    let local_filtered_total: i64 = audit::count_matching(&cat.conn, &f)?;
+    let self_host = host::resolve_host_id(&cat.conn)?;
+
+    // Merge in committed shards from other hosts (Task 4, IC-13): a count that
+    // reflects only the local table is a wrong number the moment a second host
+    // has ever exported. `self_host`'s own shard is skipped by `read_shards`
+    // itself, since those rows already live in `rows` above.
+    let shards = project_root(ctx)
+        .map(|root| shard::read_shards(&root, &f, &self_host))
+        .transpose()?
+        .unwrap_or_default();
+
+    let filtered_total: i64 = local_filtered_total + shards.rows.len() as i64;
+
+    let mut merged: Vec<(i64, i64, Value)> = rows
         .iter()
         .map(|r| {
-            json!({
-                "seq": r.seq, "at_ms": r.at_ms, "tbl": r.tbl, "op": r.op,
-                "row_id": r.row_id, "actor": r.actor, "verb": r.verb,
-                "payload": r.payload.as_deref()
-                    .and_then(|p| serde_json::from_str::<Value>(p).ok()),
-            })
+            (
+                r.at_ms,
+                r.seq,
+                json!({
+                    "host": self_host, "seq": r.seq, "at_ms": r.at_ms, "tbl": r.tbl, "op": r.op,
+                    "row_id": r.row_id, "actor": r.actor, "verb": r.verb,
+                    "payload": r.payload.as_deref()
+                        .and_then(|p| serde_json::from_str::<Value>(p).ok()),
+                }),
+            )
         })
+        .chain(shards.rows.iter().map(|l| {
+            (
+                l.at_ms,
+                l.seq,
+                json!({
+                    "host": l.host, "seq": l.seq, "at_ms": l.at_ms, "tbl": l.tbl, "op": l.op,
+                    "row_id": l.row_id, "actor": l.actor, "verb": l.verb,
+                    "payload": l.payload,
+                }),
+            )
+        }))
         .collect();
+    // Cross-host ordering uses at_ms (wall-clock), never seq (a per-host
+    // autoincrement not comparable across hosts).
+    merged.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    merged.truncate(limit);
+    let entries: Vec<Value> = merged.into_iter().map(|(_, _, v)| v).collect();
+    let count = entries.len();
+    let truncated = filtered_total > count as i64;
     let mut out = json!({
         "entries": entries,
         "count": count,
@@ -113,8 +192,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "tbl": f.tbl, "row_id": f.row_id, "actor": f.actor, "op": f.op,
             "since": f.since, "until": f.until, "limit": limit,
         },
+        "shards": {
+            "self_host": self_host,
+            "files_read": shards.files_read,
+            "files_skipped_by_window": shards.files_skipped_by_window,
+            "malformed_lines": shards.malformed,
+            "coverage": shards.hosts,
+        },
         "note": "verb means 'last dispatched verb on the writing connection', not per-statement; actor 'unknown' = a writer that did not identify itself (foreign process or raw sqlite3)."
     });
+    if shards.malformed > 0 {
+        out["shards_warning"] = json!(format!(
+            "{} malformed shard line(s) were skipped, not counted in filtered_total",
+            shards.malformed
+        ));
+    }
     if truncated {
         out["hint"] = json!(format!(
             "{filtered_total} rows match but only {count} were returned — narrow with since=<epoch-ms>, tbl=..., or raise limit (max {MAX_LIMIT})"
@@ -127,15 +219,52 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 mod tests {
     use super::*;
     use crate::librarian::catalog::Catalog;
+    use crate::librarian::current_project::CurrentProject;
     use crate::librarian::tools::TestToolContextBuilder;
 
-    fn mk_ctx() -> ToolContext {
-        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
+    fn mk_ctx() -> (ToolContext, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(std::sync::Arc::new(CurrentProject {
+                abs_path: tmp.path().to_path_buf(),
+                git_root: tmp.path().to_path_buf(),
+                main_root: None,
+                umbrella: None,
+            }))
+            .build();
+        (ctx, tmp)
+    }
+
+    /// Writes `n` lines for a foreign host directly into a committed shard
+    /// file, bypassing `shard::export` — this fixture is testing the READER,
+    /// so it must not depend on the writer to build its input.
+    fn write_foreign_shard(tmp_root: &std::path::Path, n: i64) {
+        let dir = tmp_root.join(host::AUDIT_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let at_ms = 1_788_220_800_000; // 2026-09-01T00:00:00Z
+        let name = host::shard_file_name("otherbox-99ffee", at_ms);
+        let mut body = String::new();
+        for i in 0..n {
+            let line = shard::ShardLine {
+                host: "otherbox-99ffee".to_string(),
+                seq: i + 1,
+                at_ms: at_ms + i,
+                tbl: "artifact".to_string(),
+                op: "insert".to_string(),
+                row_id: format!("foreign-{i}"),
+                actor: "unknown".to_string(),
+                verb: None,
+                payload: None,
+            };
+            body.push_str(&serde_json::to_string(&line).unwrap());
+            body.push('\n');
+        }
+        std::fs::write(dir.join(name), body).unwrap();
     }
 
     #[tokio::test]
     async fn zero_results_name_their_scope() {
-        let ctx = mk_ctx();
+        let (ctx, _tmp) = mk_ctx();
         let out = call(&ctx, json!({"action": "audit_log", "tbl": "commits"}))
             .await
             .unwrap();
@@ -153,7 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn prune_is_dry_run_without_confirm() {
-        let ctx = mk_ctx();
+        let (ctx, _tmp) = mk_ctx();
         {
             // one row to prune
             let cat = ctx.catalog.lock();
@@ -180,7 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_op_is_recoverable() {
-        let ctx = mk_ctx();
+        let (ctx, _tmp) = mk_ctx();
         let err = call(&ctx, json!({"action": "audit_log", "op": "bogus"}))
             .await
             .unwrap_err();
@@ -189,7 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_returns_rows_and_table_total() {
-        let ctx = mk_ctx();
+        let (ctx, _tmp) = mk_ctx();
         {
             let cat = ctx.catalog.lock();
             cat.conn
@@ -215,7 +344,7 @@ mod tests {
     // without the filter, then a confirmed wrong-target delete).
     #[tokio::test]
     async fn prune_with_a_filter_key_is_recoverable() {
-        let ctx = mk_ctx();
+        let (ctx, _tmp) = mk_ctx();
         let err = call(
             &ctx,
             json!({"action": "audit_log", "prune_before_ms": 10, "actor": "unknown"}),
@@ -233,7 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn prune_responses_carry_a_unit_label() {
-        let ctx = mk_ctx();
+        let (ctx, _tmp) = mk_ctx();
         {
             let cat = ctx.catalog.lock();
             cat.conn
@@ -258,7 +387,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_names_truncation_and_hints_how_to_narrow() {
-        let ctx = mk_ctx();
+        let (ctx, _tmp) = mk_ctx();
         {
             let cat = ctx.catalog.lock();
             for i in 0..3 {
@@ -282,5 +411,89 @@ mod tests {
             .as_str()
             .expect("hint must be present when truncated");
         assert!(hint.contains("since") || hint.contains("limit"));
+    }
+
+    #[tokio::test]
+    async fn export_mode_reports_what_it_wrote() {
+        let (ctx, tmp) = mk_ctx();
+        {
+            let cat = ctx.catalog.lock();
+            cat.conn
+                .execute(
+                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(1,'artifact','insert','x')",
+                    [],
+                )
+                .unwrap();
+        }
+        let out = call(&ctx, json!({"action": "audit_log", "export": true}))
+            .await
+            .unwrap();
+        assert_eq!(out["exported"], 1);
+        assert!(out["note"].as_str().unwrap().contains("REPLICA"), "{out}");
+        let dir = tmp.path().join(host::AUDIT_DIR);
+        let mut wrote_a_file = false;
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            wrote_a_file = entries.count() > 0;
+        }
+        assert!(wrote_a_file, "export must actually write a shard file");
+    }
+
+    #[tokio::test]
+    async fn a_merged_query_counts_shard_rows_in_its_totals() {
+        let (ctx, tmp) = mk_ctx();
+        write_foreign_shard(tmp.path(), 3);
+        let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();
+        // IC-13: a count that reflects only the local table is a wrong number
+        // once a second host has ever exported.
+        assert_eq!(out["filtered_total"], 3, "{out}");
+        assert_eq!(out["count"], 3, "{out}");
+        assert_eq!(out["shards"]["files_read"], 1, "{out}");
+    }
+
+    #[tokio::test]
+    async fn a_local_row_is_labelled_with_this_host_not_left_blank() {
+        let (ctx, tmp) = mk_ctx();
+        write_foreign_shard(tmp.path(), 1);
+        {
+            let cat = ctx.catalog.lock();
+            cat.conn
+                .execute(
+                    "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(2,'artifact','insert','local-1')",
+                    [],
+                )
+                .unwrap();
+        }
+        let out = call(&ctx, json!({"action": "audit_log"})).await.unwrap();
+        let entries = out["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2, "{out}");
+        for e in entries {
+            assert!(
+                e["host"].as_str().is_some_and(|h| !h.is_empty()),
+                "every entry must name its origin host, local included: {e}"
+            );
+        }
+        let local = entries
+            .iter()
+            .find(|e| e["row_id"] == "local-1")
+            .expect("local row present");
+        assert_ne!(
+            local["host"], "otherbox-99ffee",
+            "the local row's host must be THIS host, not the foreign one: {local}"
+        );
+    }
+
+    #[tokio::test]
+    async fn export_refuses_to_combine_with_a_query_filter() {
+        let (ctx, _tmp) = mk_ctx();
+        let err = call(
+            &ctx,
+            json!({"action": "audit_log", "export": true, "tbl": "artifact"}),
+        )
+        .await
+        .unwrap_err();
+        let re = err
+            .downcast_ref::<RecoverableError>()
+            .expect("must be a RecoverableError, not a silent discard");
+        assert!(re.to_string().contains("tbl"), "{re}");
     }
 }

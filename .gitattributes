@@ -3,6 +3,11 @@
 # breaking literal-string assertions and snapshot tests.
 * text=auto eol=lf
 
+# Audit shards are append-only line logs. Different hosts write different
+# files; the same host on two branches unions cleanly, because global order is
+# re-derived from (host, seq, at_ms) and never from line position.
+.codescout/audit/*.jsonl merge=union
+
 # Lockfiles and binaries are kept verbatim.
 Cargo.lock binary
 *.png binary

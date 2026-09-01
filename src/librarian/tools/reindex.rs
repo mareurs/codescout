@@ -164,6 +164,17 @@ fn backfill_commits(
     crate::librarian::catalog::commits::upsert_many(catalog, &rows?)?;
     Ok(())
 }
+// Ruling 1/2 (Task 4 brief): `ctx.project_root()` does not exist — `project_root()`
+// lives on the *agent* and is async. Duplicated from gather.rs:294 rather than made
+// `pub` mid-run. A shard is a per-REPO committed artifact, so export runs once
+// against the current project's root, never once per reindex target.
+fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
+    ctx.current_project
+        .as_ref()
+        .map(|cp| cp.abs_path.clone())
+        .or_else(|| ctx.workspace.roots.first().map(|r| r.path.clone()))
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     use super::scope::Scope;
 
@@ -397,6 +408,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let unknown_count = all_unknown_ids.len();
     const UNKNOWN_SAMPLE: usize = 20;
     let sample: Vec<&String> = all_unknown_ids.iter().take(UNKNOWN_SAMPLE).collect();
+
+    // Fold-in, best effort: an export failure must never fail a reindex. The
+    // envelope reports it so a silently-never-exporting machine is visible
+    // (a committed replica that quietly stops updating is the IC-13 this
+    // whole phase exists to avoid). Ruling 2: export runs once against the
+    // CURRENT PROJECT's root, never once per reindex target — a shard is a
+    // per-repo committed artifact, and `targets` may span several repos.
+    let audit_export = match project_root(ctx) {
+        Some(root) => {
+            match crate::librarian::catalog::audit::shard::export(&ctx.catalog.lock().conn, &root) {
+                Ok(r) => json!({"exported": r.exported, "through_seq": r.through_seq}),
+                Err(e) => {
+                    tracing::warn!("audit shard export failed: {e}");
+                    json!({"error": e.to_string()})
+                }
+            }
+        }
+        None => json!({"skipped": "no current project"}),
+    };
+
     Ok(json!({
         "added": total_added,
         "updated": total_updated,
@@ -447,6 +478,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         } else {
             "complete".to_string()
         },
+        "audit_export": audit_export,
         "scope": match effective_scope {
             Scope::Project => "project",
             Scope::Repo => "repo",
