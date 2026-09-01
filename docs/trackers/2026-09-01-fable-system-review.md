@@ -234,7 +234,7 @@ least-measured link.
 ## SR-9 — The independence is synthetic: Claude audits Claude
 
 **Status:** open
-**Valid:** invariant (until an external reader participates)
+**Valid:** conditional — an external reader participates
 
 The blind second read was Claude reading Claude — same model family, same priors, same stylistic
 attractors, redaction notwithstanding. The 86% agreement partly measures shared bias rather than

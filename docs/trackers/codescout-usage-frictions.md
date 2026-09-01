@@ -6,7 +6,7 @@ tags:
 - pika
 - iron-law
 - usage
-entry_high_water_U: 50
+entry_high_water_U: 51
 entry_prefix: U
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-frictions.yaml
 ---
@@ -2240,3 +2240,65 @@ Its own Stale-when says archive when Option A, B or C ships, or when concurrent 
 **Nobody has checked whether these actually collapse into one fix.** Counting and classifying that set is the first task of any promotion, not an assumption to build on: a fix that names a population asserts the population is non-empty and homogeneous, and this one is so far only eyeballed.
 
 **Status:** open
+
+
+### U-51 — `file-provenance`'s window floor moves on commit, so a verification re-run answers a different question
+
+**Observed:** 2026-09-01, twice in one hour, by two sessions, on the same affordance.
+
+**What happened.** `scripts/file-provenance.py <path>` answers *"who wrote this uncommitted
+file?"* over a window whose floor is **the path's last commit** (`file-provenance.py:325`:
+*"Default is 'since this path was last committed'"*). That floor **moves**. Committing the
+file pushes it past every write that constituted the evidence, so the identical command
+returns a different answer before and after.
+
+Measured on `src/util/librarian_guard.rs`:
+
+```
+run A   floor 2026-08-26T15:40:15   -> PEER, written by 3e275c54     (in-window)
+run B   floor 2026-09-01T11:48:06   -> PEER, written by 3e275c54     (in-window)
+c26943b5 commits the file at 14:59:59                                <- floor jumps
+run C   floor 2026-09-01T14:59:59   -> UNKNOWN, "38 writes predate the window"
+```
+
+**Why it bites rather than merely surprises: a verification re-run silently answers a
+DIFFERENT QUESTION.** A reader checking a past provenance claim gets `UNKNOWN`, concludes the
+claim was unsupported, and files a correction — when the claim was correct and *the commit
+erased its own evidence*. That is exactly what happened: a peer charged this session with
+`bug-fix-session-log:F-92` (*corroborating a verdict with evidence from outside its window*),
+which was the precisely wrong charge, and withdrew it once the floor movement was shown. The
+`Session-Id` trailer on `c26943b5` independently corroborates the original in-window reading,
+so the tool was right both times and the two answers are to different questions.
+
+**The worse half — the tool prints a guard rail and it does not survive being read.** Its
+`UNKNOWN` output says verbatim: *"That is a statement about coverage, NOT about ownership —
+Bash writes this tool's heuristics miss look identical. Do not read it as 'not mine'."* The
+peer **quoted that line in the message** and used the result as a refutation in the same
+breath. A warning that fails inside the message displaying it is a mechanism problem, not a
+comprehension one, and no strengthening of the wording fixes it.
+
+**Fix ideas**, unranked, none implemented:
+
+- **Print the floor's anchoring commit, not just its timestamp** — `since c26943b5
+  (2026-09-01 14:59:59)`. A reader re-running to check an older claim then sees the anchor
+  changed, which is the fact they need and currently have to infer.
+- **`UNKNOWN` + "N writes predate the window" should name the newest of them.** The count
+  arrives without its date, so the reader cannot tell whether the evidence is one minute or
+  one month outside the window — and those warrant opposite reactions.
+- **A `--since <commit|time>` escape**, so a past claim can be re-run against the window it
+  was actually taken under. Verification is the whole use case and it is the one the default
+  cannot serve.
+
+**Cross-cite:** `bug-fix-session-log:F-80` — *never close an authorship question by
+elimination; identify positively from write history*. Its third instance fired in this same
+exchange. The two are one root cause from opposite directions: `F-80` is reaching for the
+wrong instrument; this is the right instrument answering a question you did not notice you
+had changed.
+
+**Status:** open
+
+**Valid:** conditional — `file-provenance.py` gains a `--since` escape or prints its floor's
+anchoring commit
+
+**Rests on:** the default window remaining commit-relative, stated at
+`scripts/file-provenance.py:325`, which is the whole mechanism.
