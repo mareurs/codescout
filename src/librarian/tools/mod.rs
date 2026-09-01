@@ -358,6 +358,7 @@ pub mod reindex;
 pub mod context;
 
 pub mod audit_doc_refs;
+pub mod audit_log;
 pub mod legibility_scan;
 pub mod link_scan;
 

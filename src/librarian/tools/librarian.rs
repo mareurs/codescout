@@ -35,7 +35,11 @@ impl Tool for Librarian {
              merge_worktree: fold a worktree's shadow rows onto their main twins \
              (delta-only, never duplicates base entries); reseats worktree-born \
              rows. root=<worktree_root>; dry_run=true previews only; abandon=true \
-             drops the shadows."
+             drops the shadows. \
+             audit_log: query the catalog audit trail (who/what/when mutated \
+             audited tables), newest first; filter by tbl/row_id/actor/op/since/ \
+             until. prune_before_ms dry-runs a prune (returns would_delete); \
+             confirm=true applies it and leaves a self-describing marker row."
     }
 
     fn input_schema(&self) -> Value {
@@ -45,7 +49,7 @@ impl Tool for Librarian {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs", "legibility_scan", "link_scan", "doctor", "merge_worktree"],
+                    "enum": ["context", "reindex", "tracker_design", "workspace_state_at", "audit_doc_refs", "legibility_scan", "link_scan", "doctor", "merge_worktree", "audit_log"],
                     "description": "Operation to perform"
                 },
                 "topic": { "type": "string", "description": "context: subject for semantic/LIKE search across titles and topics" },
@@ -93,7 +97,6 @@ impl Tool for Librarian {
                 "fail_on": { "type": "string", "default": "never", "description": "audit_doc_refs: exit_code 1 when findings reach this severity (high | med | low | never)" },
                 "write": { "type": "boolean", "description": "legibility_scan (default true): reconcile the backlog tracker (false = dry-run JSON only). link_scan (default false): materialize/prune cites edges (false = report only)." },
                 "project": { "type": "string", "description": "legibility_scan: project root path; defaults to active project. Scopes the recorder lane." },
-                "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written. link_scan: cap ARTIFACTS scanned (default 10000) — findings use findings_limit. doctor: abs_path_outside_managed_roots window size (default 10); raise it to reach rows the report counts but elides, pair with offset to page." },
                 "offset": { "type": "integer", "description": "doctor: skip this many abs_path_outside_managed_roots rows before the window (default 0); ordered by abs_path, so pages are stable and disjoint." },
                 "findings_offset": { "type": "integer", "description": "link_scan: skip N findings per array (default 0); page with findings_limit until counts.truncated is false." },
                 "findings_limit": { "type": "integer", "description": "link_scan: findings per array (default 50)." },
@@ -101,9 +104,17 @@ impl Tool for Librarian {
                 "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune (refused if the path still exists on disk). OMIT root to run BATCH mode: dry-run lists every dead root (whole-subtree-gone) with row counts; pass confirm=true to prune them all. fix=rehome: use `old_root` instead; root is accepted as a back-compat alias. merge_worktree: the worktree root to merge/abandon (must have an active registration)." },
                 "old_root": { "type": "string", "description": "For fix=rehome: absolute path the repo USED TO live at (must no longer exist on disk). Preferred alias of root — use this name, it's the one the doctor hints and error text surface." },
                 "new_root": { "type": "string", "description": "For fix=rehome: absolute path the repo now lives at." },
-                "confirm": { "type": "boolean", "description": "doctor fix=prune_missing batch mode / fix=rehome: pass true to apply; omitted/false = dry-run." },
                 "dry_run": { "type": "boolean", "description": "merge_worktree: compute and return the full merge report without writing anything." },
-                "abandon": { "type": "boolean", "description": "merge_worktree: delete all of the worktree's shadow rows and mark its registration abandoned, instead of merging." }
+                "abandon": { "type": "boolean", "description": "merge_worktree: delete all of the worktree's shadow rows and mark its registration abandoned, instead of merging." },
+                "tbl": { "type": "string", "description": "audit_log: filter to one audited table name (e.g. 'artifact', 'commits')." },
+                "row_id": { "type": "string", "description": "audit_log: filter to one row's flattened key (e.g. an artifact id)." },
+                "actor": { "type": "string", "description": "audit_log: filter to one actor string ('codescout:<session-id>', 'codescout:anonymous', or 'unknown' for an unidentified foreign writer)." },
+                "op": { "type": "string", "enum": ["insert", "update", "delete"], "description": "audit_log: filter to one operation kind." },
+                "since": { "type": "integer", "format": "int64", "description": "audit_log: only rows at_ms >= this epoch-ms UTC timestamp." },
+                "until": { "type": "integer", "format": "int64", "description": "audit_log: only rows at_ms <= this epoch-ms UTC timestamp." },
+                "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written. link_scan: cap ARTIFACTS scanned (default 10000) — findings use findings_limit. doctor: abs_path_outside_managed_roots window size (default 10); raise it to reach rows the report counts but elides, pair with offset to page. audit_log: max rows returned, newest first (default 50, max 500)." },
+                "prune_before_ms": { "type": "integer", "format": "int64", "description": "audit_log: delete audit rows with at_ms strictly less than this epoch-ms UTC cutoff. Dry-run by default (returns would_delete); pass confirm=true to apply — the apply always leaves one self-describing marker row explaining the resulting seq gap." },
+                "confirm": { "type": "boolean", "description": "doctor fix=prune_missing batch mode / fix=rehome / audit_log prune_before_ms: pass true to apply; omitted/false = dry-run." }
             }
         })
     }
@@ -111,7 +122,7 @@ impl Tool for Librarian {
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
         let action = args["action"].as_str().ok_or_else(|| {
                 RecoverableError::new(
-                    "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree",
+                    "action required — one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log",
                 )
             })?;
         // Best-effort: identity enrichment must never fail a tool call; a failed
@@ -133,8 +144,9 @@ impl Tool for Librarian {
                 "link_scan"          => super::link_scan::call(ctx, args).await,
                 "doctor"             => super::doctor::call(ctx, args).await,
                 "merge_worktree"     => super::merge_worktree::call(ctx, args).await,
+                "audit_log"          => super::audit_log::call(ctx, args).await,
                 other => Err(RecoverableError::new(format!(
-                    "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree"
+                    "unknown action '{other}' — expected one of: context, reindex, tracker_design, workspace_state_at, audit_doc_refs, legibility_scan, link_scan, doctor, merge_worktree, audit_log"
                 ))),
             }
     }

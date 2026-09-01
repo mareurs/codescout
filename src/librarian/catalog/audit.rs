@@ -212,6 +212,98 @@ pub(crate) fn install_session(conn: &Connection, actor: &str) -> Result<()> {
     Ok(())
 }
 
+/// Query filters for `query()`. `Default::default()` matches everything.
+#[derive(Default)]
+pub(crate) struct AuditFilter {
+    pub tbl: Option<String>,
+    pub row_id: Option<String>,
+    pub actor: Option<String>,
+    pub op: Option<String>,
+    pub since: Option<i64>,
+    pub until: Option<i64>,
+}
+
+pub(crate) struct AuditRow {
+    pub seq: i64,
+    pub at_ms: i64,
+    pub tbl: String,
+    pub op: String,
+    pub row_id: String,
+    pub actor: String,
+    pub verb: Option<String>,
+    pub payload: Option<String>,
+}
+
+/// Dynamic filter SQL: same pattern as `events::timeline_for_artifact`.
+/// Newest-first (`ORDER BY seq DESC`) so a capped `limit` always returns the
+/// most recent activity rather than the oldest.
+pub(crate) fn query(conn: &Connection, f: &AuditFilter, limit: usize) -> Result<Vec<AuditRow>> {
+    let mut sql = String::from(
+        "SELECT seq, at_ms, tbl, op, row_id, actor, verb, payload FROM catalog_audit WHERE 1=1",
+    );
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    if let Some(v) = &f.tbl {
+        sql.push_str(" AND tbl = ?");
+        params.push(Box::new(v.clone()));
+    }
+    if let Some(v) = &f.row_id {
+        sql.push_str(" AND row_id = ?");
+        params.push(Box::new(v.clone()));
+    }
+    if let Some(v) = &f.actor {
+        sql.push_str(" AND actor = ?");
+        params.push(Box::new(v.clone()));
+    }
+    if let Some(v) = &f.op {
+        sql.push_str(" AND op = ?");
+        params.push(Box::new(v.clone()));
+    }
+    if let Some(v) = f.since {
+        sql.push_str(" AND at_ms >= ?");
+        params.push(Box::new(v));
+    }
+    if let Some(v) = f.until {
+        sql.push_str(" AND at_ms <= ?");
+        params.push(Box::new(v));
+    }
+    sql.push_str(" ORDER BY seq DESC LIMIT ?");
+    params.push(Box::new(limit as i64));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            Ok(AuditRow {
+                seq: r.get(0)?,
+                at_ms: r.get(1)?,
+                tbl: r.get(2)?,
+                op: r.get(3)?,
+                row_id: r.get(4)?,
+                actor: r.get(5)?,
+                verb: r.get(6)?,
+                payload: r.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Deletes audit rows older than the cutoff, then writes ONE marker row
+/// describing the prune — so the resulting seq gap explains itself instead of
+/// reading as tampering.
+pub(crate) fn prune_before(conn: &Connection, before_ms: i64) -> Result<usize> {
+    let n = conn.execute("DELETE FROM catalog_audit WHERE at_ms < ?1", [before_ms])?;
+    if n > 0 {
+        conn.execute(
+            &format!(
+                "INSERT INTO catalog_audit(at_ms, tbl, op, row_id, payload)
+                 VALUES({NOW_MS}, 'catalog_audit', 'delete', 'prune',
+                        json_object('pruned', ?1, 'before_ms', ?2))"
+            ),
+            rusqlite::params![n as i64, before_ms],
+        )?;
+    }
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::librarian::catalog::{artifact, Catalog};
@@ -481,5 +573,39 @@ mod tests {
             )
             .unwrap();
         assert_eq!(verb.as_deref(), Some("artifact.update"));
+    }
+
+    #[test]
+    fn query_filters_compose_and_order_newest_first() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "q1");
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id='q1'", [])
+            .unwrap();
+        let all = super::query(&cat.conn, &super::AuditFilter::default(), 50).unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(all[0].seq > all[1].seq, "newest first");
+        let f = super::AuditFilter {
+            op: Some("delete".into()),
+            ..Default::default()
+        };
+        let dels = super::query(&cat.conn, &f, 50).unwrap();
+        assert_eq!(dels.len(), 1);
+        assert_eq!(dels[0].row_id, "q1");
+    }
+
+    #[test]
+    fn prune_deletes_old_rows_and_leaves_a_self_describing_marker() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "p1");
+        let removed = super::prune_before(&cat.conn, i64::MAX).unwrap();
+        assert_eq!(removed, 1);
+        let rows = super::query(&cat.conn, &super::AuditFilter::default(), 50).unwrap();
+        // the marker row explains the seq gap: tbl catalog_audit, op delete
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].tbl, "catalog_audit");
+        let p: serde_json::Value =
+            serde_json::from_str(rows[0].payload.as_deref().unwrap()).unwrap();
+        assert_eq!(p["pruned"], 1);
     }
 }
