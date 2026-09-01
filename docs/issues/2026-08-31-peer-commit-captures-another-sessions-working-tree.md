@@ -583,14 +583,29 @@ against the first to introduce `| <ID> | 20`:
 | **split across two commits** | **11** (5.9%) |
 | one shape not findable by `-S` (format drift) | 2 |
 
-**Then the part that matters, and it is not the 11.** Classifying those splits by the
-`Session-Id` trailer:
+**Then the part that matters, and it is not the 11.** The `Session-Id` trailer is what would
+classify a split as capture-or-tidiness — and it is present on **both** sides of exactly one:
 
 | | count |
 |---|---:|
-| cross-session — a genuine capture | **1** (`F-93`: `c2a08c22` → `d91c1155`) |
-| same-session — one author, two commits | **0** |
-| **no trailer — unknowable, permanently** | **10** |
+| **no trailer on either side — unclassifiable, permanently** | **10** |
+| trailer on both sides — classifiable | 1 |
+| trailer on one side only | 0 |
+
+**One number, stated with its denominator: of the 1 classifiable split, 1 is cross-session** —
+`F-93`, `c2a08c22` → `d91c1155`, the case this section was written about. That is confirmation the
+instrument reports what it should, and it is not a rate. A reader mining this corpus for *"how
+often does a split indicate capture?"* has n=1 and no answer.
+
+> This table first carried a third peer row, `same-session — 0`, alongside the 1 and the 10.
+> Withdrawn on `codescout-68`'s challenge: its denominator is **1**, not 11, so the zero was the
+> arithmetic complement of a single already-known case rather than a finding about same-session
+> splits. Rendered as three peer rows the three read as independent results of comparable weight,
+> and `1/(1+0)` invites a **100% capture rate off n=1** — a far stronger claim than anything
+> measured. Same asymmetry as this page's other numbers, one turn on: a zero beside a one and a
+> ten reads as comparable when its population is a tenth the size. Independently sampled by that
+> session (every-6th-id, 3 splits in 31, all three untrailered, dated 2026-05-21 to 2026-08-26) —
+> different draw, same conclusion.
 
 The trailer is younger than the corpus, so ten of eleven splits can never be classified. And
 `%an` reads the identical name on every one of them — `IC-10` in a line — so their default
