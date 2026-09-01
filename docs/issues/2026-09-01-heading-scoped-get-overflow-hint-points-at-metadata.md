@@ -1,17 +1,17 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/hint-composed-without-the-request
+- progressive-disclosure
+- librarian
+- hint
+closed: 2026-09-01
 opened: 2026-09-01
-closed:
-severity: low
 owner: marius
 related: []
-tags:
-  - cluster/capped-result-presented-as-complete
-  - progressive-disclosure
-  - librarian
-  - hint
-kind: bug
-unverified: 'No regression test yet. The cluster tag is the weaker half of IC-13 — the response is honestly marked as buffered (nothing is presented as complete), so only IC-13''s SECOND clause applies: the signal is computed correctly and the follow-up route it names is wrong. The Index notes two readers independently hit this same boundary in IC-13''s claim text, so this file is a third datapoint for that pending ruling rather than a clean member.'
+severity: low
+unverified: "The preview.headings suppression proposed in the original Fix section was NOT measured and NOT done - whether envelope metadata pushes otherwise-inlinable sections over the 9KB inline budget is still unknown. Nothing in the shipped fix depends on it; recorded because a reader may otherwise assume the whole Fix section landed. Also: the gate's default lane showed 1 failure at commit time (tests/issue_clusters.rs::every_declared_class_has_an_index_row), which was a peer's uncommitted work on issue-clusters.md - three classes declaring a Slug with no Index row yet, all three verified absent from HEAD - and not this change."
 ---
 
 # BUG: a heading-scoped `artifact(get)` that overflows hints at `$.preview.headings[*]` — the metadata — instead of `$.body`, the section the caller asked for
@@ -74,12 +74,27 @@ review's SR-13 item 2 claimed one; this file is the corrected, narrower form.
 
 ## Root cause
 
-`inferred from the envelope's own output — the hint-selection code has not been read yet.`
+**Root cause, MEASURED 2026-09-01 — and it is sharper than the hypothesis this section
+originally carried.** The `inferred from the envelope's own output` note below was replaced by
+reading the code.
 
-The overflow hint appears to be derived from the payload's shape without reference to
-**which arguments the caller passed**. `preview.headings` is present on every `artifact(get)`
-response, so a generic shape-walk finds it first; `heading=` is what makes `$.body` the
-answer, and that argument is not consulted.
+`default_json_path_hint` (`src/tools/core/types.rs`) selects **the largest array anywhere within
+a bounded depth**. It is not argument-blind by oversight — it is *array-selecting by design*,
+and a scoped `get` answers with a `body` **string**. A string is never a candidate, so the
+heuristic **structurally cannot** return `$.body`, whatever the caller passed. `preview.headings`
+wins by being the largest array present.
+
+The irony is load-bearing rather than decorative: that heuristic was itself the fix for an
+earlier form of this same class (`docs/issues/archive/2026-08-15-jsonpath-subset-defeats-the-overflow-recovery-hint.md`),
+whose own docs say *"a hint that cannot work for the result it is attached to is worse than no
+hint: it converts a lookup into a failed call."* This is that class surviving in the one shape
+its remedy cannot express — the payload whose useful field is not a list.
+
+`json_path_hint` is a `Tool` trait method with a default, so no signature change was needed: the
+result itself carries the evidence (`body` + `body_meta`). Note the two-trait detail, since it
+cost a compile cycle here — `src/librarian/tools/*.rs` implement the **librarian's** `Tool`
+trait, which has no `json_path_hint`; the overridable one is `crate::tools::Tool`, implemented
+by `LibrarianAdapter` in `src/librarian/adapter.rs`.
 
 Two contributing facts, both observed:
 
@@ -138,24 +153,52 @@ sections — each following the hint before falling back to `$.body`.
 
 ## Fix
 
-Make the hint argument-aware: when the `get` call carried `heading` / `headings` /
-`start_line`, lead with `json_path="$.body"` — and for a body that will itself overflow,
-name the line-slice form directly (`read_file("@tool_*", start_line=1, end_line=120)`),
-which skips a whole hop.
+**SHIPPED 2026-09-01** at `bb4688fd` (**`experiments`**), patch-id
+`5e6ff450ad5eaf822283499492288b7ded15faf3`.
 
-Consider also suppressing `preview.headings` on a heading-scoped read, or reducing it to a
-count. Measure item (1) in *Root cause* first: if sections routinely sit just over the
-budget because of envelope metadata, this removes calls; if not, it is only tidiness.
+`LibrarianAdapter` — the layer that already overrides `format_compact` — now overrides
+`json_path_hint`, delegating to a free `scoped_body_hint(&Value) -> Option<String>` so the
+decision is testable without building an adapter. When the payload carries **both** a
+`body_meta` object and a `body`, the hint is `$.body`; otherwise the general heuristic stands.
 
-SHA: not yet fixed.
-patch-id: not yet fixed.
+**Keyed on `body_meta`, not on `body` alone — that is the whole discrimination.** `body`
+appears on a *full* artifact read too, and there the largest-array rule is still the better
+answer: an augmented tracker's `$.augmentation.params.<collection>[*]` is worth far more than
+a body the caller already holds entire. `body_meta` is emitted only when the server *scoped*
+the read (`heading`, `headings`, or a line slice), so it is the narrowest available signal for
+*"the caller named a part, and this is that part"*.
 
+**Scoped to the adapter rather than to `default_json_path_hint`.** That heuristic is right for
+`find`, `graph`, `state_at`, `link_scan` and the rest; one action's shape is not a reason to
+move a rule the others depend on.
+
+**The `preview.headings` suppression was NOT done, and is not owed.** The bug file proposed
+measuring whether envelope metadata pushes otherwise-inlinable sections over the 9 KB budget.
+That measurement was not run, so nothing here rests on it — and once the hint points at the
+right field, the remaining cost is bytes rather than a wasted call, which is a different and
+smaller problem. Recorded as unmeasured rather than dropped silently.
 ## Tests added
 
-None yet. Shape: a table test over `(args, expected_hint_json_path)` — `heading` present →
-`$.body`; no `heading` → `$.preview.headings[*]`. **The `heading` row must fail against
-today's tree** before the fix lands, or it pins nothing.
+Two tests in `src/librarian/adapter.rs`'s `mod tests`, both **mutation-verified rather than
+assumed green**.
 
+1. `a_scoped_read_is_hinted_at_its_body_and_a_full_read_is_not` — a four-row table.
+2. `the_scoped_hint_overrides_what_the_default_heuristic_would_have_said` — the end-to-end
+   shape, carrying a **precondition assert** that `default_json_path_hint` really does return
+   `$.preview.headings[*]` for this payload. Without that assert the test could pass while
+   being about nothing, and it is also what keeps it honest if the heuristic changes.
+
+**Mutations run:**
+
+| mutation | effect |
+|---|---|
+| always `None` (pre-change behaviour) | kills **both**; the second reports `left: "$.preview.headings[*]"` vs `right: "$.body"` — the reported defect as an assertion |
+| key on `body` alone, dropping the `body_meta` check | kills **exactly** the full-read row |
+
+The second is why row 2 of the table is annotated as the discriminator: **do not delete it as
+redundant.** Without it, a fix keyed on `body` alone passes and every *full* read silently gets
+a worse hint — a strictly larger regression than the bug being fixed. Row 3 (`body_meta` with
+no `body`) pins the same boundary from the other side.
 ## Workarounds
 
 On any buffered `artifact(get, heading=…)`, ignore the hint and go straight to
@@ -164,12 +207,12 @@ start_line=1, end_line=N)`.
 
 ## Resume
 
-Read the hint-selection code — start at `src/librarian/adapter.rs:427`
-(`librarian_compact_summary`) and find where `hint` is composed for the overflow envelope
-(it may live in the shared `ToolContext::call_content` path rather than the librarian
-adapter; `grep(pattern="to extract a specific field")` will locate the literal). Confirm
-hypothesis 3 in the code, then add the failing table-test row.
+N/A — shipped.
 
+One thing deliberately left unmeasured rather than left implied: whether `preview.headings`
+metadata pushes otherwise-inlinable sections over the inline budget. If it does, suppressing it
+on a scoped read would *remove* calls rather than re-point them. Nothing in this fix depends on
+the answer.
 ## References
 
 - `src/librarian/adapter.rs:427-488` — the compact-summary ordering rule and BL-19
