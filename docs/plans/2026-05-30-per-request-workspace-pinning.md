@@ -371,10 +371,31 @@ list into the phases that own them. What remains is genuinely open:
 > 3. **Item (b) resolved as this plan predicted:** no `ONBOARDING_VERSION` bump.
 >    `server_instructions` is live-on-connect and `builders.rs` was untouched.
 >
-> **Remaining Phase 5: (c)** retire `concurrent_activation_warning` on pinned flows — it
-> still attaches unconditionally at `src/tools/config/mod.rs:314-317`; and **(d)** the live
-> `/mcp` end-to-end verify, which is a user step. Phase 4b remains deferred and correctly
-> so: `AgentInner.workspaces` is still `HashMap<PathBuf, Workspace>` (`src/agent/mod.rs:112`).
+> **Phase 5(c) CLOSED 2026-09-02 — moot as written, verified not assumed.** The item read
+> "keep `concurrent_activation_warning` ONLY on the unpinned default path, retire it for
+> pinned flows." There is no pinned flow to retire it from, on three independent facts:
+> `note_activation` has exactly one production caller (`src/tools/config/mod.rs:308`, the
+> activate handler); `workspace` and `activate_project` sit in `Tool::pinnable`'s exclusion
+> list (`src/tools/core/types.rs:758-767`), so no `workspace=` pin reaches that handler; and
+> `last_activation` is written only by `Agent::new` and `note_activation`, so a pinned call
+> routing through `with_project_at` cannot even create the precondition. The keystone commit
+> that made `workspace` non-pinnable is what made this item moot — 5(c) was written before
+> it landed. *(An earlier note in this block said the warning "still attaches
+> unconditionally" as though that were the open work. It does attach unconditionally, but
+> only on a path no pinned call can reach, which is the state 5(c) asked for.)*
+>
+> The verification did surface a real residual, filed rather than fixed:
+> `docs/issues/2026-09-02-the-concurrent-activation-guard-substitutes-proximity-for-identity.md`.
+> The guard substitutes wall-clock proximity for caller identity, so one session's
+> documented activate-foreign-then-return-home is indistinguishable from a two-caller race.
+> The obvious repair — exempting `ReturnToHome`, already computed one line above the call
+> site — trades the false positive for a false negative on the harmful case, so it is
+> deliberately not proposed. It needs `IC-17`'s owner field, the same substrate as Fix 2 of
+> the activation bug. **Do not tune the 5s window.**
+>
+> **Remaining Phase 5: (d)** the live `/mcp` end-to-end verify, which is a user step. Phase
+> 4b remains deferred and correctly so: `AgentInner.workspaces` is still
+> `HashMap<PathBuf, Workspace>` (`src/agent/mod.rs:112`).
 
 **Status: Phases 0–3 COMPLETE — the entire READ surface honors per-request pinning;
 regime-3 is fixed for all reads.** Work lives on branch
