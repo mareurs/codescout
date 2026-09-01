@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 10
+entry_high_water_OB: 11
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-11 | 2026-09-01 | a session-keyed ledger answers for a party the protocol never named — a subagent's FIRST fetch reports as a repeat, and its auto-inject is suppressed as already-delivered | the codescout MCP server: `agent_id` rides harness `SubagentStart`/`Stop` events and no MCP tool call ever carries it | wrong instrument — the guide text told the parent to make it *worse* | **partial** — wording fixed at 3 sites, note pinned negatively, companion hook overrides the brief; the **keying** is unfixable from inside this repo |
 | OB-10 | 2026-09-01 | a mutual-exclusion resource is invisible to the session HOLDING it — the holder's own workflow succeeds and clears the condition as a side effect of finishing | the holder, a population of one against everyone else | wrong instrument | **none yet** — owner field on the resource is the candidate; enumeration is 1 verified / 4 unverified |
 | OB-9 | 2026-09-01 | plausibility is a filter with a resolution limit — a near-miss number fits inside it; 4 instances, 4 caught by re-derivation, 0 by reading | the reader | wrong instrument | **partial** — remedy shipped under `OB-1`; this row adds its scope condition |
 | OB-8 | 2026-09-01 | a shared resource carries no owner, so seeing the peer does not help — four captures in 34 min with enumeration complete | the writing session | wrong instrument | **partial** — outbound gate shipped; inbound not closeable per-session |
@@ -1207,6 +1208,28 @@ re-examined* — only the boundary).
 **Instances:** `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` (`IC-17`); adjacent, `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` (`IC-12`); `9e493b20`.
 
 **Status:** open — one verified instance, one session, four unverified candidates. **The honest gap is the enumeration**: it was assembled by reasoning about which files shared tooling reads, then filtered by the membership test, and only the first was measured. A later pass should either verify the four or drop them, because a candidate list that looks like a finding is this ledger's own subject.
+
+## OB-11 — a session-keyed ledger answers for a party the protocol never named
+
+**Valid:** conditional — MCP tool calls gain per-agent identity, at which point the ledger can key on it
+
+**Rests on:** Iron Law 6 — the parent-briefs discipline exists *because* the server cannot tell parent from subagent; `docs/issues/2026-09-01-subagent-told-to-skip-guides-it-never-received.md`
+
+**Class:** shared state keyed at a coarser grain than the party reading it
+
+**Blind party:** the codescout MCP server. `guide_hints_emitted` is keyed by Claude Code `session_id`, which a subagent shares with its parent — no separate MCP identity exists for it. The server cannot distinguish them **because the protocol never carries the distinction**: `agent_id` rides the harness's `SubagentStart`/`SubagentStop` events and appears on no MCP tool call. This is not inattention; no amount of care inside the server recovers a field it is never sent.
+
+**Who can see it:** the harness, which mints `agent_id` at dispatch, and the companion hooks that receive it. The asymmetry is the whole entry — **the party holding the identity is not the party holding the ledger**, and a protocol boundary separates them that neither crosses alone.
+
+**Plausible-answer property:** a subagent's *first* fetch is reported as a repeat, and its auto-inject is suppressed as already-delivered. Both are well-formed and confident. Nothing errors, nothing is empty, and the body is still returned — so the failure is invisible at the call site and surfaces only as degraded downstream work.
+
+**Vigilance:** wrong instrument — and this instance is unusually sharp about why. The guide text told the parent to make it *worse*: `iron-laws-detail`'s brief bullet prescribed letting the subagent "short-circuit redundant `get_guide` calls", so a **more** diligent parent produced a **more** starved subagent. Two further sites reinforced it, one of them naming a subagent's own `get_guide` call as evidence the parent had underbriefed — i.e. the correct behaviour was documented as the symptom. Three mutually-confirming wrong signals; caught by a user noticing subagent output quality, by no check.
+
+**Mechanism status:** partial — wording corrected at three sites (2026-09-01), and `repeat_fetch_keeps_body_and_flags_static` now pins the note *negatively*, so drift back toward asserting the caller already fetched it reds the lane. `codescout-companion`'s `SubagentStart` hook tells subagents to fetch regardless of their brief, covered by `tests/test-subagent-guidance.sh`. The **keying** is untouched and unfixable from inside this repo. The companion's `agent-guide-snapshot.mjs` / `agent-guide-restore.mjs` bracket already works the sibling direction (a subagent's marks starving the parent), and its own scope note records that it is inert within the session it runs in — a second party attacking the same boundary from the other side, reaching the same partial result.
+
+**Instances:** `docs/issues/2026-09-01-subagent-told-to-skip-guides-it-never-received.md` (this repo). Cross-repo, prose-only and deliberately not an edge: `claude-plugins`'s `codescout-companion/docs/issues/archive/2026-08-26-subagent-guide-fetch-starves-parent.md` and `…/2026-08-27-guide-ledger-bracket-is-inert-within-its-own-session.md`.
+
+**Status:** open — 1 session (2026-09-01), user-reported. The sibling direction was independently filed in `claude-plugins` across three earlier sessions; that is corroboration of the keying defect, not a second instance of this row.
 
 ## Template for new entries
 

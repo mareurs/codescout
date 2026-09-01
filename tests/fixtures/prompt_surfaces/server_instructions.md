@@ -12,8 +12,8 @@ Subagents inherit these rules. Pass them along.
    sed) is OK. Shell on source files is blocked.
 4. NEVER read_file markdown → read_markdown (heading-addressed).
 5. NEVER edit_file markdown → edit_markdown (heading-addressed).
-6. Subagents see only what you brief them with. Pass guide topics
-   already triggered, prior results, paths, symbol names — at every
+6. Subagents see only what you brief them with. Name the guides they
+   must fetch themselves, prior results, paths, symbols — at every
    spawn. Re-discovery is your dispatch defect, not theirs.
 ## Search/Edit decision quickref
 

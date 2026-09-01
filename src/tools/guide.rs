@@ -84,8 +84,13 @@ impl Tool for GetGuide {
                     //  - first fetch of `t` marks it emitted, so a later auto-inject of
                     //    the same topic is suppressed (and an auto-inject suppresses a
                     //    later explicit fetch's "first" status);
-                    //  - a repeat fetch is flagged so the model re-reads its existing
-                    //    copy instead of re-spending context on static content.
+                    //  - a repeat fetch is flagged so a caller still holding the guide can
+                    //    skip re-reading it. The flag must NOT assert that the CALLER
+                    //    fetched it: the ledger is session-keyed and shared parent<->subagent,
+                    //    so a SUBAGENT's very first fetch always takes this branch, with an
+                    //    empty context. Wording like "you already fetched this" is false for
+                    //    it and invites it to discard the body it just received.
+                    //    docs/issues/2026-09-01-subagent-told-to-skip-guides-it-never-received.md
                     // The body is NEVER withheld: the ledger is not cleared on `/compact`,
                     // so a legitimate post-compaction re-fetch must still return the guide.
                     // `insert` returns false when the topic was already present.
@@ -97,9 +102,12 @@ impl Tool for GetGuide {
                         )
                     } else {
                         format!(
-                            "You already fetched get_guide(\"{t}\") earlier this session. This \
-                             guide is static — if the earlier copy is still in your context, no \
-                             need to re-read it. (Re-fetch is only needed after compaction.)"
+                            "get_guide(\"{t}\") was already delivered once in this session — \
+                             possibly to a DIFFERENT agent, since the ledger is shared \
+                             parent↔subagent and a subagent's first fetch always lands here. \
+                             The full body above is authoritative: if it is not already in \
+                             your context, read it. (A caller that still holds its earlier \
+                             copy can skip re-reading; re-fetch after compaction is normal.)"
                         )
                     };
                     Ok(json!({ "topic": t, "body": *body, "note": note }))
@@ -149,7 +157,7 @@ mod tests {
             // `SESSION_OPENING_GUIDE` ("project-activation-bootstrap"), so for
             // `get_guide_returns_project_activation_bootstrap_body` the seed
             // makes `first_fetch` false and `GetGuide::call` returns the
-            // "already fetched" note rather than the "Don't re-call" one. The
+            // prior-delivery note rather than the "Don't re-call" one. The
             // BODY is byte-identical across both branches, which is all that
             // test asserts on — but a note assertion added here would be
             // reading the seeded branch, not the fresh one. Both note branches
@@ -365,7 +373,14 @@ mod tests {
         // must participate in the guide_hints_emitted ledger. Two fetches of the same
         // topic in one session (SHARED ctx) must (1) both return the full body — never
         // withhold, so post-/compact recovery still works — and (2) carry a note that
-        // flips from "don't re-call" on the first fetch to "already fetched" on the repeat.
+        // flips from "don't re-call" on the first fetch to a prior-delivery notice on
+        // the repeat.
+        //
+        // The repeat branch is ALSO where a SUBAGENT's very first fetch lands, because
+        // the ledger is session-keyed and shared parent<->subagent. So the repeat note
+        // is asserted here to stay context-neutral: it may not claim this caller
+        // already fetched the guide, and may not tell it to skip the body outright.
+        // docs/issues/2026-09-01-subagent-told-to-skip-guides-it-never-received.md
         let g = GetGuide::new();
         let tc = ctx().await;
 
@@ -398,8 +413,22 @@ mod tests {
         );
         let second_note = second["note"].as_str().expect("repeat fetch has a note");
         assert!(
-            second_note.contains("already fetched"),
-            "repeat fetch note should flag the prior fetch, got: {second_note}"
+            second_note.contains("already delivered"),
+            "repeat fetch note should flag the prior delivery, got: {second_note}"
+        );
+        assert_ne!(
+            first_note, second_note,
+            "the note must distinguish a first fetch from a repeat"
+        );
+        assert!(
+            !second_note.contains("You already fetched"),
+            "the note must not assert THIS caller fetched it — a subagent's first fetch \
+             lands on this branch with an empty context; got: {second_note}"
+        );
+        assert!(
+            second_note.contains("if it is not already in your context, read it"),
+            "the note must tell a caller lacking the guide to read the body it just \
+             received, not to skip it; got: {second_note}"
         );
     }
 

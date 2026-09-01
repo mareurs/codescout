@@ -200,8 +200,11 @@ what you knew is a dispatch defect — yours, not theirs.
 
 **No tool gate enforces this.** Iron Law 6 is behavioral, not
 substrate-gated. The discipline is observable post-hoc: a subagent
-whose first tool call is `get_guide(topic)` for a topic obviously
-needed by its task indicates the parent underbriefed.
+re-deriving what you already held — the paths you had open, a prior
+tool result, a symbol name you knew — indicates the parent
+underbriefed. A subagent calling `get_guide(topic)` is **not** that
+symptom; it is the prescribed behaviour (see the last two bullets
+below), because the auto-inject cannot reach it.
 
 **Substrate fact this compensates for:** the `guide_hints_emitted`
 ledger is process-wide and shared across the parent and its subagents,
@@ -226,12 +229,20 @@ not relay automatically.
   time/cost budget?
 - Avoid context dumps. "Everything I know" wastes the subagent's
   budget; "what the subagent needs to act on this task" is the bar.
-- **State which get_guide topics you've already triggered this
-  session.** The `guide_hints_emitted` ledger is shared parent↔subagent — so once
-  you trigger a topic, the subagent will NOT receive its V2 auto-inject
-  independently. Telling the subagent "I've triggered: [librarian,
-  progressive-disclosure]" lets it predict its own injection behavior
-  accurately and short-circuit redundant `get_guide` calls.
+- **State which get_guide topics you've already triggered — and tell the
+  subagent to fetch them itself.** The `guide_hints_emitted` ledger is shared
+  parent↔subagent, so once you trigger a topic the subagent will NOT receive
+  its auto-inject independently. Your context is not its context: it holds
+  none of those bodies. The brief is therefore "I've triggered [librarian,
+  tracker-conventions]; the auto-inject will not fire for you — call
+  `get_guide` on the ones your task needs." **Never tell it the guides are
+  already loaded, and never tell it to skip a fetch as redundant** — nothing
+  is redundant in a context window that never received it.
+- **An explicit `get_guide(topic)` always returns the full body**, ledger
+  state notwithstanding — `src/tools/guide.rs` never withholds it. So the
+  fetch above costs one call and cannot come back empty. What the ledger
+  changes is only the accompanying *note*, which is phrased for a re-fetching
+  parent; a subagent reading it should trust the body it just received.
 
 ## Related
 
