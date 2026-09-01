@@ -98,6 +98,25 @@ Birds-eye retrospective (2026-09-01) synthesized from three sweeps: the session-
 **Acceptance:** a row mutated on host A is queryable on host B after pull; same-host two-branch shard merge needs no manual resolution; doctor names the unexported delta; a merged read labels each host's coverage window.
 
 **Depends on:** T-1 (row format designed export-ready there: `seq` monotone/never-reused, watermark key reserved). Full design: `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md` § Phase 2.
+
+**Unblocked 2026-09-01 by T-13.** Three design decisions settled before planning, two of
+them correcting the spec's Phase 2 sketch:
+
+- **Read path: merge-on-query, stateless.** `audit_log` reads the local table and streams the
+  shard files, merging on `(at_ms, host, seq)`. No import step and no second copy — an
+  imported replica is the exact shape T-6 exists to remove, and shard filenames encode
+  `host` + `YYYYMM` so `since`/`until` prunes files before opening them.
+- **Shard scope: everything except `commits`-table rows.** The `commits` table is a cache of
+  git, so committing an audit of it into git is circular; at ~192 rows/day it is also the
+  largest remaining term. Still audited locally, just not exported.
+- **Prerequisites first (T-13), not folded in.** The two volume defects are logically
+  independent of an export feature, and fixing them first made the *local* trail usable
+  immediately rather than holding that behind T-7 shipping.
+
+Steady-state estimate after T-13, grounded on the catalog's own 98-day history (3,545 events
+≈ 36/day, 4,446 artifacts): roughly **1–2 MB/month/host**. The 1.74-hour window this was
+scoped in was a burst — an SDD run with 9 commits, several reindexes and a merge — and must
+not be extrapolated as a rate.
 ## T-8 — Advertise `graft`'s required params
 
 **Why:** `artifact(action="graft")` is advertised in the action enum (`src/librarian/tools/artifact.rs:35`) but its two required params are not in the schema. `src/librarian/tools/graft.rs:10-11` declares `Args { from_id: String, into_id: String }`; neither appears among `artifact`'s 53 advertised properties, verified against the live wire. Measured in `usage.db`: **1 attempt, 1 failure** (`missing_required_param`). The action is unusable as advertised.
@@ -144,6 +163,43 @@ Birds-eye retrospective (2026-09-01) synthesized from three sweeps: the session-
 **Shape:** surface the mapping from prose into the schema, or make the error name the required keys **for the `kind` actually passed**.
 
 **Acceptance:** a `create` call with a valid `kind` and a missing payload key errors naming that key. Re-judge its 7 never-passed params **after** the fix, never before — both time-travel actions (`artifact:state_at`, `librarian:workspace_state_at`) were attempted exactly once each and **both failed on the same missing param**, so a 0/2 discovery rate is what "never passed" can mean.
+
+## T-13 — Audit volume prerequisites for T-7
+
+**Valid:** dated 2026-09-01
+
+**Why it exists:** scoping T-7 started by histogramming the live trail instead of reading
+the spec's Phase 2 bullets, and the histogram said the spec's volume analysis was aimed at
+the wrong term. The spec proposed filtering "pure reindex churn" at export; reindex churn is
+**0.4%** of the rows. The dominant terms were two defects nobody had measured.
+
+**Measured** (live catalog, 1.74-hour window, 27,914 rows):
+
+| class | rows | share | payload chars | share |
+|---|---:|---:|---:|---:|
+| `commits` update, payload `{}` | 27,505 | 98.5% | 55,010 | 6% |
+| `artifact_augmentation` update | 23 | 0.08% | 786,771 | **88%** |
+| `artifact` update, churn keys only | 107 | 0.4% | 25,359 | 3% |
+| genuine signal | 279 | 1.0% | ~22k | 3% |
+
+Unfiltered that is ~380k rows/day into a git-committed file. T-7 was not shippable on it.
+
+**Shipped** at `40ab56f6` (patch-id `d3021d83634be0f6b8d7c69200f241f80f9e5f96`): a `WHEN`
+guard on the UPDATE triggers (`IS NOT`, never `<>`); a stand-in for oversized values in
+UPDATE diffs only, leaving DELETE images verbatim because that is where the forensic value
+is and not where the bytes are; and `payload_bytes` + `largest_payload_bytes` on
+`audit::health`.
+
+**Verified live, not just in tests.** Triggers are schema-level, so the fix reached the
+still-running old-binary server the moment an upgraded process opened the catalog. A reindex
+that previously wrote ~2,750 `commits`/`update` rows wrote **20 rows, 0 empty diffs**. A real
+tracker append wrote **441 chars** where it would have written 7,364.
+
+**Closed three bug files:** the empty-diff one (opened on notice during this measurement),
+the augmentation-params one (its "measure first" step discharged by the table above), and the
+writer-abort one — whose BLOB half got a test born red on the real production error, and
+whose NULL-key half is closed by narrowing the module-doc invariant rather than by a guard
+no caller can reach.
 
 ## History
 
