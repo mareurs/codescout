@@ -181,6 +181,36 @@ pub fn adapters_for(ctx: Arc<LibToolContext>) -> Vec<Arc<dyn crate::tools::Tool>
         .collect()
 }
 
+/// `Some("$.body")` when a buffered librarian result is a **scoped** read, `None` to leave
+/// the general heuristic in place.
+///
+/// `default_json_path_hint` picks the largest array within a bounded depth. That is the
+/// right rule for the results that usually overflow — lists of records — and the wrong one
+/// for a scoped read: `artifact(action="get", heading=…)` answers with a `body` **string**,
+/// and a string is never a candidate for an array-selecting heuristic. So the hint named
+/// `$.preview.headings[*]` — the heading map, which the caller already had and had not
+/// asked for — while the section they requested sat at `$.body`. Following it costs a
+/// wasted call, which is the exact cost `default_json_path_hint`'s own docs give as the
+/// reason it exists: "a hint that cannot work for the result it is attached to … converts a
+/// lookup into a failed call."
+///
+/// **Keyed on `body_meta`, not on `body` alone, and that is the whole discrimination.**
+/// `body` appears on a *full* artifact read too, where the largest-array rule is still the
+/// better answer because the caller asked for the whole row — an augmented tracker's
+/// `$.augmentation.params.<collection>[*]` is worth far more there than a body they already
+/// have in full. `body_meta` is emitted only when the server *scoped* the read (`heading`,
+/// `headings`, or a line slice), so it is the narrowest available signal for "the caller
+/// named a part, and this is that part".
+///
+/// Scoped to the librarian adapter rather than changed inside `default_json_path_hint`:
+/// that heuristic is right for `find`, `graph`, `state_at`, `link_scan` and the rest, and
+/// one action's shape is not a reason to move a rule the others depend on.
+/// docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
+fn scoped_body_hint(val: &Value) -> Option<String> {
+    let scoped = val.get("body_meta").is_some_and(Value::is_object);
+    (scoped && val.get("body").is_some()).then(|| "$.body".to_string())
+}
+
 struct LibrarianAdapter {
     inner: Arc<dyn crate::librarian::tools::Tool>,
     ctx: Arc<LibToolContext>,
@@ -320,6 +350,15 @@ impl crate::tools::Tool for LibrarianAdapter {
             return Some("tracker-conventions");
         }
         Some("librarian")
+    }
+
+    /// Point a buffered `artifact(get)` at its **body**, not at the largest array in the
+    /// envelope. Decision extracted to [`scoped_body_hint`] so a test can reach it without
+    /// building an adapter — the same shape `format_compact` uses for
+    /// `librarian_compact_summary`.
+    /// docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
+    fn json_path_hint(&self, val: &Value) -> String {
+        scoped_body_hint(val).unwrap_or_else(|| crate::tools::default_json_path_hint(val))
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -768,6 +807,87 @@ mod tests {
     use super::*;
     use crate::tools::Tool as _;
     use serde_json::json;
+
+    /// A heading-scoped `get` must be pointed at the section it returned, not at the
+    /// heading map it did not ask for.
+    ///
+    /// Born red: before the override the hint came from `default_json_path_hint`, which
+    /// selects the largest array within a bounded depth — `preview.headings` (20 objects
+    /// on `issue-clusters.md`) beats a `body` string, which is not an array and so can
+    /// never win an array-selecting rule.
+    ///
+    /// **Row 2 is the discriminator and must not be deleted as redundant.** A *full* read
+    /// also carries `body`, and there the largest-array rule is still better — an
+    /// augmented tracker's params collection is worth more than a body the caller already
+    /// has whole. Without that row, a fix keyed on `body` alone (rather than on
+    /// `body_meta`) passes, and every full read gets a worse hint. Row 3 pins the same
+    /// boundary from the other side: `body_meta` present with no `body` is not a scoped
+    /// body read.
+    ///
+    /// Mutations this kills: dropping the `body_meta` check → row 2 fails; dropping the
+    /// `body` check → row 3 fails; returning `Some` unconditionally → rows 2 and 4 fail.
+    /// docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
+    #[test]
+    fn a_scoped_read_is_hinted_at_its_body_and_a_full_read_is_not() {
+        for (label, payload, expect) in [
+            (
+                "heading-scoped get — the reported case",
+                json!({
+                    "id": "1b5a080fe2efcb6b",
+                    "body": "## Index\n\n| id | class |\n",
+                    "body_meta": { "heading": "## Index", "bytes": 25531, "line_count": 277 },
+                    "preview": { "headings": [{"text": "a"}, {"text": "b"}, {"text": "c"}] },
+                    "tags": ["one", "two", "three", "four", "five"],
+                }),
+                Some("$.body"),
+            ),
+            (
+                "FULL get — body present, no body_meta: keep the array heuristic",
+                json!({
+                    "id": "x",
+                    "body": "# Whole file\n",
+                    "augmentation": { "params": { "tasks": [{"id": "T-1"}, {"id": "T-2"}] } },
+                }),
+                None,
+            ),
+            (
+                "body_meta with no body — not a body read",
+                json!({ "id": "x", "body_meta": { "heading": "## A" } }),
+                None,
+            ),
+            (
+                "find — neither field",
+                json!({ "count": 2, "items": [{"id": "a"}, {"id": "b"}] }),
+                None,
+            ),
+        ] {
+            assert_eq!(scoped_body_hint(&payload).as_deref(), expect, "{label}");
+        }
+    }
+
+    /// The end-to-end shape, at the trait method rather than the extracted decision, so
+    /// the wiring is covered too: a scoped payload must not fall through to the array
+    /// heuristic. Pinned against `default_json_path_hint` directly rather than against a
+    /// hardcoded string, so this stays true if that heuristic's own answer changes.
+    #[test]
+    fn the_scoped_hint_overrides_what_the_default_heuristic_would_have_said() {
+        let payload = json!({
+            "body": "## Index\n",
+            "body_meta": { "heading": "## Index" },
+            "preview": { "headings": [{"text": "a"}, {"text": "b"}] },
+        });
+        let default = crate::tools::default_json_path_hint(&payload);
+        assert_eq!(
+            default, "$.preview.headings[*]",
+            "precondition: the default must pick the heading map here, or this test is \
+             not about the reported defect"
+        );
+        assert_eq!(
+            scoped_body_hint(&payload).unwrap_or(default),
+            "$.body",
+            "the override must win for a scoped read"
+        );
+    }
 
     #[test]
     fn compact_summary_surfaces_artifact_get_body_truncation() {
