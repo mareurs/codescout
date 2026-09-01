@@ -100,6 +100,14 @@ writes were recording audit rows the superseded way with nothing to signal it.
 session — `readlink /proc/<ppid>/cwd` is the discriminator that does work, and it is enough to
 tell a peer which window to reconnect.
 
+**Nothing here is orphaned — do not reach for `pkill`.** Measured 2026-09-01: every one of the
+13 processes the sweep returns had a **live parent**. A stale server is a live session's server
+running a replaced image, not a leak; a stale mux is shared infrastructure with an idle timeout.
+So the verb is *accumulate*, never *leak*, and the remedy is `/mcp` **in the owning session** —
+there is nothing to kill here, and killing one would take a working session's server out from
+under it. Read this before the counts below: a reader who meets "13 stale images" first reaches
+for `pkill` and is wrong.
+
 **They ACCUMULATE, which is the consequence of not self-healing and is easy to under-rate from a
 single reading.** Re-measured at 15:2x the same day, after a few more rebuilds: **10 stale
 servers and 2 stale muxes**, up from 3 servers ninety minutes earlier. The split is the whole
