@@ -153,10 +153,21 @@ names the class — but do not expect an IC number back.
 > running, then IC-2, IC-13 and IC-14 each +1 about two hours later — every one of them a peer
 > session filing bugs in the same checkout, none of them a mistake by whoever last wrote the cell.
 > So these cells are stale **by concurrency**, not by neglect, and no manual sweep can hold them:
-> the sweep's own result is invalidated by the next commit. `tests/issue_clusters.rs` already
-> parses this file's `**Slug:**` set and walks the corpus for tag validity; asserting each table
-> cell against its derived count is the missing gate, and it is the only thing that would make a
-> drifted cell unmergeable rather than merely noticed later.
+> the sweep's own result is invalidated by the next commit. **That gate now exists.**
+> `tests/issue_clusters.rs` parses this file's `**Slug:**` set, walks the corpus for tag validity,
+> and — in `every_index_count_matches_the_corpus` — asserts every `n` cell below against its
+> derived count, so a drifted cell is unmergeable rather than noticed later; a pre-commit hook
+> (*refuse a commit whose ledger counts disagree with its staged corpus*) runs the same check at
+> commit time. *(This passage read "asserting each table cell against its derived count is the
+> missing gate" until 2026-09-01, after the gate had already shipped — `cluster/doc-contradicted-by-code`,
+> which is `IC-11`, inside the ledger that defines it.)*
+>
+> **What stays ungated is the prose that reads those cells.** `**Members:**` and `**Promotes to:**`
+> quote counts in text, and the gate's own assert message hands re-deriving them back to a human.
+> Four were reasoning from superseded numbers on 2026-09-01 — `IC-3`, `IC-10`, `IC-11`, `IC-14`,
+> repaired at `0c5bab41` (patch-id `88bcbdba8b1c9b705442a73a3258d2b5a1c82638`) — and `IC-10`'s read
+> `not yet` — n=2 beside a cell already saying the class cleared both bars. So the gated surface and
+> the surface a promotion decision is actually read off are not the same surface.
 >
 > **When a count moves, re-derive every judgement that quotes it, in the same pass.** The
 > 2026-08-31 backfill updated `**Members:**` and this table but not `**Promotes to:**` — the
@@ -273,12 +284,19 @@ reads as 9 by occurrence against a true membership of 8
 (`docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md` names it in both places).
 Every `n` in the table above is a **file** count.
 
-Snapshot 2026-09-01: **118 tagged of 495.** This read *"78 of the 357 files dated 2026-07-01 or
-later are tagged and 279 are deliberately untagged … a further 137 pre-July files are
-unbackfilled"* until then — four figures and a two-way partition, moved by `13226bda`, `77d4da06`
-and `0dea2246` within one evening, and re-derived by none of the three commits that moved them.
-**Every `n` above therefore remains a floor.** Covering the archive would need an explicit
-`cluster/unclassified` slug meaning *looked, nothing fits* — a taxonomy decision, not a gate one.
+**No snapshot is kept here — two were, and both rotted inside a day.** The first read *"78 of the
+357 files dated 2026-07-01 or later are tagged and 279 are deliberately untagged … a further 137
+pre-July files are unbackfilled"* — four figures and a two-way partition, moved by `13226bda`,
+`77d4da06` and `0dea2246` within one evening and re-derived by none of the three commits that moved
+them. The second read *"118 tagged of 495"* and was **152 of 525** when re-derived at `0c5bab41`, on
+the same date it was written. The archive is outside the gate, so nothing holds its coverage and any
+figure here decays at the rate bugs are archived; run the two commands above instead. (Re-derived
+the same day under both instruments: `git grep -l` counts a file whose only mention is in prose,
+where the gate reads frontmatter alone — today **zero** files differ, so the two are
+interchangeable, and a bug file quoting a slug it does not declare is what would separate them.)
+**Every `n` in the table above therefore remains a floor.** Covering the archive would need an
+explicit `cluster/unclassified` slug meaning *looked, nothing fits* — a taxonomy decision, not a
+gate one.
 
 **The candidate queue is now empty — all five became classes on 2026-09-01, and every one opened
 at n=0.** `IC-13`, `IC-14` and `IC-15` are the backfill's three remaining shapes; `IC-12` is the
