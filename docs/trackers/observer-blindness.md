@@ -1221,7 +1221,7 @@ re-examined* — only the boundary).
 
 **Valid:** conditional — MCP tool calls gain per-agent identity, at which point the ledger can key on it
 
-**Rests on:** Iron Law 6 — the parent-briefs discipline exists *because* the server cannot tell parent from subagent; `docs/issues/2026-09-01-subagent-told-to-skip-guides-it-never-received.md`
+**Rests on:** Iron Law 6 — the parent-briefs discipline exists *because* the server cannot tell parent from subagent; `docs/issues/archive/2026-09-01-subagent-told-to-skip-guides-it-never-received.md`
 
 **Class:** shared state keyed at a coarser grain than the party reading it
 
@@ -1235,7 +1235,7 @@ re-examined* — only the boundary).
 
 **Mechanism status:** partial — wording corrected at three sites (2026-09-01), and `repeat_fetch_keeps_body_and_flags_static` now pins the note *negatively*, so drift back toward asserting the caller already fetched it reds the lane. `codescout-companion`'s `SubagentStart` hook tells subagents to fetch regardless of their brief, covered by `tests/test-subagent-guidance.sh`. The **keying** is untouched and unfixable from inside this repo. The companion's `agent-guide-snapshot.mjs` / `agent-guide-restore.mjs` bracket already works the sibling direction (a subagent's marks starving the parent), and its own scope note records that it is inert within the session it runs in — a second party attacking the same boundary from the other side, reaching the same partial result.
 
-**Instances:** `docs/issues/2026-09-01-subagent-told-to-skip-guides-it-never-received.md` (this repo). Cross-repo, prose-only and deliberately not an edge: `claude-plugins`'s `codescout-companion/docs/issues/archive/2026-08-26-subagent-guide-fetch-starves-parent.md` and `…/2026-08-27-guide-ledger-bracket-is-inert-within-its-own-session.md`.
+**Instances:** `docs/issues/archive/2026-09-01-subagent-told-to-skip-guides-it-never-received.md` (this repo, archived 2026-09-01). Cross-repo, prose-only and deliberately not an edge: `claude-plugins`'s `codescout-companion/docs/issues/archive/2026-08-26-subagent-guide-fetch-starves-parent.md` and `…/2026-08-27-guide-ledger-bracket-is-inert-within-its-own-session.md`.
 
 **Status:** open — 1 session (2026-09-01), user-reported. The sibling direction was independently filed in `claude-plugins` across three earlier sessions; that is corroboration of the keying defect, not a second instance of this row.
 

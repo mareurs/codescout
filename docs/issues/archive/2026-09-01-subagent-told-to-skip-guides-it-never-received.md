@@ -1,5 +1,5 @@
 ---
-id: fd378fa834757146
+id: 72f7cb362df87dd9
 kind: bug
 status: fixed
 title: 'BUG: Iron Law 6 tells the parent to make subagents skip get_guide, and the repeat-fetch note tells them they already have it'
@@ -10,7 +10,6 @@ tags:
 - prompts
 - cluster/gate-keyed-on-unobservable-event
 closed: 2026-09-01
-unverified: 'Both halves are committed and gated: codescout 019b1c5b on experiments, claude-plugins ac1b1fa on branch fix/subagent-guide-fetch-directive. That branch is NOT merged to main -- the only outstanding item. Do not archive until it merges.'
 ---
 
 ## Symptom
@@ -108,23 +107,23 @@ from this session were handed to that file's owner; note that the accompanying
 showed no lock wait at all, so lock contention is not a necessary condition and the pair is
 two plain reproductions, not a discriminating condition.
 
-**Not yet archived, and the reason is queryable in `unverified:` above.** The companion half
-of the fix — `codescout-companion/hooks/subagent-guidance.mjs`, which is the only channel
-that reaches a subagent directly, plus its three new cases in `tests/test-subagent-guidance.sh`
-(39 passed, 0 failed) — is committed in the `claude-plugins` repo at **`ac1b1fa`**, patch-id
-**`f7cbe7f484dce20a708f97e84f772550ebdbff79`**, on branch `fix/subagent-guide-fetch-directive`.
-That branch is **not merged to `main`**, which is the only thing still outstanding. Archive
-this file once it merges.
+**Both halves are landed and this file is archived.** The companion half —
+`codescout-companion/hooks/subagent-guidance.mjs`, the only channel that reaches a subagent
+directly, plus its three new cases in `tests/test-subagent-guidance.sh` — is `ac1b1fa` in the
+`claude-plugins` repo, patch-id `f7cbe7f484dce20a708f97e84f772550ebdbff79`, merged to `main`
+by fast-forward (so `ac1b1fa` is both the commit and the merge point; there is no merge
+commit to cite). `./tests/run-all.sh` green on the merged tree.
 
-(The companion half is nonetheless already *live*: `claude-plugins` hooks resolve via
-`CLAUDE_PLUGIN_ROOT` to the repo working tree, so the edit took effect on save rather than on
-merge. The codescout half is live too, by a different and less comfortable route — a release
-build by another session at 22:52 on 2026-09-01 compiled the then-uncommitted working tree into
-the shared binary, so servers started after that timestamp ran this fix before it was
-committed, while six older servers kept the pre-fix image.)
+(Both halves were already *live* before either was committed, by different routes, which is
+the part a future reader would not guess. `claude-plugins` hooks resolve via
+`CLAUDE_PLUGIN_ROOT` to the repo working tree, so that edit took effect on save. On the
+codescout side another session's release build at 22:52 on 2026-09-01 compiled the
+then-uncommitted working tree into the shared binary — so servers started after that
+timestamp ran this fix before it was committed, while six older servers kept the pre-fix
+image.)
 
 The residual that no wording change reaches — the ledger cannot key on an identity the MCP
-protocol never carries — is filed as `OB-11` on `docs/trackers/observer-blindness.md`, which
-cites this file. **That citation is a scheduled break:** archiving this bug re-keys it
-(`id = sha256(abs_path)`), so re-point `OB-11`'s `**Rests on:**` and `**Instances:**` lines in
-the same commit as the move.
+protocol never carries — stays open as `OB-11` on `docs/trackers/observer-blindness.md`, and
+is counted as the 22nd member of `IC-2` / `cluster/gate-keyed-on-unobservable-event`. Both
+cite this file at its **archive** path; they were re-pointed in the same commit as the move,
+per the archive rule.
