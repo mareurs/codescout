@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 150
+entry_high_water_R: 151
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -6310,6 +6310,67 @@ reachable, since git will not descend into a directory it has ignored.
 finding — and "this is my own debris" is not one. Read the artifact (`ls -l`, owner, ids in
 the path) before removing it; on a tree shared with peer sessions, the id is in the path
 and costs one call to read.*
+
+## R-151 — A design's quantitative premise is a hypothesis about a substrate nobody sampled
+
+**Verdict:** hit — and the unusual kind, because **no downstream gate existed to confirm it**.
+
+**What happened.** Scoping T-7 began by histogramming the live `catalog_audit` table rather
+than by reading the approved spec's Phase 2 reasoning. The spec's one named volume term
+(reindex churn) measured **0.4%** of rows; the unnamed term was **98.5%** — empty `{}` diffs
+from an UPDATE trigger with no `WHEN` clause. Full evidence:
+`catalog-audit-trail-session-log:F-1` and `catalog-audit-trail-session-log:W-1`.
+
+**Why this is a distinct shape from the ledger's existing negative-result family.** The
+`R-3 → R-113 → R-77 → R-79 → R-104` chain disciplines a **search** — a query whose zero, or
+whose confident full answer, is evidence about the predicate rather than the world. This is
+adjacent but not the same: the instrument was correct, the query was correct, and **nobody
+had run one**. The design was reasoning about a distribution that had never been sampled,
+because at brainstorming time the table did not yet exist — and nothing scheduled a
+re-measurement for the moment it did.
+
+`R-117`'s population form is the closest existing relative and is its **mirror image**: there
+a fix named a population that turned out empty; here a design named a term that turned out
+250× smaller than an unnamed one. Both fail **green**, which is the property that unites
+them. The difference that matters for routing is the trigger: `R-117` fires when you are
+*writing a fix that names a set*, and no `R-N` currently fires when you are *reading an
+approved design that rests on a rate*. That is the gap this entry records.
+
+**Why the existing promoted law did not reach it.** CLAUDE.md § Bug Tracking carries *"Run
+the reproduction before reading the fix plan — the plan is a hypothesis about the
+reproduction"* at four datapoints. It is phrased for **bug fixes** and keyed on the word
+*reproduction*. Here there was no bug, no reproduction, and an approved spec — so the law was
+loaded and did not fire. By this skill's own four-way audit that is the **outgrown** category
+(still true, too narrow), not *unreachable*: the text does not cover designs, so a better
+placement would not have helped. The remedy is re-promotion of an evolved form, not a
+restatement.
+
+**Proposal.** Widen the CLAUDE.md law from *reproduction* to *substrate*: **a design whose
+argument rests on a volume, rate, or population owes one measurement of that quantity before
+its plan is written — and a design written before its own substrate existed owes it again at
+implementation time.** The second clause is the load-bearing half here and is absent from
+every current form of the rule.
+
+**Promote-when:** one further instance of a design (not a bug fix) whose central quantitative
+claim is falsified by measuring first. At 2, promote the widened form; cite this entry and
+`catalog-audit-trail-session-log:W-1`.
+
+**Audit of the promoted set** (required by § *Every promotion audits the promoted set*), run
+2026-09-01 against the four categories:
+
+- *False* — none found. The bug-fix form's claim still holds; its four datapoints are intact.
+- *Outgrown* — **one, this entry's subject.** Recorded above, not yet re-promoted, because it
+  sits at one datapoint in the design form.
+- *Unreachable* — not applicable here; the law was in context and did not match, which is
+  narrowness rather than placement.
+- *Obsolete* — none; no structural gate measures a design's quantitative premises, and W-1's
+  counterfactual is precisely that no gate in the chain reads data rather than code.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** `catalog-audit-trail-session-log:F-1`'s measurement table; the spec text at
+`docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md` § Phase 2 as it stood
+before `b0bdc4b1`.
 
 ## Template for new entries
 
