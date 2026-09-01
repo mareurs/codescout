@@ -351,6 +351,31 @@ list into the phases that own them. What remains is genuinely open:
 
 ## Progress & Resume (2026-05-30)
 
+> **Phase 5(a) LANDED 2026-09-02 (uncommitted at time of writing).** The "when to pin"
+> guidance shipped, but **not** where this plan assumed. Three findings worth keeping:
+>
+> 1. **The refusal site, not the prompt surface, was the load-bearing gap.** Phase 5(a)
+>    was written as "broader `server_instructions` prose", and the keystone's per-property
+>    description was judged to make it mere refinement. It was not: bug
+>    `d5566f4c24ceb601` (2026-09-01) cost a live SDD run precisely because the read-only
+>    refusal offered only the process-wide remedy and never named the parameter this plan
+>    shipped, tested and advertised on 23 tools. `check_tool_access`
+>    (`src/util/path_security.rs`) now offers `workspace='<abs path>'` **before**
+>    re-activation, in both the `ActivatedReadOnly` and the unattributed `None` arm.
+> 2. **The prose could not go on the slice, and the gate that says so is not the
+>    documented one.** `STATIC_SLICE_CHAR_BUDGET = 1900` passed; a single 84-char quickref
+>    line still failed `the_tier_split_leaves_real_headroom_in_the_persistent_channel`,
+>    which reserves ≥120 chars for the dynamic `## Project Status` block (left 47). The
+>    content went to `get_guide("workspace-state")` § *Per-call workspace pinning* — which
+>    already existed and already covered when to pin — plus a two-word slice pointer.
+> 3. **Item (b) resolved as this plan predicted:** no `ONBOARDING_VERSION` bump.
+>    `server_instructions` is live-on-connect and `builders.rs` was untouched.
+>
+> **Remaining Phase 5: (c)** retire `concurrent_activation_warning` on pinned flows — it
+> still attaches unconditionally at `src/tools/config/mod.rs:314-317`; and **(d)** the live
+> `/mcp` end-to-end verify, which is a user step. Phase 4b remains deferred and correctly
+> so: `AgentInner.workspaces` is still `HashMap<PathBuf, Workspace>` (`src/agent/mod.rs:112`).
+
 **Status: Phases 0–3 COMPLETE — the entire READ surface honors per-request pinning;
 regime-3 is fixed for all reads.** Work lives on branch
 **`feat/per-request-workspace-pinning`** (forked from `experiments`). Nothing pushed;

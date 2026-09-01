@@ -649,11 +649,14 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                     cause: WriteBlockCause::ActivatedReadOnly,
                 }) => bail!(
                     "File writes are disabled: the active project is {} and it was activated \
-                     read-only. Call workspace(action='activate', path='{}', read_only: false) \
-                     to enable writes. If that is not the project you expected to be in, \
-                     something else sharing this process activated it — a subagent, or another \
-                     caller on this session — because activation replaces the default for \
-                     everyone in the process.",
+                     read-only. To write somewhere else without disturbing it, pass \
+                     workspace='<absolute path of the project you meant>' on this call — every \
+                     mutating tool takes it, and it resolves the project per-call. To lift the \
+                     block here instead, call workspace(action='activate', path='{}', \
+                     read_only: false) — but that is process-wide: activation replaces the \
+                     default for every caller sharing this process, so if a subagent or another \
+                     caller on this session activated it read-only, re-activating flips it under \
+                     them mid-task.",
                     root.display(),
                     root.display()
                 ),
@@ -669,7 +672,7 @@ pub fn check_tool_access(tool_name: &str, config: &PathSecurityConfig) -> Result
                 // No project root was available to the config builder, so say
                 // only what is known rather than asserting a cause.
                 None => bail!(
-                    "File writes are disabled for this project. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes. If you didn't expect this, a subagent may have changed the active project — call workspace(action='status') to check."
+                    "File writes are disabled for this project. To write somewhere else without changing anything process-wide, pass workspace='<absolute path of the project you meant>' on this call — every mutating tool takes it. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes — but that is process-wide and affects every caller sharing this process. If you didn't expect this, a subagent may have changed the active project — call workspace(action='status') to check."
                 ),
             }
         }
@@ -2455,6 +2458,47 @@ mod tests {
         assert!(
             err.contains("sharing this process"),
             "must point at the mechanism, since the caller did not activate it: {err}"
+        );
+    }
+
+    /// Fix 1 of `docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`,
+    /// and Phase 5(a) of the per-request-pinning plan: the refusal must offer the
+    /// per-call `workspace=` pin BEFORE re-activation.
+    ///
+    /// **Order is the assertion, deliberately.** Two `contains` checks would pass
+    /// with the pin advice appended at the end — and that arrangement is the bug,
+    /// not a fix: a caller takes the first remedy that fits, and re-activation is
+    /// process-wide, so following it flips the default under whichever peer set
+    /// it read-only. `find()` positions are what discriminate; do not relax these
+    /// to `contains`.
+    #[test]
+    fn read_only_refusal_offers_the_per_call_pin_before_reactivation() {
+        let config = PathSecurityConfig {
+            file_write_enabled: false,
+            write_block: Some(WriteBlock {
+                root: PathBuf::from("/work/some-other-repo"),
+                cause: WriteBlockCause::ActivatedReadOnly,
+            }),
+            ..PathSecurityConfig::default()
+        };
+        let err = check_tool_access("edit_file", &config)
+            .expect_err("writes are off, this must refuse")
+            .to_string();
+
+        let pin = err
+            .find("workspace=")
+            .unwrap_or_else(|| panic!("must name the per-call pin parameter: {err}"));
+        let reactivate = err
+            .find("read_only: false")
+            .unwrap_or_else(|| panic!("must still carry the re-activation remedy: {err}"));
+        assert!(
+            pin < reactivate,
+            "the non-destructive remedy must come FIRST — a caller takes the first \
+             one that fits, and re-activation is process-wide: {err}"
+        );
+        assert!(
+            err.contains("every caller"),
+            "must say WHY re-activation is the second choice, not merely that it is: {err}"
         );
     }
 

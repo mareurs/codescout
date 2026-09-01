@@ -135,6 +135,16 @@ instead of activating: pass `workspace=<absolute path>` on each tool call.
 - Pinning is the recommended path for parallel multi-workspace fan-out. Prefer
   it over calling `activate` inside a subagent (see Subagent semantics above),
   which leaves the shared slot pointed wherever the subagent last set it.
+
+**When a peer has activated read-only, pin — do not re-activate.** A refused write
+naming a project you never chose *is* this collision: another caller sharing the
+process activated it with `read_only=true`, and activation is process-wide. The
+remedy the refusal used to offer first — re-activating with `read_only=false` —
+clears your block by flipping the substrate under whoever set it, mid-task. Passing
+`workspace=<absolute path>` on the call resolves it for you alone and leaves their
+activation intact. Measured 2026-09-01: the pin worked first try during an SDD run
+where re-activation would have disrupted a running implementer
+(`docs/issues/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`).
 ## Anti-patterns
 
 - **Forgetting to restore home.** Iron-Law-grade. Server is shared

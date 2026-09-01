@@ -89,19 +89,47 @@ Deliberately **not** proposed: per-agent activation state. That is a much larger
 the per-call parameter already covers the need.
 
 ## Tests added
-N/A — not started.
 
+Regression test `read_only_refusal_offers_the_per_call_pin_before_reactivation`
+(`src/util/path_security.rs`). **The assertion is ORDER, not presence** — it takes
+`find()` positions and requires the `workspace=` offer to precede `read_only: false`.
+Two `contains` checks would pass with the pin advice appended at the end, and that
+arrangement is this bug, not its fix: a caller takes the first remedy that fits. Do not
+relax it to `contains`.
+
+Verified before writing the message that the advice actually works, rather than trusting
+the field report: `check_tool_access(name, workspace_override)` →
+`Agent::security_config_for` (`src/agent/mod.rs:712`) → `with_project_at(override)` → that
+project's own `project_security_config`. A pinned write genuinely does not consult the
+read-only project's config.
 ## Workarounds
 Pass `workspace="<abs path>"` on every mutating call while a subagent may hold the
 activation. Do **not** re-activate to fix it mid-run.
 
 ## Resume
-Start with fix 1 — it is one message and needs no state change, and the parameter it names is
-already implemented and already documented on every tool. Fix 2 is the durable one and should
-be weighed against `IC-17`'s other members rather than built for this bug alone.
 
+**Fix 1 is implemented (uncommitted, `experiments` working tree, 2026-09-02).** Both
+affected arms of `check_tool_access` now offer `workspace='<absolute path>'` *first* and
+label re-activation as process-wide: the `ActivatedReadOnly` arm, and the `None`
+(unattributed) arm, which hedges toward the same read-only cause and had the same gap.
+The `ConfiguredOff` arm was deliberately left alone — its cause is config, not activation,
+and its own test exists to stop it offering remedies that do not apply.
+
+The durable guidance went to `get_guide("workspace-state")` § *Per-call workspace
+pinning*, which already had a pinning section and now carries the read-only-collision
+case. It could **not** go on the `server_instructions` slice: that surface has ~200 chars
+of headroom under `STATIC_SLICE_CHAR_BUDGET`, and a one-line quickref addition tripped
+`the_tier_split_leaves_real_headroom_in_the_persistent_channel`, which reserves ≥120 chars
+for the dynamic `## Project Status` block. The slice carries a two-word pointer instead
+(`activate, home/foreign, pinning, reset`). No `ONBOARDING_VERSION` bump —
+`server_instructions` is live-on-connect and `builders.rs` was untouched.
+
+**Still open: Fix 2** (record *who* activated, so the message can name the subagent and
+the time instead of "something else sharing this process"). That is the durable one and
+the root cause — ownerless shared state — is untouched; weigh it against `IC-17`'s other
+members rather than building it for this bug alone. Flip this file to `mitigated` with a
+`closed:` date, fix SHA and patch-id when the Fix 1 change is committed.
 ## References
 - `.superpowers/sdd/2026-09-01-committed-audit-shards/progress.md` § Observations during the run
 - `docs/trackers/catalog-audit-trail-session-log.md` (T-7 run)
 - Cluster: `IC-17` — a shared resource carries no owner, so enumerating the peer does not help
-

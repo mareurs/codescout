@@ -31,6 +31,6 @@ Call get_guide(topic) FIRST before deeper work:
 - "tracker-conventions" — entry fields (`**Valid:**`, `**Rests on:**`), status, archive
 - "progressive-disclosure" — output budgets, @ref buffers
 - "error-handling" — RecoverableError vs anyhow::bail
-- "workspace-state" — activate, home/foreign, reset
+- "workspace-state" — activate, home/foreign, pinning, reset
 - "iron-laws-detail" — gate text + exceptions
 - "symbol-navigation" — per-language nav tips

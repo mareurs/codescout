@@ -200,6 +200,23 @@ claim like any other; that it comes with a number attached ("2-of-2") makes it r
 measurement rather than as attribution. The hedging in the text above — "candidate, not a
 finding" — was applied to the *causal* reading and not to the *observational* one, which is
 exactly where it was needed.
+
+### Reproduced 2026-09-02, and the confirmation is the point
+
+Two further observations, both under `cargo test --workspace` while a peer session was
+building concurrently on the same machine: failed in the full run, **passed in isolation
+immediately after**, twice. Same assertion, same 10s-vs-1s message.
+
+Recorded because this repo's testing discipline treats a re-derivation that *confirms* as a
+denominator rather than a non-event: without it the file accumulates only the runs that
+failed, and "how often does this fire under load" has no divisor. It adds no new
+diagnosis — the load-sensitivity was already the diagnosis — and it is **not** a second
+per-instance fix request.
+
+Incidental, and the reason it was noticed: it is the only red in an otherwise clean gate
+(lean `--no-default-features` 3441 pass / 0 fail; default 4833 pass / 1 fail), so it reads
+to an unrelated author exactly like their own regression until they check the ledger. That
+cost is paid per author, not per occurrence.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).
