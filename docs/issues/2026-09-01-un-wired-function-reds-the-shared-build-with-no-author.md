@@ -255,21 +255,55 @@ invisible to the enumeration *and* to the candidate set it produced.
 
 **The finding: broadcasting widens the guess, it does not close it.** Refusing to choose between
 two candidates was the right call and remains the cheaper error — but its correctness is about
-*not asserting a falsehood*, not about reaching the answer. Here the two-candidate set was
-itself a partial population, so **every** available routing decision was wrong: picking either
-peer would have been a misattribution, and broadcasting to both was also wrong, merely
-harmlessly so. Two sessions each spent a turn establishing a negative about work they had not
-done.
+*not asserting a falsehood*, not about reaching the answer.
 
-That is worth separating from instances 1–3 explicitly. Their remedy was *check before
-asserting*; instance four's was *a provenance channel*; **this one's is neither** — no amount of
-care or breadth on the responder's side constructs a candidate set that contains a party no
-instrument on the machine reports. The closing move is the scratchpad-path procedure now in
-`CLAUDE.md` § *Observer Blindness*, and it has a precondition this instance violates: **asking
-the session only works once the candidate set contains the owner.** Enumeration completeness is
-upstream of positive identification, not an alternative to it — which is the same conclusion
-`bug-fix-session-log:F-80` reaches from the elimination side, arrived at here from the routing
-side.
+### CORRECTED within the hour — the candidate set was constructible, and a skill for it already existed
+
+This instance was first written up as *"positive identification is unavailable; record the
+question unresolved"*, and that was **wrong**. It was a claim about the world when it was a fact
+about the instrument. The operator asked whether a peer-communication skill should have fired.
+It should have, and it had not.
+
+`codescout-companion:reaching-peer-sessions` was in this session's own skill list from the first
+turn. Its description names the trigger **verbatim** — *"or when `ListAgents` returns fewer peers
+than expected"* — which is exactly the state observed and stated out loud. Running its Step 1
+enumeration, at the operator's prompting:
+
+```
+-- 16 live sessions across 3 profile(s)
+   .claude      codescout-b1  idle  /home/marius/work/claude/codescout
+   .claude      codescout-3c  busy  /home/marius/work/claude/codescout
+   .claude      codescout-8a  busy  /home/marius/work/claude/codescout
+   .claude-sdd  codescout-09  idle  /home/marius/work/claude/codescout
+   .claude-sdd  codescout-17  busy  /home/marius/work/claude/codescout   <-- me
+   .claude-sdd  codescout-68  busy  /home/marius/work/claude/codescout
+   … 10 more across .claude / .claude-kat in other checkouts
+```
+
+`ListAgents` reported **2** peers. The real population is **16 across 3 profiles, five of them in
+this checkout** — so the broadcast reached **two of five**, and the three sessions it could not
+see were reachable throughout by `uds:/run/user/1000/cc-socks/<PID>.sock`. The mechanism is
+simply that discovery is **per-profile** (`$CLAUDE_CONFIG_DIR/sessions/*.json`) while delivery is
+**per-user** (`/run/user/<uid>/cc-socks/`).
+
+**Not claimed:** which of the omitted sessions wrote the file. `b2a50de8` / `bcc98c22` are
+plausibly among the three, and asserting that would repeat this file's own error. What *is*
+established is that a socket-scoped enumeration contained candidates the session never
+considered, so *"no routing decision was available"* is false.
+
+**What survives, and it is the better version:** the sub-shape is real — checking the object does
+not attribute a write, and the skill's own text says so (*"enumerating a complete set still only
+bounds who was present — it does not attribute a write. To attribute one, ask."*). What does
+**not** survive is the escalation to *unresolvable*. Correct sequence: **enumerate over sockets →
+intersect with the write-derived set → ask the survivors.** Only a write-derived name absent from
+a *socket-scoped* enumeration is genuinely unresolvable.
+
+**And the reason the remedy did not fire is the most transferable part.** It was not missing, not
+unknown, and not hard to run. It went uninvoked through three peer messages and a `CLAUDE.md`
+paragraph *about the gap it closes* — `OB-1` at the instrument level rather than the parameter
+level. A skill whose trigger is a condition the model must *notice* is a policy, not a mechanism.
+Candidate `H-N`: surface the profile count on the `ListAgents` response itself, which is the only
+place the precondition is observable at the moment it matters.
 
 **Two corrections I owed on my own broadcast, recorded because both were published.**
 

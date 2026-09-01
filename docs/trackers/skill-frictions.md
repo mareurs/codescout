@@ -259,6 +259,60 @@ the drift, W-2 is the win-from-catching-it. The fact that both could be
 *one* friction in the right place (writing-plans pre-write scout) and
 not just a recon-saves-the-day story is the substantive complaint.
 
+## `/codescout-companion:reaching-peer-sessions`
+
+### F-001 — the trigger condition was observed, said out loud, and the skill still went uninvoked
+
+**When:** 2026-09-01, a full session of cross-session coordination on a shared checkout
+(codescout-17). `ListAgents` was called three times and reported 2–3 peers. A peer's
+`file-provenance.py` run named two writing sessions that were **not in that list**. I stated
+that discrepancy explicitly, in writing, to two peers — *"neither of those appears in my
+`ListAgents` … either they have ended, or this is `BL-58` under-reporting again"* — and then
+reasoned onward from the short list anyway.
+
+**Got:** the skill's own `description` names this exact state as a trigger: *"…or when
+`ListAgents` returns fewer peers than expected."* It was in my available-skills list from the
+first turn of the session. It went uninvoked through:
+
+- three peer messages routed on the incomplete set (a broadcast that reached **two of five**
+  sessions in this checkout);
+- a fifth instance filed in `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`
+  concluding *"positive identification is unavailable"*;
+- a paragraph promoted into `CLAUDE.md` § *Observer Blindness* stating that as a rule.
+
+All three were wrong in the same way, and the operator caught it by asking whether a skill for
+this existed. Running Step 1 took one call and returned **16 live sessions across 3 profiles,
+five of them in this checkout** — against `ListAgents`' 2. Discovery is per-profile
+(`$CLAUDE_CONFIG_DIR/sessions/*.json`); delivery is per-user (`/run/user/<uid>/cc-socks/`). The
+three sessions I could not see were reachable the whole time.
+
+**Root cause — not a discoverability gap.** The skill is well-named, its description is precise,
+and its trigger is a condition I *observed and articulated*. Nothing was missing except the act
+of invoking it. So this is not "the skill needs a better description": it is a trigger that
+requires the model to notice a state and then choose to act, with nothing in the environment
+tying the two together. **A skill whose trigger is a condition the model must notice is a policy,
+not a mechanism** — precisely the distinction `CLAUDE.md` § *Observer Blindness* draws, and I
+committed this while editing that section.
+
+**Impact:** high for correctness, low for cost. Three published claims required retraction, one
+of them from `CLAUDE.md`. No peer was harmed — the broadcast recipients each spent a turn
+establishing a negative — and the underlying issue was closed by its own author unprompted.
+
+**Fix idea (mechanism, not exhortation):** the only place the precondition is observable at the
+moment it matters is the `ListAgents` response itself. Have the companion's post-tool hook
+annotate that response with the socket-scoped profile count whenever it exceeds the returned row
+count — e.g. `[cs-hint] ListAgents is per-profile: 2 shown, 16 live across 3 profiles; run
+/codescout-companion:reaching-peer-sessions`. That converts a trigger the model must remember
+into a fact the response carries. Tracked as a candidate `H-N` in
+`docs/trackers/codescout-usage-hookify.md`.
+
+**Secondary fix idea (cheap, partial):** the skill's own § *Two readings to get right* already
+says *"report the scope you actually searched … say which profile it covered rather than
+presenting it as the population."* That is the right rule and it is inside the skill — i.e.
+reachable only after invoking it. Consider hoisting one line of it into the `description`, so the
+per-profile caveat is visible in the skill *list* rather than only in the body: a reader who
+never invokes the skill currently never learns that `ListAgents` is a subset.
+
 ## `/buddy:summon`
 
 ### F-001 — Summon protocol assumes native Bash/Read; codescout-companion hard-denies both
