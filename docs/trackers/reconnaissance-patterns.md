@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 172
+entry_high_water_R: 173
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-173 | 2026-09-02 | miss, unrecoverable — emitted before it was noticed (1 instance) | **A classifier's REJECTED branch is where the leak is — scan a config for a property, print the key and the verdict, never the value.** Measuring `IC-4`'s env surface, a loop asked only *"does each path-valued var in `.env` still resolve?"* — and its `*)` arm, written as a courtesy to show what was skipped, printed a credential in full into a transcript. `.env` is gitignored and untracked, so nothing reached git; the exposure was created **entirely by the read**. **The asymmetry is structural:** the accepted branch is what the task is about and gets the attention, so the else-arm is written as an afterthought and reviewed as one. `.env`, `settings.json`, `.npmrc`, `~/.cargo/credentials` and CI variable dumps are all files whose *shape* is the subject of routine questions and whose *contents* are not. **Remedy:** emit the value only in the branch where the value IS the finding — a missing path must name itself to be actionable, a resolving one need not. **Checked, and not a repo defect:** no script under `scripts/` reads `.env` or dumps `key=value`; the hazard lives in ad-hoc shell written for a one-off question, which is exactly the code no reviewer sees. | pairs with `R-171` as its opposite — that one is a read emitting too LITTLE (a bound cutting the payload, an absence then acted on), this one a read emitting too MUCH in the arm chosen for completeness; both from fixing the output shape before knowing the input |
 | R-172 | 2026-09-02 | hit, narrowly — caught by an isolating re-run before sending (1 instance) | **A result that falsifies a documented invariant is usually the invariant's already-recorded RESIDUAL.** The full four-command gate, run in the documented order, gave 10 of 11 `cli_artifact` failures — the librarian-less binary — against `CLAUDE.md`'s bold claim that *"following the gate cannot arm the trap … provided both lanes actually run"*. Both ran, both exited 0, and a draft saying the claim was false got written. Re-running the two lanes ALONE: lean leaves it lean, default restores it, exit 0, 11/11 — the ordering is sound and a peer's concurrent lean lane had landed inside the window. **What makes it an entry: the corpus had predicted it three days earlier, in a field built for exactly that, and reading the claim could never have found it.** The fix's own bug file (`…-shared-target-dir-feature-clobber-reds-the-cli-tests.md`, `status: fixed`, **archived**) carries in `unverified:`: *"the fix closes the TERMINAL state only, not the window … two sessions gating concurrently still collide and nothing detects that."* The residual is invisible to the canonical triage query by construction — archiving is the normal end state — so the check is `find(kind="bug", include_archived=true, …)` and then read `unverified:` before writing the word "false". **Not `R-163`:** there the attributed cause was the unchecked claim; here observation and cause were both right and the error under construction was the CONCLUSION'S SCOPE — a true local measurement generalised into a falsification, by an instrument that could not see the concurrency it was subject to. | residual confirmation recorded on `d2b0e9c1b9802432`'s `unverified:`; gate green at 01:32; kin `R-166` (the residual survived only because it was in a queryable field, not a commit message) |
 | R-171 | 2026-09-02 | miss ×3 in one session, third caught in draft (3 instances) | **A bounded read returns an absence indistinguishable from a real one — and `tail -c` on one long line cuts the OTHER end.** Three reflexive bounded reads of output whose value was in the part the bound removed: `cargo test … \| tail -8` lost the failure message of a test whose doc comment says the message names the offending file; `\| tail -3` lost which 2 of 18 failed; and `grep -o '…' \| tail -c 1300` cut the **head** of a single long line, producing a drafted accusation that a peer's edit "isn't where they say it is" — it was exactly where they said. **The law is not about `tail`:** the bound was chosen before the shape was known, so the negative it returns is acted on as a real absence. `tail -c N` on one line is sharpest, silently reversing which end is kept. **"Be careful with flags" is the wrong remedy** — all three were the progressive-disclosure habit correctly applied to the one output class where the payload IS the tail of a long thing. **Mechanical remedy:** redirect diagnosis-bearing output to a file and query it, never pipe to `tail`; this is already the Iron-Law-3 pattern, and the gap is that it reads as a VOLUME rule when this is a SHAPE rule, so it never fires for a 3-line pipe. Adjacent but explicitly **not** an instance: six commit outputs printing `Stashing unstaged files …` were fully present, read, and pre-classified as chrome — unread differs from uncaptured and this remedy does nothing for it. | `R-3` twin (disciplines the reader of a result; this disciplines the reader's INSTRUMENT); kin `R-167` (unanchored over-match) as its opposite — that one admits too much, this one shows too little |
 | R-170 | 2026-09-02 | near-miss, caught before any write (1 instance) | **A coverage ratio is a scope question before it is a drift finding — and the scope lived in the ENFORCEMENT layer.** Auditing `docs/issues/` for missing `cluster/<slug>` tags: live 34/34 tagged, archive 156/529, by month 0% → 33% → **42% (2026-08)** → 100%. That reads as drift, and I had a 236-file retro-tagging campaign half-composed. `tests/issue_clusters.rs`'s module header says the opposite in writing — the archive is out of scope by design, *"279 archived files in the backfilled window match none of them… forcing a fit would corrupt the counts that promotion reads"* — so the campaign was the specific thing already considered and ruled out, and would have inflated every `IC-N` with non-members. **The structural cause outlives the escape:** `issue-clusters.md` is where a count is READ, and it guards exactly one failure mode (*"trust the query; re-run it before trusting the count"*) — defending the count's freshness while saying nothing about its population, so re-running as instructed yields a fresh number still scoped to a 34%-tagged corpus, and the instruction to trust it is what stops you asking. **A number and the scope that validates it must co-locate at the point of READING, not of enforcement.** Mirror of the standing law: that one disciplines a prohibition you HAVE read; here the tree held one I had not, and my proposal was exactly what it forbade — so grep the enforcement layer (`tests/`, `scripts/pre-commit-*`, hooks) for the population's name, not only the docs. Cheap tell, no judgement needed: a ratio neither ~0% nor ~100% is a boundary someone drew, not drift. | `85915e8b`; two instruments of genuinely different scope (file frontmatter vs the catalog's `artifact.tags`) agreed on all 563 files; the scope was found by opening `tests/issue_clusters.rs` for an unrelated reason |
@@ -7747,6 +7748,60 @@ found only because someone put it in a queryable field instead of a commit messa
 
 **Promote-when:** a second case where an archived `unverified:` field would have pre-empted a
 falsification, or one where it did not exist and should have.
+
+## R-173 — A classifier's REJECTED branch is where the leak is — scan a config for a property, print the key and the verdict, never the value
+
+**Valid:** invariant
+
+**Verdict:** miss. Not caught by any gate, not caught in draft, and not recoverable —
+the output had already been emitted when it was noticed.
+
+**Observed:** 2026-09-02, measuring `IC-4`'s env surface. The question was narrow: *does
+each path-valued variable in the repo-root `.env` still resolve?* The loop classified each
+line, and its two branches were asymmetric in a way that never got a second look:
+
+```bash
+case "$v" in
+  /*|./*|~*) [ -e "$p" ] && echo "  OK      $k=$v" || echo "  MISSING $k=$v" ;;
+  *)         echo "  (non-path) $k=$v" ;;          # <- the leak
+esac
+```
+
+The **accepted** branch is the one the task is about, so it gets the attention. The
+**rejected** branch was written as a courtesy — "show what I skipped" — and it printed a
+credential in full into a transcript. `.env` is gitignored and untracked, so nothing
+reached git; the exposure was created entirely by the read.
+
+**The law:** when scanning a config file for a *property*, emit the key and the verdict,
+never the value. And the leak is structurally in the **rejected** branch, because that is
+the branch nobody is thinking about: the classifier's whole purpose is the accepted set, so
+the else-arm gets written as an afterthought and reviewed as one. `.env`, `settings.json`,
+`.npmrc`, `~/.cargo/credentials` and CI variable dumps are all files whose *shape* is the
+subject of routine questions and whose *contents* are not.
+
+**Cheap form that answers the same question:**
+
+```bash
+# key + verdict, never the value
+[ -e "$p" ] && echo "  OK      $k" || echo "  MISSING $k -> $v"   # value only when it is the finding
+```
+
+Print the value **only** in the branch where the value IS the finding — a missing path has
+to name the path to be actionable, and a resolving one does not.
+
+**Not a repo defect, checked:** no script under `scripts/` reads `.env` or dumps
+`key=value`, and none needs redaction logic added. The hazard lives in ad-hoc shell written
+to answer a one-off question, which is precisely the code no reviewer sees.
+
+**Kin to `R-171`, and the pair is the point.** That entry is about a read emitting **too
+little** — a bound cutting the payload, returning an absence that gets acted on. This one is
+a read emitting **too much**, in the arm chosen for completeness. Same act, opposite failure,
+and both come from deciding the output shape before knowing what is in the input.
+
+**Status:** open
+
+**Promote-when:** a second instance, or one where the over-emission reaches a commit,
+an artifact body, or a peer rather than a transcript.
 
 ## Template for new entries
 
