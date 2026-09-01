@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: librarian-runtime guide denies the augmentation sidecar — the same-day corrective sweep named three places and this was the fourth'
 tags:
 - cluster/doc-contradicted-by-code
@@ -8,7 +8,7 @@ tags:
 - librarian
 - augmentation
 - doc-drift
-closed: null
+closed: 2026-09-01
 opened: 2026-08-31
 owner: marius
 related: []
@@ -150,6 +150,29 @@ augmentations, zero declarations, `augmentation_declared_but_absent: 0`.
 
 ## Fix
 
+**Applied 2026-09-01 on `experiments`.**
+
+- SHA: `0523b823` (`experiments` — orphans on the next rebase)
+- patch-id: `9ec0e7c8911be27700318ba60b945454275391e7` (survives rebase and cherry-pick)
+
+**Four sentences, not the two filed here.** Steps 1 and 2 below were applied as written. Reading
+the rest of § *Where catalog state lives* found two more claims false for the same reason, which
+is this bug's own lesson applied to itself — an enumeration produced from memory stops at the
+examples that prompted it:
+
+- *"An augment produces no git diff … `git status` stays clean"* — false since write-through.
+  Verified in code rather than inferred from a sibling guide: `sidecar_write_through` is called
+  at `augment.rs:248` and `:492`. Corrected to say the `.md` **body** is untouched while
+  `docs/augmentations/` is not, and that a params-only merge leaves the sidecar byte-identical.
+- The `reindex` bullet was true but incomplete — `reindex` also **restores** an absent
+  augmentation from a declared sidecar, reporting `augmentations_restored`. A reader deciding
+  whether a clone is safe needs that clause, and its absence is what made the guide read as
+  "nothing travels".
+
+Step 3 (a `doctor` check for the undeclared-and-unexported state) was **not** taken — it is a
+separate change with its own design question, and is left as this entry's open follow-on rather
+than folded in here.
+
 Not yet implemented. Proposed:
 
 1. Split the `librarian-runtime.md:101` table row in two — `params` (no disk form, by
@@ -163,6 +186,26 @@ Not yet implemented. Proposed:
    makes the stale guide costly rather than merely wrong.
 
 ## Tests added
+
+`prompts::redesign_invariants::no_guide_denies_the_augmentation_sidecar` — scans **every**
+registered guide, not the one that drifted, matching its sibling
+`no_guide_claims_a_move_preserves_the_id` directly above it. That sibling's doc comment records
+the *same* guide section being missed by the *same* kind of three-place sweep on 2026-08-16, so
+this file is the second instance and the new test says so.
+
+**It asserts both directions, and both were mutation-verified per site.** An absence assertion
+alone is monotone under removal — deleting the section satisfies `!contains` exactly as a correct
+section does — so a positive half asserts `librarian-runtime` still *mentions* the mechanism:
+
+| mutation | expected | result |
+|---|---|---|
+| reintroduce `local-only by design` | absence half fires | **FAILED** — correct |
+| strip every `expects_augmentation` / `sidecar` mention | positive half fires | **FAILED** — correct |
+
+Each fires only on its own direction and with its own message, so neither half is carrying the
+other. A phrase guard is **not** an instrument for `IC-11`'s behavioural sub-shape in general —
+nothing reference-based can be, which is that class's whole finding — it closes this one section
+against a third sweep.
 
 None yet. Item 3 above is the testable part; items 1–2 are prose. A guide-text assertion
 test would be low value, but the item-3 check is a normal `doctor` unit test in the style
