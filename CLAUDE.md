@@ -267,7 +267,19 @@ prevented none of the four. A standing policy caught one.
    so the gate cannot be *followed correctly* and still arm the next session). Next best is an
    unconditional policy tied to a trigger that happens anyway. And for any published claim, ship its
    **derivation** rather than its value, so a reader re-checks it instead of re-deriving it under a
-   counting rule of their own choosing.
+   counting rule of their own choosing. **And ship its POPULATION in the same place.** A bound
+   that lives in the *enforcement* layer — a test module header, a gate script, a hook — is
+   correctly published to an audience that never reads the number, and the author cannot perceive
+   the gap because they are the party holding the bound. So when a tracker's number and its scope
+   live apart, the fix is to **move the scope to the read surface**, not to record the lesson:
+   publishing again is redundant and reading harder is impossible, since the reader does not know
+   the other surface exists. Worse, a document that carefully names *one* failure mode implies by
+   omission that the rest are handled. (`OB-1` § *the third position*,
+   `reconnaissance-patterns:R-170`: a 29.5% tag-coverage ratio read as drift, one step from a
+   236-file campaign the gate's own header forbade in writing. Cheap tell — **a coverage ratio
+   that is neither ~0% nor ~100% is a boundary someone drew before it is drift**; and before any
+   campaign over a population, grep `tests/`, `scripts/pre-commit-*` and hooks for that
+   population's name, not only the docs.)
 
 **Authorship on a shared checkout is one of these.** The operational procedure — the scope table,
 the skill to invoke, the addressing forms, the unit rule — is § *Reaching a Peer Session* above, and

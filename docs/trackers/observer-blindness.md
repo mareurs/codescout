@@ -425,6 +425,55 @@ by the party who introduced it — no reader caught either, and none could have.
 the message itself immutable), and `reconnaissance-patterns:R-142`'s first instance.
 Framing of the genre/durability/inversion asymmetry is `codescout-fe`'s, recorded by them
 at `e8dd2445`.
+### Sub-pattern — the third position: supplied CORRECTLY, to the wrong audience
+
+Found 2026-09-02. `OB-1`'s discriminator above separates two positions and turns on which
+remedy applies: **not-supplied** (publish the parameter) and **supplied-and-unread** (`F-92` —
+where publishing again is a literal no-op, because it is already on screen). There is a third,
+and it takes a remedy neither of those prescribes.
+
+**The incident.** `docs/trackers/issue-clusters.md` publishes each class's membership as a query
+plus an `n`, and guards it deliberately — *"trust the query; re-run it before trusting the
+count."* That sentence defends the count's **freshness**. The count's **population** is bounded
+too, precisely and with measurements: a `cluster/<slug>` tag is required of `docs/issues/*.md`
+and **not** of `docs/issues/archive/*.md`, whose untagged majority is a deliberate exclusion
+because *"forcing a fit would corrupt the counts that promotion reads."* That bound is written
+down. It is written down in `tests/issue_clusters.rs`'s module header — the layer where a bound
+is **enforced**, which no reader of the number has any reason to open.
+
+So the parameter is neither missing nor ignored. It is correctly published to an audience that
+is not the one reading the number, and the author cannot perceive the gap for `OB-1`'s own
+reason: they wrote the gate, so the scope is in their model when they re-read their own ledger.
+
+**Why it earns a row rather than folding into the parent: the remedy inverts.** Publishing the
+parameter is redundant — it is already published, better than the ledger would have put it.
+Reading harder is impossible — the reader does not know the other surface exists. The only
+action left is to **move it**: a number and the scope that validates it must co-locate at the
+point of **reading**, never at the point of enforcement.
+
+**And it is worse than a plain omission, because the careful sentence supplies the
+reassurance.** A document that names one failure mode implies by omission that the others are
+handled. Re-running the query exactly as instructed returns a *fresh* number that is still scoped
+to a 34%-tagged corpus, and *"trust the query"* is precisely what stops a reader asking what it
+ranges over. The audit that found this measured 29.5% archive coverage, read it as convention
+drift, and was one step from a 236-file retro-tagging campaign the header forbids in writing — a
+campaign that would have inflated every class with members matching no class, which is the number
+promotion reads. It was caught only by opening `tests/issue_clusters.rs` for an unrelated reason.
+
+**It also completes a series, which is the grading argument for filing it here rather than as a
+new class.** `OB-1`'s instances are a count missing its *instant*, a count missing its
+*denominator*, and a query result missing its *key*. This is a count missing its *population* —
+the same `Class` field, a fourth parameter, and the third position of supply.
+
+**Two cheap tells, neither needing judgement.** A coverage ratio that is neither ~0% nor ~100% is
+a boundary someone drew before it is drift — true drift tends toward complete, a stable middle is
+usually a decision. And before proposing any campaign over a population, grep the **enforcement**
+layer for that population's name — `tests/`, `scripts/pre-commit-*`, hooks — not only the
+documentation layer. Here one `grep -l 'docs/issues' tests/` was the whole difference.
+
+Instance and full measurements: `reconnaissance-patterns:R-170`. Mechanism shipped `7331b3e4`,
+which moved the population statement into `issue-clusters.md` beside the sentence that had
+defended only freshness.
 ## OB-2 — the session that arms a shared-state trap gets no signal
 
 **Valid:** conditional — reopens if the gate's command order changes, or if a second
