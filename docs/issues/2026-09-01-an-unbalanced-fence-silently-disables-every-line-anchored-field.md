@@ -1,7 +1,7 @@
 ---
 id: '52542a0ec81771a3'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: one stray ``` disables every line-anchored field for the REST of the file, and doctor reports the result as "none declared"'
 tags:
 - cluster/addressing-without-an-escape-hatch
@@ -9,7 +9,7 @@ tags:
 - doctor
 - markdown
 - silent-failure
-closed: null
+closed: 2026-09-01
 opened: 2026-09-01
 owner: marius
 related:
@@ -19,14 +19,19 @@ severity: medium
 
 ## Summary
 
-`structured_fix_pointers` skips fenced lines, deliberately and correctly — a worked example
-is a quotation, not a declaration. But fence state is a running toggle over the whole file,
-so **one unmatched ``` flips every subsequent line to "fenced" forever**. Every
-line-anchored field after it becomes invisible: the `- **SHA:**` pair, and by the same
-convention `**Valid:**` / `**Rests on:**`. Nothing reports the imbalance. `doctor` then
-states, confidently, that no pointer is declared — for a file that visibly contains a
-`## Fix provenance` section with the SHA in it.
+`structured_fix_pointers` skipped fenced lines using a **hand-rolled boolean toggle** that
+flipped on any line starting with three or more backticks. Two consequences: a run shorter
+than an enclosing fence (a ``` quoted inside a ````) flipped it wrongly, and an
+unterminated fence left it inverted for the rest of the file. Either way every `- **SHA:**`
+below the fault is skipped, and `doctor` then states *"no `## Fix provenance` pointer is
+declared"* for a file that visibly contains one — true of the parse, false of the file.
 
+**A correct fence tracker already existed in-tree.** `crate::util::markdown_fence::FenceState`
+matches the opening character and run length, requires a closer to be at least as long and
+followed only by whitespace, and rejects a backtick opener whose info string contains a
+backtick. `src/librarian/statements.rs` documents delegating to it *"rather than a
+hand-rolled toggle"* as **"required, not incidental"**. `structured_fix_pointers` was the
+one consumer of the convention that did not.
 ## Symptom (Effect)
 
 `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md` carried a
@@ -42,17 +47,23 @@ act on the finding sees the section the finding says is absent.
 
 ## Reproduction
 
-Measured 2026-09-01 at `8982f775`. Count fences the way the parser does — `trim_start()`
-then `starts_with("```")`, so indented fences count:
+**Do not count delimiters — that instrument is wrong in both directions, measured.** The
+first version of this file prescribed an odd/even parity count. Against the three real
+files the shipped check finds, parity gets **two of three wrong**:
+`docs/superpowers/plans/2026-02-28-prompt-injection-design.md` and
+`…/2026-05-01-call-graph.md` both have EVEN parity and a genuinely open fence. It also
+false-positives on any file that quotes triple-fence syntax inside a quadruple fence — an
+odd count and perfectly well formed — which is a shape this corpus contains *because* the
+sibling checks teach people to write worked examples.
+
+The reproduction is the shipped check itself:
 
 ```
-awk '{t=$0; sub(/^[ \t]+/,"",t); if (t ~ /^```/ || t ~ /^~~~/) n++} END{print n}' <file>
+cargo build --bin codescout && ./target/debug/codescout doctor \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['summary']['by_check']['unterminated_fence'])"
 ```
 
-Odd result ⇒ every line-anchored field below the last marker is silently unreadable. The
-file above returned **11**. The cause was a doubled fence at lines 53–54 — a block closed,
-then immediately reopened by a stray marker and never closed again.
-
+Measured 2026-09-01 at the fix commit: **3**.
 ## Environment
 
 codescout `experiments`, `src/librarian/tools/doctor.rs`. Applies to any consumer of the
@@ -60,18 +71,25 @@ fenced-line convention, not just this check.
 
 ## Root cause
 
-`structured_fix_pointers` (`src/librarian/tools/doctor.rs:4535-4579`) carries `let mut
-fenced = false` and toggles on every ``` or ~~~ line, skipping while true. Read at the
-bytes 2026-09-01. The toggle is correct per-block and unbounded per-file: there is no
-parity check, no "fence still open at EOF" diagnostic, and no way for a file to escape a
-literal ``` at line start. The same convention governs `**Valid:**` and `**Rests on:**`
-detection, so the blast radius is every line-anchored field, not just fix anchors.
+`structured_fix_pointers` (`src/librarian/tools/doctor.rs`) carried `let mut fenced = false`
+and flipped it on `t.starts_with("```") || t.starts_with("~~~")`. That predicate cannot
+distinguish a delimiter from a line that merely begins with fence characters, and it has no
+notion of run length, so a `` ``` `` nested in a `` ```` `` block toggles it. Read at the
+bytes 2026-09-01.
 
-**The failure direction is what makes it hard to see.** An unbalanced fence produces
-*silence*, and silence is exactly what a file with nothing to declare produces. The two are
-indistinguishable downstream — the check cannot tell "declared nothing" from "declared, but
-unreadable from line 54 onward".
+**Correction — the blast radius claimed by the first version of this file was wrong.** It
+said the same convention governs `**Valid:**` and `**Rests on:**`, so every line-anchored
+field was exposed. Verified false: `parse_validity` / `parse_rests_on`
+(`src/librarian/statements.rs`) already use `FenceState`, **and** they receive one section's
+text at a time with a fresh tracker per call, so an unterminated fence cannot leak across a
+section boundary into a later entry. Both axes are closed there. The exposure was
+`structured_fix_pointers` alone, which is whole-file and was hand-rolled — narrower than
+filed, and worth stating because the wrong version made the defect sound systemic when it
+was one un-migrated caller.
 
+What makes the class hard is unchanged: the failure is **silence**, and silence is exactly
+what a file with nothing to declare produces. "Declared nothing" and "declared, but
+unreadable from line N" are the same empty result to every consumer.
 ## Evidence
 
 ### Two independent defects in one file, and the fence hid the other
@@ -101,28 +119,38 @@ file.
 
 ## Fix
 
-Not fixed. The stray fence in the one affected file is repaired, which is a data fix and
-not a fix for this class. Options, cheapest first:
+Two changes, both in `src/librarian/tools/doctor.rs`.
 
-- **a. A `doctor` check for odd fence parity in any catalogued markdown file.** Cheap,
-  read-only, and it converts a silent misparse into a named finding. Should report the last
-  marker's line, since that is where the invisible region begins.
-- **b. Have `structured_fix_pointers` report an unterminated fence** rather than returning
-  a clean empty vector — turning a plausible negative into an error, per
-  `docs/adrs/2026-08-27-negative-results-name-their-scope.md`.
-- **c. Widen the finding text** on `terminal_status_without_fix_anchor` to say "none
-  parsed" rather than "none declared", and name fence state as a cause. Weakest: it
-  documents the trap instead of removing it.
+**1. `structured_fix_pointers` now delegates to `FenceState`** instead of its own toggle —
+the abstraction the codebase already required of every other consumer.
 
-(a) and (b) are complements — (a) covers every consumer of the convention, (b) covers this
-one caller precisely.
+**2. New read-only `doctor` check, `unterminated_fence`.** Reports a catalogued markdown
+file that reaches EOF with a fence still open, naming the **file line** the opener sits on,
+because "somewhere below here" is the whole remedy in a ledger thousands of lines long.
+Registered in `declare_checks!` **and** wired into the dispatcher — the codebase's own
+`declare_checks!` guard caught the first omission by panicking on an undeclared name, and
+`references()` caught the second, which was three test callers and no production one.
 
+No `fix=` mode. Closing versus deleting a stray delimiter is a content judgement about the
+prose around it, and a repair tool guessing wrong would rewrite meaning.
 ## Tests added
 
-None — nothing is fixed yet. A fix under (a) wants a fixture with an odd fence count and a
-valid `- **SHA:**` line below it, asserting the check fires; plus a balanced-fence control
-asserting it stays silent, since a check that fires on everything is not a check.
+All four written before the code, each watched failing first.
 
+- `structured_fix_pointers_reads_a_declaration_after_a_quadruple_fenced_example` — the
+  toggle/`FenceState` discriminator. Failed `left: []` against the old toggle.
+- `unterminated_fence_fires_only_where_a_fence_is_left_open` — fires on the open file,
+  **silent on a balanced control**; without the control a check that fired on every
+  markdown file would pass.
+- `unterminated_fence_is_silent_on_a_quadruple_fenced_example` — the false-positive guard.
+  This one is monotone under "does nothing" and passed against the stub, so it is a control
+  and not a discriminator; it is load-bearing only in company with the two above.
+- `unterminated_fence_names_the_line_the_silenced_region_starts_at` — pins the file line,
+  not a body offset.
+
+The two sibling tests that already existed (`…ignores_a_fenced_worked_example`,
+`…returns_every_declared_pair_in_order`) stayed green across the `FenceState` swap, which
+is what makes it a migration rather than a behaviour change.
 ## Workarounds
 
 Run the parity probe under § *Reproduction* before trusting any "none declared" finding on
@@ -130,14 +158,15 @@ a file whose body you can see declares something.
 
 ## Resume
 
-Decide between (a) and (b) — (a) is the wider net. If (a): add `scan_unbalanced_fence` to
-`src/librarian/tools/doctor.rs` alongside the other read-only scans, walking catalogued
-markdown and reporting `(path, last_marker_line)` on odd parity.
+N/A — fixed, gate green, and the check verified end-to-end against the real repo rather
+than only in tests (3 findings, none of them a file a parity counter would have named
+correctly).
 
+The **3 files it reports are not repaired** — that is content work in three plans owned by
+other work streams, and the check now makes them visible, which was the point.
 ## References
 
 - `src/librarian/tools/doctor.rs:4535-4579` — `structured_fix_pointers`, the fence toggle
 - `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md` — the
   file this was found on
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — a zero must name its scope
-

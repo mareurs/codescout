@@ -197,6 +197,7 @@ declare_checks! {
     SnapshotDrift => "snapshot_drift",
     TerminalStatusWithCaveat => "terminal_status_with_caveat",
     TerminalStatusWithoutFixAnchor => "terminal_status_without_fix_anchor",
+    UnterminatedFence => "unterminated_fence",
     ValidityUnparseable => "validity_unparseable",
     WorktreeScopedRow => "worktree_scoped_row",
 }
@@ -401,6 +402,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // a record that declares none. Scoped to LIVE terminal bug files — 297 of 355 archived
     // files predate the rule, and the guide calls those stale instructions rather than debt.
     all_violations.extend(scan_terminal_status_without_fix_anchor(ctx, &cat.conn)?);
+    // Both checks above answer "is a fix pointer declared?". This one answers why that
+    // answer can be confidently wrong: an unterminated fence mutes every line-anchored
+    // scan below it, so a "nothing declared" finding may be about the parse and not the
+    // file. Ordered here so the two readings sit together in the report.
+    all_violations.extend(scan_unterminated_fence(ctx, &cat.conn)?);
 
     // Ruling 17 for the row-grain checks that carry no per-row state, applied as one
     // filter over the finished list rather than five scoping blocks.
@@ -4548,14 +4554,13 @@ fn structured_fix_pointers(content: &str) -> Vec<(String, Option<String>)> {
     // of 75 declared pointer lines in docs/issues/, 74 sit outside fences and the only
     // fenced one is a worked example, so this loses no real declaration.
     // docs/issues/archive/2026-08-26-structured-fix-pointers-reads-a-fenced-example-as-a-declaration.md
-    let mut fenced = false;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
     for line in content.lines() {
         let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            fenced = !fenced;
+        if fence.feed(t) {
             continue;
         }
-        if fenced {
+        if fence.in_fence() {
             continue;
         }
         if let Some(rest) = t.strip_prefix("- **SHA:**") {
@@ -4902,6 +4907,101 @@ fn scan_terminal_status_without_fix_anchor(
                  which the guide requires AT archive time; once the SHA orphans on a rebase, \
                  recovery measured 2-153 ambiguous candidates. If the mitigation had no \
                  commit, say that in `no_fix_commit:` rather than leaving it ambiguous."
+            ),
+        ));
+    }
+    Ok(out)
+}
+
+/// `unterminated_fence`: a catalogued markdown file that reaches EOF with a fence still
+/// open, so every line below the opener is read as code by any line-anchored scan.
+///
+/// **The failure this catches is silence, which is why nothing else catches it.** A
+/// line-anchored field inside a fence is skipped — deliberately, so a worked example
+/// teaching `**Valid:**` or `- **SHA:**` syntax is never read back as a declaration. An
+/// unterminated fence turns that correct rule into a mute button for the rest of the file,
+/// and the consumer cannot tell the difference: "declared nothing" and "declared, but
+/// unreadable from line N" produce the identical empty result. Measured 2026-09-01 —
+/// `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md` had a
+/// doubled delimiter at lines 53–54 and `doctor` reported *"no `## Fix provenance` pointer
+/// is declared"* for a file that visibly contained one. True of the parse, false of the
+/// file, and the reader is the one who pays.
+///
+/// **Delegates to [`FenceState`](crate::util::markdown_fence::FenceState) rather than
+/// counting delimiters, and the distinction is not academic.** A parity count calls any
+/// odd number of ``` lines unbalanced; a file using ```` to quote triple-fence syntax has
+/// an odd count and is perfectly well formed. Counting would report it, wrongly, and that
+/// file shape exists here *because* the sibling checks teach people to write worked
+/// examples. `unterminated_fence_is_silent_on_a_quadruple_fenced_example` pins it.
+///
+/// **Reports the opener's FILE line**, not a body offset — a reader opens the file, and in
+/// a ledger thousands of lines long "somewhere below here" is the whole remedy.
+///
+/// Archived files are included: a stray delimiter misparses wherever it sits, and
+/// `scan_archived_fix_sha_unresolvable` already reads that population.
+///
+/// Reports only; there is no `fix=`. The repair is deleting or closing one delimiter, and
+/// which of the two is correct is a content judgement about the surrounding prose.
+fn scan_unterminated_fence(
+    ctx: &ToolContext,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path) in &rows {
+        let path = Path::new(abs_path);
+        if super::containing_root(std::slice::from_ref(&cp.git_root), path).is_none() {
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        // An unreadable file is `missing_file`'s finding or nobody's, never a silent
+        // fence report — same best-effort shape as the sibling scans.
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+
+        // Track the line the CURRENTLY open fence was opened at. `FenceState` answers
+        // whether we are inside one; it does not carry where that began, and where is
+        // the entire value of the finding.
+        let mut fence = crate::util::markdown_fence::FenceState::new();
+        let mut opened_at: Option<usize> = None;
+        for (idx, line) in content.lines().enumerate() {
+            if fence.feed(line.trim_start()) {
+                opened_at = if fence.in_fence() {
+                    Some(idx + 1)
+                } else {
+                    None
+                };
+            }
+        }
+        if !fence.in_fence() {
+            continue;
+        }
+        let line_note = match opened_at {
+            Some(n) => format!("line {n}"),
+            None => "an unlocatable line".to_string(),
+        };
+
+        out.push(Violation::new(
+            "unterminated_fence",
+            Some(id.clone()),
+            abs_path.clone(),
+            format!(
+                "a fence opened at {line_note} is never closed, so every line below it is \
+                 read as code by line-anchored scans — `- **SHA:**`, `**Valid:**`, \
+                 `**Rests on:**`. Those scans then report NOTHING DECLARED, which is true \
+                 of the parse and false of the file, and no error is raised anywhere. \
+                 Close or delete the delimiter; which one is right depends on the prose \
+                 around it."
             ),
         ));
     }
@@ -6535,6 +6635,109 @@ mod tests {
             vec![("5a72304c".to_string(), Some("e9f8df63b911".to_string()))],
             "only the unfenced declaration counts — a quoted example must not be verified \
              as though the file claimed it"
+        );
+    }
+
+    /// A backtick run SHORTER than the open fence is content, not a delimiter — the
+    /// distinction a bare `starts_with` toggle cannot make. It flips on the inner run, is
+    /// left inverted for the rest of the file, and silently skips every declaration below.
+    ///
+    /// The fixture is not exotic: quadruple fences exist in this corpus precisely because a
+    /// worked example has to quote triple-fence syntax, which is what the sibling test
+    /// `structured_fix_pointers_ignores_a_fenced_worked_example` teaches people to write.
+    ///
+    /// `src/librarian/statements.rs` already states the rule this pins — delegating to
+    /// `FenceState` "rather than a hand-rolled toggle is required, not incidental".
+    #[test]
+    fn structured_fix_pointers_reads_a_declaration_after_a_quadruple_fenced_example() {
+        let text = "````\n```\n````\n\n- **SHA:** `5a72304c` (`experiments`)\n\
+                    - **patch-id:** `e9f8df63b911`\n";
+        assert_eq!(
+            structured_fix_pointers(text),
+            vec![("5a72304c".to_string(), Some("e9f8df63b911".to_string()))],
+            "a ``` inside a ```` block is content; a bare toggle flips on it and swallows \
+             every declaration that follows"
+        );
+    }
+
+    /// The balanced file is the control. Without it, a check that fired on every
+    /// markdown file in the catalog would pass this test.
+    ///
+    /// Measured 2026-09-01 before this check existed: 2 of 1259 markdown files under
+    /// `docs/` left a fence open, so the finding is rare enough to be worth reading.
+    #[tokio::test]
+    async fn unterminated_fence_fires_only_where_a_fence_is_left_open() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "balanced",
+            "open",
+            "",
+            "```\ncode\n```\n\nprose\n",
+        );
+        seed_live_bug(&cat, &root, "left-open", "open", "", "```\ncode\n\nprose\n");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_unterminated_fence(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "only the unterminated file fires: {v:#?}");
+        assert_eq!(v[0].artifact_id.as_deref(), Some("left-open"));
+    }
+
+    /// A shorter run inside a longer fence is content, so a file using quadruple fences
+    /// to quote triple-fence syntax is BALANCED and must stay silent. This is the same
+    /// discrimination `structured_fix_pointers` needed, and the reason both delegate to
+    /// `FenceState` rather than counting delimiters: a parity count of that file is odd.
+    #[tokio::test]
+    async fn unterminated_fence_is_silent_on_a_quadruple_fenced_example() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "quoted",
+            "open",
+            "",
+            "````\n```\n````\n\nprose\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_unterminated_fence(&ctx, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "three delimiters, odd parity, but the inner ``` is content — a parity \
+             counter would report this file and be wrong: {v:#?}"
+        );
+    }
+
+    /// The line is the whole remedy: it names where the invisible region begins, which is
+    /// what a reader needs to find the stray delimiter in a file thousands of lines long.
+    #[tokio::test]
+    async fn unterminated_fence_names_the_line_the_silenced_region_starts_at() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        // `seed_live_bug` prefixes 5 lines of frontmatter + title before the body, so the
+        // opener below is file line 8. Asserting the FILE line, not a body offset, is the
+        // point — a reader opens the file, not the body.
+        seed_live_bug(&cat, &root, "deep", "open", "", "intro\n\n```\ncode\n");
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_unterminated_fence(&ctx, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert!(
+            v[0].detail.contains("line 10"),
+            "detail must name the opener's FILE line (10), got: {}",
+            v[0].detail
         );
     }
 
