@@ -8,8 +8,8 @@ tags:
 - subagent
 - iron-law-6
 - prompts
-closed: ''
-unverified: Fix is applied and gated in the working tree but NOT committed — the shared checkout held another session's in-flight work, so no fix SHA or patch-id exists yet. Do not archive until both are recorded.
+closed: 2026-09-01
+unverified: 'The codescout half is committed and gated on experiments. The COMPANION half is not: codescout-companion/hooks/subagent-guidance.mjs and tests/test-subagent-guidance.sh are green but uncommitted in the claude-plugins repo. Do not archive until that lands and its SHA is recorded below.'
 ---
 
 ## Symptom
@@ -94,9 +94,27 @@ call and explicitly overrides an "already loaded" brief. Covered by three new ca
 
 ## Status
 
-Fix applied and gated in the working tree; **not committed**. The codescout checkout held
-another session's in-flight work at the time (staged `src/librarian/adapter.rs`, modified
-`src/server.rs`, `src/tools/core/*`, `src/tools/memory/*`, `docs/trackers/sdd-ruling-log.md`),
-so committing would have swept up unrelated changes. No fix SHA or `patch-id` exists yet —
-record both here and archive this file once it lands on `experiments`.
+Fixed on `experiments` at **`019b1c5b`** (`fix(prompts): stop telling subagents to skip
+guides they never received`), patch-id **`f75c181d83ae70b86918e250189883e621fcd6d5`** —
+record the patch-id rather than relying on the SHA, which orphans on rebase.
 
+The four-command gate is green at that commit, with one exception that is not this change:
+`peer::server::tests::run_exits_after_idle_timeout_with_no_connections`, the known
+load-sensitive flake filed as `ee9d8d80ad5ecdc8`. It passes in isolation in 1.13s against a
+10s deadline, and `src/peer/server.rs` has not changed since 2026-08-18. Two reproductions
+from this session were handed to that file's owner; note that the accompanying
+"concurrent cargo held the target lock" hypothesis was **retracted** — one of the two runs
+showed no lock wait at all, so lock contention is not a necessary condition and the pair is
+two plain reproductions, not a discriminating condition.
+
+**Not yet archived, and the reason is queryable in `unverified:` above.** The companion half
+of the fix — `codescout-companion/hooks/subagent-guidance.mjs`, which is the only channel
+that reaches a subagent directly, plus its three new cases in `tests/test-subagent-guidance.sh`
+(39 passed, 0 failed) — is green but uncommitted in the `claude-plugins` repo. Archive this
+file once that lands, recording its SHA and patch-id here too.
+
+The residual that no wording change reaches — the ledger cannot key on an identity the MCP
+protocol never carries — is filed as `OB-11` on `docs/trackers/observer-blindness.md`, which
+cites this file. **That citation is a scheduled break:** archiving this bug re-keys it
+(`id = sha256(abs_path)`), so re-point `OB-11`'s `**Rests on:**` and `**Instances:**` lines in
+the same commit as the move.
