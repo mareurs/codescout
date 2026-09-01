@@ -253,6 +253,50 @@ worktree-under-main-root premise. Brief them to check, and mean it.
 
 Append below. Newest run first.
 
+### request-aware-response-envelopes — 2026-09-01
+
+Plan: `docs/superpowers/plans/2026-09-01-request-aware-response-envelopes.md` ·
+Spec: `docs/superpowers/specs/2026-09-01-request-aware-response-envelope-design.md` ·
+4 task/fix commits (`f3a76f81`, `aee9dd6b`, `b9bcfee4`, `61441b3d`) + closeout `39f64a5b` ·
+**7 rulings, 1 overturned (14%)** — and the overturned one was overturned by my own
+pre-dispatch scout, hours after I had verified the challenge that should have caught it.
+
+**Run shape worth noting: of the spec's three approved changes, only one was built.** One had
+already shipped before the run started (`bb4688fd`), one was subsumed at pre-flight, and one had
+a false premise. That is not a planning failure to apologise for — it is what the scan and the
+scout are *for* — but it does mean the headline number to carry forward is **1 of 3 survived
+contact**, not "4 commits landed."
+
+| ruling | class | cost if wrong | verdict |
+|---|---|---|---|
+| 1 — work directly on `experiments`, no worktree | isolation | a peer commit captures an implementer's uncommitted work | held — `experiments` is this project's work branch and is never deleted, so the skill's consent bar does not apply; a worktree would also put Task 4's `append_entry` / `move` in the one place `tracker-conventions` forbids them |
+| 2 — DROP Task 2's code change; fold one of its tests into Task 1 | plan self-contradiction | if some path emits `body_meta` without setting `body_selected`, the summary keeps leading with the map there | held — Task 1 strictly subsumes it: `section_headings_summary` opens `…get("headings")?.as_array()?`, and every `body_meta` trigger also sets `body_selected`. Shipping T2 would have added an unreachable branch guarded by a test asserting an impossible fixture — `IC-3` and `IC-16` in one change |
+| 3 — dispatch Tasks 1 and 3 separately despite both being small | process | one extra review seat | held — CLAUDE.md mandates an Opus review on `get.rs`; batching a trivial diff into it dilutes the review it exists to buy |
+| 4 — peer challenge to Change 3 verified and **upheld**; no plan change | calibration | the task ships a non-defect | **OVERTURNED within hours by Ruling 5.** All three of the peer's claims held under independent check, and I added a fourth that decided it — also correct. The premise none of us questioned was whether Change 3 fixed anything at all. See the lesson below |
+| 5 — Task 3 DROPPED; Change 3 withdrawn from the spec entirely | plan defect | none identified | held — found by a pre-dispatch recon scout (`response-envelope-session-log:F-1`). The gate **already existed** (`types.rs:1271-1279`), and the proposed one would have been **permanently false** (`output_id` is inserted at `:1385`, inside the buffered branch `read_markdown` never takes), so the guide would have stopped shipping forever |
+| 6 — switch every commit to `git commit -m "…" -- <paths>` mid-flight, and forbid `reset`/`amend` on a capture | safety | a peer's staged work lands under my message, durably | held — the plan's `git add` + bare commit put my "check `git status` first" guard on the **wrong side** of the gap it was meant to close. Peer measurement same day: 2 paths staged, 6 in the index 6 seconds later |
+| 7 — my own Ruling 6 fix was invalid git syntax; corrected | correctness | every commit in the run fails at the last step | held — `git commit -- <paths> -m "msg"` exits 1; after `--` everything is a pathspec. Verified in a throwaway repo rather than accepted from the implementer's report (`response-envelope-session-log:F-3`) |
+
+**The lesson this run earned, and it is Ruling 4.** A peer challenged Change 3's scope. I
+verified all three of their claims in the bytes, found a fourth fact they had missed, and
+concluded the challenge did not land. Every step of that was sound and the conclusion was
+worthless: **answering a challenge is not reviewing the change.** The challenge asked *does this
+enable section-grain delivery?* — correctly answered *no, and that is fine*. Nobody asked *does
+the defect exist?* It did not. `reconnaissance-patterns:R-161`'s shape arriving through a peer
+channel: care fully engaged one level from where it was needed, and the thoroughness of the
+verification is what made the transaction feel closed.
+
+**What would have caught it, stated as a mechanism rather than as vigilance:** the scout that
+did catch it ran because the skill mandates a pre-dispatch scout, not because anyone was
+suspicious. A ruling that *upholds* a plan is exactly as much a claim about the substrate as one
+that changes it, and it is the one nobody re-checks — because upholding reads as "no action
+taken."
+
+**Also recorded: the pre-flight scan structurally could not find Ruling 6's defect.** The scan
+compares tasks against each other and against the files they touch. The commit command is in
+every task, reads as boilerplate, and is never a *seam* by that definition — so a defect sitting
+in it is invisible to the instrument by construction, not by oversight.
+
 ### catalog-audit-trail — 2026-09-01
 
 Plan: `docs/superpowers/plans/2026-09-01-catalog-audit-trail.md` ·

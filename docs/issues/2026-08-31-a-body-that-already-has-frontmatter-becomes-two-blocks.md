@@ -124,6 +124,41 @@ well-formed stamped block, and the orphan below it looks like an ordinary hand-w
 Nothing in `git diff` marks the second block as inert, and `artifact(get)` returns it as body
 content without comment.
 
+
+### Recurrence 2026-09-01 — still live at `30b6fc41`, and the author knew the bug
+
+Session `codescout-b7` filed `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
+via `artifact(action="create")` with a body copied from `docs/issues/_TEMPLATE.md` — which
+begins with a frontmatter block, because the template is a bug file. Result, verified in the
+bytes immediately after the call:
+
+```
+$ grep -c '^---$' docs/issues/2026-09-01-two-correct-pre-commit-guards-...md
+4          # two complete blocks
+```
+
+The catalog's block came first with `id`/`kind`/`status`/`title`/`owners`/`tags`/`topic`; the
+template's followed with `opened`/`closed`/`severity`/`owner`/`related` — the five fields the
+catalog block does **not** carry, so the inert block held the only copy of every date and the
+severity. Repaired by hand-merging into one block and re-running `librarian(action="reindex")`.
+
+**Two things this datapoint adds beyond "it still reproduces."**
+
+**The trigger is the project's own documented workflow, not a user error.**
+`get_guide("tracker-conventions")` and `docs/issues/_TEMPLATE.md` both instruct *copy this
+file*; the template's first line is `---`. So the prescribed way to open a bug file is also the
+reproduction, and every bug filed through `artifact(create)` rather than a literal `cp` hits it.
+
+**The author had read this bug file in the same session and hit it anyway** — which is the
+`OB-N` shape rather than carelessness. Knowing the class does not help, because the defect is
+silent at the moment of the write: `create` returned `{"id", "abs_path", "wrote_to"}` with no
+warning, and the file *looks* correct until you count `---` lines. The observer who could see it
+is the one who reads the file back, which nothing in the create path makes anyone do.
+
+**Cheap remedy this suggests, stated as a candidate not a fix:** `create` already parses the
+body enough to know whether it starts with `---`. Refusing with a `RecoverableError` naming the
+duplicated keys would be loud at the only moment anyone can act on it, and the refusal text
+could carry the merge. Not designed here; see § *Fix*.
 ## Hypotheses tried
 
 1. **Hypothesis:** the two observed instances came from hand-editing rather than a tool path.
@@ -195,4 +230,3 @@ open corpus has been checked, and only on 2026-08-31.
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — instance 1
 - `docs/issues/archive/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md` — instance 2
 - `docs/trackers/issue-clusters.md` — `IC-6`, the class this instantiates
-

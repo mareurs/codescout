@@ -15,7 +15,15 @@ Why each part, one line each. Every measurement, date and superseded form →
   `target/debug/codescout` **by path at run time** — so a terminal lean lane leaves a
   librarian-less binary that reds 10 of 11 CLI tests for the *next* session, reading exactly like a
   feature-gating regression in whatever they just committed. Ending on the default lane rebuilds it,
-  so **following the gate cannot arm the trap for anyone else.**
+  so **following the gate cannot arm the trap for anyone else — provided both lanes actually run.**
+- **Chain the two test lanes with `;`, never `&&`.** The guarantee above is conditional on the
+  default lane running, and `&&` withdraws it *exactly when something is wrong*. Worse than a
+  skipped repair: `cargo test` **builds, then runs**, so a failing lean lane has already
+  overwritten `target/debug/codescout` with the librarian-less binary by the time any test can
+  fail. `&&` therefore **arms the trap and then reports the failure that blocks the only step that
+  clears it** — a terminal state reached by following the documented order. `&&` means "stop if a
+  step fails", which is right for a gate; but the default lane does two jobs, reporting *and*
+  rebuilding, and only the first should ever be short-circuited. Read the exit codes instead.
 - **The long clippy form is the gate, not garnish:** bare `cargo clippy -- -D warnings` lints only
   the root package's **non-test** targets with default features, so it passes trees CI fails.
 - **It is `test`, not `check`:** a `check` compiles the lean test targets and never runs them, so a
