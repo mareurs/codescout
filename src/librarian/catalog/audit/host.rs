@@ -249,11 +249,25 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 /// an error) is deliberate: the directory is in git and will accumulate
 /// non-shard files, and reporting those as malformed would train readers to
 /// ignore the malformed count that DOES matter.
+///
+/// The host segment is allowlisted with the same `[a-z0-9-]` charset as
+/// `sanitize()` — a parsed host becomes half of the `(host, seq)` row
+/// identity and appears verbatim in a reader's `coverage` map, so an
+/// unvalidated `..` or `/` here is not merely cosmetic. A name that fails
+/// the allowlist is `None` (not-a-shard), never an error: it may simply be
+/// a stray committed file, and this parser owes that escape the same way
+/// it owes one for READMEs.
 #[cfg_attr(not(test), expect(dead_code, reason = "consumed by Task 3 (reader)"))]
 pub(crate) fn parse_shard_file_name(name: &str) -> Option<(String, String)> {
     let stem = name.strip_suffix(".jsonl")?;
     let (host, month) = stem.rsplit_once('-')?;
     if month.len() != 6 || !month.chars().all(|c| c.is_ascii_digit()) || host.is_empty() {
+        return None;
+    }
+    if !host
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
         return None;
     }
     Some((host.to_string(), month.to_string()))
@@ -363,5 +377,18 @@ mod tests {
         assert!(parse_shard_file_name("README.md").is_none());
         assert!(parse_shard_file_name("arch-a3f9c2.jsonl").is_none());
         assert!(parse_shard_file_name("arch-a3f9c2-20260.jsonl").is_none());
+    }
+
+    #[test]
+    fn a_host_segment_outside_the_allowlist_is_not_a_shard() {
+        // RULING 8: the host segment had no allowlist, so a stray committed
+        // file like `..-202609.jsonl` parsed to host "..". That parsed value
+        // becomes half of the (host, seq) row identity in the reader and
+        // appears verbatim in its `coverage` map, so this is not cosmetic.
+        // `None` (not-a-shard), never an error — it may simply be a stray file.
+        assert!(parse_shard_file_name("..-202609.jsonl").is_none());
+        assert!(parse_shard_file_name("../etc/passwd-202609.jsonl").is_none());
+        assert!(parse_shard_file_name("ARCH-202609.jsonl").is_none());
+        assert!(parse_shard_file_name("arch_a3f9c2-202609.jsonl").is_none());
     }
 }

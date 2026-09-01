@@ -276,6 +276,134 @@ pub(crate) fn export(conn: &Connection, repo_root: &Path) -> Result<ExportReport
     Ok(report)
 }
 
+#[derive(Debug, Default)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via read_shards"
+    )
+)]
+pub(crate) struct ShardRead {
+    pub rows: Vec<ShardLine>,
+    pub malformed: usize,
+    /// host → (min seq, max seq) present. This is the coverage window, DERIVED
+    /// from the rows rather than declared in a header: a header line would be
+    /// duplicated by `merge=union` on every same-host branch merge, and a
+    /// declared window that disagrees with the rows is worse than none.
+    pub hosts: BTreeMap<String, (i64, i64)>,
+    pub files_read: usize,
+    pub files_skipped_by_window: usize,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via read_shards"
+    )
+)]
+fn matches(l: &ShardLine, f: &super::AuditFilter) -> bool {
+    f.tbl.as_ref().is_none_or(|v| *v == l.tbl)
+        && f.row_id.as_ref().is_none_or(|v| *v == l.row_id)
+        && f.actor.as_ref().is_none_or(|v| *v == l.actor)
+        && f.op.as_ref().is_none_or(|v| *v == l.op)
+        && f.since.is_none_or(|v| l.at_ms >= v)
+        && f.until.is_none_or(|v| l.at_ms <= v)
+}
+
+/// Read every OTHER host's shards, filtered and deduped.
+///
+/// `self_host`'s own shard is skipped: those rows are already in the local
+/// table, and counting them twice would produce a wrong `filtered_total` —
+/// a plausible number rather than an error, which nothing downstream catches.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring), the merge-on-query tool surface"
+    )
+)]
+pub(crate) fn read_shards(
+    repo_root: &Path,
+    f: &super::AuditFilter,
+    self_host: &str,
+) -> Result<ShardRead> {
+    let dir = repo_root.join(AUDIT_DIR);
+    let mut out = ShardRead::default();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(out); // never exported, or a fresh clone: an empty read.
+    };
+    let mut seen: std::collections::HashSet<(String, i64)> = Default::default();
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some((file_host, month)) = host::parse_shard_file_name(&name) else {
+            continue; // a README or stray file: not a shard, not malformed.
+        };
+        if file_host == self_host {
+            continue;
+        }
+        if !month_in_window(&month, f) {
+            out.files_skipped_by_window += 1;
+            continue;
+        }
+        let Ok(body) = std::fs::read_to_string(e.path()) else {
+            continue;
+        };
+        out.files_read += 1;
+        for raw in body.lines() {
+            if raw.trim().is_empty() {
+                continue;
+            }
+            let Ok(line) = serde_json::from_str::<ShardLine>(raw) else {
+                out.malformed += 1;
+                continue;
+            };
+            let key = (line.host.clone(), line.seq);
+            let span = out
+                .hosts
+                .entry(line.host.clone())
+                .or_insert((line.seq, line.seq));
+            span.0 = span.0.min(line.seq);
+            span.1 = span.1.max(line.seq);
+            if !seen.insert(key) || !matches(&line, f) {
+                continue;
+            }
+            out.rows.push(line);
+        }
+    }
+    out.rows.sort_by(|a, b| {
+        b.at_ms
+            .cmp(&a.at_ms)
+            .then_with(|| b.seq.cmp(&a.seq))
+            .then_with(|| a.host.cmp(&b.host))
+    });
+    Ok(out)
+}
+
+/// Whole-file pruning from the filename's `YYYYMM`. Inclusive at both ends and
+/// deliberately coarse — a month that straddles the boundary is opened and its
+/// rows filtered per-line. Being generous here is the safe direction: a file
+/// wrongly skipped is a silently missing row.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "consumed by Task 4 (production wiring) via read_shards"
+    )
+)]
+fn month_in_window(month: &str, f: &super::AuditFilter) -> bool {
+    let in_bound = |ms: i64, keep_if_ge: bool| -> bool {
+        let bound = host::month_key(ms);
+        if keep_if_ge {
+            month.as_bytes() >= bound.as_bytes()
+        } else {
+            month.as_bytes() <= bound.as_bytes()
+        }
+    };
+    f.since.is_none_or(|v| in_bound(v, true)) && f.until.is_none_or(|v| in_bound(v, false))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,5 +739,211 @@ mod tests {
             "doctor's delta must describe the same population export consumes"
         );
         assert_eq!(unexported_count(&cat.conn).unwrap(), 0);
+    }
+
+    fn write_shard(root: &std::path::Path, name: &str, lines: &[&str]) {
+        let dir = root.join(super::super::host::AUDIT_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(name), lines.join("\n")).unwrap();
+    }
+
+    fn foreign_line(seq: i64, at_ms: i64, row_id: &str) -> String {
+        serde_json::json!({
+            "host": "otherbox-99ffee", "seq": seq, "at_ms": at_ms,
+            "tbl": "artifact", "op": "delete", "row_id": row_id,
+            "actor": "codescout:sess-b", "payload": {"id": row_id}
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn a_foreign_hosts_rows_are_read_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[&foreign_line(1, 1_788_220_800_000, "gone-1")],
+        );
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0].row_id, "gone-1");
+        assert_eq!(r.hosts.len(), 1, "coverage names the host");
+    }
+
+    #[test]
+    fn our_own_hosts_shard_is_not_read_back() {
+        // Our rows are already in the local table. Reading our own shard too
+        // would double-count them in `filtered_total` — a wrong NUMBER, which
+        // nothing downstream can catch.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut mine: serde_json::Value =
+            serde_json::from_str(&foreign_line(1, 1_788_220_800_000, "x")).unwrap();
+        mine["host"] = serde_json::json!("me-000000");
+        write_shard(tmp.path(), "me-000000-202609.jsonl", &[&mine.to_string()]);
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert!(r.rows.is_empty(), "got {:?}", r.rows);
+    }
+
+    #[test]
+    fn a_malformed_line_is_counted_not_silently_dropped() {
+        // A shard is a git-merged file; a bad line is expected eventually. A
+        // silent skip makes a partial answer look complete (IC-13) — the exact
+        // class this feature exists to avoid.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[
+                &foreign_line(1, 1_788_220_800_000, "ok-1"),
+                "{not json",
+                "",
+                &foreign_line(2, 1_788_220_800_001, "ok-2"),
+            ],
+        );
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.rows.len(), 2, "the good lines still arrive");
+        assert_eq!(r.malformed, 1, "and the bad one is REPORTED");
+    }
+
+    #[test]
+    fn duplicate_host_seq_pairs_collapse_to_one_row() {
+        // merge=union and crash-re-export both produce duplicates by design.
+        // Three copies (not two) so a mutation that dedups on line POSITION
+        // rather than (host, seq) — e.g. keeping only the first two lines
+        // regardless of content — cannot pass by accident: it must actually
+        // collapse on the key to reach the single-row assertion.
+        let tmp = tempfile::tempdir().unwrap();
+        let l = foreign_line(7, 1_788_220_800_000, "dup");
+        write_shard(tmp.path(), "otherbox-99ffee-202609.jsonl", &[&l, &l, &l]);
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.rows.len(), 1, "deduped on (host, seq)");
+        assert_eq!(r.rows[0].row_id, "dup");
+    }
+
+    #[test]
+    fn filters_apply_to_shard_rows_the_same_way_they_apply_locally() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[
+                &foreign_line(1, 1_788_220_800_000, "wanted"),
+                &foreign_line(2, 1_788_220_800_001, "other"),
+            ],
+        );
+        let f = crate::librarian::catalog::audit::AuditFilter {
+            row_id: Some("wanted".into()),
+            ..Default::default()
+        };
+        let r = read_shards(tmp.path(), &f, "me-000000").unwrap();
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0].row_id, "wanted");
+    }
+
+    #[test]
+    fn a_since_window_skips_whole_files_by_name() {
+        // The filename encodes the month, so an out-of-window file is never
+        // opened. This is the property that keeps merge-on-query affordable.
+        // Assert `files_read`/`files_skipped_by_window`, not just row count —
+        // a reader that opens every file and filters per-line would satisfy a
+        // row-count-only assertion while losing the property that makes this
+        // affordable.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202507.jsonl",
+            &[&foreign_line(1, 1_751_328_000_000, "old")],
+        );
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[&foreign_line(2, 1_788_220_800_000, "new")],
+        );
+        let f = crate::librarian::catalog::audit::AuditFilter {
+            since: Some(1_788_220_000_000),
+            ..Default::default()
+        };
+        let r = read_shards(tmp.path(), &f, "me-000000").unwrap();
+        assert_eq!(r.files_read, 1, "only the in-window file is opened");
+        assert_eq!(r.files_skipped_by_window, 1);
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0].row_id, "new");
+    }
+
+    #[test]
+    fn a_straddling_month_is_opened_and_filtered_per_line() {
+        // Whole-file pruning is by filename month only, and must be generous
+        // at the boundary: a file whose month straddles `since` is opened even
+        // though it also carries rows that predate the cutoff, and only the
+        // per-line filter (not the file-level window) excludes those rows.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[
+                &foreign_line(1, 1_788_220_000_000, "before-cutoff"),
+                &foreign_line(2, 1_788_220_900_000, "after-cutoff"),
+            ],
+        );
+        let f = crate::librarian::catalog::audit::AuditFilter {
+            since: Some(1_788_220_800_000),
+            ..Default::default()
+        };
+        let r = read_shards(tmp.path(), &f, "me-000000").unwrap();
+        assert_eq!(
+            r.files_read, 1,
+            "the straddling file is opened, not skipped"
+        );
+        assert_eq!(r.files_skipped_by_window, 0);
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0].row_id, "after-cutoff");
+    }
+
+    #[test]
+    fn a_missing_audit_directory_is_an_empty_read_not_an_error() {
+        // Every clone that has never exported is in this state.
+        let tmp = tempfile::tempdir().unwrap();
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert!(r.rows.is_empty());
+        assert_eq!(r.files_read, 0);
+    }
+
+    #[test]
+    fn a_stray_non_shard_file_is_ignored_and_not_counted_malformed() {
+        // The audit directory is committed and will accumulate READMEs and
+        // stray files. Those must return None from the parser and must NOT
+        // inflate `malformed` — reporting them as malformed would train
+        // readers to ignore the malformed count that matters.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(tmp.path(), "README.md", &["not a shard at all"]);
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[&foreign_line(1, 1_788_220_800_000, "ok")],
+        );
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.malformed, 0, "a stray file is not a malformed shard line");
+        assert_eq!(r.files_read, 1, "only the real shard was opened");
+    }
+
+    #[test]
+    fn coverage_reports_the_min_and_max_seq_actually_present() {
+        // Coverage must be DERIVED from the rows present, never declared in a
+        // header (a header would be duplicated by merge=union). Seed 3
+        // out-of-order seqs so a mutation that reports (first, last) by file
+        // position rather than true min/max cannot pass by accident.
+        let tmp = tempfile::tempdir().unwrap();
+        write_shard(
+            tmp.path(),
+            "otherbox-99ffee-202609.jsonl",
+            &[
+                &foreign_line(5, 1_788_220_800_000, "mid"),
+                &foreign_line(1, 1_788_220_800_001, "lo"),
+                &foreign_line(9, 1_788_220_800_002, "hi"),
+            ],
+        );
+        let r = read_shards(tmp.path(), &Default::default(), "me-000000").unwrap();
+        assert_eq!(r.hosts.get("otherbox-99ffee"), Some(&(1, 9)));
     }
 }
