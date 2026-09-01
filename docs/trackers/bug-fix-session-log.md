@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 92
+entry_high_water_F: 93
 entry_high_water_W: 93
 ---
 
@@ -8837,9 +8837,29 @@ bug-filing surface, exactly the shape this entry predicted.
 **What separates it from datapoints 1 and 2: there, doubt occurred and the claim never
 shipped. Here the law did not fire.** The claim entered the filed record and was caught an
 hour later on re-entry (`R-49`), by me, while implementing the fix it was written for. A
-ledger holding only the catches has a population containing no misses by construction —
-CLAUDE.md § *Testing Discipline*'s recording-filter law — so datapoints 1 and 2 establish a
-habit and this one establishes a rate.
+ledger holding only its catches has a population with no falsifying member in it, so
+datapoints 1 and 2 establish a habit and this one establishes a rate.
+
+**Correction 2026-09-01, raised by `codescout-e6` and verified here before accepting it:
+the sentence above cited CLAUDE.md's *recording-filter* law and that citation was wrong.**
+This is the **member-selection** half — the one the recording-filter law names as its own
+contrast (*"The law above is about members: a population selected so no member can
+falsify"*). One question separates them: **does widening the sample help?** Here it does.
+The miss left artifacts — the filed bug file, its `## Correction` paragraph, and `800f1dec`'s
+message — all on the record and greppable. The decisive proof is that **the repair was to
+add the miss to this entry, and it worked**; under the recording-filter law that addition is
+impossible, because there would be nothing to add. The remedies differ, which is why the
+mislabel mattered: member-selection says *go read more filed records*, recording-filter says
+*publish your confirmations*, and a reader inheriting the wrong tag reaches for the wrong one.
+
+**There IS a recording-filter instance adjacent to this one, and it is a different
+population.** Every time re-reading the substrate **confirmed** the claim, nothing was
+produced — no finding, no entry, no commit. So this ledger can never answer *how often does
+re-reading change the answer*, at any corpus size. CLAUDE.md's own worked example already
+names that shape and its consequence: a confirming re-derivation *"is a **denominator**, not
+a catch … bears on the base rate rather than on the hit rate."* W-91's catches are hit-rate
+evidence with no denominator behind them. Keeping the two apart is the point — same session,
+same practice, two adjacent laws, one instance of each.
 
 **Correction to this entry's own claim about the skill text, found by reading it.** The
 paragraph above says the promoted wording *"enumerates fixes and prohibitions"* and does not
@@ -9236,6 +9256,48 @@ recall. It returns `da44f73d` immediately.
 
 **Consequence:** published to the user in a session summary; corrected in the same session
 after the peer's message prompted a re-read. No artifact carried it.
+
+## F-93 — Two counts over a live append-only transcript were true when published and false within the hour
+
+**Valid:** dated 2026-09-01
+
+**Category:** measurement · **Status:** fixed-verified · **Valid:** dated 2026-09-01
+
+**Observed:** F-92's remedy was *"go audit the other fourteen published corroborations"* — and
+that sentence is itself the F-72 shape (a caveat naming a specific next action is a work item),
+so it was run rather than filed. Enumerating this session's corroborating claims from its own
+transcript returned **15**, of which two carried numbers into a **committed** artifact.
+
+**Got:** both numbers are now false.
+
+| published in `05fceb5783a0290e` | at audit |
+|---|---:|
+| the owning session used `Write` **8** times | **9** |
+| that transcript mentions `doctor.rs` **80** times | **187** |
+
+**Root limit — the substrate is append-only and still being written.** Both counts were correct
+when taken. The measured object is a peer's **live** CC transcript, and that peer spent the
+evening messaging this session about `doctor.rs`; each reply added a scratchpad `Write` and more
+mentions. A retention-swept corpus makes every count a **floor** — the familiar case, already
+documented on several `docs/PROBES.md` rows. An append-only corpus makes every count a floor that
+**rises**, which is the inverse and is worse in one specific way: the number decays in the
+direction of looking like a *conservative undercount* rather than an error, so a reader who
+re-derives it and gets more has no reason to suspect the original was ever a different value.
+
+**And the conclusion never moved**, which is what removed the last prompt to look: `Edit` is still
+0, and 9 of 9 native writes are still `/tmp` scratch — the claim "not one native write touched a
+repo file" is now *better* supported than when published. A wrong number underneath a
+strengthened conclusion has nothing anywhere pointing at it.
+
+**Cheapest sufficient check:** state the **property**, not its cardinality — *"every native write
+in that session targets scratch"* cannot rot, while *"all eight do"* rots the moment there is a
+ninth. Where a count is genuinely wanted, stamp the instant it was taken.
+
+**What this validates:** F-92's prescribed remedy was the correct one, and the discriminator that
+picked it was right. Had F-92 been filed under the recording-filter law — as a peer proposed —
+the remedy would have been *"instrument the doubt"*, and these two numbers would still be wrong
+in a committed file. Widening the audit is a no-op for a Law 2 population and found two real
+defects here in one pass, which is the empirical form of the distinction.
 
 ## Template for new entries
 
