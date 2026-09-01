@@ -161,6 +161,68 @@ rather than with care.
   negative about their own work. A misattribution is not free because the ask is "nothing needed
   from you".
 - Both wrong claims would have entered bug files uncorrected. One nearly did.
+
+## Calibration — measured 2026-09-01 before building anything
+
+Run as the first step of implementation, on the principle that a mechanism naming a population
+asserts that population is reachable. Two questions: **would the channel have answered the
+incident that motivated it**, and **what does it not see**.
+
+### 1. The motivating incident: the channel WOULD have answered it
+
+The disputed file was `src/librarian/tools/doctor.rs`, written by session `c2a08c22`
+(codescout-68). Its `.buddy/c2a08c22-…/cs_tool_log.jsonl` holds 50 records, and the writes are
+all codescout tools, each carrying the path:
+
+```
+mcp__codescout__edit_code   action=insert   path=src/librarian/tools/doctor.rs   x5
+mcp__codescout__edit_file                   path=src/librarian/tools/doctor.rs   x7
+```
+
+**Checked the other direction too, because a positive alone would not settle it.** That session's
+CC transcript records `"name":"Edit"` **0** times and `"name":"Write"` **8** times — and all eight
+Writes target `/tmp/…/scratchpad/` (commit messages, two probe scripts). Not one native write
+touched a repo file. So `doctor.rs` was authored **exclusively** through logged tools, and the
+channel would have named its owner correctly.
+
+Positive control on the search itself: the same transcript mentions `doctor.rs` 80 times, so the
+pattern reaches this file — the zero for native repo writes is a real absence, not a broken query.
+
+### 2. What it does not see — and it is bigger than "native Edit"
+
+Across 573 transcripts / 108,635 captured Bash commands in this project, writes that **no
+substrate records as writes**:
+
+| write route | repo paths | `/tmp` only |
+|---|---:|---:|
+| `sed -i` | **27** | 26 |
+| `cat > …` | **107** | 446 |
+
+Against 1,808 logged codescout write-tool calls and 318 native `Edit`/`Write`/`MultiEdit` uses
+(of which the sampled session's were 8-for-8 scratch). So the channel covers roughly **80–90% of
+repo writes** — the range, not a point, because the native-vs-scratch split is sampled rather
+than fully classified, and `> redirect` (2,201 occurrences) is dominated by `/dev/null` and
+scratch and was not separated.
+
+**The blind spot is not random, which is this bug's own asymmetry point confirmed.** It tracks
+*working style*: a session doing symbol-level edits via `edit_code` is fully visible; a session
+doing bulk mechanical edits via `sed -i` is invisible for exactly those edits. The clearest
+datapoint is first-person — the 46-file citation re-point in `9188d000` was a single `sed -i`
+loop, so the channel would have shown **nothing** for the largest write action of that session,
+while showing every one of its small `edit_file` calls.
+
+### 3. What this settles for the design
+
+Build it — the calibration is positive and coverage is high. But the **absent case is the
+load-bearing half**, and it must distinguish two states that a naive implementation collapses:
+
+- **no record names this path** — could be a Bash write by anyone; says nothing about ownership;
+- **records exist for this path and name a different session** — positive evidence it is not yours.
+
+Rendering the first as "not mine" would be the exact failure this bug documents: a true
+limitation quietly substituting for an answer, which is the shape all three of the evening's
+misattributions had. `cs_tool_log.jsonl` supports the distinction — it is a per-session file, so
+"no session's log names this path" is directly checkable rather than inferred.
 ## Hypotheses tried
 
 1. **Hypothesis:** the failures were caused by my own edits.
