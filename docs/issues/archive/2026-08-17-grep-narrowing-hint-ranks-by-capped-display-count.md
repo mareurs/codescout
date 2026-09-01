@@ -4,7 +4,7 @@ kind: bug
 status: fixed
 title: 'BUG: grep''s overflow narrowing hint ranks and reports the per-file CAPPED display count, so it recommends 3-match files and never names the 20-match one'
 tags:
-- cluster/capped-result-presented-as-complete
+- cluster/truncated-window-ordered-by-the-wrong-key
 ---
 
 ## Summary

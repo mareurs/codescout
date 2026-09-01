@@ -2,7 +2,7 @@
 kind: bug
 status: fixed
 tags:
-- cluster/capped-result-presented-as-complete
+- cluster/instrument-omits-the-dimension-that-grows
 closed: 2026-09-01
 opened: 2026-09-01
 owner: marius

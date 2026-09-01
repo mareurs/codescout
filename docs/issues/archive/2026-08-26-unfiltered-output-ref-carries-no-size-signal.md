@@ -7,7 +7,7 @@ tags:
 - run_command
 - progressive-disclosure
 - usability
-- cluster/capped-result-presented-as-complete
+- cluster/instrument-omits-the-dimension-that-grows
 closed: 2026-08-26
 opened: 2026-08-26
 owner: marius

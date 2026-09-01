@@ -7,7 +7,7 @@ tags:
 - ci
 - progressive-disclosure
 - silent-cap
-- cluster/capped-result-presented-as-complete
+- cluster/truncated-window-ordered-by-the-wrong-key
 closed: 2026-08-06
 opened: 2026-08-06
 owner: marius
