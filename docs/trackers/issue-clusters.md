@@ -45,6 +45,24 @@ on read and cannot go stale.
 So: a `**Members:**` line carries the query, plus `n=<count>` and the date it was run. Trust the
 query; re-run it before trusting the count.
 
+**And the query's POPULATION is not the whole corpus — say which one you mean before comparing
+two classes' counts.** A tag is required of `docs/issues/*.md`, and 34 of 34 carry one; it is
+**not** required of `docs/issues/archive/*.md`, and 373 of 529 carry none (measured 2026-09-02 —
+29.5% coverage). That is a deliberate bound rather than drift: `tests/issue_clusters.rs`'s module
+header records that the classes were derived from the **open** backlog and that 279 archived files
+in the backfilled window match none of them, so *"forcing a fit would corrupt the counts that
+promotion reads"*. The count gate reads open **and** archive, so every tagged archived file does
+count. An `n` is therefore **exact** over *files carrying the tag* and a **floor** over *files
+instantiating the class* — and the two readings diverge most for the oldest classes.
+
+Which is why the paragraph above defends only half of what it looks like it defends: re-running
+the query refreshes the **count** and never widens the **population**. Read
+`tests/issue_clusters.rs`'s module header before proposing any retro-tagging pass over the
+archive. A 2026-09-02 audit measured that 29.5%, read it as convention drift, and was one step
+from a 236-file campaign this bound forbids — `reconnaissance-patterns:R-170`, whose lesson is
+that a number and the scope validating it must co-locate at the point of **reading**, not at the
+point of enforcement.
+
 Design: `docs/superpowers/specs/2026-08-31-issue-clusters-design.md`.
 
 ## The entry shape
