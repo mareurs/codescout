@@ -33,7 +33,7 @@ output is mostly other sessions' work, so it is last and its deliverable is a re
 | 3 | hook refusal-text "what comes next" tail | design + shell | queued — blocked on a design call |
 | 4 | triage the 27 open bugs (verify-open cadence) | survey | queued |
 
-## 1 — double-frontmatter corruption (`c202d8febd80ca8a`)
+## 1 — double-frontmatter corruption (`a1dd1e9b0ef2f999`, archived)
 
 `artifact(action="create")` with a body copied from `docs/issues/_TEMPLATE.md` writes **two**
 frontmatter blocks: the catalog's, then the template's. The inert second block holds the only copy

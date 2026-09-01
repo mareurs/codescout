@@ -1,5 +1,5 @@
 ---
-id: c202d8febd80ca8a
+id: a1dd1e9b0ef2f999
 kind: bug
 status: fixed
 title: a body that already begins with a frontmatter block silently becomes a second, inert block
@@ -10,7 +10,7 @@ tags:
 - silent-corruption
 - artifact-create
 - artifact-update
-closed: null
+closed: 2026-09-01
 opened: 2026-08-31
 owner: marius
 related:
@@ -170,7 +170,51 @@ could carry the merge. Not designed here; see § *Fix*.
 
 ## Fix
 
-Not yet implemented. Refuse at the input boundary rather than repair at the writer:
+**Implemented 2026-09-01 on `experiments`, as prescribed below.** The plan this section wrote in
+advance held on all three of its calls: refuse rather than strip; refuse at `create` **and**
+`update`; keep the writer infallible and put the check where the `RESERVED_KEYS` refusal already
+lives. Nothing in it needed revising, which is worth recording — a `## Fix` written before the work
+is a hypothesis, and this corpus mostly records the ones that were wrong.
+
+| seam | commit | patch-id |
+|---|---|---|
+| `artifact(create)` | `38ba4f49` | `f82605403d7f7ad259c74493272c358ba2b2d99e` |
+| `artifact(update)`, full-body replacement | `7dbc7b43` | `2fdf440a517d967e52e48d93ce69767ea4b18128` |
+
+`reject_body_leading_frontmatter` in `src/librarian/tools/create.rs`, `pub(crate)` and called from
+**both** surfaces — shared rather than duplicated for the reason `action_selector_key`'s doc gives
+about its own callers: two copies of one predicate drift into recognising different sets of bodies,
+and a guard firing on one write surface but not its sibling is *harder* to notice than one firing on
+neither.
+
+**The predicate is `frontmatter::parse`'s own `starts_with("---\n")`**, reused rather than
+re-derived: a guard recognising a different set of bodies than the reader does would add a third
+grammar to a namespace that already has two (`IC-6`). Refusing a token owes an escape, so the hint
+names one — lead the body with a blank line for a literal `---` rule.
+
+**The second seam nearly shipped unfixed.** `38ba4f49` closed `create` alone, with a green gate and
+a commit message full of measurements. What caught it was re-reading *this file*, whose *Tests
+added* section already named both seams — not any check. `R-49` and CLAUDE.md's *mutate once per
+guarded SITE* arriving together.
+
+**What the reproduction added, since the record was thinner than the defect.** Two harms absent from
+§ *Symptom*: a key present in both blocks with **conflicting** values resolves silently to the
+catalog's (a probe's `status: scratch` was reported as `open`), and the inert block is served as the
+artifact's **`preview.summary`** — so it is the first thing an agent reads about the artifact.
+
+**Blast radius, measured: 9 committed files already carry a doubled block** — 8 archived bug files
+plus `docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md`; the detector was
+positive-controlled in both directions before that count was trusted. **Repairing them is NOT part
+of this fix**: it is a data migration over other sessions' archived artifacts, and for a conflicting
+key it would have to pick a winner — the exact act this guard refuses to perform on a caller's
+behalf. Queued with a `doctor`-check shape at
+`docs/plans/2026-09-01-read-surface-fix-queue.md` § *5*.
+
+---
+
+*Original plan, kept because it was right:*
+
+Refuse at the input boundary rather than repair at the writer:
 `RecoverableError` from `create` and from `update`'s body path when `body` starts with `---`
 followed by a delimiter line, naming the two legitimate intents — *pass the fields as
 `status`/`tags`/`extra` parameters*, or *fence the block if it is documentation*.
@@ -183,7 +227,6 @@ direction.
 that the `extra` backstop exists so it can. The check belongs where the `RESERVED_KEYS`
 refusal already lives — at `artifact(create|update)`'s input boundary — not at
 `frontmatter.rs:149`.
-
 ## Tests added
 
 `create_refuses_a_body_that_opens_its_own_frontmatter_block` and
