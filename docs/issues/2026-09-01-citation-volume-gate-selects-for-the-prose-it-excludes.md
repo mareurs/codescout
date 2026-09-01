@@ -100,6 +100,84 @@ suppression, counted as a violation of it. Same shape as
 `docs/issues/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md`: an id cannot
 be discussed without being cited.
 
+
+### Both options the Resume narrows to are CIRCULAR — read at the bytes 2026-09-01
+
+The first version of this file recommended deciding between (a) and (c). Neither is viable,
+and the same predicate kills both.
+
+`src/librarian/tools/link_scan/resolve.rs:331` — the resolver's suppression:
+
+```rust
+0 => {
+    if index.prefix_is_known(&citation.raw) {
+        Some(Outcome::Dangling)
+    } else {
+        None // UTF-8 / SHA-256 / GPT-4 prose noise
+    }
+}
+```
+
+And `known_prefixes` (`:71`, `:95`) is populated from **both** halves, for every artifact
+including archived ones:
+
+- every `## PREFIX-N — <title>` definition's prefix;
+- every declared `entry_prefix`.
+
+So `!prefix_is_known` **is** this check's population, by construction. Option **(a)**,
+*"reuse the resolver's suppression"*, would suppress 14 of 14 — it does not filter the check,
+it deletes it. Option **(c)**, *"require the prefix to appear in at least one
+`## PREFIX-N — <title>` heading anywhere, including archived"*, is the **first half of that
+same set**, so it suppresses 14 of 14 too. The two options that read as most distinct are
+the same dead end.
+
+Found by re-entering a bug file this session had written an hour earlier — `R-49` firing on
+a file young enough that nothing else would have re-opened it.
+
+### The discriminator is already in the check's own output, unused
+
+The check prints *"cited N times across M files"* and gates on **N alone**. `M/N` — how
+thinly the citations are spread — separates this corpus far better, and needs no new data.
+All 14 live findings, sorted by dispersion:
+
+| prefix | cites | files | files/cites | what it is | `>= 0.8` |
+|---|---:|---:|---:|---|---|
+| `CI-N` | 4 | 4 | 1.00 | prose about the class | **suppress** |
+| `RFC-N` | 7 | 7 | 1.00 | `RFC-7396` | **suppress** |
+| `SHA-N` | 21 | 21 | 1.00 | `SHA-256` | **suppress** |
+| `UTF-N` | 22 | 22 | 1.00 | `UTF-8` | **suppress** |
+| `N-N` | 16 | 14 | 0.88 | `start_line=N-9` | **suppress** |
+| `ZZ-N` | 6 | 5 | 0.83 | test fixture quoted in prose | **suppress** |
+| `CC-N` | 4 | 2 | 0.50 | archived TODO-review | keep |
+| `GPT-N` | 6 | 3 | 0.50 | `GPT-4.1`, `GPT-5` | keep |
+| `O-N` | 6 | 3 | 0.50 | option labels | keep |
+| `SF-N` | 14 | 6 | 0.43 | real reference | keep |
+| `KT-N` | 5 | 2 | 0.40 | archived TODO-review | keep |
+| `MF-N` | 6 | 2 | 0.33 | archived TODO-review | keep |
+| `SG-N` | 21 | 3 | 0.14 | real reference | keep |
+| `TC-N` | 107 | 13 | 0.12 | benchmark test-case ids | keep |
+
+**Zero real prefixes are suppressed**; 6 of 8 noise prefixes are. Precision moves 6/14 → 6/8.
+Note the ordering is close to the *inverse* of the volume ordering the gate uses now —
+`UTF-N` and `SHA-N` are simultaneously the highest-volume and the highest-dispersion, which
+is this bug's anti-correlation with a replacement attached.
+
+**Two limits, stated because the table looks better than the evidence is.**
+
+- **The threshold is fitted, not validated.** `0.8` was chosen to separate *this* table,
+  n=14, one corpus. What the measurement supports is the *direction* of the signal; the cut
+  point is not established, and a second corpus is what would establish it.
+- **Dispersion cannot exceed 6/8 here, at any threshold.** `GPT-N` (noise) and `CC-N` / `O-N`
+  (real) sit at exactly 0.50. No cut on this signal alone separates them, so lowering the
+  threshold to catch `GPT-N` necessarily loses two real prefixes. That is a structural
+  ceiling, not a tuning opportunity — written down so nobody re-derives it by tuning the
+  number down and quietly losing recall.
+
+**Corpus drift, noted so the two tables in this file can be reconciled.** The Symptom table
+was taken earlier the same day and reads `TC-N` 106 / `UTF-N` 20 / `SG-N` 20; this one reads
+107 / 22 / 21. Peers committed to the corpus in between. Neither table is stale in a way
+that changes any verdict — but a reader comparing them should know the counts are
+measurements of an instant, not constants.
 ## Hypotheses tried
 
 1. **Hypothesis:** the 14 are citation repairs. **Test:** sampled one line of context per
@@ -109,21 +187,30 @@ be discussed without being cited.
 ## Fix
 
 Not fixed — the remedy is a design choice and a wrong one makes a useful check useless.
-Options, cheapest first:
 
-- **a. Reuse the resolver's suppression.** `link_scan` already classifies these correctly;
-  `doctor` re-deriving the judgement from a different signal is the duplication that let the
-  two disagree. Strongest option, and it removes the second discriminator rather than tuning
-  it.
+**(a) and (c) are struck.** Both are circular; see Evidence § *Both options the Resume
+narrows to are CIRCULAR*. They are kept struck rather than deleted so the dead end is not
+re-proposed by the next reader, who will find them as attractive as this file's author did.
+
+- ~~**a. Reuse the resolver's suppression.**~~ **Circular** — the resolver suppresses exactly
+  `!prefix_is_known`, which is this check's entire population. Zeroes the check.
 - **b. Shape rule on the numeric part.** `SHA-256`, `UTF-8`, `RFC-7396`, `GPT-4.1` carry
-  standard/version numbers; entry ids are small ordinals. Cheap, and wrong on `TC-07`.
-- **c. Require the prefix to appear in at least one `## PREFIX-N — <title>` heading
-  ANYWHERE**, including archived. Would clear the three archived-TODO prefixes correctly and
-  is close to what "no definer" already means.
+  standard/version numbers; entry ids are small ordinals. Cheap, wrong on `TC-07`, and now
+  **subsumed by (e) for every case except `GPT-N`** — which is the one case (e) cannot
+  reach, so it survives as a possible second stage rather than as a primary.
+- ~~**c. Require a `## PREFIX-N — <title>` heading anywhere.**~~ **Circular** — that is the
+  first half of `known_prefixes`, so it is (a) under another name. Zeroes the check.
 - **d. Leave it and document the read.** Weakest — an 8-of-14 false-positive rate on a
   read-only check is a report nobody finishes reading, which is how a real finding gets
   missed.
-
+- **e. Gate on DISPERSION (`files / cites`) instead of volume.** *New, and the recommended
+  one.* Suppress a prefix whose citations are spread roughly one per file: that is the
+  signature of an incidental technical term, and the inverse of a ledger namespace, whose
+  citations cluster. Measured: 6 of 8 noise prefixes suppressed, **zero** real prefixes
+  lost, precision 6/14 → 6/8. Costs nothing to compute — the check already counts both
+  numbers and prints them in its own message. Read its two limits in Evidence before
+  implementing: the threshold is fitted to n=14, and 6/8 is a ceiling rather than a starting
+  point.
 ## Tests added
 
 None — nothing is fixed. A fix under (a) wants the 14 real prefixes as a fixture, asserting
@@ -136,10 +223,19 @@ Read the report with one line of grep context per prefix before treating any of 
 
 ## Resume
 
-Decide between (a) and (c). (a) is the better shape — one classifier, not two — but needs
-the resolver's suppression to be reachable from `doctor` without pulling in the whole
-`link_scan` pipeline. Check that first; it may be what decides between them.
+Implement **(e)**, and treat `GPT-N` and `TC-N` as *known residual* rather than as a reason
+to keep tuning — the Evidence section shows why no threshold on dispersion alone reaches
+them.
 
+Before writing code, settle the one question the measurement does not answer: whether the
+threshold ships as a bare constant or as an explicitly-labelled heuristic in the message, the
+way `params_status_drift` does (*"This check is a HEURISTIC and both directions of error are
+possible"*). That sibling's precedent argues for saying so at the finding, since the cut
+point is fitted.
+
+The test needs both directions, and the fixture must contain both: a scattered one-per-file
+prefix that must be **silent**, and a clustered prefix that must still be **reported**. The
+silence half alone is monotone under "the check does nothing" and would pass against a stub.
 ## References
 
 - `src/librarian/tools/link_scan/resolve.rs:335` — the resolver's suppression
@@ -147,4 +243,3 @@ the resolver's suppression to be reachable from `doctor` without pulling in the 
 - `docs/issues/archive/2026-08-26-cited-prefix-with-no-definer-is-invisible.md` — the bug
   this check shipped to close
 - `docs/trackers/open-issue-work-queue.md` — `BL-71`
-
