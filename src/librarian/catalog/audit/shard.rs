@@ -317,8 +317,21 @@ mod tests {
         let host_id = host::resolve_host_id(&cat.conn).unwrap();
         // Pin the full line shape against the actual source row, not just its
         // presence — a mutation probe found `at_ms`/`actor`/`verb`/`payload`
-        // all survived being zeroed at the struct literal because nothing
-        // read them back (Important 1, task-2 review).
+        // all survived being zeroed at the struct literal because nothing read
+        // them back (Important 1, task-2 review).
+        //
+        // The insert row alone cannot cover `verb`/`payload`: per
+        // audit/mod.rs's own insert_update_delete_on_artifact_each_leave_an_audit_row,
+        // an insert carries no payload, and `verb` stays `None` unless something
+        // stamps it first — so both would be `None == None` under a broken
+        // implementation too, and the assertion could not see a real value
+        // collapsing to `None` (re-review, task-2 round 2). Stamp a verb and
+        // perform a column-changing UPDATE (not a pure-churn one) to get a row
+        // with both fields genuinely populated, and assert against THAT row.
+        cat.set_audit_verb("artifact.update").unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET status='archived' WHERE id='a1'", [])
+            .unwrap();
         let (src_at_ms, src_actor, src_verb, src_payload): (
             i64,
             String,
@@ -328,31 +341,43 @@ mod tests {
             .conn
             .query_row(
                 "SELECT at_ms, actor, verb, payload FROM catalog_audit
-                 WHERE tbl='artifact' AND row_id='a1' AND op='insert'",
+             WHERE tbl='artifact' AND row_id='a1' AND op='update'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap();
+        assert!(
+            src_verb.is_some(),
+            "fixture must stamp a real verb, not None"
+        );
+        assert!(
+            src_payload.is_some(),
+            "fixture's UPDATE must change a real column, not be pure churn"
+        );
         let r = export(&cat.conn, tmp.path()).unwrap();
         assert!(r.exported >= 1, "{r:?}");
         assert!(r.through_seq > 0);
         let got = lines(tmp.path());
         let line = got
             .iter()
-            .find(|l| l.row_id == "a1" && l.tbl == "artifact")
-            .expect("the seeded artifact's insert row must be exported");
+            .find(|l| l.row_id == "a1" && l.tbl == "artifact" && l.op == "update")
+            .expect("the seeded artifact's update row must be exported");
         assert_eq!(
             line.host, host_id,
             "the line's host must match the exporting host's own id, not just be non-empty"
         );
         assert_eq!(line.at_ms, src_at_ms);
         assert_eq!(line.actor, src_actor);
-        assert_eq!(line.verb, src_verb);
+        assert_eq!(
+            line.verb, src_verb,
+            "verb must survive to the exported line"
+        );
         assert_eq!(
             line.payload,
             src_payload
                 .as_deref()
-                .and_then(|p| serde_json::from_str(p).ok())
+                .and_then(|p| serde_json::from_str(p).ok()),
+            "payload must survive to the exported line"
         );
         assert!(
             got.iter().all(|l| !l.host.is_empty()),
