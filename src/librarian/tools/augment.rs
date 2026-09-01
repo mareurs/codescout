@@ -321,7 +321,12 @@ impl Tool for ArtifactAugment {
     }
 
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value> {
-        let mut a: Args = serde_json::from_value(args)?;
+        let mut a: Args = serde_json::from_value(args).map_err(|e| {
+        crate::tools::RecoverableError::with_hint(
+            format!("artifact_augment requires 'id': {e}"),
+            "e.g. artifact_augment(id=\"<16-hex>\", prompt=\"...\"). Get an id from artifact(action=\"find\", ...). Pass merge=true to patch an existing augmentation — merge=false (the default) REPLACES all seven shape fields, silently resetting any you omit.",
+        )
+    })?;
 
         // params_path: read the params JSON from a filesystem path server-side.
         // A large params array (≳9 KB) can't be round-tripped through the model

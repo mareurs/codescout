@@ -27,6 +27,20 @@ while writing it; keep them if you adapt it.
    never DISCOVERED it: measured 2026-09-01, `commit` and `timestamp` showed zero uses, and
    both time-travel actions had been attempted exactly once each and failed on precisely
    those params. A 0/2 discovery rate and disuse are the same number here.
+
+4. **An aggregate over the retention window can STRADDLE A FIX, so a dead defect reads as a
+   live one.** This is the worst of the four because the number is real, the query is
+   correct, and nothing about the output hints at it. Measured 2026-09-01: `missing field
+   `patch`` counted 11 occurrences and ranked as the single largest cause in its error
+   family — a whole remediation task was scoped around it. All 11 predate `60df0d76`
+   (2026-08-27 18:46), which fixed it; there are zero after. **Before treating any error
+   count as live, bound it by the fix you are about to duplicate**:
+
+       SELECT date(called_at), count(*) FROM tool_calls
+        WHERE error_msg LIKE '%<pattern>%' GROUP BY 1 ORDER BY 1;
+
+   A count that stops on a date is a fixed bug, not a live one. Re-derive the population
+   with `called_at > '<fix timestamp>'` and work from that.
 """
 
 import argparse
