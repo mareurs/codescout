@@ -293,9 +293,16 @@ High→Med on the two `.rs` sites, by design, so `--fail-on high` cannot gate th
 `docs/issues/archive/<slug>` where `docs/issues/<slug>` exists on disk — a state that is
 always wrong and needs no severity judgement.
 
-**Status:** `fixed-once` — the instance was repaired in `fcb86c16` (patch-id
+**Status:** `check-shipped` — the instance was repaired in `fcb86c16` (patch-id
 `51a4af509be224cc87839ebbada5d35f68ee3b4a`), and the guide now carries the rule
-(*"cite where the file IS"*). Nothing yet prevents recurrence.
+(*"cite where the file IS"*). Recurrence **is** now prevented: the proposed check was
+built verbatim and ships — see § *Update 2026-08-27* below.
+
+*(Status corrected 2026-09-01. It read `fixed-once`, with a trailing "Nothing yet
+prevents recurrence", after the Update immediately below had already recorded the check
+shipping — so this line contradicted its own section three paragraphs later. `params`
+had been advanced to `check-shipped` and the body had not, which is the disagreement
+`doctor`'s `params_status_drift` reported. The params side was right.)*
 
 **Narrated in:** `bug-fix-session-log:F-69`.
 
