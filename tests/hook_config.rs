@@ -18,6 +18,7 @@
 //! install`. This asserts one thing: the two declarations agree.
 
 use std::path::PathBuf;
+use std::process::Command;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -123,4 +124,130 @@ fn the_hook_edition_parser_discriminates() {
     // reason unrelated to what this file gates. Non-empty is the property that matters —
     // it is what stops the real gate passing vacuously.
     assert!(!manifest_editions().is_empty());
+}
+// ---------------------------------------------------------------------------
+// IC-4 — config propagation is additive: a RENAMED path does not propagate
+// ---------------------------------------------------------------------------
+
+/// What a `core.hooksPath` setting resolves to.
+#[derive(Debug, PartialEq, Eq)]
+enum HooksPath {
+    /// Not set. git uses `.git/hooks`, which is what `scripts/install-hooks.sh` writes.
+    Unset,
+    /// Set and the directory exists. A deliberate override; not this gate's business.
+    PointsAtExisting(String),
+    /// Set and the directory does NOT exist. Every hook in the repo is dead and git says nothing.
+    PointsAtMissing(String),
+}
+
+/// Judge a `core.hooksPath` value against a directory-existence oracle.
+///
+/// Pure over both inputs so [`the_hooks_path_verdict_discriminates`] can exercise all three
+/// arms without touching this machine's `.git/config` — which is shared mutable state that a
+/// test has no business writing, and is itself an `OB-10` resource.
+fn hooks_path_verdict(configured: Option<&str>, exists: impl Fn(&str) -> bool) -> HooksPath {
+    match configured.map(str::trim).filter(|s| !s.is_empty()) {
+        None => HooksPath::Unset,
+        Some(p) if exists(p) => HooksPath::PointsAtExisting(p.to_owned()),
+        Some(p) => HooksPath::PointsAtMissing(p.to_owned()),
+    }
+}
+
+/// A `core.hooksPath` that names a missing directory silently disables every hook.
+///
+/// **The failure this catches is silence.** git does not warn when `core.hooksPath` points
+/// nowhere; it simply runs no hooks. So `.pre-commit-config.yaml` stops firing, the ledger
+/// guards stop refusing, and every commit succeeds — the additive half of a rename landing
+/// while the removal does not, which is `IC-4`'s claim. Measured cost when it happened:
+/// `docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md`, a day.
+///
+/// **Why a test and not a hook.** A hook cannot check whether hooks are wired — if the wiring
+/// is broken the hook does not run, and its silence is indistinguishable from its approval.
+/// This is the one class of check that must live outside the mechanism it guards.
+///
+/// **Why the trap and not installation.** `scripts/install-hooks.sh --check` already reports
+/// far more (shims present, stage log, opt-in trailer) and exits 0 here — but nothing runs it:
+/// no CI job, no test, no task runner reference, only a line of prose asking the operator to
+/// run it after a clone. Asserting *installation* would red every fresh clone and every CI
+/// checkout, which is why `tests/hook_config.rs` declines to. Asserting the *trap* reds nobody
+/// legitimately: unset passes, a deliberate override passes, and only a stale path fails.
+///
+/// **Vacuous in CI, on purpose, and say so rather than bank it.** A fresh checkout never has
+/// `core.hooksPath` set, so this passes trivially there and its green tick means nothing.
+/// `.git/config` is machine-local and CI cannot host the defect. The party it protects is the
+/// developer whose directory was renamed — who, per `IC-4`, verified the change they could see
+/// and got positive evidence for the wrong proposition.
+/// **The panic arm is unexercised on a healthy machine, so here is how to see it fire.** In a
+/// throwaway repo — never here, since setting this key disables every session's hooks:
+///
+/// ```text
+/// git init -q probe && cd probe
+/// git config core.hooksPath /home/you/work/OLD-NAME/.git/hooks   # the archived bug's shape
+/// printf '#!/bin/sh\nexit 1\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+/// git commit -qm x                                               # exit 0 — the REFUSING hook never ran
+/// ```
+///
+/// Measured 2026-09-02: that commit succeeds. A hook whose only job is to refuse is skipped in
+/// silence, which is the whole of the defect — not a weakened guard, an absent one.
+#[test]
+fn a_set_core_hookspath_must_point_at_a_directory_that_exists() {
+    let out = Command::new("git")
+        .args(["config", "--get", "core.hooksPath"])
+        .current_dir(repo_root())
+        .output()
+        .expect("git config failed to run");
+    // Exit 1 with no output is git's "not set", which is the healthy case rather than an error.
+    let configured = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    let root = repo_root();
+    let verdict = hooks_path_verdict(Some(configured.as_str()), |p| {
+        let path = std::path::Path::new(p);
+        if path.is_absolute() {
+            path.is_dir()
+        } else {
+            root.join(path).is_dir()
+        }
+    });
+
+    if let HooksPath::PointsAtMissing(p) = verdict {
+        panic!(
+            "core.hooksPath is set to `{p}`, which is not a directory.\n\n\
+             git overrides .git/hooks with it unconditionally and does NOT warn when it names \
+             nothing, so EVERY hook in this repo is currently dead: pre-commit does not run, \
+             the ledger-count and foreign-index guards do not refuse, and commits succeed \
+             looking exactly as they should. The usual cause is a directory rename — the new \
+             value propagated, the old absolute path did not.\n\n    \
+             git config --unset core.hooksPath && scripts/install-hooks.sh\n\n\
+             Verify with `git config --get core.hooksPath` returning nothing: an --unset that \
+             was recorded but never run is how the original bug survived being marked fixed \
+             (docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md)."
+        );
+    }
+}
+
+/// The verdict must be able to return each arm, or the gate above is decoration.
+///
+/// Note the live test can only ever observe one arm on a given machine, and on a healthy one
+/// that arm is `Unset` — so without this, `a_set_core_hookspath_must_point_at_a_directory_that_exists`
+/// is a test whose only exercised path is the one that cannot fail.
+#[test]
+fn the_hooks_path_verdict_discriminates() {
+    let never = |_: &str| false;
+    let always = |_: &str| true;
+
+    assert_eq!(hooks_path_verdict(None, always), HooksPath::Unset);
+    // git prints nothing when the key is unset; the empty string must read as unset, not as a
+    // relative path that happens to resolve to the repo root.
+    assert_eq!(hooks_path_verdict(Some(""), always), HooksPath::Unset);
+    assert_eq!(hooks_path_verdict(Some("   "), always), HooksPath::Unset);
+
+    assert_eq!(
+        hooks_path_verdict(Some(".husky"), always),
+        HooksPath::PointsAtExisting(".husky".into()),
+        "a deliberate override that exists is not this gate's business"
+    );
+    assert_eq!(
+        hooks_path_verdict(Some("/old/name/.git/hooks"), never),
+        HooksPath::PointsAtMissing("/old/name/.git/hooks".into()),
+        "the pre-rename absolute path is the exact shape of the archived bug"
+    );
 }
