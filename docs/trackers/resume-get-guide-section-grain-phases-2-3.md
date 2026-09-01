@@ -100,7 +100,7 @@ of the corpus.
 
 ## GG-3 — Extract the delivery helpers out of the 408-line trait method
 
-**Status:** open — highest-value item on the deferred list
+**Status:** done 2026-09-02 — `d0065423`, patch-id `13e5ac7b024e972aa1ead62bc1ed224fae5a2afa` (see below)
 **Valid:** dated 2026-08-27
 
 `guide_blocks_for`, `inject_hint`, `GuideDeliveryShape` and `guide_block` are
@@ -113,6 +113,31 @@ merge blocker*: the code is correct, only its testability is the problem.
 
 **Next:** pure refactor, no behaviour change. Do it before Phase 2 adds more
 delivery paths through the same method.
+
+**Done 2026-09-02** (`d0065423`). Moved verbatim to `src/tools/core/guide_emit.rs`;
+`call_content` **634 → 428 lines**. The 408 above was measured 2026-08-27 and had
+already been overtaken: operator-rules Phase 2 (`1bdf94bd`, 2026-08-31) added a
+second engine's delivery path through the same method, so the "before Phase 2 adds
+more" window had closed before this was picked up.
+
+Two things the extraction surfaced that were invisible while everything lived in
+one method:
+
+- **`guide_block` has two callers**, not one — `guide_blocks_for`'s non-declaring
+  branch, and `call_content`'s session-opener path, which delivers
+  `SESSION_OPENING_GUIDE` whole and deliberately bypasses `guide_blocks_for`. It is
+  `pub(crate)` for that reason, documented at the definition.
+- **One invariant had zero coverage.** `guide_blocks_for`'s doc comment states that
+  all-already-sent must return empty and must *never* fall back to the preamble, and
+  nothing asserted it. Now covered by
+  `all_sections_already_sent_returns_empty_and_does_not_fall_back_to_the_preamble`,
+  verified by mutation: making the unmatched branch fire when every matched section
+  is already stamped reds that test and **only** that test — the other six in the
+  module pass under the mutation.
+
+Seven unit tests total. The e2e tests are **kept, not converted**: they guard the
+wiring, these guard the logic, and the reviewer's "turns three e2e tests into unit
+tests" is read as *makes unit tests possible*.
 
 ## GG-4 — `librarian` § Body Editing Surfaces sits 54 B under the p50 ceiling
 
