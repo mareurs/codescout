@@ -132,6 +132,32 @@ That is the interesting half: `docs/adrs/2026-08-27-negative-results-name-their-
 requires a negative result to name the scope it examined. A refusal is a negative result
 about permission, and this one names the rule while withholding the position.
 
+### Incidental reproduction — the clause that mattered was not the clause that offended
+
+Logged 2026-09-01, unplanned, while doing unrelated work (locating a memory file). Submitted:
+
+```
+find ~/.local/share/codescout ~/.local/share/librarian .codescout -name 'gotchas*' 2>/dev/null | head
+echo "---"
+ls -l .codescout/memories/ 2>/dev/null | head -30
+```
+
+as one `run_command` string. Clause 1 is a genuine IL-3 violation (bare `find` → `head`). The
+gate refused **the whole submission**, so clause 2 (`echo`) and clause 3 (`ls … | head`, whose
+LHS is bounded and explicitly allowed) never ran — and the response gave no indication that two
+of three clauses were innocent.
+
+This is worth more than the three designed probes already in this file, for one reason: **it was
+not a probe.** The three above were constructed by someone who already believed the defect
+existed, so each could be dismissed as artificial. This one arrived as ordinary cost during
+unrelated work, which is the population the fix is actually for. It also shows the failure is
+not rare enough to need contriving — one session hit it inside ten minutes without trying.
+
+Note the aggravating detail for the fix's error-message half: clause 3 uses `ls` as its LHS,
+which the gate's own refusal text lists among the permitted bounded producers. So the refusal
+quoted a rule that *permits* one of the clauses it was refusing. Any fix that evaluates
+per-clause must name the offending clause, or a caller reading the rule text will conclude the
+gate is broken rather than that a sibling clause tripped it.
 ## Hypotheses tried
 
 1. **Hypothesis:** the whole compound command is refused because of one clause.

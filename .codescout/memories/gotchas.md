@@ -120,6 +120,31 @@ for p in $(pgrep -x codescout); do
 done
 ```
 
+**The fix's own AUTHOR is in the stale population by default, and this is the part that reads
+green.** Measured 2026-09-01: two fixes committed at 14:59 and 15:12, release binary rebuilt at
+15:35 — and the author's own server had started at **14:21**, so it could not contain either. The
+author had already told peers to reconnect with `/mcp` and framed staleness as a fact about *other*
+sessions. Nothing about a stale server is observable from inside it: every call succeeds, and the
+sole asymmetry is that a path the fix changed still behaves the old way. Identify your own server
+by walking up from a `run_command` shell (`sh → codescout → claude`); the `codescout` in that chain
+is yours.
+
+**So probe a code path the fix CHANGED — and check first that the probe is able to fail.** The
+first probe here read a stamped-*looking* bug file and succeeded, which reads exactly like "fix is
+live". That file carried no `id:` (`_TEMPLATE.md` writes none), so the guard arm under test never
+fired: a non-discriminating probe returns success in **both** worlds. The valid probe used a file
+verified to carry `id: <16-hex>` and no `entry_prefix` — pre-fix it refuses with the anonymous
+*"do not read or edit it directly"*, post-fix it reads. Confirming the fixture is load-bearing is
+the whole probe; without it you have measured nothing and feel informed.
+
+**Mechanism candidate (not built).** The server can answer this about itself in one syscall —
+`readlink("/proc/self/exe")` ending in `" (deleted)"` — and surface a one-line advisory in the
+envelope. That is a check that runs when nobody is worried; the `/proc` sweep above runs only once
+somebody already suspects, which is the state this whole section exists because nobody reaches.
+
+*(Re-measured 15:4x, after the 15:35 build: **10 servers — 9 stale, 1 current — plus 3 stale
+muxes**, against 10 servers + 2 muxes at 15:2x. Consistent with the floor claim; the mux count
+moved because muxes are use-coupled, the server count did not because they are not.)*
 ## RemoteEmbedder Dimensions
 
 `RemoteEmbedder.dimensions()` returns `0` until after the first successful `embed()` call
