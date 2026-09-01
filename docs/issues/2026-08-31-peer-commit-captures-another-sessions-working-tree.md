@@ -491,6 +491,19 @@ comparison is dumber and it is the one that holds, for the reason this section a
 — **a foreign hunk cannot leave the count unchanged**, and it needs to know nothing about who
 the peer is or what they wrote.
 
+The sharper statement of why, from `codescout-e6`, who explained the inversion rather than
+just recording it: **a count makes no claim about what the foreign content is, which is
+exactly why nothing about the foreign content can defeat it.** Every content predicate is a
+hypothesis about what the peer wrote, and the peer is the one party you cannot poll.
+
+**This is an `OB-1` instance** — *the parameter your own context supplies for free*. The grep
+pattern was under-specified in exactly that class's sense: its author read it already holding
+the set of entries they believed were in the file, so the missing parameter (*which entries
+might arrive*) was invisible to them and to no one else. That class's *Who can see it* field
+predicts the finder correctly — not a more careful version of the same author, but a reader
+not sharing their context. Cited here so the instance is reachable from the class; the class
+needs no new row.
+
 So the rule stays exactly as stated: compare `--stat` to `--stat`. Do not substitute a content
 search for it, and do not treat a content search as corroboration — a grep whose pattern you
 wrote from memory is evidence about your memory.
