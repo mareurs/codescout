@@ -182,7 +182,7 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 4 | clears count; spread unadjudicated | none yet |
 | IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | 0 | not yet — 1 instance, untagged; archive pass found none | none yet |
 | IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 16 | clears count; **spread adjudicated 2026-09-01 — clears, 6 or 11 depending on unit** | none yet — **10 of 16 share one layer**, so one gate covers most |
-| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 8 | clears count; spread unadjudicated | none yet |
+| IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 8 | clears count; **spread adjudicated 2026-09-01 — 4 subsystems / 6 distinct guards** | none yet — one sub-shape of three is mechanizable |
 | IC-15 | a parameter is accepted then silently dropped | `accepted-parameter-silently-dropped` | 16 | clears count; **spread adjudicated 2026-09-01 — 6 subsystems** | **partial** — behavioural probe on 2 of ~7 multi-action tools |
 | IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | 3 | **clears both bars 2026-09-01**; rule already in `CLAUDE.md` — the third instance buys measurability, not a rule | designed; positive-form guard owed |
 | IC-17 | a shared resource carries no owner, so enumerating the peer does not help | `shared-resource-carries-no-owner` | 15 | `OB-8` (+ OB-2) — 2026-09-01 | partial |
@@ -775,10 +775,23 @@ The archived instances are not yet cited here because I have not read them. What
 
 **Slug:** `cluster/guard-narrower-than-its-name`
 **Claim:** A guard's name states the property; its implementation covers a subset of it. Everything the name promises is believed protected, the uncovered remainder is protected by nothing, and the guard's own green result is what conceals the gap.
-**Members:** `filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}}` — n=7, 2026-09-01, by query after the archive backfill pass. Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me.**
+**Members:** `filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}}` — **n=8, 2026-09-01, by query**, re-derived here rather than carried. Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me**; the 8th was filed the same night and is named under *Promotes to*.
 **Blind party:** everyone downstream of the name. The implementer knows the scope at the moment they write it; every later reader knows only the name, and the name is what they reason with. This is `OB-1`'s shape — the parameter the author's context supplied for free.
-**Promotes to:** `not yet` — the count is met (n=7); the **spread is unadjudicated**, and that is now the only bar. Members were tagged at `13226bda` (2026-09-01), so the count is no longer unverified — it is unaudited: single-party classification, see the Index caveat.
-**Mechanism status:** none yet.
+**Promotes to:** **spread adjudicated 2026-09-01 — it clears, and n is 8 rather than 7.** The 8th is `2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md`: a session-attribution hook covering the **cross-path** case and not the **intra-path** one that motivated it — one session's file gaining another's lines between the check and the `git add`. Shipping it as *"prevents `d617051b`"* would have been this class inside a guard against capture; its header says so instead.
+
+Two units, both defensible. By **subsystem: 4** — the librarian-managed-file guard family (3), worktree awareness (3), the shell/`run_command` gate (1), git pre-commit hooks (1). By **distinct guard: 6** — `is_librarian_artifact` carries two members and the `EnterWorktree` post-hook carries two, so the member count overstates how many *guards* are implicated. Classification remains single-party: summaries read, not full bodies.
+
+> **Three sub-shapes, and they do not share a remedy — which is why "name it better" is a third of the answer, not the answer.**
+>
+> 1. **Axis omission (3)** — the guard covers one axis of an operation space and the name covers all of it: writes-but-not-reads, cross-path-but-not-intra-path, one-of-three-write-paths. **The mechanizable third.**
+> 2. **Predicate narrowness (3)** — the *in-scope?* test is narrower than the concept: quoted frontmatter ids, artifacts with no id at all, tilde/home paths. **This sub-shape is `IC-6` seen from the guard side** — `is_librarian_artifact` pattern-matching frontmatter text for a 16-hex `id:` is a parser with no disambiguator, and its two members are failures of that parser rather than of the guard's placement. Cited across rather than double-tagged.
+> 3. **Context blindness (2)** — the guard does not know a category of entity exists: worktree shadows. No renaming reaches this one; the guard has to learn the category.
+
+**Mechanism status:** none yet, and **only one of the three sub-shapes admits one.** Comparing a name's *semantics* to an implementation is not automatable; this entry's own tell — read the name as a claim, ask what input satisfies the name but not the implementation — is a review question, not a check. Saying so is the point: a class whose remedy is mostly discipline should not carry a `none yet` that reads as unfinished work.
+
+- **The mechanizable third is axis omission**, and `edit_file` is the worked example: it guarded 1 of its 3 write paths, and *"the two unguarded paths are precisely the ones the caller reaches for."* The check has the shape already shipped for `IC-3` — **every entry point to a guarded operation routes through the guard** — expressible as `references()` on the guard function differenced against the public write entry points. Same set-difference as the tool-registry guard, with call sites in place of registrations.
+- **Renaming stays legitimate and is often the honest fix** — a guard called `cargo-test-lib` misleads nobody — but it settles sub-shape 1 and part of 2 only.
+- **State coverage at the refusal site.** The `IC-15` probe's `accepts_any_json` and the foreign-index hook's header are this done right: the limitation is written where a reader meets the guard, not in a tracker they will not open.
 **Valid:** dated 2026-09-01
 
 Distinguish this carefully from `IC-3` (*declaration is not execution*), which they are easy to merge and should not be. In `IC-3` the mechanism is **never reached** — a selector production does not emit, a CLI flag that does not exist. Here the mechanism runs, does real work, and returns a true result about a **smaller domain than its name claims**. `IC-3` fails at zero coverage; this fails at partial coverage, which is strictly harder to see because the guard demonstrably works every time you test it.
