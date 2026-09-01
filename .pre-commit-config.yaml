@@ -126,10 +126,32 @@ repos:
         files: ^(docs/trackers/issue-clusters\.md|docs/issues/.*\.md)$
         stages: [pre-commit]
 
+      # SCOPED TO THE STAGED FILES, not the workspace.
+      #
+      # `cargo fmt` has no file-list form — it formats every target of every workspace member —
+      # so `pass_filenames: false` meant a commit staging one `.rs` parsed all 408. Measured
+      # 2026-09-01: ~2000 ms whole-tree against ~40 ms for a single file.
+      #
+      # That duration is not a comfort metric. It is the window in which another session's write
+      # lands in pre-commit's after-snapshot and is attributed to this hook (see the whole-tree
+      # diff described at the top of this file). It fired twice on 2026-09-01 on a six-session
+      # checkout, and the second one taught a `--no-verify` — the exact outcome that block warns
+      # a noisy hook produces.
+      #
+      # `--edition 2021` IS NOT OPTIONAL: standalone `rustfmt` defaults to 2015 and would misparse
+      # modern syntax, where `cargo fmt` reads the edition from `Cargo.toml`. It duplicates a
+      # manifest value, so `tests/hook_config.rs` fails if the two ever drift. There is no
+      # `rustfmt.toml` in this repo, so style is otherwise identical to what `cargo fmt` applied.
+      #
+      # A staged CRATE ROOT still recurses: `rustfmt` formats the `mod` children of any file it is
+      # given, and `--skip-children` is nightly-only (verified on 1.9.0-stable). So `lib.rs` /
+      # `main.rs` commits keep roughly the old window (measured 1868 ms) — 8 of the last 300
+      # `.rs`-touching commits. The other 289 drop to one file. This is never WORSE than the
+      # previous behaviour: one crate's module tree is a subset of the workspace.
       - id: cargo-fmt
-        name: cargo fmt --check
-        entry: cargo fmt --check
+        name: rustfmt --check (staged files)
+        entry: rustfmt --edition 2021 --check
         language: system
-        pass_filenames: false
+        pass_filenames: true
         types: [rust]
         stages: [pre-commit]

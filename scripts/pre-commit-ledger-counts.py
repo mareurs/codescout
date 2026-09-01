@@ -38,9 +38,55 @@ def _git(*args: str) -> str:
     return r.stdout
 
 
+_INDEX_BLOBS: dict[str, str] | None = None
+
+
+def _prime_index(paths: list[str]) -> None:
+    """Read every path from the index in ONE `git cat-file --batch`.
+
+    `git show :<path>` spawns a subprocess per file. Measured 2026-09-01 over the 555-file
+    corpus: index mode 1360 ms against worktree mode 103 ms. The config header's "<0.2s" was
+    the WORKTREE figure -- the mode `the_hook_script_agrees_with_this_gate` runs -- while the
+    hook itself runs index mode, so the documented number was right about a different question.
+
+    Runtime is not a comfort metric here. pre-commit fails a hook when the whole-tree diff
+    changes across it (`commands/run.py:203-206`, no per-hook opt-out), so a hook's duration IS
+    the window in which another session's unrelated write is attributed to this commit. That
+    defect is why the pre-push hooks were withdrawn; shortening the window is the only lever
+    left. See the block at the top of `.pre-commit-config.yaml`.
+    """
+    global _INDEX_BLOBS
+    stdin = "".join(f":{p}\n" for p in paths)
+    r = subprocess.run(
+        ["git", "cat-file", "--batch"], input=stdin.encode(), capture_output=True
+    )
+    blobs: dict[str, str] = {}
+    buf, i = r.stdout, 0
+    for p in paths:
+        nl = buf.find(b"\n", i)
+        if nl == -1:
+            break
+        header = buf[i:nl].decode("utf-8", "replace")
+        # A path absent from the index prints `:<path> missing` with no body.
+        if header.endswith(("missing", "ambiguous")):
+            i = nl + 1
+            continue
+        size = int(header.rsplit(" ", 1)[1])
+        body = nl + 1
+        blobs[p] = buf[body : body + size].decode("utf-8", "replace")
+        i = body + size + 1  # the newline git writes after the contents
+    _INDEX_BLOBS = blobs
+
 def read(path: str, source: str) -> str | None:
-    """File content from the index (`git show :path`) or the working tree."""
+    """File content from the index (`git show :path`) or the working tree.
+
+    Index reads consult a cache primed by [`_prime_index`]; the per-file `git show` below is
+    the fallback for anything unprimed, so a slip in the batch parser costs speed, never
+    correctness.
+    """
     if source == "index":
+        if _INDEX_BLOBS is not None and path in _INDEX_BLOBS:
+            return _INDEX_BLOBS[path]
         r = subprocess.run(["git", "show", f":{path}"], capture_output=True, text=True)
         return r.stdout if r.returncode == 0 else None
     try:
@@ -223,7 +269,12 @@ def parse_index_counts(ledger: str, valid: set[str]) -> dict[str, int]:
 def actual_counts(valid: set[str], source: str) -> dict[str, int]:
     """Mirrors `actual_counts` -- seeded at 0 so a class with no members is still compared."""
     out = {s: 0 for s in valid}
-    for rel in bug_files():
+    files = bug_files()
+    if source == "index":
+        # Prime here rather than in `read`: this is the first point the whole population is
+        # known, and it is the only caller that reads more than one file.
+        _prime_index(files)
+    for rel in files:
         content = read(rel, source)
         if content is None:
             continue
