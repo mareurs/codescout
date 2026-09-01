@@ -67,10 +67,6 @@ impl Tool for ListLibraries {
     fn format_compact(&self, result: &Value) -> Option<String> {
         Some(format_list_libraries(result))
     }
-
-    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
-        crate::tools::Availability::RequiresLibraries
-    }
 }
 
 pub struct RegisterLibrary;
@@ -218,10 +214,6 @@ impl Tool for RegisterLibrary {
             result["language"].as_str().unwrap_or("?"),
         ))
     }
-
-    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
-        crate::tools::Availability::RequiresLibraries
-    }
 }
 
 fn format_list_libraries(result: &Value) -> String {
@@ -331,8 +323,31 @@ impl Tool for Library {
         }
     }
 
-    fn availability(&self, caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
-        ListLibraries.availability(caps)
+    /// `Always`, deliberately — this method is the fix for a circular gate.
+    ///
+    /// It used to delegate to `ListLibraries.availability(caps)`, i.e.
+    /// `Availability::RequiresLibraries`, i.e. `caps.has_libraries`, which
+    /// `current_capabilities` computes as *"at least one library is already registered for
+    /// the active project"* (`src/server.rs`). But `library` is the **only** surface on which
+    /// a library can be registered — `register` is one of its actions. So the tool that
+    /// establishes the precondition was gated on that precondition: hidden from `tools/list`
+    /// in exactly the state where you need it.
+    ///
+    /// **Measured 2026-09-01**, fresh git repo with no registered libraries: **15** tools
+    /// advertised and `library` absent — yet `library(action="register", path=…)` dispatched
+    /// normally and returned `Registered library 'codescout' (rust)`. The gate removed the
+    /// capability from **discovery** without removing it from **dispatch**, which is the bad
+    /// half of each: an agent reading the only discovery surface it has concludes the
+    /// capability does not exist, while the capability sits there working.
+    ///
+    /// `auto_register_deps` (run on every project activation) masks this wherever a
+    /// dependency manifest is detectable, which is why it survived — it fails exactly for the
+    /// project that has no manifest and therefore has to register by hand.
+    ///
+    /// Do not re-gate this on `has_libraries`. A future gate must key on something
+    /// **upstream** of registration, never on its outcome.
+    fn availability(&self, _caps: &crate::tools::ToolCapabilities) -> crate::tools::Availability {
+        crate::tools::Availability::Always
     }
 }
 

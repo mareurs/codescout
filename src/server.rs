@@ -4782,6 +4782,49 @@ mod tests {
         }
     }
 
+    /// Regression: `library` is the only surface on which a library can be registered
+    /// (`register` is one of its actions), and its `availability` gated on `has_libraries`,
+    /// which `current_capabilities` computes as *"at least one library is already registered"*.
+    /// The tool that establishes the precondition was hidden by that precondition.
+    ///
+    /// Measured 2026-09-01 before the fix, in a fresh git repo with no registered libraries:
+    /// **15** tools advertised and `library` absent — while `library(action="register", path=…)`
+    /// dispatched normally and returned `Registered library 'codescout' (rust)`. Discovery and
+    /// dispatch disagreed, and discovery is the only surface an agent can read.
+    ///
+    /// **The load-bearing fixture detail is `has_libraries: false`.** Flip it to `true` and
+    /// this test passes against the *unfixed* code, because `true` is exactly the state the old
+    /// gate admitted. The assertion discriminates in one direction only, so the `false` is what
+    /// makes it a test rather than a restatement.
+    #[tokio::test]
+    async fn library_is_advertised_when_no_library_is_registered_yet() {
+        use crate::tools::ToolCapabilities;
+
+        let caps = ToolCapabilities {
+            has_lsp: true,
+            has_embeddings: true,
+            has_git_remote: true,
+            // Load-bearing: the state the old gate hid `library` in. See doc comment.
+            has_libraries: false,
+            shell_enabled: true,
+        };
+
+        let (_dir, server) = make_server().await;
+        let visible: Vec<&str> = server
+            .tools
+            .iter()
+            .filter(|t| t.availability(&caps).is_available(&caps))
+            .map(|t| t.name())
+            .collect();
+
+        assert!(
+            visible.contains(&"library"),
+            "`library` must be advertised when has_libraries=false — it is the only surface \
+             that can register the first library, so gating it on one already existing hides \
+             the bootstrap path in exactly the state that needs it. Visible: {visible:?}"
+        );
+    }
+
     #[tokio::test]
     async fn list_tools_shows_lsp_tools_when_has_lsp() {
         use crate::tools::ToolCapabilities;
