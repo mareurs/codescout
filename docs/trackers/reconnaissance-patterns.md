@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 167
+entry_high_water_R: 168
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-168 | 2026-09-02 | hit, scout refuted the sentence about to be written (1 instance) | **An instrument's report can EXPIRE — the loud state converts itself to silence on a timer.** Building `IC-4`'s worktree-gitdir surface, I was about to write *"the gate scans the filesystem because `git worktree list` cannot see this"* — clean, plausible, and reading as measured because the archived instance (`2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path`) does record an orphan the list omits. The probe refuted it: **immediately after a repo rename git DOES report it**, tagged `prunable gitdir file points to non-existent location`. Transcript and probe disagreed and both were right — about different *times*. The third party is a clock: `git gc` runs `git worktree prune --expire 3.months.ago` (`gc.worktreePruneExpire`) and **deletes the admin directory**, for a worktree whose files are still on disk, because git judges it by a path that moved. The archived bug is the post-expiry state; the rename was three months prior. **Why this is worse than a narrow instrument:** the window in which it works is the window in which nobody is looking yet, and a gate built on it **starts passing at the moment the defect becomes invisible** — its green is anti-correlated with the property. **Not `R-163`/`R-164`/`R-167`, nor `CLAUDE.md`'s recording law:** all four are instruments whose *scope* is narrower than it appears, wrong the same way on every run. This one is correct today and wrong later, with no event marking the transition, so re-running it is not a check on it — the instrument-shaped twin of `IC-11`. **Remedy:** ask whether the instrument has a garbage collector. Something that tidies "stale" records is, from the defect's point of view, something that destroys evidence, and it will be a well-behaved subsystem doing its documented job. | `7eead422` (`tests/config_propagation.rs`); `issue-clusters:IC-4` surface 2; four throwaway-repo probes, ~6 min; kin `IC-11`, contrast `R-163`/`R-164`/`R-167` |
 | R-167 | 2026-09-02 | hit (4 instances) | **An UNANCHORED pattern over-matches, and the surplus is PLAUSIBLE — `R-3`'s opposite direction.** Four in one session, one reader, each a `grep` written from intent rather than anchored to the target's grammar: `git grep -l 'cluster/<slug>'` counted files that merely NAME the class in prose (the surplus was the file **retagged out** of it, whose prose records the class it left — nearly reported to a peer as *their* drift); `^  [a-z_]+ ` dropped `state-at` and published 8 CLI verbs where `CLAUDE.md` says 9, in the very check that file warns you will get wrong; `fn selector_key` matched a TEST NAME by prefix and produced *"exactly five override sites"*, told to a peer as verified, against a real four; `n[=≥]` over a whole file would have gated a promotion **threshold** as a count. **Not `R-3`:** that one disciplines the zero and its tell is an absence you can notice — here the pattern over-matches, the surplus looks right, and nobody re-reads a number that looks right. **Remedy:** anchor to the grammar (`^[[:space:]]*-[[:space:]]*<tok>[[:space:]]*$` for a YAML item; a word boundary for a Rust item) and, where no anchor is obvious, construct one example of what else your pattern admits. The corpus already prescribed the anchored form in a gate's own failing-assert text and I used the unanchored one anyway — knowing the rule is not the mechanism. | `65fe14b1`, `fbe8e200`; opposite-direction twin of `R-3`, kin to `R-160` (hit-rate camouflage vs population camouflage) |
 | R-166 | 2026-09-01 | miss, self-inflicted, surfaced by a DISAGREEMENT (1 instance) | **A finding parked in a commit message has no citable home, so the next session that needs it cites something adjacent.** I judged a clean near-miss — a grep whose **context window stopped one line short** of the tag it was checking for, so a present tag read as absent — *"worth recording in the message since it did not earn an entry"*, and put it in `8b24df96`'s message. Seventeen minutes later `codescout-b7` needed exactly that case as the **type-B exemplar** in `R-162`'s addendum, found it in no entry, and cited `R-163` — which contains no zero at all. Their sweep confirmed the vacuum: `clipped` / `context window` / `one line short` occur nowhere in the ledger but their own table. **Two halves:** (a) a commit message is durable but **not addressable** — `link_scan` binds a token to a `## PREFIX-N — title` heading and nothing else, so a lesson there is re-narratable but not citable, and *"this doesn't earn an entry"* is judged by the author, the party least able to know who will need it; (b) **a citation is evidence about the citer's model of the target, never about the target, until the target is read** (`codescout-b7`'s line — `R-3`'s twin, disciplining the writer of a *reference* where `R-3` disciplines the reader of a *result*). **What caught it was not a check.** Re-homing the citation from `R-163` to `R-165` on scope grounds is what sent them to open `R-163`; had I cited from `R-163` as originally offered, their table would have **agreed** with my citation and nothing would have surfaced — two independently-wrong claims pointing at each other, indistinguishable at the point of use from two right ones. **Remedy:** if a finding is worth a paragraph in a commit message it is worth an entry (one call vs a fabricated citation — and an unwritten entry produces no error, no gap report and no dangling citation, because a citation that was never possible cannot dangle); and open an entry before resting a *particular* proposition on it. | `R-162` addendum + its same-hour correction; `8b24df96` message (where the case was stranded); `R-165` scope note (the disagreement); kin `R-3`, `R-163`, `R-161` |
 | R-165 | 2026-09-01 | miss, peer-caught (1 instance) | **A deletion's stale references point INWARD from files the diff never touched, so reviewing the change cannot find them.** `30b6fc41` deleted four `selector_key` overrides; I corrected the four doc comments it falsified and reported the sweep complete. A **fifth** survived in `action_selector_key`'s own doc — naming a deleted symbol, explaining a deferral that no longer applied, and prescribing an adoption that had already happened. **The two directions:** comments that *lived in* the deleted code appear in the diff (that is how four were found); comments that *pointed at* it sit in untouched files and are **structurally absent from it**. Reading the diff harder cannot reach them — a coverage failure, not a thoroughness one. Proximity did not help either: the fifth was one function from the change. **Pairs with `R-162` as the mirror instrument:** grepping the deleted token is guaranteed-zero and useless; grepping the deleted symbol's NAME is exactly right and non-zero *because* the references survive. Same technique, opposite value, discriminated by which side of the deletion you stand on. Neither is an `R-3` instance — both queries were well-formed and correctly scoped. **Remedy:** grep the tree for the deleted name before claiming a sweep is complete, and state the sweep's scope ("every falsified comment in the diff" ≠ "in the tree") — I published the stronger reading of the weaker act, `R-161` a third time. | found by `codescout-b7`; fixed at the site in `action_selector_key`'s doc; **the table in this row is superseded by `R-162`'s addendum**, which adds the asymmetric timing (Type A decidable *before* the query, Type B only after and only by a differently-scoped instrument) and the trap that B's standard remedy — widen the window — is a **no-op** against A; mechanisable as an `audit_doc_refs` extension resolving `Type::method` in Rust doc comments — candidate `I-N`, unfiled |
@@ -7460,6 +7461,58 @@ So cite the number, not the agreement. CLAUDE.md § *Reaching a Peer Session* sa
 independence rather than agreement; this is that rule applied to a count two sessions produced
 from one pattern, and the tell is that neither of us could name a second *source*, only a second
 *reading*.
+## R-168 — An instrument's report can EXPIRE — the loud state converts itself to silence on a timer
+
+**Valid:** invariant
+
+**Verdict:** hit. The scout ran before the code was written and **refuted the sentence I was
+about to put in a doc comment.** No entry would have existed had I trusted the archived bug's
+transcript, and the gate would have carried a confidently false rationale.
+
+**Observed:** 2026-09-01, building `IC-4`'s worktree-gitdir surface
+(`tests/config_propagation.rs`, `7eead422`). The archived instance
+(`docs/issues/archive/2026-08-16-bench-worktree-gitdir-points-at-pre-rename-path.md`) records
+an orphaned worktree that `git worktree list` does not show. I was about to write *"the gate
+scans the filesystem because `git worktree list` cannot see this"* — a clean, plausible reason
+that would have read as measured. The probe said otherwise: **immediately after the rename git
+DOES report it**, tagged `prunable gitdir file points to non-existent location`. The archived
+transcript and the probe disagreed, and both were correct — about different *times*.
+
+What closes the gap is a third party with a clock. `git gc` runs `git worktree prune --expire
+3.months.ago` on its own (`gc.worktreePruneExpire`), which **deletes the admin directory** — for
+a worktree whose files are still on disk, because git is judging it by a path that moved. After
+that, the entry is absent from the list, `.git/worktrees/` is gone, and the defect is silent.
+The archived bug is the post-expiry state; the probe caught the pre-expiry one; the rename was
+three months before the report.
+
+**The law:** *an instrument's report can expire.* A loud state that converts itself to a silent
+one — on a timer, with no event — is worse than an instrument that was never loud, because the
+window in which it works is exactly the window in which nobody is looking yet, and by the time
+someone looks the instrument agrees that nothing is wrong. A gate built on it does not merely
+fail to catch the defect: **it starts passing at the moment the defect becomes invisible**, so
+its green is anti-correlated with the thing it checks.
+
+**Distinguish from `R-163`/`R-164`/`R-167` and from `CLAUDE.md`'s recording law.** Those are all
+about an instrument whose *scope* is narrower than it appears — a windowed count, a kill tally, an
+unanchored pattern, a filter that drops the refuting observation. Those are wrong the same way on
+every run. This one is **correct today and wrong later, with nothing in between and no event
+marking the transition**, which is why re-running it is not a check on it. The nearest relative
+is `IC-11` (prose true when written) — this is its instrument-shaped twin.
+
+**Ask, at any seam:** does this instrument have a garbage collector? Something that tidies
+"stale" records is, from the defect's point of view, something that destroys evidence — and it
+will usually be a well-behaved subsystem doing its documented job on a schedule nobody set for
+this purpose.
+
+**Cost avoided:** a gate with a false rationale, and a doc comment asserting as measured
+something a two-minute probe refutes. **Cost incurred:** four throwaway-repo probes, ~6 minutes.
+
+**Status:** open
+
+**Promote-when:** a second instrument in this corpus is found whose report expires rather than
+being narrow — at which point the ask above earns a place beside the recording law in
+`CLAUDE.md` § *Testing Discipline*.
+
 ## Template for new entries
 
 <!-- Insert new R-N entries above this line.
