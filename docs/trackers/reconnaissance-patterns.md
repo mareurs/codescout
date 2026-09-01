@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 151
+entry_high_water_R: 152
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -6371,6 +6371,51 @@ claim is falsified by measuring first. At 2, promote the widened form; cite this
 **Rests on:** `catalog-audit-trail-session-log:F-1`'s measurement table; the spec text at
 `docs/superpowers/specs/2026-09-01-catalog-audit-trail-design.md` § Phase 2 as it stood
 before `b0bdc4b1`.
+
+## R-152 — R-49 audited against the four staleness categories — healthy; the gap is attribution, not text
+
+**Verdict:** hit for `R-49` — **and this entry exists to record the audit, not the hit.**
+
+Per this skill's § *Every promotion audits the promoted set*, a recurrence of an
+already-promoted law is a defect in the promoted text rather than a new entry. So the
+question here is not "does this deserve an R-number" but "which of the four staleness
+categories does `R-49` fall into today". Checked, 2026-09-01:
+
+- **False?** No. `R-49` says re-entering your own artifact is a seam, authorship no
+  exemption. The T-7 pre-flight scan found four non-existent interface references in a plan
+  its author had written 40 minutes earlier (`codescout:catalog-audit-trail-session-log:F-4`).
+  The law describes exactly what happened.
+- **Outgrown?** No — and this is the one worth stating, because it is the category the
+  previous audit put the *reproduction* law into. `R-49`'s wording already covers plans as
+  well as bug files, and covers implementing your own artifact as well as re-reading it.
+  Nothing in this recurrence sits outside its text.
+- **Unreachable?** No. It was in context (this session ran the skill earlier) and the scan
+  happened.
+- **Obsolete?** No. No structural gate compares a plan's identifiers against the symbol
+  index; the compiler catches three of the four *after* dispatch, and the fourth
+  (`EnvGuard`) it never catches at all, because the wrong-but-available substitute compiles.
+
+**Verdict: `R-49` is healthy. No re-promotion owed.** Recorded so the next promotion
+inherits this check instead of repeating it.
+
+**The one thing this run adds that `R-49` does not say:** attribution. Two mechanisms fired
+together — `R-49` from the recon pass, and `subagent-driven-development`'s *mandatory*
+pre-flight scan — and the catch cannot be assigned to either. `codescout:catalog-audit-trail-session-log:W-3`
+carries that caveat in full. The consequence for this ledger is a measurement rule rather
+than a scouting rule: **when two loaded mechanisms both cover a catch, the datapoint counts
+for neither's promote-when threshold.** Counting it for both is how a set of laws inflates
+its own evidence base, and the failure is silent — every entry looks individually honest.
+
+**Promote-when:** a second occasion where a catch is claimable by two mechanisms. At 2,
+promote the counting rule into this skill's *Every promotion audits the promoted set*
+section, where the four categories already live and where a shared-attribution case
+currently has nowhere to go.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** `codescout:catalog-audit-trail-session-log:F-4` and
+`codescout:catalog-audit-trail-session-log:W-3`, same session; and on `R-49`'s text as it
+stands today, re-read rather than recalled for this audit.
 
 ## Template for new entries
 

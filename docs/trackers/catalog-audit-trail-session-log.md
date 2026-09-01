@@ -10,8 +10,8 @@ tags:
 entry_prefix:
   - F
   - W
-entry_high_water_F: 3
-entry_high_water_W: 2
+entry_high_water_F: 5
+entry_high_water_W: 3
 ---
 
 # Session Log — Catalog Audit Trail (T-1 → T-13 → T-7)
@@ -72,6 +72,8 @@ entry_high_water_W: 2
 | F-1 | 2026-09-01 | high | design-vs-substrate | fixed-verified | Spec's Phase 2 volume analysis named the 0.4% term and missed the 98.5% one |
 | F-2 | 2026-09-01 | med | plan-internal-consistency | fixed-verified | Spec prescribed a stamp line inside a file it also declared merge=union |
 | F-3 | 2026-09-01 | low | tool-ergonomics | open | edit_code replace with a multi-symbol body leaves the old siblings behind |
+| F-4 | 2026-09-01 | high | plan-vs-substrate | fixed-verified | Four interface references in my own 40-minute-old plan were wrong |
+| F-5 | 2026-09-01 | high | gate-integrity | mitigated | Baseline exit code came from tail, not cargo — green and uninformative |
 
 ## Wins Index
 
@@ -79,6 +81,7 @@ entry_high_water_W: 2
 |----|------|-------:|---------|----------------|--------|
 | W-1 | 2026-09-01 | high | Histogram the substrate before reading a design whose central claim is a volume | Spec-as-written ships a green, working export writing ~380k rows/day of empty diffs into git; no gate in the chain reads data rather than code | validated |
 | W-2 | 2026-09-01 | med | Probe an embedded language's semantics before generating code in it | Guessing SQLite's JSON subtype the other way pins escaped payloads behind passing tests; without the BLOB probe the writer-abort guard has no red to be born from | validated |
+| W-3 | 2026-09-01 | high | Pre-flight scan as a row-per-pair table, run against your own plan | 3 of 5 tasks carried a plan-inherited defect; one branch ends not in a retry but in copying a forbidden UB env-mutation pattern that lands intermittently | validated |
 
 ---
 
@@ -525,6 +528,173 @@ against the same bundled SQLite the crate links (`rusqlite` `features = ["bundle
 probe used the system `sqlite3` binary, which is a **different build**, so the subtype
 result is strong evidence and not proof for the linked library. The blob error is confirmed
 independently by the in-tree test, which does run against the bundled build.
+
+## F-4 — Four interface references in my own 40-minute-old plan were wrong
+
+**Observed:** 2026-09-01, SDD pre-flight conflict scan for
+`docs/superpowers/plans/2026-09-01-committed-audit-shards.md`, before dispatching Task 1.
+
+**When:** ~40 minutes after I finished writing that plan, in the same session, having scouted
+every seam it names *while writing it*.
+
+**Expected (plan):** four interface references, each written from a scout I had just done:
+`crate::util::test_env::EnvGuard`; `ctx.project_root()` at two call sites in Task 4; `&root`
+in Task 4's reindex fold-in.
+
+**Got (scouted reality):** all four wrong.
+
+| Plan said | Reality |
+|---|---|
+| `crate::util::test_env::EnvGuard` | No such path. The only `EnvGuard` is **private**, inside `src/agent/mod.rs:2124`'s test module, `#[cfg(feature = "server-stack")]`-gated, and its own doc comment reads *"Do NOT copy this pattern into a default-feature test"*, citing an archived UB-race bug |
+| `ctx.project_root()` (×2) | No such method on `ToolContext`. `project_root()` exists on the **agent** (`src/agent/mod.rs:1466`) and is `async`. The shape the plan wanted is `src/librarian/tools/gather.rs:294` — a private free fn taking `&ToolContext` |
+| `&root` in `reindex::call` | No `root` binding exists. It has `targets: Vec<PathBuf>` (`src/librarian/tools/reindex.rs:181`), 1..n roots depending on `scope` |
+
+Two further gaps in the same scan: Task 2 duplicated the shard-filename convention instead of
+calling Task 1's `shard_file_name`, and Task 1's collision test derived its suffix from
+`nanos ⊕ pid` — identical for two calls in one process on a coarse clock, so both a flaky
+test and a real collision.
+
+**Probable cause:** the plan was written immediately after scouting, when the writer's model
+is most confident and least tested — `codescout:R-49`'s stated mechanism. Specifically, I had
+read `gather.rs` for the `catalog_meta` helpers and *inferred* a `project_root` method on
+`ToolContext` from the free function I saw there. The inference was one token off and read as
+a memory.
+
+**Workaround:** six rulings recorded in the run ledger before Task 1 dispatched; the three
+binding Task 1 travelled in its dispatch as explicit corrections that override the brief
+text. Notably Ruling 3 does not restore the missing helper — it restructures the code so no
+test needs the environment at all, splitting a pure `mint_host_id(&str)` out of
+`resolve_host_id(conn)`.
+
+**Severity:** high — three of five tasks carried a reference that would not compile. Not
+merely three retries: the `EnvGuard` one had no correct substitute, so an implementer would
+have found the private struct, seen it fit, and copied a pattern whose doc comment forbids it
+and whose archived bug is a UB race in a multithreaded test binary. That failure is
+intermittent, not a compile error.
+
+**Status:** fixed-verified — rulings landed in the ledger, corrections carried into Task 1's
+dispatch, before any subagent ran.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the four symbol reads listed above, taken this session; and on the SDD skill's
+pre-flight scan being run as a *table* (one row per task pair, one per task) rather than as a
+verdict — three of the four were found by rows that would not have been written under a
+"does the plan look consistent?" reading.
+
+**Fix idea / Pointer:** run ledger at
+`.superpowers/sdd/2026-09-01-committed-audit-shards/progress.md` § Pre-flight conflict scan
+and § Rulings.
+
+## F-5 — Baseline exit code came from tail, not cargo — green and uninformative
+
+**Observed:** 2026-09-01, establishing the clean baseline in the fresh
+`.worktrees/audit-shards-t7` worktree, before Task 1 dispatched.
+
+**When:** The `using-git-worktrees` step that exists precisely to make later failures
+attributable — *"a dirty baseline makes every later failure ambiguous."*
+
+**Expected:** `cargo test --workspace --no-default-features 2>&1 | tail -5` run in the
+background; the harness reported `exit code 0`, which I was about to record as a green
+baseline.
+
+**Got:** that `0` is **`tail`'s** exit code, not `cargo`'s. A shell pipeline exits with its
+last stage. Re-run bare into a file: `cargo exit=0`, 26 result lines, all `ok` — so the
+baseline genuinely was green **this time**, and that is the whole problem. The check and the
+broken world are indistinguishable at the point of reading.
+
+**Probable cause:** the `| tail -5` was reflex output-trimming to keep the log short. CLAUDE.md
+§ Companion Plugin documents this exact failure — *"Two things `Bash` does not get: the IL-3
+unbounded-pipe block (it masked a non-zero `cargo test` exit here)"* — and the guard that
+would have refused it is a **codescout `run_command`** guard. I used native `Bash`, which is
+permitted here while a shell-mode eval is in flight, so the pipe went through unblocked.
+
+**Workaround:** run bare, redirect to a file, read the exit code, then query the file. Adopted
+for every gate command in this run.
+
+**Severity:** high — not for what it did (nothing; the baseline was green) but for what it
+could not have detected. A red baseline read as green mis-attributes every subsequent failure
+to the task that happens to be in flight, which in an SDD run means fix rounds spent on code
+that was never broken. This is the *self-validating gate* shape from the skill's Phase 1: a
+check that reads green in the broken world carries no information.
+
+**Status:** mitigated — the practice is fixed for this run, and the structural guard exists
+but only on the `run_command` path. Native `Bash` remains unguarded by deliberate policy while
+the shell-mode eval runs, so the hazard is live for any session that reaches for `Bash`.
+
+**Valid:** conditional — the shell-mode eval concludes and `security.shell_command_mode`
+settles
+
+**Rests on:** the IL-3 pipe limiter being a `run_command`-only guard, which CLAUDE.md states
+directly; not re-verified against the hook source this session, and CLAUDE.md itself warns
+that the hook source is not ground truth for runtime behaviour — the probe is.
+
+**Fix idea / Pointer:** the honest generalisation is not "avoid pipes" but **"a pipeline's
+exit code describes its last stage"** — so any gate whose result is read as a boolean must
+not end in a filter. Candidate for the run-gate discipline in CLAUDE.md § Development
+Commands if a second instance appears.
+
+## W-3 — Pre-flight scan as a row-per-pair table caught 3 of 5 tasks' inherited defects
+
+**Observed:** 2026-09-01, immediately before dispatching Task 1 of the T-7 SDD run — a plan I
+had written myself 40 minutes earlier, after scouting each seam it names.
+
+**Pattern:** **Run the pre-flight scan against your own plan as if a stranger wrote it, and
+run it as a table rather than a judgement.** One row per task *pair* that shares a file or an
+interface (what one produces vs. what the other consumes), one row per task for
+self-consistency — and write the rows that come back clean too, because the discipline is
+what forces contact with each interface rather than a global impression of soundness.
+
+**Counterfactual:** the scan found six gaps; four were interface references that do not
+exist (`codescout:catalog-audit-trail-session-log:F-4`). Without it:
+
+- Task 1's implementer imports `crate::util::test_env::EnvGuard` → compile error → finds the
+  real `EnvGuard` in `src/agent/mod.rs:2124` → **it fits** → copies it. That is the branch
+  that does not end in a retry: the struct is feature-gated with a doc comment forbidding
+  exactly this, and the archived bug it cites is a UB env race in a multithreaded test
+  binary. Intermittent, not reproducible, lands in `master`.
+- Task 4's implementer hits `ctx.project_root()` at two sites and `&root` at a third. Three
+  compile errors, plus a design question no task owns — `reindex` has `targets: Vec<PathBuf>`,
+  so "which root does a per-repo shard export write to?" has to be answered mid-dispatch by
+  whoever is holding the smallest amount of context.
+- Task 2 ships a second copy of the shard-filename convention, and Task 1's round-trip test
+  guards a function the export never calls. Green, and covering nothing.
+
+Concretely: **3 of 5 tasks carried a defect**, matching the T-1 run's 5-of-10 rate for the
+same cause. Cost of the scan: ~8 minutes and four symbol reads.
+
+**Confirming data points:**
+1. This session — 6 gaps, 4 of them non-existent interfaces, in a plan whose author had
+   scouted those very files while writing it.
+2. The T-1 SDD run (2026-09-01, same day) — *"A plan's reference code is a sketch — 5 of 10
+   tasks carried a defect inherited from the plan, none caught by its author"*, already
+   promoted into CLAUDE.md § SDD Rulings.
+3. `codescout:R-49` — three session-authored artifacts failing later scrutiny in one sitting,
+   the promoted form of the same mechanism.
+
+**Attribution caveat, stated because it changes what this datapoint proves:** two independent
+mechanisms fired here — the SDD skill *mandates* a pre-flight scan, and `codescout:R-49` was
+in context from this session's earlier recon pass. I cannot cleanly attribute the catch to
+either, and counting it for both would inflate both. What this entry establishes is that the
+scan **found** the drift; it does not establish that recon-without-SDD would have.
+
+**Impact:** high — prevented one silent UB-pattern adoption and three compile-time failures
+across two dispatches, and settled a design question (Ruling 2) that would otherwise have
+been answered by an implementer with the least context in the run.
+
+**Promote-when:** a third SDD run where the pre-flight scan finds a defect the plan's author
+put there. At 3, the promotion is not "scan your plan" — CLAUDE.md already says that — but
+the sharper form: **the scan must be written as a row-per-pair table, and the clean rows are
+what make it work.** Two of the four findings here came from rows I would not have written
+under a holistic read.
+
+**Status:** validated — drift caught and ruled on before any subagent ran; the run's outcome
+is not yet known, so the "prevented" claim is about the dispatches, not about the merge.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** `codescout:catalog-audit-trail-session-log:F-4`, same session — this win is
+F-4's counterfactual and is not independent evidence of it.
 
 ## Template for new entries
 
