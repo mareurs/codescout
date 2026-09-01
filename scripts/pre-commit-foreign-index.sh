@@ -98,6 +98,30 @@ case "${idx##*/}" in
 esac
 
 git_dir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+
+# A sequencer stop — a conflicted cherry-pick or merge, or a rebase stopped mid-pick —
+# makes this guard's OWN prescribed remedy impossible. git refuses `git commit -- <path>`
+# there with "cannot do a partial commit during a cherry-pick", while the bare form
+# refused below is the only one it will accept. Refusing here leaves no compliant route
+# at all, which is what teaches `--no-verify`. See
+# docs/issues/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md.
+#
+# Keyed on the sequencer HEADs, NOT on "a rebase is running": measured 2026-09-02, a
+# rebase stopped with rebase-merge/ present and CHERRY_PICK_HEAD absent commits by
+# pathspec fine, so the wider test would stand the guard down while its remedy still
+# works. Asked via `--git-path` rather than "$git_dir/..." so git decides per-worktree
+# vs common itself — both resolve per-worktree today, and only one stays right if that
+# ever changes.
+#
+# This is a stand-down, not a hole: the guard still refuses in ordinary work, which is
+# the case the fix could most easily have broken. All four arms are covered by
+# tests/hooks-discrimination.sh § 7, whose `no sequencer -> still refuses` case is the
+# one that fails if this is ever widened to an unconditional exit.
+if [ -e "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] ||
+   [ -e "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+    exit 0
+fi
+
 log="$git_dir/session-stage-log"
 [ -s "$log" ] || exit 0
 

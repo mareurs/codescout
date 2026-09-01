@@ -409,6 +409,92 @@ git checkout -- s.txt
 CLAUDE_CODE_SESSION_ID="$A" git apply --cached < s.patch
 eq "a patch on stdin over-refuses (no filename in argv)" "$(owner_of s.txt)" "-"
 
+# ------------------------- 7. the guard stands down where git refuses its own remedy
+# docs/issues/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md
+#
+# The refusal names exactly ONE escape — `git commit -- <path>` — and git rejects that
+# form outright during a sequencer stop ("cannot do a partial commit during a
+# cherry-pick"), while the bare form being refused is the only one it will accept. A
+# guard may refuse; it may not refuse and then name a route git will reject, because the
+# caller's only remaining move is `--no-verify`.
+#
+# Keyed on CHERRY_PICK_HEAD / MERGE_HEAD and NOT on "a rebase is running". Measured
+# 2026-09-02: a rebase stopped with rebase-merge/ present and CHERRY_PICK_HEAD absent
+# commits by pathspec fine, so the wider test would stand the guard down in a state where
+# the prescribed remedy still works.
+#
+# EVERY case below asserts the path is FOREIGN before calling the guard. Without that the
+# hook can exit 0 for entirely the wrong reason — an unmatched log key reads as "all mine"
+# and passes silently, which is the false green that cost a probe upstream.
+echo "== sequencer stand-down"
+
+# Ownership lookup that survives a linked worktree, where `.git` is a file, not a dir.
+owner_at() { awk -F'\t' -v p="$1" '$3 == p { print $1; exit }' \
+    "$(git rev-parse --git-dir)/session-stage-log" 2>/dev/null; }
+
+# Build master/topic tips that conflict on one path, then leave the repo on master.
+conflicting_tips() {
+    echo base > a.txt
+    git add a.txt > /dev/null 2>&1
+    git commit -qm base
+    git branch -q topic
+    echo master > a.txt && git commit -qam master
+    git checkout -q topic
+    echo topic > a.txt && git commit -qam topic
+    git checkout -q master
+}
+
+new_repo
+conflicting_tips
+git cherry-pick topic > /dev/null 2>&1
+echo resolved > a.txt
+CLAUDE_CODE_SESSION_ID="$B" git add a.txt
+eq "cherry-pick fixture stages a FOREIGN path" "$(owner_at a.txt)" "$B"
+has "cherry-pick stop -> stand down" "$(guard "$A")" "EXIT=0"
+rm -rf "$T"
+
+# The control, and the only case that fails if the stand-down is written unconditionally
+# — which is the cheapest wrong fix here. Identical fixture minus the sequencer state.
+new_repo
+echo base > a.txt
+git add a.txt > /dev/null 2>&1
+git commit -qm base
+echo edited > a.txt
+CLAUDE_CODE_SESSION_ID="$B" git add a.txt
+eq "control fixture stages a FOREIGN path" "$(owner_at a.txt)" "$B"
+has "no sequencer -> still refuses" "$(guard "$A")" "EXIT=1"
+rm -rf "$T"
+
+# MERGE_HEAD is a separate arm of the condition and needs its own case: deleting it leaves
+# every cherry-pick case above green.
+new_repo
+conflicting_tips
+git merge topic > /dev/null 2>&1
+echo resolved > a.txt
+CLAUDE_CODE_SESSION_ID="$B" git add a.txt
+eq "merge fixture stages a FOREIGN path" "$(owner_at a.txt)" "$B"
+has "merge stop -> stand down" "$(guard "$A")" "EXIT=0"
+rm -rf "$T"
+
+# The reported incident: a linked worktree, where sequencer state lives per-worktree under
+# `$git_dir` rather than the common dir. A probe reading the common dir finds nothing here.
+new_repo
+conflicting_tips
+WT="$(mktemp -d)"
+git worktree add -q "$WT" topic > /dev/null 2>&1
+# NOT a subshell: `eq`/`has` increment PASS/FAIL, and a subshell would discard both — the
+# assertions would still print, and the suite's exit code would stop depending on them.
+# Same trap this file's `new_repo` header records.
+cd "$WT" || exit 1
+git cherry-pick master > /dev/null 2>&1
+echo resolved > a.txt
+CLAUDE_CODE_SESSION_ID="$B" git add a.txt
+eq "worktree fixture stages a FOREIGN path" "$(owner_at a.txt)" "$B"
+has "worktree sequencer stop -> stand down" "$(guard "$A")" "EXIT=0"
+cd "$T" || exit 1
+git worktree remove --force "$WT" > /dev/null 2>&1
+rm -rf "$WT" "$T"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]
