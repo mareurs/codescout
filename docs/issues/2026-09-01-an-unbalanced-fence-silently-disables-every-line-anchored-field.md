@@ -133,6 +133,14 @@ Registered in `declare_checks!` **and** wired into the dispatcher — the codeba
 
 No `fix=` mode. Closing versus deleting a stray delimiter is a content judgement about the
 prose around it, and a repair tool guessing wrong would rewrite meaning.
+## Fix provenance
+
+- **SHA:** `800f1dec` (`experiments`)
+- **patch-id:** `94f488b4355fc72d6874408582acbb175b84317d`
+
+One commit carries both halves — the `FenceState` migration and the new check — because the
+second is only trustworthy given the first: a detector built on the same broken toggle would
+have inherited its blind spot.
 ## Tests added
 
 All four written before the code, each watched failing first.
