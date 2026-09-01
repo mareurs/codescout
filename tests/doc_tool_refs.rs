@@ -20,6 +20,20 @@
 //! than as a sixth `RefKind`, because a test needs no wiring to be reachable and the registry has
 //! no enumerable form outside `server.rs`'s own private test module.
 //!
+//! **Why this stops at the anchored call form, measured 2026-09-01.** A prose *mention* of
+//! a dead tool is not checkable here, and two guards for it were tried and rejected rather
+//! than skipped. (a) Extending `DEPRECATED_TOOL_NAMES`' `!contains` denylist to
+//! `docs/manual/`: of ~25 retired-name occurrences there, roughly **20 are legitimately
+//! historical** — migration tables, a changelog, a `> Removed 2026-09-01.` banner, and a
+//! rename note — so the check would force deleting correct history, which is `IC-6`, a
+//! parser over a namespace with no escape hatch. (b) A heading-level guard, "no page is
+//! *titled* after a dead tool": **1 real defect in 4 hits**, because `## render_template`
+//! and `## params_schema` are augmentation *fields* and `# tracker_design` is a `librarian`
+//! action — indistinguishable from a tool name by shape. The anchored call form works
+//! precisely because it separates *calls it* from *mentions it* by construction, and prose
+//! offers no equivalent discriminator. Filed instead:
+//! `docs/issues/2026-09-01-librarian-mcp-page-describes-a-separate-server-that-was-collapsed.md`.
+//!
 //! **Scope is principled, not an allowlist.** Only surfaces where naming a parameter is a claim
 //! about *current* code are scanned: the manual, the served guides, and the root documents.
 //! `docs/issues/`, `docs/plans/`, `docs/superpowers/` and archives are excluded because a bug

@@ -1,8 +1,13 @@
-# `artifact_refresh_stale`
+# `artifact_refresh(action="list_stale")`
 
-Discovery tool: surfaces augmented artifacts whose last refresh is older than a
+Discovery action: surfaces augmented artifacts whose last refresh is older than a
 threshold. Returns them oldest-first (never-refreshed first) so the agent knows
-what to call `artifact_refresh` on next.
+what to call `artifact_refresh(action="gather")` on next.
+
+> **This was the standalone `artifact_refresh_stale` tool.** It folded into
+> `artifact_refresh` as the `list_stale` action during the librarian tool collapse —
+> see [librarian-tools-collapse](librarian-tools-collapse.md). The page kept the old
+> name in its title and its prose until 2026-09-01; the schema below is the action's.
 
 ## Schema
 
