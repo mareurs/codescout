@@ -92,7 +92,7 @@ Per-project indexes live under `CODESCOUT_SQLITE_DIR` (default
 project. The trade-off versus the full server stack is dense-only ranking — no
 sparse exact-token leg, no rerank — so exact-identifier recall is weaker; pair
 it with a strong code-embedding model on the endpoint. Design + rationale:
-`docs/plans/2026-06-16-two-stack-retrieval-lite.md`.
+`docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`.
 
 ## Why not just sign the DLL?
 

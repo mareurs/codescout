@@ -357,6 +357,6 @@ degenerate results (`docs/trackers/archive/dependency-review-session-log-2026-08
 - `docs/trackers/reconnaissance-patterns.md` — R-43 (read-side: gating claims
   from a grep hit), R-44 (write-side: enumerate the consumer set before
   accepting a proposed `#[cfg]` gate)
-- `docs/plans/2026-06-16-two-stack-retrieval-lite.md` — the lite/server split
+- `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md` — the lite/server split
   that `dense_only` implements
 - `docs/conventions/test-env-isolation.md` — `EnvGuard` for Task 1.0

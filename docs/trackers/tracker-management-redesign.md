@@ -146,7 +146,7 @@ Rejected alternatives: big-bang catalog rewrite (violates TMR-4's no-retrofit sc
 TMR-2's weak form); external service first (highest cost, unproven need); render-from-registry
 mandate fleet-wide (strong TMR-2 form was declined).
 
-Stage-1 plan: `docs/plans/2026-07-17-tracker-lifecycle-stage1-plan.md` (see History).
+Stage-1 plan: `docs/plans/archive/2026-07-17-tracker-lifecycle-stage1-plan.md` (see History) — archived 2026-09-01, all three tasks shipped.
 ## Open questions
 
 - Does the graph live in the shared catalog or per-repo, and how do umbrellas federate it?

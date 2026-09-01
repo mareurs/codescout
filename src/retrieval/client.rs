@@ -92,7 +92,7 @@ pub struct RetrievalClient {
     /// Code-chunk vector store behind the `CodeVectorStore` seam. Qdrant today;
     /// in-process sqlite-vec in the lite stack (Phase 2). `pub(crate)` so the
     /// sibling `search`/`sync` modules can reach it without exposing it outside
-    /// the crate. See `docs/plans/2026-06-16-two-stack-retrieval-lite.md`.
+    /// the crate. See `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`.
     pub(crate) code_store: Arc<dyn CodeVectorStore>,
     pub embedder: Arc<dyn CodeEmbedder>,
     #[cfg(feature = "remote-embed")]

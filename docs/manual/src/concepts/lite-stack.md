@@ -71,4 +71,4 @@ with a strong remote code-embedding model (CodeRankEmbed-class) on the endpoint.
 If you have GPU and can run Docker, the server stack scores higher; lite trades
 that for zero daemons.
 
-Design and rationale: `docs/plans/2026-06-16-two-stack-retrieval-lite.md`.
+Design and rationale: `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`.

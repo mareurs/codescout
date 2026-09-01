@@ -1,7 +1,7 @@
 ---
-id: ea2f737328725c22
+id: da501585415287c3
 kind: plan
-status: active
+status: archived
 title: Tracker Lifecycle Stage 1 — activate the dormant hygiene push trigger + add the session-log decay detector (D10)
 tags:
 - tracker-redesign

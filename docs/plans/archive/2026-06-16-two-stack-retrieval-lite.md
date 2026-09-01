@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Plan — Two-Stack Retrieval: Server (Qdrant/hybrid) + Lite (daemon-free, sqlite-vec)
 
 **Status:** draft · **Opened:** 2026-06-16 · **Owner:** marius

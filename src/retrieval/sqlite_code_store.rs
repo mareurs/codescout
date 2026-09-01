@@ -1,7 +1,7 @@
 //! In-process, daemon-free [`CodeVectorStore`] backed by **sqlite-vec** (`vec0`).
 //!
 //! This is the "lite" stack's code-search backend (see
-//! `docs/plans/2026-06-16-two-stack-retrieval-lite.md`): no Qdrant, no Docker —
+//! `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`): no Qdrant, no Docker —
 //! just a per-project SQLite file with a statically-linked `vec0` virtual table.
 //! It survives a locked-down VDI (no runtime DLL for an EDR to quarantine) and
 //! needs only a remote OpenAI-compatible embedding endpoint.

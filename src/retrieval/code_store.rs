@@ -2,7 +2,7 @@
 //! (query) and `sync_project` (index).
 //!
 //! Phase 1 of the two-stack split (see
-//! `docs/plans/2026-06-16-two-stack-retrieval-lite.md`): this trait is the seam
+//! `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`): this trait is the seam
 //! that lets the code-search backend be **Qdrant** (server / hybrid stack) or, in
 //! a later phase, **in-process sqlite-vec** (the daemon-free lite stack). Today
 //! the only production impl is [`QdrantWrap`]; the trait introduces no behavior

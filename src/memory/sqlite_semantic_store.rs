@@ -1,7 +1,7 @@
 //! In-process, daemon-free [`SemanticMemoryStore`] backed by **sqlite-vec**.
 //!
 //! The memory-recall counterpart to `retrieval::sqlite_code_store` — the lite
-//! stack's memory backend (see `docs/plans/2026-06-16-two-stack-retrieval-lite.md`).
+//! stack's memory backend (see `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`).
 //! One SQLite file per project under the shared data dir; the full
 //! [`SemanticMemory`] is stored as JSON in `memory_item`, its dense vector in a
 //! `vec0` `memory_vec` table. Dense-only ranking, no daemon, EDR-safe (statically

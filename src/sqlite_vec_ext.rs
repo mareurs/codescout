@@ -7,7 +7,7 @@
 //! **statically linked** into the binary — no runtime DLL, so nothing for an
 //! EDR like CrowdStrike to quarantine (unlike the `onnxruntime.dll` of WIN-22).
 //! That static-linking is what makes the daemon-free "lite" stack viable on a
-//! locked-down VDI; see `docs/plans/2026-06-16-two-stack-retrieval-lite.md`.
+//! locked-down VDI; see `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`.
 //!
 //! A single shared `Once` guarantees one registration regardless of which
 //! subsystem (librarian catalog, retrieval code store, memory store) touches

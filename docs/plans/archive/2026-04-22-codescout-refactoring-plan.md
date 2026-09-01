@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Codescout Refactoring Plan
 
 **Created:** 2026-04-22
@@ -371,7 +374,7 @@ shape exactly.
 single-caller helpers, not worth `src/text/` at current scale. 6.4
 (tool-file thinning) done 2026-05-02: split `semantic.rs` (4 tools, 2198 lines)
 and `markdown.rs` (2 tools, 1982 lines) into directory modules — each tool now
-in its own file, tests extracted to `tests.rs`. See `docs/TODO-phase6-provider-lifts.md`.
+in its own file, tests extracted to `tests.rs`. See `docs/archive/2026-04-22-TODO-phase6-provider-lifts.md`.
 
 **Goal:** Tool files become thin adapters. Domain logic lives in provider
 modules.

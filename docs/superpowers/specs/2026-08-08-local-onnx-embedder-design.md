@@ -9,7 +9,7 @@ tags: [retrieval, embeddings, windows, vdi, lite-stack]
 # Spec — Local ONNX embedder for the code-retrieval path
 
 **Tracker:** WIN-26 (`docs/trackers/windows-platform-support.md`), extends
-`docs/plans/2026-06-16-two-stack-retrieval-lite.md`
+`docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md`
 **Supersedes for this host:** WIN-22's "drop `local-embed*`, use a remote endpoint" mitigation
 
 ## Problem

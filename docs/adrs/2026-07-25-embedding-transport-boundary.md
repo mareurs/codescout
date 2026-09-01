@@ -313,7 +313,7 @@ argument for Stage 0 existing at all.
   (`228a7a2f4dc2378d`) — F-1, F-2, W-1 from the review that produced this ADR
 - `docs/trackers/reconnaissance-patterns.md` — R-43 (the `#[cfg]`-from-grep miss
   that nearly shipped Stage 1 as a one-line manifest change)
-- `docs/plans/2026-06-16-two-stack-retrieval-lite.md` — the lite/server split
+- `docs/plans/archive/2026-06-16-two-stack-retrieval-lite.md` — the lite/server split
   that `dense_only` implements
 - `crates/codescout-embed/src/remote.rs` empty-input `bail!` cites
   `2026-05-17-reindex-embedding-dim-mismatch.md`
