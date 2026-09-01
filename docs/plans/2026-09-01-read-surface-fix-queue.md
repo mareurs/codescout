@@ -123,7 +123,7 @@ heading inside an existing document where a leading `---` is a horizontal rule, 
 position 0. `body_edits_may_splice_content_that_begins_with_dashes` exists so that choice is
 distinguishable from a forgotten site — the *annotate-an-inert-fixture* direction of CLAUDE.md's
 fixture law.
-## 2 — heading miss discards the hint (`9b6ba9568f3c28b3`)
+## 2 — heading miss discards the hint (`a8e40acb96ca5739`, archived)
 
 `heading_miss_meta`'s absent arm drops `err.hint()` while its ambiguous sibling forwards it, so a
 heading typo returns a bare `not found` when the resolver has *already built* the "Available

@@ -1,14 +1,14 @@
 ---
+kind: bug
 status: fixed
+tags:
+- cluster/declared-not-wired
+closed: 2026-09-01
 opened: 2026-09-01
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
-tags:
-  - cluster/declared-not-wired
-kind: bug
+- docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
+severity: medium
 ---
 
 # BUG: a heading miss discards the "Available headings" hint the resolver already built
@@ -112,7 +112,7 @@ bug file is durable and re-checked by nothing.
 
 ## Fix
 
-**Fixed 2026-09-01 on `experiments`.** SHA and patch-id below.
+**Fixed 2026-09-01 on `experiments` — `a35a9c35`, patch-id `4f7f84946b904368bb2b5c01593c4a7ad3899be8`.**
 
 `heading_miss_meta` (`src/librarian/tools/get.rs`) now hoists `err.hint()` above the match, so both
 arms forward it from one expression — the two arms cannot drift on this field the way they already
