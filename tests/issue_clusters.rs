@@ -461,7 +461,12 @@ fn every_declared_class_has_an_index_row() {
         missing.is_empty(),
         "these classes declare a `**Slug:**` but have no parseable Index row: {missing:?}\n\
          Their counts are checked by nothing. Either the row is absent, or its `n` is not a bare \
-         integer in the column immediately after the slug."
+         integer in the column immediately after the slug.\n\n\
+         On a SHARED CHECKOUT there is a third possibility, and it is not your defect: a peer \
+         session is mid-write. An entry section and its Index row are two writes, so slugs that \
+         are theirs and in flight appear here until the second one lands. This message cannot \
+         tell the cases apart — `git diff HEAD -- docs/trackers/issue-clusters.md` can. Reported \
+         twice in one afternoon by a peer who worked it out unaided."
     );
     assert!(
         declared.len() > 10,

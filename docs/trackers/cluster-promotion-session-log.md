@@ -51,7 +51,7 @@ entry_high_water_W: 3
 | F-3 | 2026-09-01 | med | architectural | fixed-verified | The split's load-bearing sentence was refuted as a population claim 67 seconds before it was committed |
 | F-4 | 2026-09-01 | med | tooling | fixed-verified | The ledger's count cells go stale by CONCURRENCY — 3 re-derivations invalidated in one session by peer filings; gate shipped, caught a 4th drift on its first run |
 | F-5 | 2026-09-01 | med | architectural | open | `IC-13`'s claim is true of 4 of its 16 members — and the "≥4" floor carried from a prior audit bounded the opposite set; two rulings owed |
-| F-6 | 2026-09-01 | med | architectural | open | Ruling 2 — all 7 `IC-13` non-members fit **no existing class**, unanimously across two independent readers; the seven remedies agree pairwise, so the only open question is 3 classes or 4 |
+| F-6 | 2026-09-01 | med | architectural | fixed-verified | Ruling 2 — all 7 `IC-13` non-members fit **no existing class**, unanimously across two independent readers; four-class partition taken → IC-19/20/21/22, IC-13 16→9 |
 
 ## Wins Index
 
@@ -614,8 +614,15 @@ bar on creation, and reader 1's `MC-B` would arrive at 3 as well; the finer part
 more class that starts at n=1. Whichever is chosen, `IC-13` falls 16 → **9**, which is exactly
 what `F-5` projected.
 
-**Status:** open — adjudication complete and unanimous on membership; the granularity call is a
-human one and the retags wait on it.
+**Status:** fixed-verified — **four-class partition taken 2026-09-01** (reader 2's finer cut, on
+the remedy test being this ledger's stated discriminator). `IC-19`
+`truncated-window-ordered-by-the-wrong-key` (n=3), `IC-20` `floor-published-under-the-name-of-a-total`
+(n=1), `IC-21` `instrument-omits-the-dimension-that-grows` (n=2), `IC-22`
+`hint-composed-without-the-request` (n=1). All seven retagged through the catalog; `IC-13` fell
+16 → 9, exactly as `F-5` projected. Reader 1's merge argument is **not discarded** — it is
+recorded inside `IC-20`, whose entry carries the corpus evidence that fixing a wrong ordering
+hands you a wrong denominator, so the two co-occur even while they stay apart. The gate
+re-derived every count and passed.
 
 **Valid:** dated 2026-09-01
 
