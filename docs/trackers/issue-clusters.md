@@ -191,7 +191,7 @@ names the class — but do not expect an IC number back.
 | IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | 4 | not yet — 2 of 4 unconfirmed | shipped (partial) |
 | IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 5 | `DC` | none yet |
 | IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 1 | not yet — two tags withdrawn as misfits | none yet |
-| IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
+| IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 2 | not yet — spread 2 subsystems, so instance 3 meets it | none yet — candidate is `H` (a provenance channel for working-tree state) |
 | IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 4 | clears count; **spread adjudicated 2026-09-01 — 4 doc surfaces / 4 subsystems** | none yet — one of three sub-shapes is mechanizable |
 | IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | 0 | not yet — 1 instance, untagged; archive pass found none | none yet |
 | IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 16 | clears count; **spread adjudicated 2026-09-01 — clears, 6 or 11 depending on unit** | none yet — **10 of 16 share one layer**, so one gate covers most |
