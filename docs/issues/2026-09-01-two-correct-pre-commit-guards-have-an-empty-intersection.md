@@ -76,8 +76,21 @@ There is no third form.
 
 ## Environment
 
-Linux, git 2.x, `core.hooksPath` → `scripts/`. codescout `experiments`. Any checkout shared
-by two or more Claude Code sessions; this machine routinely runs six in this tree.
+Linux, git 2.x. codescout `experiments`. Any checkout shared by two or more Claude Code
+sessions; this machine routinely runs six in this tree.
+
+**Corrected 2026-09-02 (not by this file's author):** this block previously read
+`core.hooksPath` → `scripts/`. That is false — `core.hooksPath` is **unset** here
+(`git config --show-origin --get-all core.hooksPath` → exit 1, every scope), which is this
+repo's *healthy* state and is asserted by
+`tests/hook_config.rs::a_set_core_hookspath_must_point_at_a_directory_that_exists`; a *set*
+value silently disabled every hook here for a day
+(`docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md`). Hooks reach
+`scripts/` via pre-commit's generated `.git/hooks/pre-commit` plus `language: system`
+entries in `.pre-commit-config.yaml`. Recorded rather than silently amended because the
+false line had already been copied into a second file and a commit message before anyone
+checked it — an `## Environment` block reads as background, so nothing treats it as the
+claim it is.
 
 ## Root cause
 

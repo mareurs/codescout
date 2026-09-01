@@ -145,9 +145,37 @@ The alternative shape — keep refusing, but *change the hint* to name a route t
 in that state — is worse here, because in a sequencer stop the only available form is the
 bare commit the guard is refusing. There is no third route to name.
 
-**The fix was developed against a COPY of the hook and only applied once green**, because
-`core.hooksPath` points at `scripts/`, so saving the real file makes it live for every
-session on the checkout at that instant — there is no staging step to hide behind.
+**The fix was developed against a COPY of the hook and only applied once green.** The
+discipline was right; **the reason first recorded here was wrong twice over, and both
+errors are corrected in place rather than deleted, because each is easy to re-derive.**
+
+*First error — the mechanism.* `core.hooksPath` is **unset** in this repo
+(`git config --show-origin --get-all core.hooksPath` → exit 1, every scope, measured
+2026-09-02). Hooks reach `scripts/` via pre-commit's generated `.git/hooks/pre-commit`
+plus `entry: scripts/pre-commit-foreign-index.sh` with `language: system`
+(`.pre-commit-config.yaml:78-84`). Unset is this repo's **healthy** state and
+`tests/hook_config.rs::a_set_core_hookspath_must_point_at_a_directory_that_exists`
+asserts it; the archived instance of a *set* `hooksPath` silently disabled every hook here
+for a day (`docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md`).
+So the wrong sentence did not merely misdescribe — a reader reasoning forward from it
+could have **set** the variable and reproduced that bug. Caught by `codescout-3e`.
+
+*Second error — the conclusion, which survived the first correction.* "Saving the file
+makes it live at that instant" is **false in the direction that matters**, and stays false
+under the corrected mechanism. `pre-commit` clears unstaged changes before running hooks
+(`staged_files_only.py:108` — see `8cc95806a7b5f37a`), so a `language: system` entry
+executes the **index** copy of its own script. Measured 2026-09-02 in a throwaway repo:
+
+| hook-script edit | version the hook actually ran |
+|---|---|
+| unstaged | the **index** version — the edit is inert |
+| staged | the edit — live for every session |
+| unstaged, over a committed edit | the **index** version again |
+
+**The exposure moment is `git add`, not the editor save**, so the window this note claimed
+to be managing was never open. Both halves of the refutation were already filed in this
+repo — the `hooksPath` test and the stash bug — and two sessions each held one and neither
+composed them.
 
 
 ## Tests added

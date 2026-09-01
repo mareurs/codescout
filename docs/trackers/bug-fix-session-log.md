@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 95
+entry_high_water_F: 96
 entry_high_water_W: 93
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 93
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-96 | 2026-09-02 | med | epistemic | fixed-verified | I published `core.hooksPath points at scripts/` as the reason a hook edit is instantly live here. Wrong twice. **The variable is unset** at every scope — this repo's *healthy* state, asserted by `tests/hook_config.rs`, and a *set* value once disabled every hook here for a day, so a reader acting on my sentence reproduces an archived bug. A peer caught that. **But the conclusion survived their correction and was independently false:** pre-commit clears unstaged changes before hooks (`staged_files_only.py:108`), so a `language: system` entry runs the **index** copy of its own script — measured, 3 cases. The exposure moment is `git add`, not the editor save. Both halves of the refutation were already filed in this repo, held one each by two sessions who agreed with each other instead of composing them. **A correction is a fresh claim — check the part of the original it leaves standing.** Second law: an `## Environment` block is the least-audited claim in a bug file, and the one downstream files copy |
 | F-95 | 2026-09-01 | high | concurrent-sessions | mitigated | Mutation testing in the shared checkout put `if false && …` into a peer's **staged index**. Their review of the staged diff used a filtered grep that happened not to print the `if` line, so a disabled gate passed human review with a green suite behind it; the only thing that stopped the commit was the `unreviewed-content` pre-commit hook — which is about unstaged content, not about this defect, and would not have fired on a whole-tree `git add`. A mutation writes the SAME BYTES an intentional edit writes, so no observer can separate them: `file-provenance` correctly returned `SHARED` and named both sessions, and that is the most any instrument could say. Restored byte-exact, re-staged, peer notified, 7/7 green — but nothing prevents recurrence. Mutations belong in a worktree, not a shared tree |
 | F-94 | 2026-09-01 | med | test-rigor | fixed-verified | The new dispersion test pins the gate's **existence**, not its **threshold**. Four mutation runs: disabling the gate kills only that test (so it earns its place), but moving `DISPERSION` 0.8 → 0.9 is **7/7 green**. Its two fixtures sit at the extremes — 0.33 and 1.00 — so every cut in (0.33, 1.00] satisfies it, leaving the shipped 0.8 unguarded across **(0.667, 1.0]**. The sole guard between 0.667 and 0.8 is `…_reports_only_the_active_projects_citers`, a *project-scoping* regression whose 3-cites/2-files ratio is incidental to its purpose and unannotated — so a tidy-up making that fixture read more like a real ledger would keep it passing and delete the last guard. `IC-14` turned on a test |
 | F-93 | 2026-09-01 | med | measurement | fixed-verified | Two counts over a peer's **live append-only transcript** were true when published and false within the hour — `Write` 8 → **9**, `doctor.rs` mentions 80 → **187** — both inside a committed artifact. A retention-swept corpus makes every count a floor; an append-only one makes it a floor that **rises**, so the number decays toward looking like a conservative undercount rather than an error. The conclusion never moved and in fact strengthened (`Edit` still 0, now 9/9 native writes to `/tmp`), which removed the last thing that might have prompted a re-check. Remedy: state the PROPERTY ("every native write is scratch"), which cannot rot, not its cardinality, which rots at the ninth. **Found by running F-92's prescribed audit rather than filing it** — and that is the empirical proof F-92 was member-selection, not recording-filter: widening is a no-op for the latter and found two real defects here in one pass |
@@ -9579,6 +9580,62 @@ so the two are complements rather than rivals — but for an ordinary mutation r
 the cheaper correct answer and belongs first. `R-153`'s proposed SKILL.md bullet is updated to
 lead with it. Their summary is worth keeping verbatim: *"your `cp`+`sed` approach was right;
 what made it collide was that the window spanned turns."*
+
+## F-96 — A peer corrected my mechanism, endorsed my conclusion, and the conclusion was independently false
+
+**Valid:** dated 2026-09-02
+
+**Observed:** I published `core.hooksPath points at scripts/` as the reason a hook edit is
+instantly live for every session in this checkout. It is false at both levels. *Level 1 —
+the variable:* `core.hooksPath` is **unset** here at every scope (`git config
+--show-origin --get-all` → exit 1), which is this repo's healthy state, asserted by
+`tests/hook_config.rs::a_set_core_hookspath_must_point_at_a_directory_that_exists`; the
+archived instance of a *set* value silently disabled every hook here for a day
+(`docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md`). A reader
+reasoning forward from my sentence could have set it and reproduced that bug. *Level 2 —
+the conclusion, which SURVIVED level 1's correction:* pre-commit clears unstaged changes
+before running hooks (`staged_files_only.py:108`), so a `language: system` entry runs the
+**index** copy of its own script. Measured in a throwaway repo: unstaged edit → hook ran
+the index version; staged edit → hook ran the edit; a further unstaged edit → index version
+again. **The exposure moment is `git add`, not the editor save.**
+
+**Cost:** three durable surfaces carrying a dangerous-if-acted-on claim — my archived bug
+file, a *peer's* `## Environment` block (which is where I got it), and commit `054c8a3e`'s
+message, which is immutable on a shared branch. Two sessions propagated it before anyone
+measured. Zero code impact; the developed-against-a-copy discipline was right for the wrong
+reason, so nothing shipped badly.
+
+**Category:** epistemic / doc-vs-substrate drift · **Severity:** med
+
+**Two laws, and the second is the one this corpus does not yet state.**
+
+**(a) An `## Environment` block is the least-audited claim in a bug file.** It reads as
+background rather than as an assertion, so no reviewer treats it as checkable — and it is
+the block downstream files *copy*, which is exactly how this travelled from a peer's file
+into mine and then into a commit message. Every other section of a bug file makes a claim
+someone argues with; this one makes claims nobody does. It is `R-104`'s prohibition form
+one level down: not "X would be unsafe" but "X is simply how things are here."
+
+**(b) Correcting a premise does not correct what was built on it — and the built thing
+inherits the confidence of the correction.** `codescout-3e` corrected my mechanism
+precisely and endorsed my conclusion in the same message ("Same instant-live property,
+different path"); I accepted both, because a peer who has just caught me in an error reads
+as *more* reliable, not less. The conclusion was independently false, for a reason neither
+of us had looked up. **A correction is a fresh claim and gets a fresh check — including the
+part of the original it leaves standing.** Note the shape: the two halves of the refutation
+were *both already filed in this repo* (the `hooksPath` test, and bug `8cc95806a7b5f37a`
+naming `staged_files_only.py:108` as a root cause the day before), held one each by two
+sessions who agreed with each other instead of composing them. Agreement between parties
+reading the same wrong premise is one blind spot counted twice — CLAUDE.md § *Observer
+Blindness* states that for instruments; this is the same failure between **agents**.
+
+**Rests on:** `git config --show-origin --get-all core.hooksPath` → exit 1 (2026-09-02);
+`scratchpad/probe-hooklive.sh`, three cases, isolated throwaway repo;
+`tests/hook_config.rs`; bug `8cc95806a7b5f37a` § Root cause.
+
+**Status:** fixed-verified — both editable surfaces corrected in place (the archive file
+and the peer's file, the latter flagged to its author); `054c8a3e`'s message is immutable
+and is left standing, cited here as the third instance.
 
 ## Template for new entries
 
