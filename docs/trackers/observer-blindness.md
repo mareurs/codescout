@@ -188,12 +188,27 @@ measured into existence. Three of that night's four qualify, and the grading is 
   case the *"report a search count together with the key you searched for"* mechanism above
   already predicts, arrived at independently.
 
-**`bug-fix-session-log:F-92` is deliberately NOT cited here.** It looks like a fourth and is
-not: its claim was not under-specified, it was **unverified** — support asserted and never
-checked. The remedies diverge, which is what makes the distinction worth keeping. OB-1 says
-*publish the parameter your reader lacks*; F-92 says *check the support you are about to
-publish*. A reader inheriting F-92 as an OB-1 instance would reach for the first and the
-claim would still be wrong.
+**`bug-fix-session-log:F-92` is deliberately NOT cited here**, and the reason is sharper than
+the one first recorded. The first exclusion said its claim was *unverified* rather than
+*under-specified* — true, and it leaves F-92 looking like a boundary case. It is not a boundary
+case; it **inverts the blind-party test**, which is the field this whole class hangs on.
+
+OB-1's premise is that the parameter is supplied **silently**, so the author *cannot perceive it
+as missing*. F-92's missing parameter was the query window — which, in its own words, it *"had
+designed forty minutes earlier and which the tool prints on its own output line."* Supplied
+loudly, on screen, and unread. So the distinction is **not-supplied vs supplied-and-unread**, and
+the remedies diverge for a mechanical reason rather than a taxonomic one: publishing a parameter
+the author already has in front of them changes nothing at all. OB-1 says *publish the parameter
+your reader lacks*; F-92 says *read the one already printed*. A reader inheriting F-92 under this
+tag reaches for a remedy that is a literal no-op on it.
+
+*Reached by `codescout-68` on re-reading F-92's text rather than a summary of it — as a
+**published null result**: they drafted the opposing objection (that OB-1's own "report the key
+you searched for" mechanism would have caught F-92, so the exclusion was too clean), verified it,
+and it died. Recorded at `77258f29` as `W-91`'s first denominator datapoint. The confirming
+re-derivation is the case CLAUDE.md's recording-filter law says has no natural artifact, so it is
+worth noting that this one exists only because someone chose to write down a check that changed
+nothing.*
 
 **The vigilance count above is deliberately NOT bumped.** Doing so needs each instance judged
 against *"committed by an author actively writing about the class"*, which has not been
