@@ -188,10 +188,29 @@ rather than with care.
 No fix proposed for `-D dead-code`; it is correct. The gap is the missing channel, and the
 candidate remedies are `H`-shaped (a mechanism, not a discipline) exactly as `IC-10` predicts:
 
-- **A provenance channel for working-tree state.** `.buddy/by-ppid/<pid>/session_id` already
-  exists on disk for unrelated reasons. A `git status`-adjacent helper that maps modified paths
-  to the session that last wrote them would answer "is this mine?" directly — the question the
-  reader actually has — without needing to answer "whose?".
+- **A provenance channel for working-tree state.** The question to answer is **"is this mine?"**,
+  not "whose is this?" — the first has a reader with a decision to make, the second has no
+  channel and, on this evening's evidence, no reliable answer either.
+
+  **Substrate, corrected 2026-09-01 by `codescout-e6` before anyone built on it.** This section
+  first named `.buddy/by-ppid/<pid>/session_id`. That file maps **pid → session**, not
+  **path → session** — it answers *which session is this process*, so it cannot on its own
+  answer *who wrote this file*. The path-bearing half is `.buddy/<sid>/cs_tool_log.jsonl`, which
+  records codescout write-tool calls (`edit_file` / `edit_code` / `create_file`) with their
+  paths; joining the two yields a real path → session map.
+
+  **State the coverage limit up front, because it is large here and it is the failure mode this
+  whole bug is about.** That map sees codescout tool writes and **not** native `Bash`/`Edit`
+  writes. On this repo the gap is not marginal: `CLAUDE.md` documents both shells as
+  deliberately permitted pending an eval, and `usage.db` records MCP calls only, so a
+  Bash-written file is invisible to the channel by construction.
+
+  This does not sink it. A channel answering **"yes, mine" / "can't tell"** is strictly better
+  than the nothing we have — *provided `can't tell` is never rendered as `not mine`*. That
+  rendering would be the identical failure to the `ListAgents` gap standing in for a diagnosis
+  (see Evidence): a true limitation quietly substituting for an answer. **Design the absent case
+  first** — it is the one that will fire most.
+
 - **Cheaper and available today:** the two-command diagnostic above, promoted somewhere a
   session hits it *before* losing the ten minutes. It only occurs to you after.
 
