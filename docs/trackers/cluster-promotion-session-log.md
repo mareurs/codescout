@@ -49,7 +49,7 @@ entry_high_water_W: 3
 | F-1 | 2026-09-01 | med | architectural | open | `OB-7`'s mechanism cites an LSP-verified result to justify a text-search check |
 | F-2 | 2026-09-01 | high | tooling | open | `ListAgents` enumerated 4 of 20 live sessions, so authorship inferred from it came from a 20%-complete population |
 | F-3 | 2026-09-01 | med | architectural | fixed-verified | The split's load-bearing sentence was refuted as a population claim 67 seconds before it was committed |
-| F-4 | 2026-09-01 | med | tooling | open | The ledger's count cells go stale by CONCURRENCY — 3 re-derivations invalidated in one session by peer filings; `tests/issue_clusters.rs` checks tag validity but never the Index numbers |
+| F-4 | 2026-09-01 | med | tooling | fixed-verified | The ledger's count cells go stale by CONCURRENCY — 3 re-derivations invalidated in one session by peer filings; gate shipped, caught a 4th drift on its first run |
 
 ## Wins Index
 
@@ -422,7 +422,13 @@ population differs from the existing check — cells count **open + archive**, w
 check is deliberately open-only — so it is a second walk, not a reuse of the first. That makes a
 drifted cell a red test rather than a thing the next reader happens to notice.
 
-**Status:** open
+**Status:** fixed-verified — gate shipped in `tests/issue_clusters.rs` as
+`every_index_count_matches_the_corpus`, with `every_declared_class_has_an_index_row` guarding it
+against passing vacuously. **It caught a real drift on its first run**, ~40 minutes after a hand
+re-derivation had reported all 17 cells matching: `IC-17` table 15 vs corpus 16, from a peer's
+`workspace-activation-is-process-wide-and-a-subagent-can-flip-it` filed in between. That is this
+entry's own claim reproducing itself against the fix for it, which is as direct a confirmation as
+the friction could get.
 
 **Valid:** dated 2026-09-01
 

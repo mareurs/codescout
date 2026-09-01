@@ -1,4 +1,5 @@
-//! Gate: every tracked open bug file declares exactly one known defect class.
+//! Gates on the `IC-N` defect-class ledger: every tracked open bug file declares exactly one
+//! known class, and every count the ledger publishes matches the corpus it summarises.
 //!
 //! `docs/issues/` answers what is broken; the `IC-N` ledger
 //! (`docs/trackers/issue-clusters.md`) answers what a set of bugs has in common. That
@@ -16,8 +17,14 @@
 //!   no tag: the nine classes were derived from the open backlog, and 279 archived files
 //!   in the backfilled window match none of them. Forcing a fit would corrupt the counts
 //!   that promotion reads, so absence there is a deliberate answer rather than a gap.
+//!
+//! The **count** gate below reads a deliberately WIDER population — open *and* archive — because
+//! a class's `n` is its whole membership, and promotion reads that number. The two scopes must
+//! not be merged: [`tracked_open_bug_files`] for tag validity, [`tracked_all_bug_files`] for
+//! counts. Merging them would either red the gate on 416 legitimately untagged archive files, or
+//! silently under-count every class by its archived members.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -281,5 +288,234 @@ fn the_scan_actually_reads_files() {
     assert!(
         files.iter().all(|f| !f.ends_with("_TEMPLATE.md")),
         "the bug template is not a bug and must not be gated"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The Index table's `n` column, checked against the corpus it summarises.
+// ---------------------------------------------------------------------------
+
+/// Every tracked bug file — open corpus **and** archive.
+///
+/// Deliberately wider than [`tracked_open_bug_files`]; see the module header for why the two
+/// populations must stay separate.
+fn tracked_all_bug_files() -> Vec<String> {
+    let out = Command::new("git")
+        .args(["ls-files", "docs/issues"])
+        .current_dir(repo_root())
+        .output()
+        .expect("git ls-files failed to run — this gate needs a git checkout");
+    assert!(
+        out.status.success(),
+        "git ls-files exited {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|p| p.ends_with(".md") && !p.ends_with("_TEMPLATE.md"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `slug -> n`, parsed from the ledger's Index table.
+///
+/// A row is ``| IC-N | <class> | `<slug>` | <n> | <promotes to> | <mechanism> |``. The count is
+/// read from the cell **immediately after** the slug cell, never "the first number in the row":
+/// the mechanism column carries digits of its own (`**10 share one layer**`), so a
+/// scan-for-a-number parser would return a plausible wrong value rather than failing.
+///
+/// Pure over `text` so [`the_index_row_parser_discriminates`] can feed it a table whose right
+/// answers are known — a parser that only ever runs against the live file cannot be shown to
+/// read the right cell.
+fn parse_index_counts(text: &str, valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
+    let mut out = BTreeMap::new();
+    for line in text.lines() {
+        if !line.starts_with("| IC-") {
+            continue;
+        }
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        for (i, cell) in cells.iter().enumerate() {
+            let Some(inner) = cell.strip_prefix('`').and_then(|c| c.strip_suffix('`')) else {
+                continue;
+            };
+            if !valid.contains(inner) {
+                continue;
+            }
+            // A row whose count cell does not parse is left ABSENT rather than defaulted to 0:
+            // `every_declared_class_has_an_index_row` then reports it, where a 0 would silently
+            // become a real comparison against a number nobody wrote.
+            if let Some(n) = cells.get(i + 1).and_then(|c| c.parse::<usize>().ok()) {
+                out.insert(inner.to_owned(), n);
+            }
+            break;
+        }
+    }
+    out
+}
+
+/// [`parse_index_counts`] over the live ledger.
+fn declared_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
+    let path = repo_root().join(LEDGER);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    parse_index_counts(&text, valid)
+}
+
+/// The corpus side: how many bug files actually carry each slug.
+///
+/// Seeded with every valid slug at 0, so a class with no members is compared against its row
+/// rather than dropping out of the comparison — `IC-12` is legitimately 0 and its row must still
+/// be checked.
+fn actual_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
+    let mut out: BTreeMap<String, usize> = valid.iter().map(|s| (s.clone(), 0)).collect();
+    for rel in tracked_all_bug_files() {
+        let Ok(content) = std::fs::read_to_string(repo_root().join(&rel)) else {
+            continue;
+        };
+        let Some(fm) = frontmatter(&content) else {
+            continue;
+        };
+        for tag in cluster_tags(fm) {
+            if let Some(c) = out.get_mut(&tag) {
+                *c += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Every `n` in the ledger's Index table equals the class's real membership.
+///
+/// The counts are a decision input, not decoration: a class clearing n≥3 across ≥2 subsystems is
+/// what promotes it into a rule, and `IC-10` crossed exactly that line on 2026-09-01. A stale
+/// cell is a wrong input to a live decision.
+///
+/// This is a gate rather than a documented habit because the cells go stale by **concurrency**,
+/// not by neglect. Measured 2026-09-01: three separate hand re-derivations were invalidated
+/// inside one session by peer sessions filing bugs into the same checkout, so a sweep's own
+/// result is falsified by the next commit and no amount of care holds it
+/// (`cluster-promotion-session-log:F-4`).
+#[test]
+fn every_index_count_matches_the_corpus() {
+    let valid = valid_slugs();
+    let declared = declared_counts(&valid);
+    let actual = actual_counts(&valid);
+
+    let mut drift = Vec::new();
+    for (slug, n) in &declared {
+        let got = actual.get(slug).copied().unwrap_or(0);
+        if got != *n {
+            drift.push(format!("cluster/{slug} — table says {n}, corpus has {got}"));
+        }
+    }
+
+    assert!(
+        drift.is_empty(),
+        "the Index table's `n` column disagrees with the corpus:\n  {}\n\n\
+         Re-derive rather than adjust by the delta — per slug:\n    \
+         git grep -clE '^[[:space:]]*-[[:space:]]*cluster/<slug>[[:space:]]*$' -- 'docs/issues/*.md' | wc -l\n\n\
+         `git grep -l` counts FILES. `grep -o | sort | uniq -c` counts OCCURRENCES and \
+         double-counts any bug file that also names its own slug in prose, which is why every \
+         `n` in that table is a file count. If a file moved between classes, re-derive every \
+         judgement quoting either count in the same pass — the `**Members:**` line and the \
+         `**Promotes to:**` field of BOTH classes, since a count and the judgement that reads \
+         it move independently.",
+        drift.join("\n  ")
+    );
+}
+
+/// The count check must actually compare something.
+///
+/// If [`parse_index_counts`] matched nothing — a renamed column, a reformatted table, a slug cell
+/// that stopped being backticked — every comparison in [`every_index_count_matches_the_corpus`]
+/// is skipped and it passes green forever. That is zero coverage wearing a passing test's
+/// clothes, the shape this very ledger tracks as `IC-16`, so it is guarded rather than assumed.
+/// The per-slug half also catches the narrower case: one row whose count cell stopped parsing.
+///
+/// **Measured, not argued.** Stripping the backticks off every slug cell — a one-line `sed` —
+/// leaves [`every_index_count_matches_the_corpus`] *passing* and reds only this test, which then
+/// names all 17 classes. Its sibling is monotone under parser failure by construction: an empty
+/// map means an empty loop means no assertion. This test is the whole of what stands between
+/// that and a gate that is green forever for the wrong reason.
+#[test]
+fn every_declared_class_has_an_index_row() {
+    let valid = valid_slugs();
+    let declared = declared_counts(&valid);
+
+    let missing: Vec<&String> = valid
+        .iter()
+        .filter(|s| !declared.contains_key(*s))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "these classes declare a `**Slug:**` but have no parseable Index row: {missing:?}\n\
+         Their counts are checked by nothing. Either the row is absent, or its `n` is not a bare \
+         integer in the column immediately after the slug."
+    );
+    assert!(
+        declared.len() > 10,
+        "only {} Index rows parsed — the table format moved and the count gate is now comparing \
+         almost nothing",
+        declared.len()
+    );
+}
+
+/// The row parser reads the right cell, and only real rows.
+///
+/// Feeds a table whose answers are known, covering the two ways a looser parser goes wrong:
+/// taking any numeric cell in the row (`42` sits one column past the count), and treating a
+/// non-`IC-` line that happens to mention a slug as a row.
+#[test]
+fn the_index_row_parser_discriminates() {
+    let valid: BTreeSet<String> = ["alpha-slug", "beta-slug", "gamma-slug"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let table = "\
+| id | class | slug | n | promotes to | mechanism |
+|---|---|---|---:|---|---|
+| IC-1 | some class | `alpha-slug` | 7 | 42 | none yet |
+| IC-2 | another | `beta-slug` | 0 | not yet | **10 share one layer** (of 14) |
+| note | prose naming `gamma-slug` | 99 | 99 | | |
+";
+    let got = parse_index_counts(table, &valid);
+
+    assert_eq!(
+        got.get("alpha-slug"),
+        Some(&7),
+        "must read the cell immediately after the slug, not any number in the row"
+    );
+    assert_eq!(
+        got.get("beta-slug"),
+        Some(&0),
+        "a zero-membership class is a real row — skipping it would hide a class whose members \
+         all moved away"
+    );
+    assert_eq!(
+        got.get("gamma-slug"),
+        None,
+        "only `| IC-` lines are rows; prose naming a slug must not define a count"
+    );
+    assert_eq!(got.len(), 2);
+}
+
+/// The count scan must actually reach the archive.
+///
+/// [`actual_counts`] walks a different population from the tag gate, so it needs its own positive
+/// control. A filter that silently excluded `archive/` would make every count read low, and the
+/// comparison would then demand the ledger be rewritten *wrong*.
+#[test]
+fn the_count_scan_reaches_the_archive() {
+    let files = tracked_all_bug_files();
+    let archived = files.iter().filter(|f| f.contains("/archive/")).count();
+    assert!(
+        archived > 100,
+        "expected the archive inside the count population; found {archived} archived files — \
+         the scan is looking in the wrong place"
+    );
+    assert!(
+        files.len() > tracked_open_bug_files().len(),
+        "the count population must be strictly wider than the open-corpus gate's"
     );
 }
