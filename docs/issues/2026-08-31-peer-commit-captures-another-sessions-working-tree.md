@@ -495,11 +495,32 @@ So the rule stays exactly as stated: compare `--stat` to `--stat`. Do not substi
 search for it, and do not treat a content search as corroboration — a grep whose pattern you
 wrote from memory is evidence about your memory.
 
-**Disposition of the captured content.** `F-93` is `codescout-e6`'s work, authored by them and
-committed under `c2a08c22`'s message at `0c32bb85`. Recorded here, and disclosed to that
+**Disposition of the captured content — and the entry is SPLIT, which is the part worth
+carrying forward.** `F-93` is `codescout-e6`'s work. Its **body** was captured into
+`c2a08c22`'s `0c32bb85` (05:05:57); its **index row** landed twenty seconds later in that
+session's own `26f5b496` (05:06:17). Verified both directions:
+
+```
+git log -S"## F-93 —"            -- <tracker>  ->  0c32bb85   (captured)
+git log -S"| F-93 | 2026-09-01"  -- <tracker>  ->  26f5b496   (author's own)
+```
+
+So a single ledger entry can be **split across two commits with two different owners**, and
+neither `git log -S` on the body nor on the row alone reveals it — each returns one commit
+and looks complete. This follows directly from this repo's own append discipline, which
+writes the section first and the index row *after*: that ordering puts a commit boundary
+where a peer's `git add` can fall. Anyone reconstructing authorship from `git log -S` should
+probe **both** shapes of the same entry.
+
+Note also that `%an` reads `Marius Ailinca` on both commits — git's author field is constant
+across sessions (`IC-10`), so the `Session-Id` trailer is the only thing separating them,
+and it exists on both because both were committed. During the window it did not.
+
+Not rewritten: `git reset` on a shared index is the vector *Remedy (1)* documents, and
+trading a durable attribution error for a live one is a bad exchange. Disclosed to that
 session directly, per *Instance 5*'s finding that disclosure is what prevents the downstream
-damage. Not rewritten: `git reset` on a shared index is the vector *Remedy (1)* documents, and
-trading a durable attribution error for a live one is a bad exchange.
+damage — specifically a captured session re-running `append_entry` for content already in
+`HEAD`.
 
 ### Second detection, 2026-09-01 `0c32bb85` — and this time a CONTENT check gave a false all-clear
 
