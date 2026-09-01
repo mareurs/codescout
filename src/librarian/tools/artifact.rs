@@ -319,27 +319,11 @@ mod tests {
         }
     }
 
-    /// Class-level guard for the family
-    /// `docs/issues/archive/2026-08-17-find-silently-drops-top-level-rel-path.md` belongs
-    /// to — generalised from `find` alone to every action the dispatcher routes.
-    ///
-    /// `input_schema_has_no_phantom_update_fields` above asserts a key is backed by *some*
-    /// action. That is not enough, and `rel_path` was the proof: it **was** backed — by
-    /// `create` — while its description also instructed `find`, whose `Args` had no such
-    /// field, so serde discarded it and the query answered with an unfiltered first page.
-    /// `Args` cannot carry `deny_unknown_fields` (the dispatcher passes `action` down, and
-    /// adding it once broke every `artifact(update)` call), so nothing else catches this.
-    ///
-    /// **Why the probe compares two calls instead of asserting one fails.** For each
-    /// property labelled `<action>:`, that action is called twice: once with its required
-    /// params alone, once with the same plus the key set to a value ill-typed for its
-    /// *declared schema type*. A key the sub-tool honors is type-checked, so the second call
-    /// fails differently from the first. A key it discards is dropped by serde, so both
-    /// calls behave identically — and identical is the defect.
-    ///
-    /// Asserting "the second call errors" would be vacuous here: most actions have required
-    /// params and error either way. Comparing outcomes is what makes the probe sound for
-    /// them, and it is why this generalises where the original find-only version could not.
+    /// Site 1 of 4. The rationale that used to live here — why two calls are compared rather
+    /// than one asserted to fail, why `deny_unknown_fields` is unavailable (measured: adding
+    /// it once broke every `artifact(update)` call), and what the `accepts_any_json` escape
+    /// admits — now lives on `crate::librarian::tools::param_probe`, shared with `librarian`,
+    /// `artifact_event` and `artifact_refresh`.
     ///
     /// Required params are type-valid dummies chosen to **fail resolution**: a nonexistent
     /// id, an escaping `rel_path`. That failure is the point — it is reached *after*
@@ -348,26 +332,9 @@ mod tests {
     /// differ for the wrong reason.
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        const NO_SUCH_ID: &str = "0000000000000000";
-        const ACTIONS: [&str; 12] = [
-            "find",
-            "get",
-            "create",
-            "update",
-            "move",
-            "delete",
-            "graft",
-            "link",
-            "graph",
-            "state_at",
-            "append_entry",
-            "update_entry",
-        ];
+        use crate::librarian::tools::param_probe::{assert_all_honored, Spec};
 
-        // Keys whose backing field accepts arbitrary JSON, so no value is ill-typed for them
-        // and the probe cannot speak. Each entry is an admission of blindness, not a pass —
-        // keep the list short and justified.
-        const ACCEPTS_ANY_JSON: [&str; 0] = [];
+        const NO_SUCH_ID: &str = "0000000000000000";
 
         fn required(action: &str) -> serde_json::Map<String, Value> {
             let mut m = serde_json::Map::new();
@@ -417,77 +384,36 @@ mod tests {
             m
         }
 
-        // A value that cannot deserialise into the declared JSON type.
-        fn ill_typed(declared: &str) -> Value {
-            if declared == "array" {
-                json!(0)
-            } else {
-                json!([])
-            }
-        }
+        let spec = Spec {
+            actions: &[
+                "find",
+                "get",
+                "create",
+                "update",
+                "move",
+                "delete",
+                "graft",
+                "link",
+                "graph",
+                "state_at",
+                "append_entry",
+                "update_entry",
+            ],
+            accepts_any_json: &[],
+            required,
+        };
 
-        fn outcome(r: &anyhow::Result<Value>) -> String {
-            match r {
-                Ok(v) => format!("ok:{v}"),
-                Err(e) => format!("err:{e}"),
-            }
-        }
-
-        let schema = Artifact.input_schema();
-        let props = schema["properties"]
-            .as_object()
-            .expect("schema has properties")
-            .clone();
-
-        let mut checked = 0usize;
-        let mut unhonored: Vec<String> = Vec::new();
-        for (name, spec) in &props {
-            if name == "action" || ACCEPTS_ANY_JSON.contains(&name.as_str()) {
-                continue;
-            }
-            let Some(desc) = spec["description"].as_str() else {
-                continue;
-            };
-            // Label convention: the description opens `<action>: …`.
-            let Some(action) = desc.split(':').next() else {
-                continue;
-            };
-            if !ACTIONS.contains(&action) {
-                continue;
-            }
-            let declared = spec["type"].as_str().unwrap_or("string");
-
-            let ctx = mk_ctx();
-            let mut base_args = required(action);
-            base_args.insert("action".into(), json!(action));
-            let base = Artifact.call(&ctx, Value::Object(base_args.clone())).await;
-
-            let mut probe_args = base_args;
-            probe_args.insert(name.clone(), ill_typed(declared));
-            let probed = Artifact.call(&ctx, Value::Object(probe_args)).await;
-
-            if outcome(&base) == outcome(&probed) {
-                unhonored.push(format!("{action}:{name} (declared {declared})"));
-            }
-            checked += 1;
-        }
-
-        assert!(
-            unhonored.is_empty(),
-            "these schema keys are labelled for an action whose Args has no such field, so \
-             serde discards them silently — exactly as find discarded rel_path. Either add \
-             the field or move the guidance off the key: {unhonored:?}"
-        );
-        // 37 labelled keys across the 12 actions as of 2026-08-17, all honored. The floor
-        // leaves room for the schema to shrink without a false alarm while still catching a
-        // break in the `<action>:` label convention, which would otherwise make this test
-        // quietly stop checking anything — the exact failure mode it exists to prevent.
-        assert!(
-            checked >= 30,
-            "expected the sweep to cover most of the schema's ~37 labelled keys, covered \
-             {checked} — the `<action>:` label convention may have changed, which would make \
-             this test silently stop checking"
-        );
+        // 37 labelled keys across the 12 actions as of 2026-08-17. The floor leaves room for
+        // the schema to shrink without a false alarm while still catching a break in the
+        // `<action>:` label convention.
+        assert_all_honored(
+            "artifact",
+            &Artifact.input_schema(),
+            &spec,
+            30,
+            |args| async move { Artifact.call(&mk_ctx(), args).await },
+        )
+        .await;
     }
 
     /// The doc half of

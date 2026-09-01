@@ -96,6 +96,52 @@ mod tests {
         TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
     }
 
+    /// Site 3 of 4 for the `IC-15` param probe — see
+    /// `crate::librarian::tools::param_probe` for why it compares two calls and what
+    /// `accepts_any_json` admits.
+    ///
+    /// Required params are chosen to fail *after* deserialisation: a well-formed but
+    /// nonexistent artifact id. `create` additionally needs `kind` and `payload`, and its
+    /// payload requirements are per-kind — `note` takes `text`, which is the cheapest valid
+    /// shape and keeps the baseline failing on the id rather than on validation.
+    #[tokio::test]
+    async fn every_action_labelled_schema_key_is_honored_by_that_action() {
+        use crate::librarian::tools::param_probe::{assert_all_honored, Spec};
+
+        const NO_SUCH_ID: &str = "0000000000000000";
+
+        fn required(action: &str) -> serde_json::Map<String, Value> {
+            let mut m = serde_json::Map::new();
+            m.insert("artifact_id".into(), json!(NO_SUCH_ID));
+            if action == "create" {
+                m.insert("kind".into(), json!("note"));
+                m.insert("payload".into(), json!({"text": "probe"}));
+            }
+            m
+        }
+
+        let spec = Spec {
+            actions: &["create", "list"],
+            // Empty, and verified empty rather than assumed. `payload` and `source` were
+            // excluded on a first pass because they are `object`-typed and looked like the
+            // arbitrary-JSON case; probing with the list emptied showed both ARE honoured, so
+            // the exclusion was hiding two keys for no reason and coverage went 12 -> 14. An
+            // `accepts_any_json` entry is an admission of blindness — write one only after
+            // watching the probe fail to speak for that key.
+            accepts_any_json: &[],
+            required,
+        };
+
+        assert_all_honored(
+            "artifact_event",
+            &ArtifactEvent.input_schema(),
+            &spec,
+            11,
+            |args| async move { ArtifactEvent.call(&mk_ctx(), args).await },
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn unknown_action_returns_recoverable_error() {
         let err = ArtifactEvent

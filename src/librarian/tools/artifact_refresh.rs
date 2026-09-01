@@ -76,6 +76,41 @@ mod tests {
         TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
     }
 
+    /// Site 4 of 4 for the `IC-15` param probe — see
+    /// `crate::librarian::tools::param_probe`.
+    ///
+    /// `gather` needs an id; a well-formed but nonexistent one keeps the failure after
+    /// deserialisation. `list_stale` needs nothing, so its baseline succeeds — which is fine
+    /// and is why the probe compares outcomes rather than asserting an error: an honoured key
+    /// still diverges, because the ill-typed value fails the type check on the way in.
+    #[tokio::test]
+    async fn every_action_labelled_schema_key_is_honored_by_that_action() {
+        use crate::librarian::tools::param_probe::{assert_all_honored, Spec};
+
+        fn required(action: &str) -> serde_json::Map<String, Value> {
+            let mut m = serde_json::Map::new();
+            if action == "gather" {
+                m.insert("id".into(), json!("0000000000000000"));
+            }
+            m
+        }
+
+        let spec = Spec {
+            actions: &["gather", "list_stale"],
+            accepts_any_json: &[],
+            required,
+        };
+
+        assert_all_honored(
+            "artifact_refresh",
+            &ArtifactRefreshTool.input_schema(),
+            &spec,
+            3,
+            |args| async move { ArtifactRefreshTool.call(&mk_ctx(), args).await },
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn unknown_action_returns_recoverable_error() {
         let err = ArtifactRefreshTool

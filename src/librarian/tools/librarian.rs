@@ -151,58 +151,31 @@ mod tests {
         assert!(err.downcast_ref::<RecoverableError>().is_some());
     }
 
-    /// The `artifact` twin of this probe lives at
-    /// `src/librarian/tools/artifact.rs::every_action_labelled_schema_key_is_honored_by_that_action`
-    /// and its doc comment carries the full rationale — why two calls are compared rather than
-    /// one asserted to fail, and why `deny_unknown_fields` is unavailable (the dispatcher passes
-    /// `action` down; adding it once broke every `artifact(update)` call).
+    /// Site 2 of 4. Rationale, the `deny_unknown_fields` measurement, and the reason the
+    /// probe compares two calls rather than asserting one fails all live on
+    /// `crate::librarian::tools::param_probe`.
     ///
-    /// **Why a second site rather than a shared helper.** The generic half is ~30 lines; the
-    /// per-tool half — action list, minimum viable args, blindness exclusions — is most of the
-    /// body and does not factor. Two sites is where duplication is still cheaper than the
-    /// indirection. **At a third, extract it** — `artifact_event`, `artifact_refresh`,
-    /// `library`, `workspace` and `index` all dispatch on a string key over a shared schema and
-    /// are all unprobed today.
-    ///
-    /// **What this adds over the twin:** `librarian` labels some keys for several actions at
-    /// once (`"context/reindex/workspace_state_at/link_scan: scope"`). The `artifact` probe
-    /// takes `desc.split(':').next()` and requires an exact action match, so a slash-joined
-    /// label matches nothing and is skipped *silently*. Splitting on `/` first is what makes
-    /// those keys reachable — and `scope` is one of them, which is precisely the key in
+    /// **What this site contributed to the shared helper:** `librarian` labels some keys for
+    /// several actions at once (`"context/reindex/workspace_state_at/link_scan: scope"`). The
+    /// original `artifact`-only probe split on `:` and required an exact action match, so a
+    /// slash-joined label matched nothing and was skipped *silently*. Splitting on `/` first
+    /// is what reaches those keys — and `scope` is one of them, which is exactly the key in
     /// `docs/issues/archive/2026-07-05-audit-doc-refs-scope-param-ignored.md`, an `IC-15`
     /// member that was this key on this tool.
+    ///
+    /// Born red: it flagged `tracker_design`'s `intent` and `archetype`, which were being
+    /// discarded wholesale by an `unwrap_or_default()` on the deserialisation
+    /// (`docs/issues/archive/2026-09-01-tracker-design-discards-every-argument-on-one-type-error.md`).
     #[tokio::test]
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
-        const ACTIONS: [&str; 9] = [
-            "context",
-            "reindex",
-            "tracker_design",
-            "workspace_state_at",
-            "audit_doc_refs",
-            "legibility_scan",
-            "link_scan",
-            "doctor",
-            "merge_worktree",
-        ];
-
-        // Keys whose backing code reads them through an UNTYPED accessor
-        // (`args.get(k).and_then(Value::as_str)`), so no value is ill-typed for them and the
-        // probe cannot speak. Each entry is an admission of blindness, not a pass.
-        //
-        // Both of these are `doctor`'s, and both are a soft instance of the very class this
-        // test guards: `doctor(fix=[])` runs a read-only scan and reports success rather than
-        // refusing, because `as_str()` on a non-string is `None` and `None` means "no fix
-        // requested". A caller who mistypes the value is told nothing. That is weaker than
-        // the defect this probe hunts — the value was malformed rather than valid-and-ignored
-        // — but it is the same silence, and switching `doctor` to a typed `Args` would let
-        // the probe reach both keys.
-        const ACCEPTS_ANY_JSON: [&str; 2] = ["fix", "offset"];
+        use crate::librarian::tools::param_probe::{assert_all_honored, Spec};
 
         fn required(action: &str) -> serde_json::Map<String, Value> {
             let mut m = serde_json::Map::new();
             match action {
-                // Exactly one of commit|timestamp is required; a well-formed hash that resolves
-                // to nothing keeps the failure AFTER deserialisation, where the probe can see it.
+                // Exactly one of commit|timestamp is required; a well-formed hash that
+                // resolves to nothing keeps the failure AFTER deserialisation, where the
+                // probe can see it.
                 "workspace_state_at" => {
                     m.insert(
                         "commit".into(),
@@ -217,78 +190,35 @@ mod tests {
             m
         }
 
-        fn ill_typed(declared: &str) -> Value {
-            if declared == "array" {
-                json!(0)
-            } else {
-                json!([])
-            }
-        }
+        let spec = Spec {
+            actions: &[
+                "context",
+                "reindex",
+                "tracker_design",
+                "workspace_state_at",
+                "audit_doc_refs",
+                "legibility_scan",
+                "link_scan",
+                "doctor",
+                "merge_worktree",
+            ],
+            // Both are `doctor`'s, both read through untyped accessors, so no value is
+            // ill-typed for them. Admissions of blindness, not passes — and both are a softer
+            // instance of this very class: `doctor(fix=[])` runs a read-only scan and reports
+            // success rather than refusing. A typed `Args` for `doctor` would let the probe
+            // reach them.
+            accepts_any_json: &["fix", "offset"],
+            required,
+        };
 
-        fn outcome(r: &anyhow::Result<Value>) -> String {
-            match r {
-                Ok(v) => format!("ok:{v}"),
-                Err(e) => format!("err:{e}"),
-            }
-        }
-
-        let schema = Librarian.input_schema();
-        let props = schema["properties"]
-            .as_object()
-            .expect("schema has properties")
-            .clone();
-
-        let mut checked = 0usize;
-        let mut unhonored: Vec<String> = Vec::new();
-        for (name, spec) in &props {
-            if name == "action" || ACCEPTS_ANY_JSON.contains(&name.as_str()) {
-                continue;
-            }
-            let Some(desc) = spec["description"].as_str() else {
-                continue;
-            };
-            // Label convention: `<action>: …`, or `<a>/<b>/<c>: …` for a shared key.
-            let Some(label) = desc.split(':').next() else {
-                continue;
-            };
-            let Some(action) = label.split('/').next() else {
-                continue;
-            };
-            if !ACTIONS.contains(&action) {
-                continue;
-            }
-            let declared = spec["type"].as_str().unwrap_or("string");
-
-            let ctx = mk_ctx();
-            let mut base_args = required(action);
-            base_args.insert("action".into(), json!(action));
-            let base = Librarian.call(&ctx, Value::Object(base_args.clone())).await;
-
-            let mut probe_args = base_args;
-            probe_args.insert(name.clone(), ill_typed(declared));
-            let probed = Librarian.call(&ctx, Value::Object(probe_args)).await;
-
-            if outcome(&base) == outcome(&probed) {
-                unhonored.push(format!("{action}:{name} (declared {declared})"));
-            }
-            checked += 1;
-        }
-
-        assert!(
-            unhonored.is_empty(),
-            "these schema keys are labelled for an action whose Args has no such field, so \
-             serde discards them silently — the shape of IC-15. Either add the field or move \
-             the guidance off the key: {unhonored:?}"
-        );
-        // Floor, not a target. It exists so a break in the `<action>:` / `<a>/<b>:` label
-        // convention cannot make this test quietly stop checking anything — the exact failure
-        // mode it is here to prevent, and the one an `is_empty()` assertion is monotone under.
-        assert!(
-            checked >= 15,
-            "expected the sweep to cover most of the schema's labelled keys, covered \
-             {checked} — the label convention may have changed, which would make this test \
-             silently stop checking"
-        );
+        assert_all_honored(
+            "librarian",
+            &Librarian.input_schema(),
+            &spec,
+            15,
+            |args| async move { Librarian.call(&mk_ctx(), args).await },
+        )
+        .await;
     }
 
     #[tokio::test]
