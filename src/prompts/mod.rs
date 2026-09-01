@@ -1967,7 +1967,7 @@ mod tests {
     /// order is load-bearing: the lean lane leaves a librarian-less binary in the
     /// shared `target/`, so ending on it arms a trap for the next session. See
     /// CLAUDE.md § Development Commands and
-    /// `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`.
+    /// `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`.
     ///
     /// Two traps this test is shaped around, both measured against CLAUDE.md on
     /// 2026-08-31 rather than reasoned about:
