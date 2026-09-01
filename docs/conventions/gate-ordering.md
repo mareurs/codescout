@@ -57,6 +57,42 @@ reordered vs 79.6s for the rejected appended-`cargo build` fix, so both remedies
 reorder wins on structure rather than speed — it removes the proposition whose exit code could be
 misread, where an appended build step is one more thing that can silently not have run.
 
+
+### The `&&` exception — the "by construction" guarantee assumes the lanes RUN
+
+**Measured 2026-09-01, by arming it.** The guarantee above holds for a gate that runs to
+completion. Chained with `&&` it inverts, and it inverts *exactly when something is wrong*:
+
+```
+cargo fmt && cargo clippy … && cargo test --workspace --no-default-features && cargo test --workspace
+                                                          ↑ fails here                  ↑ never runs
+```
+
+A session chained the four commands that way, the **lean** lane failed on an unrelated red (a
+peer's bug file, momentarily tracked without its `cluster/` tag), and the default lane was
+skipped — leaving `target/debug/codescout` librarian-less. So the terminal state was the lean
+binary, which is the precise condition the reorder exists to prevent, reached *by following the
+documented order*. The failure that skips the rebuild is also the one that guarantees you are
+about to re-run and re-fail, so the window is not short.
+
+The asymmetry worth naming: `&&` expresses "stop if a step fails", which is right for a gate
+whose purpose is a **verdict**, and wrong for the one step whose purpose is a **side effect**.
+The default lane is doing two jobs — reporting and rebuilding — and only the first should be
+short-circuited.
+
+**So chain the two test lanes with `;`, not `&&`**, and read the exit codes rather than relying
+on the chain to surface them:
+
+```
+cargo test --workspace --no-default-features 2>&1; echo "===LEAN exit $?==="
+cargo test --workspace                       2>&1; echo "===DEFAULT exit $?==="
+```
+
+This does not weaken the gate: nothing is being committed on a red either way, and the change
+only guarantees the rebuild happens. It is the same shape as the reorder itself — make the
+correct path end in a safe state, so compliance cannot leave anything armed (CLAUDE.md §
+*Observer Blindness*, remedy 3). The reorder closed the case where you *walk away* from the lean
+lane; this closes the case where the gate *stops you* at it.
 ## Why the long clippy form, not `cargo clippy -- -D warnings`
 
 The long clippy form is the gate, not garnish: bare `cargo clippy -- -D warnings` lints only the

@@ -12,7 +12,7 @@ owner: marius
 related:
 - '64efc41ac6686afb'
 severity: low
-unverified: Pre-existence is NOT established — no bisect against 0ed6cb18 was run. The no-call-path argument makes causation by the T-7 diff implausible, but 2/2 clean full runs at a low flake rate cannot distinguish pre-existing from aggravated.
+unverified: 'Pre-existence is NOT established — no bisect against 0ed6cb18 was run, and it remains INFEASIBLE: the rate is too low to separate signal from noise. The no-call-path argument makes causation by the T-7 diff implausible. Obs. 5-6 (peer, 2026-09-01) add two more full-`--workspace` failures on a ~6-session box but supply NO condition — the reporter''s "concurrent cargo holding the target lock" claim was retracted the same day by their own second run, which had zero lock waits and failed anyway. This session''s four runs refute total load (the HEAVIEST run passed, a lighter one failed). Sole surviving candidate is async-executor churn, and it does not survive its own first check either (equal other-failure counts produced opposite outcomes). No discriminating factor is known.'
 ---
 
 ## Summary
@@ -110,6 +110,96 @@ stamped, so the librarian guard refused it, which is
 the corpus's newest file. Reaching it needed `artifact(action="find")` then
 `artifact(action="get")`. Worth knowing if a future session looks for this record by path and
 concludes it is absent.
+
+Two further reproductions, reported by `fix-subagent-guide-injection-brief` (`.claude-kat`) on
+2026-09-01, who deliberately did not edit this file. Recorded here because they are the first
+observations to arrive with a **named condition** rather than a rate:
+
+| probe | result | condition |
+|---|---|---|
+| full `cargo test --workspace` | fails | 6 live sessions **and** a concurrent cargo holding the target lock |
+| full `cargo test --workspace` | fails | same |
+| the test in isolation | passes, 1.13s against a 10s budget | quiet |
+
+Their own reading: this "moved the rate from ~1-in-N to 2-of-2". They also confirm
+`src/peer/server.rs` last changed 2026-08-18, so neither the T-7 diff nor their own
+`src/prompts/` + `src/tools/guide.rs` change is in the call path — an independent restatement
+of § *Why it is not attributable to the T-7 change*, from a session with a different diff.
+
+**Why these two matter more than the rate they add.** Every prior observation reported a
+frequency; these report a *condition*. A 2-of-2 rate under a condition someone can recreate is
+the first thing here that makes the bisect in `unverified:` actually runnable — at ~1-in-N a
+bisect against `0ed6cb18` cannot separate signal from noise, which is precisely why nobody has
+run it. If the condition holds, the method changes from "re-run until it flakes" to "hold the
+target lock and run once per candidate commit".
+
+**And this session's own four runs cut partly AGAINST a simple load reading, which is why the
+condition is still a candidate.** Measured 2026-09-01 during the `30b6fc41` work:
+
+| run | scope | other failures | this test |
+|---|---|---|---|
+| mutation A (default returns `None`) | `--workspace --lib` | 11 | **failed** |
+| mutation B (one tool opts out) | `--workspace --lib` | 1 | passed |
+| gate, lean lane | `--workspace --no-default-features` | 0 | passed |
+| gate, default lane | `--workspace` (full, heaviest) | 1 (a peer's snapshot) | passed |
+
+The heaviest run passed and a lighter one failed. So *total* load is not sufficient to predict
+it, and the peer's more specific factor — a **concurrent cargo build holding the target lock**,
+not merely concurrent sessions — survives this data where a general load hypothesis does not.
+Stated as a discriminating candidate to test, not as the cause: four runs on one box cannot
+separate lock contention from scheduler luck, and the mutation-A run had 11 other failing tests
+churning the same executor, which is its own confound.
+
+**The next probe is therefore specified, where before it was not:** run the test under a
+deliberately held target lock and count. If that reproduces at a high rate, bisect; if it does
+not, the peer's 2-of-2 was coincidence and we are back to a rate, having learned which variable
+is innocent.
+
+#### RETRACTED, same day, by the reporter — and the retraction is the finding
+
+`fix-subagent-guide-injection-brief` re-checked their own raw buffers and withdrew the
+condition within the hour:
+
+- **Run 1** (chained `clippy && lean && default`): two `Blocking waiting for file lock` lines,
+  at buffer lines 4 and 3643 — immediately after `===CLIPPY-OK===` and `===LEAN-OK===`. Each
+  was a wait at a lane's **build start** that resolved before any test ran, not a lock held
+  through test execution.
+- **Run 2** (standalone `cargo test --workspace`): **zero** lock-wait lines. Failed anyway.
+
+So lock contention is **not necessary** for the failure, refuted by the reporter's own second
+reproduction. Their summary: *"I had a coincidence and named a mechanism for it."*
+
+**Everything above that rests on the condition is withdrawn**, specifically: that these were
+observations with a *named condition* rather than a rate; that a bisect is thereby feasible;
+and the "next probe is specified" paragraph, which would have spent effort probing a variable
+the reporter had already accidentally controlled for, in the direction of innocence. The
+superseded text is kept rather than deleted because what was believed, and why it was wrong,
+is the transferable part.
+
+**What survives at the strength the evidence supports:** two more failures of
+`cargo test --workspace` at full scope (integration binaries included) on a box with ~6 live
+sessions. One started behind a transient build-lock wait; the other did not. No discriminating
+factor. Rate, not condition — so the bisect is **infeasible** exactly as before, and
+`unverified:` is restored to say so.
+
+**The surviving candidate is executor churn, and it comes from this session's table rather than
+from either reporter's hypothesis.** Mutation A had 11 other tests failing in the same async
+executor; no passing run shared that. But it does not survive its own first check: this
+session's default-lane run had exactly **one** other failure and this test passed, and the
+peer's two runs almost certainly also had exactly one other failure — their own
+`prompt_surfaces_server_instructions_snapshot`, which was red in the tree at the time — and
+this test failed. Same other-failure count, opposite outcomes. That is not a refutation at
+n=1 either way, and the discriminating question is now precise enough to ask rather than
+model: **how many other tests failed in each of their two runs?** Asked; unanswered at the
+time of writing.
+
+**Method note, and the reason this subsection exists at all.** I recorded a peer's condition
+after verifying their *arithmetic* on an unrelated claim earlier the same evening, and did not
+ask how they had established *this* one. A characterisation of one's own observation is a
+claim like any other; that it comes with a number attached ("2-of-2") makes it read as
+measurement rather than as attribution. The hedging in the text above — "candidate, not a
+finding" — was applied to the *causal* reading and not to the *observational* one, which is
+exactly where it was needed.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).

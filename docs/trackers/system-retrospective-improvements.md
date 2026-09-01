@@ -416,6 +416,29 @@ separator.
 **Acceptance:** the three probes as a table test, the two refusal rows asserting on the
 **named clause** rather than merely on refusal. Keep the `allowed` row — it is the
 discriminator that stops a refuse-everything gate from satisfying both refusal rows.
+
+**Fifth firing, 2026-09-01, and it raises the severity rather than the count.** The refused
+command was:
+
+    git status --short && grep -c 'fn selector_key' src/librarian/adapter.rs && git log -3 …
+
+One `grep` clause on a source file refused the whole thing, so `git status` and `git log`
+never ran. This entry currently characterises the population as *"measurement commands"*,
+which reads as low-stakes; this instance was a **peer-collision check under time pressure** —
+I was establishing whether a peer's index had captured my uncommitted work before warning
+them, and the two clauses the gate discarded were the ones carrying the answer. The
+substantive clause was the innocent one and the offending clause was the afterthought, which
+is the inverse of what the "measurement command" framing suggests.
+
+So the cost is not only a wasted round-trip: it is a wasted round-trip **on the class of
+command where latency is the whole point**. CLAUDE.md § *Reaching a Peer Session* prescribes
+checking tree state before peer routing is load-bearing, and this gate taxes exactly that
+check, because a peer-coordination probe naturally mixes `git` plumbing (bounded, allowed)
+with a source-file content read (refused). **Acceptance addition:** one probe row of the
+`git … && grep … src/*.rs` shape, asserting the refusal names the `grep` clause — the
+existing three probes are all single-purpose and none mixes an allowed `git` clause with a
+refused source read, so none of them exhibits the discarded-innocent-clause cost this row
+would pin.
 ## History
 
 ### 2026-09-01 — Tracker created

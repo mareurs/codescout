@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 161
+entry_high_water_R: 165
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,10 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-165 | 2026-09-01 | miss, peer-caught (1 instance) | **A deletion's stale references point INWARD from files the diff never touched, so reviewing the change cannot find them.** `30b6fc41` deleted four `selector_key` overrides; I corrected the four doc comments it falsified and reported the sweep complete. A **fifth** survived in `action_selector_key`'s own doc — naming a deleted symbol, explaining a deferral that no longer applied, and prescribing an adoption that had already happened. **The two directions:** comments that *lived in* the deleted code appear in the diff (that is how four were found); comments that *pointed at* it sit in untouched files and are **structurally absent from it**. Reading the diff harder cannot reach them — a coverage failure, not a thoroughness one. Proximity did not help either: the fifth was one function from the change. **Pairs with `R-162` as the mirror instrument:** grepping the deleted token is guaranteed-zero and useless; grepping the deleted symbol's NAME is exactly right and non-zero *because* the references survive. Same technique, opposite value, discriminated by which side of the deletion you stand on. Neither is an `R-3` instance — both queries were well-formed and correctly scoped. **Remedy:** grep the tree for the deleted name before claiming a sweep is complete, and state the sweep's scope ("every falsified comment in the diff" ≠ "in the tree") — I published the stronger reading of the weaker act, `R-161` a third time. | found by `codescout-b7`; fixed at the site in `action_selector_key`'s doc; mechanisable as an `audit_doc_refs` extension resolving `Type::method` in Rust doc comments — candidate `I-N`, unfiled |
+| R-164 | 2026-09-01 | near-miss, self-caught (3rd of family in one session) | **A mutation's kill COUNT answers a different question than necessity, and the reassuring number establishes least.** Verifying `30b6fc41`: the canonical mutation (trait default returns `None`) killed **11** tests; the per-site mutation (one `None` override on `ReadFile` alone) gave **4826 pass, exactly 1 fail**, naming `read_file`. I had the 11 in hand and was composing it as the new gate's justification — but **10 of the 11 pre-existed**, so it establishes that the *inversion* matters and says nothing about the gate. **Why the number actively misleads:** a mutation answers "is this line guarded?", not "is MY guard load-bearing?"; the kill count measures the existing guard population at that site, which is **largest at the canonical site** because prominence is what got it covered. The count is anti-correlated with the information wanted, and a big number is what does not prompt a second look. **Distinct from `R-158`** (which case to mutate) **and from the standing per-site law** (how many sites) — this is how to read the result, and it bites even when both are obeyed. **Remedy:** never report a kill count without naming the proposition it establishes; the reportable form is "mutating a site this guard uniquely covers left M others green and reddened only this one." | `30b6fc41` patch-id `db34821395d6257eb37562bb779ed9ab4eba091e`, whose message records both mutations and states the 11-kill is not evidence for the gate; kin `R-158` |
+| R-163 | 2026-09-01 | miss, reporter-retracted within the hour (1 instance) | **A peer's observation and its attributed CAUSE are two claims, and the real number makes the inferred condition read as measured.** A peer reported two flake reproductions *plus* a condition ("6 live sessions **and** a concurrent cargo holding the target lock — moved the rate from ~1-in-N to 2-of-2"). I had verified an unrelated numeric claim of theirs the same hour (byte arithmetic, `+3 −1 = +2`, exact) and took this one whole — into a durable bug record, into its **queryable `unverified:` field** as "bisect now feasible", and into a specified next probe. Retracted by the reporter from their own buffers: run 1's lock-waits were at *build start*, run 2 had **zero** and failed anyway. Their words: *"I had a coincidence and named a mechanism for it."* **Not `R-160`/`R-117`:** the figure was REAL — two runs did fail — and only the *condition* was inferred, so the observation lent its credibility to the attribution riding along with it. **What defeated an engaged reflex:** I hedged the **causal** reading ("candidate, not a finding") while recording the **observational** claim as fact — care applied one level from where it was needed. Unused tell: "2-of-2" is a denominator over a population the reporter selected. **Cost asymmetry:** it reached a field a triage query returns, not a sentence a reader re-reads. **Remedy:** one question — *"how did you establish that?"* | `ee9d8d80ad5ecdc8` § *RETRACTED, same day, by the reporter*, which preserves the superseded text and the corrected `unverified:`; kin `R-160`, `R-117`, `R-161`, `R-162` |
+| R-162 | 2026-09-01 | miss, peer-caught (1 instance) | **A DELETION cannot introduce the token you grep for, so the zero is guaranteed before you run the query.** Screening a subagent's collision warning on `src/librarian/adapter.rs`, I grepped the staged file for `action_selector_key`, got **0**, and overruled the subagent. Measured on `30b6fc41`: that token occurs **0 times both before and after** the peer's change — the query returned the same answer in both worlds, zero bits. The discriminating query was one line away (`fn selector_key` goes **2 → 1**); `git diff --cached`, which the peer ran, named both authors immediately. **Not R-3 again:** R-3's three ways a zero lies — scope, shape, encoding — are properties of how the *query* was written, and mine was well-formed, correctly scoped, right file. This is a property of the **hypothesis**: the proposition has a direction and a token search reads only one of them, so it is blind to half the space, silently. Widening corpus, glob or pattern fixes none of it. It is CLAUDE.md § Testing Discipline's recording-filter law arriving at a peer-coordination check instead of a test. **The escalation is the expensive part:** the instrument did not merely fail to inform, it **outranked a correct signal** — a subagent had already found the collision by the right method. The asymmetry that made it feel safe: a positive hit *would* have been evidence, so a one-outcome query felt like a two-outcome test. **Rule:** to detect a peer's change in a file, diff the file; you cannot know which direction their change ran. | this session; `30b6fc41` patch-id `db34821395d6257eb37562bb779ed9ab4eba091e`; sub-shape named by `compact-root-claude-md`; parent `R-3` |
 | R-161 | 2026-09-01 | hit ×2, neither by method (2 instances) | **The weaker act wears the stronger act's appearance, so completing it feels like completing the stronger one.** Two unrelated-looking cases, one shape; care is fully engaged on the weaker act, which is why the substitution is invisible. **(a) Checking a warning is not clearing a change.** `codescout-b7` verified all three facts of a peer warning, found a fourth that made them inapplicable, and moved to dispatch — the warning was discharged, the change was never reviewed. An unrelated scout stopped them; their words: *"luck of sequencing, not method."* The change carried **two** defects neither party had named. **(b) A present fixture reads as coverage.** Gate 7's `output_id` probe exercises real branches in `symbols`/`references`/`call_graph` and is **inert** for the only declaring topic, whose router never reads that key — not wrong, and indistinguishable from load-bearing from outside. **Remedy for (b) is the INVERSE of an existing law:** CLAUDE.md says annotate a fixture's *load-bearing* detail so a tidy-up cannot silently remove it; this says annotate a fixture as *inert* so nobody credits it with coverage it lacks. One guards silent removal, the other silent credit, and the second is worse — false coverage stops the next person looking. **Proposals:** (a) Phase 2 — discharging a warning is not an outcome, name what remains unchecked; (b) CLAUDE.md § Testing Discipline, operator's call, not filed by this entry — and state the ASYMMETRY rather than the pairing: false coverage stops the next person looking, silent removal does not. **Addendum:** 4th instance (declining to message a running implementer — "one more thing" wears the appearance of fixing the task), and remedy (b) has a gap: a property jointly covered by N files has N candidate annotation sites and no owner, so annotate-at-the-fixture-line has nothing to fire at. | worked example shipped at `b4fa1be6`; `response-envelope-session-log:F-1` (b7's withdrawal); kin `R-159` — mechanism-vs-reachability is the same substitution one layer down |
 | R-160 | 2026-09-01 | miss, peer-caught (1 instance) | **Partial success is the camouflage: one pattern over a heterogeneous population misses its odd member.** Probing five keys of a session-registry file with one grep built as `"$k":"[^"]*"`, I reported four present and `pid` absent — then offered "pid is only the filename" to a peer as a refinement. Wrong: the bytes are `"pid":3624594`. Four keys are JSON **strings** and `pid` is a **number**, so the type-uniform pattern excluded exactly the one key typed differently. What made it persuasive is that the instrument was **visibly working** — a uniform 0/5 would have sent me to the pattern, where 4/5 made the blank read as a property of the data. The peer's own diagnosis (minified, no space after colon) was also wrong; `grep -c '": '` returns 0. Fourth false-negative filter of mine in one session, three in `cargo test`: a bare name with `--exact` matched 0 of 4820 and reported `ok`; `-- guide` matched 132 tests but not the gate under test; `-- valid_slugs` named no test at all. Each returned a well-formed plausible result, never an error. **Proposal:** `R-3` bullet — check the pattern against the population's ODD member, and treat a partial hit as a stronger warning than a total miss. | this session, verified in the bytes both ways; sibling of `R-158` — there the *control* was drawn from the most prominent member, here the *pattern* was fitted to the most typical one |
 | R-159 | 2026-09-01 | hit (1 instance) | **Verifying a MECHANISM is not verifying its REACHABILITY, and a clean mechanism check feels like the strong form of confirmation.** Refused to relay a peer's claim unverified (`R-154`) and checked all three load-bearing facts in the bytes: `Shape::matches` opening `let Some(sel) = sel else { return false }` (`guide_index.rs:179`), the trait default returning `None` (`types.rs:1439`), and exactly five `selector_key` override sites of six files. All three held; I relayed it as time-critical. **Correct, and moot** — the recipient found a fourth fact neither of us sought: `progressive-disclosure.md` carries **zero** `serves:` markers (`librarian.md` is the only declaring guide), so `guide_blocks_for` takes the `!GUIDE_INDEX.declares(topic)` branch at `types.rs:1019` and `Shape::matches` is **never consulted** for that topic. Every check asked how the code behaves *when entered*; none asked *is it entered*. This is § *Testing Discipline*'s "loudness is a property of a PATH" aimed at a claim rather than a guard — `BL-66` is an `abort!` nothing reaches, this is a verified blocker nothing reaches — and the remedy transposes: name the live configuration in which the mechanism fires. One `grep -l 'serves:' src/prompts/guides/*.md` answers it. **Not an argument against verifying before relaying:** reachability is a FOURTH question, and verifying the mechanism harder never reaches it. | mirror of `R-3` — that says prove your instrument can *find*, this says prove your finding can *fire*; sibling `R-154` (relay discipline, which worked) |
@@ -6978,6 +6982,274 @@ body-selected read's `preview.headings` is not a renderable array, which is what
 section map* — so either site alone is the defect the constraint exists to prevent. That is the
 shape the generalisation above was reaching for: not an annotation with no owner, but one contract
 with two citers.
+
+## R-162 — A DELETION cannot introduce the token you grep for — the zero is guaranteed before you run it
+
+**Valid:** invariant
+
+**Verdict:** miss. The scout ran, produced a zero, and the zero was used to overrule a
+correct signal. Caught by a peer's independent `git diff --cached`, one command before a
+broken commit.
+
+**Observed:** 2026-09-01, coordinating a shared-checkout commit with `compact-root-claude-md`
+(pid 3624594, `.claude-sdd`). My fix-wave subagent flagged that the index held a collision in
+`src/librarian/adapter.rs` and recommended syncing before committing. I screened the claim by
+grepping the staged file for `action_selector_key`, got **0**, concluded no peer refactor was
+present, and overruled the subagent.
+
+**The law, and why it is decidable in advance.** `R-3` says a search that finds nothing is
+evidence about the search rather than about the world — a caution you apply *after* reading a
+zero. This is the sharper form, with a predicate you can evaluate *before* running the query:
+
+> When the change class you are screening for is a **deletion**, a search for the token
+> being introduced returns zero regardless of the file's contents. The query cannot express
+> the state it is being used to rule out.
+
+Measured on the commit that landed (`30b6fc41`): `action_selector_key` occurs **0 times in
+`adapter.rs` both before and after** the peer's change. My query returned the same answer in
+the world where their work was staged and in the world where it was not — zero bits. The
+discriminating query was one line away and I did not run it: `fn selector_key` goes **2 → 1**
+across the same commit, and `git diff --cached` — which the peer ran — named both authors
+immediately.
+
+**The direction problem is what makes token queries unsafe here in general, not just this
+once.** At screening time you do not know which way a peer's edit ran. A token query is a bet
+on direction: it can only detect an *introduction*, so it is blind to exactly half the
+hypothesis space, and blind *silently*. The operational rule takes no judgement:
+
+> To detect a peer's change in a file, **diff the file**. Do not grep it for a token — you
+> cannot know which direction their change ran.
+
+**Why this is not merely R-3 again.** `R-3`'s three named ways a zero lies are *scope*,
+*shape* and *encoding* — all properties of how the query was written. This one is a property
+of the **hypothesis**: the query is well-formed, correctly scoped, and searches the right
+file. It fails because the proposition under test has a direction and the instrument only
+reads one of them. Widening the corpus, the glob, or the pattern fixes none of it. It is
+CLAUDE.md § *Testing Discipline*'s recording-filter law — *a test cannot detect what its
+recording filters out* — arriving at a peer-coordination check instead of at a test.
+
+**The escalation is the expensive part.** The bad instrument did not merely fail to inform;
+it **outranked a correct signal**. A subagent had already identified the collision by the
+right method and recommended the right action. A zero from a query that could not have
+returned anything else was treated as strong enough to reverse that. Note the asymmetry that
+made it feel safe: a *positive* hit would have been real evidence, so the query felt like a
+test with two outcomes when it had one.
+
+**Cost if unnoticed:** the commit would have carried the peer's `LibrarianAdapter::selector_key`
+deletion **without** the `types.rs` default inversion it is atomic with — leaving the override
+gone and the default still `None`, which kills librarian guide routing outright. Not untidy
+attribution: a bisect hazard, landing under my `Session-Id` trailer with the peer's reasoning
+nowhere in the message.
+
+**Rests on:** nothing in the tree — the law is about query direction, not about any current
+symbol. The worked measurement rests on `30b6fc41` (patch-id
+`db34821395d6257eb37562bb779ed9ab4eba091e`) still being resolvable.
+
+**Status:** open — proposal for the skill's Phase 1, one line: *when screening for a peer's
+in-flight change, diff the file; a token grep can only see an introduction.*
+
+**Credit:** the sub-shape was named by `compact-root-claude-md`, who ran the diff that caught
+it and declined to write the entry so the counterfactual would stay with the session that
+lived it.
+
+## R-163 — A peer's observation and its attributed CAUSE are two claims; the real number makes the inferred condition read as measured
+
+**Valid:** invariant
+
+**Verdict:** miss. The peer's figure was verified and their *attribution* was not, and the
+unverified half reached a queryable `unverified:` field on a durable bug record, where it
+asserted that a bisect was feasible. Caught by the reporter's own re-check within the hour —
+not by me, and not by any gate.
+
+**Observed:** 2026-09-01. A peer reported two reproductions of a known low-rate flake *and*
+attributed them to a condition: *"both were full `cargo test --workspace` runs on a box with 6
+live sessions and a concurrent cargo build holding the target lock… that moved the rate from
+~1-in-N to 2-of-2."* I had verified an unrelated numeric claim of theirs the same hour — byte
+arithmetic on a snapshot delta, `+3 −1 = +2`, which checked out exactly — and then took this
+one whole. I wrote it into a durable bug record (`ee9d8d80ad5ecdc8`), **updated its queryable
+`unverified:` field to say a bisect was now feasible**, and specified the next probe on that
+basis.
+
+Retracted by the reporter within the hour, from their own raw buffers: run 1's two lock-waits
+were at *build start* and resolved before any test ran; run 2 had **zero** lock-wait lines and
+failed anyway. Lock contention is therefore not necessary, refuted by their own second
+reproduction. Their words: *"I had a coincidence and named a mechanism for it."* The probe I
+had specified would have spent effort on a variable they had already accidentally controlled
+for, in the direction of innocence.
+
+**Mechanism — and why this is not the existing law about verifying a peer's number.** An
+observation and the *attribution of a condition to it* are two claims, delivered as one
+sentence by the party best placed to conflate them. The corpus already says verify a peer's
+figure (`R-160`) and that a proposed fix is a claim about current state (`R-117`). Neither
+reaches this, because here the figure was **real** — two runs did fail — and only the
+*condition* was inferred. The observation lends its credibility to the attribution riding
+along with it.
+
+**What made it slip past a reflex that was actively engaged.** I hedged, and hedged the wrong
+clause: I wrote "a discriminating candidate, not a finding" about the **causal** reading while
+recording the **observational** claim ("2-of-2 under a named condition") as fact. Care was
+fully applied one level away from where it was needed — `R-161`'s shape, arriving through a
+peer channel. The tell available at the time and not used: **"2-of-2" is a denominator over a
+population the reporter selected**, and I never asked how the two runs were chosen, how many
+runs there were in total, or how the condition was established.
+
+**Cost, and why it is worse than an ordinary wrong belief.** It reached a *queryable field* on
+a durable record. A wrong narrative sentence is re-read by whoever next opens the file; a wrong
+`unverified:` is what a triage query returns, and it said "feasible" about work that is not.
+Same asymmetry as `R-117`'s durable-record surface: a fix built on a bad premise fails at the
+call site, a filed claim built on one is cited and re-checked by nothing.
+
+**Remedy, stated as a question rather than as vigilance:** when a peer hands over an
+observation *plus* a cause, record the observation and ask one question about the cause —
+*"how did you establish that?"* One message, and the reporter here answered it unprompted an
+hour later, which is evidence the question was cheap and would have been welcomed. Do not
+apply the general "verify a peer's number" reflex and consider the transaction closed: the
+number may be the sound half.
+
+**Status:** open — the remedy is a one-question habit and is unmechanised. No gate can catch
+this; the nearest mechanism is that a `**Rests on:**` line required on a bug-file claim would
+have forced the provenance question at write time.
+
+**Rests on:** `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`
+§ *RETRACTED, same day, by the reporter*, which preserves the superseded text and the corrected
+`unverified:`. Related: `R-160` (verify the figure), `R-117` (a claim about current state),
+`R-161` (care applied one level from where it was needed), and `R-162` — the same peer's own
+write-up of the mirror-image failure in the same exchange.
+
+**Promote-when:** a second instance where a peer-supplied *attribution* rather than a
+peer-supplied *number* reaches a durable record. At two, this belongs in CLAUDE.md §
+*Reaching a Peer Session*, whose current text disciplines routing and counting but says nothing
+about inheriting a peer's causal reading.
+
+## R-164 — A mutation's kill COUNT answers a different question than necessity, and the reassuring number is the one that establishes least
+
+**Valid:** invariant
+
+**Verdict:** near-miss, self-caught. The misleading number was in hand and being composed as
+the new gate's justification; the per-site mutation rule (CLAUDE.md § *Testing Discipline*)
+caught it before publication. Third instance of the family in one session, by the agent who
+wrote up the first two — so knowing the law is demonstrably not the mechanism.
+
+**Observed:** 2026-09-01, verifying `30b6fc41` (inverting `Tool::selector_key`'s default so
+every tool opts into operator-rule routing). I added a registry-wide gate and mutated to check
+it. Two mutations, and the numbers point opposite ways:
+
+| mutation | result |
+|---|---|
+| **canonical** — trait default returns `None` again | **11 tests fail** |
+| **per-site** — one `selector_key -> None` override on `ReadFile` alone | 4826 pass, **exactly 1 fails**, naming `read_file` |
+
+I had the 11 in hand and was composing it as evidence for the new gate. It is not: **10 of the
+11 already existed.** The canonical mutation establishes that the *inversion* matters and says
+nothing whatsoever about whether the gate I just wrote was needed. Only the per-site mutation
+does that — and it shows the gate is the sole signal when a single tool opts out, which is the
+case a tool added next month would actually hit.
+
+**Mechanism, and why the number is actively misleading rather than merely uninformative.** A
+mutation run answers *"is this line guarded?"* A new guard's author wants the answer to *"is
+MY guard load-bearing?"* — a different question. The kill count measures the size of the
+existing guard population at the mutated site, and that population is **largest at the
+canonical site**, because prominence is what got it covered in the first place. So the count is
+*anti*-correlated with the information wanted: the more reassuring the number, the less it
+establishes. And a big number is exactly what does not prompt a second look, which is why this
+is a distinct failure from picking the wrong case.
+
+**Not a duplicate of `R-158`, and not of CLAUDE.md § *Testing Discipline*'s per-site rule.**
+`R-158` is about **which case to mutate** (the canonical one is the worst positive control).
+The standing law is about **how many sites** to mutate (once per guarded site, not once per
+feature). This is about **how to read the result** — and it bites even when both of those are
+obeyed, because I *did* go on to mutate per-site; the near-miss was publishing the canonical
+count as the gate's justification while doing so.
+
+**Third instance in one session, same family.** `artifact.create` in `1b02f36b` (two
+pre-existing tests fired, proving nothing about Gate 6); `symbol-navigation` in `b4fa1be6`
+(the one topic an existing byte-identity test pins, which forced a published retraction); and
+this. The rate matters: three in one sitting, by an agent who had written the first two up.
+Knowing the law did not prevent the third — which is the `observer-blindness` signature and the
+argument for a mechanism rather than more care.
+
+**Remedy, and it is a sentence-level discipline because that is where the error lands:** never
+report a kill count without naming the proposition it establishes. For a new guard, the
+reportable figure is not *"the mutation killed N tests"* but *"mutating a site this guard
+uniquely covers left M other tests green and reddened only this one."* The second form is
+falsifiable by the reader; the first is not, and reads stronger.
+
+**Status:** open — applied by hand in `30b6fc41`'s message, which records both mutations and
+states explicitly that the 11-kill is *not* evidence for the gate. Unmechanised.
+
+**Rests on:** `30b6fc41` (SHA orphans on rebase; patch-id
+`db34821395d6257eb37562bb779ed9ab4eba091e`), whose message carries both mutation results and
+the reasoning. Related: `R-158` (which case), CLAUDE.md § *Testing Discipline* (how many sites).
+
+**Promote-when:** one further instance of a kill count being offered as evidence for the wrong
+proposition. At that point the candidate home is CLAUDE.md § *Testing Discipline* as a clause on
+the existing per-site law — *"and report which proposition the kill establishes"* — rather than
+a new law, since it shares that law's subject.
+
+## R-165 — A deletion's stale references point INWARD from files the diff never touched, so reviewing the change cannot find them
+
+**Valid:** invariant
+
+**Verdict:** miss, peer-caught. The sweep was reported complete after correcting four
+falsified comments; a fifth survived in the file one function from the change, and
+`codescout-b7` found it by grepping the deleted symbol's name — the instrument a diff review
+cannot substitute for.
+
+**Observed:** 2026-09-01, `30b6fc41`. The commit deleted four `selector_key` overrides and I
+swept the comments it falsified, correcting **four**: two stated kill-mutations that could no
+longer be applied, one already-stale tense claim, one fixture annotation. I reported the sweep
+as complete. `codescout-b7` then found a **fifth**, in `action_selector_key`'s own doc — the
+helper the change promoted to canonical:
+
+> *"`LibrarianAdapter::selector_key` carries the same reasoning and predates this helper; it is
+> left untouched here only to avoid colliding with concurrent work in that file, and should
+> adopt this once free."*
+
+Three false clauses: it names a symbol the commit deleted, explains a deferral that no longer
+applies, and prescribes an adoption that had already happened — in the very function the
+sentence sits on.
+
+**Mechanism.** A deletion's stale-reference radius has **two directions**, and a diff review
+only shows one. Comments that *lived in* the deleted code appear in the diff as removed or
+adjacent lines, so reviewing the change surfaces them — that is how the four were found.
+Comments that *pointed at* the deleted code are in files the commit never touched, so they are
+**structurally absent from the diff**. Reading the diff more carefully cannot find them; it is
+not a thoroughness failure, it is a coverage one. Worse, the fifth was the *closest* file to the
+change — one function away from the new default — which is why proximity did not help either.
+
+**The pairing with `R-162`, written by the same peer from the same exchange, is the useful
+form.** Both are about a deletion defeating an instrument, and the remedies are opposite:
+
+| looking for | instrument | verdict |
+|---|---|---|
+| *did a peer's deletion touch this file?* | grep for the token being deleted | **guaranteed zero** — `R-162`. Useless. Diff instead. |
+| *what still references what I deleted?* | grep the deleted symbol's NAME across the tree | **exactly right** — non-zero *because* the references survive. Diff cannot reach it. |
+
+Same technique, opposite value, and the discriminator is which side of the deletion you are
+standing on. Neither is a `search-finds-nothing` instance (`R-3`): both queries were
+well-formed, correctly scoped, right files. The defect is in the match between instrument and
+direction of the hypothesis.
+
+**Remedy, mechanical and cheap:** after deleting a named item, grep the tree for its **name**
+before claiming a sweep is complete — `grep -rn 'LibrarianAdapter::selector_key'` would have
+returned the fifth in one call. State the sweep's scope when reporting it: *"corrected every
+falsified comment in the diff"* is true and much weaker than *"corrected every falsified
+reference in the tree"*, and I published the stronger reading of the weaker act — `R-161`'s
+shape a third time tonight.
+
+**Status:** open, remedy applied by hand. Mechanisable: `audit_doc_refs` already resolves code
+refs in prose but does not resolve `Type::method` paths in Rust doc comments against the symbol
+index, which is exactly the check that would have caught this. Candidate `I-N` for
+`test-escape-hardening`, not filed by this entry.
+
+**Rests on:** `30b6fc41` (patch-id `db34821395d6257eb37562bb779ed9ab4eba091e`) and the
+follow-up correcting `action_selector_key`'s doc, which records the finding at the site.
+Related: `R-162` (the mirror instrument, same exchange), `R-161` (the weaker act wearing the
+stronger act's appearance), and the ledger's law **E — the blast radius is wider than the thing
+you edited**, of which this is the doc-comment case.
+
+**Promote-when:** a second deletion whose surviving references were missed by a diff review. At
+two, the remedy is a gate rather than a habit — see the `audit_doc_refs` extension above.
 
 ## Template for new entries
 

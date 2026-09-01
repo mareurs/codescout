@@ -642,20 +642,30 @@ fn find_largest_array(v: &Value, path: &str, depth: usize, best: &mut Option<(St
     }
 }
 
-/// The `<tool>.<action>` projection a tool opts into operator-rule routing with.
+/// The `<tool>.<action>` projection every tool's selector key is built from.
 ///
-/// Shared so the opted-in tools cannot drift apart in a way that makes one rule
-/// route while its sibling silently does not — `OP-4` names `edit_file` and
-/// `create_file` in a single rule, and a half-routable rule is harder to notice
-/// than an unroutable one, because it fires for some writes and not others.
+/// **This is `Tool::selector_key`'s default body as of 2026-09-01 (`30b6fc41`), so it is no
+/// longer an opt-in helper — it is the mechanism.** All 21 registered tools reach routing
+/// through it, and nothing overrides `selector_key`.
 ///
-/// An action-less call projects the **bare tool name**, never `None`.
-/// `Shape::matches` reads `None` as "cannot match", so returning it for a
-/// tool-only shape would make such declarations permanently unmatchable — a
-/// silent-absence failure rather than the fail-safe-toward-delivery direction
-/// this feature requires. `LibrarianAdapter::selector_key` carries the same
-/// reasoning and predates this helper; it is left untouched here only to avoid
-/// colliding with concurrent work in that file, and should adopt this once free.
+/// It was extracted as a shared helper when three tools opted in separately, so they could
+/// not drift apart in a way that makes one rule route while its sibling silently does not —
+/// `OP-4` names `edit_file` and `create_file` in a single rule, and a half-routable rule is
+/// harder to notice than an unroutable one, because it fires for some writes and not others.
+/// Promoting it to the default RETIRED that risk rather than mitigating it: with one
+/// implementation there is nothing left to diverge.
+///
+/// An action-less call projects the **bare tool name**, never `None`. `Shape::matches` reads
+/// `None` as "cannot match", so returning it for a tool-only shape would make such
+/// declarations permanently unmatchable — a silent-absence failure rather than the
+/// fail-safe-toward-delivery direction this feature requires.
+///
+/// *(This doc used to close by saying `LibrarianAdapter::selector_key` "should adopt this
+/// once free". It did, by deletion — its body was byte-identical to this one. Do not go
+/// looking for that override; `30b6fc41` removed all four. Noted because the sentence
+/// survived that commit's sweep of the comments it falsified: the four corrected ones LIVED
+/// IN the deleted code, and this one POINTED AT it. Found by codescout-b7, not by me — see
+/// `reconnaissance-patterns:R-165`.)*
 pub(crate) fn action_selector_key(name: &str, input: &Value) -> Option<String> {
     match input.get("action").and_then(Value::as_str) {
         Some(action) => Some(format!("{name}.{action}")),
