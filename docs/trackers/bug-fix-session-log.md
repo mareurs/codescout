@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 87
-entry_high_water_W: 90
+entry_high_water_F: 88
+entry_high_water_W: 91
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -137,6 +137,7 @@ entry_high_water_W: 90
 | F-85 | 2026-09-01 | med | self-friction | open | Committed the exact IC-10 attribution error I had corrected a peer for eight minutes earlier, in the next message, about that class. On a shared checkout git author is identical and `git status` shows the UNION of all sessions' work, so author / adjacency / dirty-file lists carry ZERO ownership signal by construction — not a care problem, no heuristic extracts it. Five wrong attributions across three sessions in 15 min; all five resolved by asking the session, and only by asking. That protocol is the mechanism IC-10 lacks |
 | F-86 | 2026-09-01 | high | process | open | A guard's ABORT path is an unscoped write. My commit guard's success branch was scoped to one explicit path; its failure branch was a bare `git reset`, i.e. `--mixed HEAD` over the whole shared index. It fires exactly when a peer is active, because a foreign staged path is what trips it. Provable margin: the 16 staged paths landed as 0dea2246 at 00:44:39, my commit at 00:45:17 — any run of the old guard inside that window would have unstaged a batch its owner committed seconds later. The two runs that passed did so because nothing foreign happened to be staged, which is luck and reads identically to correctness. Remedy is to delete the branch, not scope it: `git commit -F <msg> -- <path>` has no mismatch to detect |
 | F-87 | 2026-09-01 | med | self-friction | fixed-verified | A double-quoted grep pattern let the shell expand `$tmp` to empty, so the search actually run was `mv -f ""` and its clean zero read as "the commit deleted this mechanism". The line is present at `:141`. The zero landed right after `git show --stat` had proved that commit DID touch the file, so a prior belief was already in place and the false negative confirmed it rather than looking odd. Queued next action was retracting a correct root cause in my own just-filed bug file. Fourth mechanism for the `R-3`→`R-113`→`R-77`→`R-79`→`R-104` law, which covers scope, shape and encoding but assumes the tool received the pattern its author wrote |
+| F-88 | 2026-09-01 | med | self-friction | fixed-verified | Bulk-inserted `## Fix provenance` into 7 bug files after verifying placement on the FIRST one only. One target already had that section (unbolded `- SHA:`, which the parser skips), so the insert produced two byte-identical headings — `IC-6`, and removable only via the `occurrence` disambiguator shipped by another file in the same batch. The post-hoc check asked *did it land between `## Fix` and `## Tests added`*, an assertion **monotone under "a section already existed here"**: it can confirm an insert worked, never that it was inappropriate. The precondition was *absent in all 7*, and one `grep -c '^## Fix provenance'` answers it. Also read `doctor`'s "no pointer is **declared**" as a claim about the file when it is a claim about the parse |
 
 ## Wins Index
 
@@ -236,6 +237,7 @@ entry_high_water_W: 90
 
 | W-89 | 2026-09-01 | high | **Compare `updated_at` across every response a cross-section claim rests on, before publishing it** — and escalate to `artifact_event(action="list")`'s `field_patch` `prev_bytes`/`new_bytes` to learn exactly which state each read saw. A versioned store read through more than one call is not a snapshot | Five discrepancies sitting in context (IC-3 20-vs-18; IC-13/14/15/16 0-vs-16/7/15/2) were **all** artifacts of the torn read [[F-83]] — both commits either side are internally consistent, so the ledger contradicted itself in none of sixteen rows. Publishing would have called a peer's correct in-flight backfill a five-row self-contradiction, inside a report whose declared subject was count-vs-prose staleness, which is what would have made it credible rather than suspect. Detection cost: one `artifact(get)`. The same check then fired AGAIN four minutes later on the same artifact — IC-3's target moved to `OB-7` and `cluster/doc-contradicted-by-code` went 1 → 4, carrying IC-11 over n≥3 — so it is the correct default for the whole window `ListAgents` reports a busy peer, not a one-off | validated |
 | W-90 | 2026-09-01 | med | **Re-verify `path:line` citations in artifacts THIS session authored, after any rebuild or peer commit.** Authorship is no exemption (`R-49`) — a bug file's citations are written at fix time, while peers are still moving the substrate under them | Filed bug cited `post-index-change-stage-log.sh:142` for the mv/rm fallback; the line is `:141` and `:142` is blank. No gate would have caught it: `audit_doc_refs` DOES scan `**/*.sh`, but `scan_code_comments` forces those findings to `Med` and CI runs `--fail-on high`, so it passes by design — the citation survives until a human follows it onto whitespace. The same pass also separated real drift from a false accusation: a `docs(issues):`-titled commit genuinely had changed the script, which looked like a capture, but the diff was a comment-only re-point of an archived path, coherent with its message. Without reading it, the plausible move was filing a third capture bug against a correct commit | validated |
+| W-91 | 2026-09-01 | high | **Re-read the substrate before a claim enters a DURABLE, queryable record** — the filesystem for a claim about the filesystem, the implementation for a claim that a capability is missing. Recorded as a **recurrence** of the reconnaissance skill's already-promoted current-state law, not as a new pattern, per that skill's § *Every promotion audits the promoted set* | Two catches. (1) A bug file's `## Residual — still open` said `.worktrees/bench` retains an orphaned gitdir; `ls .worktrees/` shows only `audit-trail-t1`. I was one call from writing a queryable `unverified:` field asserting an open residual that does not exist — into the single file tagged `cluster/record-asserts-an-unchecked-completion`. (2) I had begun drafting a bug asserting `unverified:` is unreachable by any query, on two true pieces of evidence (`find` → `unknown field`, and the librarian guide's "`extra` is NOT catalog-indexed"); `scan_terminal_status_with_caveat` is the deliberate reader and reports **65** records. Both false claims were backed by real evidence about something narrower than the sentence it was licensing. `outgrown` signal (n=1) on the promoted text: it names *fixes* and *prohibitions*, not **filed defect records** — the costliest surface, since a fix assuming a missing capability fails loudly at the call site while a filed bug is durable and nothing re-checks it | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -8708,6 +8710,126 @@ One confirmed datapoint; promote-when threshold (2) not reached.
 
 **Rests on:** `audit_doc_refs`' `scan_code_comments` forcing `Med` on source-comment findings,
 and CI running `--fail-on high` — the two together are why this class has no automated gate.
+
+## F-88 — Bulk-inserted a section into 7 files after verifying the shape on 1 — one target already had it, and the check I ran could not have told me
+
+**Observed:** 2026-09-01, anchoring the 11 live terminal bug files `doctor` reported under
+`terminal_status_without_fix_anchor`.
+
+**When:** Adding a `## Fix provenance` section to 7 of them via
+`artifact(update, body_edits=[{action: "insert_after", heading: "## Fix"}])`. I applied the
+first file alone, verified it, then batched the remaining six.
+
+**Expected:** None of the 7 had a `## Fix provenance` section. That is what `doctor` said —
+*"no `## Fix provenance` pointer is declared"* — and I read it as a statement about the files.
+
+**Got:** `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
+already had one. My insert produced a **second** `## Fix provenance` heading in the same
+file: two byte-identical headings, which is `IC-6` — the cluster this repo maintains for
+exactly that — and removing mine required the `occurrence` disambiguator shipped by
+`identical-headings`, another file in the same batch of seven.
+
+The pre-existing section declared the same SHA and patch-id, written `- SHA:` / `- patch-id:`
+rather than the bolded `- **SHA:**` that `structured_fix_pointers` matches. So `doctor`'s
+sentence was true of the **parse** and false of the **file**, and I supplied the stronger
+reading it never claimed.
+
+**Probable cause:** The check I ran after the first insert asked *did the section land
+between `## Fix` and `## Tests added`* — an assertion **monotone under "a section already
+existed here"**. It can confirm an insert worked; it can never report that the insert was
+inappropriate. Having satisfied it once, I generalised from n=1 to seven targets. This is
+CLAUDE.md § *Testing Discipline*'s first law firing on a scout rather than on a test: I
+mutated in the direction the assertion could see.
+
+**Workaround:** `grep -c '^## Fix provenance' <all 7 targets>` before inserting into any.
+One command, and it answers the precondition that actually mattered — *absent in all N* —
+which no post-hoc placement check can establish.
+
+**Severity:** med — one duplicate heading, self-inflicted, caught by re-running `doctor`;
+cost was a remove-with-`occurrence` plus a diagnostic detour. It would have been **high**
+had I taken the batch as done without re-running the check: a duplicate `## Fix provenance`
+is permanently unaddressable by heading, and the file would have carried two provenance
+blocks with no way to edit either by name.
+
+**Status:** fixed-verified — duplicate removed, `doctor` re-run reports 0, and a from-disk
+re-derivation sharing none of `doctor`'s code agrees.
+
+**Valid:** dated 2026-09-01
+
+True of `structured_fix_pointers`' accepted grammar at `370775ca`; re-verify if the parser
+widens to accept unbolded pairs.
+
+**Rests on:** `structured_fix_pointers` matching only the bolded `- **SHA:**` form and
+skipping fenced lines (`src/librarian/tools/doctor.rs:4535-4579`), and on `doctor`'s finding
+text saying *declared* where it means *parsed*.
+
+**Fix idea / Pointer:** Before a bulk edit that **inserts** a section, scout the whole target
+set for that section's presence. The parser half — an unbalanced fence silently disabling
+every line-anchored field below it, which is why the anchor did not take even once written
+correctly — is filed as
+`docs/issues/2026-09-01-an-unbalanced-fence-silently-disables-every-line-anchored-field.md`.
+
+## W-91 — Re-reading the substrate before writing a durable claim killed two false records — one about the filesystem, one about a capability that already existed
+
+**Observed:** 2026-09-01, twice in one session working the `docs/issues/` tracker.
+
+**Pattern:** Before a claim goes into a **durable, queryable** record — a frontmatter field,
+a new bug file's Summary — re-read the thing the claim is about, this session. The
+filesystem for a claim about the filesystem; the implementation for a claim about a missing
+capability.
+
+**Counterfactual:** Two catches, neither of which would have surfaced later.
+
+1. **A doc's claim about the filesystem.**
+   `2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md` carried a
+   `## Residual — still open` section stating `.worktrees/bench` retains an orphaned gitdir
+   pointing at a repository that does not exist. I was about to add an `unverified:` field
+   describing that residual as open. `ls .worktrees/` returns only `audit-trail-t1` — `bench`
+   is gone entirely. Without the check I would have written a **queryable** field asserting
+   an open residual that does not exist, into the one file in the corpus tagged
+   `cluster/record-asserts-an-unchecked-completion`.
+
+2. **An absence claim about the implementation.** I had begun drafting a bug asserting
+   `unverified:` is unreachable by any query, on two pieces of evidence that both held:
+   `find` returns `unknown field 'unverified'`, and `get_guide("librarian")` states `extra`
+   is *"NOT catalog-indexed / not filterable via find"*. Reading
+   `scan_terminal_status_with_caveat` (`src/librarian/tools/doctor.rs`) showed the reader
+   exists and is deliberate — its own doc-comment calls it *"the reader half of a feature
+   that shipped without one"* — and a live run reports **65** records. The bug would have
+   asserted a false gap in a ledger this project treats as load-bearing.
+
+**Confirming data points:** the two above. Note what they share: in both, the false claim was
+supported by real evidence that was simply about something narrower than the sentence it was
+about to license — `find`'s field list is not the set of queries, and a `## Residual` heading
+is not the filesystem.
+
+**Impact:** high — (2) would have put a false claim into the permanent bug ledger; (1) into a
+frontmatter field a query reads.
+
+**This is a recurrence of an already-promoted law, not a new pattern — recorded as such
+deliberately.** The reconnaissance skill's Phase 1 already carries *"a proposed fix — and
+equally a prohibition — is a claim about CURRENT STATE; verify it before designing around
+it"*, with *"treat 'X is already set' as a finding, not a dead end."* Datapoint 2 is exactly
+its absence form. Per that skill's § *Every promotion audits the promoted set*, filing this
+as a fresh pattern would be the defect that section names. The one thing the promoted wording
+does **not** name is the surface I was on: it enumerates *fixes* and *prohibitions*, and a
+**bug filing** is a third — arguably the costliest, since a fix that assumes a missing
+capability fails loudly at the call site, while a filed bug asserting a missing capability is
+durable, cited, and nothing re-checks it. That is an `outgrown` signal (category 2) on the
+promoted text, of one datapoint.
+
+**Promote-when:** a second bug-filing-shaped instance of the absence form. At 2 datapoints,
+propose widening the skill's Phase 1 bullet from *"a proposed fix or prohibition"* to name
+filed defect records explicitly.
+
+**Status:** validated — both catches confirmed against the substrate the same session; the
+`outgrown` proposal awaits its second datapoint.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the skill's existing current-state law, of which this is an instance rather
+than independent evidence — and on `scan_terminal_status_with_caveat` remaining the reader
+for `unverified:`.
 
 ## Template for new entries
 
