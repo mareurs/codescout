@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 9
+entry_high_water_OB: 10
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-10 | 2026-09-01 | a mutual-exclusion resource is invisible to the session HOLDING it — the holder's own workflow succeeds and clears the condition as a side effect of finishing | the holder, a population of one against everyone else | wrong instrument | **none yet** — owner field on the resource is the candidate; enumeration is 1 verified / 4 unverified |
 | OB-9 | 2026-09-01 | plausibility is a filter with a resolution limit — a near-miss number fits inside it; 4 instances, 4 caught by re-derivation, 0 by reading | the reader | wrong instrument | **partial** — remedy shipped under `OB-1`; this row adds its scope condition |
 | OB-8 | 2026-09-01 | a shared resource carries no owner, so seeing the peer does not help — four captures in 34 min with enumeration complete | the writing session | wrong instrument | **partial** — outbound gate shipped; inbound not closeable per-session |
 | OB-7 | 2026-09-01 | a declaration is well-formed, and nothing in production reaches it — including for the compiler, which cannot lint `pub` in a lib crate | the author of the declaration | wrong instrument | **partial** — decidable for 1 of 3 families |
@@ -1173,6 +1174,39 @@ this row contributes is its **scope condition**.
 (`cluster-promotion-session-log.md:241-250`; `93bd6f88`; `fe085987`; `issue-clusters.md:391`
 and `:429`, the last confirming n moved 20→18 with *no bug added, removed, fixed or
 re-examined* — only the boundary).
+
+## OB-10 — a mutual-exclusion resource is invisible to the session holding it
+
+**Valid:** invariant
+
+**Rests on:** `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md`, and the membership test below rather than the enumeration, which is incomplete by construction.
+
+**Class:** a *mutual-exclusion* resource — one whose merely-modified state changes behaviour for every other session — where the holder's own workflow keeps succeeding, and typically **clears the condition as a side effect of finishing**.
+
+**Blind party:** the holder. Not carelessness, and not the same shape as `OB-2`: the holder is still present, still working, and every operation they run returns normally. The signal that would reach them is *their own* failure, and the mechanism guarantees they do not get one — in the instance above, the act that clears the block (`git add` the config) is the act by which the editor finishes their edit, so the outage ends in the same motion that would have revealed it.
+
+**Who can see it:** every other session, immediately and on every attempt. They differ by *not holding the resource* — this is the rare case where the blind party is a population of one and the sighted party is everyone else, which inverts the usual reviewer advice: the remedy is not a second pair of eyes on the holder's work, it is a channel from the victims back to the holder.
+
+**Plausible-answer property:** the holder gets *success*. That is the whole defect — no error, no warning, no slow path, just an ordinary working session. Note this differs from `OB-2`, where the victim gets a plausible WRONG diagnosis; here the victim's diagnosis is accurate and complete about the *what* (`Your pre-commit configuration is unstaged`) and silent about the *who*, so it is actionable only by guessing.
+
+**Vigilance:** wrong instrument, and demonstrably so. The holder in the recorded instance was, at that moment, writing a commit message about shared-checkout hazards and had spent the evening filing observer-blindness findings. Knowing the class prevented nothing, because the class does not present to the holder at all.
+
+**Mechanism status: none yet.** Two candidate shapes, in the order this ledger prefers them:
+
+1. **An owner field on the resource** — the refusal names the file; it should name the holder. The machinery exists: `scripts/pre-commit-foreign-index.sh` already resolves a staged path to a `Session-Id` and prints `SendMessage(to: "uds:/run/user/<uid>/cc-socks/<pid>.sock")`. This converts an unbounded wait into a message and is `IC-17`'s remedy exactly.
+2. **Make compliance end in a safe state** — the `OB-2` shape, here spelled *edit-and-land, never edit-and-hold*. Weaker, because it is a practice rather than a mechanism, and it is addressed to the party defined as receiving no signal.
+
+**Membership test — and use it, do not trust the list below.** A file is in this class when a **modified-but-unstaged** (or merely modified, for untracked shared state) copy changes behaviour for a session *other than the editor*, and the resulting failure does **not** name the editor. That is narrower than "shared checkout": every `.rs` edit affects peers too, but a broken build names the file and points at the change. The distinguishing pair is **global effect** and **no attribution**.
+
+- **Verified — 1.** `.pre-commit-config.yaml`. `pre_commit/commands/run.py:353` refuses before any hook runs, on `git diff --quiet` against that one path. Blocks every session's commits. See the bug file.
+- **Identified by mechanism, unverified — 4.** `rust-toolchain.toml` (rustup reads the working tree, so a dirty edit switches every session's compiler), `.cargo/config.toml` (rustflags/target-dir changes invalidate the shared `target/`, and `cargo rb`'s definition lives here), `Cargo.toml` / `Cargo.lock` (dependency and feature resolution for every concurrent build), `.gitignore` (changes what `git status` and `git add -A` see for everyone). Each is *reasoned*, none is *measured*, and they are listed that way on purpose.
+- **A different class, noted so it is not swept in — 3.** `.codescout/workspace.toml`, `.claude/settings.json`, `.claude/settings.local.json` are **untracked**, so there is no staged/unstaged distinction and no git-mediated remedy at all: the file simply is the shared state. `CLAUDE.md` already documents the `workspace.toml` case, where a mis-rooted `[[project]]` silently redirects every per-project memory write and no review can catch it.
+
+**A second instance in the same tool, filed separately:** `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`. It is `IC-12` rather than this class — there the *reader* is deceived and the writer is fine, the exact inversion — but it shares the substrate and, usefully, the remedy direction: its exposure is the hook runtime, which `9e493b20` cut from ~2000 ms to ~40 ms while fixing something else.
+
+**Instances:** `docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` (`IC-17`); adjacent, `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` (`IC-12`); `9e493b20`.
+
+**Status:** open — one verified instance, one session, four unverified candidates. **The honest gap is the enumeration**: it was assembled by reasoning about which files shared tooling reads, then filtered by the membership test, and only the first was measured. A later pass should either verify the four or drop them, because a candidate list that looks like a finding is this ledger's own subject.
 
 ## Template for new entries
 
