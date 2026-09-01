@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Codescout Refactoring Plan — Phase 1b
 
 > Continuation of `2026-04-22-codescout-refactoring-plan.md`.

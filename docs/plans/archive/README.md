@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Archived plans
 
 Plans in this directory have **shipped** or are otherwise settled. They are preserved for historical context — what we were trying to build, why, and what tradeoffs we considered — not as living specifications. For current behavior, read the code; for change history, read `git log`.

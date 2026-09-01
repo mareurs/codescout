@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Code Review Findings + Security Profiles + Platform Abstraction
 
 **Date:** 2026-03-20

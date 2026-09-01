@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Usage Traceability & Debug Mode
 
 **Date:** 2026-04-02

@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # Document Section Editing — Design Spec
 
 **Date:** 2026-03-23

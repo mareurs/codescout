@@ -1,3 +1,6 @@
+---
+status: archived
+---
 # MCP Surface on a Token Budget
 
 **Status:** Design — awaiting implementation plan
