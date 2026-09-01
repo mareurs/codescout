@@ -153,6 +153,59 @@ F-80 by name as the reason not to do it. That is `OB-1`'s signature — *the aut
 specifically* — and it is the standing argument for answering this class with a mechanism
 rather than with care.
 
+
+### Fourth instance, 2026-09-01 — and it is a DIFFERENT sub-shape: the object was checked, and could not answer
+
+Added by `codescout-17` at `codescout-68`'s request. It matters because the three above share a
+property this one does not, and the section's own conclusion turns on it.
+
+**What happened.** Running the gate in the main checkout, `cargo clippy --workspace
+--all-targets` reddened on two `doc_lazy_continuation` errors in
+`src/librarian/tools/doctor.rs:7811-7812`. I established the finding correctly and then
+misrouted it to `codescout-09`, who did not own it. `codescout-68` did.
+
+**The distinguishing detail — the checks the three above skipped, I ran.** The section above
+concludes *"no step of either explanation was checked against the object in front of us, and
+checking took one `git log`."* That remedy does not reach this instance:
+
+```
+git show HEAD:src/librarian/tools/doctor.rs > /tmp/head.rs
+grep -c 'Together they admit only' /tmp/head.rs   -> 0     # absent from HEAD
+git diff --stat src/librarian/tools/doctor.rs     -> 51 insertions(+)   # working tree only
+```
+
+Both checks were run, both were **correct**, and the correcting peer confirmed *"your read of
+the working tree was right in every particular; only the owner was wrong."* They then ran the
+two checks that actually discriminate — `git diff` vs `git diff --cached` — and located the
+string in the unstaged half. So the object was interrogated and answered every question **except
+the one that was asked**: `git diff --stat` names insertions and **names no author**.
+
+**Adjacency was not weak evidence here; it was anti-evidence.** The file had **three** sessions
+touching it inside one hour. A signal that points at three parties at once cannot support one
+conclusion, and it still read as a lead — which is the part worth recording. The three instances
+above reason from *salience* and from a *correctly-recalled limitation*; this one reasons from a
+**correctly-measured diff that structurally omits the field**. Same class, and the remedy above
+is a no-op against it.
+
+**Consequence for the section's argument, sharpened rather than repeated.** *"Knowing the class
+prevented none of the three"* holds for a fourth — I had read `IC-10` earlier in the same
+session and cited it while making the error. But this instance adds the stronger form: **checking
+the object did not prevent it either.** For the three above, "check before asserting" was an
+available remedy that went unused; for this one it was used and was insufficient. That is the
+difference between a discipline gap and an information gap, and only the second requires a
+provenance channel to exist.
+
+**Datapoint on the mechanism.** `scripts/file-provenance.py` (shipped `0e657dc5`, same evening)
+is the channel this instance needed, and it existed — unknown to me — while I was inferring.
+`codescout-68` reports two correct positives from it within the hour, one of them identifying a
+peer's uncommitted `src/util/librarian_guard.rs` in their own `git diff`. **Not verified here**:
+I did not run it against `doctor.rs` after the fact, so this is their measurement and not mine.
+Two stated limits worth carrying: the default window is *since this path was last committed*,
+and `UNKNOWN` means no record matched — never "not yours".
+
+**Cost:** one misrouted message, one correcting message, one re-routed message. The lint was
+already fixed by its owner before the reroute arrived (`d44a4409`), so the routing error cost
+more than the routing did.
 ### The cost, itemised
 
 - ~10 minutes establishing the failures were not mine, mid-task, with my own gate result unknown
