@@ -194,6 +194,55 @@ pub(crate) fn reject_reserved_extra_keys(
         hint,
     ))
 }
+/// Refuse a `body` that itself begins with a frontmatter block.
+///
+/// [`call`] composes the file as `frontmatter::write(&fm, "\n{body}\n")`, so a body
+/// whose first line is `---` produces a **second** block below the catalog's. Unlike
+/// the duplicate-key case in [`reject_reserved_extra_keys`], the result parses fine —
+/// [`crate::librarian::frontmatter::parse`] reads the first block and hands the second
+/// back as body text — which is precisely why nothing failed. Three harms, all silent,
+/// measured on a real reproduction 2026-09-01:
+///
+/// 1. Keys the catalog block does not model (`opened`, `closed`, `severity`, `owner`,
+///    `related` — the exact set `_TEMPLATE.md` carries) live **only** in the inert
+///    block, so no query can read them.
+/// 2. A key present in both blocks with **different** values resolves silently to the
+///    catalog's. A probe passing `status: scratch` in the body block was reported as
+///    `status: open` by `artifact(action="get")`, the caller's value simply gone.
+/// 3. The inert block is served as the artifact's `preview.summary`, so the first thing
+///    an agent reads about the artifact is a mangled YAML fragment.
+///
+/// **Not a rare caller mistake.** The trigger is the project's own documented workflow:
+/// `docs/issues/_TEMPLATE.md` opens with `---`, and `get_guide("tracker-conventions")`
+/// says to copy it. Measured across the committed corpus the same day: **9 files already
+/// carry a doubled block**, 8 archived bug files and one spec.
+///
+/// **Refused, not repaired — the same reasoning as [`reject_reserved_extra_keys`]**, and
+/// here the two channels disagree often enough to make that concrete: merging would have
+/// to pick a winner for `status`, and picking is a question about what the caller meant.
+///
+/// **The predicate is [`crate::librarian::frontmatter::parse`]'s own**
+/// (`starts_with("---\n")`), deliberately, rather than a new one: a guard recognising a
+/// different set of bodies than the reader does would add a third grammar to a namespace
+/// that already has two — the `IC-6` shape this repo has 27 instances of. **The escape,
+/// since refusing a token owes one:** a body that genuinely opens with a `---` horizontal
+/// rule keeps it by leading with a blank line, and the hint says so.
+fn reject_body_leading_frontmatter(body: &str) -> Result<()> {
+    if !(body.starts_with("---\n") || body.starts_with("---\r\n")) {
+        return Ok(());
+    }
+    Err(RecoverableError::with_hint(
+        "body begins with its own `---` frontmatter block, which would be written BELOW \
+         the catalog's and silently ignored"
+            .to_string(),
+        "artifact(action=\"create\") writes the frontmatter itself from the typed \
+         parameters. Drop the block from `body` and route its keys: kind / status / \
+         title / owners / tags / topic / time_scope as their own parameters, everything \
+         else (opened, closed, severity, owner, related, …) via `extra={...}`. If you \
+         meant a literal `---` horizontal rule, start `body` with a blank line."
+            .to_string(),
+    ))
+}
 
 /// Resolve the `status` for a new artifact, defaulting **per kind**.
 ///
@@ -292,6 +341,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     let id = crate::librarian::ids::artifact_id_from_abs(&full);
     reject_reserved_extra_keys(&a.extra, ExtraKeySurface::Create)?;
+    reject_body_leading_frontmatter(&a.body)?;
     let status = resolve_status(&a.kind, a.status.as_deref())?;
     let fm = Frontmatter {
         id: Some(id.clone()),
@@ -903,6 +953,100 @@ mod tests {
             !tmp.path().join("issues/x.md").exists(),
             "the artifact must not be created"
         );
+    }
+    /// The documented workflow IS the reproduction: `docs/issues/_TEMPLATE.md` opens
+    /// with `---` and `get_guide("tracker-conventions")` says to copy it, so the body
+    /// below is what a caller following instructions actually passes.
+    ///
+    /// The fixture's load-bearing detail is `"status": "scratch"` INSIDE the body block
+    /// while the call passes no `status=` parameter. That is what makes this the
+    /// silent-conflict case rather than merely a cosmetic one: pre-fix, the catalog
+    /// defaulted `status` to `open` for `kind: bug` and `artifact(action="get")`
+    /// reported `open`, with the caller's `scratch` present on disk and readable by
+    /// nothing. Change it to agree with the default and the test still passes while
+    /// no longer demonstrating the harm.
+    ///
+    /// Mutation caught: deleting the `reject_body_leading_frontmatter` call in `call()`,
+    /// or narrowing its predicate to require a closing `---`.
+    #[tokio::test]
+    async fn create_refuses_a_body_that_opens_its_own_frontmatter_block() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({
+                "repo": "r",
+                "rel_path": "issues/x.md",
+                "kind": "bug",
+                "title": "X",
+                "body": "---\nstatus: scratch\nseverity: low\n---\n\n# BUG: something\n"
+            }),
+        )
+        .await
+        .expect_err("a body opening its own frontmatter block must be refused");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("frontmatter block"),
+            "the error must name what it found: {msg}"
+        );
+        assert!(
+            msg.contains("extra="),
+            "the hint must route the non-schema keys to the channel that accepts them: {msg}"
+        );
+        assert!(
+            msg.contains("blank line"),
+            "refusing a token owes an escape, and the hint is where a caller meets it: {msg}"
+        );
+
+        // Refused means refused — and this guard runs BEFORE the disk write, so there is
+        // no orphan for a later reindex to classify from a glob.
+        assert!(
+            !tmp.path().join("issues/x.md").exists(),
+            "the artifact must not be created"
+        );
+    }
+
+    /// The twin, and the one that carries the weight. The refusal test above is an
+    /// EXISTENCE assertion ("an error came back"), which is monotone under widening —
+    /// a guard that refused every body whatsoever would satisfy it completely. This
+    /// mutates in the direction that one cannot: bodies containing `---` that are not
+    /// a leading block must still be created.
+    ///
+    /// Three shapes, because they fail for three different reasons: a leading blank
+    /// line (the escape the refusal's own hint promises, so this is that promise under
+    /// test), a horizontal rule further down, and a fenced YAML example — the last
+    /// being how any document *about* frontmatter is written, including this repo's
+    /// own guides.
+    ///
+    /// Mutation caught: widening the predicate to `body.contains("---")` or to a
+    /// `trim_start()`-ed prefix check kills this and leaves the refusal test green.
+    #[tokio::test]
+    async fn create_accepts_a_body_whose_dashes_are_not_a_leading_block() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        for (n, body) in [
+            "\n---\nstatus: scratch\n---\n\ntext\n",
+            "# Title\n\nsome prose\n\n---\n\nmore prose\n",
+            "# Guide\n\n```yaml\n---\nkind: bug\n---\n```\n",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let rel = format!("issues/ok-{n}.md");
+            call(
+                &ctx,
+                json!({
+                    "repo": "r", "rel_path": rel,
+                    "kind": "bug", "title": "X", "body": body
+                }),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("body {n} must be accepted, got: {e}"));
+            assert!(tmp.path().join(&rel).exists(), "body {n} must be written");
+        }
     }
 
     /// The hint is the whole point of this check — a caller who cannot act on it pays a
