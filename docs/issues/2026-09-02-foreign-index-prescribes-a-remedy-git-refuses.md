@@ -1,12 +1,14 @@
 ---
 id: b0f96b8e45f9d189
 kind: bug
-status: open
+status: fixed
 title: foreign-index refuses a commit and prescribes a remedy git refuses too
 tags:
 - cluster/gate-keyed-on-unobservable-event
 topic: shared-checkout commit coordination
-closed: null
+closed: 2026-09-02
+fix_patch_id: 0e7feedf232c5ed9e22fd975c6fe36baa109e1d2
+fix_sha: 74b9cc67 (experiments)
 opened: 2026-09-02
 owner: marius
 related: []
@@ -125,27 +127,65 @@ will reject.
 
 ## Fix
 
-**Designed, not applied — a pre-commit edit on a live shared checkout is the thing
-`docs/issues/2026-09-01-an-unstaged-pre-commit-config-blocks-every-session.md` records,
-and this one is held for the operator's call.**
+**FIXED on `experiments` at `74b9cc67`, patch-id
+`0e7feedf232c5ed9e22fd975c6fe36baa109e1d2`** (2026-09-02). The SHA dies on the next rebase;
+the patch-id is a content hash of the diff and survives rebase and cherry-pick both.
 
-Stand down on one condition: `CHERRY_PICK_HEAD` or `MERGE_HEAD` exists in `$GIT_DIR`.
-That is exactly the set where the prescribed remedy is unsatisfiable. It needs no
-worktree special-case, it is narrower than the `rebase-merge` test, and it leaves both
-the main checkout and shared worktrees fully guarded.
+Stands down on one condition: `CHERRY_PICK_HEAD` or `MERGE_HEAD` exists. That is exactly
+the set where the prescribed remedy is unsatisfiable. It needs no worktree special-case, it
+is narrower than the `rebase-merge` test, and it leaves both the main checkout and shared
+worktrees fully guarded.
+
+Probed via `git rev-parse --git-path` rather than `"$git_dir/..."`. Sequencer state is
+per-worktree today — verified 2026-09-02, `CHERRY_PICK_HEAD` lands in
+`.git/worktrees/<name>/`, and a probe reading the common dir finds nothing — and `--git-path`
+keeps being right if that ever changes.
 
 The alternative shape — keep refusing, but *change the hint* to name a route that exists
 in that state — is worse here, because in a sequencer stop the only available form is the
 bare commit the guard is refusing. There is no third route to name.
 
-**A regression test is owed and is not free.** The guard's failing branch needs a repo in
-a `CHERRY_PICK_HEAD` state, which `tests/hooks-discrimination.sh` does not currently
-build. Without one, the fix is a line nothing exercises — `IC-16`.
+**The fix was developed against a COPY of the hook and only applied once green**, because
+`core.hooksPath` points at `scripts/`, so saving the real file makes it live for every
+session on the checkout at that instant — there is no staging step to hide behind.
 
+
+## Tests added
+
+`tests/hooks-discrimination.sh` § 7, four cases. Suite went 46 passed / 3 failed → **49 / 0**.
+
+**Every case asserts the staged path is FOREIGN before invoking the guard.** Without that
+the hook exits 0 for entirely the wrong reason — an unmatched `session-stage-log` key reads
+as "all mine" and passes silently, which is the false green a probe upstream already paid
+for. The fixtures derive ownership through the suite's own `post-index-change` shim rather
+than hand-seeding the log, so they cannot drift from the parser under test.
+
+| case | asserts |
+|---|---|
+| conflicted cherry-pick | stands down |
+| **no sequencer** (control) | **still refuses** |
+| conflicted merge | stands down |
+| cherry-pick inside a linked worktree | stands down — the reported incident |
+
+**Mutations**, run against a copy before the shared script was touched, each mutant
+`diff`-verified to differ from baseline:
+
+| mutation | killed by |
+|---|---|
+| remove the `CHERRY_PICK_HEAD` arm | the cherry-pick and worktree cases |
+| remove the `MERGE_HEAD` arm | the merge case **only** — without it this mutation survives |
+| stand down unconditionally | the control **only** |
+
+The last row is why the control is not filler: an unconditional stand-down is the cheapest
+wrong fix here, it passes every other case, and nothing else in the suite notices it.
+
+One defect was caught in the test *while writing it*: the worktree case was first wrapped in
+a `( ... )` subshell, which would have discarded its `PASS`/`FAIL` increments — the
+assertions would still print while the suite's exit code stopped depending on them. Same
+subshell trap this file's `new_repo` header already records.
 ## Provenance
 
 Reported by `codescout-8a` via peer message, 2026-09-01. Reproductions, the
 precondition narrowing, and the rejection of hypotheses 2 and 3 were measured in this
 session (`0771abbc`) and accepted by the reporter. The reporter separately withdrew an
 adjacency-based authorship claim they had made about these scripts — see `IC-10`.
-

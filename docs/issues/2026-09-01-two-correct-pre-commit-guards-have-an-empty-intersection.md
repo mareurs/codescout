@@ -182,12 +182,28 @@ stages through plumbing that writes no `session-stage-log` entry, so a session's
 as foreign. That is `IC-2` (a gate keyed on an event it cannot observe substitutes a proxy) rather
 than `IC-17`, and it means isolating the resource does not help while the proxy stays wrong.
 
-Two one-line guards they propose, neither weakening the shared-checkout case — **not yet verified
-by me, recorded as their claim:**
+**Both of the guards they proposed were then MEASURED AND REJECTED, and what shipped is
+neither.** Superseded by `docs/issues/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md`
+(`b0f96b8e45f9d189`), fixed at `74b9cc67`, patch-id
+`0e7feedf232c5ed9e22fd975c6fe36baa109e1d2`. Read that file rather than the two bullets this
+paragraph used to carry:
 
-- exit 0 when `git rev-parse --git-dir` differs from `--git-common-dir` (linked worktree ⇒ private
-  index);
-- exit 0 while a rebase or cherry-pick is in progress (`$GIT_DIR/rebase-merge`, `CHERRY_PICK_HEAD`).
+- *exit 0 in any linked worktree* (`--git-dir` ≠ `--git-common-dir`) proves **linked
+  worktree**, not **unshared index**. Two sessions in the *same* worktree share its index
+  exactly as two share the main checkout's, and the guard already handles that correctly —
+  `session-stage-log` lives at `$git_dir/…`, which is per-worktree. It would have disarmed
+  the guard where it currently works, on a machine running 16 sessions with worktrees as
+  the isolation mechanism. **Rejected.**
+- *exit 0 while a rebase or cherry-pick is in progress* is **wider than the defect**.
+  Measured 2026-09-02 in a throwaway repo: a rebase stopped with `rebase-merge/` present and
+  `CHERRY_PICK_HEAD` absent commits by pathspec fine, so the prescribed remedy still works
+  there and the guard must not stand down. **Rejected.**
+
+What shipped is the narrower condition — stand down **only** when `CHERRY_PICK_HEAD` or
+`MERGE_HEAD` exists, which is exactly the set where git refuses `git commit -- <path>`. Both
+the main checkout and shared worktrees stay fully guarded, and the `no sequencer -> still
+refuses` control in `tests/hooks-discrimination.sh` § 7 is the single case that fails if this
+is ever widened to an unconditional exit.
 
 **They used `--no-verify` for that one commit and disclosed it**, having identified the content
 *positively* first rather than by elimination: `git patch-id --stable` of the staged diff was
@@ -197,9 +213,11 @@ the guard's own text warns about — the disclosure and the positive identificat
 different.
 
 **What this changes here:** § *Fix* direction 3 (*"per-session worktrees, which dissolve this"*) is
-wrong as written and must not be costed as an escape. Directions 1 and 2 stand. A fourth is now
-available and is cheaper than either: **fix the discriminator** — ask whether the index is shared,
-which git can answer directly, instead of whether the staging was claimed, which it cannot.
+wrong as written and must not be costed as an escape. Directions 1 and 2 stand, and both remain
+open — **this bug is NOT closed by that fix.** The entangled-ledger deadlock this file documents is
+untouched: `74b9cc67` only covers the sequencer-stop route, where git itself refuses the remedy. A
+fourth direction is now **shipped** for that route — fix the discriminator, asking a question git
+can answer instead of one it cannot.
 ## Tests added
 
 None. This is a report, not a fix. The simulation harness that produced the six-row table
@@ -221,6 +239,10 @@ owner-field direction is the only one left and this becomes a design task, not a
 
 ## References
 
+- `docs/issues/2026-09-02-foreign-index-prescribes-a-remedy-git-refuses.md`
+  (`b0f96b8e45f9d189`) — the sequencer-stop route out of this deadlock, and the only one
+  fixed so far (`74b9cc67`). It carries the reproductions that rejected both of the
+  originally-proposed guards.
 - `docs/plans/archive/2026-09-01-shared-checkout-commit-sequence-guide.md` — the friction this bug
   is the guard-side half of; § *Where a two-author commit is genuinely unrepresentable*
   carries the simulation.
