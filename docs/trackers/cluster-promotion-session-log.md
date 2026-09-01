@@ -393,7 +393,7 @@ you are deriving**. Three invalidations, none of them anyone's mistake:
    in `eee6eedf`.
 2. During the blind audit — the three classifier subagents ran ~6–9 minutes — a peer filed
    `docs/issues/archive/2026-09-01-git-apply-cached-stages-but-records-no-owner.md` (IC-3) and
-   `docs/issues/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md` (IC-6), taking
+   `docs/issues/archive/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md` (IC-6), taking
    them to 22 and 30. Caught only because the retag pass re-derived all 17 cells before
    committing `d928932e`.
 3. About two hours later, the peer's audit-trail work landed three more archived bug files —

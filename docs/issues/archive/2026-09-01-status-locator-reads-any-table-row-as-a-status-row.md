@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/addressing-without-an-escape-hatch
 closed: null
@@ -169,6 +169,54 @@ Options, unranked. Count the population first — see Evidence.
 to silence the finding. That would edit a tracker to fit an instrument, and the tracker's
 convention is fine.
 
+
+## Fix provenance
+
+Fixed on `experiments` by option 1 — require the table to have a status column.
+
+- **SHA:** `901cdb2b`
+- **patch-id:** `bcd5f39006a4d2db23cb72e6c818bca07ead46e1`
+
+**The fix removed a MASKING effect as well as the false positive, which this file did not
+predict.** Filed as an over-report; falling through to the heading form also finds `Status:`
+lines the wrong region was standing in front of:
+
+```
+before   4 findings of 6 compared   T-11, T-12 via "table row states no enum value"
+after    3 findings of 4 compared   T-14, T-15, T-16 via their real Status: lines
+```
+
+`compared` drops 6 → 4 because T-11/T-12 now correctly resolve to `None`. The three that
+remain are **genuine**, verified by reading the bodies rather than trusting the count — each
+reads `**Status:** open` while `params` says `done` / `in-progress` / `done`. Left for whoever
+owns that tracker's params; they are catalog-local and belong to the session that set them.
+
+**Option 1 as filed said "check the header row above it for a status column, and return the
+cell under it". Only the first half shipped.** Returning the cell would additionally close the
+scan's documented third blind spot (prose in a status region mentioning another enum word),
+but it narrows the compared string for 101 live entries across two ledgers, and this defect
+did not require it. Recorded as available and deliberately not taken, not as overlooked.
+
+**A design decision I got wrong first, kept here because the wrong version looked tidier.** I
+anchored the header scan on the `|---|` separator; that broke
+`status_drift_fires_when_params_and_the_body_row_disagree`, whose fixture has a header and a
+data row with no separator. I fixed the **code**, not the fixture: requiring a separator would
+silently stop comparing a real status table written without one — a false negative in exactly
+the direction this check exists to catch. The header is now the top of the row's contiguous
+`|` block, which handles all four live shapes, including `windows-platform-support` whose
+*first* table is a legend explaining the status vocabulary rather than its entry table.
+
+Test written first and watched failing, both directions in one fixture, with the analysis
+table placed **above** the real one — the locator takes the first matching row, so a fix that
+inspected only the last table would pass a fixture ordered the other way. Deliberate break
+run rather than asserted: `table_is_about_status` forced `true` kills the silence assertion,
+forced `false` kills the fires-anyway assertion and the pre-existing row-disagreement test.
+
+**Stale premise, corrected.** Evidence above says *"the only `^|` block is the
+`| task | headline number | reality |` table"*. True when measured; the file now carries
+**three** tables. The claim it supported still holds — T-11/T-12 match the analysis table and
+it has no status column — but the count decayed within hours, which is why the fix walks up
+from the matched row rather than assuming one table per file.
 ## Tests added
 
 None yet. The test must assert the check is **silent** on a ledger with a non-status table —

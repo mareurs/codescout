@@ -3958,7 +3958,7 @@ fn status_token_present(haystack: &str, token: &str) -> bool {
 /// closures in `## History` and carries an unrelated `| task | headline number | reality |`
 /// analysis table, so every entry resolved to a "status region" stating no status — turning
 /// the skip this function documents below into four reported findings.
-/// docs/issues/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md
+/// docs/issues/archive/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md
 ///
 /// `None` means *this entry states no status in the body*, which is not a finding: a
 /// params-only entry has no second representation and therefore cannot drift from one.
@@ -8368,7 +8368,7 @@ mod tests {
     /// no status. That is the case the scan's own doc comment excludes: *"An entry with no body
     /// region stating a status is skipped, not reported."* Branch 1 shadowed branch 2, which
     /// would have found the heading, found no `Status:` line, and correctly returned `None`.
-    /// docs/issues/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md
+    /// docs/issues/archive/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md
     ///
     /// **Both directions in one fixture**, because the silence half alone is monotone under
     /// "the check does nothing" and would pass against a stub returning `vec![]`. `T-1` lives
