@@ -214,8 +214,20 @@ fn guard_with_oracle(
          Full guide: resources/read doc://librarian-guide"
             .to_string()
     };
+    // The trailing clause is a claim about SCOPE, and for `stamped_only` the blanket form is
+    // now false: reads and body edits both returned `Ok` above, so "do not read or edit it
+    // directly" contradicts this refusal's own hint two lines below. Found by probe
+    // 2026-09-01, after the narrowing had already shipped and been reviewed — `why` and
+    // `hint` were made access-aware in the same change and this sentence was not, because it
+    // is a `format!` literal rather than one of the two fields under edit. Read a refusal
+    // end-to-end, not by the field you just touched.
+    let scope = if stamped_only {
+        "do not edit its frontmatter directly"
+    } else {
+        "do not read or edit it directly"
+    };
     Err(RecoverableError::with_hint(
-        format!("'{path}' is a librarian-managed artifact{why} — do not read or edit it directly"),
+        format!("'{path}' is a librarian-managed artifact{why} — {scope}"),
         hint,
     )
     .into())
@@ -830,6 +842,85 @@ mod tests {
             !hint.contains("append_entry"),
             "a stamped non-ledger owns no id namespace: {hint}"
         );
+    }
+
+    /// The refusal's own sentence must not contradict its own hint.
+    ///
+    /// The stamped arm permits reads and body edits, so "do not read or edit it directly" is
+    /// simply false there — and it sat one line above a hint stating that reads and body edits
+    /// are allowed. Found by probe rather than by review: the narrowing made `why` and `hint`
+    /// access-aware and left the sentence blanket, because the sentence is a `format!` literal
+    /// and not one of the two fields under edit.
+    ///
+    /// A TABLE over all three arms, because the claim is that the arms DIFFER. Asserting only
+    /// the stamped row is satisfied by a guard that says "frontmatter" everywhere — which
+    /// would under-claim on `augmented`, where reading really is wrong, and that mistake is
+    /// worse than the one being fixed.
+    #[test]
+    fn the_refusal_sentence_scopes_itself_to_what_the_arm_actually_forbids() {
+        struct Augmented(bool);
+        impl AugmentedArtifactOracle for Augmented {
+            fn is_augmented(&self, _: &std::path::Path) -> bool {
+                self.0
+            }
+        }
+
+        let cases = [
+            (
+                "stamped only — the file is still where its state lives",
+                "id: '23421bbc5b226368'\nkind: doc",
+                false,
+                true,
+            ),
+            (
+                // Load-bearing row: `augmented` means the file is a rendered snapshot, so a
+                // READ is wrong too. If this ever expects the narrow wording, the fix has
+                // leaked past the arm it was scoped to.
+                "augmented — the file is only a snapshot of catalog params",
+                "id: '23421bbc5b226368'\nkind: tracker",
+                true,
+                false,
+            ),
+            (
+                // Load-bearing for the same reason via the other arm: a ledger refuses every
+                // access, so the blanket sentence is the TRUE one here and must survive.
+                "ledger — owns a PREFIX-N namespace",
+                "kind: tracker\nentry_prefix: OB",
+                false,
+                false,
+            ),
+        ];
+
+        for (label, frontmatter, augmented, expect_narrow) in cases {
+            let text = format!("---\n{frontmatter}\n---\n\n## A\n\nprose\n");
+            let err = guard_with_oracle(
+                "docs/trackers/x.md",
+                &text,
+                Some(std::path::Path::new("/repo/docs/trackers/x.md")),
+                Some(&Augmented(augmented)),
+                Access::FrontmatterWrite,
+            )
+            .expect_err("every arm must still refuse a frontmatter write");
+            let msg = err.to_string();
+
+            if expect_narrow {
+                assert!(
+                    msg.contains("do not edit its frontmatter directly"),
+                    "{label}: the sentence must scope itself to frontmatter: {msg}"
+                );
+                assert!(
+                    !msg.contains("do not read"),
+                    "{label}: reads are permitted on this file, so the refusal must not \
+                     forbid them — it would contradict its own hint: {msg}"
+                );
+            } else {
+                assert!(
+                    msg.contains("do not read or edit it directly"),
+                    "{label}: this arm refuses every access, so the blanket sentence is \
+                     correct here and must NOT be narrowed: {msg}"
+                );
+            }
+        }
     }
 
     /// A prose ledger declares its id namespace in frontmatter and needs no
