@@ -99,13 +99,38 @@ me="${CLAUDE_CODE_SESSION_ID:--}"
 staging_op() {
     [ -r "/proc/$PPID/cmdline" ] || return 1
     _so_seen_git=0
+    _so_skip_value=0
     while IFS= read -r _so_tok; do
         [ -n "$_so_tok" ] || continue
         if [ "$_so_seen_git" = "0" ]; then
             [ "$(basename -- "$_so_tok")" = "git" ] && _so_seen_git=1
             continue
         fi
+        if [ "$_so_skip_value" = "1" ]; then
+            _so_skip_value=0
+            continue
+        fi
         case "$_so_tok" in
+            # Global flags that consume the NEXT argv token, so the value lands in its
+            # own slot. Without this arm the value is classified as the subcommand: a
+            # path matches no verb, falls to `*) return 1`, and `git -C <path> add` --
+            # the form codescout-companion's worktree guard MANDATES -- silently records
+            # `-` instead of the stager.
+            #
+            # HAND-MAINTAINED SUBSET, and deliberately so: git exposes no way to ask it
+            # which global flags take a value, so this list can only ever be a snapshot.
+            # It is safe incomplete. An unlisted value-taking flag leaves its value to be
+            # classified below, where it hits `*) return 1` and the pair is recorded `-`
+            # -- the OVER-refusing direction this hook already prefers (a987df96):
+            # `-` is loud and recoverable, a wrong claim is silent. So a future git flag
+            # degrades attribution, never fakes it. Add to this list when one appears.
+            #
+            # The joined form (`--git-dir=X`) is ONE token and must NOT match here; it
+            # falls through to `-*` below, consuming no following token.
+            -C | -c | --git-dir | --work-tree | --namespace | --exec-path | --super-prefix)
+                _so_skip_value=1
+                continue
+                ;;
             -*) continue ;;
             *=*) continue ;;
             add | rm | mv | restore | apply | update-index | stash) return 0 ;;

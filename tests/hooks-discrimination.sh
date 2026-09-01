@@ -167,6 +167,37 @@ has "refusal names the staged deletion" "$out" "del.txt"
 echo more > s1.txt
 CLAUDE_CODE_SESSION_ID="$A" git add s1.txt
 eq "a real add still claims normally" "$(owner_of s1.txt)" "$A"
+
+# Invocation form must not change attribution. `staging_op` classifies the tokens after
+# `git` in /proc/$PPID/cmdline, and git's global flags come in two shapes: `--git-dir=X`
+# is ONE token, but `-C <path>` and `--git-dir <path>` put the value in its own argv slot.
+# A parser that skips the flag and then classifies the next token reads a PATH as the
+# subcommand. Every add below is the same operation by the same session as the one above.
+# `git -C` matters most: codescout-companion's worktree guard mandates that exact form.
+echo formC > formC.txt
+CLAUDE_CODE_SESSION_ID="$A" git -C "$PWD" add formC.txt
+eq "-C <path> add is a staging op" "$(owner_of formC.txt)" "$A"
+
+echo formJ > formJ.txt
+CLAUDE_CODE_SESSION_ID="$A" git --git-dir="$PWD/.git" --work-tree="$PWD" add formJ.txt
+eq "--git-dir=X joined add is a staging op" "$(owner_of formJ.txt)" "$A"
+
+echo formS > formS.txt
+CLAUDE_CODE_SESSION_ID="$A" git --git-dir "$PWD/.git" --work-tree "$PWD" add formS.txt
+eq "--git-dir X separate add is a staging op" "$(owner_of formS.txt)" "$A"
+
+echo formK > formK.txt
+CLAUDE_CODE_SESSION_ID="$A" git -c user.name=t -C "$PWD" add formK.txt
+eq "-c k=v then -C <path> add is a staging op" "$(owner_of formK.txt)" "$A"
+
+# The other direction, and it is what stops "skip the value too" being over-applied: a
+# NON-staging verb wearing the same flags must still fail to claim. A fix that swallows
+# one token after every flag, or that returns 0 whenever it cannot classify, passes the
+# four cases above and fails this one.
+rm -f .git/session-stage-log
+CLAUDE_CODE_SESSION_ID="$B" git -C "$PWD" status --short > /dev/null
+eq "-C <path> status is NOT a staging op" "$(owner_of formC.txt)" "-"
+
 rm -rf "$T"
 
 # -------------------------------------------------------------- 3. owner resolution
