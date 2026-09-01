@@ -641,6 +641,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         Err(_) => missing.push(name.clone()),
                     }
                 }
+                if !missing.is_empty() || !ambiguous.is_empty() {
+                    // Partial success is not "the caller got what they asked for" — same
+                    // premise failure as the singular `heading` case above (I2's ruling,
+                    // extended to this branch in fix round 1): a caller who named N headings
+                    // and got M<N back plus a withheld section map has exactly the map they
+                    // need to repair the member that failed, and stubbing it away would cost
+                    // a second round-trip just to find it. This is a distinct guarded site
+                    // from the singular branch — it does not share that branch's flag write.
+                    stub_this_preview = false;
+                }
                 let joined = parts.join("\n\n");
                 let mut extra = json!({ "headings": list });
                 if !missing.is_empty() {
@@ -1120,6 +1130,85 @@ mod tests {
             "{:?}",
             v["body_meta"]
         );
+    }
+
+    /// I2 extended to the plural selector (fix round 1): when every member resolves, the
+    /// stub still applies. This is the "all succeeded" control the missing/ambiguous tests
+    /// below need — without it, a mutation that always restores the full preview would look
+    /// identical to a correct guard.
+    #[tokio::test]
+    async fn headings_selector_stub_applies_when_all_members_resolve() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## B\n\nb\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "headings": ["## A", "## B"]}))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            v["preview"]["headings"].as_str(),
+            Some(HEADINGS_OMITTED_NOTE),
+            "every member resolved — this is a successful selection, the stub should apply"
+        );
+    }
+
+    /// I2 extended (fix round 1): a missing member alone (no ambiguous member present) must
+    /// still restore the full preview. Isolates the `!missing.is_empty()` half of the guard
+    /// from its `!ambiguous.is_empty()` sibling — a mutation that checks only the ambiguous
+    /// list would pass `headings_selector_restores_preview_on_ambiguous_member` below but
+    /// fail this one.
+    #[tokio::test]
+    async fn headings_selector_restores_preview_on_missing_member() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## B\n\nb\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "headings": ["## A", "## Nowhere"]}))
+            .await
+            .unwrap();
+
+        let headings = v["preview"]["headings"]
+            .as_array()
+            .expect("a missing member must keep the full heading array, not the omitted note");
+        assert_eq!(headings.len(), 3, "# T, ## A, ## B: {headings:?}");
+    }
+
+    /// I2 extended (fix round 1): an ambiguous member alone (no missing member present) must
+    /// also restore the full preview. Isolates the `!ambiguous.is_empty()` half of the guard
+    /// from its `!missing.is_empty()` sibling — a mutation that checks only the missing list
+    /// would pass the test above but fail this one.
+    #[tokio::test]
+    async fn headings_selector_restores_preview_on_ambiguous_member() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &mk_row("a")).unwrap();
+        let (ctx, dir) = mk_ctx_with_root(cat);
+        fs::write(
+            dir.path().join("a.md"),
+            "---\nkind: spec\n---\n\n# T\n\n## A\n\nfirst\n\n## B\n\nb\n\n## A\n\nsecond\n",
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({"id": "a", "headings": ["## A", "## B"]}))
+            .await
+            .unwrap();
+
+        // "## A" is doubly defined, "## B" resolves cleanly — no member is strictly missing.
+        assert_eq!(v["body_meta"]["headings_missing"], Value::Null);
+        let headings = v["preview"]["headings"]
+            .as_array()
+            .expect("an ambiguous member must keep the full heading array, not the omitted note");
+        assert_eq!(headings.len(), 4, "# T, ## A, ## B, ## A: {headings:?}");
     }
 
     #[tokio::test]
