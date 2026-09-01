@@ -1,11 +1,11 @@
 ---
 id: d5566f4c24ceb601
 kind: bug
-status: open
+status: mitigated
 title: Workspace activation is process-wide, so a subagent's read-only activate disables the controller's writes
 tags:
 - cluster/shared-resource-carries-no-owner
-closed: ''
+closed: 2026-09-02
 opened: 2026-09-01
 owner: marius
 severity: low
@@ -108,7 +108,9 @@ activation. Do **not** re-activate to fix it mid-run.
 
 ## Resume
 
-**Fix 1 is implemented (uncommitted, `experiments` working tree, 2026-09-02).** Both
+**Fix 1 is implemented and committed** — `7a52e621` on `experiments`, patch-id
+`630a6acd0541130ce0c32d3bf706b9c8b6b8d149`. (The patch-id is the durable half: the SHA
+orphans when `experiments` is rebased after a ship.) Both
 affected arms of `check_tool_access` now offer `workspace='<absolute path>'` *first* and
 label re-activation as process-wide: the `ActivatedReadOnly` arm, and the `None`
 (unattributed) arm, which hedges toward the same read-only cause and had the same gap.
@@ -124,11 +126,14 @@ for the dynamic `## Project Status` block. The slice carries a two-word pointer 
 (`activate, home/foreign, pinning, reset`). No `ONBOARDING_VERSION` bump —
 `server_instructions` is live-on-connect and `builders.rs` was untouched.
 
+**Status is `mitigated`, not `fixed`, and the distinction is the point.** The refusal now
+names the non-destructive remedy first, but activation state is still a single
+process-global with no owner — two callers in one process still hold different legitimate
+answers to "what is the active project", and the data structure still represents one.
+
 **Still open: Fix 2** (record *who* activated, so the message can name the subagent and
-the time instead of "something else sharing this process"). That is the durable one and
-the root cause — ownerless shared state — is untouched; weigh it against `IC-17`'s other
-members rather than building it for this bug alone. Flip this file to `mitigated` with a
-`closed:` date, fix SHA and patch-id when the Fix 1 change is committed.
+the time instead of "something else sharing this process"). That is the durable one; weigh
+it against `IC-17`'s other members rather than building it for this bug alone.
 ## References
 - `.superpowers/sdd/2026-09-01-committed-audit-shards/progress.md` § Observations during the run
 - `docs/trackers/catalog-audit-trail-session-log.md` (T-7 run)
