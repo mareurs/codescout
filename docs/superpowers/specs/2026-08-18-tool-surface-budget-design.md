@@ -146,9 +146,9 @@ Every decision below rests only on today's source and today's wire.
 - **Derive schemas from `Args` via `schemars` (already a direct dependency).** This is the
   structural answer to F-1's whole class — doc-comments become descriptions, and
   advertised-equals-accepted holds by construction. Deferred under this project's
-  `tool-registration-rule-of-three`: one confirmed instance (F-1) plus one unverified
-  (`query` / `title_contains` / `preview` passed by agents, unadvertised — origin not yet
-  checked). See *Revisit-when*.
+  `tool-registration-rule-of-three`. See *Revisit-when* for the live count, **recounted
+  2026-09-01 and corrected in both directions at once** — it gained a confirmed instance and
+  lost an unverified one, and still stands one short.
 
 ## Architecture
 
@@ -257,6 +257,27 @@ commit body should record that the addition was paid for rather than absorbed.
 - **A third instance of advertised ≠ accepted appears.** Then derive schemas from `Args`
   via `schemars` and delete this class of defect. The dependency is already present; the
   argument for waiting is sample size, not feasibility.
+
+  **Live count, recounted 2026-09-01: 2 confirmed, 1 live. The trigger has NOT fired.**
+  Both halves of the original count moved, in opposite directions:
+
+  | instance | verdict |
+  |---|---|
+  | F-1 — `append_entry`'s `anchor_heading` implemented, unadvertised | confirmed; **since fixed** (`anchor_heading` is advertised today) |
+  | `artifact(action="graft")`'s `from_id` / `into_id` — **required** by `graft::Args`, absent from the 53 advertised properties | **confirmed, new.** Measured: 1 attempt, 1 failure (`missing_required_param`) in 51,346 recorded calls. `docs/issues/archive/2026-09-01-graft-requires-two-params-the-schema-never-advertises.md` (`2fbb59c9b84a0dcf`), fixed at `6894b67d` / patch-id `3cb9bc68a685c46252388dc21a3dd8d7beff9098` |
+  | `query` / `title_contains` / `preview` — previously listed here as the unverified second instance | **retired — wrong class.** Verified 2026-09-01: no `Args` struct under `src/librarian/tools/` accepts any of the three (the sole grep hit is an unrelated fn parameter, `src/librarian/tools/get.rs:35`). They are neither advertised **nor** accepted — agents guessed the names and serde dropped them, because `find::Args` cannot carry `deny_unknown_fields` while the dispatcher passes sibling actions' keys through. That is `IC-15` accepted-parameter-silently-dropped, owned by `system-retrospective-improvements:T-2`, not this class |
+
+  Worth stating plainly, because the correction ran both ways: an **inflated** count fires
+  this rewrite early, and a **stale** one never fires it at all. The entry that was costing
+  us was the unverified one — it had sat as "origin not yet checked" since 2026-08-18, and
+  checking it took one grep.
+
+  **What now detects instance 3 without anyone going looking.**
+  `param_probe::assert_required_are_advertised` (`src/librarian/tools/mod.rs`, added
+  `6894b67d`) asserts each action's required params against the advertised schema, at all
+  four probe sites. Until this trigger fires, that guard is the thing standing in for the
+  structural fix — so the next instance arrives as a red test rather than as a user
+  tripping over it.
 - **The routing experiment resolves.** Add `call_graph` and `tree` to the
   `server_instructions` quickref, note the SHA, and re-read `usage.db` filtered on
   `codescout_sha` after two weeks. `references` is the control — already routed, 128

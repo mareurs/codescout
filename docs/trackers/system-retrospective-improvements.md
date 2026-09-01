@@ -82,6 +82,13 @@ Birds-eye retrospective (2026-09-01) synthesized from three sweeps: the session-
 
 **Acceptance:** each seam either derives from one source or loudly names which representation answered.
 
+
+**Named instances** (add to this list rather than opening a sibling task):
+
+1. *Prompt-surface triplication* — 3 surfaces, manual `ONBOARDING_VERSION` bump. The original motivating case.
+2. *Dual symbol source* — `symbols()` silently swapping LSP↔tree-sitter mid-session.
+3. **`src/prompts/README.md`'s own figures, fixed 2026-09-01.** § *Surfaces* read `57,148 / 48,627 as of 2026-08-18` and § *The tool-surface budget* read `6,528 characters across 24 pinnable tools`; measured live the same day, the surface was **54,976 / 47,549** and the injection **3,818 across 23**. Wrong on five numbers, in a file whose own § budget section warns about exactly this. Remedy applied was the one this task prescribes — not a drift checker but a pointer to the deriving command (`cargo test --lib tool_surface_report_lengths -- --nocapture`), so the next reader re-derives instead of re-citing.
+4. **`param_probe`'s `Spec::required` table vs the advertised schema** — closed by T-9. The `required()` helper stated what each action needs while the schema stated something different, and `graft` lived in the gap for as long as both existed. Note the remedy shape: the fix asserted the two existing representations against each other rather than adding a third.
 ## T-7 — Committed audit shards (phase 2 of T-1)
 
 **Why:** the audit WAL (T-1) is machine-local like everything else in the catalog — the same liability class it exists to make forensic. Exported to committed per-host JSONL shards, one machine can answer "which session on the other machine deleted these rows".
