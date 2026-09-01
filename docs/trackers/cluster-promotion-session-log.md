@@ -14,7 +14,7 @@ topic: cluster promotion and mechanism design
 entry_prefix:
 - F
 - W
-entry_high_water_F: 4
+entry_high_water_F: 5
 entry_high_water_W: 3
 ---
 
@@ -50,6 +50,7 @@ entry_high_water_W: 3
 | F-2 | 2026-09-01 | high | tooling | open | `ListAgents` enumerated 4 of 20 live sessions, so authorship inferred from it came from a 20%-complete population |
 | F-3 | 2026-09-01 | med | architectural | fixed-verified | The split's load-bearing sentence was refuted as a population claim 67 seconds before it was committed |
 | F-4 | 2026-09-01 | med | tooling | fixed-verified | The ledger's count cells go stale by CONCURRENCY — 3 re-derivations invalidated in one session by peer filings; gate shipped, caught a 4th drift on its first run |
+| F-5 | 2026-09-01 | med | architectural | open | `IC-13`'s claim is true of 4 of its 16 members — and the "≥4" floor carried from a prior audit bounded the opposite set; two rulings owed |
 
 ## Wins Index
 
@@ -481,6 +482,69 @@ zero-leak verified by probe rather than assumed.
 **Rests on:** the general principle that a review's independence is a property of what the
 reviewer can *read*, not of what they were *told* — the same reasoning as `CLAUDE.md`
 § *Observer Blindness*'s third requirement, a check that runs when nobody is worried.
+
+## F-5 — IC-13's claim is true of 4 of its 16 members, and the floor I carried pointed the wrong way
+
+**Observed:** 2026-09-01. `IC-13`'s claim text was about to be ruled on using the figure *"at
+least four members where the claim is false"*, carried over from the blind second-read audit.
+
+**When:** Before the ruling, on the instinct that a floor two readers noticed while doing a
+*different* job is not a measurement of a population.
+
+**Expected:** The measurement would confirm the floor and put a denominator under it — roughly
+"4-ish of 16, so widen the claim's wording."
+
+**Got:** The floor was carried in the **wrong direction**, and the ruling it pointed at is the one
+the evidence supports least. All 16 bodies read against the claim's *"without a marker"* clause,
+one reader per file, quote required per verdict, and the expected answer deliberately withheld
+from the readers:
+
+| | | n |
+|---|---|---:|
+| **A** | claim holds as written — no marker anywhere | 4 |
+| **B** | marker computed correctly, never reaches the reader | 5 |
+| **C** | neither — cap announced, or no cap at all | 7 |
+
+14 of 16 high confidence. **The claim as written is true of 4 of its 16 members.** "At least four"
+had been read as bounding the members the claim *fails* for; it bounds the ones it *holds* for.
+The true failure figure is **12 of 16**.
+
+C is not one bucket, and the readers' own evidence forced the split: **C1 (4)** announce their cap
+reachably and file a different defect; **C2 (2)** involve no truncation at all, classified "C by
+elimination, not by fit"; **C3 (1)** carries a marker that is *present and wrong* — `grep`'s
+`Showing N of N`, whose true total after `hit_cap` is **unknowable** rather than unreported, so
+"add a marker" is not an available remedy. C3 is a fourth shape the three offered categories could
+not express, and it surfaced only because rows carried quotes.
+
+**Probable cause:** two compounding errors, both mine. The floor came from subagent reports —
+which `reconnaissance-patterns` Law A names explicitly as *claims*, not artifacts — and it was
+restated across three of my own messages without once being re-derived, so each restatement
+inherited the direction of the first. Second, the framing ("the claim is too narrow") selected
+what the number seemed to mean: a wording problem predicts B, so a floor of 4 read as "4 B's",
+when B is in fact the *smallest* bucket and the membership problem is the largest.
+
+**Workaround:** none needed — the measurement ran before the ruling, which is the whole of the
+save.
+
+**Severity:** med — nothing shipped. Had the ruling gone ahead on the floor, IC-13's claim would
+have been widened to cover B while 7 non-members stayed in the class, which retroactively
+legitimises drift and makes the class *less* falsifiable. Two of those seven disclaim the class in
+their own text (`grep-narrowing-hint`, `append-entry-anchor`), so the wrong ruling would have
+contradicted the corpus in writing.
+
+**Fix idea / Pointer:** Two rulings owed, deliberately **not** folded together and in this order:
+(1) widen the claim's clause to *"without a marker the caller can see"*, covering A+B = 9; (2)
+re-adjudicate the 7 C's, which would take n from 16 to ~9. Order matters — widening first while
+C members remain would legitimise them. Both are recorded in `IC-13`'s *Open ruling*. The
+measurement itself is **one reader per file with no cross-check**, the same single-party property
+the Index caveats for the archive pass, so 4/16 is a measurement and not yet a corroborated one.
+
+**Status:** open — measurement complete and recorded; both rulings await a human call.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the 16 per-file verdicts, each carrying a direct quote from the bug file, and on the
+two members whose own text disclaims the class — those two need no adjudication from anyone.
 
 ## Template for new entries
 
