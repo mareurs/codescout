@@ -131,6 +131,19 @@ grep -A6 '^## IC-' docs/trackers/issue-clusters.md | grep -B4 'not yet'
 grep -L 'cluster/' docs/issues/2026-*.md
 ```
 
+**The `not yet` token in `Promotes to:` is load-bearing — keep it when you add a verdict to that
+field.** The third query above keys on it. Adjudicating a class tempts you to overwrite the field
+with the *spread* verdict, which answers a different question, and the class then leaves the query
+without anything reporting that it did. Measured 2026-09-01: `IC-13`, `IC-14` and `IC-15` were
+adjudicated that day, each had `not yet` overwritten by the same author in the same sitting, and
+all three vanished from a query returning six classes — while every one of them still read
+`Mechanism status: none yet`, i.e. still owed exactly what the query looks for. Found by running
+the query, not by re-reading the edits; restored the same day. `IC-16` is correctly absent — its
+rule already exists in `CLAUDE.md`, so it is not owed one.
+
+Note what the query returns: field blocks identified by `**Slug:**`, never by `## IC-N`. `-B4`
+reaches Blind party at the furthest, and the heading is five lines up. That is usable — the slug
+names the class — but do not expect an IC number back.
 ## Index
 
 > Hand-maintained reading surface. The `## IC-N — <title>` headings are what define the tokens
@@ -179,7 +192,7 @@ grep -L 'cluster/' docs/issues/2026-*.md
 | IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | 5 | `DC` | none yet |
 | IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | 1 | not yet — two tags withdrawn as misfits | none yet |
 | IC-10 | authorship on a shared checkout is unrecoverable after the fact | `authorship-unrecoverable-after-the-fact` | 1 | not yet — below threshold | none yet |
-| IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 4 | clears count; spread unadjudicated | none yet |
+| IC-11 | documentation denies a capability the code has since gained | `doc-contradicted-by-code` | 4 | clears count; **spread adjudicated 2026-09-01 — 4 doc surfaces / 4 subsystems** | none yet — one of three sub-shapes is mechanizable |
 | IC-12 | transient shared state lies to every reader | `transient-shared-state-lies-to-readers` | 0 | not yet — 1 instance, untagged; archive pass found none | none yet |
 | IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | 16 | clears count; **spread adjudicated 2026-09-01 — clears, 6 or 11 depending on unit** | none yet — **10 of 16 share one layer**, so one gate covers most |
 | IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | 8 | clears count; **spread adjudicated 2026-09-01 — 4 subsystems / 6 distinct guards** | none yet — one sub-shape of three is mechanizable |
@@ -300,11 +313,18 @@ were left alone rather than re-adjudicated, with two deliberate exceptions named
 untagged archive files contain plenty of shared-state pollution and none that is transient in
 that sense. It stays at 0 on evidence, not on an unexamined queue.
 
-**`IC-11` was deliberately not backfilled.** Roughly 15 doc-vs-code candidates exist, but its
+**`IC-11` was not backfilled with the others — and then was, on 2026-09-01, by a probe of its own.** Roughly 15 doc-vs-code candidates existed, and its
 claim turns on *"the prose was true when written"*, which is a fact about history and not about
 the text — the same discriminator `claim-decay`'s inclusion test makes mandatory, and which
 separates `decayed` from `never-true` only under `git log -S`. Tagging them without that probe
-per file would be exactly the shortcut that ledger exists to forbid.
+per file would be exactly the shortcut that ledger exists to forbid. Fourteen went to that probe on
+2026-09-01: three passed and are tagged, one was refuted, ten are recorded as
+probed-and-not-established. The entry's own *The probe* section holds the working.
+
+*(This paragraph asserted "**deliberately not backfilled**" in the present tense until then,
+standing beside an `n` column that already read 4 — the same premise-moved-conclusion-didn't
+defect the paragraph two above this one records happening to itself. Twice in one section, and
+the second instance was committed by the author of the first. Neither was reported by anything.)*
 
 **The `IC-3` / `IC-15` boundary, settled 2026-09-01 on the remedy test** — the same test that
 keeps `IC-1` and `IC-2` apart. The discriminator is: **was a caller-supplied value accepted?**
@@ -607,9 +627,9 @@ Kept as a class of one for the same reason as `IC-8`: the bug corpus is where th
 
 **Slug:** `cluster/authorship-unrecoverable-after-the-fact`
 **Claim:** On a shared checkout there is no attribution channel, so authorship cannot be recovered after the fact. Every party therefore infers it from proximity — who else was active, which file appeared when — and proximity is not evidence.
-**Members:** `filter={"tags": {"contains": "cluster/authorship-unrecoverable-after-the-fact"}}` — n=1, 2026-08-31. The seed narrative below is not a bug file and is not counted.
+**Members:** `filter={"tags": {"contains": "cluster/authorship-unrecoverable-after-the-fact"}}` — n=2, 2026-09-01, by query. The seed narrative below is not a bug file and is not counted. Second member `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md` is the **read-side**: the write-side asks *who wrote this*, the read-side asks *is this mine* — and on a shared checkout neither is answerable for uncommitted state. Subsystem spread is now 2 (companion plugin banner; shared build + git tooling), so a third instance meets the promotion threshold.
 **Blind party:** every party equally, which is what makes it different from an ordinary mistake. The information does not exist to be careless with: `git` collapses all sessions into one author string, and an untracked file carries no origin at all.
-**Promotes to:** `not yet` — n=1. When it moves the target is likely `H` (a provenance channel is a mechanism, not a discipline), not `OB`.
+**Promotes to:** `not yet` — n=2. When it moves the target is likely `H` (a provenance channel is a mechanism, not a discipline), not `OB`.
 **Mechanism status:** none yet.
 **Valid:** dated 2026-08-31
 
@@ -626,6 +646,17 @@ The file belongs to a third session neither had enumerated. `git log` shows why 
 Note the pattern is `OB-1`'s — *"the author, specifically"*. All three attributions were made by parties who had just read the evidence, in messages *about* attribution failure. Knowing the class prevented none of them, which is the standing argument against answering this kind of defect with care rather than mechanism.
 
 **Falsified by** an attribution dispute on a shared checkout that a party could settle from committed state alone.
+
+**The instrument exists, and it splits by state — established 2026-09-01, three misattributions of ONE file in one evening.** A fourth, fifth and sixth instance of the seed pattern above, and the sharpest yet because the parties were mid-argument *about this class* and citing F-80 by name:
+
+| state | instrument |
+|---|---|
+| committed | **`Session-Id` commit trailer.** Positive, exact, one `git log`, reaches sessions no socket enumerates including exited ones. |
+| **uncommitted** | **none exists.** Directory adjacency, `ListAgents`, `git status`, dirty-file lists and conversational proximity are all elimination in disguise. Ask the session; until it answers the supportable claim is **"not mine"**, never "yours". |
+
+The sequence: a session running the gate hit a red build from a peer's un-wired function, established "not mine" correctly by `git status` + `git grep HEAD`, then asserted an owner from conversational proximity — wrong. The correcting peer named a different session from *directory* adjacency — also wrong, and filed against themselves as `bug-fix-session-log:F-89` for committing the corrected error inside the correction. The true owner was settled only once the work was **committed** and its trailer existed, then volunteered by that session unprompted.
+
+**What this adds to the class: the trailer is a real positive instrument, and reaching for it on uncommitted state is an instrument swap that reads as rigour.** The sentence "the trailer is the positive instrument" was true and did not apply to the object in front of either party. The remedy the evening actually supports is the terminal state, not a better inference — stop at "not mine".
 
 **A TOOL commits this class too, which is the strongest evidence the ledger has for it.** The three misattributions above were made by agents, so "be more careful" remains an available (wrong) reading. `pre-commit` removes it. Its post-hook check is an unconditional whole-tree diff — `files_modified = diff_before != diff_after`, `pre_commit/commands/run.py:203-206`, no per-hook opt-out in 4.6.2 — and it reports any difference as *"files were modified by this hook"*. The tool has no way to ask who wrote them, so it attributes by **proximity in time**, exactly as the agents attributed by proximity in the working tree.
 
@@ -668,9 +699,9 @@ which holds equally for **agreeing** with one, the direction three of these four
 **Claim:** A document states a behaviour the code contradicts. The statement was *true when written*; the code later gained or lost the capability. Nothing checks prose against code systematically, and the corrective pass that *does* happen is a hand-enumerated sweep whose completeness is unfalsifiable — it reports the surfaces it changed, never the ones it missed. Unlike a wrong statement, this defect has no authoring error to find.
 **Members:** `filter={"tags": {"contains": "cluster/doc-contradicted-by-code"}}` — n=4, 2026-09-01, by query after a probed archive pass. **Fourteen candidates were probed and three passed**; the ten that did not are deliberately untagged, not pending. See *The probe* below..
 **Blind party:** the *reader*, routed to the document by its own scope claim and given no signal to cross-check. The author of the prose is not blind — they wrote something true. The author of the *code* change is differently blind: gaining a capability gives you no reason to search prose for sentences your feature just falsified.
-**Promotes to:** `not yet` — n=1 taggable. The likely target is `DC` (`docs/trackers/claim-decay.md`): a true-when-written claim that silently decayed is that ledger's subject, and this class is the bug-corpus entry point to it rather than a competitor — the same relationship `IC-8` declares.
-**Mechanism status:** none yet, and the nearest existing mechanism does not cover it. `librarian(action="audit_doc_refs")` lints *references* — paths, symbols, line numbers, link targets — so a document may cite every path correctly and still assert the opposite of what the code at those paths does. The remedy would have to check claims, not refs.
-**Valid:** dated 2026-08-31
+**Promotes to:** `not yet` — n=4 since the probe. The `n=1 taggable` this line carried was written before it and stood after. What holds promotion is no longer the count but the three-way remedy split adjudicated below. The likely target is `DC` (`docs/trackers/claim-decay.md`): a true-when-written claim that silently decayed is that ledger's subject, and this class is the bug-corpus entry point to it rather than a competitor — the same relationship `IC-8` declares.
+**Mechanism status:** none yet, and the nearest existing mechanism does not cover it. `librarian(action="audit_doc_refs")` lints *references* — paths, symbols, line numbers, link targets — so a document may cite every path correctly and still assert the opposite of what the code at those paths does. The remedy would have to check claims, not refs. **That is the right conclusion for the wrong reason on one of the four members** — see *The spread* below, where a member citing four names that do not exist is missed anyway, and not because it asserts anything.
+**Valid:** dated 2026-09-01
 
 Seed instance: `2026-08-31-librarian-runtime-guide-denies-the-augmentation-sidecar`. The served `librarian-runtime` guide states augmentation has *"**No** — there is no on-disk representation"* and that sharing it is *"local-only by design"*. Both sentences were accurate when written. The sidecar shipped as `e799f29d` on 2026-08-30, and a deliberate sweep the **same day** — `e1b91221`, *"state that augmentation shape now travels, in the three places that said otherwise"* — corrected `CLAUDE.md`, `docs/conventions/cross-machine-catalog-resume.md` and `tracker-conventions.md`. Not this guide. So the drift is **one day old**, and the mechanism is an enumeration produced from memory, not neglect: "three places" reads as a finding and is a list. The guide mentions `sidecar`/`expects_augmentation` zero times; `tracker-conventions` mentions them thirteen.
 
@@ -728,6 +759,55 @@ in the file's own creation commits; `scope`'s documented `project` default again
 authoring error, and "probably" is exactly the standard this entry exists to refuse. They are
 listed as probed-and-not-established so the next reader does not re-derive the same fourteen.
 
+**The spread, adjudicated 2026-09-01 — and the unit matters, as it did for `IC-14`.** Four members,
+**four distinct documentation surfaces** (user manual, conventions doc, Rust doc comment, served
+guide) and **four distinct subsystems** (retrieval, test infrastructure, error handling, librarian).
+The two counts agree at 4, which is worth stating rather than picking one — agreement is evidence,
+and a bare *"4"* hides which question it answers. `IC-14`'s did **not** agree (8 members, 6 guards),
+so the agreement here is a fact about this population and not a property of the ledger.
+
+**But the four split three ways on what the prose is a claim ABOUT, and the three have three
+different remedies** — the same shape `IC-14` turned out to have, and the same reason one promoted
+rule would be right about a third of it:
+
+- **Behavioural claim** (2) — the prose asserts what the code does or does not do, and every path
+  and symbol it cites is correct. `recoverableerror-display-doc-contradicts-code`, where the doc
+  comment claims an omission the `fmt` body does not make, and the sidecar guide. **Unreachable by
+  any reference check, by construction.**
+- **Decision claim** (1) — `test-env-isolation-doc-prescribes-rejected-remedy` prescribes option B
+  after `a656f8ce` recorded that remedy **NOT VIABLE**. The falsifying artifact is *another
+  document*, so neither reading the code nor checking its refs reaches it. This is the member with
+  a measured live cost: its own summary records the doc having made engineers reproduce a purged
+  bug "at least twice in one session".
+- **Named-entity claim** (1) — `tools-semantic-search-manual-page-describes-legacy-interface` names
+  four things that do not exist (`score`, `language`, `detail_level`, `offset`). It is not an
+  assert-the-opposite at all, and it is the mechanizable one.
+
+**The mechanism finding corrects this entry's own stated reason.** `Mechanism status` above says
+`audit_doc_refs` cannot cover the class because a document "may cite every path correctly and still
+assert the opposite". True of the first two shapes; the **wrong reason** for the third, which cites
+nothing correctly — four dead names — and is missed anyway. Two hypotheses were tried before the
+right one, and both are recorded because each is the plausible answer:
+
+1. *The names sit in a fenced JSON block and the scanner skips fences.* **Refuted.** `parser.rs:48`
+   emits candidates while `in_code_block`, pinned by `parser_walks_fenced_code_blocks`
+   (`parser.rs:1021`). A fenced ref is **severity-capped** to `code_block`, never dropped
+   (`severity::cap_code_block`, applied at `resolver.rs:671`, pinned at `resolver.rs:866`). Same
+   structure as the forced-`Med` on code comments: found, then downgraded below `--fail-on high`.
+2. *So it is found and downgraded.* Also wrong. `RefKind` has exactly five variants — `FilePath`,
+   `FileLine`, `FileSymbol`, `ModulePath`, `Link` (`src/librarian/tools/audit_doc_refs/mod.rs:11`)
+   — and **all five are locations**. A JSON response field and a tool parameter are neither. The
+   instrument does not downgrade them; it never sees them.
+
+So the class has one buildable sub-remedy with a concrete shape — a candidate kind for tool params
+and response fields, checkable against the live schema, which is the same set-difference the tool
+registry guard uses — against "check claims, not refs" for the other two, which is not buildable
+today. **`Mechanism status` stays `none yet` because the majority shape has no instrument, but it
+is `none yet` for two reasons now, and only one of them is hard.**
+
+*(Both hypotheses above were mine, stated confidently, and each was refuted by one grep. The
+fence one is the instructive failure: fenced content being illustrative rather than real is
+`IC-6`'s subject, so the wrong answer was the one the neighbouring class made most available.)*
 ## IC-12 — transient shared state lies to every reader, and the standard diagnostic confirms the lie
 
 **Slug:** `cluster/transient-shared-state-lies-to-readers`
@@ -754,7 +834,7 @@ Measured 2026-08-31, within a minute of git hooks being enabled on this shared c
 **Claim:** A result is truncated by a limit — a page size, a byte budget, a display cap — and returned without a marker saying so. The caller reads a partial answer as the whole answer, and a **zero** from a capped scan reads as "not present" rather than "not reached".
 **Members:** `filter={"tags": {"contains": "cluster/capped-result-presented-as-complete"}}` — n=16, 2026-09-01, by query after the archive backfill pass. Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), which I have not independently verified.** The count is a peer's, the membership is unassigned, and the query is honest about that: it returns nothing until the files are tagged.
 **Blind party:** the caller, who has no way to distinguish a short list from a complete one. Also the *author of a downstream count*, since an aggregate computed over a capped scan is wrong in a direction nothing signals.
-**Promotes to:** **spread adjudicated 2026-09-01 — it clears, and the interesting number is not the spread.** Two defensible counts, stated with their units because they answer different questions. Coarse unit (*the top-level surface owning the cap*): **6** — librarian (8 members), `grep` (2), `read_file`/`file_summary` (2), `run_command` (2), the shared output buffer / `truncate_compact` (1), and one cross-cutting audit (1). Fine unit (*the module carrying the cap*): **11**, splitting librarian into `artifact`/`get` (3), `preview`, `audit_doc_refs`, `doctor`, `link_scan` and `append_entry`. Either way the bar is met; the classification remains single-party — I read the member titles and tags, not all sixteen bodies, and say so rather than implying an audit.
+**Promotes to:** `not yet` — **spread adjudicated 2026-09-01 — it clears, and the interesting number is not the spread.** Two defensible counts, stated with their units because they answer different questions. Coarse unit (*the top-level surface owning the cap*): **6** — librarian (8 members), `grep` (2), `read_file`/`file_summary` (2), `run_command` (2), the shared output buffer / `truncate_compact` (1), and one cross-cutting audit (1). Fine unit (*the module carrying the cap*): **11**, splitting librarian into `artifact`/`get` (3), `preview`, `audit_doc_refs`, `doctor`, `link_scan` and `append_entry`. Either way the bar is met; the classification remains single-party — I read the member titles and tags, not all sixteen bodies, and say so rather than implying an audit.
 
 > **The finding that matters is concentration, not spread: 10 of the 16 carry the `progressive-disclosure` tag.** This is not a defect scattered across unrelated components — it is very largely **one architectural layer**, codescout's own output-budget machinery, emitting the same defect at many exits. That makes the class *more* tractable than its spread suggests, and it inverts the usual promotion reasoning: a wide spread normally argues for a rule because no single fix reaches the members, whereas here a single invariant on the capping layer would reach most of them.
 
@@ -777,7 +857,7 @@ The archived instances are not yet cited here because I have not read them. What
 **Claim:** A guard's name states the property; its implementation covers a subset of it. Everything the name promises is believed protected, the uncovered remainder is protected by nothing, and the guard's own green result is what conceals the gap.
 **Members:** `filter={"tags": {"contains": "cluster/guard-narrower-than-its-name"}}` — **n=8, 2026-09-01, by query**, re-derived here rather than carried. Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me**; the 8th was filed the same night and is named under *Promotes to*.
 **Blind party:** everyone downstream of the name. The implementer knows the scope at the moment they write it; every later reader knows only the name, and the name is what they reason with. This is `OB-1`'s shape — the parameter the author's context supplied for free.
-**Promotes to:** **spread adjudicated 2026-09-01 — it clears, and n is 8 rather than 7.** The 8th is `2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md`: a session-attribution hook covering the **cross-path** case and not the **intra-path** one that motivated it — one session's file gaining another's lines between the check and the `git add`. Shipping it as *"prevents `d617051b`"* would have been this class inside a guard against capture; its header says so instead.
+**Promotes to:** `not yet` — **spread adjudicated 2026-09-01 — it clears, and n is 8 rather than 7.** The 8th is `2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md`: a session-attribution hook covering the **cross-path** case and not the **intra-path** one that motivated it — one session's file gaining another's lines between the check and the `git add`. Shipping it as *"prevents `d617051b`"* would have been this class inside a guard against capture; its header says so instead.
 
 Two units, both defensible. By **subsystem: 4** — the librarian-managed-file guard family (3), worktree awareness (3), the shell/`run_command` gate (1), git pre-commit hooks (1). By **distinct guard: 6** — `is_librarian_artifact` carries two members and the `EnterWorktree` post-hook carries two, so the member count overstates how many *guards* are implicated. Classification remains single-party: summaries read, not full bodies.
 
@@ -808,7 +888,7 @@ Two live examples visible from this session without consulting the archive. `car
 **Claim:** A parameter is accepted at the boundary — it validates, the call succeeds — and some path downstream discards it. The caller has positive evidence the value was set, because nothing rejected it, and no later observation distinguishes "applied" from "accepted and dropped".
 **Members:** `filter={"tags": {"contains": "cluster/accepted-parameter-silently-dropped"}}` — n=15, 2026-09-01, by query after the archive backfill pass (13 newly tagged, 2 moved from `IC-3`). Single-party classification — see the Index caveat. **Provenance: three or more instances identified by the 2026-08-31 archive backfill pass (`8b13b5f3`), unverified by me.**
 **Blind party:** the caller, and specifically because acceptance is the only feedback the interface gives. Rejection is loud; silent discard is indistinguishable from success at every point they can observe.
-**Promotes to:** **spread adjudicated 2026-09-01 — it clears.** Six subsystems across the 16 members: librarian `artifact`/`find`/`update_entry` (7), librarian `audit_doc_refs` (2), the cross-cutting `workspace=` pin (3 — `edit_code`, `memory`, `artifact(find)`), file tools (1), the friction probe (1), the CLI (1), plus `tracker_design` (1, added 2026-09-01). **One caveat kept rather than smoothed:** the workspace-pin trio is arguably *one* mechanism at three call sites, not three members, so an independent-mechanism count is lower than 16 — the raw tag count is a partition of *bug files*, not of causes. Both numbers are defensible for different questions; neither is quotable without its unit.
+**Promotes to:** `not yet` — **spread adjudicated 2026-09-01 — it clears.** Six subsystems across the 16 members: librarian `artifact`/`find`/`update_entry` (7), librarian `audit_doc_refs` (2), the cross-cutting `workspace=` pin (3 — `edit_code`, `memory`, `artifact(find)`), file tools (1), the friction probe (1), the CLI (1), plus `tracker_design` (1, added 2026-09-01). **One caveat kept rather than smoothed:** the workspace-pin trio is arguably *one* mechanism at three call sites, not three members, so an independent-mechanism count is lower than 16 — the raw tag count is a partition of *bug files*, not of causes. Both numbers are defensible for different questions; neither is quotable without its unit.
 **Mechanism status:** **partial** — a behavioural probe exists and works, on 2 of ~7 candidate tools.
 
 - **Shipped:** `every_action_labelled_schema_key_is_honored_by_that_action`, on `artifact` (`src/librarian/tools/artifact.rs`) and `librarian` (`src/librarian/tools/librarian.rs`, added 2026-09-01). For each schema key labelled `<action>:`, it calls that action twice — once with required params, once with the key set to a value **ill-typed for its declared schema type**. An honoured key is type-checked, so the calls differ; a discarded key is dropped by serde, so they are identical, and *identical is the defect*.
