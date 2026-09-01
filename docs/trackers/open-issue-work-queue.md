@@ -110,6 +110,9 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-61 | 3 | ZOMBIE WATCH: `references` answers a warming LSP with `symbol not found` | open (**watch, not work**) — re-open trigger is `symbol not found` only; a timeout and a guarded zero are outside it, and BL-49 was checked against it | `d25aa6db7b4e6367` |
 | BL-62 | 3 | ZOMBIE WATCH: two Windows CI tests flake on wall-clock/race assumptions | open (**watch, not work**) — check the wine skip-list first; W-64 took it 32 → 8 with every survivor classified | `e817931ef9d51dd0` |
 | BL-63 | 3 | ZOMBIE WATCH: `symbols` search mode 0-matches then succeeds on retry | open (**watch, not work**) — Bug A fixed, Bug B mitigated + instrumented; read the instrumentation before treating it as live | `523233935cc53bc4` |
+| BL-69 | 1 | Repair the 3 files with an unterminated fence | **done** 2026-09-01 — all three were one defect: a nested fence closing its enclosing ```markdown block early. Two widened to ````, one stray trailing delimiter deleted. `unterminated_fence` 3 → 0 | — |
+| BL-70 | 1 | Catalog-integrity sweep — the 3 IN-REPO doctor findings | open — three, not six: the other half of what doctor reports under these checks lives in the whatsapp and eduplanner-ui repos and is not ours to fix | — |
+| BL-71 | 1 | Triage the link-graph findings, and test whether the volume gate discriminates | open — likely a CHECK defect, not 26 repairs: `SHA-N`/`UTF-N`/`RFC-N` are prose acronyms, and the documented "citation-volume threshold" selects FOR them because acronyms are the highest-volume tokens in a technical corpus | — |
 
 > **Params and body reconciled again** (2026-08-16, second pass — 31 rows). The
 > previous reconciliation held for status but not for **ids**: BL-26 and BL-27 were
@@ -1231,6 +1234,56 @@ Verify: `doctor` `params_behind_body` 2 → 1.
 The surviving hole is concrete rather than hypothetical: `stefanini/…/june-fixes-review-followups.md` holds 8 `CR` entries, defines none of them, and declares no `entry_prefix` — so a wholly-broken namespace is **still** invisible, which is the exact defect BL-41 reports, surviving its own fix. The bug file predicted this limit ("improves coverage without completing it"); it is now instantiated.
 
 Remedy is one frontmatter line per ledger. Both targets are outside the working dirs of the session that shipped BL-41, so it needs the owner's go-ahead — and it shares its two files with BL-39 step 4's remainder, so doing them together makes one citation sweep instead of two.
+### BL-69 — repair the 3 files with an unterminated fence
+
+Found by the `unterminated_fence` check shipped at `800f1dec`. Three catalogued plans reach
+EOF with a fence open, so every line below the opener is read as code by line-anchored
+scans:
+
+| file | opener |
+|---|---|
+| `docs/superpowers/plans/2026-02-28-prompt-injection-design.md` | L180 |
+| `docs/superpowers/plans/2026-05-01-call-graph.md` | L1326 |
+| `docs/superpowers/plans/2026-06-19-codescout-pi-integration.md` | L466 |
+
+Each needs a **close-vs-delete judgement read from the surrounding prose** — which is why
+the check ships with no `fix=` mode and why the repair was deliberately not folded into the
+commit that found them.
+
+### BL-70 — catalog-integrity sweep: the 3 in-repo doctor findings
+
+**Three, not six** — half of what `doctor` reports under these checks is in *other* repos
+and is not codescout's to fix: two `worktree_scoped_row` under
+`/home/marius/work/claude/whatsapp`, one `params_status_drift` in `eduplanner-ui`. Counting
+before partitioning is the whole point of this row.
+
+- **`entry_without_definition`** — `docs/trackers/provenance-subsystem.md`, 38 of 68 `PV-N`
+  rows lack a heading *in this file*. **Read before fixing:** the finding itself says all 31
+  cited ones are defined in a sibling artifact, which may be the intended split.
+- **`params_behind_body`** — `docs/trackers/test-escape-hardening.md`, `I-8` is anchored in
+  the body with no `params` row, so it is absent from every `entry_filter` query.
+- **`params_status_drift`** — `docs/trackers/claim-decay.md`, `DC-2` params says
+  `check-shipped` while its body `Status:` says `fixed-once`.
+
+### BL-71 — triage the link-graph findings, and test whether the volume gate discriminates
+
+26 findings, but the likely shape is a **check defect, not 26 citation repairs**.
+
+`cited_prefix_with_no_definer` (14) is dominated by prose acronyms: `SHA-N` is `SHA-256`
+(19 citations), `UTF-N` is `UTF-8` (20), plus `RFC-N`, `GPT-N`, and `N-N` — the literal
+`PREFIX-N` people write when *describing* the convention.
+
+`get_guide("tracker-conventions")` says the check *"fires only above a citation-volume
+threshold to stay quiet on incidental prose"*. But common acronyms are the **highest**-volume
+tokens in a technical corpus, so volume is anti-correlated with the property it was chosen
+to select for. `link_scan`'s resolver already suppresses these correctly
+(`src/librarian/tools/link_scan/resolve.rs`, `prefix_is_known`); `doctor`'s check is its
+deliberate complement and inherits no such gate.
+
+Steps: triage the 14 into real vs acronym; check whether `TC-N` (106 citations) is genuine;
+then decide between reusing the resolver's suppression and adding a shape rule. Handle
+`entry_cited_from_outside_but_undeclared` (12) separately — that one is a real worklist and
+should not be swept up in a check fix.
 ## Phase descriptions
 
 Phases encode **readiness, not importance.** A phase-3 item may matter far more than a phase-1 one;

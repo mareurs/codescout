@@ -1257,7 +1257,7 @@ Per `CLAUDE.md § Documenting Features on experiments`.
 
 - [ ] **Step 1: Write the docs page**
 
-```markdown
+````markdown
 # `call_graph`
 
 > ⚠ Experimental — may change without notice.
@@ -1300,7 +1300,7 @@ across multi-session edits.
 - Cross-project edges are not supported in v1.
 - `Direction::Callees` via tree-sitter fallback is best-effort — described in
   the implementation; check `docs/TODO-tool-misbehaviors.md` for current status.
-```
+````
 
 - [ ] **Step 2: Add to index**
 

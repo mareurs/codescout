@@ -463,4 +463,3 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - **bash steering is a one-time `tool_result` hint, not a block** — Pi's `tool_call` return only controls blocking, so a non-blocking nudge must come from `tool_result`. Hardening into a selective block is a future option.
 - **Global `AGENTS.md`** applies codescout guidance in every Pi session (including non-code dirs, where the extension no-ops). Acceptable for a daily-driver; scope to project `.pi/` later if it becomes noise.
 - All `contrib/pi/` work stays on `experiments`; promotion to `master` follows the Standard Ship Sequence if desired.
-```

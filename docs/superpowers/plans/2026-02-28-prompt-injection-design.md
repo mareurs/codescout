@@ -148,7 +148,7 @@ written). Focus on *how to navigate* with code-explorer specifically.
 **Addition 2 — Post-onboarding guidance section** (appended at the very end, after the
 "Confirm with user" step):
 
-```markdown
+````markdown
 ## After Memories Are Created
 
 After confirming memories with the user, deliver this brief guide:
@@ -177,7 +177,7 @@ navigation of this codebase. Update it anytime as you learn what works:
 4. `find_symbol("TargetName", include_body=true)` — read it
 
 ---
-```
+````
 
 ---
 
