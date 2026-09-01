@@ -279,7 +279,7 @@ child while growing the file reads as a benign append, so
 Accepted keys: `status, title, owners, tags, topic, time_scope, extra, body, body_edits, params`. `extra` is a map of custom frontmatter keys (YAML-only — round-trip-safe, surfaced by `get`, but NOT catalog-indexed / not filterable via `find`; a `null` value deletes a key).
 
 ## librarian(action=...) — Reference
-<!-- serves: librarian.reindex, librarian.link_scan, librarian.doctor, librarian.audit_doc_refs, librarian.context, librarian.tracker_design, librarian.legibility_scan -->
+<!-- serves: librarian.reindex, librarian.link_scan, librarian.doctor, librarian.audit_doc_refs, librarian.context, librarian.tracker_design, librarian.legibility_scan, librarian.audit_log -->
 
 | Action | What it does |
 |--------|-------------|
@@ -292,6 +292,7 @@ Accepted keys: `status, title, owners, tags, topic, time_scope, extra, body, bod
 | `legibility_scan` | Rank code-legibility refactor candidates from usage.db friction + the symbol index. Writes the `legibility-backlog` tracker (open targets by observed cost; auto-closes refactored ones). `write=false` for dry-run. |
 | `doctor` | Read-only catalog drift scan (forward-slash form, NTFS ADS colons, `..` segments, missing-on-disk files, `abs_path_must_be_absolute`). Manual — run after large refactors or when downstream LIKE queries return empty. Returns a per-check JSON report; does NOT mutate catalog state. |
 | `merge_worktree` | Fold a worktree session's shadow rows onto their main twins (delta-only) and close the registration. See § Worktree overlay below. |
+| `audit_log` | Query the catalog audit trail — who mutated what, when; actor 'unknown' = a writer that did not identify itself (foreign process). `prune_before_ms` + `confirm` prunes (dry-run by default). |
 
 **context params:**
 ```

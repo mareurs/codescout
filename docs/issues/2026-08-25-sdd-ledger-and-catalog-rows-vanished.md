@@ -367,6 +367,10 @@ the fourth cannot be settled by inspection. The only thing that would answer it 
 evidence captured *while it happens*: a write audit trail on the catalog, or at minimum
 recording the writing process on `artifact` mutations. Propose that first; investigating
 again without it repeats a search whose outcome is already known.
+
+Prospective instrument now exists: `librarian(action="audit_log")` records every catalog
+mutation incl. foreign writers (T-1, this plan). The historical loss stays
+undeterminable; any recurrence is now answerable. Re-open trigger unchanged.
 ## References
 
 - `docs/superpowers/plans/2026-08-23-hidden-information-eval.md` — the plan whose
