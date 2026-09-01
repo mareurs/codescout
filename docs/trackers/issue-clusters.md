@@ -295,13 +295,67 @@ an SDD run, and lives in `CLAUDE.md` § *Testing Discipline* already. What never
 indexing the corpus against it — so *"which of our bugs instantiate the vacuous-assertion rule?"*
 has no answer, and nobody can tell whether the rule is working. The class exists to make an
 existing rule measurable rather than to earn a new one.
-**The 2026-09-01 archive pass had no independent second read, and that is the caveat to carry.**
+**The 2026-09-01 archive pass was single-party; an independent blind second read has since run, and agreed on 37 of 43.**
 One party (`codescout-e8`) did both the classification and the tag application for all 40 files
 behind IC-13 (16), IC-14 (7), IC-15 (15) and IC-16 (2), plus the two IC-3 → IC-15 moves. Nobody
 re-checked those assignments against the class claims. That is not a reason to distrust the
 counts; it is the difference between them and the `IC-9` withdrawal, where a second read is
 exactly what caught two misfits. A reader in a month cannot otherwise tell which of the two
 regimes produced a given number.
+
+**The second read, run 2026-09-01 — 37 of 43 agreed.** The population was every file *currently*
+carrying one of the four tags: **43**, being the pass's 40 plus three that acquired the tag
+elsewhere. Blindness was structural rather than instructed — working copies had the `cluster/`
+slug **and** every `IC-N` token redacted (the second mattered: these files cite each other's
+classes in prose, so the obvious redaction alone leaks), all seventeen class claims were offered
+rather than the four under audit so a misfit could surface as *any* class, and the ledger and
+`docs/issues/` were off-limits to the readers. Three independent readers, one per batch.
+
+Agreement **37/43 (86%)**, by on-disk class: IC-13 14/16, IC-14 7/8, IC-15 13/16, IC-16 3/3.
+Calibration held — 27 of 28 high-confidence rows agreed, against 9 of 13 med and 1 of 2 low — so
+the six disagreements are the arguable boundary cases and not scatter. **They are recorded, not
+applied**; each is a live adjudication:
+
+| file | on-disk | second read | conf |
+|---|---|---|---|
+| `foreign-index-guard-passed-a-peers-staged-deletion` | IC-14 | **IC-10** (2nd IC-17) | med |
+| `doctor-outside-roots-sample-is-unranked-and-unreachable` | IC-13 | **IC-15** | med |
+| `capped-get-body-round-trips-into-truncating-write` | IC-13 | **IC-14** (2nd IC-13) | high |
+| `cli-artifact-drops-time-scope-and-extra` | IC-15 | **IC-3** | med |
+| `update-entry-drops-entry-silently-when-fields-is-also-present` | IC-15 | **IC-14** (2nd IC-15) | med |
+| `friction-target-omits-command-and-file-path` | IC-15 | **IC-14** (2nd IC-13) | low |
+
+The first row is the one with a consequence: `IC-10` sits at n=2 with *"instance 3 meets it"*
+recorded as its own promotion condition, so that single retag would trip it. That is the
+preamble's systematic-loss mechanism caught in the act — an instance filed under a well-developed
+class (n=8) whose claim belongs to a threshold-adjacent one — and it is the argument for
+adjudicating these rather than letting them stand.
+
+**The preamble's predicted DIRECTION of loss was pre-registered and did not survive.** After the
+first batch returned, two disagreements both moving toward the smaller class looked like
+confirmation, and the test was stated before the other two batches ran. It failed: across all 43
+the recorded second choices concentrate on `IC-2` (6) and `IC-3` (6) — the two largest classes
+after IC-6, not threshold-adjacent ones. This is a null rather than a refutation, and the
+confound is why: IC-2 and IC-3 are broad *mechanism* classes overlapping everything, so their
+frequency as seconds may measure class breadth rather than promotion pressure. Published because
+a re-derivation that disconfirms otherwise leaves no artifact at all (`CLAUDE.md` § *Testing
+Discipline*).
+
+**Two readers independently hit the same wall in `IC-13`'s claim text.** Its *"returned WITHOUT A
+MARKER"* clause is strictly false for at least four members where the truncation signal is
+computed **correctly** and then fails to reach the reader — dropped at the buffering boundary, or
+left as an inert JSON key the text renderer discards. Both placed those under IC-13 as
+nearest-available while naming the mismatch, and one reached for IC-3's *"no call site connects
+them"* as the better mechanism. **The class's claim, not the tags, is what needs the ruling.**
+
+Also surfaced and not acted on: three **split candidates** (the `ollama-large-batch` file's second
+vacuity — a not-compiled test reporting `0 passed; 19 filtered out`, exit 0, character-identical
+to a pass; `residual-workspace-pin-gaps`' finding 6, which the file itself calls *"never wired for
+pinning in the first place"* and so states IC-3's claim standing alone; and
+`artifact-find-ignores-workspace-pin`'s `scope="all"` hint pointing at the parameter already
+passed), and three **no-fit** candidates for which no class's *mechanism* is present — a selector
+silently narrower than the population it names, nondeterministic sampling (`SELECT` with no
+`ORDER BY`), and a front-anchored window that structurally omits the item the caller needs.
 
 Each tag was matched against the class's **stated claim**, never the bug file's title — title
 matching is what put the two misfits in `IC-9` four hours earlier, because *"a test that passes
