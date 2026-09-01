@@ -8,6 +8,7 @@ tags:
 - subagent
 - iron-law-6
 - prompts
+- cluster/gate-keyed-on-unobservable-event
 closed: 2026-09-01
 unverified: 'Both halves are committed and gated: codescout 019b1c5b on experiments, claude-plugins ac1b1fa on branch fix/subagent-guide-fetch-directive. That branch is NOT merged to main -- the only outstanding item. Do not archive until it merges.'
 ---
