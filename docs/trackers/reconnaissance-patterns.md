@@ -6669,7 +6669,15 @@ Following it would have committed the ledger **carrying the peer's `n=2`** witho
 
 **Status:** validated — one datapoint, but the mechanism is inspectable rather than inferred: the guard's text is in `.pre-commit-config.yaml`'s `foreign-index` hook and contains no notion of inter-file coupling.
 
-**Promote-when:** a second instance where a guard's or linter's suggested fix is locally correct and globally wrong. Then it belongs next to `R-49` in the *proposed fix is a claim* family rather than as its own entry.
+**Deepened 2026-09-01, and deliberately NOT counted as a second instance.** `codescout-b7`, reading `scripts/pre-commit-unreviewed-content.sh` to check an unrelated claim, found the same prescription is narrower in a **second, independent** way: `git commit -- <paths>` commits the **working tree** at those paths, so on a shared checkout it also takes whatever a concurrent session wrote to the *same* file between your edit and your commit. The hook's own header says so and states the bound — *"it narrows the window, it does not close it — only a per-session worktree does that."* So the remedy trades index-capture for **worktree-capture** rather than closing capture, and *"commits only those paths regardless of index state"* was never the safety property it reads as.
+
+That is this entry's law firing on this entry's own worked example, twice over, in opposite directions: the remedy ships a red `HEAD` under coupling **and** it leaves a narrower capture window open. Both were discovered by reading the guard's implementation rather than its message.
+
+**It is one instance, not two, and the distinction is the point.** Both findings are about the *same* prescription, so counting them separately would promote this entry on a doubled datapoint — which is the shape `IC-22`'s uncounted-instances note refuses one ledger over. The `Promote-when` below stands unfired.
+
+**One mitigation worth knowing, measured rather than assumed:** for a pathspec commit that was `git add`ed first, `pre-commit-unreviewed-content.sh` compares the about-to-be-committed blob against the **real index** blob and refuses on any difference — so a peer's same-path write landing after your `add` is caught, not captured. The residual window is between reading the diff and running `add`. Audited on this session's own three pathspec commits touching shared files: no unintended capture, and the one that carried a peer's edit did so knowingly and with their consent recorded in the message.
+
+**Promote-when:** a second instance where a guard's or linter's suggested fix is locally correct and globally wrong — arising from a **different** guard, not a further consequence of this one. Then it belongs next to `R-49` in the *proposed fix is a claim* family rather than as its own entry.
 
 **Valid:** invariant
 
