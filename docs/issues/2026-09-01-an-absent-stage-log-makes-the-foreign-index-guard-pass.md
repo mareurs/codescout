@@ -47,6 +47,51 @@ A	peerfile.txt
 `EXIT=0` with `peerfile.txt` staged is the capture the guard exists to prevent, and it emits
 nothing at all.
 
+
+## Escalation — a lost log does not merely fail open, it CROSS-CLAIMS
+
+**Measured 2026-09-01, after this file was first written.** The framing above ("absent log →
+guard passes") understates it. The log is rebuilt from `git diff --cached --raw` on every index
+write, and `:135` is `[ -n "$owner" ] || owner="$claimant"` — so a pair with no surviving row
+is assigned to **whoever caused the current write**, not to `-`.
+
+Consequence: with the log lost, one session staging **one** file becomes the recorded owner of
+**every** currently-staged path, including its peers'. Session A had staged `f.txt` and `g.txt`;
+the log was removed; session B then staged only `h.txt`:
+
+```
+bbbb-B   f.txt     <- A's work, now recorded as B's
+bbbb-B   g.txt     <- A's work, now recorded as B's
+bbbb-B   h.txt     <- the only file B staged
+```
+
+The foreign-index guard then sees nothing foreign and passes **silently** — which is the
+production capture at `3a422b31` that started this whole line of work, reached by a second road.
+
+**This inverts the direction, and that is why it matters more than the original framing.**
+`a987df96`'s ruling is *unknown over-refuses recoverably, where `mine` under-refuses silently —
+prefer the noisy wrong answer where the quiet one is unobservable.* Both `e3c75306` (seed at
+install) and `a987df96` (non-staging writes record `-`) patch specific entry points toward that
+rule, but the **fallback itself still defaults to `claimant`**, so the cold-log path lands on
+exactly the direction the ruling forbids.
+
+**Second measured property — `-` is sticky, and it explains a peer's live symptom.** The lookup
+at `:131-134` keys on `(blob, path)`, so once a pair is stamped `-` the true owner re-staging
+*other* files never recovers it. Verified: A staged `f.txt` (owner A); log removed; a peer
+`git status` stamped `f.txt` as `-`; A then staged `g.txt` — `g.txt` got `A` and `f.txt` stayed
+`-`. It recovers only when the file's **content** changes, minting a new blob and therefore a
+new key. Peer `codescout-68` reported `docs/trackers/bug-fix-session-log.md` sitting at `-`
+despite a bare `git add` with a live session id, and hypothesised a `/proc/$PPID` divergence
+under Claude Code's Bash tool. **That hypothesis is rejected** — a bare `git add` after a plain
+`cd` in a Bash tool call attributes correctly, measured. Stickiness explains it without it.
+
+**Why the fix is not obvious, and why it is not attempted here.** "Record `-` when the log is
+cold" is wrong as stated: a genuinely new pair created by the current staging op *should* be
+claimed by the stager, and from the rebuild alone the hook cannot distinguish "pair I just
+created" from "pair whose row was lost". Distinguishing them needs a signal the rebuild does
+not carry — the pathspec from argv, or a durable marker that the log was once non-empty. That
+is a design decision with a real failure mode either way, so it is left for a ruling rather
+than guessed at.
 ## Reproduction
 Verified 2026-09-01 in a throwaway repo under `$TMPDIR`; the real checkout was never touched.
 

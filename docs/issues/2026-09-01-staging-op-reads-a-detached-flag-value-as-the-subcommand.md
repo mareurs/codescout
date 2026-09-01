@@ -1,18 +1,18 @@
 ---
 id: '882fea0f3d66d72f'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: staging_op reads a detached global-flag value as the subcommand, so `git -C <path> add` loses the stager'
 owners:
 - marius
 tags:
 - cluster/addressing-without-an-escape-hatch
-closed: ''
+closed: 2026-09-01
 opened: 2026-09-01
 owner: marius
 related: []
 severity: medium
-unverified: 'Impact direction is reasoned, not observed in production: `-` over-refuses (the recoverable direction per a987df96''s own ruling), so this generates FALSE REFUSALS rather than captures. No production false refusal has been observed yet — the mechanism is measured, its live cost is not.'
+unverified: 'Fix and mechanism are measured and pinned (7278508e, 5 regression cases, 3 confirmed RED first). What was never counted is the IMPACT: no production false refusal was ever observed or tallied, so the cost claim stays inferential. Peer codescout-cc confirmed continuous live use of the `git -C <abs>` form during the defect''s lifetime, which establishes exposure, not incidents.'
 ---
 
 ## Summary
@@ -104,29 +104,64 @@ then cannot attribute anything staged that way. Following one guard defeats the 
 collision is the finding, not the parse bug alone.
 
 ## Fix
-Not attempted. The shape: teach `staging_op()` which global flags consume a following token
-and skip both, e.g. a `-C|-c|--git-dir|--work-tree|--namespace|--exec-path)` arm that sets a
-skip-next flag. Keep `*=*` for the joined form.
 
-Whatever lands must be pinned by a case per invocation form — a single `git add` case is
-monotone under this defect and passes against the broken parser (see below).
+**Fixed at `7278508e` on `experiments`** (patch-id `b631c794728005941272b2191a709329644ecccd`).
 
+`staging_op()` now carries a `_so_skip_value` flag and an arm listing the global flags that
+consume the **next** argv token — `-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`,
+`--exec-path`, `--super-prefix` — placed **before** the generic `-*)` arm so the joined form
+(`--git-dir=X`, one token) still falls through and consumes nothing.
+
+**The list is a hand-maintained subset and says so at the site.** Raised by peer `codescout-cc`
+during the fix as this bug's own `IC-6` shape: a closed enumeration over a namespace, which a
+seventh value-taking flag silently rejoins. Git exposes no way to ask which of its global flags
+take a value, so the enumeration cannot be derived — but it is **safe incomplete**, and that is
+the load-bearing property. An unlisted value-taking flag leaves its value to be classified
+below, where it hits `*) return 1` and the pair is recorded `-`. That is the **over-refusing**
+direction `a987df96` already chose: `-` is loud and recoverable, a wrong claim is silent. A
+future git flag can degrade attribution; it cannot fake it.
+
+Still out of scope, unchanged, and still stated in the script header: `git add -A` under a
+single session id, where every path reads as yours by construction.
 ## Tests added
-None yet. `tests/hooks-discrimination.sh` § *stager wins* asserts attribution **only** via
-plain `git add` / `git rm --cached`, so all 21 cases pass against the defect. This is CLAUDE.md
-§ *Testing Discipline*'s "mutate once per guarded SITE, not once per feature": the site here
-is the invocation form, and one form was sampled.
 
+**`tests/hooks-discrimination.sh`** § *stager wins*, five cases at `7278508e` — 21 → 26, all
+passing.
+
+Four assert the stager is recorded regardless of invocation form; the fifth is the
+discrimination in the other direction. **Three were confirmed RED against the parent commit
+before the fix**, failing with `want 'aaaa…' got '-'` — the feature missing, not a typo:
+
+| case | pre-fix |
+|---|---|
+| `git add f` | passed — the control |
+| `git -C <path> add f` | **RED** |
+| `git --git-dir=X --work-tree=Y add f` | passed (one token, caught by `*=*`) |
+| `git --git-dir X --work-tree Y add f` | **RED** |
+| `git -c k=v -C <path> add f` | **RED** |
+| `git -C <path> status` must NOT claim | passed — must hold in both worlds |
+
+The last one is what makes the set mutation-resistant rather than merely green: a fix that
+swallows one token after **every** flag, or that returns 0 whenever it cannot classify a token,
+passes all four positive cases and fails that one.
+
+Mutation discipline per CLAUDE.md § *Testing Discipline* — the guarded **site** here is the
+invocation form, and the pre-existing suite sampled exactly one of them, which is why 21 cases
+passed against this defect for the whole of its life.
 ## Workarounds
 Run staging commands with the cwd inside the repo (`cd "$P" && git add f`), or use the joined
 `--git-dir=`/`--work-tree=` form, which parses correctly.
 
 ## Resume
-Open. Mechanism measured and reproduced; fix and per-form test cases owed.
 
+N/A — root cause measured, fixed at `7278508e`, pinned by five regression cases.
+
+Archive is owed (`docs/issues/archive/`) once someone re-points the two citations of this file:
+`docs/issues/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md` § *References*
+and the `7c44a605` commit message. Deliberately not done in the same breath as the fix while
+four peer sessions are live in this checkout.
 ## References
 - `scripts/post-index-change-stage-log.sh:99-116` (`staging_op`)
 - `docs/issues/archive/2026-09-01-foreign-index-guard-passed-a-peers-staged-deletion.md` — the fix (`a987df96`) this defect survives
 - `tests/hooks-discrimination.sh` § *stager wins* — the suite that passes against it
 - `docs/issues/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md` — found in the same pass
-
