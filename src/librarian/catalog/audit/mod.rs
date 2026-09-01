@@ -24,6 +24,9 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
+pub(crate) mod host;
+pub(crate) mod shard;
+
 /// Tables under audit. Columns are read from live PRAGMA table_info at
 /// install time, so migration-added columns are always covered and a
 /// column-list drift can never break an open. row_id exprs are the one
