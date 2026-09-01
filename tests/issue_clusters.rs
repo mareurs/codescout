@@ -47,6 +47,18 @@ enum Verdict {
     Unknown(String),
 }
 
+/// The `cluster/<slug>` inside the first backtick pair of a `**Slug:**` line's tail.
+///
+/// Shared by [`valid_slugs`] and [`parse_member_counts`] so the two cannot disagree about what
+/// a slug declaration looks like — the second reads the same lines to key its counts, and a
+/// private copy here would be the exact drift the hook-agreement tests exist to prevent one
+/// layer up.
+fn backticked_cluster_slug(rest: &str) -> Option<String> {
+    let start = rest.find('`')? + 1;
+    let end = rest[start..].find('`')? + start;
+    rest[start..end].strip_prefix("cluster/").map(str::to_owned)
+}
+
 /// The closed set of slugs, read from the ledger's `**Slug:**` declarations.
 ///
 /// The ledger is the single source of truth: renaming a class there is what makes the
@@ -57,12 +69,17 @@ fn valid_slugs() -> BTreeSet<String> {
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
     text.lines()
         .filter_map(|l| l.strip_prefix("**Slug:**"))
-        .filter_map(|rest| {
-            let start = rest.find('`')? + 1;
-            let end = rest[start..].find('`')? + start;
-            rest[start..end].strip_prefix("cluster/").map(str::to_owned)
-        })
+        .filter_map(backticked_cluster_slug)
         // The ledger's own template declares `cluster/<slug>`; a placeholder is not a class.
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_lowercase() || c == '-'))
+        .collect()
+}
+
+/// [`valid_slugs`] over caller-supplied text, for fixture-driven tests.
+fn valid_slugs_from(text: &str) -> BTreeSet<String> {
+    text.lines()
+        .filter_map(|l| l.strip_prefix("**Slug:**"))
+        .filter_map(backticked_cluster_slug)
         .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_lowercase() || c == '-'))
         .collect()
 }
@@ -355,6 +372,66 @@ fn parse_index_counts(text: &str, valid: &BTreeSet<String>) -> BTreeMap<String, 
     out
 }
 
+/// The FIRST `n=<N>` on a `**Members:**` line, ignoring later ones.
+///
+/// Three entries quote a superseded count in the same sentence (*"Was 16 until…"*, *"It read
+/// n=…"*), so "any `n=`" would read a historical figure as the live one — the same defect
+/// [`parse_index_counts`] avoids by taking the cell immediately after the slug rather than the
+/// first number in the row.
+fn first_n_claim(rest: &str) -> Option<usize> {
+    let mut hay = rest;
+    while let Some(at) = hay.find("n=") {
+        let digits: String = hay[at + 2..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if let Ok(n) = digits.parse::<usize>() {
+            return Some(n);
+        }
+        hay = &hay[at + 2..];
+    }
+    None
+}
+
+/// `slug -> n`, parsed from each `## IC-` section's `**Members:**` line.
+///
+/// **Why this is a second parser and not a widening of [`parse_index_counts`].** The Index cell
+/// and the `**Members:**` claim are different assertions about the same quantity, published in
+/// different places, and they drift independently: measured 2026-09-01, the Index cells were
+/// gated from 14:27 while four prose judgement fields silently kept reasoning from superseded
+/// counts until a peer swept them by hand (`0c5bab41`). The gated number is not the one a reader
+/// acts on.
+///
+/// The slug is taken from the section's own `**Slug:**` line and RESET at every `## IC-`
+/// heading, so a section that declares a slug but no `**Members:**` line cannot leak its slug
+/// into the next section's count. Pure over `text` so
+/// [`the_member_claim_parser_discriminates`] can feed it a ledger whose right answers are known.
+fn parse_member_counts(text: &str, valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
+    let mut out = BTreeMap::new();
+    let mut slug: Option<String> = None;
+    for line in text.lines() {
+        if line.starts_with("## IC-") {
+            // A new section invalidates the previous one's slug, whether or not it was used.
+            slug = None;
+        } else if let Some(rest) = line.strip_prefix("**Slug:**") {
+            slug = backticked_cluster_slug(rest).filter(|s| valid.contains(s));
+        } else if let Some(rest) = line.strip_prefix("**Members:**") {
+            if let (Some(s), Some(n)) = (slug.take(), first_n_claim(rest)) {
+                out.insert(s, n);
+            }
+        }
+    }
+    out
+}
+
+/// [`parse_member_counts`] over the live ledger.
+fn member_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
+    let path = repo_root().join(LEDGER);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    parse_member_counts(&text, valid)
+}
+
 /// [`parse_index_counts`] over the live ledger.
 fn declared_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
     let path = repo_root().join(LEDGER);
@@ -397,6 +474,90 @@ fn actual_counts(valid: &BTreeSet<String>) -> BTreeMap<String, usize> {
 /// inside one session by peer sessions filing bugs into the same checkout, so a sweep's own
 /// result is falsified by the next commit and no amount of care holds it
 /// (`cluster-promotion-session-log:F-4`).
+/// Both ledger parsers agree with the hook script on shapes the live corpus does not contain.
+///
+/// [`the_hook_script_agrees_with_this_gate`] compares the two derivations over the **live**
+/// ledger, and that corpus is not adversarial: every real section declares a `**Slug:**` before
+/// its `**Members:**`, so the section-boundary reset is unreachable from it. Measured — deleting
+/// that reset from either language leaves the corpus-driven comparison green. This feeds both
+/// implementations the same adversarial fixture instead.
+///
+/// The fixture is [`the_member_claim_parser_discriminates`]'s, deliberately: the Rust parser is
+/// pinned against known answers there, so agreeing with it here means the Python is pinned to
+/// the same answers rather than merely to whatever Rust currently does.
+///
+/// Mutation that must kill this: drop the `## IC-` reset, or the first-`n=` rule, from the
+/// PYTHON side — the Rust side is already covered by the discriminator.
+#[test]
+fn the_ledger_parsers_agree_on_a_fixture() {
+    let ledger = "\
+## IC-1 — first
+**Slug:** `cluster/alpha`
+| IC-1 | first | `cluster/alpha` | 7 | not yet — **10 share one layer** | none yet |
+**Members:** `filter={...}` — **n=7, 2026-09-01, re-derived**. Was 16 until n=3 moved out.
+
+## IC-2 — declares a slug but never states a count
+**Slug:** `cluster/beta`
+**Claim:** something.
+
+## IC-3 — states a count but declares no slug
+**Members:** `filter={...}` — n=99, by query.
+
+## IC-4 — fourth
+**Slug:** `cluster/gamma`
+| IC-4 | fourth | `cluster/gamma` | 2 | not yet | none yet |
+**Members:** `filter={...}` — n=2, by query.
+";
+
+    let mut child = Command::new("python3")
+        .args(["scripts/pre-commit-ledger-counts.py", "--fixture-ledger"])
+        .current_dir(repo_root())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(ledger.as_bytes())
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    assert!(
+        out.status.success(),
+        "script exited {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let got: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("script must emit JSON");
+
+    let valid = valid_slugs_from(ledger);
+    for (field, mine) in [
+        ("declared", parse_index_counts(ledger, &valid)),
+        ("claimed", parse_member_counts(ledger, &valid)),
+    ] {
+        let theirs: BTreeMap<String, usize> =
+            serde_json::from_value(got[field].clone()).expect("map of slug -> count");
+        assert_eq!(
+            mine, theirs,
+            "`{field}` disagrees on the adversarial fixture — the live-corpus agreement test \
+             cannot see this, because the corpus contains no section that consumes a slug it \
+             did not set.\n\
+             Reproduce: printf '%s' \"<fixture>\" | python3 scripts/pre-commit-ledger-counts.py \
+             --fixture-ledger"
+        );
+    }
+
+    // The fixture must actually exercise the reset, or this test degrades into the one above.
+    assert_eq!(
+        parse_member_counts(ledger, &valid).get("beta"),
+        None,
+        "fixture no longer reaches the section-boundary leak; see \
+         the_member_claim_parser_discriminates for why the IC-2/IC-3 ORDER is load-bearing"
+    );
+}
+
 /// The hook script reads BOTH YAML tag styles, like [`cluster_tags`] does.
 ///
 /// Split from [`the_hook_script_agrees_with_this_gate`] because that one runs against the live
@@ -442,6 +603,134 @@ fn the_hook_script_agrees_on_both_yaml_tag_styles() {
     }
 }
 
+/// Every `**Members:** … n=N` prose claim equals the class's real membership.
+///
+/// The sibling of [`every_index_count_matches_the_corpus`], and NOT redundant with it. That one
+/// gates the Index table cell; this gates the number a reader actually acts on. They drift
+/// independently and did: the Index cells were gated from 14:27 on 2026-09-01, and four `IC-N`
+/// judgement fields went on reasoning from superseded counts until a peer repaired them by hand
+/// hours later (`0c5bab41`) — one of them claiming a member that a blind second read had already
+/// moved to another class.
+///
+/// A gated cell beside an ungated restatement is worse than neither, because the green tick
+/// reads as covering both.
+#[test]
+fn every_member_claim_matches_the_corpus() {
+    let valid = valid_slugs();
+    let claimed = member_counts(&valid);
+    let actual = actual_counts(&valid);
+
+    let mut drift: Vec<String> = claimed
+        .iter()
+        .filter(|(slug, n)| actual.get(*slug).copied().unwrap_or(0) != **n)
+        .map(|(slug, n)| {
+            format!(
+                "cluster/{slug} — **Members:** claims n={n}, corpus has {}",
+                actual.get(slug).copied().unwrap_or(0)
+            )
+        })
+        .collect();
+    drift.sort();
+
+    assert!(
+        drift.is_empty(),
+        "a `**Members:**` line disagrees with the corpus it summarises:\n  {}\n\n\
+         The Index cell may be correct at the same moment — it is gated separately, and the two \
+         drift independently. Re-derive rather than adjust by the delta:\n    \
+         git grep -clE '^[[:space:]]*-[[:space:]]*cluster/<slug>[[:space:]]*$' -- 'docs/issues/*.md' | wc -l\n\n\
+         Then check the `**Promotes to:**` field of the SAME entry in the same pass: it reasons \
+         from this number, is not gated by anything, and is where the four 2026-09-01 drifts \
+         actually did their damage.",
+        drift.join("\n  ")
+    );
+}
+
+/// Every declared class states a `**Members:**` count — the vacuity guard for the test above.
+///
+/// [`every_member_claim_matches_the_corpus`] is monotone under parser failure: a parser that
+/// matches nothing produces an empty drift list and passes. Measured by deliberate break — the
+/// same property [`every_declared_class_has_an_index_row`] exists for one layer up.
+#[test]
+fn every_declared_class_states_a_member_count() {
+    let valid = valid_slugs();
+    let claimed = member_counts(&valid);
+    let missing: Vec<&String> = valid.iter().filter(|s| !claimed.contains_key(*s)).collect();
+    assert!(
+        missing.is_empty(),
+        "declared classes with no parseable `**Members:** … n=N` line: {missing:?}\n\
+         Either the entry is missing its count, or `parse_member_counts` stopped matching — \
+         which would make `every_member_claim_matches_the_corpus` pass vacuously.\n\
+         Note the template placeholder is NOT in this set: its `## IC-N — <the class…>` heading \
+         declares `cluster/<slug>`, which `valid_slugs` rejects."
+    );
+}
+
+/// The member-claim parser reads the right count and keys it to the right class.
+///
+/// Pure-fixture, because a parser that only ever runs against the live ledger cannot be shown to
+/// read the right thing — it can only be shown not to have complained. Three discriminations,
+/// each a real shape in the corpus:
+///
+/// 1. **First `n=` wins.** Three live entries quote a superseded count in the same sentence.
+/// 2. **The slug is the section's own.** A `**Members:**` line is keyed by the `**Slug:**` above
+///    it, not by whichever slug was seen last.
+/// 3. **A slug does not survive its section.** `IC-2` declares one and states no count; `IC-3`
+///    states a count and declares no slug. Only the `## IC-` boundary reset stops `IC-3`'s 99
+///    being filed under `beta` — a silent wrong answer, the worst shape available here.
+///
+/// **The ORDER of `IC-2` and `IC-3` is what makes this test able to fail, and it is not
+/// cosmetic.** `slug.take()` already clears after any successful match, so a countless section
+/// anywhere else is harmless and the reset reads as dead code. The leak needs a section that
+/// *sets* the slug without consuming it, immediately followed by one that consumes without
+/// setting. Separate them and mutation F below passes with the reset deleted — measured, not
+/// argued: the first version of this fixture put `IC-3` last and did exactly that.
+///
+/// Mutation that must kill this: replace the `line.starts_with("## IC-")` arm with `false`.
+#[test]
+fn the_member_claim_parser_discriminates() {
+    let valid: BTreeSet<String> = ["alpha", "beta", "gamma"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let ledger = "\
+## IC-1 — first
+**Slug:** `cluster/alpha`
+**Members:** `filter={...}` — **n=7, 2026-09-01, re-derived**. Was 16 until n=3 moved out.
+
+## IC-2 — declares a slug but never states a count
+**Slug:** `cluster/beta`
+**Claim:** something.
+
+## IC-3 — states a count but declares no slug
+**Members:** `filter={...}` — n=99, by query.
+
+## IC-4 — fourth
+**Slug:** `cluster/gamma`
+**Members:** `filter={...}` — n=2, by query.
+";
+    let got = parse_member_counts(ledger, &valid);
+
+    assert_eq!(
+        got.get("alpha"),
+        Some(&7),
+        "must take the FIRST n=, not the 16 or the 3 later in the same sentence"
+    );
+    assert_eq!(
+        got.get("gamma"),
+        Some(&2),
+        "gamma's own count must survive the two malformed sections between them"
+    );
+    assert_eq!(
+        got.get("beta"),
+        None,
+        "beta states no count. ABSENT, never 0 — a 0 becomes a real comparison against a number \
+         nobody wrote — and never 99, which is IC-3's count leaking across a section boundary \
+         into the last slug that happened to be set"
+    );
+    assert_eq!(got.len(), 2, "exactly alpha and gamma: {got:?}");
+}
+
 /// The pre-commit hook script derives the same counts this gate does.
 ///
 /// `scripts/pre-commit-ledger-counts.py` duplicates the parse logic above on purpose: a cargo
@@ -485,6 +774,7 @@ fn the_hook_script_agrees_with_this_gate() {
     for (field, mine) in [
         ("declared", declared_counts(&valid)),
         ("actual", actual_counts(&valid)),
+        ("claimed", member_counts(&valid)),
     ] {
         let theirs: BTreeMap<String, usize> =
             serde_json::from_value(got[field].clone()).expect("map of slug -> count");

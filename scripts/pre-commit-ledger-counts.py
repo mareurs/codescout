@@ -65,17 +65,9 @@ def valid_slugs(ledger: str) -> set[str]:
     for line in ledger.splitlines():
         if not line.startswith("**Slug:**"):
             continue
-        rest = line[len("**Slug:**"):]
-        a = rest.find("`")
-        if a < 0:
+        slug = backticked_cluster_slug(line[len("**Slug:**") :])
+        if slug is None:
             continue
-        b = rest.find("`", a + 1)
-        if b < 0:
-            continue
-        inner = rest[a + 1 : b]
-        if not inner.startswith("cluster/"):
-            continue
-        slug = inner[len("cluster/") :]
         # The ledger's own template declares `cluster/<slug>`; a placeholder is not a class.
         if slug and all(c.islower() and c.isascii() or c == "-" for c in slug):
             out.add(slug)
@@ -115,6 +107,65 @@ def cluster_tags(fm: str) -> list[str]:
                 continue
             out.append(item.strip().strip("\"'"))
     return [t[len("cluster/") :] for t in out if t.startswith("cluster/")]
+
+
+def backticked_cluster_slug(rest: str) -> str | None:
+    """Mirrors `backticked_cluster_slug` -- the slug inside the first backtick pair."""
+    a = rest.find("`")
+    if a < 0:
+        return None
+    b = rest.find("`", a + 1)
+    if b < 0:
+        return None
+    inner = rest[a + 1 : b]
+    return inner[len("cluster/") :] if inner.startswith("cluster/") else None
+
+
+def first_n_claim(rest: str) -> int | None:
+    """Mirrors `first_n_claim` -- the FIRST `n=<N>`, never a later one.
+
+    Three entries quote a superseded count in the same sentence, so "any n=" would read a
+    historical figure as the live one.
+    """
+    hay = rest
+    while True:
+        at = hay.find("n=")
+        if at < 0:
+            return None
+        digits = ""
+        for ch in hay[at + 2 :]:
+            if not ch.isdigit():
+                break
+            digits += ch
+        if digits:
+            return int(digits)
+        hay = hay[at + 2 :]
+
+
+def parse_member_counts(ledger: str, valid: set[str]) -> dict[str, int]:
+    """Mirrors `parse_member_counts` -- each `## IC-` section's `**Members:** ... n=N` claim.
+
+    The Index cell and this claim are different assertions about the same quantity and drift
+    independently: measured 2026-09-01, the cells were gated while four prose judgement fields
+    kept reasoning from superseded counts until a peer swept them by hand (`0c5bab41`).
+
+    The slug RESETS at every `## IC-` heading, so a section declaring a slug but no `**Members:**`
+    line cannot leak its slug into the next section's count.
+    """
+    out: dict[str, int] = {}
+    slug: str | None = None
+    for line in ledger.splitlines():
+        if line.startswith("## IC-"):
+            slug = None
+        elif line.startswith("**Slug:**"):
+            cand = backticked_cluster_slug(line[len("**Slug:**") :])
+            slug = cand if cand in valid else None
+        elif line.startswith("**Members:**"):
+            n = first_n_claim(line[len("**Members:**") :])
+            if slug is not None and n is not None:
+                out[slug] = n
+            slug = None
+    return out
 
 
 def parse_index_counts(ledger: str, valid: set[str]) -> dict[str, int]:
@@ -168,6 +219,22 @@ def main() -> int:
             source = arg.split("=", 1)[1]
         elif arg == "--json":
             as_json = True
+        elif arg == "--fixture-ledger":
+            # Pure over stdin: both ledger parsers on a caller-supplied ledger, so
+            # `the_ledger_parsers_agree_on_a_fixture` can feed shapes the LIVE corpus does not
+            # contain. It does not contain them by construction — every real section declares a
+            # slug before its count, so the section-boundary reset is unreachable from the
+            # corpus and a corpus-driven agreement check passes with it deleted. Measured.
+            fixture = sys.stdin.read()
+            fv = valid_slugs(fixture)
+            print(json.dumps(
+                {
+                    "declared": parse_index_counts(fixture, fv),
+                    "claimed": parse_member_counts(fixture, fv),
+                },
+                sort_keys=True,
+            ))
+            return 0
         elif arg == "--fixture-tags":
             # Pure over stdin, so `the_hook_script_agrees_on_both_yaml_tag_styles` can feed
             # both YAML forms directly. The live corpus cannot exercise the inline arm:
@@ -186,27 +253,38 @@ def main() -> int:
 
     valid = valid_slugs(ledger)
     declared = parse_index_counts(ledger, valid)
+    claimed = parse_member_counts(ledger, valid)
     actual = actual_counts(valid, source)
 
     if as_json:
-        print(json.dumps({"declared": declared, "actual": actual}, sort_keys=True))
+        print(json.dumps(
+            {"declared": declared, "actual": actual, "claimed": claimed},
+            sort_keys=True,
+        ))
         return 0
 
     drift = [
-        f"cluster/{slug} — table says {n}, staged corpus has {actual.get(slug, 0)}"
+        f"cluster/{slug} — Index table says {n}, staged corpus has {actual.get(slug, 0)}"
         for slug, n in sorted(declared.items())
+        if actual.get(slug, 0) != n
+    ] + [
+        f"cluster/{slug} — **Members:** claims n={n}, staged corpus has {actual.get(slug, 0)}"
+        for slug, n in sorted(claimed.items())
         if actual.get(slug, 0) != n
     ]
     if not drift:
         return 0
 
     print(
-        "the Index table's `n` column disagrees with the corpus THIS COMMIT STAGES:\n  "
+        "a published count disagrees with the corpus THIS COMMIT STAGES:\n  "
         + "\n  ".join(drift)
         + "\n\n"
         "This reads the INDEX, so it is about what you are SHIPPING, not what is on disk.\n"
         "`cargo test --test issue_clusters` can be green at the same moment — it reads the\n"
         "working tree, and a partial commit ships a state that never existed there.\n\n"
+        "Two surfaces are checked and they drift independently: the Index table's `n` cell,\n"
+        "and each entry's `**Members:** ... n=N` prose. A row can be right while the sentence\n"
+        "restating it is stale — four such drifts were repaired by hand on 2026-09-01.\n\n"
         "Most likely: you staged the ledger and not the bug files whose tags it counts.\n"
         "  git status --short docs/issues     # what is not staged\n"
         "  git add <the bug file(s)>          # then re-commit\n\n"
