@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 86
-entry_high_water_W: 89
+entry_high_water_F: 87
+entry_high_water_W: 90
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -136,6 +136,7 @@ entry_high_water_W: 89
 | F-84 | 2026-09-01 | med | codescout-tool | open | A rebuild + `/mcp` refreshes the SERVER but not its LSP mux delegates. A `$PPID` walk proves this session fresh (pid 2695653, 15s post-build, `/proc/exe` with no ` (deleted)`), while six siblings ran the replaced inode — including this repo's own rust-analyzer mux, started 00:04:55, half an hour before the build. Binary mtime, the `~/.cargo/bin` symlink, a clean tree, the last source commit and the reconnect itself ALL read green; only `/proc/<pid>/exe` did not. R-89's fourth axis: delegate |
 | F-85 | 2026-09-01 | med | self-friction | open | Committed the exact IC-10 attribution error I had corrected a peer for eight minutes earlier, in the next message, about that class. On a shared checkout git author is identical and `git status` shows the UNION of all sessions' work, so author / adjacency / dirty-file lists carry ZERO ownership signal by construction — not a care problem, no heuristic extracts it. Five wrong attributions across three sessions in 15 min; all five resolved by asking the session, and only by asking. That protocol is the mechanism IC-10 lacks |
 | F-86 | 2026-09-01 | high | process | open | A guard's ABORT path is an unscoped write. My commit guard's success branch was scoped to one explicit path; its failure branch was a bare `git reset`, i.e. `--mixed HEAD` over the whole shared index. It fires exactly when a peer is active, because a foreign staged path is what trips it. Provable margin: the 16 staged paths landed as 0dea2246 at 00:44:39, my commit at 00:45:17 — any run of the old guard inside that window would have unstaged a batch its owner committed seconds later. The two runs that passed did so because nothing foreign happened to be staged, which is luck and reads identically to correctness. Remedy is to delete the branch, not scope it: `git commit -F <msg> -- <path>` has no mismatch to detect |
+| F-87 | 2026-09-01 | med | self-friction | fixed-verified | A double-quoted grep pattern let the shell expand `$tmp` to empty, so the search actually run was `mv -f ""` and its clean zero read as "the commit deleted this mechanism". The line is present at `:141`. The zero landed right after `git show --stat` had proved that commit DID touch the file, so a prior belief was already in place and the false negative confirmed it rather than looking odd. Queued next action was retracting a correct root cause in my own just-filed bug file. Fourth mechanism for the `R-3`→`R-113`→`R-77`→`R-79`→`R-104` law, which covers scope, shape and encoding but assumes the tool received the pattern its author wrote |
 
 ## Wins Index
 
@@ -234,6 +235,7 @@ entry_high_water_W: 89
 | W-88 | 2026-08-31 | high | **A fix option that names a file KIND is a hypothesis about which instances are live — count the population before preferring it for being narrow.** Running the reproduction before the plan (CLAUDE.md § Bug Tracking) on the gitignored-anchor bug: the filed mechanism was churn — a lock file and a db "rewritten on every index build" — and both are **inert here**, last changed 2026-04-17 and 2026-05-13, the retrieval backend having moved to remote Qdrant. What fires is the file's own second-order effect, and it is a different KIND of defect: all five sidecars recorded one identical `.codescout/project.toml` hash matching no file present, mtime three days before the re-anchor that supposedly refreshed it. A tracked sidecar hashing a gitignored file is a cross-machine oscillation with **no fixed point** — A refreshes, commits A's hash, B is permanently stale, B refreshing flips A — so unlike churn, the repair action creates the next defect, for someone not present to see it. Paired second win: three write sites, `refresh_hashes` never re-seeding, confirmed by per-site mutation rather than argued | The plan's option (2), "exclude by kind — lock files, `*.db`, `*.sqlite`, cache dirs", is a churn detector, and reads as the prudent narrow choice **until** you count what it catches. The worst instance is a small, stable, hand-edited TOML: no matching extension, no cache directory, never rewritten. It would have excluded the two already-inert anchors and left `project.toml` — the one firing in all five memories — anchored: 12 bad anchors down to 7, and **zero** of the eight false staleness reports resolved, behind its own green tests. Separately, a fix at `seed_anchors` alone (the site "anchor-selection time" most naturally names) would have compiled, passed the gate, and changed nothing observable, since every affected memory already had a sidecar and so reaches only the two other sites | validated |
 
 | W-89 | 2026-09-01 | high | **Compare `updated_at` across every response a cross-section claim rests on, before publishing it** — and escalate to `artifact_event(action="list")`'s `field_patch` `prev_bytes`/`new_bytes` to learn exactly which state each read saw. A versioned store read through more than one call is not a snapshot | Five discrepancies sitting in context (IC-3 20-vs-18; IC-13/14/15/16 0-vs-16/7/15/2) were **all** artifacts of the torn read [[F-83]] — both commits either side are internally consistent, so the ledger contradicted itself in none of sixteen rows. Publishing would have called a peer's correct in-flight backfill a five-row self-contradiction, inside a report whose declared subject was count-vs-prose staleness, which is what would have made it credible rather than suspect. Detection cost: one `artifact(get)`. The same check then fired AGAIN four minutes later on the same artifact — IC-3's target moved to `OB-7` and `cluster/doc-contradicted-by-code` went 1 → 4, carrying IC-11 over n≥3 — so it is the correct default for the whole window `ListAgents` reports a busy peer, not a one-off | validated |
+| W-90 | 2026-09-01 | med | **Re-verify `path:line` citations in artifacts THIS session authored, after any rebuild or peer commit.** Authorship is no exemption (`R-49`) — a bug file's citations are written at fix time, while peers are still moving the substrate under them | Filed bug cited `post-index-change-stage-log.sh:142` for the mv/rm fallback; the line is `:141` and `:142` is blank. No gate would have caught it: `audit_doc_refs` DOES scan `**/*.sh`, but `scan_code_comments` forces those findings to `Med` and CI runs `--fail-on high`, so it passes by design — the citation survives until a human follows it onto whitespace. The same pass also separated real drift from a false accusation: a `docs(issues):`-titled commit genuinely had changed the script, which looked like a capture, but the diff was a comment-only re-point of an archived path, coherent with its message. Without reading it, the plausible move was filing a third capture bug against a correct commit | validated |
 ## Category conventions
 
 Use a short kebab-case category to group similar frictions. Prior
@@ -8601,6 +8603,111 @@ the implementation?" versus "what does the failure branch touch that the success
 careful about?"). Cluster is `IC-1`/`IC-17` territory — a write reaching past the peers you can
 see — but `IC-17` was minted minutes ago (`0dea2246`) and I have not read it, so the
 classification is deliberately left to that ledger's owner rather than guessed at here.
+
+## F-87 — A double-quoted grep pattern let the shell eat `$tmp`, and the clean zero read as "the code was deleted"
+
+**Observed:** 2026-09-01, post-rebuild reconnaissance over two bug files filed earlier
+in the same session, verifying their `path:line` citations still held after peers landed
+two commits.
+
+**When:** Checking whether `71499331` — a commit titled `docs(issues): archive the
+foreign-index fix` that also touched `scripts/post-index-change-stage-log.sh` — had moved
+the mechanism my bug file cites.
+
+**Expected:** `grep -n 'mv -f "$tmp"' scripts/post-index-change-stage-log.sh` to print the
+atomic-replace line I had read minutes earlier.
+
+**Got:** zero output. Read at face value this says the `mv`/`rm` fallback was **deleted** by
+that commit — which would have made my just-filed bug file wrong about its own root cause,
+and the natural next action was to file a correction retracting it.
+
+The line is present, at `:141`. The pattern was written in **double quotes**, so the shell
+expanded `$tmp` before `grep` ever saw it and the search actually run was `mv -f ""`.
+`grep -c 'mv -f "\$tmp"'` (single-quoted) returns 1.
+
+**Probable cause:** A shell variable inside a double-quoted grep pattern is indistinguishable
+at a glance from a literal, and the failure has no error surface — `grep` is *given* a valid
+pattern and correctly reports no match for it. The zero is a true statement about a query I
+did not write. Compounding it: the query ran immediately after `git show --stat` proved that
+commit *had* changed the file, so a prior belief ("the script moved") was already in place and
+the zero confirmed it. That ordering is what made the false negative persuasive rather than
+suspicious.
+
+**Workaround:** Single-quote any grep pattern containing `$`, `` ` ``, `\`, or `!`. Where a
+pattern must be assembled from a variable, echo it before use. For "did this change land?",
+prefer comparing the artifact (`git show <sha> -- <path>`, checksum) over searching it — the
+diff answers the question the grep only approximates.
+
+**Severity:** med — no wrong artifact shipped, but the next action queued was a retraction of a
+correct root cause in `docs/issues/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md`.
+Cost had it landed: a bug file arguing against its own measured evidence, plus a peer acting on
+the retraction.
+
+**Status:** fixed-verified — pattern re-run single-quoted, line confirmed at `:141`, and the
+bug file's stale `:142` citation corrected in the same pass.
+
+**Valid:** invariant
+
+Shell expansion inside double quotes is a property of POSIX shells, not of this repo or this
+grep version.
+
+**Rests on:** `scripts/post-index-change-stage-log.sh:141` as of `71499331`; the *line number*
+is dated, the quoting law is not.
+
+**Fix idea / Pointer:** This is the skill's own "a search that finds nothing is evidence about
+the search" law (`R-3` → `R-113` → `R-77` → `R-79` → `R-104`) in a mechanism that chain does not
+yet name: the promoted text covers **scope**, **shape** and **encoding**, and this is a fourth —
+**the pattern was mutated by the shell before the tool ran**. Candidate `R-N` proposal: add
+*"quote the pattern"* to that bullet, since the existing three mechanisms all assume the tool
+received the pattern the author wrote.
+
+## W-90 — Post-rebuild recon caught a stale line citation in a bug file authored the same session
+
+**Observed:** 2026-09-01, reconnaissance run immediately after a `cargo rb` + `/mcp`
+reconnect, over two bug files filed earlier in the same session.
+
+**Pattern:** After a rebuild/reconnect, re-verify the `path:line` citations in any artifact
+**this session authored**, not just the code about to be touched. Authorship is not an
+exemption (`R-49`), and a bug file's citations are written at fix time while the substrate is
+still moving under peer commits.
+
+**Counterfactual:** `docs/issues/2026-09-01-an-absent-stage-log-makes-the-foreign-index-guard-pass.md`
+was filed citing `scripts/post-index-change-stage-log.sh:142` for the
+`mv -f "$tmp" "$log" … || rm -f "$tmp"` fallback. The line is `:141`; `:142` is **blank**. The
+off-by-one entered because the file was read once at `a987df96` and cited from that reading
+while `71499331` was landing.
+
+Nothing downstream would have caught it. `audit_doc_refs` **does** scan `**/*.sh`, but
+`scan_code_comments` forces those findings to **`Med`**, and CI runs `--fail-on high` — so the
+gate passes by design. The citation would have survived until a human followed it and landed on
+whitespace, in a file whose whole argument is that a silent wrong answer costs more than a loud
+one.
+
+**Confirming data points:**
+1. This session — `:142` → `:141`, corrected in the same pass that found it, before the file
+   was ever committed.
+2. Same pass, opposite direction: a commit titled `docs(issues): archive …` genuinely *had*
+   changed `scripts/post-index-change-stage-log.sh`, which looked like a capture
+   (`cluster/shared-resource-carries-no-owner` has 15 members). Reading the diff showed a
+   comment-only re-point of an archived path — **coherent with its message**. The scout is what
+   separated the real drift from the false accusation; without it, the plausible move was to
+   file a third capture bug against a correct commit.
+
+**Impact:** med — one wrong citation prevented, one wrong bug file prevented.
+
+**Promote-when:** a second session finds a stale citation in an artifact it authored earlier in
+that same session. At 2 datapoints, promote to CLAUDE.md § *Bug Tracking* as *"re-verify
+`path:line` citations in bug files you authored this session before committing them — peers move
+the substrate between the read and the write."*
+
+**Status:** validated — single datapoint, drift caught and corrected before commit.
+
+**Valid:** dated 2026-09-01
+
+One confirmed datapoint; promote-when threshold (2) not reached.
+
+**Rests on:** `audit_doc_refs`' `scan_code_comments` forcing `Med` on source-comment findings,
+and CI running `--fail-on high` — the two together are why this class has no automated gate.
 
 ## Template for new entries
 
