@@ -217,6 +217,48 @@ Incidental, and the reason it was noticed: it is the only red in an otherwise cl
 (lean `--no-default-features` 3441 pass / 0 fail; default 4833 pass / 1 fail), so it reads
 to an unrelated author exactly like their own regression until they check the ledger. That
 cost is paid per author, not per occurrence.
+
+### Fifth observation, 2026-09-02 — the signature is NOT confined to this test, and that falsifies the paragraph above
+
+Gate run during unrelated work (`GG-3`, a guide-emission refactor touching only
+`src/tools/core/`). Three runs, back to back, same tree, same machine:
+
+| run | command | reds |
+|---|---|---|
+| 1 | `cargo test --workspace` | **14** |
+| 2 | `cargo test --workspace --lib` (alone) | **0** — 4905 passed |
+| 3 | `cargo test --workspace` again | **1** — this test only |
+
+Run 1's other thirteen, all previously unrecorded on this file:
+
+- `retrieval::sync::tests::*` — **twelve**, including both
+  `sync_project_holds_index_lock_for_its_full_duration` and
+  `sync_worktree_holds_index_lock_for_its_full_duration`,
+  `sync_project_fails_fast_on_a_dim_mismatch_before_touching_the_store`, and
+  `sync_project_sizes_a_fresh_collection_from_the_unpinned_local_embedder`.
+- `retrieval::index_state::tests::a_live_binary_does_not_report_itself_deleted` — one.
+
+**What this corrects.** The section immediately above says this test *"is the only red in an
+otherwise clean gate, so it reads to an unrelated author exactly like their own regression
+until they check the ledger."* That was true of every run recorded here before today and is
+false of run 1. The reading cost it names gets **worse**, not better: fourteen reds across
+three modules do not read as one known flake, they read as a broken build — and the author
+who sees them is, by construction, someone who just changed something else.
+
+**What is established, and what is not.** Established: all fourteen pass in isolation and
+twelve of the thirteen new ones sit in one module. **Not** established: that they share this
+file's mechanism. The assertion text was **not captured** — the isolating re-run passed, so
+the stdout blocks that would name the failure do not exist, and run 3 did not reproduce
+them. Two lock-duration tests failing together is *suggestive* of contention on the index
+lock, which is a different resource from this test's idle timer. Treat the shared signature
+(red under `--workspace`, green under `--lib`) as a **lead**, not as membership.
+
+**Next, and deliberately not done here:** capture the assertion text by looping
+`cargo test --workspace` with stdout retained until the cluster recurs. If it names the
+index lock rather than a timeout, it is a **separate bug file**, not a step of this class —
+and recording it here as membership would be the elimination-by-plausibility this repo
+keeps paying for. Recorded on this file only because the signature was observed in the same
+run as this test, which is a fact about the run rather than about the cause.
 ## Hypotheses tried
 - *Named in a prior flake file?* No — `2026-08-26-wine-lane-flakes-under-load-on-three-tests`
   narrowed itself to one unrelated test (`run_migrations_is_safe_under_concurrent_connections`).
