@@ -139,7 +139,72 @@ Discipline*: *"instrument the doubt, not the correction — when a re-derivation
 publish the confirmation."* A confirming probe leaves no artifact by default, so the
 population of "suspicions that turned out fine" is unfalsifiable unless someone writes one
 down. This is one. It is a **denominator**, not a catch.
-## Change 3 — gate overflow-guides on actual overflow (widening WITHDRAWN)
+## Change 3 — CLOSED BY PROBE: already enforced centrally, and the prescribed fix would regress
+
+**CLOSED BY PROBE 2026-09-02 — no work, and the prescribed fix would REGRESS.** Read this
+before re-opening; everything below it is kept for the reasoning, not as a work item.
+
+*Already enforced, centrally.* `src/tools/core/types.rs:1281-1294` (**at HEAD `4672799b`** — see
+the coordinate note at the end of this block) gates the topic inside `call_content`, for **every**
+tool:
+
+```rust
+let should = match topic {
+    "progressive-disclosure" => {
+        exceeds_inline_limit(&json)
+            || val.as_object().and_then(|o| o.get("output_id"))
+                  .and_then(|v| v.as_str()).is_some()
+    }
+    _ => true,
+};
+if !should { continue; }
+```
+
+So the six tools returning `Some("progressive-disclosure")` unconditionally — `grep`, `tree`,
+`read_file`, `read_markdown`, `run_command`, `semantic_search` — already never ship it on a call
+that did not overflow. The `continue` precedes `guide_blocks_for`, so a suppressed candidate has
+**zero** delivery effect and **zero** ledger effect. `Symbols::relevant_guide_topic` says so in
+its own comment — *"`call_content` gates it on overflow having actually happened, so returning it
+there delivers nothing at all"* — and its `if` exists to **repurpose the slot** with
+`symbol-navigation` (`BL-25`), not to suppress an injection. This spec read that pattern as the
+missing fix; it is a second, different purpose that only the three symbol tools have.
+
+*Already tested, with the exact pair § Test plan prescribes.*
+`src/server.rs:7557 run_command_without_overflow_no_progressive_hint` is the absence side,
+`:7579 run_command_with_overflow_emits_progressive_hint_once` its positive twin (which also pins
+per-session dedup). Both green 2026-09-02. `run_command` is one of the six, so that pair is
+direct proof the central gate suppresses an unconditional per-tool return.
+
+*And the fix would regress.* Making those six return `None` on a non-overflowing result skips the
+enclosing `else if let Some(content_topic) = self.relevant_guide_topic(&val)` branch **entirely**,
+so `topic_declaring` is never consulted and the declaring-section **fallthrough** — added
+2026-08-31, immediately below at `types.rs:1265-1272` (HEAD) — becomes unreachable for those
+tools. The
+unconditional `Some` is what keeps that path live. It is inert today only because
+`grep -l 'serves:' src/prompts/guides/*.md` returns one file and `librarian.md` declares no
+`grep`/`read_file` shape, so the regression is **latent**: it would land the day someone authors a
+`serves:` section for one of the six. A no-op that is load-bearing.
+
+*Fourth `reconnaissance-patterns:R-117` datapoint* — a fix naming a population asserts that
+population is non-empty, and this is the form that fails **green**: it compiles, its tests pass
+(written from the same wrong model), the diff is clean, and nothing anywhere reports a change. The
+wrinkle this instance adds is that "harmless if unnecessary" was **also** false, so the usual
+fallback reassurance did not hold either. Both halves were answerable by reading two call sites.
+
+*Coordinate note, and it is a hazard worth stating rather than a tidy-up.* The line numbers in
+this block are **HEAD's**, and the first draft of it cited a different set — 1076-1083 and
+1063-1066 — taken from `grep`/`read_file`, which read the **working tree**. On this shared
+checkout a peer held `src/tools/core/types.rs` mid-edit and **206 lines shorter than HEAD** (1321
+vs 1527), so those coordinates described uncommitted code that exists in no commit and may never.
+`symbols` disagreed with `grep` about the same file by 206 lines, and that disagreement is the
+only reason it was caught: `symbols` reads the AST/LSP index, `grep` and `read_file` read the
+worktree, `git show HEAD:` reads the commit. Three instruments, two worlds, no error from any of
+them. **The conclusion is unaffected** — the gate and the fallthrough are present in HEAD with
+identical semantics, verified at `git show HEAD:src/tools/core/types.rs` — but a citation into a
+shared checkout is a claim about a worktree unless it says otherwise, and on this one that is not
+the same thing as a claim about the code.
+
+---
 
 **The signature change shown below is withdrawn.** It is kept visible rather than deleted,
 because a rejected design a later reader might re-propose is worth showing along with the
