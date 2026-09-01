@@ -304,20 +304,6 @@ impl crate::tools::Tool for LibrarianAdapter {
         }
     }
 
-    /// Projects `{tool}.{action}` before `call()` consumes `input`. When the call
-    /// carries no `action` (e.g. `artifact_augment`, which has no `action` param at
-    /// all), falls back to the bare tool name rather than `None` — a tool-only
-    /// declaration must still be matchable. `Shape::matches` (Task 5) treats `None`
-    /// as "cannot match", so returning `None` here for the no-action case would make
-    /// such declarations permanently unmatchable: a silent-absence failure, not the
-    /// fail-safe-toward-delivery direction this feature requires.
-    fn selector_key(&self, input: &Value) -> Option<String> {
-        match input.get("action").and_then(Value::as_str) {
-            Some(action) => Some(format!("{}.{}", self.name(), action)),
-            None => Some(self.name().to_string()),
-        }
-    }
-
     fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
         // Two guides serve this tool and only one can be delivered per call, so pick by
         // what the call actually touched rather than always sending the bigger one.
@@ -1005,11 +991,12 @@ mod tests {
         );
     }
 
-    /// `section_headings_summary` requires `preview.headings` to be an ARRAY
-    /// (src/librarian/adapter.rs:747). Once a body-selected read stubs that key to a
-    /// string, the summary can no longer lead with the heading map — so the fix in
-    /// `get.rs` delivers this for free and no second gate is needed here.
-    /// Controller Ruling 2, .superpowers/sdd/.../progress.md
+    /// `section_headings_summary` requires `preview.headings` to be an ARRAY. Once a
+    /// body-selected read stubs that key to a string, the summary can no longer lead with
+    /// the heading map — so the fix in `get.rs` delivers this for free and no second gate
+    /// is needed here.
+    /// Controller Ruling 2,
+    /// docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md
     ///
     /// `body` is padded past `dominant_text_preview`'s 200-byte `MIN_LEN` so
     /// `librarian_compact_summary` has a non-heading signal to report — without it every
@@ -1021,7 +1008,9 @@ mod tests {
     /// at `.expect("a summary")` with no headings-related message at all.
     #[test]
     fn a_body_selected_read_summary_cannot_lead_with_the_heading_map() {
-        // Shaped as a POST-Task-1 scoped result: `headings` is the stub string.
+        // Any non-array `headings` value satisfies this fixture's assertion — the literal
+        // stub string below is illustrative, not load-bearing; `section_headings_summary`
+        // only requires `.as_array()` to fail, and a bare stubbed-marker string does that.
         let result = json!({
             "body": "## Index\n\nthe section the caller asked for, padded past the two-hundred-byte \
                       dominant-text-preview threshold so the compact summary has a non-heading \

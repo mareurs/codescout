@@ -625,27 +625,6 @@ impl Tool for Memory {
         "memory"
     }
 
-    /// Projects `memory.<action>` so `OP-3` (`**Serves:** memory.write`) can
-    /// route on a real call.
-    ///
-    /// The trait default returns `None`, which `Shape::matches` treats as
-    /// "cannot match" — deliberately, because a wildcard would deliver every
-    /// triggered rule on every call from every tool that has not opted in, the
-    /// opposite of just-in-time. Routing is therefore opt-in, and this is
-    /// `memory` opting in. Until now the only production override was
-    /// `LibrarianAdapter`, so `OP-3` could not fire however correct its rule,
-    /// matcher and ledger entry were — and the routing suite stayed green
-    /// against a stub *named* `"memory"` that supplied the key the real tool
-    /// did not.
-    /// See `docs/issues/archive/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`.
-    ///
-    /// Mirrors `LibrarianAdapter::selector_key`, including the action-less
-    /// case: it projects the bare tool name rather than `None`, so a tool-only
-    /// rule shape stays matchable instead of being permanently unreachable.
-    fn selector_key(&self, input: &serde_json::Value) -> Option<String> {
-        crate::tools::core::types::action_selector_key(self.name(), input)
-    }
-
     fn is_write(&self, input: &Value) -> bool {
         // Dispatched by the `action` field. These mutate the memory store;
         // read|list|recall|dump bypass the write lock.

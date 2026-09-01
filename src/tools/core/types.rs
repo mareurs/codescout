@@ -1431,13 +1431,34 @@ pub trait Tool: Send + Sync {
     }
 
     /// A cheap projection of this call's shape, taken BEFORE `call()` consumes
-    /// `input`. Default `None` ⇒ the tool opts out at zero cost.
+    /// `input`. **Every tool opts in by default**: the default computes
+    /// `action_selector_key(self.name(), input)`, so a tool is reachable by
+    /// `triggered` operator rules and by section-grain guide matching without
+    /// writing any code for it.
     ///
-    /// Deliberately not a clone of `input`: `create_file` and `edit_file` inputs
-    /// carry whole file bodies, and a clone would be paid on 100% of tool calls
-    /// to benefit the ~3% that inject a guide.
-    fn selector_key(&self, _input: &Value) -> Option<String> {
-        None
+    /// Overriding to `None` opts a tool OUT and owes a stated reason. `None` makes
+    /// `Shape::matches` report "cannot match", which disables operator-rule routing
+    /// AND section-grain matching for every call to that tool — a silent-absence
+    /// failure, not the fail-safe-toward-delivery direction this feature requires.
+    /// Nothing overrides it today, and
+    /// `every_registered_tool_supplies_a_selector_key` (`src/server.rs`) fails if
+    /// anything starts to.
+    ///
+    /// **Inverted 2026-09-01, and the previous default is why.** It returned `None`
+    /// — documented as "the tool opts out at zero cost" — which left routing
+    /// structurally unreachable for 17 of the 21 registered tools while the suite
+    /// stayed green, because the only caller exercising the path was a test stub
+    /// named after a real tool. Opt-out-by-default put the cost on the invisible
+    /// side: a tool that never opted in produced no error, no empty result and no
+    /// log line, just a rule that never fired. See
+    /// docs/issues/archive/2026-08-28-triggered-operator-rules-route-nothing-in-production.md.
+    ///
+    /// Deliberately still not a clone of `input`: `create_file` and `edit_file`
+    /// inputs carry whole file bodies, and a clone would be paid on 100% of calls.
+    /// `action_selector_key` reads one field and allocates one short string, which
+    /// is the cost this default is affordable at.
+    fn selector_key(&self, input: &Value) -> Option<String> {
+        action_selector_key(self.name(), input)
     }
 
     /// Topic name this tool's discipline depends on, for the first-call

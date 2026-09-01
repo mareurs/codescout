@@ -311,6 +311,72 @@ async fn write_and_read_roundtrip() {
     assert_eq!(result["content"], "hello memory");
 }
 
+/// The one operator rule that can fire end-to-end, driven through the real call path.
+///
+/// This closes a gap that the fix for
+/// `docs/issues/archive/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`
+/// named in its own `unverified:` field and deliberately left open: *"no test drives a
+/// real `memory(action="write")` call through `call_content` and asserts the OP-3 block
+/// appears."* Until this existed the chain was covered by two tests meeting at a verified
+/// point — the real tool returns `Some(key)`, and `route()` delivers given a `Some`
+/// selector — which is not the same claim as the composition working. Every link can pass
+/// while the joint does not.
+///
+/// **It must be `call_content`, not `call`.** `call` returns the tool's own JSON and never
+/// consults the router at all: the selector projection, the `if selector.is_some()` guard,
+/// the once-per-session ledger stamp and the block rendering all live in `call_content`. A
+/// test against `call` would be green in a world where routing is entirely dead, which is
+/// the world that shipped for three days.
+///
+/// The write has to genuinely succeed. `call_content` propagates the tool's error with
+/// `?` before it reaches the routing block, so a failing write produces no operator
+/// content and this test would fail for a reason unrelated to routing — hence
+/// `test_ctx_with_project`, not a bare context.
+///
+/// **Mutation that must kill this:** make `Tool::selector_key`'s default return `None`
+/// again (`src/tools/core/types.rs`). `Memory` no longer overrides it — as of 2026-09-01
+/// the inverted default *is* the mechanism — so that one edit removes the key, and
+/// `Shape::matches` reads `None` as "cannot match". `every_registered_tool_supplies_a_selector_key`
+/// (`src/server.rs`) fires on the same mutation across all 21 registered tools; this test
+/// is the one that proves the delivery those keys exist for.
+#[tokio::test]
+async fn a_real_memory_write_call_delivers_op_3() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+
+    let out = Memory
+        .call_content(
+            serde_json::json!({
+                "action": "write",
+                "topic": "op3-routing-probe",
+                "content": "A real write, so `call_content` reaches the router instead of \
+                            short-circuiting on the error path.",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("the write must succeed — call_content's `?` would skip the router");
+
+    let text = out
+        .iter()
+        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        text.contains("operator-rule OP-3"),
+        "a real memory(action=\"write\") must deliver OP-3 through call_content — this is \
+         the composition the two unit tests could not establish. Got: {text}"
+    );
+    // The marker alone is not the rule: a mutation that emitted the comment with an
+    // empty or wrong body would otherwise ship green. Same reasoning as
+    // `a_triggered_operator_rule_is_delivered_once_per_session`, which asserts against
+    // the stub rather than the real tool.
+    assert!(
+        text.contains("codescout memory or a tracker"),
+        "the OP-3 block arrived without its body — marker present, rule text absent: {text}"
+    );
+}
+
 #[tokio::test]
 async fn read_missing_returns_null() {
     let (_dir, ctx) = test_ctx_with_project().await;

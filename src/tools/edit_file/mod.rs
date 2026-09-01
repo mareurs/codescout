@@ -363,25 +363,6 @@ impl Tool for EditFile {
         "edit_file"
     }
 
-    /// Opts `edit_file` into operator-rule routing so `OP-4`
-    /// (`**Serves:** edit_file(path~/.claude)`) can reach `route()` at all.
-    ///
-    /// Routing is opt-in: the trait default returns `None`, which
-    /// `Shape::matches` treats as "cannot match", because a wildcard would
-    /// deliver every triggered rule on every call from every tool. This tool
-    /// takes no `action`, so the key is the bare tool name — the tool-only
-    /// shape `Shape::matches` already supports. The action-aware form is kept
-    /// so the behaviour matches `LibrarianAdapter` and `Memory` exactly, and
-    /// stays correct if an `action` is ever added.
-    ///
-    /// This is the routing PRECONDITION only. `OP-4` still cannot fire: its
-    /// `path~` predicate is matched against the response, and this tool returns
-    /// no path — see
-    /// `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`.
-    fn selector_key(&self, input: &serde_json::Value) -> Option<String> {
-        crate::tools::core::types::action_selector_key(self.name(), input)
-    }
-
     fn is_write(&self, _input: &Value) -> bool {
         true
     }

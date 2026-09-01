@@ -3396,6 +3396,102 @@ mod tests {
              truncated corpus and would otherwise pass vacuously"
         );
     }
+    /// Every registered tool must supply a selector key. This is the routing
+    /// PRECONDITION, and it is the direction no other gate runs in.
+    ///
+    /// `call_content` gates operator-rule routing on `if selector.is_some()`
+    /// (`src/tools/core/types.rs`), so a tool returning `None` is unreachable by every
+    /// `triggered` rule — permanently, and with no observable symptom: no error, no
+    /// empty result, nothing in a log. The rule simply never fires.
+    ///
+    /// **Measured 2026-09-01, before `Tool::selector_key`'s default was inverted: 17 of
+    /// the 21 registered tools returned `None`, and the entire routing suite was green.**
+    /// It was green because the only caller exercising the path was `RoutedEchoTool`, a
+    /// `#[cfg(test)]` stub *named* `"memory"` that projected the key the real tool did
+    /// not — a green suite and a dead feature, consistent with each other for as long as
+    /// the stub was the only caller. See
+    /// `docs/issues/archive/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`.
+    ///
+    /// This gate is what makes opting out *visible*. The default now opts every tool in,
+    /// so an override returning `None` is the only way to leave the set, and it reds here
+    /// naming the tool that left.
+    ///
+    /// **A selector is necessary, NOT sufficient — do not read a green here as "routing
+    /// works".** `OP-4` names `edit_file` and `create_file`, both of which have supplied
+    /// selectors since `2447f709`, and it still cannot fire: its `path~` predicate is
+    /// matched against the RESPONSE, which carries no path. That defect is open at
+    /// `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`. This annotation is
+    /// the reason the two tools' own `selector_key` overrides could be deleted — it is
+    /// where their doc comments carried that caveat, and this is the site where someone
+    /// is most likely to mistake a supplied selector for a working route.
+    ///
+    /// The positive end-to-end proof, for the one rule that does route, is
+    /// `crate::tools::memory::tests::a_real_memory_write_call_delivers_op_3`.
+    #[tokio::test]
+    async fn every_registered_tool_supplies_a_selector_key() {
+        let (_dir, server) = make_server().await;
+
+        let mut checked = 0usize;
+        for tool in &server.tools {
+            let name = tool.name().to_string();
+
+            // Action-less shape: the key must be the bare tool name, never `None`.
+            // `Shape::matches` reads `None` as "cannot match", so a tool-only rule or
+            // section declaration would be permanently unmatchable.
+            let bare = tool.selector_key(&serde_json::json!({}));
+            assert_eq!(
+                bare.as_deref(),
+                Some(name.as_str()),
+                "tool `{name}` returned {bare:?} for an action-less call. It is therefore \
+                 unreachable by every triggered operator rule and by section-grain guide \
+                 matching. If this tool genuinely must opt out, say why at the override \
+                 and update this gate deliberately — do not silence it."
+            );
+
+            // A tool taking an `action` must carry it into the key, or two actions on one
+            // tool are indistinguishable to a rule that means only one of them. The
+            // oracle is the tool's own `input_schema` action enum, so a new action needs
+            // no edit here.
+            let actions: Vec<String> = tool
+                .input_schema()
+                .get("properties")
+                .and_then(|p| p.get("action"))
+                .and_then(|a| a.get("enum"))
+                .and_then(|e| e.as_array())
+                .map(|v| {
+                    v.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for action in &actions {
+                let key = tool.selector_key(&serde_json::json!({"action": action}));
+                let want = format!("{name}.{action}");
+                assert_eq!(
+                    key.as_deref(),
+                    Some(want.as_str()),
+                    "tool `{name}` projected {key:?} for action `{action}`, not `{want}`. \
+                     A rule serving one action of this tool would match the wrong calls, \
+                     or none."
+                );
+                checked += 1;
+            }
+            checked += 1;
+        }
+
+        // Anti-vacuity floor, not a total: the loop is silent on an empty registry, which
+        // is the state this gate is least useful in and most likely to be read as green.
+        // 21 tools are registered unconditionally (the librarian family and `PeerTool` are
+        // feature- and runtime-conditional and only add to this), and `checked` also
+        // counts one per action, so this floor holds in both the lean and default lanes
+        // and never needs revising upward. Deliberately not an equality — that would red
+        // on every tool or action added.
+        assert!(
+            checked >= 21,
+            "the gate scanned only {checked} tool shapes — it is reading an empty or \
+             truncated registry and would otherwise pass vacuously"
+        );
+    }
 
     /// A declaring topic must have at least one LIVE route from a real call to at least
     /// one of its declared sections. Gate 7.

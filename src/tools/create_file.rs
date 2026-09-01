@@ -14,21 +14,6 @@ impl Tool for CreateFile {
         "create_file"
     }
 
-    /// Opts `create_file` into operator-rule routing so `OP-4`
-    /// (`**Serves:** create_file(path~/.claude)`) can reach `route()` at all.
-    ///
-    /// Covered in the same change as `edit_file` deliberately: `OP-4` names
-    /// both in one rule, and opting in only one would leave it half-routable —
-    /// a state harder to notice than not routable at all, because the rule
-    /// would fire for some writes and silently not for others.
-    ///
-    /// This is the routing PRECONDITION only; `OP-4`'s `path~` predicate is
-    /// matched against the response, which carries no path. See
-    /// `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`.
-    fn selector_key(&self, input: &serde_json::Value) -> Option<String> {
-        crate::tools::core::types::action_selector_key(self.name(), input)
-    }
-
     fn is_write(&self, _input: &Value) -> bool {
         true
     }

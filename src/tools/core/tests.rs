@@ -1392,6 +1392,12 @@ async fn write_echo(
 /// it as a test double, no longer as a paper-over. This stub
 /// projects `{tool}.{action}` the same way `LibrarianAdapter::selector_key`
 /// does, so the router path in `call_content` can be exercised regardless.
+///
+/// **Keep this stub's own `selector_key` override, even though `Tool`'s inverted
+/// default (2026-09-01) now produces an identical key.** Deleting it as redundant
+/// would make every router test in this file depend on the default under test, so a
+/// regression to `None` would red them all and bury the one signal that names the
+/// cause. Independence from the default is the property, not the projection.
 struct RoutedEchoTool {
     name: &'static str,
     result: serde_json::Value,
@@ -1436,8 +1442,12 @@ fn joined_text(content: &[rmcp::model::Content]) -> String {
 /// OP-3 (`triggered`, serves `memory.write`) must arrive once per session for
 /// a call shape it serves, and not again on a repeat of the same shape — the
 /// same once-per-session contract the guide ledger already gives topics, now
-/// asserted for the `op:OP-3` key. `RoutedEchoTool` stands in for `memory`
-/// (see its doc comment) since the real tool has no `selector_key` override.
+/// asserted for the `op:OP-3` key. `RoutedEchoTool` stands in for `memory` (see its
+/// doc comment) so the router filters can be exercised without depending on `Memory`'s
+/// call path, its on-disk state, or the trait default this file also tests. The real
+/// tool has supplied a key since `2447f709`, and supplies it via the inverted default
+/// as of 2026-09-01 — `crate::tools::memory::tests::a_real_memory_write_call_delivers_op_3`
+/// is the end-to-end assertion against the real tool.
 ///
 /// Also checks the delivered payload rather than just the marker (a mutation
 /// emitting the `operator-rule OP-3` comment with an empty or wrong body
@@ -1487,14 +1497,20 @@ async fn a_triggered_operator_rule_is_delivered_once_per_session() {
 /// This is the assertion `RoutedEchoTool` has been standing in for, and the
 /// substitution is the whole defect: the routing tests above are green against
 /// a stub *named* `"memory"` that projects `{tool}.{action}`, while the
-/// production `Memory` takes the trait default and returns `None`. So the suite
+/// production `Memory` took the trait default and returned `None`. So the suite
 /// proved the router works and said nothing about whether any real call reaches
 /// it — a green suite and a dead feature were consistent with each other for as
 /// long as the stub was the only caller.
 ///
-/// Mutation that must kill this: delete `Memory`'s `selector_key` override, and
-/// the trait default at `types.rs` returns `None` again, which `Shape::matches`
-/// treats as "cannot match".
+/// Mutation that must kill this: make `Tool::selector_key`'s default return `None`
+/// (`src/tools/core/types.rs`), which `Shape::matches` treats as "cannot match".
+///
+/// *(Updated 2026-09-01. This read "delete `Memory`'s `selector_key` override". That
+/// mutation no longer exists: the default was inverted to opt every tool in, and
+/// `Memory`'s now-redundant override was deleted, so there is nothing left to remove.
+/// A stated kill-mutation that can no longer be applied credits a test with coverage it
+/// does not have — and reads entirely plausibly while doing so, which is why this moved
+/// rather than being left alone.)*
 #[test]
 fn the_real_memory_tool_supplies_a_selector_key_for_op_3() {
     let tool = crate::tools::memory::Memory;
@@ -1529,8 +1545,10 @@ fn the_real_memory_tool_supplies_a_selector_key_for_op_3() {
 /// `abs_path` does). That is a second, independent defect. This closes only the
 /// routing precondition — without it, fixing the predicate would change nothing.
 ///
-/// Mutation that must kill this: drop either override and the trait default
-/// `None` returns, which `Shape::matches` treats as "cannot match".
+/// Mutation that must kill this: make `Tool::selector_key`'s default return `None`
+/// (`src/tools/core/types.rs`), which `Shape::matches` treats as "cannot match".
+/// Updated 2026-09-01 from "drop either override": both overrides were deleted as
+/// redundant when the default was inverted, so neither is available to mutate.
 #[test]
 fn the_real_write_tools_supply_selector_keys_for_op_4() {
     let input = serde_json::json!({"path": "/home/u/.claude/settings.json"});
