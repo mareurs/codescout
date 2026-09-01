@@ -3951,15 +3951,58 @@ fn status_token_present(haystack: &str, token: &str) -> bool {
 /// decision"*, *"local export DONE, one item left"* — and matching against it would report
 /// the narration as the status.
 ///
+/// **The table form additionally requires the table to HAVE a status column**, added
+/// 2026-09-01. A line anchor alone is not enough: it stops a mention inside another row's
+/// prose from masquerading as this entry's row, but not a row that legitimately *starts*
+/// with the id in a table about something else. `system-retrospective-improvements` records
+/// closures in `## History` and carries an unrelated `| task | headline number | reality |`
+/// analysis table, so every entry resolved to a "status region" stating no status — turning
+/// the skip this function documents below into four reported findings.
+/// docs/issues/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md
+///
 /// `None` means *this entry states no status in the body*, which is not a finding: a
 /// params-only entry has no second representation and therefore cannot drift from one.
 fn entry_status_region(lines: &[&str], eid: &str) -> Option<(String, &'static str)> {
+    /// Walk up from a data row to its own table's header and ask whether that table is
+    /// about status. Anchored on the top of the row's contiguous `|` block rather than on
+    /// "the first table in the file": `windows-platform-support` opens with a *legend*
+    /// table explaining its status vocabulary, and `system-retrospective-improvements` has
+    /// three tables, so the header must be the one belonging to THIS row.
+    ///
+    /// Deliberately does NOT require a `|---|` separator. Requiring one looked tidier and
+    /// was wrong in the dangerous direction: a real status table written without a
+    /// separator would silently stop being compared, which is a false negative in exactly
+    /// the direction this check exists to catch. Caught by
+    /// `status_drift_fires_when_params_and_the_body_row_disagree`, whose fixture omits it.
+    fn table_is_about_status(lines: &[&str], row: usize) -> bool {
+        let mut top = row;
+        while top > 0 && lines[top - 1].trim_start().starts_with('|') {
+            top -= 1;
+        }
+        if top == row {
+            return false; // no header above this row at all
+        }
+        // Matched case-insensitively because both live ledgers spell it differently —
+        // `| ID | Ph | Task | Status | Bug |` and `| id | area | status | … |`.
+        lines[top].split('|').any(|c| {
+            c.trim()
+                .trim_matches('*')
+                .trim_matches('`')
+                .eq_ignore_ascii_case("status")
+        })
+    }
+
     let esc = regex::escape(eid);
     // 1. Table row. Anchored at line start so a mention inside another row's prose
-    //    cannot masquerade as this entry's row.
+    //    cannot masquerade as this entry's row — and gated on the table having a status
+    //    column, so a row in an unrelated table cannot either.
     if let Ok(row_re) = regex::Regex::new(&format!(r"^\|\s*`?{esc}`?\s*\|")) {
-        if let Some(l) = lines.iter().find(|l| row_re.is_match(l)) {
-            return Some(((*l).to_string(), "table row"));
+        if let Some(i) = lines.iter().position(|l| row_re.is_match(l)) {
+            if table_is_about_status(lines, i) {
+                return Some((lines[i].to_string(), "table row"));
+            }
+            // Otherwise fall through to the heading form rather than returning a region
+            // that states no status — which would report an entry that cannot drift.
         }
     }
     // 2. Heading section, then its `Status:` line. The dash is required: it is what
@@ -8313,6 +8356,62 @@ mod tests {
             "the finding must name the params side, since the reader has to decide \
              which of the two is stale: {}",
             v[0].detail
+        );
+    }
+
+    /// A table row is only this entry's STATUS region if its table has a status column.
+    ///
+    /// `entry_status_region` tried the table form first and returned the first line matching
+    /// `^| <ID> |` with no check that the table concerned status at all — so a ledger whose
+    /// entries carry no `**Status:**` line, but which happens to contain an unrelated analysis
+    /// table mentioning those ids, had every entry's "status region" resolve to a row stating
+    /// no status. That is the case the scan's own doc comment excludes: *"An entry with no body
+    /// region stating a status is skipped, not reported."* Branch 1 shadowed branch 2, which
+    /// would have found the heading, found no `Status:` line, and correctly returned `None`.
+    /// docs/issues/2026-09-01-status-locator-reads-any-table-row-as-a-status-row.md
+    ///
+    /// **Both directions in one fixture**, because the silence half alone is monotone under
+    /// "the check does nothing" and would pass against a stub returning `vec![]`. `T-1` lives
+    /// only in the analysis table and must be SILENT; `T-2` has a real status table whose row
+    /// contradicts its `params`, and must still FIRE. Mutate the fix to skip table rows
+    /// entirely and `T-2` dies; mutate it to accept any row and `T-1` dies.
+    #[test]
+    fn status_drift_ignores_a_table_that_has_no_status_column() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_status_tracker(
+            &cat,
+            "no-status-col",
+            tmp.path(),
+            // An analysis table — three columns, none of them status — sits ABOVE the real
+            // one. Order is load-bearing: the locator takes the FIRST matching row, so a fix
+            // that only checked the last table would pass this while still being wrong.
+            "## T-1 — measured, no status line\n\n\
+             **Why:** recorded in History rather than per-entry.\n\n\
+             | task | headline number | reality |\n\
+             |---|---|---|\n\
+             | T-1 | `missing field 'patch'` x11 | all 11 predate the fix |\n\n\
+             ## T-2 — tracked in a real status table\n\n\
+             | ID | Task | Status |\n\
+             |---|---|---|\n\
+             | T-2 | the CLI drops two fields | **open** |\n",
+            &[("T-1", "done"), ("T-2", "done")],
+            &["open", "done", "dropped"],
+        );
+
+        let v = scan_params_status_drift(&cat.conn).unwrap();
+        let detail = v.first().map(|x| x.detail.clone()).unwrap_or_default();
+
+        assert!(
+            !detail.contains("T-1"),
+            "T-1 states no status anywhere — its only table row is an analysis row, so it has \
+             one representation and cannot drift. Reporting it is the defect: {v:?}"
+        );
+        assert!(
+            detail.contains("T-2"),
+            "T-2's real status row says `open` while params says `done` — that is a genuine \
+             disagreement and must still be reported, or the fix has simply disabled the \
+             table form: {v:?}"
         );
     }
 
