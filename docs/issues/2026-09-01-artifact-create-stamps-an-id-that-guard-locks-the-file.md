@@ -239,8 +239,8 @@ protects. No behaviour change; a refusal a reader can act on and judge.
   absence is the whole discriminator, so a tidy-up "completing" either frontmatter block
   would leave it passing and testing nothing.
 
-SHA: recorded at commit time below.
-patch-id: recorded at commit time below.
+SHA: `0933bc95` (**`experiments`**) — the message half only.
+patch-id: `42c3dcd17a52ed55f082c14de843173f88a2fb2c`
 
 ### Still owed — the behavioural decision, for a human
 
