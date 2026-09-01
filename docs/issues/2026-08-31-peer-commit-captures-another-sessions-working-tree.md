@@ -500,6 +500,48 @@ committed under `c2a08c22`'s message at `0c32bb85`. Recorded here, and disclosed
 session directly, per *Instance 5*'s finding that disclosure is what prevents the downstream
 damage. Not rewritten: `git reset` on a shared index is the vector *Remedy (1)* documents, and
 trading a durable attribution error for a live one is a bad exchange.
+
+### Second detection, 2026-09-01 `0c32bb85` — and this time a CONTENT check gave a false all-clear
+
+Same layer, same shape, disclosed by the capturing session (`codescout-68`) rather than found by
+the captured one. Verified `git diff` on `docs/trackers/bug-fix-session-log.md` at **23/3**, ran
+`git add && git commit -- <path>` ~30s later, and it landed **66/4**. The 43-line gap is this
+session's `F-93` entry body, written into the window. Confirmed from the other side:
+`git log -S"## F-93 —"` names `0c32bb85`, while `git log -S"| F-93 | 2026-09-01"` names
+`26f5b496` twenty seconds later — **one entry split across two commits under two authors**, the
+body filed under a message about a law citation and the index row under its own.
+
+Not rewritten. `git reset` on a shared index is the vector *Remedy (1)* documents, so the trade
+is a durable attribution error against a live one, and the durable one is cheaper.
+
+**The new finding is the check that did NOT fire.** Alongside the stat comparison, the capturing
+session ran a content check and got a clean zero:
+
+```
+git diff docs/trackers/bug-fix-session-log.md | grep -c "F-92\|F-91\|W-93"   ->  0
+```
+
+That zero is correct and worthless. **The pattern enumerates the peer entries its author already
+knew existed** — and a peer's next write is, necessarily, an entry that does not yet exist.
+Measured on the actual captured text: the pattern returns **0** against `## F-93 — Two counts
+over a live append-only transcript`, and **1** against `## F-92`. It fires only on what is
+already known and never on what is arriving, so it could not have fired in the direction that
+mattered — at any time, on any content, no matter how long the window.
+
+This is `reconnaissance-patterns` R-5's shape (a check whose predicate is derived from the thing
+it judges, so it cannot fail) meeting the negative-search law (a predicate written from memory
+fails silently while the instrument answers in its own terms). What makes it worth recording
+here rather than there is the **ranking inversion**:
+
+| check | reads as | actually |
+|---|---|---|
+| `grep` for known entry ids in the diff | specific — it names the thing you fear | **unable to fire**; blind to every new entry |
+| `--stat` against a remembered count | dumb — it is just two numbers | **held**; a foreign hunk cannot leave the count unchanged |
+
+The content grep is the one a careful author reaches for, because it looks like it is checking
+the *substance*. It is checking a list of things already accounted for. Prefer the number: it
+makes no claim about what the foreign content is, which is exactly why nothing about the foreign
+content can defeat it.
 ## Candidate remedies
 
 > **Superseded by *Re-ranking, third time* above — kept for the reasoning, not the ranking.**
