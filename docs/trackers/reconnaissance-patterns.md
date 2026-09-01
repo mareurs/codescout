@@ -1227,6 +1227,13 @@ twin), R-5 (compiler backstop that would NOT have caught the dead test), R-17
 
 **Verdict:** hit (ordering caveat — recon ran after the edit, before the gate).
 
+**Valid:** invariant
+
+The claim is a structural property of two techniques, not of this incident: caller
+enumeration answers *who calls this symbol*, and a relocation changes *where a file lives*,
+so no amount of caller coverage reaches the consumer that resolves a path. The `mux_dir`
+case is evidence for it, not the claim. Declared 2026-09-01.
+
 Fixing the two-module lock-file leak
 (`docs/issues/archive/2026-07-28-index-lock-tests-pollute-runtime-dir.md`), the `lsp/mux`
 half changed *where* files live: `mux_dir()` returns a per-process scratch
@@ -1469,6 +1476,11 @@ before the `F-7` sweep.
 **Verdict:** miss → rule. Recon did not prevent these; they were caught downstream, each
 by a different accident. The value is in the shape they share.
 
+**Valid:** invariant
+
+*The view is not the set* is a law about filtered reads; the five instances are its
+evidence. A sixth would strengthen it, never date it. Declared 2026-09-01.
+
 Five distinct wrong conclusions in a single session, each from a *view* of a set mistaken
 for the set:
 
@@ -1530,6 +1542,12 @@ summary) is project-shaped and belongs in the `reconnaissance` memory instead.
 **Status:** promoted 2026-08-20 — verdict `miss → rule, promote-ready` (Index row). The
 `promote-ready` mark had stood since **2026-08-04, sixteen days**, and nothing ever queried
 for that state.
+
+**Valid:** invariant
+
+An instrument writing into its own corpus is a hazard of the arrangement, not of any one
+probe. Corroborated by the project itself: this entry is already promoted into the served
+`SKILL.md`, which is what a law-shaped claim earns. Declared 2026-09-01.
 
 **Promoted-to:** `claude-plugins/codescout-companion/skills/reconnaissance/SKILL.md`
 § Phase 1 — Scout. D11-verified 2026-08-20 in the served `1.16.14` cache: back-cited as
@@ -3304,6 +3322,15 @@ currently says "read callers if shape changes" and that phrasing asks only quest
 **Observed:** 2026-08-17, across one session of `audit_doc_refs` and `link_scan` work. Five
 wrong conclusions, all the same shape: a query returned nothing, or returned a number, and
 I read it as a fact about the corpus.
+
+**Valid:** invariant
+
+The claim — *a zero is a fact about your query, not about the world* — is a law. **One
+caveat, and it is why this was nearly declared `conditional` instead:** the title's *"three
+independent ways"* is an enumeration, and enumerations of a class grow. This one already
+has — the served `SKILL.md` chains the law across `R-3` → `R-113` → `R-77` → `R-79` →
+`R-104`, with a sixth at `R-4`. Read the three as illustrative, not exhaustive: the law does
+not decay when a fourth arrives, only the count does. Declared 2026-09-01.
 
 **Pattern:** a findings-array query can answer confidently and wrongly for three reasons
 that look identical from the outside. Each was hit at least once:

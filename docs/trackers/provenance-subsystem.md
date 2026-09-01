@@ -1042,6 +1042,14 @@ Full detail for every entry stays in params: `artifact(action="get", id="e12cd7e
 
 
 #### PV-9 — DONE — M6 measured: spec churn is same-session, not long-horizon drift
+
+**Valid:** dated 2026-08-28
+
+M6 is a measurement — spec churn observed to be same-session rather than long-horizon — and
+is true of the corpus as measured on that date. Worth noting at the class line rather than
+buried: this entry's title was RECOVERED-VERBATIM on 2026-08-31 after an AUTHORED title had
+asserted a *different* claim (*"at any horizon that matters"* vs same-session churn), so the
+headline has already drifted once from the measurement beneath it. Declared 2026-09-01.
 `gap` · **settled** · repo-gated weak NO · heading added 2026-08-28; title RECOVERED-VERBATIM 2026-08-31 from the desktop catalog, replacing an AUTHORED title that asserted a different claim ("at any horizon that matters" vs same-session churn)
 #### PV-11 — RESOLVED — `unrecorded` dominates only at whole-repo scope, NOT at working-diff scope
 `gap` · **settled** · resolves to PV-17 · heading added 2026-08-28; title RECOVERED-VERBATIM 2026-08-31 from the pre-integration catalog snapshot, replacing a 2026-08-28 authored approximation that matched the canonical claim in substance but not in text (missing `RESOLVED — ` prefix, `NOT` lowercased)

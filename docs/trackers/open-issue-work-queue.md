@@ -627,7 +627,14 @@ catalog row kept its old value until an `artifact(update)` repaired it. The two 
 adjacent in one session and got conflated; BL-48's evidence should point at that one.
 ### BL-58 — ListAgents omits live cross-profile sessions, and the counts are incomparable
 
-**Status:** partial — root cause still blocked upstream (harness, not this repo), but the local mitigation SHIPPED: `scripts/peer-sessions.sh` plus a `docs/PROBES.md` row, so it fires at the moment of use rather than when someone opens the bug file. **Valid:** dated 2026-08-31
+**Status:** partial — root cause still blocked upstream (harness, not this repo), but the local mitigation SHIPPED: `scripts/peer-sessions.sh` plus a `docs/PROBES.md` row, so it fires at the moment of use rather than when someone opens the bug file.
+
+**Valid:** dated 2026-08-31
+
+*(Not a new judgement — the author's own class, relocated 2026-09-01. It was written
+mid-line at the end of the `**Status:**` sentence above, and detection is line-anchored at
+column 0, so it counted as undeclared and the entry showed up in
+`entry_cited_from_outside_but_undeclared` while visibly carrying a declaration.)*
 
 `docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`.
 Discovery is scoped to the calling session's config profile; the socket directory
@@ -1047,6 +1054,13 @@ signal exists; the work is threading it through a core primitive that ~4,600 tes
 
 ### BL-44 — a params row can drift out of sync with its body counterpart with no check on either side of that direction
 
+**Valid:** conditional — until a drift check compares body and params field-by-field rather than by id
+
+The claim is that a gap exists, so it holds only while the gap does. Partly narrowed since
+it was written: `doctor`'s `params_status_drift` now compares the **status** field on both
+sides (it fired on `claim-decay:DC-2` on 2026-09-01 and was correct). Every other field is
+still set-difference-on-ids only, so the entry stands. Declared 2026-09-01.
+
 Surfaced while executing BL-42's data repair: diffing `windows-platform-support.md`'s body table against `params` field-by-field (not just by id) found 7 rows present on both sides with different content — `WIN-1`, `WIN-4`, `WIN-5`, `WIN-20`, `WIN-27` had a stale pre-archive `ref`; `WIN-28` and `WIN-29` were worse, `params` held an earlier `open` snapshot with a superseded root-cause summary while the body already carried the resolved `fixed` story. This tracker's own `entry_filter={"status":{"eq":"open"}}` convention would have returned two closed issues as open, with the wrong explanation.
 
 `doctor`'s `params_behind_body` (BL-40) does not cover this: it computes set difference on ids, so a row present on both sides with disagreeing fields passes it silently. `update_entry` already warns one direction (`snapshot_stale`, params-changed/body-didn't) but nothing scans the other direction — a body edit that never touches params leaves no trace.
@@ -1161,6 +1175,12 @@ commit's? Option 3 is spent; do not re-raise it.
 **done**
 
 ### BL-29 — append_entry writes catalog-only state, so the committed snapshot drifts
+
+**Valid:** conditional — until the snapshot gate reaches majority coverage
+
+Its own status line names the condition: drift is now reported at write time and by
+`doctor`, and 0 trackers are adrift, but the gate still needs majority coverage. When that
+lands the entry is spent, not merely older. Declared 2026-09-01.
 **open** — partial: drift is now reported at write time and by `doctor`, and 0 trackers are adrift; the gate still needs majority coverage.
 
 ### BL-30 — FRICTION: adding one tracker entry costs four bookkeeping sub-tasks

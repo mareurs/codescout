@@ -1464,6 +1464,15 @@ Recorded here so a second instance has something to join.
 
 ## F-9 — Three promoted rules are in force in zero of three profiles, and the session that promoted them is the one observer that cannot see it
 
+**Valid:** dated 2026-08-20
+
+A count of a live state — three promoted rules in force in zero of three profiles — taken
+the day the entry was observed. Both halves decay: a version bump or a cache refresh moves
+the zero, and the profile count is per-machine. The *lesson* (the promoting session is the
+one observer that structurally cannot see the gap) is durable and is why the entry is
+cited, but the entry's headline is the measurement, and the class follows the headline.
+Declared 2026-09-01.
+
 **Observed:** 2026-08-20, `/codescout-companion:reconnaissance` invoked during compaction
 prep. Reading the loaded skill surfaced its own § *Every promotion audits the promoted set*,
 which governs edits to that file — a section I had not read before editing it an hour earlier.

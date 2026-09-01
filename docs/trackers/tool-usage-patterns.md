@@ -105,6 +105,14 @@ directory to look in. "How does the solver handle room conflicts?" with no known
 
 
 ### T-005 — `npm run build 2>&1 | grep` × 7 in one session
+
+**Valid:** dated 2026-05-03
+
+An observation of one session (`c5daabbe`, eduplanner-ui): the same piped-build pattern run
+7 times, at those specific call indices. The count and the session are fixed facts about
+that transcript. The *prompt gap* it names — Iron Law #3 lacking a concrete build example —
+is a claim about the current prompt surface and would need its own entry to be rested on;
+it is not what this class covers. Declared 2026-09-01.
 **Session:** c5daabbe (eduplanner-ui, 2026-05-03)
 
 Build verification after each edit batch. Model ran the same piped pattern 7 times (#48, #73, #77, #111, #113, #151, #159). Iron Law #3 prohibits piping run_command output — the buffer workflow exists precisely for this.

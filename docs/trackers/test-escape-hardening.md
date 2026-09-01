@@ -96,6 +96,14 @@ as deferred: mutation testing (I-3) dominates it on coverage-per-value.
 
 ### I-7 — Deprecated-tool-name gate over the `get_guide` bodies (gate-scope)
 
+**Valid:** dated 2026-08-16
+
+The entry's load-bearing sentence is a census of a moment: *the ten `get_guide` bodies were
+the only prose surface with no drift gate*, with `prompt_surfaces_reference_only_real_tools`
+building its list from exactly three entries. Both counts move — guides are added, and the
+gate this intervention shipped is itself a fourth surface — so the claim is anchored to the
+day I-7 opened and shipped (per this file's own `## History`). Declared 2026-09-01.
+
 The ten `get_guide` bodies are the fourth prose surface the model reads, and were the
 only one with no drift gate at all. `prompt_surfaces_reference_only_real_tools`
 (`src/server.rs:1839`) builds its `surfaces` list from exactly three entries —

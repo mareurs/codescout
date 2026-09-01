@@ -519,6 +519,15 @@ dropped. Net: 0 of 3 enriched hunks kept as resident prose, consistent with the 
 
 ## A-20 — the verify-before-assert paragraph works (93.3% vs 0% bare), but P1/P3/P4 were refuted and P5 is untestable at ceiling
 
+**Valid:** dated 2026-08-18
+
+An eval result: n=15/arm, 93.3% vs 0% bare, on the arms and traps as they stood that day
+(commit `9703102c`). The numbers are true of that run, not of the prompt in general — a
+re-run against changed arms, a changed `iron-laws-detail` guide, or a different model would
+produce different figures without falsifying anything here. Declared 2026-09-01; the entry
+carried no date of its own, so the class is anchored to the commit that introduced it,
+which is the default `tracker-conventions` already assigns to an undeclared entry.
+
 **P1/P3/P4 REFUTED; P2 inside noise; P5 untestable** — the instrument class saturated at 100% in
 every arm because the traps name the artifact. The a2 prose dominated: plausibility verified 93.3%
 versus 0% bare, overall correct 100%. The `t2` trap matters most because its false premise is a
@@ -528,6 +537,13 @@ satisfies the contract's letter. Stacking diluted rather than added. Active-ingr
 handed to A-21.
 
 ## A-21 — the active ingredient is an unconditional imperative that binds at every claim: b2 alone hit 100%, beating the full paragraph
+
+**Valid:** dated 2026-08-18
+
+Same run as `A-20` — the entry says so itself (*"Run same day, n=15/arm"*). b2 at 100.0% is
+a measurement of that grid, and the revised mechanism it proposes is a *fit to 11 arms*,
+which is evidence rather than a law: the mechanism claim would need its own entry and its
+own class before anything rests on it. Declared 2026-09-01, anchored to `9703102c`.
 
 **Run same day, n=15/arm; 1 of 6 predictions held — and the one that held inverted a prediction.**
 b2, imperative-only, scored **100.0%**, the best arm in the grid, exceeding the full a2 paragraph at
@@ -1561,5 +1577,3 @@ Deleting or shortening `### Memory` and `### Subagent Dispatch` in the three pro
 ### Contamination guard — clean
 
 `path_security.rs` last moved 08:45:38, **before** this run's 09:07:08 start; `read_file.rs`, `grep.rs` and `file_group.rs` unchanged across the window. The primary metric is uncontaminated.
-
-
