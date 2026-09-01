@@ -210,6 +210,33 @@ re-derivation is the case CLAUDE.md's recording-filter law says has no natural a
 worth noting that this one exists only because someone chose to write down a check that changed
 nothing.*
 
+**Two mechanisms reach this class, and naming only one leaves a solo session with no remedy.**
+The *Who can see it* field says *a reader who does not share the author's context*. That is
+usually read as **another party**, and a session working alone then inherits a diagnosis with no
+action attached. `R-49` is the second access route, and it is not a weaker version of the first:
+its claim is that **an author an hour later is partially such a reader** — temporal separation
+degrades shared context the way a different session never had it. Hence its own wording, *"the
+countermeasure is temporal, not attentional — re-read on re-entry, not harder on write."*
+
+| | context | latency | availability |
+|---|---|---|---|
+| peer channel | never shared | immediate | needs a peer |
+| `R-49` re-entry | shared, then decayed | delayed | always |
+
+Both fired **unaided** on 2026-09-01, verified verbatim in their commit messages. `800f1dec` —
+*"the bug file's own first version overstated the blast radius… verified false and corrected in
+this commit"* — is `W-91`'s promote-when trigger, found alone. `2e5dc738` — *"re-reading my own
+bug file an hour after writing it found two of its four Fix options CIRCULAR"* — likewise.
+
+*This paragraph exists because a claim in the other direction was withdrawn. This session
+published **"none of the eight corrections tonight was self-caught; every one crossed the session
+boundary"** — and the eight **were the peer exchanges**, so the population was selected by the
+very property the claim announced discovering. Not false: **vacuous**, no member able to falsify
+it. That is CLAUDE.md § Testing Discipline's member-selection law made about a corpus rather than
+a test, and the third over-clean grouping in one session — the others a zero whose denominator
+was a tenth of its neighbours', and a "three splits" tally holding one member that was not a
+split. None contained a false statement; each licensed a wrong count.*
+
 **The vigilance count above is deliberately NOT bumped.** Doing so needs each instance judged
 against *"committed by an author actively writing about the class"*, which has not been
 derived for these three — and bumping an underived count inside the entry documenting
