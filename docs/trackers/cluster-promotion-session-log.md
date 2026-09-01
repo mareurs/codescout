@@ -14,7 +14,7 @@ topic: cluster promotion and mechanism design
 entry_prefix:
 - F
 - W
-entry_high_water_F: 6
+entry_high_water_F: 7
 entry_high_water_W: 3
 ---
 
@@ -52,6 +52,7 @@ entry_high_water_W: 3
 | F-4 | 2026-09-01 | med | tooling | fixed-verified | The ledger's count cells go stale by CONCURRENCY — 3 re-derivations invalidated in one session by peer filings; gate shipped, caught a 4th drift on its first run |
 | F-5 | 2026-09-01 | med | architectural | open | `IC-13`'s claim is true of 4 of its 16 members — and the "≥4" floor carried from a prior audit bounded the opposite set; two rulings owed |
 | F-6 | 2026-09-01 | med | architectural | fixed-verified | Ruling 2 — all 7 `IC-13` non-members fit **no existing class**, unanimously across two independent readers; four-class partition taken → IC-19/20/21/22, IC-13 16→9 |
+| F-7 | 2026-09-01 | med | tooling | open | The ledger shipped without its corpus — 3 new classes published counts of 3/1/2 against **0 members at HEAD**; the gate reads the working tree, so a partial commit is invisible to it. Repaired; mechanism owed |
 
 ## Wins Index
 
@@ -629,6 +630,61 @@ re-derived every count and passed.
 **Rests on:** two independent readers over the same seven files, every row carrying a direct quote
 and an explicit remedy, and on the seven remedies agreeing pairwise — which is what makes this a
 granularity dispute rather than a classification one.
+
+## F-7 — the ledger shipped without its corpus — the gate reads the working tree, so a partial commit is invisible to it
+
+**Observed:** 2026-09-01, post-rebuild reconnaissance immediately after `461c037a` shipped
+ruling 2.
+
+**When:** Comparing `HEAD` against the working tree — a habit adopted an hour earlier only
+because a peer session reported the count gate going red on them for a reason its message could
+not express.
+
+**Expected:** `461c037a` shipped ruling 2 whole. The gate was green when I committed it.
+
+**Got:** It shipped the **ledger** and not the **corpus**. Six of the seven retagged bug files
+were never staged, so at `HEAD`:
+
+| slug | working tree | HEAD |
+|---|---:|---:|
+| `capped-result-presented-as-complete` | 9 | **15** |
+| `truncated-window-ordered-by-the-wrong-key` | 3 | **0** |
+| `floor-published-under-the-name-of-a-total` | 1 | **0** |
+| `instrument-omits-the-dimension-that-grows` | 2 | **0** |
+
+Three of the four newly-opened classes had **zero members at `HEAD`** while the Index published
+3, 1 and 2. Repaired in `4f598b5b`, and `HEAD` now derives 9 / 3 / 1 / 2 / 1.
+
+**Probable cause — and the gate could not have caught it.**
+`every_index_count_matches_the_corpus` runs `git grep` against the **working tree**, so it
+validates *the state on disk*. That state was correct and self-consistent the whole time. A commit
+that takes **some** of that state and not the rest produces a `HEAD` the gate never examined —
+there is no moment at which the check runs against what was actually shipped. Local green, CI red,
+and the red surfaces to whoever pushes next rather than to the author.
+
+This is one turn sharper than the tracked-only property documented in that test's doc comment an
+hour ago. That one is about files git **cannot see**; this one is about files git **can** see and
+the commit did not take. Both make a local green a **deferral** rather than a clearance, which is
+now two mechanisms with one consequence.
+
+**Severity:** med — nothing was wrong on disk at any point, and no judgement rested on the bad
+state. The cost was a `HEAD` that published counts its own corpus contradicted, discoverable only
+by CI or by a scout that thought to compare the two.
+
+**Fix idea / Pointer:** The invariant is a **commit-boundary** one — *at every commit, the
+ledger's counts match the corpus at that commit* — and pre-commit is where this repo's other
+commit-boundary invariants already live (`refuse a pathspec commit carrying unstaged content`,
+`refuse an index commit carrying another session's staged paths`). A hook running the same
+derivation against the **staged** state (`git grep --cached`, or a temp-index checkout) closes it
+exactly. Deliberately **not** done by changing the test to read the index: that would red on every
+ordinary unstaged edit, which is the state the test is useful in.
+
+**Status:** open — the split is repaired; the mechanism that would have prevented it is not built.
+
+**Valid:** dated 2026-09-01
+
+**Rests on:** the measured `HEAD`-vs-worktree divergence above, and on the gate's own
+implementation reading the working tree — not on any claim about how the commit was made.
 
 ## Template for new entries
 
