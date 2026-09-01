@@ -5301,7 +5301,7 @@ Not corruption at all. A hang.
 Every signal pointed at re-opening a closed corruption bug — in masking code, on a
 platform with no local reproduction, at roughly 7 minutes per CI round trip. The message
 fix cost one edit and one run and pointed somewhere else entirely
-(`docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md`).
+(`docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md`).
 
 **Why it generalises:** an uninformative failure message is not a documentation problem,
 it is a *measurement* problem — the instrument cannot distinguish the hypotheses you are
@@ -6118,7 +6118,7 @@ instead of an error: `git diff --cached --stat` (whose lines); file mtimes, dest
 as evidence by a `touch` run to bust a clippy fingerprint; a cached clippy
 `Finished in 0.48s`, byte-identical to a green that validates the change; and
 `ListAgents` reporting `Peer sessions (2)` where three were live
-(`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`).
+(`docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`).
 The last is the worst — the others misdescribe artifacts, that one misdescribes who
 else is writing to your tree, which is the premise this whole entry rests on.
 ### Promoted 2026-08-30 → `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md`
@@ -8726,7 +8726,7 @@ first file alone, verified it, then batched the remaining six.
 **Expected:** None of the 7 had a `## Fix provenance` section. That is what `doctor` said —
 *"no `## Fix provenance` pointer is declared"* — and I read it as a statement about the files.
 
-**Got:** `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
+**Got:** `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
 already had one. My insert produced a **second** `## Fix provenance` heading in the same
 file: two byte-identical headings, which is `IC-6` — the cluster this repo maintains for
 exactly that — and removing mine required the `occurrence` disambiguator shipped by
@@ -8770,7 +8770,7 @@ text saying *declared* where it means *parsed*.
 set for that section's presence. The parser half — an unbalanced fence silently disabling
 every line-anchored field below it, which is why the anchor did not take even once written
 correctly — is filed as
-`docs/issues/2026-09-01-an-unbalanced-fence-silently-disables-every-line-anchored-field.md`.
+`docs/issues/archive/2026-09-01-an-unbalanced-fence-silently-disables-every-line-anchored-field.md`.
 
 ## W-91 — Re-reading the substrate before writing a durable claim killed two false records — one about the filesystem, one about a capability that already existed
 

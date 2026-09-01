@@ -175,5 +175,5 @@ None — no codescout code is involved.
 - `docs/issues/archive/2026-08-17-mcp-reconnect-does-not-refresh-server-instructions.md`
   — same family: `/mcp` refreshes one surface and not another.
 - `docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md` — same family.
-- `docs/issues/2026-08-29-stale-model-dir-env-masked-by-shell.md` — adjacent, but a
+- `docs/issues/archive/2026-08-29-stale-model-dir-env-masked-by-shell.md` — adjacent, but a
   different mechanism (ambient shell masking a repo file, not a harness merge).

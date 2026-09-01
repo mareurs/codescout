@@ -272,7 +272,7 @@ site the narrower one never had.
 1. Ask `codescout-ae` for the design before writing anything; they own it and asked to
    circulate first. Reach them at `uds:/run/user/1000/cc-socks/803654.sock` if
    `ListAgents` does not show them — it under-reports arbitrarily
-   (`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`).
+   (`docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`).
 2. Contest or accept the two-lists proposal above.
 3. Whatever lands, **name both test lanes by what they are, never by ordinal.** An
    ordinal is a positional reference — correct for one arrangement, silently wrong after
@@ -284,11 +284,11 @@ site the narrower one never had.
    grepping for old wording, not by diff review.
 5. Gate in the new order. It leaves `target/debug/codescout` correct, so the next
    session does not inherit the `cli_artifact` clobber
-   (`docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`).
+   (`docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`).
 
 ## References
 
 - `73066479` — the gate reorder in `CLAUDE.md`, with the by-construction argument and both caveats.
 - `4c88e129` — the earlier `cargo test` → `cargo test --workspace` swap that widened some sites and not others.
 - `d92f5f9c` — the shared-`target/` clobber this ordering exists to avoid.
-- `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
+- `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`

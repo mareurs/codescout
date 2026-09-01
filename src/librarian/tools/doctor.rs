@@ -4922,7 +4922,7 @@ fn scan_terminal_status_without_fix_anchor(
 /// unterminated fence turns that correct rule into a mute button for the rest of the file,
 /// and the consumer cannot tell the difference: "declared nothing" and "declared, but
 /// unreadable from line N" produce the identical empty result. Measured 2026-09-01 —
-/// `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md` had a
+/// `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md` had a
 /// doubled delimiter at lines 53–54 and `doctor` reported *"no `## Fix provenance` pointer
 /// is declared"* for a file that visibly contained one. True of the parse, false of the
 /// file, and the reader is the one who pays.

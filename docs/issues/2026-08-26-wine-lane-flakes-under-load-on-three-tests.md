@@ -212,7 +212,7 @@ the one place a transient failure becomes an absent field with no trace.
 
 ## References
 
-- `docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md` — the
+- `docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md` — the
   other wine-lane caveat; that one is a version divergence, this one is load, and they are
   not the same thing
 - `src/tools/run_command/output.rs:129-131` — the `.ok()` that would hide the I/O error

@@ -145,7 +145,7 @@ pub struct SectionRange {
 /// a section is unreachable through every heading-addressed surface — including
 /// `artifact(update, patch={body_edits})`, which is the *only* edit path a
 /// librarian-managed artifact has, so the section becomes permanently uneditable.
-/// See `docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
+/// See `docs/issues/archive/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
 ///
 /// `&str` converts in, so every caller with nothing to disambiguate keeps passing a
 /// bare string and keeps today's behaviour.

@@ -1,5 +1,5 @@
 ---
-id: '00c57991620f6e05'
+id: d2b0e9c1b9802432
 kind: bug
 status: fixed
 title: 'BUG: a peer''s lean build clobbers target/debug/codescout, reddening 10 cli_artifact tests with a gating-regression message'

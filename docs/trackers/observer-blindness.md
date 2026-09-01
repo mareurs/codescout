@@ -358,7 +358,7 @@ at `e8dd2445`.
 **Valid:** conditional — reopens if the gate's command order changes, or if a second
 terminal command is appended after the default-features lane
 
-**Rests on:** `docs/issues/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
+**Rests on:** `docs/issues/archive/2026-08-30-shared-target-dir-feature-clobber-reds-the-cli-tests.md`
 
 **Class:** a shared mutable artifact (here `target/debug/codescout`) left in a degraded
 state by a correct, documented action.
@@ -468,7 +468,7 @@ split one layer up, and the reason a send-by-name failure must never be read as 
 
 **Valid:** conditional — closes when `.worktrees/bench`'s gitdir is repointed or the corpus is re-created under `codescout`'s own `.git`
 
-**Rests on:** `docs/issues/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md` § Residual; reported by `codescout-fe`, verified here 2026-08-31.
+**Rests on:** `docs/issues/archive/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md` § Residual; reported by `codescout-fe`, verified here 2026-08-31.
 
 **Class:** a structural marker read as a liveness signal, when what determines liveness is *reference from elsewhere*.
 

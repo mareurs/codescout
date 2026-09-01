@@ -33,7 +33,7 @@ predicate runs through `names_path_containing`, which scans the **response**. So
 was structurally dead: the only path-shaped field a write response carried was
 `wrote_to`, which names the project root — for a write to `~/.claude/settings.json` that
 is the codescout checkout, and matches no `~/.claude` needle.
-`docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md` recorded it, with mutations
+`docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md` recorded it, with mutations
 showing that widening the scan to `wrote_to` still does not fire while a response carrying
 a real `abs_path` does.
 
@@ -106,5 +106,5 @@ bug nor its repair. It is removed, per its own instruction.
 - `src/util/librarian_response.rs` — `names_path_containing`, the consumer
 - `src/operator_rules/route.rs` — `op_4s_predicate_is_itself_sound_given_a_path_bearing_response`
 - `src/tools/core/tests.rs` — `op_4_routes_on_a_write_response_the_pipeline_produced`
-- `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`
+- `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`
 

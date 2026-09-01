@@ -545,7 +545,7 @@ No shape carries the written path, so the predicate matches nothing, ever.
 
 **Files:**
 - Modify: `src/operator_rules/route.rs` (`mod tests`)
-- Create: `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`
+- Create: `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`
 
 **Interfaces:**
 - Consumes: `route::route` from Task 3. Produces nothing new.
@@ -561,7 +561,7 @@ Append to `src/operator_rules/route.rs`'s `mod tests`:
 /// convention, and `names_path_containing` scans only `abs_path`/`rel_path`
 /// (top level and `items[]`) plus `violations[].path`. Giving writes a path
 /// field is a change to the no-echo convention, not a bug fix — see
-/// docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md
+/// docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md
 ///
 /// **When this test starts failing, that is the fix landing.** Delete it and
 /// assert delivery instead; close the bug file.
@@ -600,7 +600,7 @@ Expected: PASS, both. The second is the positive control that keeps the first me
 
 - [ ] **Step 3: File the bug**
 
-Copy `docs/issues/_TEMPLATE.md` to `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md` with `status: open` and a body carrying: the four scanned shapes, the observed `edit_file` response above, the two test names that pin it, and the statement that the remedy is a no-echo-convention decision (add `abs_path` to write responses) rather than a change to `names_path_containing`, whose doc declined to widen the top-level scan for exactly this kind of single-caller need.
+Copy `docs/issues/_TEMPLATE.md` to `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md` with `status: open` and a body carrying: the four scanned shapes, the observed `edit_file` response above, the two test names that pin it, and the statement that the remedy is a no-echo-convention decision (add `abs_path` to write responses) rather than a change to `names_path_containing`, whose doc declined to widen the top-level scan for exactly this kind of single-caller need.
 
 - [ ] **Step 4: Run the full gate**
 
@@ -614,7 +614,7 @@ cargo check --no-default-features
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/operator_rules/route.rs docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md
+git add src/operator_rules/route.rs docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md
 git commit -m "test(operator-rules): pin OP-4's dead path~ predicate, with a positive control
 
 The selector is sound; the write-response shape carries no path. Fixing that
@@ -775,7 +775,7 @@ The honest cost, from `A-34`: unlike the `Conclude Last` deletion, `OP-2`/`OP-3`
 > Claude Code's own tools that never enter this process, so no override can reach them.
 > Deleting these sections would leave both rules undelivered everywhere, with the ledger as
 > their only copy. See
-> `docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`.
+> `docs/issues/archive/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`.
 
 - [ ] **Step 1: Back up all three profiles**
 

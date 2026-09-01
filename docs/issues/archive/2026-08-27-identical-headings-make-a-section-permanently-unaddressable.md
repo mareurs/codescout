@@ -1,5 +1,5 @@
 ---
-id: '9f7de1c3c092095d'
+id: 6abf6e3397b1bdd5
 kind: bug
 status: fixed
 title: 'BUG: two byte-identical headings make both sections permanently unaddressable, and the error''s prescribed remedy names parameters that do not exist on the tool it names'

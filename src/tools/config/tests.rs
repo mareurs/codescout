@@ -1431,7 +1431,7 @@ async fn post_compact_flushes_lsp_clients_and_returns_flushed() {
 
 /// The `post_compact` hint must price the flush, not merely describe its mechanism.
 ///
-/// `docs/issues/2026-08-28-post-compact-flush-leaves-first-nav-call-to-pay-cold-start.md`
+/// `docs/issues/archive/2026-08-28-post-compact-flush-leaves-first-nav-call-to-pay-cold-start.md`
 /// (`open-issue-work-queue:BL-49`). The restart is lazy, so the next navigation call
 /// pays the language-server start — on a 1697-file Rust crate that once exceeded the
 /// 60s tool timeout and returned nothing. The old hint read "Clients restart

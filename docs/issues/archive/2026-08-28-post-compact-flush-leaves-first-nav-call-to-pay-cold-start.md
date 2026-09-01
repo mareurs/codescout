@@ -1,5 +1,5 @@
 ---
-id: caa8bc1df0e8c0d8
+id: d7072ed21959aca1
 kind: bug
 status: mitigated
 title: 'BUG: workspace(post_compact) flushes LSP without prewarming, so the next navigation call pays cold start and can blow the 60s tool timeout — while its own hint promises no disruption'

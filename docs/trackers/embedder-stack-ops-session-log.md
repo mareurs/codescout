@@ -372,7 +372,7 @@ misleading, so go to `curl` and `dmesg` first.
 **Counterfactual:** Without testing through the actual unit (vs. just trusting my earlier manual `docker compose --profile gpu up -d dense-gpu` success), the project-root `.env`'s stale `CODESCOUT_MODEL_DIR=/home/marius/models` would have stayed invisible indefinitely — every interactive debugging session this machine has ever had was shielded by an ambient `CODESCOUT_MODEL_DIR=./models` export that happens to override `.env` (Docker Compose precedence: process env > `.env` file > inline default). The bug would have first bitten in some future genuinely-clean context (CI, a fresh terminal, another machine, or exactly this systemd unit on the very first real reboot after enabling it) — at a moment with far less context loaded than right now, likely reading as a fresh, confusing GPU/VRAM-looking crash-loop (dense-gpu AND reranker-gpu both failing simultaneously) rather than the one-line fix it actually was.
 
 **Confirming data points:**
-1. This session (2026-08-29) — `dense-gpu`/`reranker-gpu` crash-looped only via the systemd unit path, not via my earlier manual restart, and the root cause (`docs/issues/2026-08-29-stale-model-dir-env-masked-by-shell.md`) was found and fixed within minutes once the clean-env log evidence was read directly (`No such file or directory` + an empty root-owned host directory with a matching mtime) rather than re-guessing a resource-contention story.
+1. This session (2026-08-29) — `dense-gpu`/`reranker-gpu` crash-looped only via the systemd unit path, not via my earlier manual restart, and the root cause (`docs/issues/archive/2026-08-29-stale-model-dir-env-masked-by-shell.md`) was found and fixed within minutes once the clean-env log evidence was read directly (`No such file or directory` + an empty root-owned host directory with a matching mtime) rather than re-guessing a resource-contention story.
 2. Pending: any future "add automation for X" task on this machine that previously only ran interactively.
 
 **Impact:** high — this was a real, previously-invisible defect in a live config file that would have blocked the exact automation just built, on its very first real trigger (next reboot), with no advance warning.
@@ -385,7 +385,7 @@ misleading, so go to `curl` and `dmesg` first.
 
 One confirmed datapoint; promote-when threshold (2 datapoints) not yet reached.
 
-**Rests on:** `docs/issues/2026-08-29-stale-model-dir-env-masked-by-shell.md` — the bug file this win's counterfactual is built on.
+**Rests on:** `docs/issues/archive/2026-08-29-stale-model-dir-env-masked-by-shell.md` — the bug file this win's counterfactual is built on.
 
 ## Template for new entries
 

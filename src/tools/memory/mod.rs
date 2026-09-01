@@ -637,7 +637,7 @@ impl Tool for Memory {
     /// matcher and ledger entry were — and the routing suite stayed green
     /// against a stub *named* `"memory"` that supplied the key the real tool
     /// did not.
-    /// See `docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`.
+    /// See `docs/issues/archive/2026-08-28-triggered-operator-rules-route-nothing-in-production.md`.
     ///
     /// Mirrors `LibrarianAdapter::selector_key`, including the action-less
     /// case: it projects the bare tool name rather than `None`, so a tool-only

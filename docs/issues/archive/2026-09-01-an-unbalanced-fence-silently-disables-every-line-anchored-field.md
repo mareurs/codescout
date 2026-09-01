@@ -1,5 +1,5 @@
 ---
-id: '52542a0ec81771a3'
+id: 073c72c36e845402
 kind: bug
 status: fixed
 title: 'BUG: one stray ``` disables every line-anchored field for the REST of the file, and doctor reports the result as "none declared"'

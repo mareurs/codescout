@@ -36,7 +36,7 @@ down, which needs a single-session workspace idle past the 180-second timeout.
 
 If a navigation call is the first thing you do after the flush and it stalls, re-run
 it. See
-`docs/issues/2026-08-28-post-compact-flush-leaves-first-nav-call-to-pay-cold-start.md`.
+`docs/issues/archive/2026-08-28-post-compact-flush-leaves-first-nav-call-to-pay-cold-start.md`.
 
 *(Corrected 2026-08-30. This section previously said "no disruption to the session",
 which is the sentence that cost an investigation a wrong diagnosis: it rules out the

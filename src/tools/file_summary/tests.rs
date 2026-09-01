@@ -867,7 +867,7 @@ fn occurrence_selects_among_identical_headings() {
     // Two byte-identical headings: the exact tiers match both and return before the
     // fuzzy tiers run, and no query string can separate two equal strings anyway.
     // The 1-indexed selector is the only way to reach either.
-    // docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md
+    // docs/issues/archive/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md
     let content = "# Title\n## Fix\nfirst\n## Middle\nm\n## Fix\nsecond";
 
     let first = resolve_section_range(content, HeadingQuery::new("## Fix", Some(1))).unwrap();

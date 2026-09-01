@@ -257,7 +257,7 @@ git ls-files ':(glob)docs/issues/archive/*.md' | wc -l                          
 counts **occurrences**, and a bug file that names its own slug in prose as well as in frontmatter
 is then counted twice. That is not hypothetical — it is why `cluster/config-propagation-is-additive`
 reads as 9 by occurrence against a true membership of 8
-(`docs/issues/2026-08-30-core-hookspath-points-at-pre-rename-path.md` names it in both places).
+(`docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md` names it in both places).
 Every `n` in the table above is a **file** count.
 
 Snapshot 2026-09-01: **118 tagged of 495.** This read *"78 of the 357 files dated 2026-07-01 or

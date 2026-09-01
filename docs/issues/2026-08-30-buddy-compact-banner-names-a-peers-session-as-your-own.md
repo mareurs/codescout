@@ -76,7 +76,7 @@ at all.
 **Why the profile detail matters more than "another session".** It says the `from` value is
 resolved against something that is **not scoped to the reader's config dir** — which is the
 same axis that partitions `ListAgents` visibility
-(`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`,
+(`docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`,
 where `CLAUDE_CONFIG_DIR` was measured as the discriminator 7/7). A same-profile mix-up would
 be a selection bug; crossing the profile boundary suggests the lookup has no profile scope in
 it at all.

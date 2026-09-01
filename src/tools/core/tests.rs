@@ -1382,7 +1382,7 @@ async fn write_echo(
 /// `memory(action="write", ...)` call, even though it is the rule Task 6
 /// expects that call to surface. That is no longer true: `Memory` opts in as of
 /// the fix to
-/// docs/issues/2026-08-28-triggered-operator-rules-route-nothing-in-production.md,
+/// docs/issues/archive/2026-08-28-triggered-operator-rules-route-nothing-in-production.md,
 /// and `the_real_memory_tool_supplies_a_selector_key_for_op_3` below asserts it
 /// against the real tool rather than this stand-in.
 ///
@@ -1524,7 +1524,7 @@ fn the_real_memory_tool_supplies_a_selector_key_for_op_3() {
 /// **This does not make `OP-4` fire, and that is deliberate.** Its `path~`
 /// predicate is evaluated against the tool's *response*, and write tools return
 /// no path by the no-echo convention
-/// (`docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`, whose own
+/// (`docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`, whose own
 /// mutations show that widening to `wrote_to` still does not fire while a real
 /// `abs_path` does). That is a second, independent defect. This closes only the
 /// routing precondition — without it, fixing the predicate would change nothing.
@@ -1635,7 +1635,7 @@ async fn an_unpinned_write_names_the_checkout_it_reached() {
 /// `"ok"` under the no-echo convention, promoted here to `{"status":"ok","wrote_to":…}`
 /// — and `wrote_to` is the project ROOT, not the file. So the rule could never match a
 /// write to `~/.claude/…`: the one field present names the wrong thing.
-/// `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md` records exactly this,
+/// `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md` records exactly this,
 /// its Mutation 1 showing that widening the scan to `wrote_to` still does not fire while
 /// a response carrying a real `abs_path` does.
 ///

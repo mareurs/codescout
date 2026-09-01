@@ -140,7 +140,7 @@ and `git log -S'IC-11'` answers the question "why was this class added?" with th
 commit's `--stat` reported 32 changed lines in a file where one cell had been edited, and the
 session happened to read it. Nothing warns. A pre-commit check comparing each staged path's
 working-tree hash against the hash the session last wrote would catch it — but this checkout's
-`core.hooksPath` is broken (`docs/issues/2026-08-30-core-hookspath-points-at-pre-rename-path.md`),
+`core.hooksPath` is broken (`docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md`),
 so no hook fires here at all.
 
 ## Instance 5 — the captured side, and an announce channel that was used and did not help
@@ -163,7 +163,7 @@ field it was editing and asking it not to undo them. The channel existed, was us
 specific, and was early. It did not prevent the capture, and could not have: cross-session
 messages drain at the **receiver's next tool round**, and the receiver was mid-turn on a
 commit. So announcing is subject to exactly the defect
-`docs/issues/2026-08-30-a-transient-uncoordinated-mutation-during-an-announced-window.md`
+`docs/issues/archive/2026-08-30-a-transient-uncoordinated-mutation-during-an-announced-window.md`
 records — an announcement is not a lock, and a window announced is still a window.
 
 That closes the remedy space on this side. (1) path-scoping fails on contended files

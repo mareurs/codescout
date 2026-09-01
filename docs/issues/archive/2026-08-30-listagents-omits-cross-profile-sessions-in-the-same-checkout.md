@@ -1,5 +1,5 @@
 ---
-id: '4266d09da90acb5e'
+id: 1950479aff0acb5b
 kind: bug
 status: mitigated
 title: 'BUG: ListAgents omits live cross-profile sessions writing the same checkout, and reports the short count as complete'

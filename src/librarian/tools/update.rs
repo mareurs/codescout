@@ -1888,7 +1888,7 @@ text
     /// byte-identical headings made both sections permanently uneditable through every
     /// available path. `edit_markdown` refuses managed files, `edit_file` refuses them on
     /// every path, and the error's own hint named `edit_file` parameters that do not exist.
-    /// See `docs/issues/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
+    /// See `docs/issues/archive/2026-08-27-identical-headings-make-a-section-permanently-unaddressable.md`.
     #[test]
     fn body_edits_occurrence_reaches_the_second_of_two_identical_headings() {
         let body = "## Fix\n\nthe plan\n\n## Middle\n\nm\n\n## Fix\n\nthe plan\n";

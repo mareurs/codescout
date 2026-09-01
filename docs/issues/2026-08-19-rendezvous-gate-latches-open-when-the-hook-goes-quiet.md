@@ -267,7 +267,7 @@ opens a gate — but it is **not permanent**: a later `SessionStart` stamps it, 
 2026-08-28 06:23Z on the very slot cited here. (This sentence originally read "permanent by
 design", generalising from one code path to the whole system; corrected same day.) Filed
 separately — different mechanism, opposite direction, different fix:
-`docs/issues/2026-08-28-rendezvous-slot-never-stamped-leaves-phase-c-inactive.md`
+`docs/issues/archive/2026-08-28-rendezvous-slot-never-stamped-leaves-phase-c-inactive.md`
 
 ## Mechanism SETTLED 2026-08-28 — Shape B ran, and it discriminates
 

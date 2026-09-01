@@ -15,7 +15,7 @@ opened: 2026-08-31
 owner: marius
 related:
 - docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md
-- docs/issues/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md
+- docs/issues/archive/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md
 severity: medium
 ---
 
@@ -113,7 +113,7 @@ reasoning about precisely this hazard at the adjacent seam.
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — orphan block
   carried `opened`, `severity`, `owner`, `related`; all four invisible to every query. Repaired
   in `351836a8` by rewriting the body and merging the keys into real frontmatter via `extra`.
-- `docs/issues/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md` — orphan block
+- `docs/issues/archive/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md` — orphan block
   carried `status: fixed`, `closed`, `severity`, `owner`, `unverified`. The catalog reported
   `open`. Repaired by a concurrent session.
 
@@ -193,6 +193,6 @@ open corpus has been checked, and only on 2026-08-31.
 
 - `src/librarian/frontmatter.rs:105-150` — `write`, and the `RESERVED_KEYS` guard at `:70-78`
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — instance 1
-- `docs/issues/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md` — instance 2
+- `docs/issues/archive/2026-08-31-doctor-test-substring-matches-a-random-tempdir-name.md` — instance 2
 - `docs/trackers/issue-clusters.md` — `IC-6`, the class this instantiates
 

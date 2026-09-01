@@ -1,5 +1,5 @@
 ---
-id: '28d61d3b0dca0932'
+id: b93be92b22a9b73f
 kind: bug
 status: mitigated
 title: 'BUG: the working tree briefly held a mutation nobody applied, during the window announcing that exact mutation'

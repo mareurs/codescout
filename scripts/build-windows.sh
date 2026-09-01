@@ -63,7 +63,7 @@
 # Windows makes them MANDATORY — so wine could neither reproduce that defect nor verify its
 # fix (`ee9d9844`). Nor is a green run here a green wine LANE: CI installs ubuntu's wine
 # 9.0, typically two majors behind a dev box, and the two have already diverged twice —
-# `docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md`.
+# `docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md`.
 # Check `wine --version` before trusting a local result against a CI failure.
 set -euo pipefail
 
@@ -120,7 +120,7 @@ case "$CMD" in
     echo ">>> wine in CI: whatever 'apt-get install wine' gives ubuntu-latest" >&2
     echo ">>>             (.github/workflows/ci.yml, step 'Install MinGW + wine')" >&2
     echo ">>> A green run here is NOT a green wine LANE — nor a green windows-latest." >&2
-    echo ">>>   docs/issues/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md" >&2
+    echo ">>>   docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md" >&2
     export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER="wine"
     export WINEDEBUG="${WINEDEBUG:--all}"   # silence wine's GL/pci-id probe noise
     set -x; exec cargo test --target "$TARGET" "${FEATURES[@]}" "${ARGS[@]}" ;;

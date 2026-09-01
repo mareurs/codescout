@@ -208,7 +208,7 @@ choice among instruments that already exist, most of them not ours.
 - An instance appears where clause 3 produced meaningful drag — a marker that was
   expensive or impossible to obtain. Today every marker was free.
 - `ListAgents` gains machine-wide enumeration or a scope note
-  (`docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`,
+  (`docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`,
   `open-issue-work-queue:BL-58`). That would retire the worst member but not the class.
 
 **Confidence: high.** Nine instances in one day, found independently by four sessions,
@@ -297,7 +297,7 @@ twelve days earlier.
 - `bug-fix-session-log:W-73` — "compile-error → green" as the trigger for spending a
   mutation; the passing-unit-test member of this census is its caller-side twin.
 - `bug-fix-session-log:W-74` — when the closure step *is* the broken operation, run it.
-- `docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`
+- `docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md`
   (`open-issue-work-queue:BL-58`) — the worst member, filed separately.
 - `docs/issues/2026-08-30-buddy-compact-banner-names-a-peers-session-as-your-own.md`
   (`BL-59`) — adjacent: it overstates what *you* wrote rather than misreporting an

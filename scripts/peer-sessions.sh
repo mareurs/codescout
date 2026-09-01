@@ -32,7 +32,7 @@
 # every participant. Six authorship misattributions were made that afternoon, each
 # a correct elimination over a population short by at least two.
 #
-# See docs/issues/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md
+# See docs/issues/archive/2026-08-30-listagents-omits-cross-profile-sessions-in-the-same-checkout.md
 # (BL-58). The underlying defect is in the harness and cannot be fixed here; this
 # is the local mitigation, made runnable so it fires at the moment of use rather
 # than being remembered.

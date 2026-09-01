@@ -212,7 +212,7 @@ fn annotate_write_root(val: &mut Value, root: &std::path::Path) {
 /// `names_path_containing` scans the response, writes answer `"ok"` under the
 /// no-echo convention, and the one field promotion added was `wrote_to` — the
 /// project ROOT, which for a write to `~/.claude/…` names the wrong thing entirely.
-/// `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`.
+/// `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`.
 ///
 /// **This is a narrow, deliberate exception to no-echo, not its repeal.** The
 /// convention exists so a write does not echo the *content* it wrote — the reason

@@ -24,7 +24,7 @@ impl Tool for CreateFile {
     ///
     /// This is the routing PRECONDITION only; `OP-4`'s `path~` predicate is
     /// matched against the response, which carries no path. See
-    /// `docs/issues/2026-08-28-op-4-path-predicate-can-never-fire.md`.
+    /// `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`.
     fn selector_key(&self, input: &serde_json::Value) -> Option<String> {
         crate::tools::core::types::action_selector_key(self.name(), input)
     }

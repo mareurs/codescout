@@ -9,7 +9,7 @@
 # left to a hand-run command it went wrong silently for a day:
 # `core.hooksPath` still pointed at a pre-RENAME absolute path, git does not warn or
 # fall back when that directory is missing, and ZERO hooks ran —
-#   docs/issues/2026-08-30-core-hookspath-points-at-pre-rename-path.md
+#   docs/issues/archive/2026-08-30-core-hookspath-points-at-pre-rename-path.md
 # This tracked script is the record of what "installed" means, and it checks for that
 # exact trap before doing anything.
 #
