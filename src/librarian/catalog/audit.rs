@@ -304,6 +304,26 @@ pub(crate) fn prune_before(conn: &Connection, before_ms: i64) -> Result<usize> {
     Ok(n)
 }
 
+/// Rolls up audit-trail size, time span and unknown-actor count for
+/// `doctor`'s `catalog_health` block. `unknown_actor_rows` surfaces writers
+/// (foreign processes, direct SQL) that never identified themselves — see
+/// `resolve_actor` for how an identified writer sets `actor` instead.
+pub(crate) fn health(conn: &Connection) -> Result<serde_json::Value> {
+    let (rows, min_ms, max_ms, unknown): (i64, Option<i64>, Option<i64>, i64) = conn.query_row(
+        "SELECT count(*), min(at_ms), max(at_ms),
+                count(*) FILTER (WHERE actor = 'unknown')
+         FROM catalog_audit",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+    Ok(serde_json::json!({
+        "rows": rows,
+        "span_ms": min_ms.zip(max_ms).map(|(a, b)| serde_json::json!([a, b])),
+        "unknown_actor_rows": unknown,
+        "hint": "unknown_actor_rows counts writers that did not identify themselves (foreign processes). Query with librarian(action=\"audit_log\", actor=\"unknown\")."
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::librarian::catalog::{artifact, Catalog};
@@ -610,5 +630,27 @@ mod tests {
             serde_json::from_str(rows[0].payload.as_deref().unwrap()).unwrap();
         assert_eq!(p["pruned"], 1);
         assert_eq!(p["before_ms"], i64::MAX);
+    }
+
+    #[test]
+    fn health_counts_rows_and_unknown_actors() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "h1"); // stamped by this connection's session actor
+        cat.conn
+            .execute(
+                "INSERT INTO catalog_audit(at_ms,tbl,op,row_id) VALUES(5,'artifact','insert','h2')",
+                [],
+            )
+            .unwrap(); // direct insert: stamped too (same conn) — so force one unknown:
+        cat.conn
+            .execute(
+                "UPDATE catalog_audit SET actor='unknown' WHERE row_id='h2'",
+                [],
+            )
+            .unwrap();
+        let h = super::health(&cat.conn).unwrap();
+        assert!(h["rows"].as_i64().unwrap() >= 2);
+        assert_eq!(h["unknown_actor_rows"], 1);
+        assert!(h["span_ms"].is_array());
     }
 }

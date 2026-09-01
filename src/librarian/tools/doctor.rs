@@ -488,6 +488,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         None => Vec::new(),
     };
 
+    // Computed here, not beside the other catalog_health inserts below: the
+    // lock is dropped immediately after (next line) to keep lock scope
+    // minimal, and audit::health needs &cat.conn.
+    let audit_health = crate::librarian::catalog::audit::health(&cat.conn)?;
+
     // Drop the lock before computing the summary — keeps lock scope minimal.
     drop(cat);
 
@@ -734,6 +739,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // absent/unreadable/unparseable config) stays distinguishable from a pass.
     catalog_health.insert("declared_roots".to_string(), declared_roots_health);
     catalog_health.insert("archived_fix_shas".to_string(), archived_fix_shas);
+    catalog_health.insert("audit".to_string(), audit_health);
     catalog_health.insert("hint".to_string(), json!(health_hint));
 
     Ok(json!({
