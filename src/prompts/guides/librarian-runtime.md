@@ -98,16 +98,24 @@ markdown files only.
 | State | Source of truth | Regenerable from disk? |
 |---|---|---|
 | Artifact rows (id, kind, status, title, frontmatter, body text) | the `.md` file | **Yes** — `reindex` rebuilds them from disk |
-| Augmentation (`prompt`, `params`, `params_schema`, `render_template`, `entry_collection`) | the **catalog DB only** | **No** — there is no on-disk representation |
+| Augmentation **shape** (`prompt`, `params_schema`, `render_template`, `entry_collection`, `append_mode`, `history_cap`) | the catalog DB, projected to a committed sidecar | **Yes, since 2026-08-30** — export it with `librarian(action="doctor", fix="export_augmentations")`, declare it with `expects_augmentation:`, and `reindex` re-attaches it |
+| Augmentation **params** (the live rows) | the **catalog DB only** | **No**, and deliberately so — params churn, and committing them recreates the params-vs-body drift the sidecar split exists to avoid |
 
 Implications for augmented trackers (anything with `entry_collection` /
 filterable `params`):
 
-- **An augment produces no git diff.** `artifact_augment` writes only the
-  catalog row; the `.md` body is untouched. `git status` stays clean.
+- **An augment produces no git diff *to the `.md` body*.** `artifact_augment`
+  writes the catalog row and leaves the body untouched. `git status` no longer
+  stays clean, though: a call that changes the *shape* writes through to the
+  artifact's committed sidecar (`sidecar_write_through`, `augment.rs:248`), so
+  read `git diff` on `docs/augmentations/` as you would for any generated file.
+  A params-only merge does leave the sidecar byte-identical.
 - **Augmentations survive `reindex`** (even `force=true`). Reindex
   regenerates artifact rows *from disk*; it cannot recreate params that have
-  no disk form, so it preserves augmentation rows keyed by artifact `id`.
+  no disk form, so it preserves augmentation rows keyed by artifact `id`. It
+  also **restores** an absent one from a declared sidecar — repair, never sync:
+  a live row is never overwritten, and `augmentations_restored` distinguishes a
+  run that repaired nothing from one with nothing to repair.
 - **They do NOT survive a file delete+recreate.** A recreated file gets a
   new `id`, orphaning the old augmentation. Use `artifact(action="move")`
   to relocate a tracker, never delete+recreate.
@@ -120,7 +128,11 @@ filterable `params`):
   can be re-pointed.
 - **To share a filterable index with teammates**, the structured rows would
   need to be persisted into the file (frontmatter/body) — the catalog alone
-  is local tooling state. As of 2026-05, retrofits are local-only by design.
+  is local tooling state, and that remains true of `params`. The augmentation
+  **shape** is a different matter and does travel: see
+  `get_guide("tracker-conventions")` § *Declaring an augmentation*, which owns
+  the mechanism. A restored tracker comes back working and empty — never
+  holding another machine's rows.
 
 ## Per-project classifier overrides
 

@@ -2399,6 +2399,44 @@ mod redesign_invariants {
         }
     }
 
+    /// The `librarian-runtime` guide denied the augmentation sidecar for a full day
+    /// after `e799f29d` shipped it, because the same-day corrective sweep
+    /// (`e1b91221`) named *three* places and this was the fourth. That is the
+    /// identical mechanism, in the identical guide section, that
+    /// `no_guide_claims_a_move_preserves_the_id` above exists for — two separate
+    /// three-place sweeps have now each missed this one file. Scanning every
+    /// registered guide is what generalises past the copy that happened to drift.
+    ///
+    /// **The absence half alone would be monotone under removal:** deleting the
+    /// section satisfies it exactly as a correct section does. The positive half is
+    /// what lets this test tell the two apart — it fires if the mechanism stops
+    /// being documented at all, which no `!contains` can detect.
+    #[test]
+    fn no_guide_denies_the_augmentation_sidecar() {
+        for &topic in crate::prompts::GUIDE_TOPICS {
+            let body = crate::prompts::topic_body(topic).expect("guide registered");
+            for phrase in ["there is no on-disk representation", "local-only by design"] {
+                assert!(
+                    !body.contains(phrase),
+                    "guide '{topic}' denies the augmentation sidecar ('{phrase}'). Shape has \
+                     travelled since 2026-08-30 via docs/augmentations/ plus an \
+                     `expects_augmentation:` declaration; only `params` stay catalog-only. \
+                     A sentence saying a capability does not exist ends the search that \
+                     would have found it."
+                );
+            }
+        }
+
+        let runtime = crate::prompts::topic_body("librarian-runtime").expect("guide registered");
+        for token in ["expects_augmentation", "sidecar"] {
+            assert!(
+                runtime.contains(token),
+                "librarian-runtime no longer mentions `{token}`, so the sidecar mechanism has \
+                 gone undocumented — the state the absence assertions above are blind to."
+            );
+        }
+    }
+
     #[test]
     fn every_iron_law_has_do_instead() {
         let rendered = build_server_instructions(None);
