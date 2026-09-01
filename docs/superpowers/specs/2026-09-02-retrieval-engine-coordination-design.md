@@ -56,6 +56,21 @@ retrieval mechanism, and what the ledger must remember.
 | 4. outcome coaching | *result* shape | `err_family`, already ranked | unbuilt | n/a |
 | 5. operator | the human | `~/.claude*/CLAUDE.md` + `docs/trackers/operator-rules.md` | **shipped.** `OP-1` resident in 3 profiles; `triggered` routing live | **yes** — borrows 1's grammar, shares 1's ledger |
 | 6. craft / domain | task intent | `SKILL.md`, buddy specialists | exists, own retrieval | **no** — see below |
+| **7. session opener** | **session phase** | compiled-in guides (shared with 1) | **shipped** — `SESSION_OPENING_GUIDE`, one topic | **yes** — shares 1's namespace, deliberately |
+
+> **Engine 7 was added 2026-09-02, found by implementing Layer 1 rather than by
+> re-reading the roster.** The 2026-08-27 enumeration walked the *surface inventory*;
+> this one only becomes visible when you enumerate the **ledger write sites**, because
+> it stamps a bare topic name indistinguishable from engine 1's. It fires on the first
+> eligible call of a session regardless of shape — *session phase*, not call shape — so
+> under this table's own discriminator it is a separate engine, not a mode of engine 1.
+>
+> Two consequences worth carrying forward. **The discriminator works**: applied to the
+> code rather than to the docs it produced a member the doc-level pass missed. And
+> **"six" was never a count of a closed set** — it was a count of what one instrument
+> could see, which is exactly the failure mode this repo names when a bound is published
+> without its population. Read the roster as "the engines we have enumerated", and expect
+> Layer 2 to find more when key construction routes through the registry.
 
 `domain`, `model` and `task-shape` are **facets that cut across engines**, not engines. The
 evidence is in engine 5's own corpus: *"Sonnet is the floor for subagent dispatch"* is a
@@ -268,9 +283,35 @@ design consequence, and it is available now.
 1. **Registry totality.** Every code path that can stamp `GuideLedger` is a registered
    engine. Mirrors `every_registered_tool_supplies_a_selector_key`; fails the build on a
    new unregistered writer.
-2. **Prefix disjointness as a registry property.** No registered `ledger_prefix` is a
-   prefix of another. Replaces `op_keys_collide_with_no_guide_key` at N engines instead
-   of 2.
+
+   > **Shipped at partial resolution, and the shortfall is named rather than hidden.**
+   > `engines::tests::every_live_ledger_key_has_a_registered_owner` asserts every key the
+   > *registered* corpora emit has an owner. A brand-new engine writing a brand-new
+   > namespace passes it trivially — the gate cannot see a writer it was never told
+   > about. Closing that needs key **construction** to route through the registry, so
+   > that an unregistered engine cannot mint a key at all. That is Layer 2's job, and it
+   > is the difference between a gate and a convention.
+2. **Disjointness, conditioned on corpus.** Two engines drawing on **different**
+   corpora must own disjoint key spaces. Replaces `op_keys_collide_with_no_guide_key`
+   at N engines instead of 2. Shipped as
+   `engines::tests::engines_over_different_corpora_own_disjoint_key_spaces`.
+
+   > ⚠ **Corrected 2026-09-02, before implementation, by enumerating the write sites.**
+   > This gate first read *"no registered `ledger_prefix` is a prefix of another"*. That
+   > is **wrong**, and it would have failed on correct code the day it landed.
+   >
+   > Production has **six** ledger writers, not two. Four belong to `guide-sections`
+   > (whole / preamble / section / explicit `get_guide` fetch), and a fifth is the
+   > **session opener** — an engine the spec's own six-engine enumeration missed,
+   > because it retrieves on *session phase* rather than call shape and stamps a bare
+   > topic name indistinguishable from `guide-sections`'. That overlap is deliberate
+   > and argued at the site: keying the opener finer *"would desync this trigger from
+   > what `GuideLedger::re_arm` actually re-arms."*
+   >
+   > A collision **within** one corpus re-delivers the same bytes; a collision **across**
+   > corpora lets one engine's stamp silence another's unrelated content. Only the
+   > second is a defect, so only the second is gated. `RetrievalKey::SessionPhase` and
+   > the `Corpus` field both exist because of this find.
 3. **One budget.** A p50 session's **total** emission across all engines is under one
    committed ceiling. Absorbs Task 10's `CEILING`; does not sit beside it.
 4. **Preview fidelity — and note which assertion discriminates.** The obvious gate is
@@ -289,8 +330,8 @@ design consequence, and it is available now.
 
 | step | content | blocked on |
 |---|---|---|
-| 0 | **GG-3** — extract the delivery helpers out of the 408-line trait method. Pure refactor. | — |
-| 1 | Layer 1 registry + gates 1 and 2 | GG-3 |
+| 0 | **GG-3** — extract the delivery helpers out of the 408-line trait method. Pure refactor. | — **done** `d0065423` |
+| 1 | Layer 1 registry + gates 1 and 2 | — **done** `src/engines/mod.rs` |
 | 2 | Layer 2 coordinator, byte-identical behaviour + gate 3 | Layer 1 |
 | 3 | Layer 3 preview + `codescout engines` CLI + gate 4 | Layer 2 |
 | 4 | Layer 4 dashboard routes | Layer 3 |

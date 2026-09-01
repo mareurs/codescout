@@ -28,6 +28,7 @@ pub mod config;
 #[cfg(feature = "dashboard")]
 pub mod dashboard;
 pub mod embed;
+pub mod engines;
 pub mod fs;
 
 pub mod git;
