@@ -1,15 +1,15 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/hint-composed-without-the-request
+closed: 2026-09-01
 opened: 2026-09-01
-closed:
-severity: medium
 owner: marius
 related:
-  - docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
-  - docs/issues/archive/2026-07-10-preview-headings-silent-cap-20.md
-tags:
-  - cluster/hint-composed-without-the-request
-kind: bug
+- docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
+- docs/issues/archive/2026-07-10-preview-headings-silent-cap-20.md
+severity: medium
 ---
 
 # BUG: a scoped `artifact(get)` is billed the full heading map — narrowing the request does not narrow the response
@@ -152,31 +152,78 @@ here is that the array is sent **at all** on a narrowed request.
 
 ## Fix
 
-**Plan.** Compute `body_selected` *before* `:536` and branch the preview on it. When any
-selector is present, emit a stub rather than the array:
+**SHIPPED 2026-09-01 on `experiments`, in three commits.** Each SHA is paired with its
+patch-id because the SHA is positional and dies when `experiments` is rebased; every
+patch-id below was **re-derived independently** at closeout rather than copied from an
+implementer's report.
 
-```json
-"preview": { "shape": "default", "line_count": 1190, "total_headings": 32,
-             "headings": "omitted (selector present) — call with no selector for the map" }
-```
+| SHA (`experiments`) | patch-id | what |
+|---|---|---|
+| `f3a76f81ded24630411894d8898492a402463f80` | `69d5fda78f7fcaa292f0b1fcc419bd4bd50cefef` | the stub itself |
+| `aee9dd6bb7c85ff804ded190c0ccd6cac933bdbe` | `08bba53a99703b16f21aaed1d051fe0566d74e9f` | review round: contract annotation, heading-miss restore, `last_heading` kept, `total_headings` backfill |
+| `b9bcfee42ea57c6dd64351efa3e677b1325fedce` | `6102147d08b38d0dbad1f4ee72984870335846ac` | heading-miss restore extended to the plural `headings=` selector |
 
-Retaining `total_headings` is deliberate: it reports the **magnitude** the caller did not
-receive, rather than merely its absence.
+**What shipped.** `body_selected` (already in scope) now gates the preview: on a
+body-selected read `stub_preview` replaces the `headings` array with a note string,
+keeping `line_count`, `total_headings` and `headings_truncated`. `entry_filter` is
+deliberately excluded — it filters params rows rather than selecting body.
 
-The change lives at `src/librarian/tools/get.rs:535-540`. Design context, and the two
-sibling changes that share this invariant, are in
-`docs/superpowers/specs/2026-09-01-request-aware-response-envelope-design.md`.
+**Three corrections the review forced, each a defect in the original plan rather than in
+the implementation:**
 
-SHA and patch-id to be recorded here at fix time, per `get_guide("tracker-conventions")`.
+1. **The stub must not apply when the selector fails to resolve.** `body_selected` is true
+   whenever `heading=` is supplied *including on a typo*, so the first version made a
+   mistyped heading lose the map — costing the second round-trip this change exists to
+   remove. Restored for both the singular and plural selectors, on missing **and**
+   ambiguous. Not extended to `start_line`/`end_line` or `full=true`: a line range has no
+   "did you mean" character the map would repair.
+2. **`last_heading` is kept, not dropped.** It exists because `append_entry` inserts
+   *before* its anchor, so a ledger's append point is its LAST heading. ~60 bytes against
+   a ~2,400-byte array — 2% of the saving, protecting a fix that took its own bug file.
+3. **`total_headings` is backfilled from the discarded array when absent.** It is stamped
+   only above the 20-heading cap, so under-cap reads previously got the note and *no
+   count* — strictly worse than before, in the commoner case. This is what makes the
+   "magnitude is retained" claim true rather than merely stated.
 
+Design context: `docs/superpowers/specs/2026-09-01-request-aware-response-envelope-design.md`.
 ## Tests added
 
-None yet — the fix is not written. When it lands, the gating assertion
-(`preview_stubbed_when_selector_present`) is **monotone under removal**: a dead preview
-builder satisfies it perfectly. It must therefore ship paired with its positive twin, and
-that twin already exists — `preview_present_by_default` at
-`src/librarian/tools/get.rs:1024`. Neither alone covers the property.
+Ten tests, all verified present by name at closeout. All exercise real `call(&ctx, …)`
+paths against on-disk fixtures — **no hand-built response shapes**, which was a defect
+found and corrected earlier in this same work stream
+(`response-envelope-session-log:F-1`).
 
+**The gate and its twin** — the absence assertion is monotone under removal (a dead
+preview builder satisfies it perfectly), so neither covers the property alone:
+
+- `preview_is_stubbed_when_a_body_selector_is_present` — `src/librarian/tools/get.rs:1269`
+- `preview_headings_are_still_shipped_when_no_body_selector` — `:1345`
+- `preview_present_by_default` — `:1239` (pre-existing; retained as the shape twin)
+
+**The heading-miss restore** — the regression the review caught:
+
+- `heading_miss_keeps_the_full_preview_not_the_stub` — `:978` (singular)
+- `headings_selector_restores_preview_on_missing_member` — `:1167`
+- `headings_selector_restores_preview_on_ambiguous_member` — `:1192`
+- `headings_selector_stub_applies_when_all_members_resolve` — `:1140` (the control; without
+  it, a mutation disabling the plural stub entirely passes the three above)
+
+**Magnitude retained under the cap:**
+
+- `stub_preview_backfills_total_headings_under_the_cap` — `:1314`
+
+**The cross-file contract** — `section_headings_summary` requires `preview.headings` to be
+a renderable array, and the stub's string is what suppresses the section map. Stated in
+**both** production doc comments, not only in a test:
+
+- `a_body_selected_read_summary_cannot_lead_with_the_heading_map` — `src/librarian/adapter.rs:1023`
+- `an_unscoped_read_summary_still_leads_with_the_heading_map` — `:1049`
+
+**Mutation-verified per guarded SITE, not per feature.** Both halves of the plural
+`!missing.is_empty() || !ambiguous.is_empty()` condition were mutated separately, each
+killing exactly the test for the condition it dropped; the stub gate, the `M5` backfill and
+the `I4` drop-list arm were each killed individually. A kill at one site says nothing about
+another.
 ## Workarounds
 
 None needed for correctness — the requested payload is right. To limit the cost, prefer
@@ -185,12 +232,14 @@ None needed for correctness — the requested payload is right. To limit the cos
 
 ## Resume
 
-Edit `src/librarian/tools/get.rs`: hoist the `body_selected` computation from `:538` above
-the `out["preview"]` assignment at `:536`, then branch. Add
-`preview_stubbed_when_selector_present` next to the existing
-`preview_present_by_default` (`:1024`) and mutate **this site specifically** — a kill on
-the hint builder or the guide trigger proves nothing about this one.
+N/A — fixed, reviewed (Opus task review + scoped re-review, all findings addressed), gate
+green on `experiments`.
 
+Three **deferred minors** carried to the whole-branch review rather than discarded: a test
+cites a gitignored `progress.md` path that will not survive the SDD workspace deletion;
+the adapter fixture hard-codes the note string instead of referencing the constant; and
+`stub_preview` has no direct unit test, so its "unknown preview shapes keep current
+behaviour" claim holds by coincidence of key naming rather than by construction.
 ## References
 
 - `docs/issues/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md` — the
