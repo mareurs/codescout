@@ -56,7 +56,14 @@ The escape idiom is copy-pasted in ~5 inline sites across two idioms with no sha
 through it; add a source-scan `#[test]` (mirroring `claude_md_contains_no_deprecated_tool_names`)
 asserting every `LIKE` literal has a paired `ESCAPE` clause.
 
-**Valid:** dated 2026-07-17
+**Valid:** dated 2026-09-02
+
+**Re-verified 2026-09-02, both halves.** Helper: `escape_like_pattern` at
+`src/librarian/util.rs:26` with five unit tests, and `filter.rs:246` / `gc.rs` / `augmentation.rs`
+routed through the paired `ESCAPE '\\'` form. Gate: `like_escape_idiom_is_not_inlined_outside_helper`
+(`util.rs:112`) plus a sibling `sql_descendant_like_is_not_inlined_outside_helper` (`:172`) the
+intervention did not ask for. Checked because a `status: done` in params is a record asserting a
+completed action, which is `IC-8`'s whole subject.
 
 ### I-3 — Mutation testing at the ship boundary (defects #2/#3/#4)
 `cargo-mutants` is not yet a repo dev-dependency. Add a diff-scoped `cargo mutants --in-diff <range>`
@@ -65,7 +72,12 @@ mutants = untested behavior. Diff-scoping keeps cost tractable; ship-boundary ca
 off the per-edit hot path. This is the only mechanism that would have caught the non-discriminating
 guard test (#2).
 
-**Valid:** dated 2026-07-17
+**Valid:** dated 2026-09-02
+
+**Re-verified 2026-09-02.** `docs/RELEASE.md:206-219` carries
+`cargo mutants --in-diff /tmp/ship.diff --package codescout` and states in the same block that it is
+*"Advisory, not a hard gate — `cargo-mutants` is not yet a workspace dev-dependency"* — which matches
+this intervention's own title rather than overstating it.
 
 ### I-4 — Standing review-lens bullets (defects #2/#3/#4/#1)
 The superpowers `task-reviewer-prompt.md` / `code-reviewer.md` carry only a generic
@@ -76,7 +88,30 @@ cross-migration-seam check. **Ownership caveat:** superpowers is a marketplace p
 not owned) — editing the cache is ephemeral. Durable home is the owned buddy `testing-snow-leopard`
 (carries the lenses as doctrine); the superpowers edit is an upstream suggestion.
 
-**Valid:** dated 2026-07-17
+**Valid:** dated 2026-09-02
+
+**Re-verified 2026-09-02 in the durable home, and the first search said the opposite.** Grepping the
+**labels** (`L3`/`L4`/`L5`) returned **0 across all five locations** — four plugin caches and the
+source repo — which reads exactly like an unshipped intervention. A positive control (confirm the
+file is readable, then search the lens *content* rather than its label) found all of them, under the
+names the skill actually uses:
+
+| claimed as | lives at |
+|---|---|
+| L3 assert-on-cause | Operating Principle 3 — *"assert on the specific cause (message substring, error variant, or field)"* |
+| L4 branch-pairing | Self-Trap 7, *"Branch pairing gap"* — *"both the present and the absent side"* |
+| L5 round-trip completeness | Heuristic 8 + § Properties — including the *"target always has a slug"* shared-precondition warning, which is `R-42` verbatim |
+
+Also present: mutation-thinking (Operating Principle 3 and Phase 3's *"what single mutation would I
+miss?"*) and a `Mutation-survival:` field the skill's own test format requires. Migration-seam is the
+thinnest — covered only as *"or migration pair"* under Round-trip, not as its own lens.
+
+**The label/content gap is the finding, not a footnote.** This ledger names interventions by a
+private shorthand (`L3`…`L5`) that the destination artifact never adopted, so every future
+verification of I-4 and I-5 hits the same false negative. Renaming is not the fix — the destination
+is a different repo and the names there are better; what this entry owes is the mapping table above,
+so the next check searches for behaviour rather than for a label. `R-3`, met inside the sweep that
+re-derives it.
 
 ### I-5 — Durable recall (all defects)
 codescout memories: `catalog-sql-hazards` (#1, #5) and `test-design-discipline` (#2/#3/#4) —
@@ -86,7 +121,18 @@ DONE 2026-07-17. Pending: `testing-snow-leopard` SKILL.md gains L3 (assert-on-ca
 edit is a scout-behavior change → requires re-scoring `docs/evals/reconnaissance-output.md`
 (baseline n=0). The superpowers/testing-snow-leopard edits are not eval-gated.
 
-**Valid:** dated 2026-07-17
+**Valid:** dated 2026-09-02
+
+**Re-verified 2026-09-02, three surfaces.** Memories `catalog-sql-hazards` and
+`test-design-discipline` both present in this project's memory list. Reconnaissance seam classes:
+`references/seam-classes.md` in the **served** `codescout-companion@1.20.0` cache carries both
+(schema-migration ordering; writer-shape↔reader-surfacing) — checked at the served copy, not the
+source, per `R-89`. `testing-snow-leopard` L3–L5: present under different names — see I-4's mapping
+table, and the label/content false negative recorded there applies identically here.
+
+**Still open and unchanged:** the eval caveat. `docs/evals/reconnaissance-output.md` baseline remains
+n=0, so the claim that the seam-class edit improved scout behaviour is still unmeasured. Re-dating
+this entry does not discharge that — it was not measured today either.
 
 ### I-6 — Untested-new-symbol detector (deferred, low-yield)
 Buildable cheaply from `call_graph(direction=callers)` + a `tests/` name-path heuristic, but only
