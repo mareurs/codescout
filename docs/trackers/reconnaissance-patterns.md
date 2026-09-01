@@ -6,7 +6,7 @@ tags:
 - reconnaissance
 - skill-meta
 - scout
-entry_high_water_R: 160
+entry_high_water_R: 161
 entry_prefix: R
 expects_augmentation: docs/augmentations/docs-trackers-reconnaissance-patterns.yaml
 ---
@@ -289,6 +289,7 @@ be treated as findings, not as a summary to re-derive.
 
 | ID | Date | Verdict | Pattern | Evidence (session-log) |
 |----|------|---------|---------|------------------------|
+| R-161 | 2026-09-01 | hit ×2, neither by method (2 instances) | **The weaker act wears the stronger act's appearance, so completing it feels like completing the stronger one.** Two unrelated-looking cases, one shape; care is fully engaged on the weaker act, which is why the substitution is invisible. **(a) Checking a warning is not clearing a change.** `codescout-b7` verified all three facts of a peer warning, found a fourth that made them inapplicable, and moved to dispatch — the warning was discharged, the change was never reviewed. An unrelated scout stopped them; their words: *"luck of sequencing, not method."* The change carried **two** defects neither party had named. **(b) A present fixture reads as coverage.** Gate 7's `output_id` probe exercises real branches in `symbols`/`references`/`call_graph` and is **inert** for the only declaring topic, whose router never reads that key — not wrong, and indistinguishable from load-bearing from outside. **Remedy for (b) is the INVERSE of an existing law:** CLAUDE.md says annotate a fixture's *load-bearing* detail so a tidy-up cannot silently remove it; this says annotate a fixture as *inert* so nobody credits it with coverage it lacks. One guards silent removal, the other silent credit, and the second is worse — false coverage stops the next person looking. **Proposals:** (a) Phase 2 — discharging a warning is not an outcome, name what remains unchecked; (b) CLAUDE.md § Testing Discipline, operator's call, not filed by this entry. | worked example shipped at `b4fa1be6`; `response-envelope-session-log:F-1` (b7's withdrawal); kin `R-159` — mechanism-vs-reachability is the same substitution one layer down |
 | R-160 | 2026-09-01 | miss, peer-caught (1 instance) | **Partial success is the camouflage: one pattern over a heterogeneous population misses its odd member.** Probing five keys of a session-registry file with one grep built as `"$k":"[^"]*"`, I reported four present and `pid` absent — then offered "pid is only the filename" to a peer as a refinement. Wrong: the bytes are `"pid":3624594`. Four keys are JSON **strings** and `pid` is a **number**, so the type-uniform pattern excluded exactly the one key typed differently. What made it persuasive is that the instrument was **visibly working** — a uniform 0/5 would have sent me to the pattern, where 4/5 made the blank read as a property of the data. The peer's own diagnosis (minified, no space after colon) was also wrong; `grep -c '": '` returns 0. Fourth false-negative filter of mine in one session, three in `cargo test`: a bare name with `--exact` matched 0 of 4820 and reported `ok`; `-- guide` matched 132 tests but not the gate under test; `-- valid_slugs` named no test at all. Each returned a well-formed plausible result, never an error. **Proposal:** `R-3` bullet — check the pattern against the population's ODD member, and treat a partial hit as a stronger warning than a total miss. | this session, verified in the bytes both ways; sibling of `R-158` — there the *control* was drawn from the most prominent member, here the *pattern* was fitted to the most typical one |
 | R-159 | 2026-09-01 | hit (1 instance) | **Verifying a MECHANISM is not verifying its REACHABILITY, and a clean mechanism check feels like the strong form of confirmation.** Refused to relay a peer's claim unverified (`R-154`) and checked all three load-bearing facts in the bytes: `Shape::matches` opening `let Some(sel) = sel else { return false }` (`guide_index.rs:179`), the trait default returning `None` (`types.rs:1439`), and exactly five `selector_key` override sites of six files. All three held; I relayed it as time-critical. **Correct, and moot** — the recipient found a fourth fact neither of us sought: `progressive-disclosure.md` carries **zero** `serves:` markers (`librarian.md` is the only declaring guide), so `guide_blocks_for` takes the `!GUIDE_INDEX.declares(topic)` branch at `types.rs:1019` and `Shape::matches` is **never consulted** for that topic. Every check asked how the code behaves *when entered*; none asked *is it entered*. This is § *Testing Discipline*'s "loudness is a property of a PATH" aimed at a claim rather than a guard — `BL-66` is an `abort!` nothing reaches, this is a verified blocker nothing reaches — and the remedy transposes: name the live configuration in which the mechanism fires. One `grep -l 'serves:' src/prompts/guides/*.md` answers it. **Not an argument against verifying before relaying:** reachability is a FOURTH question, and verifying the mechanism harder never reaches it. | mirror of `R-3` — that says prove your instrument can *find*, this says prove your finding can *fire*; sibling `R-154` (relay discipline, which worked) |
 | R-158 | 2026-09-01 | miss twice, self-caught on the retry (2 instances) | **The canonical case is the worst positive control — prominence is why it is already covered.** `R-3` says run a positive control and is silent on *which* case. The case that comes to mind first is the highest-traffic, best-documented one, which is exactly the one most likely already protected: prominence causes both memorability and coverage, so the correlation is systematic rather than luck. Mutating `artifact.create` to verify a new declared-shape gate reddened **two pre-existing tests**, because it is one of six shapes a hard-coded high-volume test pins — "proving" the gate fires while proving nothing about its necessity. Re-mutating on `artifact.link` (one of 18 of 24 unpinned shapes) gave the real figure: 132 guide tests pass, the new gate alone fails. Same session, same mistake: annotating `symbol-navigation` first to verify Gate 7, the one topic an existing byte-identity test happens to pin via its `symbols` fixture. **The two failed in OPPOSITE directions** — one made the gate look more necessary than it is, the other made the tree look less defended, retracting a published "passes all six gates". So the bias is toward whatever the canonical case happens to be, and cannot be corrected by leaning either way. **Proposal:** choose controls from the population's UNREMARKABLE members; pairs with CLAUDE.md's "mutate once per guarded SITE", which says how many and is silent on which. | this session; gates `1b02f36b` and `b769277b`; the retraction is recorded in `system-retrospective-improvements:T-15a` |
@@ -6858,6 +6859,63 @@ instruments.
 **Rests on:** the registry being minified JSON with `pid` as a bare number. If a future Claude
 Code version pretty-prints it or quotes `pid`, the instances stay valid as history but the byte
 detail does not.
+
+## R-161 — The weaker act wears the stronger act's appearance — discharging a warning, and a present-but-inert fixture
+
+**Valid:** dated 2026-09-01
+
+**Verdict:** hit on both instances, but by luck of sequencing in the first and by a peer's
+observation in the second — neither was reached by method.
+
+**Observed:** 2026-09-01, two exchanges with `codescout-b7` and `codescout-3c`.
+
+**The law.** Two acts came up an hour apart that had nothing in common on the surface, and the
+shape is the same: **the weaker act wears the stronger act's appearance, so completing it feels
+like completing the stronger one.** Neither failure is a lapse in care — care is fully engaged on
+the weaker act, which is precisely why the substitution is invisible.
+
+**Instance 1 — checking a warning is not clearing a change.** `b7` received a three-fact warning
+from me about `selector_key`, verified all three in the bytes, found a fourth fact that made them
+inapplicable to their change, and their next move was to dispatch the next task. The warning had
+been *discharged*; the change had not been *reviewed*. What stopped them was an unrelated scout of
+a different question, and they said so plainly: *"I got there by luck of sequencing, not by
+method."* Their change then turned out to carry **two** defects neither of us had named — the gate
+it proposed already existed, and its predicate would have been permanently false. **A peer warning
+that turns out not to apply reads as "cleared", and clearing is a claim about the whole change
+that answering a warning never makes.**
+
+**Instance 2 — a present fixture reads as coverage.** Gate 7's probe set contains an
+`{"output_id", "overflow"}` row that exercises real branches in `symbols` / `references` /
+`call_graph` — and the gate evaluates only *declaring* topics, where the librarian router reads
+`abs_path` / `violations` and never looks at either key. So the row changes no outcome. It is not
+wrong; it is **inert**, and inert looks identical to load-bearing from the outside.
+
+**The remedy for instance 2 is the INVERSE of a law this project already has.** CLAUDE.md §
+Testing Discipline says *annotate a fixture's load-bearing detail on the fixture line*, so a
+tidy-up cannot silently remove what makes the test discriminate. This is the same failure from the
+other end: **annotate a fixture as inert, so nobody credits it with coverage it does not
+provide.** One guards against silent removal, the other against silent credit — and `b7`'s reading
+is that the second is worse, because a false sense of coverage actively stops the next person
+looking. Shipped as a worked example in `b4fa1be6`: *"nothing breaks if it goes now, and it must
+not be cited as overflow coverage."* Keeping the row while explicitly denying it credit is a
+better disposal than deleting it (which loses the probe for when it becomes live) or quietly
+retaining it (which is the defect).
+
+**Proposal, two destinations by the routing test.** Instance 1 is recon-shaped and belongs in the
+Phase 2 *Compare* step: **discharging a warning is not an outcome — name what the warning covered
+and what remains unchecked.** Instance 2 is craft-shaped and belongs in CLAUDE.md § Testing
+Discipline as the stated inverse of the load-bearing-fixture law; it is **not** filed there by
+this entry, because CLAUDE.md edits are the operator's call and that file was being modified by
+another session at the time. Surfaced, with the worked example already committed.
+
+**Cost if unnoticed:** instance 1 would have dispatched a task implementing a non-bug as a silent
+regression; instance 2 leaves a probe that a future reader cites as overflow coverage while it
+provides none.
+
+**Rests on:** the librarian adapter's router reading only `abs_path` / `violations`
+(`src/librarian/adapter.rs`), and `types.rs:1271-1279` reading `output_id` from the tool's own
+`val` rather than the envelope — so the key is present for self-buffering tools like
+`run_command` and absent for `read_markdown`. Re-verify if either moves.
 
 ## Template for new entries
 
