@@ -29,9 +29,10 @@ impl Tool for Librarian {
              materializes/prunes cites edges. \
              doctor: catalog drift scanner (read-only by default): abs_path form, \
              ADS colons, '..' segments, missing files; commits.git_root form; \
-             worktree-scoped rows; frontmatter id vs catalog id. JSON \
-             violation-count report. Opt-in repairs, each detailed under the `fix` \
-             param. \
+             worktree-scoped rows; frontmatter id vs catalog id; and \
+             `claim_liveness` — a `status: taken` bug whose claiming session is \
+             dead or unresolvable here. JSON violation-count report. Opt-in \
+             repairs, each detailed under the `fix` param. \
              merge_worktree: fold a worktree's shadow rows onto their main twins \
              (delta-only, never duplicates base entries); reseats worktree-born \
              rows. root=<worktree_root>; dry_run=true previews only; abandon=true \

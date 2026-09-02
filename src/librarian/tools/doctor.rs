@@ -5526,10 +5526,11 @@ fn scan_unterminated_fence(
 /// bug with no readable `claimed_by:` names nobody, so it never reaches
 /// `SessionRegistry::resolve` at all — the three-outcome contract above is untouched by it.
 /// It gets its own name rather than folding into `claim_unresolvable_here` because the two
-/// remedies differ: "check the claiming machine" (a live claim, wrong host) versus "add or
-/// clear `claimed_by:`" (a locally malformed record) — and this design's organising
-/// principle is that outcomes needing different remedies get different names, which is the
-/// same reason `claim_unresolvable_here` is not folded into `claim_held_by_dead_session`.
+/// remedies differ: "check the claiming machine" (a live claim, wrong host) versus "add the
+/// claiming session's id, or demote to `investigating`" (a locally malformed record) — and
+/// this design's organising principle is that outcomes needing different remedies get
+/// different names, which is the same reason `claim_unresolvable_here` is not folded into
+/// `claim_held_by_dead_session`.
 ///
 /// Reports only; there is no `fix=`. Releasing a claim is a judgement about whether the
 /// work stands, which this check cannot make.

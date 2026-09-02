@@ -3319,6 +3319,20 @@ mod tests {
     /// correctness fix — the weaker kind of payback, recorded so a later sweep does
     /// not count it as one of the good ones.
     ///
+    /// **Raised 2026-09-03, 56_735 → 56_833 (+98) — `librarian`'s `doctor` clause
+    /// now names `claim_liveness`, the check this feature adds.**
+    ///
+    /// `doctor` already runs it; the check added immediately before this one,
+    /// `non_terminal_status_with_fix_anchor`, shipped on none of the three prose
+    /// surfaces that describe `doctor`, so an agent had no way to learn it existed
+    /// short of reading the `scan_*` functions directly
+    /// (`docs/issues/2026-09-02-doctor-doc-surfaces-describe-six-of-its-twenty-three-checks.md`).
+    /// Naming `claim_liveness` here is exactly "an action no agent could discover"
+    /// from the policy below. There was zero headroom before this change too, so a
+    /// raise was unavoidable once the clause was trimmed as far as it would go
+    /// without losing the fact that the remedy differs by outcome (dead session vs
+    /// unresolvable host).
+    ///
     /// **RAISING THIS IS ALLOWED — it is a ratchet, not a ceiling.** The assertion
     /// says "find the bytes" because that is the right FIRST move, not because a
     /// raise is forbidden; two of the entries above are raises and both were
