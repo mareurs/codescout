@@ -2780,7 +2780,7 @@ mod tests {
     /// rather than ship a sentence that is still wrong about half its domain, or
     /// spend the last 3 bytes unremarked. The precedence clause is load-bearing
     /// and NEW: until
-    /// docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md was fixed,
+    /// docs/issues/archive/2026-09-02-read-only-true-is-inert-at-every-root.md was fixed,
     /// `read_only: true` was inert at every root, so "explicit wins" was not a
     /// true statement about this tool and could not have been documented.
     ///

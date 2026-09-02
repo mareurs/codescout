@@ -170,7 +170,7 @@ impl AgentInner {
     /// cannot recur here. Three copies of the rule existed when this was
     /// extracted, one of them dead; keep this the only one.
     ///
-    /// See docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md
+    /// See docs/issues/archive/2026-09-02-read-only-true-is-inert-at-every-root.md
     fn resolve_read_only(read_only: Option<bool>, is_home: bool) -> bool {
         read_only.unwrap_or(!is_home)
     }
@@ -3011,7 +3011,7 @@ mod tests {
         // swallowed this, which made `read_only: true` inert at EVERY root —
         // home came back writable, and a foreign root was already protected by
         // default, so no root could observe the flag. See
-        // docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md
+        // docs/issues/archive/2026-09-02-read-only-true-is-inert-at-every-root.md
         agent
             .activate(dir.path().to_path_buf(), Some(true))
             .await

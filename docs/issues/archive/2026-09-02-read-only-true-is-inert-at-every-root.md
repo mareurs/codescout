@@ -1,5 +1,5 @@
 ---
-id: '114306f5be948990'
+id: 421564ab7890f8f8
 kind: bug
 status: fixed
 title: 'BUG: `read_only: true` is inert at every root — home swallows it, foreign already implies it, and the one caller needing the state bypasses the API'

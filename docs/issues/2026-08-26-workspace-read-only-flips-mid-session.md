@@ -387,7 +387,7 @@ deferred a third time:
 
 - **Option 2 as written — "a read-only activation stays resident but does not take the
   default" — recreates the class it fixes.** Because `read_only: true` was inert
-  (`docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md`), *every* foreign
+  (`docs/issues/archive/2026-09-02-read-only-true-is-inert-at-every-root.md`), *every* foreign
   activation without an explicit `read_only=false` **is** a read-only activation. So option 2
   means no foreign activation ever takes the default unless the caller requests **write**
   access to a tree it only wants to read — while `get_guide("workspace-state")` §

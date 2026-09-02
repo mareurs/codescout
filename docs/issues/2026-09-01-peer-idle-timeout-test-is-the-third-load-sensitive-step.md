@@ -291,7 +291,7 @@ once".
 
 ### Seventh observation, 2026-09-02 — twice in one session, plus a directly-observed mechanism for the FIFTH's cluster
 
-Gate runs during the `read_only`-inert fix (`docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md`).
+Gate runs during the `read_only`-inert fix (`docs/issues/archive/2026-09-02-read-only-true-is-inert-at-every-root.md`).
 Three full gate runs on one tree, ~40 minutes apart, with peers committing throughout (HEAD
 moved 6 commits in ~22 minutes and the tree carried peer *uncommitted* edits to
 `src/prompts/mod.rs`, `src/server.rs`, `src/librarian/tools/doctor.rs`).
@@ -301,6 +301,7 @@ moved 6 commits in ~22 minutes and the tree carried peer *uncommitted* edits to
 | 1 | `0` | `101` | **this test** + `tool_surface_under_budget` (that one genuinely mine) |
 | 2 | `101` | `101` | `build_with_workspace_appends_project_table` (peer's in-flight fix) + `a_live_binary_does_not_report_itself_deleted` + **5× `retrieval::sync::tests::*`** — this test did **not** fail |
 | 3 | `0` | `101` | **this test only**, `src/peer/server.rs:752`, `run() did not exit within 10s of a 1s idle timeout` |
+| 4 | `0` | `101` | **this test only**, on a diff that is **comment-only across every file** and does not touch `src/peer/server.rs` at all — the archive-move sweep, ~40 min after run 3 |
 
 **Denominator: 7 isolated re-runs, 7 green** (4 after run 1, 3 after run 3), no code change
 between any of them. Recorded per § *Sixth observation* — a confirmation that goes unrecorded

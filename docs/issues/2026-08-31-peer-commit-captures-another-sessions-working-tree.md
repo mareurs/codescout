@@ -295,6 +295,18 @@ Two things that window taught, neither of which is "commit faster":
   guard's failure mode under retry is to call your own staged work foreign — which is the safe
   direction, and it is also indistinguishable from a real capture at the point of use. Filed
   separately; the pathspec form the hook recommends is the working route.
+
+  **Narrower than the truth, corrected within the hour.** The subsystem owner reproduced it and
+  minimised it past this description: the trigger is not a failed commit but **any transiently
+  empty staged set**, and bare `git stash` is enough — three `named` rows, `git stash`, log
+  empty, `stash pop`, one `not-staging` row. Permanent. Root cause is that the log is a
+  *projection of the current index* (truncate, rebuild from `git diff --cached --raw`, atomic
+  replace) whose ownership carry-over reads the rows the truncate just discarded, so an empty
+  staged set both writes nothing and preserves nothing. Pre-commit's stash/restore is one route
+  in; `reset` is another. Filed as
+  `docs/issues/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` at
+  `8c893060`. Kept here as written because the *reading* was correct when taken — which is the
+  property this ledger is about — but do not cite this bullet for the mechanism; cite that file.
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because
