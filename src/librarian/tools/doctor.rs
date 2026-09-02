@@ -184,6 +184,7 @@ declare_checks! {
     EntryCitedFromOutsideButUndeclared => "entry_cited_from_outside_but_undeclared",
     EntryConditionalPastDue => "entry_conditional_past_due",
     EntryDatedStale => "entry_dated_stale",
+    EntryDefinedTwice => "entry_defined_twice",
     EntryWithoutDefinition => "entry_without_definition",
     FrontmatterIdIsNotACatalogId => "frontmatter_id_is_not_a_catalog_id",
     FrontmatterIdMismatch => "frontmatter_id_mismatch",
@@ -309,6 +310,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // questions of the same body (does it carry the row / can anything cite the
     // entry) and are allowed to disagree. See `scan_undefined_entries`.
     all_violations.extend(scan_undefined_entries(&cat.conn)?);
+    // One ledger defining a token twice — what a cross-host merge produces. Sits
+    // beside scan_undefined_entries because the two ask opposite questions of the
+    // same bodies (never defined / defined twice). See `scan_entry_defined_twice`.
+    all_violations.extend(scan_entry_defined_twice(&cat.conn)?);
     // Starts from the citation graph rather than a known ledger's claimed entries — the
     // gap neither scan_undefined_entries nor link_scan's own report reaches. See
     // `scan_cited_prefix_with_no_definer`. Scoped like the entry-validity family (Ruling
@@ -2729,11 +2734,6 @@ fn entry_indegree(
 /// make this check's positive case unrepresentable. `entry_sections` emits one
 /// `EntrySection` per matching heading with no such guard, so it is safe to
 /// build a duplicate-detector on top of it. `bug-fix-session-log:F-99`.
-//
-// Not yet called outside its own tests: Task 2 wires it into the `doctor`
-// tool as the `entry_defined_twice` check. `allow(dead_code)` is scoped to
-// this one function and comes off in that task's diff.
-#[allow(dead_code)]
 fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u32>)> {
     use crate::librarian::tools::link_scan::extract::entry_sections;
     use std::collections::BTreeMap;
@@ -2754,6 +2754,71 @@ fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u3
     seen.into_iter()
         .filter(|(_, lines)| lines.len() > 1)
         .collect()
+}
+
+/// `entry_defined_twice`: one ledger defines the same `PREFIX-N` token twice.
+///
+/// This is what a cross-host merge produces. Two clones read their own committed
+/// `entry_high_water_<PREFIX>`, allocate the same id, and the merge lands two
+/// `## PREFIX-N — <title>` headings in one file —
+/// `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
+///
+/// Unreachable at two independent layers before this check, which is why neither
+/// `link_scan` nor `scan_undefined_entries` reports it: the extractor de-duplicates
+/// definitions at parse time, and `resolve.rs`'s `EntryToken` arm short-circuits to
+/// `SelfCite` whenever a definer shares the citing artifact's id — the commonest
+/// citation shape inside a ledger.
+///
+/// Scope is ONE artifact. A token defined in both a live ledger and its archive
+/// companion is the compaction ladder working; cross-artifact duplication is
+/// `link_scan`'s `ambiguous` and `prefix_conflicts`.
+///
+/// Read-only; there is no `fix=`. Renumbering rewrites a citable token, which
+/// silently re-points every existing citation — a separate decision.
+fn scan_entry_defined_twice(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.abs_path FROM artifact a \
+         WHERE a.missing_since IS NULL ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+
+    let mut out = Vec::new();
+    for (id, abs_path) in rows {
+        let Ok(text) = std::fs::read_to_string(&abs_path) else {
+            continue;
+        };
+        let prefixes = crate::util::librarian_guard::declared_entry_prefixes(&text);
+        if prefixes.is_empty() {
+            continue;
+        }
+        for (token, lines) in duplicate_definitions(&text, &prefixes) {
+            let lines_str = lines
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(Violation::new(
+                "entry_defined_twice",
+                Some(id.clone()),
+                abs_path.clone(),
+                format!(
+                    "`{token}` is defined {} times in this ledger, at lines {lines_str}. \
+                     One token with two active definitions is what a cross-host merge \
+                     produces: two clones allocated it from their own committed \
+                     `entry_high_water_` mark. Every citation of `{token}` now resolves \
+                     to whichever definition the reader reaches first, and nothing else \
+                     reports this state — the extractor de-duplicates definitions at \
+                     parse time. Give the LATER entry a fresh id; never a suffix \
+                     (`{token}b` is not a valid token and can be neither defined nor \
+                     cited), and re-point citations that meant it.",
+                    lines.len()
+                ),
+            ));
+        }
+    }
+    Ok(out)
 }
 
 /// Cross-file citations below which a Statement is not worth anyone's attention.
@@ -13417,5 +13482,64 @@ body
         let got = duplicate_definitions(body, &["R".to_string(), "T".to_string()]);
         let ids: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["R-1", "T-1"], "sorted by token: {got:?}");
+    }
+    /// A ledger with two `## R-147 — …` headings. The FIXTURE'S LOAD-BEARING DETAIL
+    /// is the repeated token with different titles: the collision a cross-host merge
+    /// produces is two entries that were each written independently, not a copy.
+    #[tokio::test]
+    async fn entry_defined_twice_fires_on_a_duplicated_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "ledger",
+            &tmp.path().join("ledger.md"),
+            "---\nentry_prefix: R\n---\n\n# L\n\n## R-147 — desktop\n\nbody\n\n## R-147 — laptop\n\nbody\n",
+        );
+        let ctx = ctx_rooted_at(cat, tmp.path());
+        let out = call(&ctx, json!({})).await.unwrap();
+        let found = violations_named(&out, "entry_defined_twice");
+        assert_eq!(found.len(), 1, "{out:#?}");
+        assert!(found[0]["detail"].as_str().unwrap().contains("R-147"));
+    }
+
+    /// The negative direction, and the one that makes the test above discriminating.
+    #[tokio::test]
+    async fn entry_defined_twice_is_silent_on_a_clean_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "ledger",
+            &tmp.path().join("ledger.md"),
+            "---\nentry_prefix: R\n---\n\n# L\n\n## R-147 — one\n\n## R-148 — two\n",
+        );
+        let ctx = ctx_rooted_at(cat, tmp.path());
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert!(
+            violations_named(&out, "entry_defined_twice").is_empty(),
+            "{out:#?}"
+        );
+    }
+
+    /// Spec success criterion 2. A non-ledger with two identical definition headings
+    /// declares no `entry_prefix`, so it owns no namespace and defines nothing.
+    /// 24 of 27 trackers under docs/trackers/ are in this category.
+    #[tokio::test]
+    async fn entry_defined_twice_is_silent_on_a_non_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "notaledger",
+            &tmp.path().join("notaledger.md"),
+            "---\nkind: doc\n---\n\n# Design\n\n## R-147 — quoted\n\n## R-147 — quoted again\n",
+        );
+        let ctx = ctx_rooted_at(cat, tmp.path());
+        let out = call(&ctx, json!({})).await.unwrap();
+        assert!(
+            violations_named(&out, "entry_defined_twice").is_empty(),
+            "{out:#?}"
+        );
     }
 }
