@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: mitigated
 tags:
 - cluster/shared-resource-carries-no-owner
 - librarian
@@ -9,10 +9,12 @@ tags:
 - cross-machine
 - collision
 - allocator
+closed: 2026-09-02
 opened: 2026-08-31
 owner: marius
 related: []
 severity: high
+unverified: 'Three open gaps, not one. (1) Peer-ahead direction: detection is complete but prevention is partial by construction and stays so — the guard catches only the direction where THIS host is ahead. `@{upstream}` is a remote-tracking ref, stale until someone fetches, so a peer who allocates and pushes while this host has not fetched still collides undetected, and an unpushed peer commit is unreachable by any local check. That is why status is `mitigated`, not `fixed`. (2) Params-ledger gap, concrete surface: both components cover PROSE ledgers only. Component B''s guard sits inside the `a.entry_collection.is_none()` branch, so the params allocation path has no upstream guard. Component A is built on `entry_sections` (`## PREFIX-N — Title` headings), so a params ledger whose body carries an index TABLE rather than headings yields no EntrySection and a duplicate there is neither prevented nor detected. This is not closed by ''rows are machine-local'': a params ledger''s `entry_high_water_<PREFIX>` frontmatter AND its `| PREFIX-N |` index table are BOTH committed and BOTH merge — `body_claimed_indices` (`src/librarian/catalog/augmentation.rs:1282-1292`) counts index rows toward allocation, so the committed surface collides exactly like the prose one and is simply uncovered by either component. (3) Detector''s real-world track record: a whole-branch review ran entry_defined_twice against this repo''s corpus (1451 markdown files, 37 declared ledgers) and found 3 findings, all false positives, all sub-headings repeating their own entry''s token (e.g. `### A-28` nested under `## A-28`); those are now excluded (0cb617cc) by dropping a definition strictly deeper than, and inside the span of, an earlier definition of the same token. Post-fix measured corpus output is zero findings — the check has never yet fired on a real collision; its true-positive rate is validated only against fixtures, not against a real occurrence.'
 ---
 
 # BUG: append_entry's committed high-water mark does not guard against a second HOST, only a second worktree
@@ -130,6 +132,53 @@ Options, none costed yet:
 Note the third is useful regardless: it is the only option that helps a collision that has
 already merged.
 
+## Fix provenance
+
+All nine commits below are on branch `entry-id-collision`, **not yet merged to
+`experiments`** at the time of writing. `experiments` is rebased after every ship, which
+orphans SHAs, so the patch-id is the durable identifier for each of these — the SHA is
+recorded alongside it only because `structured_fix_pointers` (`doctor.rs`) reads the
+`- **SHA:**` / `- **patch-id:**` pair and treats prose without it as `NOT VERIFIED`.
+
+Component A (detection — `doctor` check `entry_defined_twice`):
+
+- **SHA:** `374c75dc`
+  **patch-id:** `de1f07d691d833ce028bfb389050a689f4ae737f`
+  feat(doctor): duplicate_definitions, re-derived from headings not DocExtract
+- **SHA:** `507bab94`
+  **patch-id:** `8b6758da076236dbf1c1da007693143e539797e0`
+  fix(doctor): build duplicate_definitions on entry_sections, not headings::parse
+- **SHA:** `3f188500`
+  **patch-id:** `ef1d059a3dcce94579e37ce407f0af3f474cc598`
+  feat(doctor): entry_defined_twice — the cross-host merge collision
+- **SHA:** `f9f9a269`
+  **patch-id:** `df5f6a0b2b0664f3ce384a2347c11f23ae4b05c2`
+  fix(doctor): scope entry_defined_twice to the active project, assert its wiring
+
+Component B (partial prevention — `append_entry` upstream-freshness refusal):
+
+- **SHA:** `ee7218e7`
+  **patch-id:** `0aa94f94345c6f1f9726f6a6c51eb26e225315d0`
+  feat(append_entry): per-file upstream-freshness helper
+- **SHA:** `fb31cd6d`
+  **patch-id:** `5ab44ae2f9692c6a0c6090b56585f79740584882`
+  fix(append_entry): harden upstream-freshness tests and commit_path pathspec
+- **SHA:** `276cd463`
+  **patch-id:** `2935a15ef9a373ed6ee4f52cd0061c2ed14318c1`
+  feat(append_entry): refuse allocation against an unpushed ledger
+- **SHA:** `d0f8fac5`
+  **patch-id:** `00616e489ca014253d22bb860cc20c5e5bbe411c`
+  fix(append_entry): address review findings on the unpushed-ledger refusal
+
+Cross-cutting fix wave, both components:
+
+- **SHA:** `0cb617cc`
+  **patch-id:** `a46d29d58e80446d0cc77d7bc42dad638862a707`
+  fix(doctor,append_entry): scope entry_defined_twice to real duplicates, fix guard/messages
+
+All nine passed per-task review, a whole-branch review, and a final fix-wave re-review with
+a **Merge** verdict. What each component does and does not cover is in `extra.unverified` on
+this artifact's frontmatter, not restated here.
 ## Tests added
 
 None — no fix written. A regression test should assert that allocation is refused (or
