@@ -218,6 +218,33 @@ That keeps readers out of the index — which was the goal and is right — and 
 reason anyone has to stage a file they did not write, without asking the count to mean something the
 gate does not check.
 
+**Why the union's failure is undetectable, which is sharper than why it is wrong.** `codescout-05`,
+who proposed it and independently derived its falsification before this correction reached it:
+*the union is a prediction about other sessions' future commits wearing the shape of a
+measurement, and it reads identically whether or not the prediction holds.* Its own case is the
+proof — when it checked whether its advice had reddened the build, it had not: tracked 21,
+published 21, green. But only because `codescout-69` had committed `445fce36` in the interval. Had
+`69` abandoned that file, 21 would have been wrong and the gate red, with **nothing changing on
+`codescout-05`'s side in between**. Same family as the `grep -r` corroboration this file offered
+and withdrew: a number that is right for a reason its reader cannot see.
+
+**One site owes the amendment, not two — and the miscount is this file's own subject.** `grep -c
+'git add. first, then count' docs/trackers/issue-clusters.md` returns **2** at HEAD *(unit: matches
+in the ledger, not repo-wide — this bug file now contains the string too, in the sentence you are
+reading)*. Only `IC-11`'s `**Members:**` (`:872`) is
+the live instruction. The second, `IC-17`'s `**Members:**` (`:1139`), is *this file's author
+quoting it* inside the account of the harm, added at `cd6bb36c`. Amending that one would rewrite
+the record of what the instruction said, inside the explanation of why it was harmful.
+
+A prose mention of an instruction is not an instance of it — and this repo ships a named test for
+exactly that distinction, `a_cluster_slug_in_prose_is_not_a_declaration`. It was nonetheless
+mis-drawn **four times on 2026-09-02 by four sessions**: `tracker_design.rs:596`'s comment counted
+as a probe site; a template placeholder counted as the 23rd class record, which
+`the_slug_set_excludes_the_template_placeholder` already excludes; and this occurrence, twice. The
+generalisation is the one that matters here: **counting a namespace by string match has no escape
+for talking about the namespace** — which is `IC-6`'s no-escape half, holding about the very
+counting procedure this ledger prescribes.
+
 Removing readers from the queue does **not** fix the write-side serialization this file is about —
 but on 2026-09-02 the readers were two of the three collisions, so it is worth doing on its own.
 
