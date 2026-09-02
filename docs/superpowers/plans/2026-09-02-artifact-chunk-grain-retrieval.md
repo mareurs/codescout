@@ -12,6 +12,52 @@
 
 **Bug:** `docs/issues/2026-09-02-artifacts-are-embedded-from-their-first-chunk-only.md` (artifact `7a37f1179d2f0e21`)
 
+## Execution status — read this before dispatching any task
+
+**Tasks 1–6 are shipped, and the checkboxes did not say so.** Two sessions executed this
+plan concurrently and neither ticked a box, so on 2026-09-02 the plan read 0 of 71 steps
+done against six finished tasks. A subagent dispatched from the unamended plan would have
+re-implemented all six. The ticks below Task 1–6 were added retroactively on 2026-09-02
+from the evidence in this table — they are a *record*, not a live trace.
+
+Authorship is by the `Session-Id:` trailer on each commit, which is a **recorded field**.
+It is not adjacency (`git diff --stat` names insertions and no author) and not a
+self-reported name (a name is registry-minted and re-minted by compaction or by a restart
+under another profile; the sessionId survives both).
+
+| Task | Commits | `Session-Id:` |
+|---|---|---|
+| 1 | `ee111a3d` | `19e0e253` |
+| 2 | `aebb285c`, `304a4d8a` | `19e0e253` |
+| 3 | `be043276`, `51a441a3` | `19e0e253` |
+| 4 | `a3d2aba3`, `79cafa16` | `19e0e253` |
+| 5 | `e811ffd6`, `22845220`, `dbfd1d0c`, `9e71f25e` | `19e0e253` |
+| 6 | `411a6523`; hardening in `de434ca5` | `19e0e253`; `ffb95976` |
+
+`19e0e253-6b26-4a74-a201-33c92fbd0b30` is session `codescout-20` (profile `~/.claude`).
+`ffb95976-dc89-4cca-87aa-c026544faf2f` is the session that wrote this block.
+
+**What a retroactive tick is evidence for, and what it is not.** Every task's deliverable
+was read on disk on 2026-09-02 and every commit above was resolved from `git log`. That
+covers each step which leaves a durable artifact — write the tests, implement, gate and
+commit. It does **not** cover the `Step 2: Run to verify they fail` reds: a red leaves
+nothing in the tree, so those ticks rest on the commit sequence rather than on an
+observation. Read a tick as *"this task shipped"*, never as *"every step was witnessed"*.
+Task 6 Step 5 is the one exception — it was run and the red observed; see its annotation.
+
+**Tasks 7–12 have not started**, verified negatively at the surfaces they would touch:
+`src/librarian/catalog/gc.rs` contains no `artifact_chunk` or `artifact_vec_v2` reference
+(its three `chunk` hits are `slice::chunks` inside `detect_move_candidates`), and
+`src/librarian/catalog/find.rs` contains no `max_per_artifact`.
+
+Two carried rulings for whoever picks them up:
+
+- **Read `8b48b8f1` before starting Task 7.** It amends Task 7, which as originally written
+  would have shipped dead code.
+- **Task 11's swap stays blocked** on the diagnosis in `2bc70c26` — the indexer stamps
+  content-seen before it embeds, trapping 729 artifacts. Task 11's *backfill* half is not
+  blocked. The standing ruling is stop-and-surface; never backfill into the hole.
+
 ## Global Constraints
 
 - **The chunk budget does NOT change.** It stays `512` tokens / 2,048 chars. `chunk_size_for_model` returns a *ceiling*, not a target; `AST_CHUNK_TARGET = 3000` and the benchmark-backed `STACK_CHUNK_TARGET = 1200` are the project's deliberate window. A task that raises it is wrong — see the spec's § *Retraction*.
@@ -115,7 +161,7 @@ Runs first, before any behaviour changes, because a before/after comparison need
 **Interfaces:**
 - Produces: `scripts/run-artifact-bench.py --suite <path> --out <json>` writing `{"suite": str, "n": int, "hits_at_5": int, "mrr": float, "cases": [{"id","query","expect_entry","expect_path","rank"}]}`
 
-- [ ] **Step 1: Write the suite file with 12 cases**
+- [x] **Step 1: Write the suite file with 12 cases**
 
 Ground truth is an entry token plus its defining file. Pick queries whose answer is unambiguous and lives **after** the first heading — that is the property under test.
 
@@ -146,7 +192,7 @@ done
 
 Add 8 more the same way, spread across at least 4 distinct files, at least 2 of them `docs/issues/` bug files. A case whose entry is in the first chunk is inert for this suite — annotate any you keep as inert so nobody credits it with coverage.
 
-- [ ] **Step 2: Write the scorer**
+- [x] **Step 2: Write the scorer**
 
 ```python
 #!/usr/bin/env python3
@@ -210,7 +256,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 3: Run it against the CURRENT implementation to capture the baseline**
+- [x] **Step 3: Run it against the CURRENT implementation to capture the baseline**
 
 ```bash
 cargo build
@@ -221,7 +267,7 @@ python3 scripts/run-artifact-bench.py \
 
 **Expected: `hits@5 0/12`, `MRR 0.0`.** Today's results carry no `start_line`, so no case can score. A non-zero baseline means the scorer's hit condition is wrong — fix the scorer, not the expectation.
 
-- [ ] **Step 4: Record the baseline in the benchmark tracker**
+- [x] **Step 4: Record the baseline in the benchmark tracker**
 
 The tracker is augmented — write through the catalog, never the file:
 
@@ -232,7 +278,7 @@ artifact(action="update", id="<id>", patch={body_edits: [{
   content: "\n### 2026-09-02 — artifact-path baseline\n\nFirst instrument for `artifact(find, semantic=)`. The 25-TC suite scores `bench_<model>_code_chunks` and never touched this path. Baseline on first-chunk-only: **hits@5 0/12, MRR 0.0** — no result carries a line range, so no case can score. Suite: `scripts/tc-suites/artifact-entries.json`.\n"}]})
 ```
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit**
 
 ```bash
 cargo fmt
@@ -256,7 +302,7 @@ git -C /home/marius/work/claude/codescout commit -m "test(bench): artifact-path 
 - Produces: `pub fn split_markdown_with_depth(source: &str, chunk_size: usize, chunk_overlap: usize, max_heading_depth: usize) -> Vec<RawChunk>`
 - Produces: `pub fn split_markdown(source, chunk_size, chunk_overlap) -> Vec<RawChunk>` — unchanged signature, delegates with `max_heading_depth = 3`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -291,12 +337,12 @@ fn split_markdown_with_depth_3_equals_the_default() {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test -p codescout-embed split_markdown_with_depth`
 Expected: FAIL — `cannot find function split_markdown_with_depth`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace the body of `split_markdown` at `chunker.rs:83`:
 
@@ -368,12 +414,12 @@ fn heading_level(line: &str) -> Option<usize> {
 }
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cargo test -p codescout-embed split_markdown`
 Expected: PASS, including the four pre-existing `chunk_markdown_*` tests.
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit**
 
 ```bash
 cargo fmt
@@ -396,7 +442,7 @@ A chunk hit must name a **citable** entry (`bug-fix-session-log:W-81`), which is
 **Interfaces:**
 - Produces: `pub fn entry_tokens_by_line(source: &str) -> Vec<Option<String>>` — one entry per **1-indexed line**, index 0 unused, each holding the token of the innermost entry heading at or above that line.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[cfg(test)]
@@ -443,12 +489,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --lib entry_token`
 Expected: FAIL — `unresolved module` / `cannot find function entry_tokens_by_line`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```rust
 //! Which ledger entry (`W-81`, `BL-71`) encloses a given line of a tracker.
@@ -525,12 +571,12 @@ Add to `src/librarian/mod.rs`:
 pub mod entry_token;
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib entry_token`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Verify against the real corpus (not just fixtures)**
+- [x] **Step 5: Verify against the real corpus (not just fixtures)**
 
 ```bash
 cargo run --quiet --bin codescout -- --version >/dev/null
@@ -538,7 +584,7 @@ cargo run --quiet --bin codescout -- --version >/dev/null
 
 Then, in a scratch test, assert the parser finds **1,482** defined entries across `docs/trackers` and `docs/issues` — the number the spec derived. A different number means the parser and the spec's population disagree; reconcile before continuing, and state which is right.
 
-- [ ] **Step 6: Gate and commit**
+- [x] **Step 6: Gate and commit**
 
 ```bash
 cargo fmt
@@ -559,7 +605,7 @@ git -C /home/marius/work/claude/codescout commit -m "feat(librarian): entry_toke
 **Interfaces:**
 - Produces: tables `artifact_chunk` and `artifact_vec_v2`; `schema_version` max becomes 11.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -601,12 +647,12 @@ fn deleting_an_artifact_cascades_its_chunk_rows() {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --lib v11_creates_the_chunk_table`
 Expected: FAIL — `assertion failed: left == right` (10 vs 11), then `no such table: artifact_chunk`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Insert directly after the `VALUES (10)` stamp in `apply_migrations_in_txn`:
 
@@ -654,12 +700,12 @@ conn.execute(
 )?;
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib v11`
 Expected: PASS, 3 tests. Also run the full catalog module: `cargo test --lib librarian::catalog`
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit**
 
 ```bash
 cargo fmt
@@ -697,7 +743,7 @@ git -C /home/marius/work/claude/codescout commit -m "feat(catalog): schema v11 �
   ```
   `replace_chunks` returns the rows **as stored** — chunk ids for unchanged `(artifact_id, chunk_ix, content_hash)` triples are preserved, so a re-index does not churn vectors.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -744,12 +790,12 @@ fn replace_chunks_drops_chunks_that_no_longer_exist() {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --lib catalog::chunk`
 Expected: FAIL — `unresolved module`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```rust
 //! `artifact_chunk` rows: the line-anchored, entry-tagged pieces an artifact is
@@ -863,12 +909,12 @@ pub fn chunks_for(cat: &Catalog, artifact_id: &str) -> Result<Vec<ChunkRow>> {
 
 Add `pub mod chunk;` to `src/librarian/catalog/mod.rs`.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib catalog::chunk`
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit**
 
 ```bash
 cargo fmt
@@ -882,16 +928,27 @@ git -C /home/marius/work/claude/codescout commit -m "feat(catalog): artifact_chu
 
 ## Task 6: Indexer emits every chunk
 
-**Files:**
-- Modify: `src/librarian/indexer.rs:54-75` (`embed_queue_item`), `:249-253` and `:284-288` (the two enqueue sites), `:22` (`EmbedQueueItem`)
+**Files:** *(addressed by symbol, not by line — see the note below)*
+- Modify: `src/librarian/indexer.rs` — `embed_queue_items` (the plan drafted it singular as
+  `embed_queue_item`; it shipped **plural**), the two
+  `embed_queue.extend(embed_queue_items(cat, &id, title, body)?)` enqueue sites inside
+  `index_repo_sync`, and the `EmbedQueueItem` type alias
 - Test: `src/librarian/indexer.rs` `#[cfg(test)] mod tests`
+
+> **Why no line numbers here.** This line originally read
+> `` `:54-75` … `:249-253` and `:284-288` … `:22` ``. By the time the task shipped, the four
+> coordinates had drifted to `70-102`, `277`, `310` and `24` — **non-uniformly**, by `+2`, `+16`,
+> `+28` and `+26`, because the edits between them inserted different amounts. No single offset
+> repairs a set that drifts unevenly, so a reader correcting one coordinate learns nothing about
+> the next three. A symbol name survives every insertion above it; `symbols(name="embed_queue_items",
+> path="src/librarian/indexer.rs")` resolves it at whatever line it currently occupies.
 
 **Interfaces:**
 - Consumes: `catalog::chunk::{build_chunks, replace_chunks, ChunkRow}` (Task 5)
 - Produces: `pub type EmbedQueueItem = (String, Option<String>, String);` **unchanged shape**, but element 0 is now a `chunk_id` rather than an artifact id, and there are N per artifact.
 - Produces: `fn embed_queue_items(cat: &Catalog, id: &str, title: Option<String>, body: &str) -> Result<Vec<EmbedQueueItem>>`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -936,12 +993,12 @@ fn a_whitespace_only_section_is_dropped_without_dropping_the_batch() {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --lib indexer::tests::embed_queue_items`
 Expected: FAIL — `cannot find function embed_queue_items`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace `embed_queue_item` (`indexer.rs:54-75`) with:
 
@@ -1020,17 +1077,55 @@ Update the type alias doc at `indexer.rs:22`:
 pub type EmbedQueueItem = (String, Option<String>, String);
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib indexer`
 Expected: PASS. Existing indexer tests that count `artifact_vec` rows will still pass — nothing writes to `artifact_vec_v2` until Task 7.
 
-- [ ] **Step 5: Mutation check — this is the plan's central guard**
+- [x] **Step 5: Mutation check — this is the plan's central guard**
 
 Temporarily restore `.into_iter().next()` on the chunk list. Run `cargo test --lib indexer`.
 **Expected: `embed_queue_items_emits_every_chunk_not_just_the_first` FAILS.** If it passes, the test is not discriminating — fix the test before reverting the mutation.
 
-- [ ] **Step 6: Gate and commit**
+> **RUN 2026-09-02 by session `ffb95976`. The guard holds, and it over-delivers.**
+>
+> | Point | `exit_code` | Result |
+> |---|---|---|
+> | Baseline, before mutating | `0` | 31 passed, 0 failed |
+> | Mutated | `101` | **2 FAILED**, 29 passed |
+> | After revert | `0` | 31 passed, 0 failed |
+> | `git diff --stat -- src/librarian/indexer.rs` | — | empty |
+>
+> **Deviation from the step as written: the mutation applied was `.into_iter().take(1)`, not
+> `.into_iter().next()`.** `.next()` yields `Option<ChunkRow>`, which cannot chain into the
+> `.filter().map().collect()` that follows without a second `.into_iter()` — so the step's literal
+> text does not compile. `.take(1)` is the type-correct realization of the same "first chunk only"
+> defect, and is what the mutation must be written as if this step is ever re-run.
+>
+> **Two tests died, in different directions** — the step predicted one:
+>
+> ```
+> ---- ..._emits_every_chunk_not_just_the_first stdout ----
+> panicked at src/librarian/indexer.rs:1454:9: preamble + two entries, got 1
+>
+> ---- ...a_whitespace_only_section_is_dropped_without_dropping_the_batch stdout ----
+> panicked at src/librarian/indexer.rs:1531:9: the real chunks survive
+> ```
+>
+> The first is a **count** assertion, the second a **content** assertion. That is redundancy in two
+> directions rather than the same test twice, which is what § *Testing Discipline*'s monotonicity
+> law asks for: a count assertion alone is monotone under a change that keeps one correct chunk.
+>
+> **Both kills are assertion panics that name their test.** On a shared checkout that distinction
+> is the whole point of the three-point sandwich: a bare `cargo test` red is one bit conflating an
+> assertion firing (wanted), a compile error from a peer's in-flight edit, and an unrelated panic.
+> The green baseline discriminates the compile error, the named panic discriminates the third, and
+> the empty `git diff` proves no residue was left behind. A single red would have been worthless
+> here. The mutation window was announced to the one peer sharing this tree beforehand, so a red
+> observed inside it would have had an author rather than being the anonymous kind recorded in
+> `docs/issues/2026-09-01-un-wired-function-reds-the-shared-build-with-no-author.md`.
+
+- [x] **Step 6: Gate and commit**
 
 ```bash
 cargo fmt
