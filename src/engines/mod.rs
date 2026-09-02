@@ -41,18 +41,14 @@
 //!
 //! # What this module is NOT
 //!
-//! It does not yet *drive* delivery in production — `call_content` still
-//! fans out by hand, running its own inlined copy of each engine's logic
-//! rather than calling through `emit_post`. Making it call through is
-//! `docs/superpowers/plans/2026-09-02-layer-2a-3-wiring-and-one-budget.md`
-//! (Plan 3). Three of the four rows below now carry a wired `emit_post` —
-//! `run_post_in` can call through it, and the tests do — but that is
-//! **necessary, not sufficient**: `run_post`, the only thing that would call
-//! `run_post_in` against this live registry, itself has no caller yet, so
-//! none of it runs in production until Plan 3 lands. [`Mode::Unmanaged`] is
-//! the honest state for an engine that ships and participates in nothing,
-//! which is where `craft-skills` sits today — the other three now
-//! participate in the registry, but not yet in production.
+//! It **does** drive delivery in production as of Plan 3 — `call_content`
+//! calls [`coordinator::run_post`], which fans out through the `emit_post`
+//! pointers below. What it is still not is *complete*: [`Mode::Unmanaged`]
+//! is the honest state for an engine that ships and participates in nothing,
+//! which is where `craft-skills` sits today. Three of the four rows carry a
+//! wired `emit_post` and run on every call; the fourth carries `None` and is
+//! reached by no phase, which is what `registry_order_is_delivery_precedence`
+//! pins in both directions.
 
 pub mod coordinator;
 pub mod emitters;

@@ -1,17 +1,14 @@
-//! The post-phase body of each registered engine — copied out of the
-//! inlined logic that still lives, unchanged, in `Tool::call_content`
-//! (`src/tools/core/types.rs`).
+//! The post-phase body of each registered engine, and **the production path**
+//! as of Plan 3: `Tool::call_content` (`src/tools/core/types.rs`) calls
+//! [`super::coordinator::run_post`], which dispatches here through `ENGINES`'
+//! `emit_post` pointers.
 //!
-//! **Not live in production yet.** `call_content` runs its own copy of this
-//! logic directly; nothing on any production path calls these functions —
-//! only `ENGINES`' `emit_post` pointers (reachable via `run_post_in`, which
-//! itself has no live caller outside `cfg(test)` today) and this file's own
-//! tests do. The two copies **must stay byte-identical** until
-//! `docs/superpowers/plans/2026-09-02-layer-2a-3-wiring-and-one-budget.md`
-//! (Plan 3) deletes `call_content`'s inlined branch and calls `run_post` in
-//! its place. Until then, a fix applied to one side and not the other is a
-//! silent behavior fork nothing here can catch, because these functions are
-//! not on the path production actually runs.
+//! These functions were moved verbatim out of `call_content`'s inlined
+//! fan-out, and for one commit the two copies ran side by side with a
+//! standing requirement to stay byte-identical. **That requirement is
+//! discharged** — the inlined branch is deleted, this is the only copy, and
+//! the byte-for-byte oracle that proved the move faithful was the p50 guide
+//! total, unchanged at 11,872 bytes across the cut.
 //!
 //! Each function answers one question — *"does my trigger fire on this call,
 //! and if so what do I ship?"* — and answers nothing about ordering. Ordering
