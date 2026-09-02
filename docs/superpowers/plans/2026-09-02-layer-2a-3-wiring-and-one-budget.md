@@ -22,6 +22,8 @@
   ```
 - **On `cargo fmt` and this shared checkout — the obvious scoping does not work.** Six other sessions hold uncommitted edits here, and bare `cargo fmt` is a *write* across every crate root in the workspace, so it will reformat their in-flight files. The natural remedy is wrong: **`cargo fmt -- <your file>` scopes nothing.** Verified 2026-09-02 with `cargo fmt -v`, cargo-fmt emits a single invocation — `rustfmt --edition 2021 <your file> --check <build.rs> <both libs> <main.rs> <24 test roots>` — appending the full crate-root list *after* your path. It is a whole-workspace format plus one redundant argument. Two forms are safe: `cargo fmt --check` (read-only, writes nothing) and `rustfmt --edition 2021 <your files>` invoked **directly**, which bypasses cargo's target enumeration. Name the form you ran in your report.
 
+- **A red default lane is not automatically yours, and "flaky" is the wrong first guess.** Six other sessions edit this tree and red-first TDD is normal here, so a peer's uncommitted test reds `cargo test --workspace` for everyone until it lands. Before treating any failure as your regression, take the failing test's file and run `git status --short <path>` — if it shows as another session's uncommitted modification, it is not yours. Confirm positively with `git grep -c <test_name> HEAD -- <path>`: absent from HEAD means the test exists only in someone's working tree. Observed 2026-09-02: `agent::tests::activate_home_with_read_only_true_is_honoured` was red in the shared tree from exactly this cause, and a Plan 2 run saw 14 unrelated failures from a peer's in-flight `src/server.rs`/`adapter.rs` plus a concurrent `cargo rb` unlinking the running binary. **Record such a failure by name with that evidence — do not dismiss it as flaky.** A genuine flake and another session's red-first test look identical in a single run and want opposite responses: re-run one, leave the other alone and say whose it is. **And there is a third variety the `git status` check returns CLEAN for: a filed, known, load-sensitive test.** Observed 2026-09-02 — `peer::server::tests::run_exits_after_idle_timeout_with_no_connections` reddened the default lane against a comment-only diff on files that were clean, and it is `docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`, open, with its own record refuting *total* load as the cause. So when `git status` is clean, **grep the bug corpus for the test name before concluding anything**, and re-run the same full lane rather than only the test in isolation: isolation-green is also what a test-ORDER interaction produces, so it cannot tell the two apart. The rerun was 5025 passed / 0 failed on the same tree and commit. Do not add a fourth observation to that file without a discriminating condition — it already has six and no known factor, and an undiscriminated one is noise on a population that needs signal.
+
 - **Task 1 must be byte-identical.** Any pre-existing test whose expectation needs editing is evidence the refactor was not faithful — stop rather than adjust the test.
 - **A worktree exists at `.worktrees/tool-collapse`.** Use `git -C /home/marius/work/claude/codescout` for every git mutation; bare `git commit` is hook-blocked.
 - **Shared checkout.** Never `git add -A`. Stage by pathspec → `git diff --cached --name-only` → `git diff --cached` → commit by pathspec.
@@ -165,7 +167,7 @@ If it differs, the two most likely causes in order: (a) `ENGINES` order does not
 - [ ] **Step 7: Run the gate**
 
 ```
-cargo fmt
+rustfmt --edition 2021 <the files you changed>   # NOT `cargo fmt` — see Global Constraints
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 cargo test --workspace --no-default-features ; cargo test --workspace
 ```
@@ -305,7 +307,7 @@ And update Gate 3's text in the same file: it currently says the work is *"exten
 - [ ] **Step 8: Run the gate**
 
 ```
-cargo fmt
+rustfmt --edition 2021 <the files you changed>   # NOT `cargo fmt` — see Global Constraints
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 cargo test --workspace --no-default-features ; cargo test --workspace
 ```
