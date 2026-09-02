@@ -12,7 +12,7 @@ tags:
 - epistemics
 - mineable
 topic: observer blindness and unconditional mechanisms
-entry_high_water_OB: 12
+entry_high_water_OB: 13
 entry_prefix: OB
 ---
 
@@ -138,6 +138,7 @@ only for classes where the *observer structure* is the load-bearing fact.
 
 | id | date | class | blind party | vigilance | mechanism status |
 |---|---|---|---|---|---|
+| OB-13 | 2026-09-02 | **deleting a token makes every negative assertion naming it vacuously true — permanently, silently, while staying green.** The instance was *written as a forward-looking guard and made vacuous by the very event it anticipated* (`prompts/mod.rs:2603`, "After Task 14 lands…") | **the author performing the deletion.** The diff enumerates removals; the assertions that MENTION the token are not in it — they survive untouched, compile, pass, and read as guards. Nothing in the act of deleting points backwards | wrong instrument — the reverse direction is **closed**: token→assertions is a grep, assertions→"which go vacuous" is unanswerable, since the discriminator is who OWNS the token and that is not in the text. Measured: a selector over 93 assertions returned **28**, overwhelmingly fixtures | `designed, not built` — H-N: trigger on a token leaving the tree, `grep -rn '!.*contains.*<token>'`. **Plus a repair-side check**, because the blindness recurs in the fix: the prescribed replacement needle was itself vacuous, by a different mechanism, and passed |
 | OB-12 | 2026-09-02 | a section that falsifies a sibling emits no signal — documents have no dependency edges; 5 instances, 2 documents, one of them falsified by its own review in the same pass | the author adding the new section, who is facing forward | wrong instrument — three claims survived a full session of a reader actively ruling on that document | **partial** — currency marker shipped 2026-09-02 (0/5 marked misleading, 3/3 unmarked stale); the un-noticed case has no mechanism and none is proposed |
 | OB-11 | 2026-09-01 | a session-keyed ledger answers for a party the protocol never named — a subagent's FIRST fetch reports as a repeat, and its auto-inject is suppressed as already-delivered | the codescout MCP server: `agent_id` rides harness `SubagentStart`/`Stop` events and no MCP tool call ever carries it | wrong instrument — the guide text told the parent to make it *worse* | **partial** — wording fixed at 3 sites, note pinned negatively, companion hook overrides the brief; the **keying** is unfixable from inside this repo |
 | OB-10 | 2026-09-01 | a mutual-exclusion resource is invisible to the session HOLDING it — the holder's own workflow succeeds and clears the condition as a side effect of finishing | the holder, a population of one against everyone else | wrong instrument | **none yet** — owner field on the resource is the candidate; enumeration is 1 verified / 4 unverified |
@@ -1363,6 +1364,64 @@ mechanism; it has none yet, so there is nothing to hand it.
 | `F-7` | Concern 1 introducing Strategy C | *"per-stage timeout impossible"* — true of Rust, false of the capability |
 | `F-8` | Concern 1 introducing Strategy C | Concern 2's *"before `pipeline=` goes anywhere"* prerequisite, which C dissolves |
 | `CAP-12` corpus | CAP-7's status block | CAP-7 § *Resume*'s *"Next: check 1"*, already shipped at `b34bf10e` |
+
+## OB-13 — deleting a token cannot enumerate the negative assertions that survive it
+
+**Valid:** invariant
+
+**Rests on:** `codescout-0a` (sessionId `2cb44cd3`), which found the instance while scouting Task 4
+of the tool-surface collapse and supplied the trigger direction; this session's failed
+counter-selector, which established that the opposite direction is closed; and `0a`'s subsequent
+correction of its own repair, which is the second half.
+
+**Class:** deleting a token from the tree makes every **negative assertion** naming that token
+vacuously true — permanently, silently, and while staying green. `assert!(!rendered.contains(X))`
+after `X` ceases to exist is the monotone-under-removal law (`CLAUDE.md` § *Testing Discipline*)
+with a specific trigger: **a dead mechanism produces exactly the silence the assertion asserts.**
+The suite does not shrink, no test reddens, and the guard survives in the file guarding nothing.
+
+**Blind party: the author performing the deletion, specifically.** They are looking at what is
+going away — the diff enumerates removals, and every removal is accounted for. The negative
+assertions that *mention* the token are not in the diff: they survive it untouched, compile, pass,
+and read as guards. Nothing in the act of deleting points at them. The instance is exact about
+this: `src/prompts/mod.rs:2603` carries the comment *"After Task 14 lands, the librarian block must
+not be appended"* — it was **written as a forward-looking guard and is made vacuous by the very
+event it was written for**, by an author who had that event in mind.
+
+**Who can see it:** not a more careful deleter. Someone starting from **the token** rather than
+from the diff — which is a mechanism, not a person.
+
+**The reverse direction is closed, and that is what makes this a mechanism rather than a habit.**
+Starting from the token and asking *"which negative assertions mention it"* is a `grep`. Starting
+from the assertion inventory and asking *"which will go vacuous"* is **not answerable at any level
+of grep sophistication**, because the discriminator is who *owns* the token and ownership is not in
+the text. Measured 2026-09-02 by attempting it: 121 negative containment assertions in the suite,
+93 parsing to a `(file, line, literal)` triple; the selector *"literal appears only in its own
+assertion's file"* returned **28**, and they are overwhelmingly **fixtures the test invented** —
+`get.rs:1086` writes `"…## Beta\n\nbeta body\n"` and `:1095` asserts a heading-scoped read excludes
+it, which is correct, discriminating, and legitimately unique to that file. The selector measured
+fixture authorship. Publish the 28 as the reason the trigger runs the other way: a reviewer's first
+instinct is *"why not scan the assertions"*, and *"somebody tried and got 28 wrong answers"* closes
+it in one line.
+
+**The blindness recurs in the REPAIR, which is the half that would otherwise be missed.** `0a`
+diagnosed the vacuous assertion correctly and prescribed a replacement needle,
+`doc(action="event_create")`. The reviewer committed the exact regression the test guards and it
+**passed** — the prescribed needle closes the paren immediately while the guide emits
+`doc(action="event_create", id=…` with a comma, so the new needle also has zero occurrences. It
+diagnosed a vacuous assertion and prescribed one vacuous *by a different mechanism*. Its own
+account of why: it demanded an observed RED of the implementer and never of its own repair. The
+generalisation is checkable and one command — **a needle is a claim that a string can appear, so
+grep for it** — and the repair is not done until the guard has been seen to fail.
+
+**Mechanism status:** `designed, not built` — `H-N` candidate. Trigger: a token leaving the tree.
+Query: `grep -rn '!.*contains.*<token>'`. Plus the repair-side check above, which is the cheaper
+half and covers a failure the trigger cannot.
+
+**Not promoted, and the population is honest about itself:** one instance of the deletion half, one
+of the repair half, both from the same work stream. Recorded now because the trigger is only cheap
+*before* the deletion lands, and the class is unfileable afterwards — the token is gone and nothing
+remembers it was ever there.
 
 ## Template for new entries
 

@@ -6,7 +6,7 @@ tags:
 - pika
 - hookify
 - promotion-candidates
-entry_high_water_H: 8
+entry_high_water_H: 9
 entry_prefix: H
 expects_augmentation: docs/augmentations/docs-trackers-codescout-usage-hookify.yaml
 ---
@@ -430,3 +430,53 @@ Session evidence, **corrected downward by `H-7` and stated with its unit**: this
 **Valid:** dated 2026-09-01
 
 **Rests on:** the `sqlite3` count above, run in this repo this session; `H-7`'s U-27 sweep for the adjudication that cut 5 → 3; and `CLAUDE.md` § *Companion Plugin* for `shell_command_mode` being an open arm rather than a setting.
+
+### H-9 — When a token leaves the tree, grep the negative assertions that name it
+
+**Trigger:** a commit removes the last occurrence of an identifier, tool name, or emitted string.
+
+**Query, one command:**
+
+```
+grep -rn '!.*contains.*<token>' --include='*.rs' src/ tests/
+```
+
+**Why a hook and not a habit.** A negative assertion naming a deleted token becomes vacuously
+true — permanently, silently, staying green. The author performing the deletion is the blind
+party by construction: the diff enumerates removals, and the assertions that *mention* the token
+are not in it. Nothing in deleting points backwards. Class recorded as `observer-blindness:OB-13`.
+
+**The direction is load-bearing, and this is the line a reviewer will challenge.** Token →
+assertions is a grep. Assertions → *"which will go vacuous"* is **not answerable**, because the
+discriminator is who *owns* the token and ownership is not in the text. Measured 2026-09-02 by
+attempting it: 121 negative containment assertions, 93 parseable, and the selector *"literal
+appears only in its own file"* returned **28** — overwhelmingly **fixtures the test invented**
+(`get.rs:1086` writes `"…## Beta\n\nbeta body\n"`, `:1095` asserts a heading-scoped read excludes
+it: correct, discriminating, legitimately unique to that file). *"Somebody tried it and got 28
+wrong answers"* is the one-line answer to *"why not just scan the assertions"*.
+
+**A second check, cheaper than the first and covering what it cannot: grep the REPLACEMENT
+needle.** The blindness recurs in the repair. Measured 2026-09-02 by `codescout-0a` (sessionId
+`2cb44cd3`) against its own fix: it correctly diagnosed a vacuous assertion, prescribed the needle
+`doc(action="event_create")`, and the reviewer then committed the exact regression the test guards
+— which **passed**, because the prescribed needle closes the paren immediately while the guide
+emits `doc(action="event_create", id=…` with a comma. Zero occurrences either way. It diagnosed a
+vacuous assertion and prescribed one vacuous *by a different mechanism*, and its own account of why
+is the rule: it demanded an observed RED of the implementer and never of its own repair.
+
+**So: a needle is a claim that a string can appear.** Grep for it, and do not call the repair done
+until the guard has been *seen* to fail. Fixed at `<!-- serves: doc.event_create`, with an observed
+RED under the concatenation mutation.
+
+**Do NOT propose "pair the absence test with a positive one" as the remedy.** `CLAUDE.md` §
+*Testing Discipline* records that formulation as **superseded**, falsified by the `e6414362` run
+which killed **six-for-zero** — absence assertions are monotone under removal, existence assertions
+under widening, so one of each covers a property *zero* times. `get.rs:1086`/`:1095` looks like a
+counterexample and is not: both assertions there run along the same axis (the scope of the returned
+body), so widening trips one and narrowing the other. That is a property of *that pair's geometry*,
+not of pairing — and noticing "here it works" is exactly how the superseded remedy was proposed the
+first time. Raised by `codescout-0a` before it could reach a fix.
+
+**Status:** proposed. Warn-first; the trigger is rare enough that a deny stage is unwarranted until
+a false-positive class is observed.
+
