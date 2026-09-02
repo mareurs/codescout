@@ -485,6 +485,59 @@ SIGPIPE. Add: a `… | head -N` pipeline asserting **success**; a `timeout 1 sle
 stage asserting **timed out** and `124`; and a genuinely failing stage 0 asserting failure with
 all three codes present. Each needs a mutation applied and run, per `CLAUDE.md` § mutation-apply
 discipline — a suite that passes with the `141` rule deleted has not tested it.
+
+### R5 (2026-09-02, marius) — #3 timeout policy: total, and the surface's own wording goes with it
+
+**Ruled: total wall-clock, via the existing `tokio::time::timeout` on the single `bash -c`
+child.** No per-stage budget in the schema. `timeout_secs` keeps its current meaning; under C
+this is not new code but the mechanism already in `run_command_inner`, applied to one child
+that happens to contain a pipeline.
+
+**Ruled on merit, not on impossibility — which is the whole reason #3 was re-opened.** The
+original lean rested partly on per-stage being impossible; `design-backlog-session-log:F-7`
+falsified that. The standing reason is now the same test that retired per-stage *cancellation*
+in `design-backlog-session-log:F-4`: **no caller wanting per-stage timeout has been named.**
+Only the producer stage realistically runs long, and a total budget covers it; a budget on a
+`grep` guards against a hang that can only be caused by its producer, which the total budget
+already catches.
+
+**This is a reversible "no", and that distinction is load-bearing.** Per-stage remains reachable
+at any time as `timeout <n> <stage>` composed beside the tee tap — no schema migration, no
+architectural change, no reopening of #7. Declining a *cheap and available* capability for want
+of a caller is a different act from declining an impossible one, and the entry should not let a
+later reader mistake the second for the first.
+
+**The surface's own wording is retired with the decision.** #3 reads *"each stage gets
+`remaining = total - elapsed`"* — a **sequential** notion, the same assumption that made #4, #5
+and #8 undecidable as written. Under C there is nothing to decrement: one child, one deadline,
+all stages inside it. Third instance of that assumption in one surfaces list, and the last.
+
+**Side effect — the Windows question is defused for the default path.** `timeout`'s availability
+on Git Bash was the open caveat in `F-7`. With total ruled, nothing on the default path depends
+on it; it becomes a precondition only for an opt-in that does not exist yet.
+
+### R6 (2026-09-02, marius) — #1 schema: `stages` XOR `command`, formally
+
+**Ruled: top-level `stages: [str]` **XOR** `command: str`, mutually exclusive.** Recorded as a
+ruling because it has been *leaning* since Concern 3 without ever being decided, and a lean is
+not a decision — `design-backlog-session-log:F-3` is this tracker's own record of what an
+unresolved lean does when a later reader treats it as one.
+
+**Re-founded, because Concern 3's stated argument is dead.** It reasoned from the companion
+hook being `command`-blind; that hook is unwired (no `hooks.json` PreToolUse matcher targets
+`run_command`, measured 2026-08-27). The live argument is stronger: `detect_il3_violation`
+takes a **single string** and runs at `src/tools/run_command/mod.rs:211`, before `resolve_refs`.
+Under a `command` + `pipeline` schema it would see stage 0 only — so IL-3 enforcement would go
+blind to pipelines for **every MCP client**, not merely for Claude Code.
+
+**Consequence now easier:** the contract is "exactly one of {`command`, `stages`}", so the
+IL-3 gate, telemetry and `format_compact` each branch once on field presence. **Now harder:** a
+caller cannot append stages incrementally and must structure as `stages` from the start —
+accepted, and it is the cost that buys the gate's visibility.
+
+**Implementation note the ruling implies:** `detect_il3_violation` must be applied to **every**
+stage, not to a joined string. Joining them into one line to reuse the existing call would
+re-introduce exactly the blindness this ruling exists to prevent, one layer down.
 ## Tests needed
 
 - Happy: 3-stage `seq 1 100 | grep ^5 | wc -l` produces 11 (one "5", "50"-"59", "5"; 11 matches).
