@@ -105,7 +105,7 @@ premise that every addition falsifies.
   [`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md).)
 ## Bug Tracking
 
-**Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.
+**Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | taken | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.
 
 Four behaviors are load-bearing and easy to skip:
 
@@ -180,11 +180,12 @@ The canonical "what's live right now" queries — archived rows are hidden by de
 
 ```
 doc(action="find", kind="tracker")
-doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})
+doc(action="find", kind="bug", filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
 ```
 
-`status="open"` alone hides `investigating` (actively being worked) and `zombie`
-(recurring-but-unconfirmed — a "has this come back?" check, not a task to pick up). Read one
+`status="open"` alone hides `taken` (a live session holds it), `investigating` (worked,
+no live owner) and `zombie` (recurring-but-unconfirmed — a "has this come back?" check,
+not a task to pick up). Read one
 tracker, or one section of it, with `doc(action="get", id=…, heading=…)`; filter an augmented
 tracker's rows with `entry_filter={…}`.
 

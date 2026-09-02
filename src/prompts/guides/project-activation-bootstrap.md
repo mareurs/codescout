@@ -8,8 +8,9 @@ bug is the one you never re-investigate because the project already documented i
 - `memory(action="list")`, then read the topics matching your task.
   `architecture`, `gotchas`, and `conventions` usually pay off.
 - Bug or regression work:
-  `doc(action="find", kind="bug", filter={"status": {"in": ["open", "investigating", "zombie"]}})` —
-  `status="open"` alone hides `investigating` (actively being worked) and
+  `doc(action="find", kind="bug", filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})` —
+  `status="open"` alone hides `taken` (a live session holds it — check before starting),
+  `investigating` (worked, no live owner) and
   `zombie` (recurring-but-unconfirmed — a "has this come back?" check, not a
   task to pick up) —
   the known-bug ledger. Don't re-file a filed bug as new; mark a rediscovery

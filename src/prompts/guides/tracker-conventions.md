@@ -28,11 +28,37 @@ The librarian classifier auto-recognizes the file on next reindex.
 | Value | Meaning |
 |---|---|
 | `open` | Logged, investigation not started or paused |
-| `investigating` | Actively being worked on this session |
+| `taken` | A **live** session holds this right now. Requires `claimed_by: <sessionId>`; `doctor`'s `claim_liveness` resolves it |
+| `investigating` | Worked, but **no live owner** — the residue of a claim whose session ended without concluding |
 | `fixed` | Root cause addressed, regression test added, verified |
 | `mitigated` | Workaround in place; root cause not addressed |
 | `wontfix` | Intentionally not fixing; justification in the file |
 | `zombie` | No longer observed but root cause unconfirmed. Pair with `last_observed:` and a re-open trigger |
+
+**Claiming a bug.** Set `taken` together with your own sessionId, through the catalog —
+a raw frontmatter edit does not reach it (BL-48):
+
+```
+artifact(action="update", id=…,
+         patch={"status": "taken",
+                "extra": {"claimed_by": "<sessionId>", "claimed_at": "YYYY-MM-DD"}})
+```
+
+You already know your sessionId without any API call: the harness makes it a path
+component of your scratchpad directory, `/tmp/claude-<uid>/<project>/<SESSION-ID>/scratchpad`.
+Verified 2026-09-02 to be byte-identical to the `sessionId` in the session registry.
+
+**Store the sessionId and nothing else.** Not the session name — that is registry-minted
+with `nameSource: "derived"` and re-minted by compaction, resume, or a restart under
+another profile, so a name frozen into frontmatter decays silently while the sessionId
+does not. Not the pid or socket path either; both are derived at read time.
+
+**Releasing** is the same call with `status: "investigating"` and
+`extra: {"claimed_by": null, "claimed_at": null}` (a null value deletes the key).
+Release to `investigating`, not `open` — work probably happened and the body records it.
+
+`claimed_at` is informational. Liveness is decided by resolving `claimed_by`, never by
+the age of the claim.
 
 `closed:` stays empty at creation — fill in `YYYY-MM-DD` only when
 status flips to `fixed` / `mitigated` / `wontfix`.
@@ -739,22 +765,22 @@ by the default scope:
 doc(action="find", kind="tracker")
 ```
 
-For bugs, swap the kind. **Constrain on all three non-terminal states, not just `open`**
-— `status="open"` alone hides `investigating` (this guide tells you to set that while
-actively working a bug) and `zombie` (recurring-but-unconfirmed, kept open in case it
-comes back). `zombie` sits between "no longer observed" and "closed" precisely because
-no other status fits — which is what makes it unreachable if the canonical triage query
-omits it too:
+For bugs, swap the kind. **Constrain on all four non-terminal states, not just `open`**
+— `status="open"` alone hides `taken` (a live session is on it — do not duplicate the
+work), `investigating` (worked, no live owner) and `zombie` (recurring-but-unconfirmed,
+kept open in case it comes back). `zombie` sits between "no longer observed" and "closed"
+precisely because no other status fits — which is what makes it unreachable if the
+canonical triage query omits it too:
 
 ```
 doc(action="find", kind="bug",
-         filter={"status": {"in": ["open", "investigating", "zombie"]}})
+         filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
 ```
 
 A `zombie` hit in that query is a "has this recurred?" check, not a task to pick up —
 most zombie records have no available work by design (see § Status vocabulary). Filter
-it back out explicitly (`{"status": {"in": ["open", "investigating"]}}`) when you
-specifically want only the actionable two.
+it back out explicitly (`{"status": {"in": ["open", "taken", "investigating"]}}`) when you
+specifically want only the actionable three.
 
 `status="open"` alone remains right when you specifically mean *not yet started*.
 

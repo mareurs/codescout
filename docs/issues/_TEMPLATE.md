@@ -18,9 +18,10 @@ To open a bug:
   3. Done — the librarian discovers the file on next reindex via its
      `kind: bug` frontmatter. List active bugs with:
        doc(action="find", kind="bug",
-           filter={"status": {"in": ["open", "investigating", "zombie"]}})
-     status="open" alone hides any bug marked `investigating` (actively being
-     worked) or `zombie` (recurring-but-unconfirmed -- a "has this come back?"
+           filter={"status": {"in": ["open", "taken", "investigating", "zombie"]}})
+     status="open" alone hides any bug marked `taken` (a live session holds
+     it), `investigating` (worked, no live owner) or `zombie`
+     (recurring-but-unconfirmed -- a "has this come back?"
      check, not a task to pick up). No manual index file. (Pre-2026-05-18 there was a docs/issues/INDEX.md
      to maintain by hand; that workflow was retired when bug files gained
      `kind: bug` frontmatter and the librarian classifier started picking
@@ -38,7 +39,12 @@ Trigger rules — open a tracker for ANY bug noticed during work:
 
 Status field semantics:
   open          — Logged, investigation not started or paused.
-  investigating — Actively being worked on this session.
+  taken         — A live session holds this right now. Requires
+                  claimed_by: <sessionId> in frontmatter. Decays to
+                  `investigating` when that session exits; run
+                  librarian(action="doctor") to find dead claims.
+  investigating — Worked, but no live owner. The residue of an
+                  unconcluded claim, not a synonym for `taken`.
   fixed         — Root cause addressed, regression test added, verified.
   mitigated     — Workaround in place; root cause not addressed.
   wontfix       — Intentionally not fixing; justification in the file.
