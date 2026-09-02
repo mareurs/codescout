@@ -107,6 +107,28 @@ Eleven backticked `n=` occurrences under the span reading; ten under a tight-tok
 reading. The difference is one `` `n=1 taggable` `` — a backticked *phrase*, which is
 corpus evidence that the house style already wraps prose rather than tokens.
 
+### E4 — the paired discriminators cover this direction ZERO times, not weakly
+
+`no_class_field_states_a_bare_n` is an absence assertion, so it is monotone under parser
+failure: a `bare_n_values` matching nothing yields an empty list and passes green
+forever. The two fixture-driven discriminators — `the_bare_n_claim_parser_discriminates`
+and `the_index_row_parser_discriminates` — were deliberately kept when those assertions
+inverted, precisely to stand against that, and they do that job: they run over
+adversarial fixtures with known answers and prove the parser **can** find a bare `n=`
+that is there.
+
+What neither can reach is the opposite direction — a compliant-looking write that is
+**accidentally escaped**. Proving the parser finds an unescaped `n=` says nothing about
+whether an author who meant a live claim wrote one the parser will skip. So the pair is
+monotone in one direction and this failure is covered **zero** times rather than weakly,
+which is `CLAUDE.md` § *Testing Discipline*'s first law: two guards satisfied in the same
+direction leave the property held by neither. The design note justifying the
+discriminators' retention does not mention it.
+
+Contributed by session `f13f8169`, which wrote both the inverted assertion and the note,
+and which supplied this direction rather than defending the design — the author holding
+the parameter is the party structurally least able to see it.
+
 ## Hypotheses tried
 
 - *"The gate is missing a disambiguator."* **Falsified by the code** — the backtick IS
@@ -167,4 +189,3 @@ quirks."*
 - `IC-6`, `cluster/addressing-without-an-escape-hatch`. The inverse direction of the
   class's usual complaint: the escape exists and is documented, and its cost is that an
   author who never intended to escape does so silently.
-

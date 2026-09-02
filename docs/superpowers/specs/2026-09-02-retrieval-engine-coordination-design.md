@@ -101,9 +101,10 @@ per-engine document. Nothing else lists the family. That table's status column r
 Measured 2026-09-02: engine 1's Phase 1 is **complete and shipped**, all ten tasks, and has
 its own eight-item resume queue (`docs/trackers/resume-get-guide-section-grain-phases-2-3.md`,
 `ff63538dfc9b2d8b`). Task 10's byte-ceiling test is live at
-`src/server.rs::a_p50_session_stays_under_the_committed_guide_byte_ceiling`. The row was
-correct when written and decays with every ship, because a per-engine spec is the wrong
-owner for cross-engine state.
+`src/server.rs::a_p50_session_stays_under_the_committed_emission_byte_ceiling` (renamed from
+`..._guide_byte_ceiling` by Plan 3 Task 2, which also widened what it counts — see § *Problem 4*
+and § *Measurements this spec rests on*). The row was correct when written and decays with every
+ship, because a per-engine spec is the wrong owner for cross-engine state.
 
 ### 2. A shipped spec asserts an independence the code does not have
 
@@ -152,29 +153,60 @@ also stamps the ledger, so the instrument spends the thing it measures.
 > that is never delivered per call. The corrected picture below is worse for the system and
 > supports the same gate for a different reason.
 
-There is **one** byte budget, it covers **part** of the window, and two emitters are bounded
+> ⚠ **Updated 2026-09-02, Plan 3 Task 2.** The table and prose below describe the state this
+> problem statement diagnosed. Two of its five rows are now covered — see the "Resolution"
+> block that follows the table.
+
+There was **one** byte budget, it covered **part** of the window, and two emitters were bounded
 by nothing at all.
 
-| emitter | bound | unit |
-|---|---|---|
-| guide sections (push) | `CEILING = 12_000` in `a_p50_session_stays_under_…` | bytes, p50 session |
-| session opener (engine 7) | the same ceiling — it emits a `get_guide(` block | bytes |
-| operator `always` (resident) | `SIZE_CEILING = 10`, compile time | **rule count**, and on a *disjoint* set |
-| operator `triggered` (per call) | **nothing** | — |
-| craft skills (engine 6) | **nothing** | — |
+| emitter | bound (as diagnosed) | unit | status |
+|---|---|---|---|
+| guide sections (push) | `CEILING = 12_000` in `a_p50_session_stays_under_…` | bytes, p50 session | **covered** — always was |
+| session opener (engine 7) | the same ceiling — it emits a `get_guide(` block | bytes | **still uncovered** — see Resolution |
+| operator `always` (resident) | `SIZE_CEILING = 10`, compile time | **rule count**, and on a *disjoint* set | unchanged; a deliberately separate budget, not this one |
+| operator `triggered` (per call) | **nothing** | — | **now covered structurally** — see Resolution |
+| craft skills (engine 6) | **nothing** | — | **still uncovered**, and cannot be from here — see Resolution |
 
 Engine 1 also caps each declared section at `MAX_DECLARED_SECTION_BYTES = 2500`.
 
-**The exclusion is deliberate, not incidental.** The ceiling test's `shape_total` sums only
+**The exclusion was deliberate, not incidental.** The ceiling test's `shape_total` summed only
 blocks containing `<!-- auto-injected get_guide(`; operator rules emit
-`<!-- operator-rule OP-N …`. So the one real budget is *written* not to see the other
-engine's bytes — which is defensible for a test named after guide injection, and indefensible
+`<!-- operator-rule OP-N …`. So the one real budget was *written* not to see the other
+engine's bytes — which was defensible for a test named after guide injection, and indefensible
 as the system's only accounting of what an agent receives.
 
-Sharpening it: `GG-4` records engine 1 at **11,946 B against 12,000 — 54 B of slack**
-(measured 2026-08-27; re-derive before relying on it). That margin is defended against guide
-prose and against nothing else. Any triggered operator rule, and every skill body, lands in
+Sharpening it: `GG-4` recorded engine 1 at **11,946 B against 12,000 — 54 B of slack**
+(measured 2026-08-27; re-derive before relying on it). That margin was defended against guide
+prose and against nothing else. Any triggered operator rule, and every skill body, landed in
 the same window carrying no accounting whatsoever.
+
+**Resolution, 2026-09-02 (Plan 3 Task 2).** `shape_total` no longer filters on the guide
+marker — it sums every block in the call's `Content` array after the primary, renamed to
+`a_p50_session_stays_under_the_committed_emission_byte_ceiling`. Measured at 12,116 B (up from
+the guide-only 11,872 B), against a re-derived `CEILING = 13_300`. What that buys, precisely,
+because a partial fix stated as a full one is the failure mode this section itself records:
+
+- **`operator triggered`** is now structurally counted — a triggered rule's
+  `<!-- operator-rule OP-N …` block is no longer filtered out. **Not exercised by the p50
+  fixture**: none of its six shapes (`artifact` create/get/update/append_entry/find/move)
+  matches a `serves:` declaration in `docs/trackers/operator-rules.md`, so the measured 12,116 B
+  contains zero operator-rule bytes today. The mechanism is fixed; the fixture doesn't reach it.
+- **`session opener` (engine 7) is still not covered**, and widening cannot change that:
+  `call_tool_checked` routes through `warm_ledger`, which stamps `SESSION_OPENING_GUIDE` into
+  the ledger **before every call**, so `emit_session_opener` finds its key already set and
+  declines on all six shapes. This is a fixture property, not a filter — the ceiling still
+  covers two of the three wired engines, not three.
+- **`craft skills` (engine 6) remains structurally unreachable from this test**, `Mode::Unmanaged`
+  — skill bodies reach the context window through the harness, never through an MCP response, so
+  no assertion on `Content` blocks can see a byte of them.
+- **A discovery beyond this problem's original scope**: widening also swept in bytes from
+  `post_process` (`src/server.rs`) — the once-per-activation `[codescout] paths are relative to
+  …` banner and `## Project Status (details)` block, 244 B in this fixture. `post_process`
+  predates the six-engine family and is not one of its emitters; it happens to land in the same
+  `Content` array, so counting every block after the primary picks it up. Real bytes a p50
+  session's first call receives, but not "a managed emitter" in this spec's sense — see the
+  `CEILING` constant's own comment in `src/server.rs` for the full population note.
 ---
 
 ## Design
@@ -522,6 +554,16 @@ design consequence, and it is available now.
    > have none — not merging two numbers. A gate that summed the guide ceiling's bytes and
    > `SIZE_CEILING`'s rule count would have passed, and been cited afterwards as proof the
    > budgets were unified.
+   >
+   > **Done, 2026-09-02, Plan 3 Task 2 — for two of the two.** `shape_total` in
+   > `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (renamed from
+   > `..._guide_byte_ceiling`) no longer filters on the guide marker, so `operator triggered`
+   > is now structurally counted (not exercised by the p50 fixture's shapes today, but no
+   > longer excluded by construction). `craft skills` is **not** covered and cannot be from
+   > this test — `Mode::Unmanaged` bodies never pass through an MCP `Content` block. § *Problem
+   > 4*'s table carries the row-by-row status; do not read this gate as "every emitter" —
+   > it is two of the three wired engines, plus incidental bytes from the pre-existing
+   > `post_process` onboarding hints that are outside the engine family entirely.
 4. **Preview fidelity — and note which assertion discriminates.** The obvious gate is
    *"preview leaves the ledger unchanged"*, and it is **monotone under removal**: a preview
    that returns nothing at all passes it. The discriminating assertion is that preview's
@@ -621,3 +663,15 @@ session:
 - **Inherited, dated 2026-08-27, re-derive before use:** guide corpus 106,755 B / 67 `##`
   sections; `librarian` 20,545 B; `tracker-conventions` 35,492 B; the p50 draw of 11,946 B
   against the 12,000 B ceiling (`GG-4`).
+- **One budget, derived 2026-09-02.** The p50 session's total managed emission is
+  12,116 B across six shapes, counting every block after the primary rather than only those
+  carrying the `<!-- auto-injected get_guide(` marker. Ceiling set to 13,300 B. Covers
+  `guide-sections` (exercised by this fixture) and `operator-rules` (structurally counted,
+  but this fixture's shapes trigger none — a corpus fact, not a filter gap); **does not**
+  cover `session-opener` (`call_tool_checked` stamps its ledger key before every call, so it
+  always declines) or `craft-skills`, whose bodies never travel through an MCP response. The
+  widened total also absorbs 244 B from `post_process`'s pre-existing, once-per-activation
+  onboarding hints (the path-relative-to banner and `## Project Status (details)`), which
+  predate and sit outside the six-engine family — real bytes a session's first call receives,
+  not a managed emitter. Re-derive with
+  `cargo test --lib a_p50_session_stays_under -- --nocapture`.

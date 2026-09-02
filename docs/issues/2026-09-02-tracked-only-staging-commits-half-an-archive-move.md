@@ -180,11 +180,50 @@ and several concurrent builds live.
 **One file of this fix is committed under another session's message.**
 `docs/trackers/issue-clusters.md` — carrying `IC-18`'s new member prose and the removal
 of its stored count — left this session's index between a `git status` check and the
-`git commit` one call later, and landed inside a peer's `5c353d8f` (*"retag the
-peer-serve notice bug to IC-22"*). Nothing was lost; the attribution is simply wrong,
-and `489715ef` therefore carries five of the six files. A live recurrence of
+`git commit` one call later, and landed inside `5c353d8f` (*"retag the peer-serve notice
+bug to IC-22"*), `Session-Id: f13f8169-93a1-4392-95d1-8774d296e0c0`. Nothing was lost;
+the attribution is simply wrong, and `489715ef` therefore carries five of the six files.
+Instance 7 of
 `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md`, observed
 while holding a warning about its mirror image.
+
+**The mechanism, settled by the committer quoting their own shell — not by inference.**
+It was `git add <three paths>` followed by `git commit -F <msg> -- <those same three
+paths>`. No `-A`, no `-u`, no `--no-verify`. Every path was one they legitimately had
+their own edits in; `git add <path>` stages the whole FILE, so three sessions editing the
+same two ledgers meant a peer's lines rode along inside files the pathspec named
+correctly. **Two sessions independently narrowed this and both got it wrong in the same
+direction**, because both asked *which selector did the committer use* when the answer is
+*the file was shared*. Two agreeing eliminations were one shared premise counted twice —
+the positive identifier was given by asking, exactly as `CLAUDE.md` § *Observer Blindness*
+prescribes for authorship.
+
+**And `unreviewed-content` passed BECAUSE of the capturing act.**
+`scripts/pre-commit-unreviewed-content.sh:80-85` compares, per committed path, the blob
+being committed against the blob in the real index — equal only if what is committed is
+what was staged. The `git add` made them equal. Stage less and it refuses; stage
+everything at those paths, a peer's content included, and it passes.
+
+**The incident has two halves and they read differently — do not flatten them, as this
+file's first draft did.** For the staged half (this record's), `:32-37` already lists *"A
+peer editing a file you staged AND committing it themselves"* under `WHAT IT DOES NOT
+CATCH`, written before tonight: a documented, unmechanized hole, and `Mechanism status`
+worklist material. For the **unstaged** half (`bug-fix-session-log.md`, session
+ffb95976), none of the three exclusions applies and `:29-30` explicitly claims the case
+— *"Any difference means unreviewed content — either your own unstaged edit, or a
+peer's"* — so the guard would have caught it, and the `git add` its own remedy prescribes
+is what erased the difference. That half is a live inversion of a claimed capability, and
+it needs the prescription reconsidered rather than a mechanism built. Correction owed to
+session f13f8169, which declined the flattened verdict.
+
+**The remedy text lives on the failure path, and the failure it prevents happens on the
+success path.** `:105` prescribes `git diff --cached --name-only` ("confirm these are all
+yours") and `:106` the bare `git diff --cached` ("read the content; that is the whole
+point"). The committer ran the first and skipped the second — and that text is emitted
+**only on refusal**, while this commit was never refused, because it was satisfied. This
+repo's *"loudness is a property of a PATH"* holding against a guard's documentation
+rather than against a guard.
+
 ## Tests added
 
 `move_names_the_staging_action_not_only_the_two_paths`, in `src/librarian/tools/mv.rs`

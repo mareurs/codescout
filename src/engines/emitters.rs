@@ -18,13 +18,16 @@
 //! the most volatile form there is), so the two copies never diverged in the
 //! first place. The p50 guide total was *unchanged* across the cut at 11,872
 //! bytes, which is consistent with faithfulness and is **not** a proof of it.
-//! `a_p50_session_stays_under_the_committed_guide_byte_ceiling` runs every
-//! call through `call_tool_checked`, which stamps the opener's
-//! ledger key first — so `emit_session_opener` declines on all six shapes —
-//! and its `shape_total` sums only blocks containing
-//! `<!-- auto-injected get_guide(`, so operator-rule bytes count zero. That
-//! total measures exactly one of the three wired engines. Its blindness is
-//! filed and *measured*, not merely suspected:
+//! `a_p50_session_stays_under_the_committed_emission_byte_ceiling` (renamed
+//! from `..._guide_byte_ceiling`, Plan 3 Task 2) runs every call through
+//! `call_tool_checked`, which stamps the opener's ledger key first — so
+//! `emit_session_opener` declines on all six shapes and the total still never
+//! sees engine 7's bytes. Its `shape_total` used to sum only blocks
+//! containing `<!-- auto-injected get_guide(`, so operator-rule bytes counted
+//! zero; that filter is gone, and the widened total (12,116 B against a
+//! `CEILING` of 13,300) is now capable of seeing operator-rule bytes, though
+//! this fixture's shapes trigger none. The blindness the filter left, and the
+//! fix, are both filed and *measured*, not merely suspected:
 //! `docs/issues/2026-09-02-a-byte-ceiling-test-cannot-see-a-member-stop-delivering.md`.
 //!
 //! Each function answers one question — *"does my trigger fire on this call,

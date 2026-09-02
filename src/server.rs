@@ -8482,7 +8482,7 @@ mod guide_hint_tests {
     }
 
     #[tokio::test]
-    async fn a_p50_session_stays_under_the_committed_guide_byte_ceiling() {
+    async fn a_p50_session_stays_under_the_committed_emission_byte_ceiling() {
         // The p50 session issues 6 distinct artifact/librarian shapes (measured over
         // 105 main sessions). Today that draws the whole 20,545 B librarian guide on
         // the first call and nothing after. Section grain must land well under it.
@@ -8490,7 +8490,57 @@ mod guide_hint_tests {
         // This ceiling is the mechanism that keeps the win from eroding: guides grow.
         // `tracker-conventions` gained bytes mid-study, and `iron-laws-detail` gained
         // 769 B (5d3f8ebe) during the half hour the spec was being written.
-        const CEILING: usize = 12_000;
+        //
+        // One budget over every block this call's `Content` array carries after
+        // the primary — not a guide budget. Widened 2026-09-02 from a filter that
+        // matched only `<!-- auto-injected get_guide(`, which is why the old name
+        // ("...guide_byte_ceiling") undercounted and has been retired along with it.
+        //
+        // DERIVED, not chosen: measured at 12,116 B on 2026-09-02 by summing every
+        // block after the primary across the p50 session's six shapes (see
+        // `shape_total` below) — up from the guide-only 11,872 B this replaces.
+        // Set to that figure plus ~10% headroom so ordinary corpus edits do not
+        // red the gate while a new emitter or a doubled section does. Re-derive
+        // rather than raise if it fires — the number is a fact about the corpus,
+        // and raising it to fit is how a ceiling stops being one.
+        //
+        // POPULATION — what the 244 B of widening is, and is not, stated here
+        // because a bound whose scope lives elsewhere gets read as covering
+        // everything:
+        //   * It is NOT operator-rule bytes. No shape this fixture issues
+        //     (artifact create/get/update/append_entry/find/move) matches any
+        //     `serves:` declaration in `docs/trackers/operator-rules.md`, so
+        //     `operator-rules` measures zero here — a corpus fact, not a filter
+        //     miss (Step 1 confirmed the marker filter this replaced was the
+        //     only budget-style one). The widened sum is now *capable* of
+        //     seeing operator-rule bytes when a shape does trigger one; this
+        //     fixture just doesn't exercise that path. A fixture change to
+        //     cover it is a finding, not folded in here.
+        //   * It is NOT the session opener (engine 7), which contributes zero
+        //     on every shape regardless of widening: `call_tool_checked` routes
+        //     through `warm_ledger`, which stamps `SESSION_OPENING_GUIDE` into
+        //     the ledger before every call, so `emit_session_opener` always
+        //     finds its key already set. So after this change the total still
+        //     covers only two of the three wired engines, `guide-sections` and
+        //     (structurally) `operator-rules` — never write "every managed
+        //     emitter" of this ceiling without that caveat.
+        //   * It IS `post_process`'s once-per-activation onboarding hints — the
+        //     `[codescout] paths are relative to …` banner and the
+        //     `## Project Status (details)` block, 244 B in this fixture, both
+        //     appended to the first successful call. `post_process` predates
+        //     the six-engine family and is not one of its emitters; counting
+        //     every block after the primary picks its bytes up incidentally,
+        //     which is real (a p50 session's first call does receive them) but
+        //     not what "managed emitter" means below.
+        //   * `craft-skills` (engine 6) is `Mode::Unmanaged`. Skill bodies reach
+        //     the same context window through the harness, never through an MCP
+        //     response, so no assertion on `Content` blocks can see a byte of
+        //     them.
+        //   * The PRE phase does not exist yet (Rollout 2b). When it does, its
+        //     blocks arrive through this same return value and are counted
+        //     automatically — no change needed here, which is the point of
+        //     counting blocks rather than markers.
+        const CEILING: usize = 13_300;
 
         let (_dir, server) = make_server().await;
 
@@ -8513,12 +8563,31 @@ mod guide_hint_tests {
         // shapes and understate the real total.
         let mut total = 0usize;
         let mut shape_total = |out: &[rmcp::model::Content]| -> usize {
-            let bytes: usize = guide_blocks(out)
-                .iter()
-                .filter(|b| b.contains("<!-- auto-injected get_guide("))
-                .map(|b| b.len())
-                .sum();
+            // Every block after the primary, not only the ones carrying the
+            // guide marker. `guide_blocks` is already `skip(1)`, so this counts
+            // whatever the call actually appended — guide sections here, and
+            // (structurally, though unexercised by this fixture) operator
+            // rules and post_process's onboarding hints. Filtering by marker
+            // is what made this a guide budget rather than a budget. Full
+            // population note is on `CEILING`, the read surface for it.
+            let bytes: usize = guide_blocks(out).iter().map(|b| b.len()).sum();
             total += bytes;
+            // THE DISCRIMINATOR IS IN THE PAYLOAD, and no byte count at any grain can
+            // substitute for it. `total > 0` sums six addends so it fails only if ALL are
+            // zero; a per-shape `bytes > 0` fails too, because a shape whose section is
+            // gone still receives a 491 B `preamble` fallback — measured, not reasoned.
+            // And a vanished section makes `total <= CEILING` MORE comfortable, so both
+            // aggregate assertions move the safe way when content disappears.
+            //
+            // The injector announces the condition itself. Assert on that.
+            for b in guide_blocks(out) {
+                assert!(
+                    !b.contains("no section declares this call's shape"),
+                    "a call received the no-section-matched preamble: its `serves:` \
+                     declaration no longer matches, or its section was renamed. \
+                     Neither `total > 0` nor a per-shape byte floor can catch this."
+                );
+            }
             bytes
         };
 
@@ -8590,14 +8659,13 @@ mod guide_hint_tests {
             );
 
         let whole = crate::prompts::topic_body("librarian").unwrap().len();
-        eprintln!("P50_TOTAL_BEFORE={total}");
         assert!(
             total <= CEILING,
-            "p50 session drew {total} B of guide (whole topic is {whole} B, ceiling \
-             {CEILING} B, margin {} B). Raising CEILING is a spec amendment, not a \
-             fix — it is not the remedy for this failure. The standing remedy is \
-             decomposing § Body Editing Surfaces in the librarian guide, already \
-             recorded in \
+            "p50 session emitted {total} B after the primary (whole librarian topic is \
+             {whole} B, ceiling {CEILING} B, margin {} B). Raising CEILING is a spec \
+             amendment, not a fix — it is not the remedy for this failure. The standing \
+             remedy is decomposing § Body Editing Surfaces in the librarian guide, \
+             already recorded in \
              `docs/superpowers/plans/2026-08-27-get-guide-section-grain.md` § Out of \
              scope for Phase 1. If that is not what happened here, check whether a \
              section grew past its own per-section cap (a separate gate/test) or a \
