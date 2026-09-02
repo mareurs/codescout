@@ -307,6 +307,36 @@ Two things that window taught, neither of which is "commit faster":
   `docs/issues/archive/2026-09-02-a-transiently-empty-index-destroys-stage-log-ownership.md` at
   `8c893060`. Kept here as written because the *reading* was correct when taken — which is the
   property this ledger is about — but do not cite this bullet for the mechanism; cite that file.
+## Instance 7 — 2026-09-02, the capture took the entry ABOUT this bug, mid-protocol, and a new detector found it
+
+**Capturing commit:** `5c353d8f` (session `f13f8169`, 17:11:13) — *"docs(clusters,trackers): retag the peer-serve notice bug to IC-22, and record what the retag teaches"*.
+**Captured from:** session `ffb95976`.
+**Content:** the whole of `bug-fix-session-log:W-99` in `docs/trackers/bug-fix-session-log.md` — 35 added lines plus one deletion (`entry_high_water_W: 98` → `99`). That commit added **no** entry of its own to that file and no index rows, so its entire change to that path was another session's work.
+
+Verified positively rather than inferred from timing: `git show 5c353d8f -- docs/trackers/bug-fix-session-log.md` contains `+## W-99`.
+
+Two things here are new.
+
+### A ledger append has a capture window the CONVENTION creates
+
+Every earlier instance captured an ordinary edit left sitting in the tree. This one captured a write that was **correct and incomplete by design**. `append_entry` on a guarded ledger writes the section straight to disk, and `get_guide("tracker-conventions")` requires the index row to be a *separate, later* call — "write the index row after, never before", because a row written first consumes the id it names. The prescribed protocol therefore **guarantees** an interval in which the file on disk holds a complete section with no index row, unstaged; no amount of care by the appending session shortens it, because shortening it means violating the allocation rule.
+
+That is worth separating from the earlier instances, because the remedy differs. Those argue about *how to stage*. Here the exposure is manufactured by a two-call protocol which both sessions are following **correctly**, so it recurs for every ledger append that overlaps any peer's commit. `append_entry` writing section-and-row in one call would close it; nothing the appending session can do will.
+
+### The detector was an ARITHMETIC MISMATCH on the captured side — the side `--stat` cannot serve
+
+§ *Detection* below records the commit's own `--stat` as the only check that fired. That check belongs to the **capturing** session: it reads a file list the capturer did not expect. This instance was caught from the other side, by a check the capturer cannot run at all:
+
+> I had just written ~36 lines to that file. `git diff --stat` on my own path reported `1 insertion(+)`.
+
+The *expectation* is what makes it a signal — the number is meaningless without knowing what you wrote, and only the author knows that. So the two detectors are complements rather than alternatives: one is available to the session that took the content and is blind to which content was foreign; the other is available to the session that lost it and is blind to everything outside its own path. Neither session can run the other's, which is the § *Observer Blindness* shape rather than a redundancy.
+
+**Note the direction of the failure.** A capture leaves the captured session's `git diff` looking **cleaner than it should**, never dirtier. A session that only ever asks *"is my tree clean enough to commit?"* receives a **more** comfortable answer after being captured — so vigilance pointed that way is structurally incapable of finding it, and the only question that works is *"is this the amount of change I wrote?"*
+
+**And the subject, which should not be glossed as coincidence.** The captured entry was `bug-fix-session-log:W-99`, whose topic is a peer commit capturing another session's working tree, and whose counterfactual reads *"it survives until it captures something"*. That was written under four minutes before it was captured, in the opposite direction, on itself. The entry's own estimate of its latency was the thing it got wrong.
+
+**Not repaired, per the standing rule** — reported to `f13f8169` instead, and the index row committed separately by `ffb95976`. The mislabelled attribution stands as evidence rather than being rewritten away.
+
 ## Remedy (1) is a capture VECTOR, not just an insufficient defence — second falsification
 
 Instance 3 showed path-scoped committing cannot protect *your* uncommitted files, because
