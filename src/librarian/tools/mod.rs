@@ -331,6 +331,13 @@ pub(crate) fn containing_root<'a>(
 pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
+    /// Cap on `description()` length in **characters**. Mirrors
+    /// `crate::tools::core::types::Tool::description_cap` — see that trait
+    /// method for the full contract. Forwarded to the outer `Tool` impl by
+    /// `LibrarianAdapter::description_cap` in `src/librarian/adapter.rs`.
+    fn description_cap(&self) -> usize {
+        300
+    }
     fn input_schema(&self) -> Value;
     async fn call(&self, ctx: &ToolContext, args: Value) -> Result<Value>;
 }

@@ -261,15 +261,10 @@ impl Tool for ArtifactAugment {
     }
 
     fn description(&self) -> &'static str {
-        "Attach or replace a persistent prompt + params on any artifact (merge=false, default), \
-         or patch only the fields you provide, leaving the rest untouched (merge=true). \
-         On merge=false ALL seven caller-controlled fields — prompt, params, render_template, \
-         params_schema, append_mode, history_cap, entry_collection — are overwritten with the call's values; \
-         fields you omit silently reset to None / false on the stored row. To change only some \
-         of them, use merge=true — see that param. \
-         Idempotent — safe to call on already-augmented artifacts. \
-         Params too large to pass inline (≳9 KB)? Use params_path. \
-         Replaces artifact_update_params."
+        "Attach or replace a persistent prompt + params on an artifact. merge=false (default) \
+         overwrites seven fields — prompt, params, render_template, params_schema, \
+         append_mode, history_cap, entry_collection; fields you omit silently reset. \
+         merge=true patches just what you pass."
     }
 
     fn input_schema(&self) -> Value {

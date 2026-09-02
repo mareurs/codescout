@@ -14,10 +14,9 @@ impl Tool for ArtifactRefreshTool {
 
     fn description(&self) -> &'static str {
         "Augmentation lifecycle. action: gather | list_stale. \
-         gather: collect context for an augmented artifact (does NOT write — synthesize then call \
-         artifact(update, commit_refresh=true) to write back). \
-         list_stale: list augmented artifacts whose last refresh is older than threshold_hours \
-         (default 24h), oldest-first."
+         gather: collect context for an augmented artifact (no write — synthesize then \
+         artifact(update, commit_refresh=true)). \
+         list_stale: augmented artifacts stale past threshold_hours (default 24h), oldest-first."
     }
 
     fn input_schema(&self) -> Value {

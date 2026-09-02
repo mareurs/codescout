@@ -41,6 +41,9 @@ impl Tool for Librarian {
              until. prune_before_ms dry-runs a prune (returns would_delete); \
              confirm=true applies it and leaves a self-describing marker row."
     }
+    fn description_cap(&self) -> usize {
+        1_800
+    }
 
     fn input_schema(&self) -> Value {
         json!({

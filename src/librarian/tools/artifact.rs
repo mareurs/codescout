@@ -24,6 +24,9 @@ impl Tool for Artifact {
          update_entry patches ONE existing entry in place; use it to change a row (e.g. flip a status) \
          instead of patch={params:...}, whose RFC 7396 array semantics replace the whole collection."
     }
+    fn description_cap(&self) -> usize {
+        1_800
+    }
 
     fn input_schema(&self) -> Value {
         json!({

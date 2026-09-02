@@ -225,6 +225,9 @@ impl crate::tools::Tool for LibrarianAdapter {
     fn description(&self) -> &str {
         self.inner.description()
     }
+    fn description_cap(&self) -> usize {
+        self.inner.description_cap()
+    }
 
     fn input_schema(&self) -> Value {
         self.inner.input_schema()

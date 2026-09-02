@@ -723,6 +723,16 @@ pub trait Tool: Send + Sync {
     /// prefer pointing the LLM at `get_guide(topic)` (large-budget
     /// channel — ~100 KB cap on tool results) over packing prose here.
     fn description(&self) -> &str;
+    /// Cap on `description()` length in **characters**, enforced by
+    /// `server::tests::every_tool_description_is_under_its_cap`. 300 by default.
+    /// A multi-action dispatcher whose description must name every action
+    /// (`doc`, `librarian`) overrides to 1_800 — Claude Code truncates a tool
+    /// description near 2,000 bytes (`docs/architecture/mcp-channel-caps.md`), so
+    /// 1_800 leaves margin. This replaces `is_librarian_tool`, a name-prefix list
+    /// in `server.rs` tests that a rename silently orphaned.
+    fn description_cap(&self) -> usize {
+        300
+    }
 
     /// Extended usage documentation for `doc://codescout-tool-guide`.
     ///

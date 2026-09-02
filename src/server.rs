@@ -2435,6 +2435,60 @@ mod tests {
         }
     }
 
+    /// One cap per tool, declared by the tool. Replaces the name-prefix list
+    /// `is_librarian_tool`, which `artifact → doc` would have silently emptied:
+    /// `doc` matches none of its prefixes, so the 300 cap would have applied and
+    /// the test would have failed for the wrong reason — or, had the list been
+    /// widened by reflex, passed for none. Characters, not bytes: the same unit
+    /// `TOOL_SURFACE_CHAR_BUDGET` uses, for the same em-dash reason.
+    #[tokio::test]
+    async fn every_tool_description_is_under_its_cap() {
+        let (_dir, server) = make_server().await;
+        let over: Vec<String> = server
+            .tools
+            .iter()
+            .filter(|t| t.description().chars().count() > t.description_cap())
+            .map(|t| {
+                format!(
+                    "{} is {} chars, cap {}",
+                    t.name(),
+                    t.description().chars().count(),
+                    t.description_cap()
+                )
+            })
+            .collect();
+        assert!(
+            over.is_empty(),
+            "descriptions over their cap:\n  {}",
+            over.join("\n  ")
+        );
+    }
+
+    /// The raised cap is a property of multi-action dispatchers, not a convenience.
+    /// Pin the set so a third tool cannot raise its own cap without appearing here.
+    #[tokio::test]
+    async fn only_the_two_dispatchers_raise_the_description_cap() {
+        let (_dir, server) = make_server().await;
+        let mut raised: Vec<&str> = server
+            .tools
+            .iter()
+            .filter(|t| t.description_cap() > 300)
+            .map(|t| t.name())
+            .collect();
+        raised.sort();
+        assert_eq!(raised, vec!["artifact", "librarian"]);
+    }
+
+    /// Name-prefix classifier for the librarian tool family (`artifact`,
+    /// `artifact_event`, `artifact_augment`, `artifact_refresh`, `librarian`,
+    /// `tracker_design`, `workspace_state_at`, ...), used only to size the
+    /// "core" (non-librarian) tool surface in `server_registers_all_tools`
+    /// and `server_tool_count_is_l3_target`. NOT used for the description-cap
+    /// exemption anymore — see `Tool::description_cap` for that, which a
+    /// tool rename (e.g. `artifact` → `doc`) cannot silently orphan the way
+    /// this prefix list can. This helper is scoped to the two tool-count
+    /// tests below and is expected to be retired alongside them when the
+    /// tool-surface-collapse plan folds the `artifact_*` family into `doc`.
     fn is_librarian_tool(name: &str) -> bool {
         name.starts_with("artifact_")
             || name.starts_with("librarian_")
@@ -2443,24 +2497,6 @@ mod tests {
             || name == "tracker_design"
             || name == "artifact"
             || name == "librarian"
-    }
-
-    #[tokio::test]
-    async fn tool_descriptions_stay_under_budget() {
-        let (_dir, server) = make_server().await;
-        for t in &server.tools {
-            if is_librarian_tool(t.name()) {
-                continue;
-            }
-            let d = t.description();
-            assert!(
-                d.len() <= 300,
-                "tool `{}` description is {} chars (cap 300): {:?}",
-                t.name(),
-                d.len(),
-                d
-            );
-        }
     }
 
     /// Which contract a tool's `description()` makes about its `action` enum.
@@ -2635,39 +2671,34 @@ mod tests {
 
     #[tokio::test]
     async fn tool_descriptions_report_lengths() {
-        // Companion to `tool_descriptions_stay_under_budget` — no assertions,
+        // Companion to `every_tool_description_is_under_its_cap` — no assertions,
         // just prints each tool's description length sorted descending. Run
         // with `cargo test --lib tool_descriptions_report_lengths -- --nocapture`
-        // to audit how close each tool is to the 300-char cap. Useful when
-        // adding new tools or trimming overgrown descriptions; do NOT delete
-        // this even though it has no assertions — its purpose is observability.
+        // to audit how close each tool is to its cap. Useful when adding new
+        // tools or trimming overgrown descriptions; do NOT delete this even
+        // though it has no assertions — its purpose is observability.
         let (_dir, server) = make_server().await;
-        let mut lengths: Vec<(String, usize, bool)> = server
+        let mut lengths: Vec<(String, usize, usize)> = server
             .tools
             .iter()
             .map(|t| {
                 (
                     t.name().to_string(),
-                    t.description().len(),
-                    is_librarian_tool(t.name()),
+                    t.description().chars().count(),
+                    t.description_cap(),
                 )
             })
             .collect();
         lengths.sort_by_key(|b| std::cmp::Reverse(b.1));
-        println!(
-            "\n  len  cap  tool                                            (exempt = librarian)"
-        );
+        println!("\n  len  cap  tool");
         println!("  ---  ---  ---------------------------------------------");
-        for (name, len, exempt) in &lengths {
-            let cap = if *exempt { "  -" } else { "300" };
-            let flag = if *exempt {
-                ""
-            } else if *len > 270 {
+        for (name, len, cap) in &lengths {
+            let flag = if *len > cap.saturating_sub(30) {
                 "  ⚠ near cap"
             } else {
                 ""
             };
-            println!("  {len:>3}  {cap}  {name:<45}{flag}");
+            println!("  {len:>3}  {cap:>3}  {name:<45}{flag}");
         }
     }
 
@@ -3367,23 +3398,6 @@ mod tests {
                 src.uri
             );
         }
-    }
-
-    #[tokio::test]
-    async fn every_tool_description_under_cap() {
-        const CAP: usize = 1800;
-        let (_dir, server) = make_server().await;
-        let over: Vec<(String, usize)> = server
-            .tools
-            .iter()
-            .map(|t| (t.name().to_string(), t.description().len()))
-            .filter(|(_, n)| *n > CAP)
-            .collect();
-        assert!(
-            over.is_empty(),
-            "tool descriptions over the {CAP}-char cap: {:?}",
-            over
-        );
     }
 
     #[tokio::test]
