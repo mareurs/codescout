@@ -135,8 +135,14 @@ unrecorded by default.
   SIGPIPE on a non-final stage as success. **My task list contradicted the tracker's own § *Resume*
   step 2, which already said to rule #7 first.** Corrected order: #2 → #7 (T5) → #4/#5/#8.
 
-- [ ] **T3b — #4, #5, #8 rulings.** UNBLOCKED by R3. Drafts exist in the measurement block; they
-  are one-line consequences now that the strategy is fixed.
+- [x] **T3b — #4, #5, #8 ruled together as R4.** Done 2026-09-02. Not one-line consequences after
+  all: #4 needed a real policy (classify per stage from `PIPESTATUS`; SIGPIPE `141` on a
+  non-final stage with a later `0` is success), #5 lost `stopped_at` and the truncated-array
+  branch entirely, #8 lost the `k/N` form. **One judgement call flagged inline** — the `141` rule
+  cannot discriminate "trimmer finished early" from "downstream crashed and closed the pipe" by
+  exit code alone; hedged by carrying raw `pipestatus` in the envelope so a caller can re-derive.
+  R4 also adds three test cases, because § *Tests needed* was monotone under the very defect the
+  ruling fixes.
 
 - [ ] **T7 — #3 (timeout policy), re-opened by R3.** Its "total" lean rested on per-stage being
   impossible, which `design-backlog-session-log:F-7` falsified. Both implementable. No caller for

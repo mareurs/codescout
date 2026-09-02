@@ -416,6 +416,75 @@ assumption. Backgrounded pipelines re-open #7, not #2 (see R2).
 Git Bash is unverified, and if absent, per-stage timeout degrades to unavailable-on-Windows.
 That bears on #3, not on R3: C's selection does not depend on it, since total timeout works on
 both platforms via the existing `tokio::time::timeout`.
+
+### R4 (2026-09-02) — #4, #5, #8: decide from `PIPESTATUS`, never from the aggregate status
+
+These three encoded *sequential* stages and were blocked on #7. R3 fixed the strategy, so they
+resolve together — but not as written. **One genuine judgement call is flagged inline; the rest
+are forced by measurement.**
+
+**#4 — pipefail semantics. Do NOT emit bare `set -o pipefail`.** Measured: it returns **141** on
+`seq 1 100000 | grep 5 | head -3`, a fully successful run, because `head` closes the pipe and
+SIGPIPE propagates upstream. That is the shape IL-3 redirects and therefore the shape this
+feature exists to serve. Instead read `PIPESTATUS` (a bashism R1 makes available — Ubuntu's
+dash answers `Bad substitution`) and classify per stage:
+
+| stage exit | position | verdict |
+|---|---|---|
+| `0` | any | success |
+| `141` (SIGPIPE) | **non-final**, and some later stage exited `0` | **success** — this is `head`/`grep -m` working |
+| `141` | final | failure — nothing downstream of the last stage but our own capture |
+| `124` | any | failure, reported as **timed out** rather than as a generic non-zero |
+| other non-zero | any | failure |
+
+**The `141`-is-success rule is the judgement call.** It cannot be derived: SIGPIPE on a
+non-final stage is indistinguishable, from exit codes alone, between "a trimmer finished early"
+(intended) and "a downstream stage crashed and closed the pipe" (a fault). The rule uses *some
+later stage exited 0* to discriminate, which is sound for the trimmer case and would misreport
+a crash whose successor still exited clean. Accepted because the trimmer case is the feature's
+reason to exist and the crash case still surfaces — the crashing stage's own non-zero code is
+reported. **Revisit-when** a real pipeline is misclassified either way.
+
+**A `cargo test | grep FAILED` whose `cargo` exits 101 is a FAILURE and should say so.** The
+caller expecting a failing test run still gets every stage's code; the verdict is not the
+information, the codes are.
+
+**#5 — output shape. `stopped_at` and the "truncated stages array" are removed.** Under C every
+stage starts at once, so no stage is skipped and none is truncated. Replace with each stage's
+own exit code and a *derived* pointer:
+
+```json
+{
+  "stages": [
+    {"stage": 0, "cmd": "cargo test",  "ref": "@cmd_a", "exit_code": 101, "preview": "…"},
+    {"stage": 1, "cmd": "grep FAILED", "ref": "@cmd_b", "exit_code": 0,   "preview": "…"},
+    {"stage": 2, "cmd": "head -20",    "ref": "@cmd_c", "exit_code": 0,   "preview": "…"}
+  ],
+  "final_ref": "@cmd_c",
+  "first_failing_stage": 0,
+  "pipestatus": [101, 0, 0]
+}
+```
+
+`pipestatus` is carried **raw and unclassified** alongside the verdict, so a caller who
+disagrees with the `141` rule above can re-derive its own answer without re-running anything.
+That is the cheapest possible hedge on the one judgement call in this ruling.
+
+**#8 — `format_compact`. Drop the `2/3` form**, which encodes stopping:
+
+    ✓ pipeline 3 stages                                    (query @cmd_a @cmd_b @cmd_c)
+    ✗ pipeline 3 stages — stage 0 (cargo test) exit 101     (query @cmd_a)
+    ✗ pipeline 3 stages — stage 1 (slow-thing) TIMED OUT    (query @cmd_b)
+
+All stages always ran; the count is `N`, never `k/N`. Point the reader at the **failing**
+stage's buffer, not the final one — that is where the diagnosis is.
+
+**Tests — § *Tests needed* is monotone under the defect above and must gain a case.** Its happy
+path is `seq 1 100 | grep ^5 | wc -l`, and `wc` consumes all input, so no early close and no
+SIGPIPE. Add: a `… | head -N` pipeline asserting **success**; a `timeout 1 sleep 30` middle
+stage asserting **timed out** and `124`; and a genuinely failing stage 0 asserting failure with
+all three codes present. Each needs a mutation applied and run, per `CLAUDE.md` § mutation-apply
+discipline — a suite that passes with the `141` rule deleted has not tested it.
 ## Tests needed
 
 - Happy: 3-stage `seq 1 100 | grep ^5 | wc -l` produces 11 (one "5", "50"-"59", "5"; 11 matches).
