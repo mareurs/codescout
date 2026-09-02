@@ -2865,10 +2865,13 @@ mod tests {
             // the table, 2026-09-02: read_file showed "expected 4, found 0".
             let aliases = parse_declared_aliases(props);
             alias_counts_by_tool.insert(t.name(), aliases.len());
-            let Some(required) = schema.get("required").and_then(|r| r.as_array()) else {
-                continue;
-            };
-            let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+            // Round 4 fix: `required` is now derived by the SAME function the synthetic
+            // fixture calls (`schema_required_names`), not a hand-typed copy of the
+            // extraction — a mutated or dead production derivation fails the fixture too,
+            // not just this real sweep. An empty result (no top-level `required`, or an
+            // absent one) is equivalent to the old `continue`: `find_alias_offenders`'s
+            // outer loop simply runs zero times.
+            let required = schema_required_names(&schema);
             // Round 3 fix: this now calls the SAME offender-matching function the synthetic
             // fixture test below calls, rather than a hand-typed copy of the loop — a mutated
             // or dead production detector fails the fixture too, not just this real sweep.
@@ -2909,6 +2912,24 @@ mod tests {
                 Some((name.as_str(), target))
             })
             .collect()
+    }
+
+    /// Shared by the real sweep in `required_names_no_key_that_has_a_declared_alias` and by
+    /// `alias_offender_detection_catches_a_synthetic_offender`: derive a schema's top-level
+    /// `required` array as `Vec<&str>`, or an empty vec when the schema has no `required` key
+    /// at all (the tools whose alternation is expressed purely via `anyOf`). Round 4 fix:
+    /// before this extraction, `find_alias_offenders` was shared and well-tested but its
+    /// INPUT derivation was still two lines re-typed at both call sites — the reviewer set
+    /// the production-only `required.iter().filter_map(...).collect()` line to `Vec::new()`
+    /// and every alias test, including the synthetic fixture, stayed green: the production
+    /// scan was structurally dead one line above the shared function, and nothing noticed.
+    /// Hoisting the derivation itself means the fixture enters the pipeline one hop earlier.
+    fn schema_required_names(schema: &Value) -> Vec<&str> {
+        schema
+            .get("required")
+            .and_then(|r| r.as_array())
+            .map(|required| required.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default()
     }
 
     /// Shared by the real sweep in `required_names_no_key_that_has_a_declared_alias` and by
@@ -2978,24 +2999,57 @@ mod tests {
     /// require a trailing period, silently blinding every real site at once).
     #[test]
     fn alias_offender_detection_catches_a_synthetic_offender() {
+        // Round 4 fix (M3): the fixture used to be 1 required key x 1 alias, which cannot
+        // distinguish a correct N-way match from a `.take(1)`-style truncation, and whose
+        // `assert_eq!(offenders.len(), 1)` was monotone-safe against widened comparisons
+        // (`starts_with`, `contains`, `if true`) — 1 was already this fixture's ceiling, so
+        // no over-counting mutation could ever be caught. Now: 2 required keys, 3 aliases
+        // (one, `verb`, deliberately does NOT match any required key), so the expected
+        // offender count (2) is a number a buggy detector can both undershoot (truncation,
+        // wrong-field comparison) and overshoot (matching `verb` too) past.
+        //
+        // Round 4 fix (M4): `file_path`'s description carries trailing prose after the
+        // target word, mirroring `read_file`'s real `output_id` alias text ("Alias for
+        // path — pass a returned..."). The old fixture's single-word description could not
+        // catch `parse_declared_aliases` losing its whitespace truncation (dropping
+        // `.split(...).next()` for a bare `rest`) — target would still equal `"path"`
+        // either way. Here, without truncation, the parsed target becomes the whole
+        // trailing tail instead of `"path"`, which fails the `aliases` assertion below.
         let schema = serde_json::json!({
             "type": "object",
-            "required": ["path"],
+            "required": ["path", "symbol"],
             "properties": {
                 "path": { "type": "string", "description": "canonical path param" },
-                "file_path": { "type": "string", "description": "Alias for path" }
+                "file_path": {
+                    "type": "string",
+                    "description": "Alias for path — pass a returned reference here"
+                },
+                "symbol": { "type": "string", "description": "canonical symbol param" },
+                "name_path": { "type": "string", "description": "Alias for symbol" },
+                "action": { "type": "string", "description": "canonical action param" },
+                "verb": { "type": "string", "description": "Alias for action" }
             }
         });
         let props = schema.get("properties").unwrap().as_object().unwrap();
-        let required = schema.get("required").unwrap().as_array().unwrap();
         let aliases = parse_declared_aliases(props);
         assert_eq!(
             aliases,
-            vec![("file_path", "path")],
-            "the synthetic fixture's own alias declaration was not parsed — \
-         parse_declared_aliases is broken independent of any production schema"
+            vec![
+                ("file_path", "path"),
+                ("name_path", "symbol"),
+                ("verb", "action")
+            ],
+            "the synthetic fixture's alias declarations were not parsed correctly — either \
+     parse_declared_aliases is broken independent of any production schema, or it lost \
+     the whitespace truncation that isolates the target word from trailing prose \
+     (file_path's description has trailing text after \"path\", exactly like read_file's \
+     real output_id alias)"
         );
-        let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        // Round 4 fix (M5): `required` is now derived by the SAME `schema_required_names`
+        // the production sweep above calls, instead of a re-typed copy of that extraction —
+        // a mutated or dead production derivation (e.g. its body set to `Vec::new()`) fails
+        // this fixture too, not just the real sweep.
+        let required = schema_required_names(&schema);
         // Round 3 fix: calls the SAME find_alias_offenders the production sweep above calls,
         // instead of a re-typed copy of its loop. Previously this test built its own inline
         // offender loop, so mutating the PRODUCTION loop alone (e.g. `if *target == req &&
@@ -3004,10 +3058,13 @@ mod tests {
         let offenders = find_alias_offenders("synthetic", &required, &aliases);
         assert_eq!(
             offenders.len(),
-            1,
-            "the synthetic offender (required=[\"path\"] with file_path declared an alias \
-         of path) was not detected — the offender-matching logic itself is broken, \
-         independent of whatever today's 26 production tools say"
+            2,
+            "expected exactly 2 offenders: required=[\"path\",\"symbol\"] with file_path and \
+     name_path each declared aliases of a required key. `verb` (declared an alias of \
+     `action`, which is NOT required) must NOT count — a count of 2 here rules out both \
+     under-counting (e.g. a `.take(1)`-truncated alias scan, or a wrong-field \
+     comparison) and over-counting (e.g. a loosened match that also catches `verb`):\n  {}",
+            offenders.join("\n  ")
         );
     }
 
