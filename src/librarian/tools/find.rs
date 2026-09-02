@@ -795,19 +795,39 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // `ArtifactRow` free of a score is deliberate — it is the row type every
         // non-semantic read path shares, and a query-relative number does not
         // belong on a record that outlives the query.
-        let (semantic_rows, distance_by_id, starvation) = match semantic_page {
-            Some(page) => {
-                let starvation = (page.widenings, page.exhausted);
-                let mut d = std::collections::HashMap::new();
-                let mut r = Vec::with_capacity(page.hits.len());
-                for hit in page.hits {
-                    d.insert(hit.row.id.clone(), hit.distance);
-                    r.push(hit.row);
+        //
+        // BOTH SIDE MAPS ARE KEYED BY ARTIFACT ID, AND THAT IS ONLY CORRECT WHILE
+        // THIS CALLER PASSES `max_per_artifact = 1`. Raise the cap and a second
+        // chunk of the same artifact overwrites the first here, silently — and
+        // `rows` collapses the same way, since it is one `ArtifactRow` per hit.
+        // Whoever raises it owns restructuring this into one record per HIT; the
+        // failure mode is a wrong `matched` span on a plausible-looking item, not
+        // an error.
+        let (semantic_rows, distance_by_id, chunk_by_id, starvation, cap_suppressed) =
+            match semantic_page {
+                Some(page) => {
+                    let starvation = (page.widenings, page.exhausted);
+                    let cap_suppressed = page.cap_suppressed;
+                    let mut d = std::collections::HashMap::new();
+                    let mut c = std::collections::HashMap::new();
+                    let mut r = Vec::with_capacity(page.hits.len());
+                    for hit in page.hits {
+                        d.insert(hit.row.id.clone(), hit.distance);
+                        if let Some(chunk) = hit.chunk {
+                            c.insert(hit.row.id.clone(), chunk);
+                        }
+                        r.push(hit.row);
+                    }
+                    (Some(r), d, c, Some(starvation), cap_suppressed)
                 }
-                (Some(r), d, Some(starvation))
-            }
-            None => (None, std::collections::HashMap::new(), None),
-        };
+                None => (
+                    None,
+                    std::collections::HashMap::new(),
+                    std::collections::HashMap::new(),
+                    None,
+                    0usize,
+                ),
+            };
 
         let rows = if no_augmentations_anywhere {
             // The "match nothing" filter the engine refuses to compile, applied here
@@ -884,6 +904,34 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         item["distance"] = json!((*d * 1000.0).round() / 1000.0);
                     }
                 }
+                // The chunk that matched, not the artifact's opening lines. On a
+                // ledger those are the same thing only by accident: the preamble
+                // is the one part of the file that says nothing about the entry
+                // the query actually found.
+                if let Some(chunk) = chunk_by_id.get(&r.id) {
+                    // Bounded, and it SAYS SO when it cuts. A 2 KB chunk x a
+                    // 50-item page is a 100 KB response, so the bound is not
+                    // optional — but an unmarked 480-char snippet is
+                    // indistinguishable from a chunk that happens to end there,
+                    // which is `cluster/capped-result-presented-as-complete`. The
+                    // line range travels alongside precisely so the caller can
+                    // read the full span with
+                    // `artifact(get, id=…, start_line=…, end_line=…)`.
+                    const SNIPPET_CHARS: usize = 480;
+                    let snippet = if chunk.content.chars().count() > SNIPPET_CHARS {
+                        let mut s: String = chunk.content.chars().take(SNIPPET_CHARS).collect();
+                        s.push_str(" … [snippet truncated — read the span with artifact(get)]");
+                        s
+                    } else {
+                        chunk.content.clone()
+                    };
+                    item["matched"] = json!({
+                        "start_line": chunk.start_line,
+                        "end_line": chunk.end_line,
+                        "entry_token": chunk.entry_token,
+                        "snippet": snippet,
+                    });
+                }
                 item
             })
             .collect();
@@ -917,10 +965,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         "semantic_exhausted_hint".into(),
                         json!(
                             "the KNN cap was reached before the page filled -- this is every \
-                               matching row that exists, not a truncated page."
+                               matching ARTIFACT that exists, not a truncated page."
                         ),
                     );
                 }
+            }
+            // Silent at zero, and that silence is the point: on a corpus where
+            // every artifact contributed one chunk there is nothing suppressed,
+            // and a hint that fired anyway would train readers to ignore it. When
+            // it does fire it names a RECOVERY, not just a condition — the whole
+            // artifact is one `get` away, and without this the page is a capped
+            // result presented as a complete one.
+            if cap_suppressed > 0 {
+                h.insert("cap_suppressed".into(), json!(cap_suppressed));
+                h.insert(
+                    "cap_suppressed_hint".into(),
+                    json!(format!(
+                        "{cap_suppressed} further chunk(s) belonging to artifacts already on \
+                         this page were dropped -- this page is ONE chunk per artifact, so a \
+                         single artifact answering the query several times appears once. Read \
+                         the whole thing with artifact(action=\"get\", id=…), or narrow the \
+                         query if you wanted breadth."
+                    )),
+                );
             }
             Value::Object(h)
         } else {
@@ -1787,6 +1854,235 @@ mod tests {
         let items = v["items"].as_array().unwrap();
         assert_eq!(items.len(), 2, "both artifacts should be returned");
         assert_eq!(items[0]["id"], "auth-doc");
+    }
+
+    /// Seed `id` as a three-chunk ledger — a preamble plus `## W-1` and `## W-2`
+    /// entries — and park the chunk at `near_ix` on the auth axis while the rest
+    /// sit on axis 1. `None` puts **every** chunk on the auth axis, which is how a
+    /// test makes the per-artifact cap (rather than distance) the thing that drops
+    /// the siblings. Returns the chunk rows in `chunk_ix` order, so a caller names
+    /// the one it wants by POSITION and never by a literal id.
+    fn seed_entry_chunks(
+        cat: &Catalog,
+        id: &str,
+        near_ix: Option<usize>,
+    ) -> Vec<crate::librarian::catalog::chunk::ChunkRow> {
+        let body = "# T\n\nintro\n\n## W-1 — x\n\nalpha\n\n## W-2 — y\n\nbeta\n";
+        let built = crate::librarian::catalog::chunk::build_chunks(id, body, 2048);
+        let rows = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built).unwrap();
+        assert!(
+            rows.len() >= 3,
+            "fixture needs a preamble plus two entry chunks or the tests below stop \
+             discriminating, got {}",
+            rows.len()
+        );
+        for (i, r) in rows.iter().enumerate() {
+            let mut v = vec![0.0f32; 768];
+            v[if near_ix.is_none_or(|n| n == i) { 0 } else { 1 }] = 1.0;
+            let blob: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+            cat.conn
+                .execute(
+                    "INSERT OR REPLACE INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+                    rusqlite::params![r.chunk_id, blob],
+                )
+                .unwrap();
+        }
+        rows
+    }
+
+    /// A hit must name the **entry** that matched, not the artifact's opening
+    /// lines. While the store was artifact-keyed the only thing a hit could say
+    /// was "somewhere in this file", which on a 9,000-line ledger restates the
+    /// retrieval problem rather than answering it.
+    ///
+    /// LOAD-BEARING: the near chunk is index **2**, not 0. Index 0 is the
+    /// preamble — precisely what an artifact-grain hit would report — so a fixture
+    /// whose nearest chunk is the preamble cannot tell the two grains apart, and
+    /// would pass on a tree where `matched` named line 1 unconditionally.
+    #[tokio::test]
+    async fn a_semantic_hit_names_the_entry_that_matched_not_the_preamble() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("ledger", "Gate Ledger")).unwrap();
+        let rows = seed_entry_chunks(&cat, "ledger", Some(2));
+        let expected = rows[2].clone();
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 3, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        let m = &v["items"][0]["matched"];
+        assert_eq!(
+            m["entry_token"],
+            json!("W-2"),
+            "a hit must name the entry it landed in: {v}"
+        );
+        assert_eq!(m["start_line"], json!(expected.start_line));
+        assert_eq!(m["end_line"], json!(expected.end_line));
+        assert!(
+            m["start_line"].as_u64().unwrap() > 1,
+            "line 1 is the preamble — an artifact-grain answer wearing a chunk-grain shape: {m}"
+        );
+        assert!(
+            m["snippet"].as_str().unwrap().contains("beta"),
+            "the snippet must be the matched chunk's own text, not the file's head: {m}"
+        );
+    }
+
+    /// One artifact answering the query three times appears **once**, and the page
+    /// has to say so. The two dropped chunks are not absent from the corpus, only
+    /// from the page, and nothing else in the response distinguishes those two
+    /// states — which is `cluster/capped-result-presented-as-complete`.
+    #[tokio::test]
+    async fn suppressed_sibling_chunks_are_reported_rather_than_silently_dropped() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("ledger", "Gate Ledger")).unwrap();
+        // Every chunk on the auth axis, so all three are candidates and the
+        // per-artifact CAP is what removes two of them rather than distance.
+        seed_entry_chunks(&cat, "ledger", None);
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 5, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            v["items"].as_array().unwrap().len(),
+            1,
+            "one chunk per artifact: {v}"
+        );
+        assert_eq!(
+            v["hints"]["cap_suppressed"],
+            json!(2),
+            "two sibling chunks were dropped and the page must say how many: {}",
+            v["hints"]
+        );
+        assert!(
+            v["hints"]["cap_suppressed_hint"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("artifact(action=\"get\""),
+            "the hint must name the recovery action, not only the condition: {}",
+            v["hints"]
+        );
+    }
+
+    /// The control for the hint above — the case where it must stay **silent**.
+    /// Without it a `cap_suppressed` that fired unconditionally would look correct
+    /// in every other test here, and the field's whole value is that its absence
+    /// means something.
+    #[tokio::test]
+    async fn a_page_with_nothing_suppressed_says_nothing() {
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("auth-doc", "Authentication Guide")).unwrap();
+        artifact::upsert(&cat, &sample_row("deploy-doc", "Deployment Runbook")).unwrap();
+        seed_vec(&cat, "auth-doc", 0);
+        seed_vec(&cat, "deploy-doc", 1);
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 10, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(v["items"].as_array().unwrap().len(), 2);
+        assert!(
+            v["hints"].get("cap_suppressed").is_none(),
+            "single-chunk artifacts suppress nothing, so the field must be absent: {}",
+            v["hints"]
+        );
+    }
+
+    /// The snippet is bounded **and says so when it cuts** — both directions in
+    /// one test, because a marker is only informative if its absence is too. A
+    /// snippet that always carried the marker satisfies the first assertion and
+    /// tells a reader nothing; the second assertion is what makes the first mean
+    /// "this one was cut" rather than "snippets have a suffix".
+    #[tokio::test]
+    async fn a_cut_snippet_says_it_was_cut_and_an_uncut_one_does_not() {
+        fn seed_one_chunk(cat: &Catalog, id: &str, body: &str) {
+            let built = crate::librarian::catalog::chunk::build_chunks(id, body, 8192);
+            let rows = crate::librarian::catalog::chunk::replace_chunks(cat, id, &built).unwrap();
+            assert_eq!(
+                rows.len(),
+                1,
+                "this fixture wants exactly one chunk for {id}"
+            );
+            let mut v = vec![0.0f32; 768];
+            v[0] = 1.0;
+            let blob: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+            cat.conn
+                .execute(
+                    "INSERT OR REPLACE INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+                    rusqlite::params![rows[0].chunk_id, blob],
+                )
+                .unwrap();
+        }
+
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &sample_row("long", "Long Entry")).unwrap();
+        artifact::upsert(&cat, &sample_row("short", "Short Entry")).unwrap();
+        let long_body = format!("## W-9 — t\n\n{}\n", "padding ".repeat(200));
+        assert!(
+            long_body.chars().count() > 480,
+            "fixture must exceed SNIPPET_CHARS or nothing is cut, got {}",
+            long_body.chars().count()
+        );
+        seed_one_chunk(&cat, "long", &long_body);
+        seed_one_chunk(&cat, "short", "## W-8 — t\n\nshort body\n");
+
+        let svc = Arc::new(EmbeddingService::new(Arc::new(MockEmbedder)));
+        let ctx = mk_ctx_with_embedder(cat, svc);
+        let v = call(
+            &ctx,
+            json!({"semantic": "auth login flow", "limit": 10, "scope": "all"}),
+        )
+        .await
+        .unwrap();
+
+        let items = v["items"].as_array().unwrap();
+        let snip = |id: &str| -> String {
+            items
+                .iter()
+                .find(|i| i["id"] == id)
+                .unwrap_or_else(|| panic!("{id} missing from {v}"))["matched"]["snippet"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+
+        let long_snip = snip("long");
+        assert!(
+            long_snip.contains("snippet truncated"),
+            "a cut snippet that does not say it was cut is a capped result presented as \
+             complete: {long_snip:?}"
+        );
+        assert!(
+            long_snip.chars().count() < long_body.chars().count(),
+            "the bound must actually bind"
+        );
+
+        let short_snip = snip("short");
+        assert!(
+            !short_snip.contains("snippet truncated"),
+            "an uncut snippet must not claim it was cut, or the marker means nothing: \
+             {short_snip:?}"
+        );
+        assert!(
+            short_snip.contains("short body"),
+            "an uncut snippet is the whole chunk: {short_snip:?}"
+        );
     }
 
     /// The distance must reach the caller, per item. Before this, `semantic_find`

@@ -2795,6 +2795,25 @@ mod tests {
     /// is the cheapest kind of payback and the one to look for first: **a
     /// description that is long because the tool is wrong.**
     ///
+    /// **Raised 2026-09-02, 56_497 → 56_735 (+238) — `artifact`'s `semantic` param,
+    /// for a RESPONSE SHAPE a caller cannot discover from the response itself.**
+    ///
+    /// Semantic hits became chunk-grain, so each item now carries `matched` (line
+    /// range, enclosing entry token, bounded snippet) and the page carries
+    /// `hints.cap_suppressed`. The old description ended at "(requires embedder)",
+    /// which stayed true and became materially incomplete: a caller reading it has
+    /// no reason to look for `matched`, and — the part that actually buys the bytes
+    /// — no reason to know the page is ONE CHUNK PER ARTIFACT. A ledger answering
+    /// the query six times looks exactly like one answering it once, and the
+    /// suppressed chunks leave **no trace in `items`**, so this is not a fact the
+    /// response can teach.
+    ///
+    /// 30 bytes were paid back before raising: the first draft spelled out "with
+    /// the line range, the enclosing entry token (e.g. `W-81`) and a bounded
+    /// snippet" and named the preamble twice. That is prose-golf rather than a
+    /// correctness fix — the weaker kind of payback, recorded so a later sweep does
+    /// not count it as one of the good ones.
+    ///
     /// **RAISING THIS IS ALLOWED — it is a ratchet, not a ceiling.** The assertion
     /// says "find the bytes" because that is the right FIRST move, not because a
     /// raise is forbidden; two of the entries above are raises and both were
@@ -2814,7 +2833,7 @@ mod tests {
     /// on the very next added byte, which is the only thing keeping this honest.
     /// The sweep that pays it back should LOWER this line, and any pass that
     /// cannot is a pass that did not happen.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_497;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_735;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
