@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 106
+entry_high_water_F: 107
 entry_high_water_W: 101
 ---
 
@@ -10542,6 +10542,54 @@ catchable from inside the document.
 
 **Rests on:** nothing that decays — this is a claim about two lines of a specific plan and
 the general shape they instantiate.
+
+## F-107 — The prediction's structure held and every count was +2, because the write-up cites the tokens it counts
+
+**Observed 2026-09-02.** After shipping `link_scan`'s `colliding_tokens` (D12, `741cda03`), I
+predicted the live output before measuring it — the disciplined move — and got the structure
+right and every count wrong in the same direction.
+
+| | predicted | measured |
+|---|---|---|
+| `prefix_conflicts` | 4 | **4** ✓ |
+| `prefix_conflicts_live` | 3 | **3** ✓ |
+| `IC` colliding tokens | 0 | **0** ✓ |
+| `T` colliding tokens | `T-14/15/16/17` | **exactly those** ✓ |
+| `T-14` citing_sources | 12 | **14** ✗ |
+| `T-15` citing_sources | 0 | **2** ✗ |
+| `T-16` citing_sources | 1 | **3** ✗ |
+| `T-17` citing_sources | 3 | **5** ✗ |
+
+**Every count is +2, and the +2 is me.** I derived the predictions from a measurement taken
+*before* I wrote the bug file and the `IC-6` `**Members:**` derivation. Both documents cite all
+four colliding tokens, so each became a new citing source for each. Confirmed independently by
+grep rather than by arithmetic: the bug file holds `T-14`×9, `T-15`×3, `T-16`×4, `T-17`×13; the
+class file holds 2/1/1/2. `T-17` also carries the −1 from removing the served guide's citation,
+which is why its prediction was 3 rather than 4 — and 3 + 2 = 5, measured.
+
+**So documenting the collision made the collision's own metric worse than fixing the guide made
+it better**, in the `citing_sources` unit: −1 from the fix, +2 from the write-up. That is not an
+argument against documenting it. It is the reason a broken-citation count cannot be read as a
+health metric for a class that is actively being written about, and I would have published a
+"the fix reduced it" claim if the arithmetic had not been checked.
+
+**The seam.** A prediction is only as good as the interval it covers, and I treated "measured
+earlier today" as "measured before this change" — true of the code, false of the corpus, because
+the corpus includes my own prose. `references/seam-classes.md` names this class: an instrument
+that writes into what it measures. Knowing the class did not help; the arithmetic did.
+
+**Why the structural half still counts as verification.** `prefix_conflicts_live` distinguishing
+`IC` (0 tokens, 22 definers) from `T` (4 tokens) is the whole feature, and no self-citation
+effect can produce that — my writes could only inflate counts within an already-live conflict,
+never create or clear one. The falsifiable half held; the decorative half is what moved.
+
+**Status:** fixed-verified — D12 verified live at `741cda03`; the miss is in my prediction, not
+in the code.
+
+**Valid:** dated 2026-09-02
+
+**Rests on:** `tracker-hygiene-log:HY-21` (the D12 proposal), and
+`docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`
 
 ## Template for new entries
 
