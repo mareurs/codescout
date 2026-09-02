@@ -2770,11 +2770,51 @@ mod tests {
     /// prose-golf pass across 26 tools. Recorded here because a raised budget is
     /// indistinguishable from an earned one once the reason leaves the room.
     ///
+    /// **Raised 2026-09-02, 56_519 → 56_547, again against this test's own advice
+    /// — also DEBT, not an earned baseline.**
+    ///
+    /// `workspace`'s `read_only` description was WRONG rather than merely terse:
+    /// it read "(default: false)" while any non-home root defaults to `true`.
+    /// Stating both defaults plus the precedence costs 31 chars, and the surface
+    /// had 3 of headroom (measured baseline 56_516). The owner chose to raise
+    /// rather than ship a sentence that is still wrong about half its domain, or
+    /// spend the last 3 bytes unremarked. The precedence clause is load-bearing
+    /// and NEW: until
+    /// docs/issues/2026-09-02-read-only-true-is-inert-at-every-root.md was fixed,
+    /// `read_only: true` was inert at every root, so "explicit wins" was not a
+    /// true statement about this tool and could not have been documented.
+    ///
+    /// **Lowered 2026-09-02, 56_547 → 56_497 — the first payback, and it retires one
+    /// of the two debts above by its exact size.**
+    ///
+    /// `memory`'s `project_id` description carried "(key is project_id; project
+    /// accepted as an alias)" — 50 characters spent documenting an UNDOCUMENTED
+    /// param, since the schema advertised one name while the runtime honoured two.
+    /// The alias is now a refusal naming `project_id`, and the sentence went with
+    /// it. The bytes came back from a correctness fix, not from prose-golf, which
+    /// is the cheapest kind of payback and the one to look for first: **a
+    /// description that is long because the tool is wrong.**
+    ///
+    /// **RAISING THIS IS ALLOWED — it is a ratchet, not a ceiling.** The assertion
+    /// says "find the bytes" because that is the right FIRST move, not because a
+    /// raise is forbidden; two of the entries above are raises and both were
+    /// correct. Raise it when the bytes buy something the surface genuinely owes:
+    /// a default that was documented wrong, an action no agent could discover, a
+    /// guard whose absence loses data. Do not raise it to avoid re-reading a
+    /// paragraph.
+    ///
+    /// Two hard requirements, and they are what make the permission safe. Set it
+    /// to the exact measured total from the report test. And add an entry here
+    /// saying what the bytes bought — a raised budget is indistinguishable from an
+    /// earned one once the reason leaves the room, which is why this comment is a
+    /// log rather than a number. Fuller rationale:
+    /// docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md.
+    ///
     /// Set to the exact measured total, never rounded up: the ratchet still bites
     /// on the very next added byte, which is the only thing keeping this honest.
     /// The sweep that pays it back should LOWER this line, and any pass that
     /// cannot is a pass that did not happen.
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_519;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 56_497;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
@@ -2784,9 +2824,12 @@ mod tests {
         assert!(
             total <= TOOL_SURFACE_CHAR_BUDGET,
             "advertised tool surface is {total} chars across {} tools; budget is {}. \
-             Do NOT raise the budget — find the bytes. Run \
+             Find the bytes FIRST — the cheapest are in a description that is long \
+             because the tool is wrong. Run \
              `cargo test --lib tool_surface_report_lengths -- --nocapture` for the \
-             per-tool map. See \
+             per-tool map. If the addition is genuinely owed, raising the budget IS \
+             allowed: set it to the exact measured total and add an entry to \
+             `TOOL_SURFACE_CHAR_BUDGET`'s log saying what the bytes bought. See \
              docs/superpowers/specs/2026-08-18-tool-surface-budget-design.md.",
             rows.len(),
             TOOL_SURFACE_CHAR_BUDGET,
@@ -2974,6 +3017,140 @@ mod tests {
             messages.is_empty(),
             "prompt-surface drift detected:\n  {}",
             messages.join("\n  ")
+        );
+    }
+
+    /// A param a prompt surface names for a tool must be a param that tool advertises.
+    ///
+    /// Sibling of [`prompt_surfaces_reference_only_real_tools`], which checks backticked
+    /// **tool names** against the registry and deliberately nothing finer. That is one
+    /// grain too coarse: a sentence can name three real tools and a param that two of
+    /// them do not have, and pass. Exactly that shipped —
+    /// *"Use `project: "<id>"` in `symbols` / `semantic_search` / `memory`"* — where
+    /// `symbols` advertises no project param and silently ignored one, `semantic_search`
+    /// spells it `project_id`, and only `memory` honoured `project`, via an alias added
+    /// for a 2026-06-09 bug filed against **this same sentence**. The prose was fixed
+    /// once, on one tool of three.
+    ///
+    /// **It also scans a surface the sibling never did.** That sentence is emitted from
+    /// `build_project_status_segments`, not from `SERVER_INSTRUCTIONS` or the onboarding
+    /// prompt — so the token-level gate could not have caught it at any grain. The status
+    /// block is rendered here through the public `build_status_response_block` and scanned
+    /// with the other three.
+    ///
+    /// Scope, stated so nobody credits it with more: it reads `` `param: …` `` declarations
+    /// and attributes them to backticked tool names **in the same sentence**. A param named
+    /// far from its tool, or written as `tool(param=…)`, is not covered — the call-form is a
+    /// larger population and is left to a later pass rather than smuggled in untested here.
+    ///
+    /// docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
+    #[tokio::test]
+    async fn prompt_surfaces_name_only_params_their_tools_advertise() {
+        use std::collections::HashMap;
+
+        let (_dir, server) = make_server().await;
+        let schemas: HashMap<&str, Value> = server
+            .tools
+            .iter()
+            .map(|t| (t.name(), t.input_schema()))
+            .collect();
+
+        // Two projects, because the workspace table is only emitted for a real workspace —
+        // a single-project status renders no table and would make this surface silently
+        // empty rather than merely unchecked.
+        let status = crate::prompts::ProjectStatus {
+            name: "codescout".into(),
+            path: "/tmp/codescout".into(),
+            languages: vec!["rust".into()],
+            memories: vec![],
+            has_index: false,
+            system_prompt: None,
+            workspace: Some(vec![
+                crate::prompts::WorkspaceProjectSummary {
+                    id: "codescout".into(),
+                    root: ".".into(),
+                    languages: vec!["rust".into()],
+                    depends_on: vec![],
+                },
+                crate::prompts::WorkspaceProjectSummary {
+                    id: "codescout-embed".into(),
+                    root: "crates/codescout-embed".into(),
+                    languages: vec!["rust".into()],
+                    depends_on: vec![],
+                },
+            ]),
+            worktree: None,
+        };
+        let status_block = crate::prompts::build_status_response_block(&status).unwrap_or_default();
+        assert!(
+            status_block.contains("## Workspace Projects"),
+            "fixture must actually render the workspace table, or this surface is inert \
+             rather than clean"
+        );
+
+        let draft = crate::prompts::builders::build_system_prompt_draft(&[], &[], None, None, &[]);
+        let surfaces: &[(&str, &str)] = &[
+            (
+                "server_instructions.md",
+                crate::prompts::SERVER_INSTRUCTIONS,
+            ),
+            (
+                "onboarding_prompt.md",
+                crate::prompts::RAW_ONBOARDING_PROMPT,
+            ),
+            ("build_system_prompt_draft", draft.as_str()),
+            ("project_status_block", status_block.as_str()),
+        ];
+
+        // A backticked `param: …` declaration, then the tools named in the same sentence.
+        let decl = regex::Regex::new(r"`([a-z_][a-z_0-9]*):[^`]*`").unwrap();
+        let tick = regex::Regex::new(r"`([a-z][a-z_0-9]{2,})`").unwrap();
+
+        let mut drift = Vec::<String>::new();
+        let mut checked = 0usize;
+
+        for (surface, body) in surfaces {
+            for m in decl.captures_iter(body) {
+                let param = m.get(1).unwrap().as_str();
+                let rest = &body[m.get(0).unwrap().end()..];
+                let sentence = rest.split(['.', '\n']).next().unwrap_or("");
+                for t in tick.captures_iter(sentence) {
+                    let tool = t.get(1).unwrap().as_str();
+                    // Not a registered tool — that is the sibling test's question, and
+                    // answering it here too would double-report one drift as two.
+                    let Some(schema) = schemas.get(tool) else {
+                        continue;
+                    };
+                    checked += 1;
+                    let advertised = schema
+                        .get("properties")
+                        .and_then(Value::as_object)
+                        .is_some_and(|p| p.contains_key(param));
+                    if !advertised {
+                        drift.push(format!(
+                            "{surface}: `{param}:` is named for `{tool}`, which advertises \
+                             no such param"
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            checked > 0,
+            "no param/tool pair was reached in any surface — the pattern this test looks \
+             for has been reworded away, and a green run here now means nothing. Re-aim it \
+             or delete it; do not leave it passing."
+        );
+        assert!(
+            drift.is_empty(),
+            "prompt surfaces name params their tools do not advertise:\n  {}\n\n\
+             An agent reads these before its first call and passes what it was told; an \
+             unadvertised param is dropped silently, so the agent gets an unscoped result \
+             that looks scoped. Fix the prose to the param the tool actually takes, or add \
+             the param to the tool — but do not fix it on one tool and leave the sentence \
+             naming the others, which is how this one survived a prior bug filed against it.",
+            drift.join("\n  ")
         );
     }
 

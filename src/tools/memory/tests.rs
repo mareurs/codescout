@@ -2128,8 +2128,28 @@ async fn memory_read_with_unknown_project_id_says_no_such_project_not_no_topics(
     );
 }
 
+/// `project` is refused by name, and `project_id` still routes — both in one test.
+///
+/// **Renamed from `memory_write_accepts_project_alias_for_project_id`.** That test pinned an
+/// UNDOCUMENTED alias: the schema advertised `project_id` alone while the runtime also
+/// honoured `project`, accepted 2026-06-09 because the onboarding prompt taught that
+/// spelling. The prompt surfaces now say `project_id` everywhere, so the alias had no
+/// caller — and a param the schema does not advertise is unreachable to any agent reading
+/// the tool list, which is the same defect the prompt fix was about, pointing the other way.
+///
+/// **The alias is refused rather than deleted, and that distinction is the point.** Simply
+/// removing the `or_else` would have restored the ORIGINAL 2026-06-09 defect in its harder
+/// direction — `project` silently dropped, the write misrouted to the focused project, and
+/// a scoped-looking result that is not scoped. A refusal naming the right key cannot fail
+/// that way.
+///
+/// **The control is not decoration.** Asserting only the refusal passes against a
+/// `resolve_memory_dirs` that refuses everything; asserting only the routing passes against
+/// one that ignores the key. Neither half alone discriminates.
+///
+/// docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
 #[tokio::test]
-async fn memory_write_accepts_project_alias_for_project_id() {
+async fn memory_refuses_the_project_key_and_still_routes_project_id() {
     use crate::agent::Agent;
     use crate::memory::semantic_store::test_support::InMemorySemanticMemoryStore;
     use crate::memory::semantic_store::SemanticMemoryStore;
@@ -2147,8 +2167,8 @@ async fn memory_write_accepts_project_alias_for_project_id() {
     // a project, so this fixture used to declare an `mcp-server` that did not
     // exist — and the assertions below passed anyway, because an unknown
     // project_id silently got its own `projects/<id>/memories` tree. Matching the
-    // sibling fixture's content makes the sub-project real, so the alias is now
-    // tested against a project that is actually there.
+    // sibling fixture's content makes the sub-project real, so the routing control
+    // below is tested against a project that is actually there.
     std::fs::write(mcp.join("package.json"), r#"{"scripts":{"build":"tsc"}}"#).unwrap();
     std::fs::create_dir_all(root.join(".codescout")).unwrap();
 
@@ -2167,11 +2187,11 @@ async fn memory_write_accepts_project_alias_for_project_id() {
         workspace_override: None,
     };
     // Network-free stubs, installed before any tool call can trigger ambient
-    // resolution — this test's "write" action succeeds, which reaches the
-    // best-effort semantic-anchor side effect in Memory::call. See
-    // test_ctx_with_project's doc comment. The code-search override is a
-    // THIRD, separate resolution path (see test_ctx_with_project_raw's doc
-    // comment) that neither the embedder nor the store seam covers.
+    // resolution — the control write below succeeds, which reaches the best-effort
+    // semantic-anchor side effect in Memory::call. See test_ctx_with_project's doc
+    // comment. The code-search override is a THIRD, separate resolution path (see
+    // test_ctx_with_project_raw's doc comment) that neither the embedder nor the
+    // store seam covers.
     ctx.agent
         .set_memory_embedder_for_test(Arc::new(FixedEmbedder) as Arc<dyn DenseEmbedder>)
         .map_err(|_| ())
@@ -2186,10 +2206,11 @@ async fn memory_write_accepts_project_alias_for_project_id() {
         Arc::new(NoCodeSearch) as Arc<dyn crate::retrieval::search::CodeChunkSearch>
     );
 
-    // Write using the `project` ALIAS (not project_id). Regression for the 2026-06-09
-    // onboarding bug: the unknown `project` key was silently dropped and the write
-    // misrouted to the focused/root project.
-    Memory
+    let project_mem_path = root.join(".codescout/projects/mcp-server/memories/conventions.md");
+    let root_mem_path = root.join(".codescout/memories/conventions.md");
+
+    // 1. `project` is refused, and the refusal names the key that works.
+    let err = Memory
         .call(
             json!({
                 "action": "write",
@@ -2200,23 +2221,54 @@ async fn memory_write_accepts_project_alias_for_project_id() {
             &ctx,
         )
         .await
-        .unwrap();
-
-    // Alias must land in the per-project dir that project_id= would use.
-    let project_mem_path = root.join(".codescout/projects/mcp-server/memories/conventions.md");
+        .unwrap_err();
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("a wrong-but-close key is a correctable input mistake, not a bail");
     assert!(
-        project_mem_path.exists(),
-        "project= alias must route to per-project dir (not silently dropped): {project_mem_path:?}"
+        rec.message.contains("project_id"),
+        "the refusal must name the key that works, or it teaches nothing: {}",
+        rec.message
+    );
+    assert!(
+        rec.hint().unwrap_or("").contains("mcp-server"),
+        "the hint must carry the caller's own value back, so the retry is a copy rather \
+         than a re-derivation: {:?}",
+        rec.hint()
     );
 
-    // And must NOT misroute to the workspace-level/root dir.
-    let root_mem_path = root.join(".codescout/memories/conventions.md");
+    // 2. And nothing was written ANYWHERE. This is the assertion that separates a refusal
+    //    from the 2026-06-09 defect it replaces: that bug's symptom was a write landing in
+    //    the root dir, which a caller reading `ok` would never notice.
+    assert!(!project_mem_path.exists(), "a refused call must not write");
     assert!(
         !root_mem_path.exists(),
-        "project= alias must NOT misroute to the root memory dir: {root_mem_path:?}"
+        "a refused call must not misroute to the root memory dir either: {root_mem_path:?}"
     );
 
-    // Read back via the canonical project_id= key returns the same content.
+    // 3. Control: the advertised key still routes to the per-project dir, and not to root.
+    //    Without this, every assertion above is satisfied by a function that refuses all input.
+    Memory
+        .call(
+            json!({
+                "action": "write",
+                "topic": "conventions",
+                "content": "Use camelCase",
+                "project_id": "mcp-server"
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        project_mem_path.exists(),
+        "project_id= must route to the per-project dir: {project_mem_path:?}"
+    );
+    assert!(
+        !root_mem_path.exists(),
+        "project_id= must NOT misroute to the root memory dir: {root_mem_path:?}"
+    );
+
     let read_result = Memory
         .call(
             json!({ "action": "read", "topic": "conventions", "project_id": "mcp-server" }),

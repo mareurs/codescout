@@ -436,16 +436,35 @@ impl MemoryReadDirs {
 
 /// Resolve the directories a `memory` tool call reads from.
 ///
-/// If `project_id` (or its `project` alias) is provided, route to the per-project
-/// directory via `Workspace::memory_dir_for_project`. Otherwise use the focused
-/// project's memory dir. Falls back gracefully when no workspace is loaded.
+/// If `project_id` is provided, route to the per-project directory via
+/// `Workspace::memory_dir_for_project`. Otherwise use the focused project's memory
+/// dir. Falls back gracefully when no workspace is loaded.
+///
+/// **`project` was an undocumented alias and is now a refusal.** It was accepted
+/// from 2026-06-09 to 2026-09-02 because the onboarding prompt taught that
+/// spelling; the prompt surfaces now say `project_id` everywhere, so the alias had
+/// no caller left. Deleting it outright would have re-created the original defect
+/// in its harder direction — a scoping param silently dropped, yielding an
+/// unscoped result that reads as scoped — so the key is rejected with the correct
+/// spelling instead of ignored. The schema advertises one name and the runtime
+/// honours exactly that one.
+///
+/// docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
 ///
 /// `.primary` is the write target; `.secondary` is the other layout's directory
 /// for the same project when the two differ. See [`MemoryReadDirs`].
 async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result<MemoryReadDirs> {
+    if input.get("project_id").is_none() {
+        if let Some(v) = input.get("project").and_then(Value::as_str) {
+            return Err(super::RecoverableError::with_hint(
+                "`project` is not a parameter of `memory` — the key is `project_id`",
+                format!("Re-send with project_id: {v:?}"),
+            )
+            .into());
+        }
+    }
     let project_param = input
         .get("project_id")
-        .or_else(|| input.get("project")) // "project" accepted as an alias for project_id (2026-06-09 onboarding-prompt bug)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     // Pin the memory dir to the workspace named by ctx.workspace_override
@@ -712,7 +731,7 @@ impl Tool for Memory {
                 "query": { "type": "string", "description": "For recall. Search query." },
                 "limit": { "type": "integer", "description": "For recall. Max results (default 5)." },
                 "id": { "type": "string", "description": "For forget. UUID string from a recall result." },
-                "project_id": { "type": "string", "description": "Scope to a workspace project ID (key is project_id; project accepted as an alias). Default: focused project." }
+                "project_id": { "type": "string", "description": "Scope to a workspace project ID. Default: focused project." }
             }
         })
     }

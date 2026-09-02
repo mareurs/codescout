@@ -116,9 +116,29 @@ Every decision below rests only on today's source and today's wire.
    **all-capabilities-true** — the maximal advertised surface, and the only one that must
    be guaranteed to fit.
 
-4. **Hard ratchet, lower-only.** The constant carries the same instruction as
-   `STATIC_SLICE_CHAR_BUDGET`: *do not raise this number — find the bytes.* Adding a
-   parameter becomes a trade rather than an accretion.
+4. **Ratchet, not ceiling — default lower, raise on a recorded justification.** The
+   constant's first instruction is the same as `STATIC_SLICE_CHAR_BUDGET`'s: *find the
+   bytes.* That is the right first move and makes adding a parameter a trade rather than
+   an accretion. It is not a prohibition, and this decision used to read "lower-only",
+   which its own history had already falsified — the budget was raised twice on purpose
+   (2026-08-28 for `memory`'s `force` shrink guard, 2026-09-02 for `workspace`'s
+   `read_only` precedence clause), each time because the bytes bought something the
+   surface genuinely owed and each time recorded as debt at the constant.
+
+   **Raise it when the addition is owed** — a default documented wrong, an action no
+   agent could discover, a guard whose absence loses data. Do not raise it to avoid
+   re-reading a paragraph. Two requirements make the permission safe rather than a
+   loophole: set the constant to the **exact measured total** from the report test, never
+   rounded up, so the ratchet still bites on the very next added byte; and **add an entry
+   to the constant's log** saying what the bytes bought. A raised budget is
+   indistinguishable from an earned one once the reason leaves the room, which is why the
+   constant carries a log rather than a number.
+
+   **The cheapest payback is a description that is long because the tool is wrong.**
+   First lowering, 2026-09-02, 56_547 → 56_497: `memory`'s `project_id` description spent
+   50 characters documenting an *undocumented* alias — the schema advertised one key while
+   the runtime honoured two. Removing the alias removed the sentence. Prose-golf across 26
+   tools was never needed.
 
 5. **Fail loudly and specifically.** On breach, print the per-tool table so the failure
    names where the bytes went. A budget that reports only a total tells an author to give

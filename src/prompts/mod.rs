@@ -200,7 +200,7 @@ fn build_project_status_segments(status: &ProjectStatus) -> Vec<StatusSegment> {
                 ));
             }
             table.push_str(
-                "\nUse `project: \"<id>\"` in `symbols` / `semantic_search` / `memory` to scope to a specific project.\n",
+                "\nUse `project_id: \"<id>\"` in `semantic_search` / `memory` to scope to a specific project. `symbols` has no project param — scope it with `path` (its `scope` is a different axis: project/libraries/all).\n",
             );
             segs.push(StatusSegment {
                 text: table,
@@ -1413,8 +1413,18 @@ mod tests {
         assert!(block.contains("python-services/"));
         // depends_on rendered for python-services
         assert!(block.contains("mcp-server"));
-        // scoping hint present
-        assert!(block.contains("project: \"<id>\""));
+        // Scoping hint names only params the tools actually advertise. This assertion
+        // used to read `contains("project: \"<id>\"")` and was satisfied BY THE DEFECT:
+        // the sentence named `project` on `symbols`, which advertises no such param and
+        // silently ignored it, for three months.
+        // docs/issues/2026-09-02-activation-banner-names-a-project-param-symbols-does-not-have.md
+        assert!(block.contains("project_id: \"<id>\""));
+        assert!(
+            !block.contains("` in `symbols`"),
+            "`symbols` advertises no project param — naming one here is the defect this \
+                 assertion now guards, and a substring check that both spellings satisfy is \
+                 how it went unnoticed: {block}"
+        );
     }
 
     #[test]
