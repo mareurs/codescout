@@ -121,6 +121,18 @@ whatever route did that is not one of the two documented ones today.
    **Evidence:** *Root cause*, first bullet.
 
 ## Fix
+**Provenance.** Recorded 2026-09-02, at archive time rather than fix time — this file had no fix
+pointer at all until then, and the only hash in it (`450d34fd`, on both Environment lines) is the
+branch tip at reproduction, not a fix.
+
+- **SHA:** `44a2d0ab` on **`experiments`** — positional; it dies when `experiments` is rebased.
+- **patch-id:** `76a60568db56cb086f54132315099e70003330c4` — content hash of the diff; survives
+  rebase and cherry-pick. `git show 44a2d0ab | git patch-id --stable`.
+
+Identified positively, not by proximity: `44a2d0ab` modifies this bug file plus exactly `+2` lines
+each to `docs/trackers/tool-usage-patterns.md` (the `T` prefix) and
+`docs/trackers/test-escape-hardening.md` (the `I` prefix) — the two declarations this bug is about,
+and nothing else.
 
 Applied 2026-09-02. Both artifacts now declare their namespace in committed frontmatter,
 written through the catalog so the change reaches the index as well as the file:

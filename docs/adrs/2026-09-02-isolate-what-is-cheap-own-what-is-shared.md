@@ -109,7 +109,7 @@ The remedy the hook headers gesture at. Rejected on measurement, not taste:
 - **Cost:** 29 GB per session, for a git problem that is 43 MB.
 - **It does not reach the head.** Ledgers are still shared, and worktrees make merging them
   *worse*: cross-tree entry-id collision
-  (`docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`), shadow
+  (`docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`), shadow
   catalog rows requiring `librarian(action="merge_worktree")`, and
   `repair_frontmatter_id` rewriting inside a live worktree.
 - **It trades loud failures for silent ones**, which is the decisive argument. A shared tree
@@ -259,9 +259,8 @@ stay flat or rise. If writes fall instead, the spool has added friction rather t
 - `docs/conventions/shared-checkout-commit-sequence.md` — the six steps and their measurements
 - `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` — Instance 7
 - `docs/issues/2026-09-01-two-correct-pre-commit-guards-have-an-empty-intersection.md`
-- `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`
-- `docs/issues/2026-09-02-one-ledger-file-serializes-every-class-edit.md`
+- `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`
+- `docs/issues/archive/2026-09-02-one-ledger-file-serializes-every-class-edit.md`
 - `docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`
 - `docs/trackers/observer-blindness.md` — `OB-8`, `OB-15`
 - `CLAUDE.md` § *Reaching a Peer Session*, § *Observer Blindness*
-

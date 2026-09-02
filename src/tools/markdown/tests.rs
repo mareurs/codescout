@@ -3488,7 +3488,7 @@ fn diagnose_causes_produce_pairwise_distinguishable_messages() {
 /// to appear is the root the tool resolved it against — the thing that separates
 /// "this file is absent" from "you are pointed at a tree where it never was".
 ///
-/// docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md
+/// docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md
 #[tokio::test]
 async fn read_markdown_file_not_found_names_the_root_it_searched() {
     let dir = tempdir().unwrap();

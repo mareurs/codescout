@@ -1410,7 +1410,7 @@ mod tests {
     /// was handed. `resolved` is already in scope at the failure site and was simply
     /// never used in the text.
     ///
-    /// docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md
+    /// docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md
     #[tokio::test]
     async fn file_not_found_names_the_root_it_searched() {
         use tempfile::tempdir;

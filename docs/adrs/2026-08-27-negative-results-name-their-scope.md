@@ -144,7 +144,7 @@ and the surfaces that already error are the ones that should carry it.
   and on what evidence — today they have never conflicted in a recorded incident.
 - A per-caller identity lands in the MCP `RequestContext`. Some scope-naming here is
   compensating for the workspace clobber
-  (`docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md`); a structural fix
+  (`docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md`); a structural fix
   would make that instance redundant, though not the general rule.
 
 **Confidence: high.** Grounded in three same-day fixes across three unrelated subsystems,
@@ -182,8 +182,9 @@ right; the ADR's contribution is the name and the third clause.
   `src/tools/symbol/symbols.rs` (`WalkAudit.accepted`), `src/tools/read_file.rs`
   (`read_file_text`), `src/tools/markdown/read_markdown.rs` (`resolve_markdown_source`),
   `src/util/path_security.rs` (`check_tool_access`).
-- `docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md` — still open for the
-  structural half.
+- `docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md` — `mitigated` and
+  archived 2026-09-02; the structural half was **declined**, not deferred (see that file's
+  `unverified:` field for both derivations).
 
 
 - `docs/adrs/2026-08-30-a-plausible-value-is-not-a-verification.md` — **the sibling,

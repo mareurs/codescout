@@ -138,7 +138,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // as a hard failure here would trade a real capability (allocation still
         // working against a momentarily-stale catalog) for no safety, since a
         // deleted file cannot itself collide.
-        // docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md
+        // docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md
         // Scoped to a LEDGER. This guard sits in front of `allocate_entry_id`, which
         // is the layer that actually decides whether `a.id` declares an
         // `entry_prefix` (`augmentation.rs:975-995`) — so without a check here, a

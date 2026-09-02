@@ -440,7 +440,7 @@ fn project_security_config(p: &ActiveProject) -> crate::util::path_security::Pat
     // when it is also read-only, because that is the cause whose remedy is
     // different. Telling someone to re-activate writable when their
     // project.toml turns writes off is advice that costs a call and fails.
-    // docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md
+    // docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md
     let cause = crate::util::path_security::WriteBlockCause::classify(
         p.config.security.file_write_enabled,
         p.read_only,

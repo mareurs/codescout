@@ -24,7 +24,7 @@ topic: issue clusters and rule promotion
 - **commit provenance — OWNED.** `scripts/prepare-commit-msg-session-id.sh` stamps a `Session-Id:` trailer from `CLAUDE_CODE_SESSION_ID`. That is `IC-10`'s mechanism rather than this class's, but it is what makes a *committed* hunk attributable without a live session to ask.
 - **`target/` — PARTIAL.** The gate reorder at `73066479` closes the terminal state; `50b1605f` isolated one consumer of `/proc/self/exe`. Neither touches the resource, so any other reader is exposed identically.
 - **working tree, unstaged — NONE.** `docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md` and `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md`. Git has no per-path unstaged ownership concept, so this is the one gap with no adjacent primitive to extend.
-- **`entry_high_water_<PREFIX>` — NONE.** `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`: the committed mark guards a second worktree and never a second host.
+- **`entry_high_water_<PREFIX>` — NONE.** `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`: the committed mark guards a second worktree and never a second host.
 - **active-project slot — PROXIMITY, NOT IDENTITY.** `docs/issues/2026-09-02-the-concurrent-activation-guard-substitutes-proximity-for-identity.md`. A guard exists and is wrong in both directions, which for triage is worse than none — it reports a verdict rather than a gap.
 
 The **inbound** half remains not closeable by any per-session behaviour.

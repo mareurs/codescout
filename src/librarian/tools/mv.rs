@@ -160,7 +160,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // imperative is carried here rather than left to be inferred. At the catalog
         // layer this move IS atomic — the split only becomes visible one tool call
         // later, at the git layer, to a different observer.
-        // docs/issues/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md
+        // docs/issues/archive/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md
         "stage_together": [to_forward_slash(&old_full), to_forward_slash(&new_full)],
         // Deliberately path-free. `stage_together` is relativized by
         // `path_strip::PATH_KEYS` and a prose string is not, so a path embedded here
@@ -345,7 +345,7 @@ mod tests {
     ///
     /// **The regression test the bug file proposed would have passed against the
     /// defect, and that is the finding.**
-    /// `docs/issues/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md`
+    /// `docs/issues/archive/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md`
     /// § *Tests added* specifies that "a regression test would assert that a `move`
     /// response names both paths" — but `old_abs_path` / `new_abs_path` were already
     /// emitted unconditionally when that file was written, so the proposed assertion

@@ -2800,7 +2800,7 @@ fn duplicate_definitions(text: &str, prefixes: &[String]) -> Vec<(String, Vec<u3
 /// This is what a cross-host merge produces. Two clones read their own committed
 /// `entry_high_water_<PREFIX>`, allocate the same id, and the merge lands two
 /// `## PREFIX-N — <title>` headings in one file, at the SAME heading level —
-/// `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
+/// `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
 /// It is not the only cause a same-level duplicate can have (a hand-edited
 /// ledger or a bad cherry-pick reach the same shape), so the detail below
 /// describes what the state IS rather than asserting the merge as certain.

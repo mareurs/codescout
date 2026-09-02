@@ -1,5 +1,5 @@
 ---
-id: c752708c2757e139
+id: 6a3bb4d968d1d514
 kind: bug
 status: mitigated
 title: Workspace read_only flipped to true twice mid-session with no activate call from this session, silently blocking every write

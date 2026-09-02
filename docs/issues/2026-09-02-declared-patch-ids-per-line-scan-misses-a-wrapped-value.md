@@ -12,8 +12,8 @@ closed: null
 opened: 2026-09-02
 owner: marius
 related:
-- docs/issues/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md
-- docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md
+- docs/issues/archive/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md
+- docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md
 severity: medium
 ---
 
@@ -50,7 +50,7 @@ Four live instances, all verified by hand on 2026-09-02 against the working tree
 `patch-id` ends the line; the backticked value opens the next:
 
 ```
-docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md:57-58
+docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md:57-58
   Observed 2026-08-31 with the desktop at what is now `4d2e5e58` (patch-id
   `3687655cd2dc5849e87278015774349302fd977d`; the original SHA `97d3a4ec` was orphaned
 
@@ -102,7 +102,7 @@ fixing the false negatives.
 
 ### E1 — the structured form survives by luck, not by design
 
-`docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md:145-149`
+`docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md:145-149`
 carries nine anchors in a two-line shape:
 
 ```
@@ -179,4 +179,3 @@ scope. Read `## Fix` before touching `declared_patch_ids`.
   — `IC-6`'s shell-gate member, offered as a cross-reference by the same peer. Related
   in shape (a boundary token the pattern cannot express) and a different class in
   direction (it matches too much; this matches too little).
-

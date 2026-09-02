@@ -49,7 +49,7 @@ stops the reader looking"* — no relation to cross-machine allocation. The edge
 syntactically derived and semantically false.
 
 Same document set, same pattern, three further instances at
-`docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md:29,31,89`
+`docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md:29,31,89`
 — the bug file describing the collision, which cannot describe it otherwise.
 
 ## Root cause
@@ -109,7 +109,7 @@ the same annotation overstated its claim, and rewriting the sentence for accurac
 happened to drop the token, so `link_scan` will prune the edge as stale on its next
 `write=true`. The rewrite was not motivated by this bug and the reasoning above still
 stands on its merits; the surviving demonstration is the three instances in
-`docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`
+`docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`
 (`:29`, `:31`, `:89`), which genuinely cannot be reworded away — that file's subject *is*
 the colliding id.
 

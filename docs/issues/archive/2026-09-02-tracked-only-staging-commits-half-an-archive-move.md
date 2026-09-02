@@ -1,5 +1,5 @@
 ---
-id: '2a9e782b58f6844c'
+id: 4aceabeba46a94b0
 kind: bug
 status: fixed
 title: 'BUG: tracked-only staging commits half an artifact(move) archive, silently undoing it'

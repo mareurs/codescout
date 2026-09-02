@@ -35,7 +35,7 @@ the next id to 147, so an `append_entry` there would have minted a second `R-147
 The allocation was deliberately not executed — the record describes a reachable
 state, not damage done.
 
-Full record: `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
+Full record: `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
 Class: `docs/trackers/issue-clusters.md` `IC-17`, whose remedy clause is *isolate the
 resource or add an owner field, never a better listing*.
 
@@ -242,7 +242,7 @@ Against `CLAUDE.md` § *Testing Discipline*:
 
 ## References
 
-- `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md` — the record
+- `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md` — the record
 - `docs/trackers/issue-clusters.md` `IC-17` — the class; its `Mechanism status` was
   corrected at `3151201a` (patch-id `6de1f659eabfd098dcfc52140b92f7de1448f41f`) and now
   names `entry_high_water_<PREFIX>` as one of three genuinely unowned resources

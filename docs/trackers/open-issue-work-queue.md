@@ -95,7 +95,7 @@ from here — and never treat the one-line `next` as the instruction. It is a po
 | BL-51 | 2 | a rendezvous slot that misses its SessionStart stamp can never be stamped again — Phase C inactive for that server's life | **dropped** — both claims refuted by their own author 90 min after filing; self-heals at next SessionStart; severity `informational`; code is JS in `claude-plugins`, not this repo | `d91e96485308ee2f` |
 | BL-52 | 2 | the rendezvous gate latches open, so a hook going quiet mid-process leaves `/clear` invisible again | **blocked** — sketched fix refuted (`hook_at` ages 0.6–25h, so no window discriminates); viable fix is cross-repo + a design decision; next step is measurement, not code | `54a70b49f6f26681` |
 | BL-53 | 3 | guide topics are atomic nodes in an unmodelled graph — also `GG-7`, sequenced there; do not fix from here | open (cross-ref) | `7579b32b1cd2362f` |
-| BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | investigating (cross-ref) | `c752708c2757e139` |
+| BL-54 | 2 | workspace `read_only` flips mid-session with no `activate` — also `WP-5`; may share a `with_project_at` root cause with BL-46 | mitigated + archived 2026-09-02 (`3ccfefb2`) — per-call pinning is a probe-verified escape; the structural half was **declined**, not deferred | `6a3bb4d968d1d514` |
 | BL-55 | 3 | three unrelated tests failed together on the wine lane under load — the reference case for "flaky by wall clock" vs "defect load exposes" (`F-78`) | open | `05b157e0c38b765a` |
 | BL-56 | 1 | SDD ledger directory and its catalog rows both vanished between sessions — gitignored catalog means unrecoverable, not stale | **zombie 2026-08-30** — the disposition its own Resume prescribed. Hypotheses 4 and 6 acquitted from code + live measurement, plus a newly-found 9 (→ BL-64) acquitted twice. Survivor is 8 (a foreign `codex` writer), and it is **unfalsifiable, not untested**: the catalog keeps no write audit trail, so "who deleted these rows" has no answer once the window closes. Re-open trigger in frontmatter | `73158c500ff6b293` |
 | BL-65 | 1 | the CLI's `doctor` exposes no `--fix`, so all six repairs are MCP-only | **open** — third instance of one mechanism in a day (after `19289b1f` and BL-60); strands `fix=export_augmentations`, which exists to run on the OTHER machine. Root cause INFERRED from `--help`. Two findings now argue for a key-set coverage test over a fourth round of flags | `2f2409074ee2319d` |
@@ -487,7 +487,7 @@ bug-first triage.
 
 **Valid:** dated 2026-08-29
 
-`docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md`. Silently blocks every write.
+`docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md`. Silently blocks every write.
 Also `resume-workspace-pinning-phase-4b-5:WP-5`, listed there for adjacency to the write-root
 split (BL-46) — the two may share a root cause in `with_project_at`, which is worth establishing
 before either is designed.

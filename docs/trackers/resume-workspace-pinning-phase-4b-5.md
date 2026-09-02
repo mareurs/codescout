@@ -170,8 +170,8 @@ racy by construction.
 **Status:** investigating — tracked as a bug, listed here for adjacency
 **Valid:** dated 2026-08-28
 
-`docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md`
-(`c752708c2757e139`): workspace `read_only` flipped to `true` twice mid-session
+`docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md`
+(`6a3bb4d968d1d514`): workspace `read_only` flipped to `true` twice mid-session
 with no `activate` call from the session, silently blocking every write.
 
 Listed here because it lives in exactly the registry/activation machinery WP-1
@@ -202,4 +202,3 @@ not a duplicate — do not update status here.
 Promoted from the plan's § *Phase 4b — DEFERRED* resume kit, as that section
 itself authorises. Phase 4a, the lock-ordering proof, and the still-live
 `concurrent_activation_warning` were all re-verified against `src/` that day.
-

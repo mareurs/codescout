@@ -92,7 +92,7 @@ pub struct PathSecurityConfig {
     /// path that has no project root to name (`SecuritySection::to_path_security_config`,
     /// `Default`): the refusal then falls back to its original wording rather
     /// than asserting a cause it does not know.
-    /// docs/issues/2026-08-26-workspace-read-only-flips-mid-session.md
+    /// docs/issues/archive/2026-08-26-workspace-read-only-flips-mid-session.md
     pub write_block: Option<WriteBlock>,
 }
 

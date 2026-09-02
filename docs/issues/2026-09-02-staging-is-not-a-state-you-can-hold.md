@@ -306,6 +306,6 @@ opposite directions and the resolution is one decision, not two. Then add the at
 - `62d7fa4b` — the commit that closed the red window with the single-invocation form.
 - `docs/issues/2026-09-01-pre-commit-stash-removes-every-peers-unstaged-work.md` — sibling
   mechanism, unstaged work rather than staged paths.
-- `docs/issues/2026-09-02-one-ledger-file-serializes-every-class-edit.md` — why the pair had to be
+- `docs/issues/archive/2026-09-02-one-ledger-file-serializes-every-class-edit.md` — why the pair had to be
   atomic in the first place.
 - `docs/trackers/issue-clusters.md` `IC-17`.

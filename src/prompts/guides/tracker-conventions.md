@@ -148,7 +148,7 @@ pair is the positive confirmation; a ` D` plus a `??` is half-staged. The `move`
 response carries `stage_together` and `stage_hint` saying exactly this — both paths
 were always reported, and reporting them was measured insufficient: one session read
 them six times across six moves and still had to be told the action.
-`docs/issues/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md`
+`docs/issues/archive/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md`
 
 **Then re-point the citations, in the same commit as the move —
 paths *and* ids.** The move changes both, and archiving is a bug file's *normal*
@@ -472,7 +472,7 @@ letters, a hyphen, digits, and **nothing else**.
   re-check the entry or the ledger; push, or batch and push once. (Measured
   end-to-end 2026-09-02: 7 of 37 declared ledgers refusing at 133 commits ahead, one
   push cleared all 7, one commit re-armed one within ten minutes — derivation in
-  `docs/issues/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.)
+  `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.)
   Two things this refusal is **not**: it
   does not prevent the collision — a peer at origin collides with your unpushed
   entries whether or not you are refused, and what it converts is an *invisible*

@@ -5,7 +5,7 @@ WHY THIS EXISTS. The ledger used to store each class's count in three places -- 
 `n` cell, `**Members:**`, and `**Promotes to:**` -- and filing any bug file forced an edit to all
 three. One file is git's staging unit; 22 class records are the edit unit, so every filer held a
 lock on all 22 classes and textually disjoint edits blocked each other
-(`docs/issues/2026-09-02-one-ledger-file-serializes-every-class-edit.md`). The counts are exactly
+(`docs/issues/archive/2026-09-02-one-ledger-file-serializes-every-class-edit.md`). The counts are exactly
 derivable, so they are no longer stored. This is where you read them.
 
 WHAT IT DOES NOT DO, and this is the part to read before quoting it.
