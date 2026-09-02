@@ -1,7 +1,7 @@
 ---
-id: '76bb1a07806f8020'
+id: b2d4389045294219
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a session''s self-reported name is not verifiable from inside the session, and the positive-identification procedure does not distinguish that from its sessionId'
 tags:
 - cluster/authorship-unrecoverable-after-the-fact
@@ -123,22 +123,42 @@ was committed by an author who had written about the class forty minutes earlier
 
 ## Fix
 
-Not implemented. Two parts, and the second is the one that matters.
+**Fixed** at `ab231cbf`, patch-id `09251910d6feca4aac0ef9e7b33340411e7a9b21`.
 
-**Documentation.** `CLAUDE.md` § *Observer Blindness*'s positive-identification sentence
-should name the **sessionId** rather than leaving "the id" to be read as the display name, and
-say plainly that a name is not self-verifiable from inside the session. The scope table in §
-*Reaching a Peer Session* is already correct about routing; this is about attribution.
+**Documentation half — both prescribing sites, not one.** § *Observer Blindness*'s
+positive-identification sentence now names the **sessionId** and states plainly that a name is
+minted into a per-profile registry and re-minted by compaction, resume, or a restart under another
+profile, so a session reporting its own name is quoting a belief rather than reading a fact. §
+*Reaching a Peer Session*'s "quote its own id from its scratchpad path" bullet gains the same
+one-clause disambiguation. Routing was already correct and is untouched — this was only ever about
+attribution.
 
-**A mechanism, per that section's own third position.** Asking a session to quote its
-scratchpad path yields the sessionId structurally — that is already the robust form and needs
-only to be the *prescribed* form. Whether anything can make a name self-verifying is a harness
-question and probably out of scope; the cheaper move is to stop attributing by name.
+Both measurements are cited in place: the `codescout-26` signature from a session already exited on
+another profile, and `codescout-00` → `codescout-cc` across profiles and PIDs with its sessionId
+unchanged — which is the only reason stage-log attributions kept resolving to it, since that column
+keys on sessionId.
 
-Do **not** attempt to make names stable — that is the harness's to decide, and the corpus's
-own advice (positively identify, do not eliminate) works fine once it points at the right
-field.
+**Mechanism half — taken as prescribed, i.e. by narrowing the field rather than stabilising the
+name.** This file's own § *Fix* says *"do not attempt to make names stable — that is the harness's
+to decide"*, and that holds. The corpus's advice works once it points at the right field, so the
+change is to stop attributing by name; nothing new was built.
 
+## The downstream correction is an annotation, not a rename — and that is the finding
+
+`bug-fix-session-log:F-97` credited its catch to `codescout-26`. Repairing it by substituting a
+sessionId was the obvious move and is **wrong**: the name resolves to *two* candidates —
+`codescout-17` (sessionId `9716a130`) has stated it signed an earlier message under that name, and
+a real `codescout-26` existed on `.claude-kat` and has exited — and the `from=` socket that would
+decide it is not recoverable from that session's context.
+
+Picking the likelier one is elimination over a population of two, which is precisely what §
+*Observer Blindness* forbids, performed *inside* the entry that would then be citing it. So `F-97`
+stands as written — accurate about what the signature **said** — with the attribution marked
+**unresolvable**.
+
+That leaves the better artifact. A corpus that quietly repaired the name would carry no evidence
+the failure mode had ever occurred, which is the same recording-filter shape this repo tracks: the
+tidy version of the record is the one from which the defect is invisible.
 ## Tests added
 
 None, and it is not clear a test is available: the defect is in a prescription, and the

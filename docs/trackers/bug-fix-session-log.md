@@ -9684,7 +9684,7 @@ elimination over a population of two, which is the thing `CLAUDE.md` § *Observe
 forbids, inside the entry that would be citing it.
 
 The general form is filed as
-`docs/issues/2026-09-02-a-sessions-self-reported-name-is-not-self-verifiable.md`: a name is minted
+`docs/issues/archive/2026-09-02-a-sessions-self-reported-name-is-not-self-verifiable.md`: a name is minted
 into a per-profile registry and re-minted by compaction, resume, or a restart under another
 profile, so a session reporting its own name quotes a belief rather than reading a fact. Only the
 **sessionId** is structural. `CLAUDE.md` now says so in both places that prescribe asking.
