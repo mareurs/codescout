@@ -10029,8 +10029,34 @@ implementation either of us can see, and it left it there rather than inventing 
 honest boundary: the *pointer/record* cut needs a reader, the *path resolves* check does not, and
 the *claim was tested* check is currently neither.
 
+**Correction, five minutes later, by dogfooding this entry against its own check.** Above I called
+the path check *"the part that needs no judgement"*. **That is false, and the entry's own commit
+falsified it.** Run over this entry it flagged **three** paths and found **zero** defects:
+
+| flagged | what it actually is |
+|---|---|
+| `scripts/does-not-exist.sh` | a quoted probe result whose point is that the path is absent |
+| `scripts/probe-cluster-express.py` | this entry *quoting the typo* as its worked example |
+| `scripts/reload.py` | **buddy 0.9.1's** script, correctly qualified in prose as such |
+
+The second is a *record* in exactly this entry's sense — quoting a bad path in order to say it is
+bad. The third is a cross-repo citation the grep reads as local, because `scripts/` is assumed to
+mean *this* repo's.
+
+So the check is a **candidate generator, not a linter**, and every hit needs the pointer/record cut
+applied to it. What it removes is the *noticing*, not the *judging* — it guarantees you look at
+every path, and it took ~10 seconds to produce three candidates a reader then resolved in under a
+minute. That is still worth having; it is just not the clean division of labour claimed above, and
+the corrected split is: the machine enumerates, the reader classifies, and neither half works alone.
+
+`codescout-0d`'s null run (10 paths, 9 resolve, 1 fixture) reads differently in this light too —
+its "1 fixture" was a *classification it performed*, not a pass the check gave it.
+
 **Promotion candidate, not promoted:** if the pointer/record cut recurs on a third removal it earns
-a place in `docs/conventions/`. Two instances (this one, `0d`'s) are not a rule yet.
+a place in `docs/conventions/`. Two instances (this one, `0d`'s) are not a rule yet — and the
+correction above is an argument for waiting, since the version that would have been promoted five
+minutes ago carried a false claim about which half needs a reader.
+
 
 ## Template for new entries
 
