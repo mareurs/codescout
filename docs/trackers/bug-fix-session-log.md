@@ -9671,6 +9671,24 @@ True of this session's reporting, not of the code. Re-check if the gate's four c
 
 **Rests on:** CLAUDE.md § *Development Commands* — the four commands are four because each answers a question the others cannot, and `check` answers none of clippy's.
 
+**Attribution correction, 2026-09-02 — and it is NOT a rename.** This entry credits the catch to
+`codescout-26`. That name does not resolve to a session, and the honest repair is to say so rather
+than substitute a better guess. Two candidates: `codescout-17` (sessionId
+`9716a130-c93d-4a65-9ab2-ddc53d6d9cfb`) has since stated it signed an earlier message under that
+name, and a real `codescout-26` also existed on `.claude-kat` and has since exited. The `from=`
+socket that would have decided it is not recoverable from this session's context.
+
+So the record stands as written — it is accurate about *what the signature said* — with the
+attribution marked **unresolvable**. Closing it by picking the likelier candidate would be
+elimination over a population of two, which is the thing `CLAUDE.md` § *Observer Blindness*
+forbids, inside the entry that would be citing it.
+
+The general form is filed as
+`docs/issues/2026-09-02-a-sessions-self-reported-name-is-not-self-verifiable.md`: a name is minted
+into a per-profile registry and re-minted by compaction, resume, or a restart under another
+profile, so a session reporting its own name quotes a belief rather than reading a fact. Only the
+**sessionId** is structural. `CLAUDE.md` now says so in both places that prescribe asking.
+
 **Fix idea / Pointer:** Before writing "green" anywhere a reader will act on, name which command produced it. A status table listing three commands and omitting the fourth reads as complete; the omission is invisible to the reader and to the author.
 
 ## F-98 — A correctly-scoped retraction left the same claim standing in a second artifact, labelled verified

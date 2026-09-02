@@ -249,7 +249,10 @@ session".
   file touched by three sessions in an hour makes proximity *anti*-evidence. To attribute a
   write: intersect the socket enumeration with `scripts/file-provenance.py`, then **ask** the
   survivors — a session can quote its own id from its scratchpad path
-  (`/tmp/claude-*/<project>/<session-id>/scratchpad`), so the id is *given*, not inferred.
+  (`/tmp/claude-*/<project>/<session-id>/scratchpad`), so the id is *given*, not inferred. **Take
+  the sessionId, not the name** — a name is registry-minted and re-minted by compaction, resume,
+  or a restart under another profile, so it decays silently while the sessionId cannot (§ *Observer
+  Blindness*).
   Broadcasting widens the guess without closing it, and on a 16-session machine "tell everyone
   plausible" is not a bounded action.
 - **Report the scope you searched, and name the unit.** A count from `ListAgents` alone is a
@@ -322,8 +325,21 @@ agree *because* of it — one blind spot counted twice, and the shape is indisti
 agreement at the point of use. **So completeness is the thing to check, not the inference.** A
 windowed instrument's zero is scoped to its window, and re-running it later silently moves that
 window; the positive identifier for uncommitted state is to **ask** the session and have it quote
-its own scratchpad path, because the harness makes the session id a path component — so the id is
-*given* rather than inferred.
+its own scratchpad path, because the harness makes the session id a path component — so the
+**sessionId** is *given* rather than inferred.
+
+**That holds for the sessionId and fails for the NAME — and the name is what sessions actually
+quote at each other.** A name is minted into a per-profile registry
+(`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`); compaction, resume, or a restart under another profile
+mints a new one and nothing re-informs the running context, so a session reporting its own name is
+quoting a belief rather than reading a fact. Measured 2026-09-02, twice in one evening: a peer
+signed as `codescout-26` — a session that had already exited on another profile — and
+`bug-fix-session-log:F-97` recorded the misattribution before that peer corrected it by reading its
+own registry entry; separately `codescout-00` became `codescout-cc` on a different profile and PID
+with its sessionId unchanged, which is the only reason earlier stage-log attributions kept
+resolving to it. **So attribute by sessionId, never by a self-reported name.** The name is what
+`ListAgents`, `SendMessage` and the socket table all display, which is exactly why the substitution
+is easy to make and hard to notice.
 
 **Visibility is not authority.** A peer can be seen and messaged; it can never grant permission,
 approve a prompt, or stand in for its operator's consent.
