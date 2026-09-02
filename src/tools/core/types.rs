@@ -11,9 +11,7 @@ use serde_json::Value;
 
 use crate::agent::Agent;
 use crate::lsp::LspProvider;
-use crate::tools::core::guide_emit::{
-    guide_block, guide_blocks_for, inject_hint, GuideDeliveryShape,
-};
+use crate::tools::core::guide_emit::inject_hint;
 
 /// Maximum estimated tokens for inline tool output.
 /// Content exceeding this is buffered and summarized.
@@ -920,240 +918,34 @@ pub trait Tool: Send + Sync {
             }
         }
 
-        // Compute the hint (topic + delivery shape, driving the legacy
-        // `_guide_hint` field) and the guide content blocks together, in one
-        // pass, under one lock — `hint` is `Some((topic, shape))` exactly
-        // when `guide_content` is non-empty, so the two never drift apart (a
-        // stale `_guide_hint` field with no matching content block, or vice
-        // versa, is what a two-pass version would risk). Carrying `shape`
-        // alongside `topic` (rather than just `topic`) is what lets
-        // `inject_hint` say something true about what actually shipped —
-        // see `GuideDeliveryShape`.
-        let (guide_hint, guide_content): (Option<(String, GuideDeliveryShape)>, Vec<Content>) = {
+        // The post-phase fan-out. Ordering, corpus exclusivity and the
+        // anonymous-tier idle re-arm all live in the coordinator now; what
+        // stays here is assembling the primary block, which the coordinator
+        // must not know about because `inject_hint` mutates it in place.
+        //
+        // One lock for the whole fan-out, where this used to take two — the
+        // guide path and the rule path each locked `guide_hints_emitted`
+        // separately. Fewer acquisitions, identical bytes.
+        let (guide_hint, injected) = {
             let mut emitted = ctx.guide_hints_emitted.lock();
-            // Anonymous tier only (a no-op when no TTL is configured): re-arm
-            // topics the model plausibly no longer holds. Must run BEFORE the
-            // opener check below (`!emitted.contains(SESSION_OPENING_GUIDE)`),
-            // or an expiry that empties the ledger goes unseen until the next
-            // call.
-            let rearmed_count = emitted.tick();
-            if rearmed_count > 0 {
-                tracing::debug!(
-                    "anonymous guide ledger idle TTL re-armed {rearmed_count} topic(s)"
-                );
-            }
-            if !emitted.contains(crate::prompts::SESSION_OPENING_GUIDE) {
-                // Session opener. Fires whenever the bootstrap topic
-                // specifically is absent, not merely whenever the whole
-                // ledger is empty — those diverge the moment something
-                // re-arms just that one topic. `GuideLedger::re_arm` (used by
-                // a project-switch-scoped re-arm) can remove
-                // `SESSION_OPENING_GUIDE` from a set that still holds nine
-                // other topics; the set stays non-empty, so an `is_empty()`
-                // trigger would never observe that re-arm and the opener
-                // would silently stop firing for the rest of the session.
-                // Checking for the topic directly makes a surgical re-arm
-                // observable. This also retires a latent bug: an explicit
-                // `get_guide(...)` as a session's first call used to make the
-                // ledger non-empty and suppress the opener for the whole
-                // session — `contains` doesn't care what else is in the set.
-                //
-                // Before 2026-08-16 this fired only for `workspace`, so a
-                // session opening with symbols/grep/read_file never received
-                // it. `progressive-disclosure` does not cover the gap: it is
-                // conditional on actual overflow, so a session with small
-                // results got no guide at all.
-                //
-                // The calling tool's own topic is deliberately NOT marked
-                // emitted here, so it still fires on a later call. The cost is
-                // a one-response delay, and a tool called exactly once in a
-                // session forfeits its guide — an acceptable trade against
-                // 18 KB of librarian guide landing on a one-shot `artifact`
-                // call. See `prompts::SESSION_OPENING_GUIDE`.
-                //
-                // Kept keyed on the bare topic name — deliberately: this
-                // topic never declares sections (Phase 1), so it is not
-                // eligible for the finer `topic#heading` keys
-                // `guide_blocks_for` uses below, and mixing the two here
-                // would desync this trigger from what `GuideLedger::re_arm`
-                // actually re-arms.
-                let topic = crate::prompts::SESSION_OPENING_GUIDE;
-                // Only burn the ledger key once the block actually builds —
-                // same fail-safe-inversion fix as the bare-topic branch in
-                // `guide_blocks_for` above: an unregistered/empty topic must
-                // not consume the slot on silence. `SESSION_OPENING_GUIDE`
-                // never declares sections in Phase 1 (see the comment block
-                // above), so this always resolves to `Whole` or nothing —
-                // but that assumption is asserted, not just commented, by
-                // `session_opening_guide_never_declares_sections` below.
-                match guide_block(topic) {
-                    Some(block) => {
-                        emitted.insert(topic.to_string());
-                        (
-                            Some((topic.to_string(), GuideDeliveryShape::Whole)),
-                            vec![block],
-                        )
-                    }
-                    None => (None, Vec::new()),
-                }
-            } else if let Some(content_topic) = self.relevant_guide_topic(&val) {
-                // Two ways to name a topic. The tool's own
-                // `relevant_guide_topic` reads the RESULT; `topic_declaring`
-                // asks which section was WRITTEN for this call's shape. They
-                // can disagree, and until 2026-08-31 the result heuristic did
-                // not merely win — it was the only one consulted, so a section
-                // it disagreed with could never be delivered at all. Measured:
-                // `librarian.md` § *doctor repairs* declares `librarian.doctor`,
-                // yet every `doctor` scan of a real catalog names tracker paths,
-                // so the call shipped 39,106 bytes of `tracker-conventions` and
-                // 0 of the 1,490-byte section authored for it.
-                //
-                // **The result heuristic still goes first, and that is not
-                // deference — it is more specific.** It encodes what the call
-                // TOUCHED, which no unqualified `serves:` shape expresses.
-                // `doctor` routing to `tracker-conventions` closed `32736ca0`,
-                // because the entry-validity checks' remediation lives only
-                // there; an `artifact.create` under `docs/trackers/` needs the
-                // frontmatter and status vocabulary far more than it needs
-                // § *Artifact Model*. Letting declarations win outright would
-                // revert both, and `librarian.md` declares nearly every
-                // librarian/artifact shape, so it would starve
-                // `tracker-conventions` about as thoroughly as the old order
-                // starved the sections — the same defect with the sign flipped,
-                // on a guide that already spent one stretch authored, pointed at
-                // and never connected (see
-                // `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`).
-                //
-                // So the declaring topic is a FALLTHROUGH, and the change is
-                // strictly additive: the only calls whose output differs are the
-                // ones that used to deliver NOTHING — content topic already
-                // spent for this session — and now deliver a section written for
-                // their shape. No call loses a guide it used to get.
-                //
-                // Trying a candidate that ships nothing is free of DELIVERY
-                // effects — it cannot emit, suppress or duplicate a block. It is
-                // NOT free of ledger effects, and the first version of this
-                // comment claimed it was, from reading rather than running.
-                // `GuideLedger::insert` persists unconditionally and refreshes
-                // the stamp on a repeat, by design: the stamp means "last
-                // delivered", which is what `expire_idle`'s TTL reads. Two of
-                // `guide_blocks_for`'s four empty-return paths call it anyway —
-                // the preamble path inserts before deciding to return empty, and
-                // the all-sections-already-sent path inserts per matched
-                // section, its `if` gating only the `push`.
-                //
-                // Only the first is excluded here by construction: a declaring
-                // candidate cannot reach the preamble path, since
-                // `topic_declaring` selects it BY a section matching. The second
-                // is live, and is the fallthrough's real price — falling through
-                // onto a spent declaring topic costs N stamp refreshes and N
-                // disk writes for zero bytes delivered.
-                //
-                // Deliberately not worked around at this call site. `op_content`
-                // below solves the same problem with `contains`-then-`insert`,
-                // and the matching fix belongs inside `guide_blocks_for`, where
-                // it would also cover the pre-existing repeat-call path that has
-                // always done this. That is a wider change — it moves
-                // `expire_idle` re-arm timing for every topic — and wants its own
-                // decision rather than riding in on this one.
-                let mut candidates: Vec<&str> = vec![content_topic];
-                if let Some(t) = crate::prompts::guide_index::GUIDE_INDEX
-                    .topic_declaring(selector.as_deref(), &val)
-                {
-                    if t != content_topic {
-                        candidates.push(t);
-                    }
-                }
-                let mut delivered: (Option<(String, GuideDeliveryShape)>, Vec<Content>) =
-                    (None, Vec::new());
-                for topic in candidates {
-                    // Either the default-path buffering kicked in (large JSON),
-                    // or the tool itself pre-buffered (e.g. run_command storing
-                    // a `@cmd_*` ref and returning a small envelope with
-                    // `output_id`). Both signal the agent should learn the
-                    // progressive-disclosure pattern.
-                    let should = match topic {
-                        "progressive-disclosure" => {
-                            exceeds_inline_limit(&json)
-                                || val
-                                    .as_object()
-                                    .and_then(|o| o.get("output_id"))
-                                    .and_then(|v| v.as_str())
-                                    .is_some()
-                        }
-                        _ => true,
-                    };
-                    if !should {
-                        continue;
-                    }
-                    let (blocks, shape) =
-                        guide_blocks_for(topic, selector.as_deref(), &val, &mut emitted);
-                    // `shape.is_none()` iff `blocks.is_empty()` — every return
-                    // path in `guide_blocks_for` keeps the two in lockstep —
-                    // so branching on `shape` alone is sufficient and avoids
-                    // restating the emptiness check.
-                    if let Some(shape) = shape {
-                        delivered = (Some((topic.to_string(), shape)), blocks);
-                        break;
-                    }
-                }
-                delivered
-            } else {
-                (None, Vec::new())
-            }
-        };
-
-        // --- Operator rules: `triggered`-rule delivery (Phase 2) -----------
-        //
-        // Independent of the guide path above — a call may receive both. The
-        // two stamp disjoint key namespaces (`op:OP-N` vs `<topic>` /
-        // `<topic>#<heading>`), asserted by Gate 5 in
-        // `operator_rules::route::tests::op_keys_collide_with_no_guide_key`.
-        //
-        // Computed here, while `&val` is still borrowable: the small-output
-        // branch below moves `val`.
-        //
-        // `always` rules are excluded inside `route`, not here — a resident
-        // rule delivered on a call would arrive twice, and stamping it would
-        // assert a per-session delivery event that never happened (spec § 5).
-        let op_content: Vec<Content> = if selector.is_some() {
-            let mut emitted = ctx.guide_hints_emitted.lock();
-            let mut out = Vec::new();
-            for r in crate::operator_rules::route::route(selector.as_deref(), &val) {
-                let key = crate::operator_rules::route::ledger_key(&r.id);
-                // `contains` then `insert` rather than relying on `insert`'s
-                // return value: skipping `insert` on a repeat avoids refreshing
-                // the last-delivered stamp that `expire_idle`'s TTL reads, for a
-                // call that delivered nothing — and avoids `persist()`'s
-                // unconditional disk write (`guide_ledger.rs:216`) on every
-                // repeat call. (`insert`'s returned bool IS trustworthy as an
-                // absence signal — `HashMap::insert(..).is_none()` — that is
-                // not the reason to avoid it here.)
-                if emitted.contains(&key) {
-                    continue;
-                }
-                emitted.insert(key);
-                out.push(Content::text(format!(
-                    "<!-- operator-rule {} — delivered once this session for this call \
-                     shape; see docs/trackers/operator-rules.md -->\n{}",
-                    r.id, r.imperative
-                )));
-            }
-            out
-        } else {
-            // Tools that have not opted into routing return the trait default
-            // `None`, so this branch skips the mutex lock and the corpus scan
-            // for calls that could never route regardless.
-            //
-            // It used to read "no tool outside the `LibrarianAdapter` family
-            // overrides `selector_key`, so every other tool call takes this
-            // branch". That was true and is no longer: `memory`, `edit_file`
-            // and `create_file` now opt in, so they take the routing branch
-            // above. The remaining tools still land here, which is the point of
-            // the fast path — but it is a majority now, not a totality, and a
-            // reader must not infer from this branch that routing is
-            // librarian-only.
-            Vec::new()
+            let post = crate::engines::coordinator::PostCtx {
+                selector: selector.as_deref(),
+                value: &val,
+                content_topic: self.relevant_guide_topic(&val),
+                // Either the default-path buffering will kick in (large JSON),
+                // or the tool itself pre-buffered (e.g. `run_command` storing a
+                // `@cmd_*` ref and returning a small envelope with
+                // `output_id`). Both signal the agent should learn the
+                // progressive-disclosure pattern.
+                overflowing: exceeds_inline_limit(&json)
+                    || val
+                        .as_object()
+                        .and_then(|o| o.get("output_id"))
+                        .and_then(|v| v.as_str())
+                        .is_some(),
+            };
+            let e = crate::engines::coordinator::run_post(&post, &mut emitted);
+            (e.hint, e.blocks)
         };
 
         // Build the primary response block (the tool's actual output).
@@ -1229,8 +1021,7 @@ pub trait Tool: Send + Sync {
         // either the single whole-topic block (non-declaring topic) or the
         // per-section slices / preamble fallback (declaring topic).
         let mut blocks = vec![primary];
-        blocks.extend(guide_content);
-        blocks.extend(op_content);
+        blocks.extend(injected);
         Ok(blocks)
     }
 

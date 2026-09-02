@@ -127,15 +127,6 @@ pub struct EngineDecl {
     /// in `call_content`. A function pointer rather than a trait object
     /// because an engine is data, not behaviour with state — and because a
     /// `&'static EngineDecl` must stay `Sync` without a `Box`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by engines::coordinator::run_post_in, which Plan 3 of \
-                      the Layer 2a sequence wires into call_content; tests call \
-                      run_post_in directly today, so it is live under cfg(test)"
-        )
-    )]
     pub(crate) emit_post: Option<
         fn(
             &crate::engines::coordinator::PostCtx<'_>,

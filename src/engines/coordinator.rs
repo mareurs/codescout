@@ -46,15 +46,6 @@ pub(crate) struct PostCtx<'a> {
     pub overflowing: bool,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "constructed and read by run_post_in, which becomes reachable \
-                  in Plan 3 when call_content wires run_post in; tests construct \
-                  and read it directly today"
-    )
-)]
 /// One engine's contribution to one response.
 #[derive(Default)]
 pub(crate) struct Emission {
@@ -82,15 +73,6 @@ impl Emission {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "constructed by run_post_in's per-engine loop, which becomes \
-                  reachable in Plan 3 when call_content wires run_post in; tests \
-                  construct and match on it directly today"
-    )
-)]
 /// Whether an engine's trigger fired — which is **not** the same question as
 /// whether it produced bytes.
 ///
@@ -107,15 +89,6 @@ pub(crate) enum Emitted {
     Claimed(Emission),
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "called only by run_post, which Plan 3 wires into call_content; \
-                  tests call this function directly today, which is why it is \
-                  split out at all — see its own doc comment"
-    )
-)]
 /// `run_post`'s logic, generic over the engine slice.
 ///
 /// Split out so the ordering rules can be exercised against synthetic engines
@@ -156,11 +129,6 @@ pub(crate) fn run_post_in(
     out
 }
 
-#[expect(
-    dead_code,
-    reason = "bound to call_content by Plan 3; nothing calls it yet, not even \
-              tests, which exercise run_post_in directly against synthetic engines"
-)]
 /// The live fan-out, bound to [`ENGINES`].
 pub(crate) fn run_post(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -> Emission {
     run_post_in(ENGINES, ctx, ledger)

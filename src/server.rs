@@ -8590,6 +8590,7 @@ mod guide_hint_tests {
             );
 
         let whole = crate::prompts::topic_body("librarian").unwrap().len();
+        eprintln!("P50_TOTAL_BEFORE={total}");
         assert!(
             total <= CEILING,
             "p50 session drew {total} B of guide (whole topic is {whole} B, ceiling \
