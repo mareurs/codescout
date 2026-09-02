@@ -2817,37 +2817,57 @@ mod tests {
     /// The remedy is the schema, not the code: `file_path` is a deliberate, documented
     /// alias, so the fix is to stop the `required` array from claiming `path` alone —
     /// never to make the code refuse aliases.
+    ///
+    /// KNOWN, DELIBERATE EXCLUSION — the non-path alias family. Both this gate and its
+    /// constant-driven companion below are scoped to path-shaped aliases: this one by
+    /// the literal `"Alias for "` prose prefix, the other by `PATH_PARAM_ALIASES`
+    /// (`src/fs/mod.rs`). `edit_code`'s `symbol` param also accepts `name_path` as an
+    /// alias (documented inline inside `symbol`'s own description, `edit_code.rs:117-120`,
+    /// not as a separate `"name_path": {"description": "Alias for symbol"}` property),
+    /// and `edit_code`'s `body`/`content` are likewise alias-like without either gate's
+    /// vocabulary reaching them (`edit_code.rs:133-140`). Neither gate can see these —
+    /// covering them is not required, but leaving the gap uncovered *and undeclared* is
+    /// what this note fixes. If `edit_code`'s `required` ever names `symbol` or `body`
+    /// alone while `name_path`/`content` could discharge it, no automated check here
+    /// will catch it; that would need a `name_path`/`content`-aware companion gate,
+    /// which is out of scope for this pass.
     #[tokio::test]
     async fn required_names_no_key_that_has_a_declared_alias() {
         let (_dir, server) = make_server().await;
         let mut offenders = Vec::new();
-        let mut total_aliases_found = 0usize;
+        let mut alias_counts_by_tool: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
         for t in &server.tools {
             let schema = t.input_schema();
             let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
                 continue;
             };
+            // property name -> the name it declares itself an alias of.
+            //
+            // FIXTURE NOTE — the literal `"Alias for "` prefix parsed here (by
+            // `parse_declared_aliases`) is what makes a schema property register as
+            // an alias for this test's purposes. Reword it (e.g. to "Same as path")
+            // on any property and that property silently drops out of `aliases` —
+            // the derivation goes quiet, not red, on its own. The per-tool
+            // assertion below (`EXPECTED_ALIAS_COUNTS_BY_TOOL`) is what turns that
+            // silence into a failing assertion, scoped to the one tool that was
+            // reworded, instead of a global sum no single tool's reword can move.
+            //
+            // Alias counting must NOT be gated on a top-level `required` array
+            // existing — five tools (read_file, create_file, edit_file,
+            // edit_markdown, read_markdown) express their path requirement
+            // entirely via `anyOf` and carry no top-level `required` at all, so
+            // gating the count on `required` being present (as the offender scan
+            // below correctly does, since an offender needs a `required` to name
+            // the key) would silently record 0 aliases for exactly those five
+            // tools and make their `EXPECTED_ALIAS_COUNTS_BY_TOOL` entries
+            // unconditionally fail. Caught by re-running this test after adding
+            // the table, 2026-09-02: read_file showed "expected 4, found 0".
+            let aliases = parse_declared_aliases(props);
+            alias_counts_by_tool.insert(t.name(), aliases.len());
             let Some(required) = schema.get("required").and_then(|r| r.as_array()) else {
                 continue;
             };
-            // property name -> the name it declares itself an alias of.
-            //
-            // FIXTURE NOTE — the literal `"Alias for "` prefix parsed here is what
-            // makes a schema property register as an alias for this test's purposes.
-            // Reword it (e.g. to "Same as path") on any property and that property
-            // silently drops out of `aliases` — the derivation goes quiet, not red, on
-            // its own. `total_aliases_found` below is the check that turns that
-            // silence into a failing assertion instead of a no-op pass.
-            let aliases: Vec<(&str, &str)> = props
-                .iter()
-                .filter_map(|(name, def)| {
-                    let d = def.get("description")?.as_str()?;
-                    let rest = d.strip_prefix("Alias for ")?;
-                    let target = rest.split(|c: char| c.is_whitespace()).next()?;
-                    Some((name.as_str(), target))
-                })
-                .collect();
-            total_aliases_found += aliases.len();
             for req in required.iter().filter_map(|v| v.as_str()) {
                 for (alias_name, target) in &aliases {
                     if *target == req {
@@ -2859,20 +2879,116 @@ mod tests {
                 }
             }
         }
-        assert!(
-            total_aliases_found > 0,
-            "no property anywhere in the tool set matched the \"Alias for \" prefix this \
-             test derives its alias relation from — either every declared alias was \
-             removed (unlikely) or the phrasing was reworded, which silently empties the \
-             alias list and turns the offender check below into a no-op. This assertion \
-             exists so a reword goes red instead of silently passing."
-        );
+        for (tool, expected) in EXPECTED_ALIAS_COUNTS_BY_TOOL {
+            let actual = alias_counts_by_tool.get(tool).copied().unwrap_or(0);
+            assert_eq!(
+                actual, *expected,
+                "{tool}: expected {expected} \"Alias for \" property description(s), found \
+                 {actual} — either an alias description was reworded (silently blinding \
+                 both this per-tool check and the offender scan above for {tool} alone) or \
+                 a genuinely new/removed alias needs this table updated to match"
+            );
+        }
         assert!(
             offenders.is_empty(),
             "these schemas name a required key that another property declares itself an \
              alias of — the true requirement is an alternation; express it with `anyOf` \
              (a branch per acceptable name) rather than a bare `required` entry:\n  {}",
             offenders.join("\n  ")
+        );
+    }
+
+    /// Shared by the real sweep above and by
+    /// `alias_offender_detection_catches_a_synthetic_offender`: derive a schema's
+    /// property-name -> alias-target pairs from `"Alias for <name>"`-prefixed
+    /// descriptions, exactly as `required_names_no_key_that_has_a_declared_alias`
+    /// consumes them. Kept as one function so the synthetic-fixture test below
+    /// exercises the *actual* derivation, not a re-typed copy of it that could drift.
+    fn parse_declared_aliases(props: &serde_json::Map<String, Value>) -> Vec<(&str, &str)> {
+        props
+            .iter()
+            .filter_map(|(name, def)| {
+                let d = def.get("description")?.as_str()?;
+                let rest = d.strip_prefix("Alias for ")?;
+                let target = rest.split(|c: char| c.is_whitespace()).next()?;
+                Some((name.as_str(), target))
+            })
+            .collect()
+    }
+
+    /// Tools known (as of this writing) to declare at least one `"Alias for path"`
+    /// property, with the exact count each currently carries. Grepped 2026-09-02:
+    /// `grep(pattern="Alias for path")` across the tree — 10 files, 29 sites total
+    /// (`read_file` carries a fourth, `output_id`, whose description opens `"Alias
+    /// for path — ..."` and so also parses). This table is what makes a
+    /// *single-tool* reword catch-able: `total_aliases_found > 0` (the prior form of
+    /// this sanity check) summed across all 26 tools, so ~26 other surviving sites
+    /// kept the sum positive no matter what happened to any one tool — rewording
+    /// every `"Alias for path"` description on `edit_code` alone left the global sum
+    /// unaffected and the check green. A per-tool minimum closes exactly that gap:
+    /// rewording `edit_code`'s three sites drops `edit_code`'s own count to 0, which
+    /// this table catches specifically, independent of every other tool's wording.
+    /// (Companion guard for the derivation *logic* itself, independent of production
+    /// wording entirely, is `alias_offender_detection_catches_a_synthetic_offender`
+    /// below — the two are complementary, not redundant: this table catches a
+    /// *production* reword, the synthetic fixture catches a broken *detector*.)
+    const EXPECTED_ALIAS_COUNTS_BY_TOOL: &[(&str, usize)] = &[
+        ("read_file", 4),
+        ("create_file", 3),
+        ("edit_file", 3),
+        ("edit_markdown", 3),
+        ("read_markdown", 3),
+        ("call_graph", 3),
+        ("edit_code", 3),
+        ("references", 3),
+        ("symbol_at", 3),
+        ("grep", 1),
+    ];
+
+    /// Synthetic-fixture companion to the per-tool table above. Built from a schema
+    /// value that is NOT read from any production tool, so it cannot be emptied by
+    /// fixing (or breaking) production schemas — it locks down that
+    /// `parse_declared_aliases` plus the offender-matching loop it feeds still
+    /// correctly flags an obvious offender, independent of what today's 26 tools
+    /// happen to say. `EXPECTED_ALIAS_COUNTS_BY_TOOL` catches a *production* reword;
+    /// this catches a broken *detector* (e.g. someone "fixing" the prefix match to
+    /// require a trailing period, silently blinding every real site at once).
+    #[test]
+    fn alias_offender_detection_catches_a_synthetic_offender() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+                "path": { "type": "string", "description": "canonical path param" },
+                "file_path": { "type": "string", "description": "Alias for path" }
+            }
+        });
+        let props = schema.get("properties").unwrap().as_object().unwrap();
+        let required = schema.get("required").unwrap().as_array().unwrap();
+        let aliases = parse_declared_aliases(props);
+        assert_eq!(
+            aliases,
+            vec![("file_path", "path")],
+            "the synthetic fixture's own alias declaration was not parsed — \
+             parse_declared_aliases is broken independent of any production schema"
+        );
+        let mut offenders = Vec::new();
+        for req in required.iter().filter_map(|v| v.as_str()) {
+            for (alias_name, target) in &aliases {
+                if *target == req {
+                    offenders.push(format!(
+                        "synthetic: required=[{req:?}] but {alias_name:?} is declared an \
+                         alias of it"
+                    ));
+                }
+            }
+        }
+        assert_eq!(
+            offenders.len(),
+            1,
+            "the synthetic offender (required=[\"path\"] with file_path declared an alias \
+             of path) was not detected — the offender-matching logic itself is broken, \
+             independent of whatever today's 26 production tools say"
         );
     }
 

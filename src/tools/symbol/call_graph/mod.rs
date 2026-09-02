@@ -369,12 +369,15 @@ impl Tool for CallGraph {
             "properties": {
                 "symbol":       { "type": "string", "description": "Symbol identifier. Plain method: 'MyStruct/method'. Trait impl method: 'impl Trait for Struct/method'." },
                 "path":         { "type": "string", "description": "File containing the symbol (required for seed resolution)" },
+                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
+                // src/server.rs's required_names_no_key_that_has_a_declared_alias
+                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["call_graph"] == 3) parses it.
                 "file_path":    { "type": "string", "description": "Alias for path" },
                 "relative_path": { "type": "string", "description": "Alias for path" },
                 "file":         { "type": "string", "description": "Alias for path" },
                 "direction":    { "type": "string", "enum": ["callers", "callees", "both"], "default": "callers", "description": "Which edges to walk: functions that call the symbol, functions it calls, or both." },
                 "max_depth":    { "type": "integer", "default": 3, "description": "Max BFS depth (capped at 10)" },
-                "detail_level": { "type": "string", "enum": ["exploring", "full"], "default": "exploring", "description": "'exploring' (default): compact edge list. 'full': every node with its file and line." }
+                "detail_level": { "type": "string", "enum": ["exploring", "full"], "default": "exploring", "description": "exploring: counts, auto-promotes full at <=30 edges. full: every edge; cap 200->500." }
             },
             "required": ["symbol"],
             "anyOf": [

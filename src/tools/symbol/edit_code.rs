@@ -119,6 +119,12 @@ impl Tool for EditCode {
                     "description": "Symbol name-path, e.g. \"MyStruct/my_method\" or \"my_fn\". Alias: `name_path` (symbols()' name for the same address) is accepted."
                 },
                 "path":     { "type": "string", "description": "File path (relative to project root) containing the symbol." },
+                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
+                // src/server.rs's required_names_no_key_that_has_a_declared_alias
+                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["edit_code"] == 3) parses it. This is
+                // the exact site the Round 2 review demonstrated: rewording all three
+                // to e.g. "Same as path" while `required` still names "path" alone
+                // must go red per-tool, not just globally.
                 "file_path": { "type": "string", "description": "Alias for path" },
                 "relative_path": { "type": "string", "description": "Alias for path" },
                 "file": { "type": "string", "description": "Alias for path" },

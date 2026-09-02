@@ -385,6 +385,9 @@ impl Tool for EditFile {
             ],
             "properties": {
                 "path": { "type": "string", "description": "File path" },
+                // FIXTURE NOTE: the literal "Alias for " prefix here is load-bearing —
+                // src/server.rs's required_names_no_key_that_has_a_declared_alias
+                // (EXPECTED_ALIAS_COUNTS_BY_TOOL["edit_file"] == 3) parses it.
                 "file_path": { "type": "string", "description": "Alias for path" },
                 "relative_path": { "type": "string", "description": "Alias for path" },
                 "file": { "type": "string", "description": "Alias for path" },

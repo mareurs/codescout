@@ -40,6 +40,12 @@ impl Tool for ReadFile {
             ],
             "properties": {
                 "path": { "type": "string", "description": "File path relative to project root" },
+                // FIXTURE NOTE: the literal "Alias for " prefix on these four
+                // descriptions is load-bearing — src/server.rs's
+                // required_names_no_key_that_has_a_declared_alias (and its
+                // EXPECTED_ALIAS_COUNTS_BY_TOOL entry for "read_file", currently 4)
+                // parse it to derive this schema's alias relation. Reword any of
+                // them (e.g. to "Same as path") and that count silently drops.
                 "file_path": { "type": "string", "description": "Alias for path" },
                 "relative_path": { "type": "string", "description": "Alias for path" },
                 "file": { "type": "string", "description": "Alias for path" },
