@@ -594,7 +594,7 @@ async fn echo_once(ctx: &ToolContext) -> String {
 }
 
 /// docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md
-/// docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md
+/// docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md
 ///
 /// `guard_worktree_write` refuses writes on these two facts; reads used to
 /// resolve against the main checkout and say nothing.

@@ -12,7 +12,7 @@ tags:
 opened: 2026-09-02
 owner: marius
 related:
-- docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md
+- docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md
 - docs/issues/archive/2026-06-01-peer-workspace-arg-pin-escape.md
 severity: low
 unverified: 'Filed from a bytes-level read of two mechanisms, not from an end-to-end reproduction: peer-serve is an explicit `codescout peer serve` surface this session did not stand up, so the observable claim (a served read emits the notice) is INFERRED from the strip + call_content path rather than seen. What IS established at the bytes: `workspace` is absent from PEER_EXPOSED_TOOLS and named in the deny comment; handle_tool_call_inner removes the `workspace` argument before dispatch; the notice body names both calls. Anyone fixing this should reproduce first — CLAUDE.md''s rule that the plan is a hypothesis about the reproduction applies with full force here, because the fix option a reader finds most attractive (option 3) is the one that writes to the argument the strip exists to control.'
@@ -69,7 +69,7 @@ notice exists to fire on.
 
 The notice used to be one-shot per conversation (`notice_once`), so peer-serve saw one dead
 message and nobody noticed. Removing that gate — the fix for
-`docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`,
+`docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`,
 which the one-shot was silencing in the state it exists to report — makes it one per served
 read. **The change is right and this consequence is real**: the same removal that makes the
 notice useful to a session that can act on it makes it repetitive for one that cannot. Named
@@ -99,4 +99,3 @@ before writing code.
 Unclaimed. The decision above is the whole of the work; the code is small under any of the
 three. Anyone taking it should read `2026-06-01-peer-workspace-arg-pin-escape.md` first if
 they are drawn to option 3 — that bug is what the strip is for.
-

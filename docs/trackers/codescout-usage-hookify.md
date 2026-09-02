@@ -505,7 +505,7 @@ match.** Neither half is optional, and the second is the one that gets skipped.
 **Measurement note, recorded because it is this month's own bug class:** `0a` measured 123/27 and
 47/17 from a worktree; this repo's main checkout gives 122/27 and 46/17. Both derive the same
 76-hit difference. The totals differ by one because the trees differ — see
-`docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`. Neither
+`docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`. Neither
 number is wrong; they answer questions about different trees, and a hook quoting one must say which.
 
 **Status:** proposed. Warn-first; the trigger is rare enough that a deny stage is unwarranted until

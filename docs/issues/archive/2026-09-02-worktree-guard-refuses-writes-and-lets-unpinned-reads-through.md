@@ -195,6 +195,31 @@ the `workspace` argument before dispatch. That strip is the fix for
 discriminator exists at this seam — `home_root` cannot separate peer-serve from the ordinary
 startup fallback, which is the case the notice must fire on. Filed as
 `docs/issues/2026-09-02-the-worktree-notice-prescribes-two-calls-a-served-peer-cannot-make.md`.
+
+## Fix provenance
+
+Fixed on `experiments`.
+
+- **SHA:** `7a3aee93`
+- **patch-id:** `ea0e75497a182f07c1fbd0f753d86841f874fc1d`
+
+Gate green in the load-bearing order: `fmt` clean; `clippy --workspace --all-targets --features
+local-embed -D warnings` exit 0; lean lane **3487 passed**, exit 0; default lane last, **4996
+passed / 1 failed** on `peer::server::tests::run_exits_after_idle_timeout_with_no_connections`.
+
+That failure is **not this change**, and it was established here rather than inherited: the
+test passes in isolation in **1.13s** on this machine, and the diff touches nothing under
+`src/peer/`. It is the load-sensitive test of
+`docs/issues/2026-09-01-peer-idle-timeout-test-is-the-third-load-sensitive-step.md`, measured
+with **nine sessions live in this checkout** and a peer mid-build against the shared `target/`.
+Prior sessions reached the same verdict; citing theirs instead of running it would have been
+one blind spot counted twice, since a stale binary and a loaded machine produce identical
+symptoms.
+
+The commit landed five files in one go because the ledger gate requires it: a class gaining a
+member and the `**Members:**` field naming it must be atomic, or the tree is red in one
+direction. That gate refused this commit once, correctly — it is the forcing function added
+earlier the same day, and its first live catch was its own author.
 ## Tests added
 
 Two, in `src/tools/core/tests.rs`, and **the first is an inverted assertion rather than a new

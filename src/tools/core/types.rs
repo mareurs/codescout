@@ -114,7 +114,7 @@ pub struct ToolContext {
 /// is precisely the act that makes the notice unnecessary. So the one-shot was
 /// structurally guaranteed to be spent on the wrong episode.
 ///
-/// Measured on a live transcript, `docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`:
+/// Measured on a live transcript, `docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`:
 /// an unpinned read and a *refused* write in the same window — the refusal proving
 /// the slot was empty and worktrees present — carried no notice, while the first
 /// read after a ledger clear carried one. Six reconnects, zero notices; one clear,

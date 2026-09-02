@@ -130,7 +130,6 @@ The hook is in a sibling repo, not this one — changing it needs a commit there
   `docs/issues/archive/2026-09-01-staging-op-reads-a-detached-flag-value-as-the-subcommand.md`,
   is the same defect one layer over: a git-subcommand parser mis-reading its own namespace.
 - Noticed while deriving SHA/patch-id pairs during the entry-id cross-host collision plan; recorded
-  by a peer in `docs/issues/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`
+  by a peer in `docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md`
   § References as adjacent and separately filable, deliberately not folded in — a different guard
   and a different defect.
-
