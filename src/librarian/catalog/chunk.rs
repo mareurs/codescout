@@ -54,13 +54,27 @@ pub fn build_chunks(artifact_id: &str, body: &str, chunk_size: usize) -> Vec<Chu
 /// (`AFTER DELETE ON artifact_chunk`) fires on every deleted row, including ones
 /// whose `chunk_id` a blanket delete-then-insert would otherwise "preserve" —
 /// the id survives but the embedding it was preserving the id for does not.
-/// Four branches, keyed on `chunk_ix`:
-///   - same `chunk_ix`, same `content_hash` → touch nothing (no DELETE, no
-///     INSERT, no UPDATE) — this is the branch that keeps the vector alive.
+///
+/// The vector and the position fields have different dependencies and are kept
+/// in sync separately: the vector depends on `content` alone, so it is keyed by
+/// `content_hash`; `start_line`/`end_line`/`entry_token` depend on the body's
+/// layout, so they are re-synced on every content-hash match whose position
+/// actually moved — an ordinary edit above an unchanged chunk shifts it without
+/// touching its hash, and a stale line range is worse than a miss: the caller
+/// follows it to the wrong place with no error. Four branches, keyed on
+/// `chunk_ix`:
+///   - same `chunk_ix`, same `content_hash` → keep the id and the vector
+///     (no DELETE, no INSERT); UPDATE the position fields only if they moved.
 ///   - same `chunk_ix`, different `content_hash` → DELETE + INSERT (a new
 ///     `chunk_id`); the vector is correctly destroyed, content changed.
 ///   - old `chunk_ix` absent from the new rows (body shrank) → DELETE.
 ///   - new `chunk_ix` absent from the old rows → INSERT.
+///
+/// The resync uses a plain `UPDATE`, never `INSERT OR REPLACE`: SQLite only
+/// fires delete triggers on a REPLACE-conflict deletion when `recursive_triggers`
+/// is enabled, which defaults OFF — so `REPLACE` would preserve the vector today
+/// by accident of that pragma, and silently destroy it again the moment anything
+/// turns the pragma on. `UPDATE` is safe unconditionally.
 ///
 /// Deletes run before inserts so a body that shrinks AND changes in the same
 /// edit never collides with a stale row still holding the freed `chunk_ix`
@@ -84,13 +98,25 @@ pub fn replace_chunks(
 
     let mut out = Vec::with_capacity(rows.len());
     let mut to_insert: Vec<ChunkRow> = Vec::new();
+    let mut to_resync: Vec<ChunkRow> = Vec::new();
     for row in rows {
         let mut stored = row.clone();
         match existing_by_ix.get(&row.chunk_ix) {
             Some(e) if e.content_hash == row.content_hash => {
-                // Unchanged: preserve the id, touch nothing in the DB — this is
-                // the branch the whole function exists for.
+                // Unchanged content: preserve the id AND the vector (no DELETE),
+                // but the body's layout may have shifted — a preamble edit moves
+                // every unchanged chunk below it without touching its hash. Only
+                // the position fields depend on layout, so only they are synced;
+                // an UPDATE (never INSERT OR REPLACE — that relies on
+                // recursive_triggers, off by default, to avoid firing the vector
+                // cascade, which silently breaks the moment that pragma flips).
                 stored.chunk_id = e.chunk_id.clone();
+                if e.start_line != stored.start_line
+                    || e.end_line != stored.end_line
+                    || e.entry_token != stored.entry_token
+                {
+                    to_resync.push(stored.clone());
+                }
             }
             Some(e) => {
                 // Same ordinal, different content: the old row must go so the
@@ -114,6 +140,22 @@ pub fn replace_chunks(
             .prepare("DELETE FROM artifact_chunk WHERE artifact_id = ?1 AND chunk_ix = ?2")?;
         for ix in &delete_ixs {
             del_stmt.execute(rusqlite::params![artifact_id, *ix as i64])?;
+        }
+    }
+
+    if !to_resync.is_empty() {
+        let mut upd_stmt = cat.conn.prepare(
+            "UPDATE artifact_chunk
+                SET start_line = ?1, end_line = ?2, entry_token = ?3
+              WHERE chunk_id = ?4",
+        )?;
+        for r in &to_resync {
+            upd_stmt.execute(rusqlite::params![
+                r.start_line as i64,
+                r.end_line as i64,
+                r.entry_token,
+                r.chunk_id
+            ])?;
         }
     }
 
@@ -275,6 +317,54 @@ mod tests {
             vec_row_count(&cat, &chunk_id),
             1,
             "unchanged content must keep its vector across a re-index"
+        );
+    }
+    #[test]
+    fn an_unchanged_chunk_gets_its_line_range_resynced_when_content_above_it_shifts() {
+        // LOAD-BEARING: edit the PREAMBLE only. Chunk 0's hash changes; every chunk
+        // below keeps byte-identical content at a shifted start_line. Asserting only
+        // that the chunk_id survived (as the round-1 test does) passes against a
+        // stale-position bug — assert the LINE NUMBERS moved, and that the vector
+        // (keyed by content_hash, not position) still survived the resync.
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(&cat, &art("a", "tracker", "active")).unwrap();
+        let body = "# T\n\nx\n\n## W-1 — t\n\ny\n";
+        let first = build_chunks("a", body, 2048);
+        let stored1 = replace_chunks(&cat, "a", &first).unwrap();
+        let w1 = stored1
+            .iter()
+            .find(|r| r.entry_token.as_deref() == Some("W-1"))
+            .unwrap();
+        let chunk_id = w1.chunk_id.clone();
+        let original_start_line = w1.start_line;
+        seed_vec_row(&cat, &chunk_id);
+
+        // Insert a line into the preamble only — the W-1 entry's own content is
+        // byte-identical, but its position in the body has shifted down by one.
+        let shifted_body = "# T\n\nx\nANOTHER LINE\n\n## W-1 — t\n\ny\n";
+        let second = build_chunks("a", shifted_body, 2048);
+        replace_chunks(&cat, "a", &second).unwrap();
+
+        // Re-fetch from the DB — the return value of replace_chunks is built
+        // from the freshly computed rows regardless of what was persisted, so
+        // asserting on it would pass even if the UPDATE never ran. Only a
+        // fresh chunks_for() proves what actually landed in artifact_chunk.
+        let persisted = chunks_for(&cat, "a").unwrap();
+        let w2 = persisted
+            .iter()
+            .find(|r| r.entry_token.as_deref() == Some("W-1"))
+            .unwrap();
+
+        assert_eq!(w2.chunk_id, chunk_id, "id preservation still holds");
+        assert_eq!(
+            w2.start_line,
+            original_start_line + 1,
+            "persisted line range must resync to the new position"
+        );
+        assert_eq!(
+            vec_row_count(&cat, &chunk_id),
+            1,
+            "resyncing position must not disturb the content-keyed vector"
         );
     }
 
