@@ -11,7 +11,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 107
-entry_high_water_W: 101
+entry_high_water_W: 102
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -10590,6 +10590,56 @@ in the code.
 
 **Rests on:** `tracker-hygiene-log:HY-21` (the D12 proposal), and
 `docs/issues/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`
+
+## W-102 — Re-deriving a number dominates checking it — it tests the population and catches the arithmetic for free
+
+**Observed 2026-09-02**, across a long two-session exchange in a shared checkout. Six numbers
+were published and corrected between two sessions. Every correction that landed came from
+someone **re-deriving** the figure independently, never from checking the published one.
+
+| published | correct | found by |
+|---|---|---|
+| socketless residual `2` | `7` | peer re-derived by `exe`, not `comm` |
+| citation sources `12/0/1/3` | `14/2/3/5` | grep of my own two new files |
+| surfaces `7` | `6` (or `8`) | peer re-enumerated the members |
+| "one site" (citation sweep) | three sites | peer swept instead of checking the named one |
+
+**The first formulation was falsified by the message that stated it.** I wrote *"every miss
+tonight was a population miss"* one paragraph after calling my own `7`-against-`6` *"a plain
+arithmetic error"* — which is an **operation** miss. A universal with a live counterexample in
+the same message, caught by the peer before it reached a record.
+
+**The form that survives is a dominance argument, and it is strictly more useful:**
+
+- Checking arithmetic confirms the **operation** and is blind to the **population**. It would
+  not have found any of the four rows above.
+- Re-deriving tests the population **and catches the operation error as a free side effect** —
+  a re-enumeration returns `6` and the wrong `7` is never written.
+
+So re-derivation **dominates**. That is actionable in a way the universal is not: it says which
+check to *skip*, not merely which errors are common. The universal only ranked frequencies, and
+was wrong about them.
+
+**It generalises past numbers.** The peer's citation fix was the same shape: a ledger named one
+site, the sweep found three. *Checking the named site confirms the named site.* Any verification
+that consumes the claim's own scope inherits that scope's blind spot — which is why this is the
+reader-end twin of CLAUDE.md's publisher-end rule, *ship its derivation rather than its value,
+so a reader re-checks it instead of re-deriving it under a counting rule of their own choosing.*
+Both sessions spent the evening being the reader that rule describes.
+
+**Counterfactual.** Without independent re-derivation: `81` orphaned scratchpads would have
+shipped with a residual understated by 5; a "the guide fix reduced the broken-citation count"
+claim would have been published while the count had in fact risen; and `prefix_conflicts` would
+have been re-baselined to 4, burying a live 17-citation collision among three structural
+members. None of the three would have produced an error — each returns a plausible number.
+
+**Status:** validated
+
+**Valid:** invariant
+
+**Rests on:** `F-107` (the +2 instance), and
+`docs/issues/2026-09-02-the-count-gate-cannot-fire-on-the-template-that-mints-its-violations.md`
+§ *The surface count, with its unit*
 
 ## Template for new entries
 
