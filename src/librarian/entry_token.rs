@@ -9,29 +9,32 @@
 //! Fenced code blocks are skipped. Documentation that teaches this syntax
 //! quotes real-looking headings, and counting one would make every guide a
 //! ledger — the fence is the escape this parser owes its namespace.
+//!
+//! Fence tracking is delegated to [`crate::util::markdown_fence::FenceState`]
+//! rather than re-implemented here. An earlier hand-rolled version tracked
+//! only run length (`ticks >= open ⇒ close`), which is CommonMark-incomplete
+//! in exactly the way that module's own doc comment describes: it also
+//! missed that a closer must be followed by nothing but whitespace, and that
+//! a backtick fence's info string may not contain a backtick. Both gaps are
+//! real in this corpus, not hypothetical — see the regression test below,
+//! reproducing `docs/trackers/bug-fix-session-log.md:3002-3004`, where a
+//! nested-fence example with trailing content on its "closer" line wrongly
+//! closed the outer fence and then desynced state for 120 real entry
+//! headings after it (measured via a grep-vs-parser agreement check on the
+//! live corpus). Two implementations of one fence rule is this project's own
+//! "two implementations" defect class; delegating closes it rather than
+//! growing a third.
 
 /// The entry token in scope at each 1-indexed line. Index 0 is unused padding
 /// so callers can index by line number directly.
 pub fn entry_tokens_by_line(source: &str) -> Vec<Option<String>> {
     let mut out: Vec<Option<String>> = vec![None];
     let mut current: Option<String> = None;
-    let mut fence: Option<usize> = None;
+    let mut fence = crate::util::markdown_fence::FenceState::new();
 
     for line in source.lines() {
-        let trimmed = line.trim_start();
-        let ticks = trimmed.chars().take_while(|c| *c == '`').count();
-        if ticks >= 3 {
-            match fence {
-                // A closing fence must be at least as long as the opener, so a
-                // ``` inside a ```` block does not close it.
-                Some(open) if ticks >= open => fence = None,
-                Some(_) => {}
-                None => fence = Some(ticks),
-            }
-            out.push(current.clone());
-            continue;
-        }
-        if fence.is_none() {
+        let is_delimiter = fence.feed(line);
+        if !is_delimiter && !fence.in_fence() {
             if let Some(tok) = heading_defines_entry(line) {
                 current = Some(tok);
             }
@@ -109,5 +112,41 @@ mod tests {
         // 64 of 1,482 entries in this corpus are defined at ####.
         let src = "# T\n\n#### BL-71 — deep\n\nbody\n";
         assert_eq!(entry_tokens_by_line(src)[5].as_deref(), Some("BL-71"));
+    }
+
+    #[test]
+    fn a_nested_fence_with_trailing_content_does_not_close_the_outer_fence() {
+        // Reproduces docs/trackers/bug-fix-session-log.md:3002-3004 verbatim in
+        // shape: a real corpus line, sitting inside an already-open fence,
+        // undercounted 120 real entries by prematurely closing it. LOAD-BEARING:
+        // line 4's leading run (4 backticks) is >= the opener's run (3), which is
+        // what a run-length-only rule (CommonMark-incomplete) mistakes for a
+        // valid closer. The trailing content after that run (" ```md ````") is
+        // what makes it NOT a closer per CommonMark — remove the trailing
+        // content and this line becomes an ordinary (valid) closer, and the test
+        // stops discriminating between the fixed rule and the old buggy one.
+        let src = "# T\n\n```\n```` ```md ````\n```\n\n## W-1 — real entry\n\nbody\n";
+        let by_line = entry_tokens_by_line(src);
+        assert_eq!(
+            by_line[7].as_deref(),
+            Some("W-1"),
+            "the outer fence closes at line 5, not line 4 — W-1 is real prose, not fenced"
+        );
+        assert_eq!(by_line[9].as_deref(), Some("W-1"), "body below the heading");
+    }
+
+    #[test]
+    fn an_inline_code_span_of_a_fence_does_not_open_a_block() {
+        // A backtick fence's info string may not itself contain a backtick —
+        // CommonMark forbids it, and FenceState enforces it. Without this rule,
+        // a line like the opener below would start a fence that never closes,
+        // swallowing every heading after it for the rest of the file.
+        let src = "# T\n\n```` ```lang ````\n\n## W-2 — still real\n";
+        let by_line = entry_tokens_by_line(src);
+        assert_eq!(
+            by_line[5].as_deref(),
+            Some("W-2"),
+            "the ```` ```lang ```` line never opened a fence"
+        );
     }
 }
